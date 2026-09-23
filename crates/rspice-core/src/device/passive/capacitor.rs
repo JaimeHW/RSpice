@@ -2,7 +2,8 @@
 
 use crate::config::ExpressionDialect;
 use crate::device::behavioral::{
-    BehavioralEnvironment, compiled_expression_branch_partial, compiled_expression_node_partial,
+    BehavioralEnvironment, DerivativeTarget, compiled_expression_branch_partial,
+    compiled_expression_node_partial,
 };
 use crate::device::traits::{DynamicDevice, MatrixStamper};
 use crate::expr::{
@@ -300,6 +301,7 @@ impl SolutionDependentCapacitor {
                 },
                 index,
             )
+            .or_else(|| self.integral_partial(time, DerivativeTarget::Node(index)))
             .unwrap_or_else(|| self.estimate_node_partial(index, value, time));
             partials.push((global_index, derivative));
         }
@@ -326,6 +328,7 @@ impl SolutionDependentCapacitor {
                 },
                 index,
             )
+            .or_else(|| self.integral_partial(time, DerivativeTarget::Branch(index)))
             .unwrap_or_else(|| self.estimate_branch_partial(index, value, time));
             partials.push((global_index, derivative));
         }
@@ -335,6 +338,23 @@ impl SolutionDependentCapacitor {
 
     pub(crate) fn accepted_sdt_history(&self) -> Vec<crate::expr::AcceptedSdtState> {
         self.vm.accepted_sdt_history(self.program.sdt_count)
+    }
+
+    fn integral_partial(&self, time: Value, target: DerivativeTarget<'_>) -> Option<Value> {
+        self.integral_equations.as_ref()?.transient_partial(
+            &self.node_values,
+            &self.branch_values,
+            &self.accepted_sdt_history(),
+            BehavioralEnvironment {
+                time,
+                frequency: self.frequency,
+                temperature: self.temperature,
+                gmin: self.gmin,
+                expression_dialect: self.expression_dialect,
+                logarithm_domain: LogarithmDomain::Guarded,
+            },
+            target,
+        )
     }
 
     pub(crate) fn restore_sdt_history(&mut self, history: &[crate::expr::AcceptedSdtState]) {

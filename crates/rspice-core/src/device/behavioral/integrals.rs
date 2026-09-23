@@ -197,7 +197,7 @@ impl IntegralEquations {
 
     /// Differentiate the actual trapezoidal VM update while holding accepted
     /// history fixed. Nested states consume their inner trial value/derivative.
-    pub(super) fn transient_partial(
+    pub(crate) fn transient_partial(
         &self,
         nodes: &[Value],
         branches: &[Value],

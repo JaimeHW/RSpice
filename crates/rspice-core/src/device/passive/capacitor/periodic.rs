@@ -258,5 +258,31 @@ mod tests {
             capacitor.accepted_integrals().collect::<Vec<_>>(),
             [1e10; 4]
         );
+        // Finite differences of the complete capacitance lose tiny trial
+        // integral increments against this large history. Differentiate the
+        // actual nested VM update while its accepted coordinates remain fixed.
+        let history = vec![
+            AcceptedSdtState {
+                time: 1.0,
+                input: 1.0,
+                integral: 1e10
+            };
+            4
+        ];
+        capacitor.restore_sdt_history(&history);
+        let time = 1.0 + 1e-12;
+        let dt = time - 1.0;
+        let sample = capacitor.linearize(&[2.0, 3.0], time);
+        let partial = |column| {
+            sample
+                .partials
+                .iter()
+                .filter(|(i, _)| *i == column)
+                .map(|(_, value)| value)
+                .sum::<Value>()
+        };
+        assert!((partial(0) / (2.0 * dt) - 1.0).abs() < 1e-14);
+        assert!((partial(1) / (3.0 * (0.5 * dt).powi(2) + 5.0 * 0.5 * dt) - 1.0).abs() < 1e-14);
+        assert_eq!(capacitor.accepted_sdt_history(), history);
     }
 }

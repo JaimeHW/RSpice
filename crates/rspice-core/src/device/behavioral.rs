@@ -197,7 +197,7 @@ impl BehavioralReferenceError {
 }
 
 #[derive(Clone, Copy)]
-enum DerivativeTarget<'a> {
+pub(crate) enum DerivativeTarget<'a> {
     Node(usize),
     Branch(usize),
     NodeDirection(&'a [Derivative]),
