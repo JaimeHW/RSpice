@@ -2025,6 +2025,30 @@ impl Engine {
             expression.rebase_accepted_history(0.0);
         }
         for line in &mut circuit.circuit.tlines {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if !line.is_memoryless_two_port()
+                && let Some(mesh) = &circuit.integration_mesh
+            {
+                let edges = mesh.pending_sampled_edges(
+                    line.delay(),
+                    period,
+                    self.config.resource_limits,
+                    abort,
+                )?;
+                // The replacement checkpoint and the accepted history coexist
+                // during validation; bound their aggregate scratch first.
+                if !edges.is_empty() {
+                    self.ensure_result_values(
+                        line.history_storage_values()
+                            .saturating_mul(3)
+                            .saturating_add(edges.len().saturating_mul(24)),
+                    )?;
+                    line.promote_sampled_history_events(&edges)
+                        .map_err(SimulationError::Circuit)?;
+                }
+            }
             line.rebase_lossless_history(0.0)
                 .map_err(SimulationError::Circuit)?;
         }

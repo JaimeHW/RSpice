@@ -8,9 +8,98 @@ pub(in crate::engine) struct PssIntegrationMesh {
     period: Value,
     times: Arc<[Value]>,
     delay_corners: Arc<[Value]>,
+    /// Provenance of paired samples at a declared ideal source/arrival edge.
+    /// Nearby ordinary samples alone never create this ownership.
+    sampled_edges: Arc<[SampledEdge]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct SampledEdge {
+    pub time: Value,
+    pub incoming: Value,
+    pub outgoing: Value,
+}
+
+impl SampledEdge {
+    fn key(self) -> [u64; 3] {
+        [self.time, self.incoming, self.outgoing]
+            .map(|time| if time == 0.0 { 0 } else { time.to_bits() })
+    }
+
+    fn shifted(self, offsets: &[Value]) -> Self {
+        Self {
+            time: PssIntegrationMesh::shift_directed(self.time, offsets, 1),
+            incoming: PssIntegrationMesh::shift_directed(self.incoming, offsets, -1),
+            outgoing: PssIntegrationMesh::shift_directed(self.outgoing, offsets, 1),
+        }
+    }
 }
 
 impl PssIntegrationMesh {
+    pub(super) fn pending_sampled_edges(
+        &self,
+        delay: Value,
+        endpoint: Value,
+        limits: crate::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<[Value; 3]>, SimulationError> {
+        if self.sampled_edges.is_empty() {
+            return Ok(Vec::new());
+        }
+        if endpoint != self.period || !delay.is_finite() || delay <= 0.0 {
+            return Err(SimulationError::Circuit(
+                "invalid periodic delay event window".into(),
+            ));
+        }
+        let cycles = (delay / self.period).ceil();
+        if !cycles.is_finite() || cycles >= usize::MAX as Value {
+            return Err(SimulationError::Circuit(
+                "periodic delay event window overflows".into(),
+            ));
+        }
+        let capacity = (cycles as usize)
+            .saturating_add(1)
+            .saturating_mul(self.sampled_edges.len());
+        crate::ResourceLimitError::ensure(
+            crate::ResourceKind::AnalysisPoints,
+            capacity,
+            limits.max_analysis_points,
+        )?;
+        crate::ResourceLimitError::ensure(
+            crate::ResourceKind::ResultValues,
+            capacity.saturating_mul(3),
+            limits.max_result_values,
+        )?;
+        let mut events = Vec::new();
+        events.try_reserve_exact(capacity).map_err(|_| {
+            SimulationError::Circuit("periodic delay event allocation failed".into())
+        })?;
+        for cycle in 0..=cycles as usize {
+            for (index, &edge) in self.sampled_edges.iter().enumerate() {
+                if index & 0xff == 0 && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let edge = if cycle == 0 {
+                    edge
+                } else {
+                    edge.shifted(&[-self.period, -((cycle - 1) as Value * self.period)])
+                };
+                // Only events that have yet to arrive after the continuation
+                // origin need ownership. Older history keeps its sampled form.
+                if edge.time > endpoint - delay && edge.time <= endpoint {
+                    events.push([edge.time, edge.incoming, edge.outgoing]);
+                }
+            }
+        }
+        events.sort_by(|a, b| {
+            a[0].total_cmp(&b[0])
+                .then(a[1].total_cmp(&b[1]))
+                .then(a[2].total_cmp(&b[2]))
+        });
+        events.dedup();
+        Ok(events)
+    }
+
     pub(in crate::engine) fn from_times(
         period: Value,
         times: Vec<Value>,
@@ -32,6 +121,7 @@ impl PssIntegrationMesh {
             period,
             times: times.into(),
             delay_corners: Arc::from([]),
+            sampled_edges: Arc::from([]),
         })
     }
 
@@ -54,6 +144,22 @@ impl PssIntegrationMesh {
 
     pub(super) fn times(&self) -> &[Value] {
         &self.times
+    }
+
+    fn shift_directed(mut time: Value, offsets: &[Value], direction: i8) -> Value {
+        for &offset in offsets {
+            let sum = time + offset;
+            let recovered = sum - time;
+            let error = (time - (sum - recovered)) + (offset - recovered);
+            time = if direction < 0 && error < 0.0 {
+                sum.next_down()
+            } else if direction > 0 && error > 0.0 {
+                sum.next_up()
+            } else {
+                sum
+            };
+        }
+        time
     }
 
     /// Preserve the two sides of a represented edge when shifting it onto a
@@ -148,6 +254,7 @@ impl PssIntegrationMesh {
         times.push(self.period);
         let mut refined = Self::from_times(self.period, times)?;
         refined.delay_corners = self.delay_corners.clone();
+        refined.sampled_edges = self.sampled_edges.clone();
         Ok((refined, retained))
     }
 }
@@ -191,8 +298,20 @@ impl Engine {
         if mesh.delay_corners.is_empty() {
             return Ok((refined, retained, Vec::new()));
         }
+        self.ensure_result_values(
+            mesh.times
+                .len()
+                .saturating_add(mesh.delay_corners.len())
+                .saturating_add(mesh.sampled_edges.len().saturating_mul(3))
+                .saturating_mul(4),
+        )?;
         let period = mesh.period;
         let mut corners = mesh.delay_corners.to_vec();
+        let mut edges = mesh.sampled_edges.to_vec();
+        let mut seen_edges = edges
+            .iter()
+            .map(|edge| edge.key())
+            .collect::<std::collections::HashSet<_>>();
         let mut added = Vec::new();
         // Preserve explicitly adjacent authored clocks. Otherwise merge only
         // roundoff-sized duplicates from different orders of line traversal.
@@ -210,6 +329,30 @@ impl Engine {
             .filter(|line| !line.is_memoryless_two_port())
         {
             let phase_delay = line.delay().rem_euclid(period);
+            for (index, edge) in mesh.sampled_edges.iter().enumerate() {
+                if index & 0xff == 0 && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let offset = if edge.time >= period - phase_delay {
+                    -(period - phase_delay)
+                } else {
+                    phase_delay
+                };
+                let edge = edge.shifted(&[offset]);
+                if !seen_edges.contains(&edge.key()) {
+                    self.ensure_analysis_points(edges.len().saturating_add(1))?;
+                    self.ensure_result_values(
+                        refined
+                            .times
+                            .len()
+                            .saturating_add(corners.len())
+                            .saturating_add(edges.len().saturating_add(1).saturating_mul(3))
+                            .saturating_mul(4),
+                    )?;
+                    seen_edges.insert(edge.key());
+                    edges.push(edge);
+                }
+            }
             for (index, &corner) in mesh.delay_corners.iter().enumerate() {
                 if index & 0xff == 0 && abort.is_aborted() {
                     return Err(SimulationError::Aborted);
@@ -248,6 +391,7 @@ impl Engine {
             }
         }
         if added.is_empty() {
+            refined.sampled_edges = edges.into();
             return Ok((refined, retained, added));
         }
         let fraction = (0.01 * self.voltage_reltol()).min(1e-4);
@@ -287,6 +431,7 @@ impl Engine {
             .collect();
         refined = PssIntegrationMesh::from_times(period, times)?;
         refined.delay_corners = corners.into();
+        refined.sampled_edges = edges.into();
         added.sort_by(Value::total_cmp);
         added.dedup();
         Ok((refined, retained, added))
@@ -318,6 +463,7 @@ impl Engine {
             let (enriched, retained, events) =
                 self.pss_propagated_source_mesh(&mesh, circuit, abort)?;
             if events.is_empty() {
+                circuit.integration_mesh = Some(enriched);
                 return Ok(coarse);
             }
             let steps = circuit.integration_steps;
@@ -421,8 +567,9 @@ impl Engine {
         // A PWL jump has two values at one authored time. Keep the published
         // sample and the incoming/outgoing values at neighboring clocks, as
         // behavioral source event schedules already do for ideal steps.
-        self.ensure_result_values(breakpoints.times().len().saturating_mul(4))?;
+        self.ensure_result_values(breakpoints.times().len().saturating_mul(8))?;
         let authored = breakpoints.times().to_vec();
+        let mut source_edges = Vec::new();
         for (event, &time) in authored.iter().enumerate() {
             if event & 0xff == 0 && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
@@ -484,6 +631,13 @@ impl Engine {
             if after && time < period {
                 breakpoints.add(time.next_up());
             }
+            if before || after {
+                source_edges.push(SampledEdge {
+                    time,
+                    incoming: if before { time.next_down() } else { time },
+                    outgoing: if after { time.next_up() } else { time },
+                });
+            }
             self.ensure_analysis_points(breakpoints.times().len())?;
         }
         drop(authored);
@@ -491,14 +645,50 @@ impl Engine {
         // may span several carrier cycles; only its phase affects this clock,
         // whereas the shooting history still covers the entire physical TD.
         // Subsequent solved meshes extend these through reflections/cascades.
-        self.ensure_result_values(breakpoints.times().len().saturating_mul(2))?;
+        self.ensure_result_values(
+            breakpoints
+                .times()
+                .len()
+                .saturating_mul(2)
+                .saturating_add(source_edges.len().saturating_mul(9)),
+        )?;
         let source_events = breakpoints.times().to_vec();
+        let mut sampled_edges = source_edges.clone();
+        let mut seen_edges = source_edges
+            .iter()
+            .map(|edge| edge.key())
+            .collect::<std::collections::HashSet<_>>();
         for line in circuit
             .tlines
             .iter()
             .filter(|line| !line.is_memoryless_two_port())
         {
             let phase_delay = line.delay().rem_euclid(period);
+            for (index, &edge) in source_edges.iter().enumerate() {
+                if index & 0xff == 0 && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let offset = if edge.time >= period - phase_delay {
+                    -(period - phase_delay)
+                } else {
+                    phase_delay
+                };
+                let edge = edge.shifted(&[offset]);
+                if !seen_edges.contains(&edge.key()) {
+                    self.ensure_analysis_points(sampled_edges.len().saturating_add(1))?;
+                    self.ensure_result_values(
+                        breakpoints.times().len().saturating_mul(3).saturating_add(
+                            source_edges
+                                .len()
+                                .saturating_add(sampled_edges.len())
+                                .saturating_add(1)
+                                .saturating_mul(6),
+                        ),
+                    )?;
+                    seen_edges.insert(edge.key());
+                    sampled_edges.push(edge);
+                }
+            }
             for (index, &event) in source_events.iter().enumerate() {
                 if index & 0xff == 0 && abort.is_aborted() {
                     return Err(SimulationError::Aborted);
@@ -518,6 +708,7 @@ impl Engine {
             }
         }
         drop(source_events);
+        drop(seen_edges);
         self.ensure_result_values(breakpoints.times().len().saturating_mul(3))?;
         let delay_corners = breakpoints.times().to_vec();
         if circuit
@@ -565,7 +756,17 @@ impl Engine {
                 PssError::InvalidConfig("source integration mesh size overflowed".to_owned())
             })?;
         // The temporary merge and immutable mesh can coexist during conversion.
-        self.ensure_result_values(capacity.saturating_mul(2).saturating_add(events.len()))?;
+        self.ensure_result_values(
+            capacity
+                .saturating_mul(2)
+                .saturating_add(events.len())
+                .saturating_add(
+                    sampled_edges
+                        .len()
+                        .saturating_add(source_edges.len())
+                        .saturating_mul(3),
+                ),
+        )?;
         let mut times = Vec::new();
         times.try_reserve_exact(capacity).map_err(|_| {
             PssError::InvalidConfig("source integration mesh allocation failed".to_owned())
@@ -645,6 +846,7 @@ impl Engine {
                 .any(|line| !line.is_memoryless_two_port())
             {
                 mesh.delay_corners = delay_corners.into();
+                mesh.sampled_edges = sampled_edges.into();
             }
             Ok(Some(mesh))
         } else {
@@ -656,6 +858,67 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sampled_delay_event_provenance_survives_refinement_and_full_history_windows() {
+        let time = 0.375_f64;
+        let mut mesh =
+            PssIntegrationMesh::from_times(1.0, vec![0.0, time.next_down(), time, 0.75, 1.0])
+                .unwrap();
+        // An arbitrary adjacent pair has no physical event provenance.
+        assert!(
+            mesh.pending_sampled_edges(2.25, 1.0, Default::default(), &NoAbort)
+                .unwrap()
+                .is_empty()
+        );
+        mesh.sampled_edges = vec![SampledEdge {
+            time,
+            incoming: time.next_down(),
+            outgoing: time,
+        }]
+        .into();
+        mesh.delay_corners = vec![time.next_down(), time].into();
+        let refined = mesh.refined(&NoAbort).unwrap().0;
+        assert_eq!(&*refined.sampled_edges, &*mesh.sampled_edges);
+        let events = refined
+            .pending_sampled_edges(2.25, 1.0, Default::default(), &NoAbort)
+            .unwrap();
+        assert_eq!(
+            events.iter().map(|e| e[0]).collect::<Vec<_>>(),
+            vec![-0.625, 0.375]
+        );
+        assert_eq!(events[0][1], (-0.625_f64).next_down());
+        let engine = Engine::default();
+        let deck = Netlist::parse(
+            "edge propagation\nR1 a 0 50\nR2 b 0 50\nT1 a 0 b 0 Z0=50 TD=.1875\n.end\n",
+        )
+        .unwrap();
+        let circuit = engine.build_circuit(&deck).unwrap();
+        let (propagated, _, _) = engine
+            .pss_propagated_source_mesh(&mesh, &circuit, &NoAbort)
+            .unwrap();
+        assert!(
+            propagated
+                .sampled_edges
+                .iter()
+                .any(|edge| edge.time == 0.5625 && edge.incoming < edge.outgoing)
+        );
+        assert!(matches!(
+            refined.pending_sampled_edges(
+                2.25,
+                1.0,
+                Default::default(),
+                &crate::abort_signal::CountingAbort::new(0)
+            ),
+            Err(SimulationError::Aborted)
+        ));
+        let mut limits = crate::ResourceLimits::default();
+        limits.max_analysis_points = 1;
+        assert!(matches!(
+            refined.pending_sampled_edges(2.25, 1.0, limits, &NoAbort),
+            Err(SimulationError::ResourceLimit(_))
+        ));
+    }
 
     #[test]
     fn shifted_delay_clocks_preserve_both_sides_of_ideal_edges() {

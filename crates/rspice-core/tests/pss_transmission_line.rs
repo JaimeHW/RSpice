@@ -28,6 +28,11 @@ fn shooting_delay_preserves_ideal_repeating_pwl_steps() {
             1.1875,
             "IIN 0 in PWL(0 0 .375 0 .375 .01 .625 .01 .625 0 1 0) R=0",
         ),
+        (
+            SpiceDialect::Xyce,
+            2.1875,
+            "VIN in 0 PWL(0 0 .375 0 .375 1 .625 1 .625 0 1 0) R=0",
+        ),
     ] {
         let deck = Netlist::parse(&format!("Ideal PWL delay\n{source}\nRS in near 50\nT1 near 0 far 0 Z0=50 TD={delay}\nRL far 0 50\n.save all\n.end\n")).unwrap();
         let mut simulation = SimulationConfig::default();
@@ -70,15 +75,13 @@ fn shooting_delay_preserves_ideal_repeating_pwl_steps() {
                 expected(time)
             );
         }
-        // This short history has no pre-origin jump pending at the receiver.
-        // Long-delay sampled PSS edges need their own event provenance.
-        if delay < 1.0 {
+        {
             let (continued, checkpoint) = engine
                 .run_tran_from_pss_state(&deck, &state, 0.7, 0.001)
                 .unwrap();
             let checkpoint = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
             let (resumed, _) = engine
-                .run_tran_resume(&deck, &checkpoint, 1.5, 0.001)
+                .run_tran_resume(&deck, &checkpoint, 2.0 * delay + 1.0, 0.001)
                 .unwrap();
             for transient in [&continued, &resumed] {
                 let far = transient
