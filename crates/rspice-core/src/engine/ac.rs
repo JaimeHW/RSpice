@@ -1921,6 +1921,27 @@ impl Engine {
         circuit
             .bsim3v3
             .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
+        for dev in &circuit.bsim3v3.devices {
+            if dev.uses_trnqs() && !dev.uses_ac_nqs() {
+                // b3acld.c retains the transient charge-deficit relaxation
+                // when ACNQSMOD does not override it. ag0=0 extracts its
+                // static Jacobian; storage is stamped on the imaginary axis.
+                let (charge, mode) = dev.charge_at_with_probe(op_voltages, true);
+                dev.stamp_trnqs_charge_companion_with_probe(
+                    &charge,
+                    mode,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    op_voltages,
+                    &mut stamper,
+                    true,
+                );
+            }
+        }
         // BSIM4: identical discipline (b4acld.c repeats the DC
         // conductance groups, GIDL/GISL included, on the real axis).
         circuit
@@ -2483,9 +2504,13 @@ impl Engine {
                 );
             }
             for dev in &circuit.bsim3v3.devices {
-                let (charge, mode) = dev.charge_at(op_voltages);
-                let gc = crate::device::Bsim3v3Device::charge_matrix(&charge, mode);
-                dev.stamp_charge_matrix(&gc, omega, &mut stamper);
+                let (charge, mode) = dev.charge_at_with_probe(op_voltages, true);
+                if dev.uses_trnqs() && !dev.uses_ac_nqs() {
+                    dev.stamp_trnqs_charge_matrix(&charge, mode, omega, &mut stamper);
+                } else {
+                    let gc = crate::device::Bsim3v3Device::charge_matrix(&charge, mode);
+                    dev.stamp_charge_matrix(&gc, omega, &mut stamper);
+                }
             }
             for dev in &circuit.bsim4v8.devices {
                 let (charge, mode) = dev.charge_at(op_voltages);

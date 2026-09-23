@@ -171,6 +171,19 @@ impl Bsim3v3Device {
         q.stamp_rhs(self.node_charge_deficit, -scale * TRNQS_SCALING * qdef);
         q.stamp_rhs(self.node_charge_deficit, scale * charge.qcheq);
 
+        self.stamp_trnqs_charge_matrix(charge, op.mode, 1.0, q);
+        Ok(())
+    }
+
+    /// Native NQSMOD charge derivatives, shared by AC and periodic response.
+    /// `factor` is one for Q or omega for an imaginary AC stamper.
+    pub(crate) fn stamp_trnqs_charge_matrix(
+        &self,
+        charge: &Bsim3v3Charge,
+        mode: i32,
+        factor: Value,
+        q: &mut impl MatrixStamper,
+    ) {
         // NQS terminal Q contains only overlap and junction depletion. The
         // channel charge lives in the explicit deficit equation instead.
         let overlap = Bsim3v3ChargeMatrix {
@@ -186,20 +199,25 @@ impl Bsim3v3Device {
             gcbsb: -charge.capbs,
             ..Bsim3v3ChargeMatrix::default()
         };
-        self.stamp_charge_matrix(&overlap, 1.0, q);
-        let (drain, source) = if op.mode > 0 {
+        self.stamp_charge_matrix(&overlap, factor, q);
+        let (drain, source) = if mode > 0 {
             (charge.cqdb, charge.cqsb)
         } else {
             (charge.cqsb, charge.cqdb)
         };
-        for (node, derivative) in
-            nodes
-                .into_iter()
-                .zip([-drain, -charge.cqgb, -source, -charge.cqbb, TRNQS_SCALING])
-        {
-            q.stamp(self.node_charge_deficit, node, self.multiplier * derivative);
+        for (node, derivative) in self.periodic_coupling_nodes().into_iter().zip([
+            -drain,
+            -charge.cqgb,
+            -source,
+            -charge.cqbb,
+            TRNQS_SCALING,
+        ]) {
+            q.stamp(
+                self.node_charge_deficit,
+                node,
+                factor * self.multiplier * derivative,
+            );
         }
-        Ok(())
     }
 }
 

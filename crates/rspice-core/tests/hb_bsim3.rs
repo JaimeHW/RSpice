@@ -110,13 +110,13 @@ fn bsim3_periodic_nqs_solves_hidden_charge_and_terminal_displacement_currents() 
     let f = 1e9;
     let amplitude = 1e-4;
     let models = MODELS.replace("capmod=3", "capmod=2 nqsmod=1 acnqsmod=0");
-    let netlist = Netlist::parse(&format!(
+    let deck = format!(
         "Native BSIM3 NQS periodic state\n\
         vd d 0 dc 0.8\nvin g 0 dc 0.9 sin(0.9 {amplitude} {f})\n\
         m1 d g 0 0 n018 w=10u l=0.18u ad=4.2p as=4.2p pd=20.84u ps=20.84u m=2\n\
         {models}\n.end\n"
-    ))
-    .unwrap();
+    );
+    let netlist = Netlist::parse(&deck).unwrap();
     let card = netlist
         .models
         .iter()
@@ -161,6 +161,30 @@ fn bsim3_periodic_nqs_solves_hidden_charge_and_terminal_displacement_currents() 
     let expected_deficit = jw * charge.cqgb * drive / (charge.gtau + jw * 1e-9);
     let expected_gate = 2.0
         * (jw * (charge.cgdo + charge.cgso + charge.cgbo) * drive - charge.gtau * expected_deficit);
+    // Ordinary AC must retain the same explicit relaxation equation over
+    // both its quasi-static limit and high-frequency rolloff.
+    let ac_netlist =
+        Netlist::parse(&deck.replace(&format!("sin(0.9 {amplitude} {f})"), "ac 1")).unwrap();
+    for ac in Engine::default()
+        .run_ac(&ac_netlist, &[1e3, f, 1e12])
+        .unwrap()
+    {
+        let jw = Complex64::new(0.0, TAU * ac.frequency);
+        let deficit = jw * charge.cqgb / (charge.gtau + jw * 1e-9);
+        let gate = 2.0 * (jw * (charge.cgdo + charge.cgso + charge.cgbo) - charge.gtau * deficit);
+        let qnode = ac
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("m1.__charge"))
+            .unwrap();
+        let vin = ac
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("vin"))
+            .unwrap();
+        close(ac.voltages[qnode], deficit, 2e-6);
+        close(ac.currents[vin], -gate, 2e-6);
+    }
     let hb = run_hb(&netlist, f);
     let deficit = hb
         .result
