@@ -346,10 +346,10 @@ impl PeriodicCapabilityDescriptor {
 
 use CapabilitySupport::{Absent, Complete, Inapplicable, Restricted};
 
-/// Shared phrase for the envelope initializer's linear subset. The gap query
+/// Shared phrase for the envelope initializer's supported subset. The gap query
 /// reports the offending family by name; this states why it is a gap.
 const ENVELOPE_LINEAR_SUBSET: &str = "the exact envelope initializer supports linear R/L/C networks, fixed mutual \
-     inductance, and independent or controlled sources";
+     inductance, and independent, controlled or behavioral sources";
 const CYCLOSTATIONARY_FLICKER: &str = "stationary thermal/shot noise is exact; a nonzero flicker coefficient needs cyclostationary \
      colored-noise folding rather than a DC-bias substitution";
 const RESISTOR_CYCLOSTATIONARY_FLICKER: &str = "thermal noise and AF=2 signed-current flicker modulation are exact; other AF values \
@@ -672,7 +672,7 @@ pub(crate) const fn periodic_capability_descriptor(
             ),
             noise: Inapplicable,
             pss_state: Complete,
-            envelope: Absent(ENVELOPE_LINEAR_SUBSET),
+            envelope: Complete,
         },
         F::XspiceInstance => PeriodicCapabilityDescriptor {
             residual_jacobian: Inapplicable,
@@ -1437,7 +1437,7 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
 
 /// Gaps in the envelope initialization/continuation contract.
 ///
-/// Every family outside the initializer's linear subset is named, so a
+/// Every family outside the initializer's supported subset is named, so a
 /// rejection says which element of the deck is outside it.
 pub(in crate::engine) fn envelope_gaps(circuit: &CircuitData) -> Vec<CapabilityGap> {
     use PeriodicCapability::EnvelopeContinuation as Cap;
@@ -1718,7 +1718,7 @@ mod tests {
     /// plus `hb_has_supported_nonlinear_devices` (residual/Jacobian),
     /// `hb_periodic_mna_unsupported_summary` (periodic descriptor),
     /// `ensure_pss_continuation_state_supported` (PSS state map),
-    /// `ensure_hb_envelope_linear_subset` (envelope), the pole-zero
+    /// `ensure_hb_envelope_state_supported` (envelope), the pole-zero
     /// transmission-line and BSIM AC-NQS checks (dynamic state), and the
     /// pnoise colored-noise gate (noise sources). The match is exhaustive, so
     /// a new family cannot reach the circuit store without stating what it can
@@ -1756,7 +1756,7 @@ mod tests {
             F::InductorCoupling | F::CoupledInductorPair => [I, C, C, I, R, C],
             F::MultiWindingTransformer => [I, C, C, I, A, A],
             F::JilesAthertonInductor | F::XyceCoreGroup => [I, C, A, I, A, A],
-            F::BehavioralSource => [R, C, R, I, R, A],
+            F::BehavioralSource => [R, C, R, I, C, C],
             F::XspiceInstance => [I, C, A, I, A, A],
             // The dynamic-state contract became instance conditional for the
             // same reason the transmission line's did: `absdelay` is a delay

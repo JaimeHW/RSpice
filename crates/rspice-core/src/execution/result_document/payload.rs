@@ -3230,6 +3230,8 @@ pub enum EnvelopeGuaranteeTag {
     ExactLinearRcMnaV1,
     /// Exact projection including winding histories and physical branch currents.
     ExactLinearRlcMnaV1,
+    /// Complete behavioral-source integral memory and physical R/L/C state.
+    ExactBehavioralRlcMnaV1,
 }
 
 impl From<HbEnvelopeStateGuarantee> for EnvelopeGuaranteeTag {
@@ -3237,6 +3239,7 @@ impl From<HbEnvelopeStateGuarantee> for EnvelopeGuaranteeTag {
         match guarantee {
             HbEnvelopeStateGuarantee::ExactLinearRcMnaV1 => Self::ExactLinearRcMnaV1,
             HbEnvelopeStateGuarantee::ExactLinearRlcMnaV1 => Self::ExactLinearRlcMnaV1,
+            HbEnvelopeStateGuarantee::ExactBehavioralRlcMnaV1 => Self::ExactBehavioralRlcMnaV1,
         }
     }
 }
@@ -3246,6 +3249,7 @@ impl From<EnvelopeGuaranteeTag> for HbEnvelopeStateGuarantee {
         match guarantee {
             EnvelopeGuaranteeTag::ExactLinearRcMnaV1 => Self::ExactLinearRcMnaV1,
             EnvelopeGuaranteeTag::ExactLinearRlcMnaV1 => Self::ExactLinearRlcMnaV1,
+            EnvelopeGuaranteeTag::ExactBehavioralRlcMnaV1 => Self::ExactBehavioralRlcMnaV1,
         }
     }
 }

@@ -520,8 +520,8 @@ fn hb_envelope_source_selection_and_circuit_subset_fail_closed() {
 
     for (label, deck) in [
         (
-            "behavioral memory",
-            "unsupported behavioral memory\nV1 in 0 SIN(0 1 1meg)\nB1 out 0 V={sdt(V(in))}\nR1 out 0 1k\n.end\n",
+            "capacitor charge history",
+            "unsupported capacitor history\nV1 in 0 SIN(0 1 1meg)\nR1 in out 1k\nC1 out 0 C={1p*(1+V(out)^2)}\n.end\n",
         ),
         (
             "nonlinear",

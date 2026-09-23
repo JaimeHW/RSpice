@@ -25,6 +25,9 @@ pub enum HbEnvelopeStateGuarantee {
     /// inductance, independent and controlled sources, and physical MNA
     /// branches (including capacitor IC and resistor-current branches).
     ExactLinearRlcMnaV1,
+    /// Complete R/L/C and behavioral-source state, including every retained
+    /// SDT value and its accepted input at the continuation origin.
+    ExactBehavioralRlcMnaV1,
 }
 
 /// Authenticated HB carrier state that can restart transient integration at
@@ -242,13 +245,13 @@ impl Engine {
         Ok(canonical_names)
     }
 
-    fn ensure_hb_envelope_linear_subset(circuit: &CircuitData) -> Result<(), SimulationError> {
+    fn ensure_hb_envelope_state_supported(circuit: &CircuitData) -> Result<(), SimulationError> {
         match periodic_capability::summarize(&periodic_capability::envelope_gaps(circuit)) {
             None => Ok(()),
             Some(blockers) => Err(SimulationError::unsupported_capability(
                 "analysis.hb.envelope.continuation",
                 format!(
-                    "HB Envelope continuation is unavailable because the circuit contains {blockers}; the exact initializer supports linear R/L/C networks, fixed mutual inductance, and independent or controlled sources"
+                    "HB Envelope continuation is unavailable because the circuit contains {blockers}; the exact initializer supports linear R/L/C networks, fixed mutual inductance, and independent, controlled or behavioral sources"
                 ),
             )),
         }
@@ -341,6 +344,7 @@ impl Engine {
         mut circuit: CircuitData,
         config: &HbConfig,
         result: &HbResult,
+        operating_point: &HbOperatingPoint,
     ) -> Result<(TransientCheckpoint, Value), SimulationError> {
         if !result.is_valid() || !result.continuation_limitations.is_empty() {
             return Err(SimulationError::Circuit(
@@ -443,6 +447,48 @@ impl Engine {
         }
         circuit.restore_coupled_inductor_pair_state(solutions.last().unwrap());
 
+        // Unlike the public display spectra, retained descriptor coordinates
+        // use two-sided Fourier coefficients. Preserve their solved constants
+        // as well as the AC terms; a fresh VM would silently reset every SDT.
+        let integral_names = circuit
+            .behavioral_sources
+            .integral_names()
+            .collect::<Vec<_>>();
+        let spectra = operating_point.integral_spectra();
+        if spectra.len() != integral_names.len()
+            || spectra
+                .iter()
+                .zip(&integral_names)
+                .any(|(row, name)| row.name != *name)
+        {
+            return Err(SimulationError::Circuit(
+                "HB Envelope behavioral integral basis does not match the circuit".into(),
+            ));
+        }
+        let integrals = spectra
+            .iter()
+            .map(|row| {
+                row.coefficients
+                    .iter()
+                    .enumerate()
+                    .map(|(harmonic, coefficient)| {
+                        coefficient.re * if harmonic == 0 { 1.0 } else { 2.0 }
+                    })
+                    .sum()
+            })
+            .collect::<Vec<Value>>();
+        circuit
+            .behavioral_sources
+            .reset_integrals(&integrals)
+            .map_err(SimulationError::Circuit)?;
+        // Evaluate the original expressions at time zero, with the restored
+        // nested integrals held fixed. This installs their actual accepted
+        // inputs without advancing time or performing a second carrier solve.
+        circuit
+            .behavioral_sources
+            .accept_transient_step(solutions.last().unwrap(), 0.0)
+            .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+
         let lte_reference = self
             .config
             .transient_lte_reference
@@ -472,8 +518,9 @@ impl Engine {
     }
 
     /// Solve an authenticated carrier-periodic HB state with selected slow
-    /// source waveforms frozen at their exact time-zero values, then create an
-    /// exact transient continuation state for supported linear R/L/C networks.
+    /// source waveforms frozen at their exact time-zero values, then create a
+    /// complete transient continuation state for supported R/L/C networks and
+    /// behavioral equations, including their integral memory.
     pub fn run_hb_envelope_continuation_state(
         &self,
         netlist: &Netlist,
@@ -514,11 +561,13 @@ impl Engine {
                     .to_string(),
             ));
         }
-        Self::ensure_hb_envelope_linear_subset(&original_circuit)?;
+        Self::ensure_hb_envelope_state_supported(&original_circuit)?;
         Self::transient_checkpoint_capability_for_circuit(&original_circuit, abort)?
             .require_resumable()
             .map_err(SimulationError::Circuit)?;
-        let guarantee = if original_circuit.inductors.is_empty()
+        let guarantee = if !original_circuit.behavioral_sources.is_empty() {
+            HbEnvelopeStateGuarantee::ExactBehavioralRlcMnaV1
+        } else if original_circuit.inductors.is_empty()
             && original_circuit.resistor_branches.is_empty()
             && original_circuit.vcvs.is_empty()
             && original_circuit.vccs.is_empty()
@@ -559,6 +608,7 @@ impl Engine {
             original_circuit,
             &config,
             &analysis.result,
+            &analysis.operating_point,
         )?;
         let resolved_simulation_identity = simulation_checkpoint_identity(&engine.config);
         Ok((
