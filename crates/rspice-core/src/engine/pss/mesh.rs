@@ -169,6 +169,59 @@ impl Engine {
             self.config.resource_limits.max_analysis_points,
             true,
         )?;
+        // Seed the first periodic arrival of each prescribed corner. A delay
+        // may span several carrier cycles; only its phase affects this clock,
+        // whereas the shooting history still covers the entire physical TD.
+        // Further reflected features remain subject to solved-grid refinement.
+        self.ensure_result_values(breakpoints.times().len().saturating_mul(2))?;
+        let source_events = breakpoints.times().to_vec();
+        for line in circuit
+            .tlines
+            .iter()
+            .filter(|line| !line.is_memoryless_two_port())
+        {
+            let phase_delay = line.delay().rem_euclid(period);
+            for (index, &event) in source_events.iter().enumerate() {
+                if index & 0xff == 0 && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                // Subtract first to avoid overflow near the largest period.
+                let arrival = if event >= period - phase_delay {
+                    event - (period - phase_delay)
+                } else {
+                    event + phase_delay
+                };
+                breakpoints.add(arrival);
+                self.ensure_analysis_points(breakpoints.times().len())?;
+            }
+        }
+        drop(source_events);
+        if circuit
+            .tlines
+            .iter()
+            .any(|line| !line.is_memoryless_two_port())
+        {
+            // Native quadratic wave interpolation uses two predecessors. A
+            // short restart interval supplies two samples on the new side of
+            // a slope corner, just as TRAN's breakpoint restart does. Keep it
+            // in the immutable mesh and its history projection; workers must
+            // not choose it from their independently perturbed wave values.
+            self.ensure_result_values(breakpoints.times().len().saturating_mul(3))?;
+            let corners = breakpoints.times().to_vec();
+            let fraction = (0.01 * self.voltage_reltol()).min(1e-4);
+            for (index, &corner) in corners.iter().enumerate() {
+                if index & 0xff == 0 && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let next = corners.get(index + 1).copied().unwrap_or(period);
+                let restart = (corner + fraction * (next - corner).min(period / steps as Value))
+                    .max(corner.next_up());
+                if restart < next {
+                    breakpoints.add(restart);
+                    self.ensure_analysis_points(breakpoints.times().len())?;
+                }
+            }
+        }
         let events = breakpoints.times();
         if events.is_empty()
             && !circuit.behavioral_sources.needs_time_resolution(period)
