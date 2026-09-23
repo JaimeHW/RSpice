@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::abort_signal::{ImmediateAbort, NoAbort};
+use crate::analysis::reliability::{AgingLaw, ReliabilityTransientWindow};
 
 const DECK: &str = "PMOS stress\n.param SUP=1\nVS source 0 {SUP}\nVG gate 0 0\nVD drain 0 0.2\nM1 drain gate source source PM W=10u L=1u DTEMP=10\n.model PM PMOS (LEVEL=1 VTO=-0.2 KP=100u)\n.end\n";
 
