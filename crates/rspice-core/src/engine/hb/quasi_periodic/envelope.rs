@@ -10,6 +10,8 @@ use crate::engine::PeriodicDcOperatingPointSeed;
 use crate::engine::transient::source_events::{PhysicalSourceEvents, PhysicalSourceOwner};
 mod events;
 mod event_topology;
+mod event_tolerances;
+pub use event_tolerances::EnvelopeEventTolerances;
 mod mission;
 pub use mission::{
     NetlistEnvelopeMission, NetlistEnvelopeSample, NetlistEnvelopeTransition,
@@ -162,6 +164,48 @@ fn invalid(message: impl Into<String>) -> SimulationError {
     SimulationError::Circuit(format!("spectral Envelope: {}", message.into()))
 }
 
+impl SpectralEnvelopeConfig {
+    pub fn validate(&self) -> Result<(), SimulationError> {
+        self.build_grid(&ResourceLimits::default(), &NoAbort)
+            .map(|_| ())
+    }
+
+    fn build_grid(
+        &self,
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<QuasiPeriodicGrid, SimulationError> {
+        check_abort(abort)?;
+        if !self.stop_time.is_finite()
+            || self.stop_time <= 0.0
+            || !self.source_time_step.is_finite()
+            || self.source_time_step <= 0.0
+        {
+            return Err(invalid(
+                "stop time and source time step must be positive and finite",
+            ));
+        }
+        self.solver.validate().map_err(numerical_error)?;
+        match &self.carrier {
+            EnvelopeCarrierBasis::Periodic {
+                frequency_hz,
+                harmonics,
+                samples,
+            } => QuasiPeriodicGrid::periodic_with_abort(
+                *frequency_hz,
+                *harmonics,
+                *samples,
+                limits,
+                abort,
+            ),
+            EnvelopeCarrierBasis::QuasiPeriodic { grid } => {
+                QuasiPeriodicGrid::new_with_abort(grid.clone(), limits, abort)
+            }
+        }
+        .map_err(numerical_error)
+    }
+}
+
 impl Engine {
     pub fn prepare_spectral_envelope_with_abort(
         &self,
@@ -170,37 +214,9 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<PreparedSpectralEnvelope, SimulationError> {
         check_abort(abort)?;
-        if !config.stop_time.is_finite()
-            || config.stop_time <= 0.0
-            || !config.source_time_step.is_finite()
-            || config.source_time_step <= 0.0
-        {
-            return Err(invalid(
-                "stop time and source time step must be positive and finite",
-            ));
-        }
-        config.solver.validate().map_err(numerical_error)?;
         let engine = self.resolved_for_netlist(netlist);
         let mut limits = engine.config.resource_limits;
-        let grid = Arc::new(
-            match &config.carrier {
-                EnvelopeCarrierBasis::Periodic {
-                    frequency_hz,
-                    harmonics,
-                    samples,
-                } => QuasiPeriodicGrid::periodic_with_abort(
-                    *frequency_hz,
-                    *harmonics,
-                    *samples,
-                    &limits,
-                    abort,
-                ),
-                EnvelopeCarrierBasis::QuasiPeriodic { grid } => {
-                    QuasiPeriodicGrid::new_with_abort(grid.clone(), &limits, abort)
-                }
-            }
-            .map_err(numerical_error)?,
-        );
+        let grid = Arc::new(config.build_grid(&limits, abort)?);
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
         Self::ensure_no_mixed_signal_analysis(&circuit, "spectral Envelope")?;
         circuit.set_independent_source_context(

@@ -12,7 +12,8 @@ pub use adaptive::{
     SpectralEnvelopeAdvance, SpectralEnvelopeControl, advance_spectral_envelope_with_abort,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SpectralEnvelopeMethod {
     BackwardEuler,
     /// Variable-step BDF2, starting/restarting with backward Euler when no
