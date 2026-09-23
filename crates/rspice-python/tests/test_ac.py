@@ -478,7 +478,7 @@ R2 out 0 1k
         [
             ("voltage", "1", "no FREQ or HERTZ"),
             ("FREQ HERTZ", "1 2", "ambiguous frequency"),
-            ("FREQ", "-1", "frequency must be positive"),
+            ("FREQ", "-1", "frequency must be nonnegative and finite"),
         ],
     )
     def test_invalid_frequency_table_raises_value_error(
