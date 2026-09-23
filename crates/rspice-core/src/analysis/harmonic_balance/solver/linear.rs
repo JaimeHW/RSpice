@@ -70,6 +70,26 @@ impl ExactPeriodicNetwork {
             };
 
         match self {
+            Self::Capacitor {
+                name,
+                node_pos,
+                node_neg,
+                branch,
+                capacitance,
+            } => {
+                if name.trim().is_empty() || !capacitance.is_finite() {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "periodic capacitor '{name}' has an invalid constitutive equation"
+                    )));
+                }
+                add(*branch, *branch, Complex64::new(constant, 0.0))?;
+                let coefficient = if difference.is_some() {
+                    Complex64::new(-capacitance, 0.0)
+                } else {
+                    Complex64::new(0.0, -omega * capacitance)
+                };
+                add_diff(*branch, *node_pos, *node_neg, coefficient)?;
+            }
             Self::ScalarWave {
                 name,
                 node1_pos,

@@ -151,8 +151,10 @@ impl HbSolver {
             }
         }
         for capacitor in &self.periodic_capacitors {
-            exclude_node(capacitor.pos);
-            exclude_node(capacitor.neg);
+            if capacitor.branch.is_none() {
+                exclude_node(capacitor.pos);
+                exclude_node(capacitor.neg);
+            }
         }
         // Legacy nodal inductors do not use the exact branch registry.
         // Conservatively exclude their rows instead of substituting a DC short.
@@ -161,6 +163,11 @@ impl HbSolver {
         }
         for source in &sources.voltage_sources {
             linear[self.num_nodes + source.branch_ordinal - 1] = false;
+        }
+        for capacitor in &self.periodic_capacitors {
+            if let Some(branch) = capacitor.branch {
+                linear[branch] = false;
+            }
         }
         for row in &mut linear[self.num_nodes + self.physical_branch_count()..] {
             *row = false;

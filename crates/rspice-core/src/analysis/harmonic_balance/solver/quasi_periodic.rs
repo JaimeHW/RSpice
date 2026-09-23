@@ -486,6 +486,7 @@ impl Circuit for HbSolver {
 
     fn voltage_equation(&self, row: usize) -> bool {
         row >= self.num_nodes
+            && !self.is_capacitor_current_row(row)
             && self
                 .periodic_mna_branches
                 .get(row - self.num_nodes)

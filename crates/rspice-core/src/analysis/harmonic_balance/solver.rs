@@ -236,6 +236,8 @@ pub struct HbSolverState {
     pub(crate) integral_branch_start: Option<usize>,
     /// Voltage-valued normalized capacitor rates follow expression integrals.
     pub(crate) capacitor_rate_branch_start: Option<usize>,
+    /// Physical branch rows whose constitutive equation has current units.
+    pub(crate) current_equation_branches: Vec<usize>,
 }
 
 impl HbSolverState {
@@ -263,6 +265,7 @@ impl HbSolverState {
             mna_branch_residual_scale: Vec::new(),
             integral_branch_start: None,
             capacitor_rate_branch_start: None,
+            current_equation_branches: Vec::new(),
         }
     }
 
@@ -852,10 +855,19 @@ impl ExactMnaBranch {
     }
 }
 
-/// Exact frequency-domain distributed network. Each variant emits the direct
+/// Exact frequency-domain constitutive network. Each variant emits the direct
 /// MNA operator `Y(omega)`; residual/Jacobian paths consume its negative.
 #[derive(Debug, Clone)]
 pub(crate) enum ExactPeriodicNetwork {
+    /// Ibranch - C*d(Vpos-Vneg)/dt = 0. Initial voltage is a startup
+    /// constraint, not an additional steady-state voltage source.
+    Capacitor {
+        name: String,
+        node_pos: usize,
+        node_neg: usize,
+        branch: usize,
+        capacitance: Value,
+    },
     ScalarWave {
         name: String,
         node1_pos: usize,

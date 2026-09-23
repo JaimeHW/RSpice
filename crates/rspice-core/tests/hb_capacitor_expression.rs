@@ -25,11 +25,11 @@ fn engine() -> Engine {
     Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
 }
 
-fn deck(options: &str) -> Netlist {
+fn deck(options: &str, ic: &str) -> Netlist {
     parse(&format!(
         "Variable capacitor\nVctrl ctrl 0 SIN(0.2 0.1 1k 0 0 90)\n\
         Bdrive 0 out I={{(0.5+0.2*sin(2*pi*1k*time))/1k+100n*(1+0.1*(0.5+0.2*sin(2*pi*1k*time))+0.2*(0.2+0.1*cos(2*pi*1k*time)))*2*pi*1k*0.2*cos(2*pi*1k*time)}}\n\
-        R1 out 0 1k\nC1 out 0 C={{100n*(1+0.1*V(out)+0.2*V(ctrl))}}\n{options}\n.end\n"
+        R1 out 0 1k\nC1 out 0 C={{100n*(1+0.1*V(out)+0.2*V(ctrl))}} {ic}\n{options}\n.end\n"
     ))
 }
 
@@ -89,8 +89,12 @@ fn response(input: i32) -> Vec<Complex64> {
 
 #[test]
 fn expression_capacitor_hb_and_retained_pac_match_dynamic_law() {
-    for (options, krylov) in [("", false), (".options hbint tahb=1", true)] {
-        let netlist = deck(options);
+    for (options, krylov, ic) in [
+        ("", false, ""),
+        (".options hbint tahb=1", true, ""),
+        (".options hbint tahb=1", true, "IC=.5"),
+    ] {
+        let netlist = deck(options, ic);
         let mut config = HbConfig::new(1e3)
             .with_harmonics(4)
             .with_collocation_points(33);
@@ -115,6 +119,21 @@ fn expression_capacitor_hb_and_retained_pac_match_dynamic_law() {
                 .all(|branch| !branch.device_name.contains("voltage_rate"))
         );
         let capacitor = &hb.result.reactive_spectra[0];
+        if !ic.is_empty() {
+            let branch = hb
+                .result
+                .mna_branch_currents
+                .iter()
+                .find(|row| row.device_name.eq_ignore_ascii_case("C1"))
+                .unwrap();
+            for (actual, expected) in branch
+                .coefficients
+                .iter()
+                .zip(&capacitor.current_coefficients)
+            {
+                assert!((actual - expected).norm() < 1e-11);
+            }
+        }
         assert!((capacitor.current_coefficients[0].re - 2e-9 * 0.1 * TAU * 1e3).abs() < 1e-12);
         assert!((capacitor.current_coefficients[1].re - 1.09e-7 * 0.2 * TAU * 1e3).abs() < 1e-12);
         let result = engine()
@@ -138,7 +157,7 @@ fn expression_capacitor_hb_and_retained_pac_match_dynamic_law() {
 
 #[test]
 fn expression_capacitor_retained_shooting_response_matches_dynamic_law() {
-    let netlist = deck("");
+    let netlist = deck("", "IC=.5");
     let mut config = PssConfig::new(1e3)
         .with_points_per_period(256)
         .with_tstab_periods(0)

@@ -1313,6 +1313,7 @@ fn every_branch_has_a_periodic_owner(circuit: &CircuitData) -> bool {
         .chain(&circuit.resistor_branches.branch_indices)
         .chain(&circuit.vcvs.branch_indices)
         .chain(&circuit.ccvs.branch_indices)
+        .chain(circuit.capacitors.ic_branch_indices.iter().flatten())
         .chain(
             circuit
                 .multi_winding_transformers

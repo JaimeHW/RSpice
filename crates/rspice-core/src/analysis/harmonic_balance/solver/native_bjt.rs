@@ -444,6 +444,7 @@ impl HbSolver {
             if selected.is_some_and(|rows| {
                 !rows[rate]
                     && !(start..capacitor_integral_start).any(|row| rows[row])
+                    && !capacitor.branch.is_some_and(|branch| rows[branch])
                     && ![capacitor.pos, capacitor.neg]
                         .into_iter()
                         .any(|node| node > 0 && rows[node - 1])

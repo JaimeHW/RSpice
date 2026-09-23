@@ -78,6 +78,9 @@ impl HbSolver {
             (physical != self.exact_mna_branches().len()).then_some(physical);
         state.capacitor_rate_branch_start =
             (!self.periodic_capacitors.is_empty()).then_some(self.capacitor_rate_start());
+        state.current_equation_branches = (0..physical)
+            .filter(|branch| self.is_capacitor_current_row(self.num_nodes + branch))
+            .collect();
     }
 }
 
@@ -99,13 +102,15 @@ impl HbSolverState {
         {
             return false;
         }
-        [
-            (0..start, voltage_abstol),
-            (start..rates, abstol),
-            (rates..count, voltage_abstol),
-        ]
-        .into_iter()
-        .all(|(rows, tolerance)| {
+        (0..count).all(|row| {
+            let tolerance = if (start..rates).contains(&row)
+                || self.current_equation_branches.binary_search(&row).is_ok()
+            {
+                abstol
+            } else {
+                voltage_abstol
+            };
+            let rows = row..row + 1;
             residual_rows_converged(
                 &self.mna_branch_currents[rows.clone()],
                 &self.mna_branch_residual[rows.clone()],
@@ -137,11 +142,15 @@ impl HbSolverState {
             ));
         }
         let mut merit: Value = 0.0;
-        for (rows, tolerance, label) in [
-            (0..start, voltage_abstol, "KVL-voltage"),
-            (start..rates, abstol, "integral-rate"),
-            (rates..count, voltage_abstol, "capacitor-voltage-rate"),
-        ] {
+        for row in 0..count {
+            let (tolerance, label) = if (start..rates).contains(&row) {
+                (abstol, "integral-rate")
+            } else if self.current_equation_branches.binary_search(&row).is_ok() {
+                (abstol, "capacitor-current")
+            } else {
+                (voltage_abstol, "KVL-voltage")
+            };
+            let rows = row..row + 1;
             merit = merit.max(residual_rows_merit(
                 label,
                 &self.mna_branch_currents[rows.clone()],

@@ -303,13 +303,23 @@ impl HbSolver {
                     continue;
                 }
                 insert(rate, node - 1)?;
-                insert(node - 1, rate)?;
+            }
+            let rows = capacitor
+                .branch
+                .map_or([Some(capacitor.pos), Some(capacitor.neg)], |branch| {
+                    [Some(branch + 1), None]
+                });
+            for row in rows.into_iter().flatten().filter(|row| *row > 0) {
+                insert(row - 1, rate)?;
+                if capacitor.branch.is_some() {
+                    insert(row - 1, row - 1)?;
+                }
                 for column in capacitor
                     .expression
                     .bound_solution_indices()
                     .chain(start..capacitor_state)
                 {
-                    insert(node - 1, column)?;
+                    insert(row - 1, column)?;
                 }
             }
         }

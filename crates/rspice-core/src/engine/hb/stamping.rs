@@ -7,6 +7,7 @@ use crate::device::passive::CoupledWinding;
 
 #[derive(Debug, Clone, Copy)]
 enum PeriodicMnaRegistration {
+    Capacitor(usize),
     VoltageSource(usize),
     Inductor(usize),
     TransformerWinding(usize, usize),
@@ -313,7 +314,9 @@ impl Engine {
         solver: &mut HbSolver,
     ) {
         for i in 0..circuit.capacitors.len() {
-            if circuit.capacitors.value_expressions[i].is_some() {
+            if circuit.capacitors.value_expressions[i].is_some()
+                || circuit.capacitors.ic_branch_indices[i].is_some()
+            {
                 continue;
             }
             let np = circuit.capacitors.stamps[i].pp.row;
@@ -360,6 +363,29 @@ impl Engine {
         }
         let mut tline_branches = vec![None; circuit.tlines.len()];
         let mut cpl_branches = vec![None; circuit.coupled_tlines.len()];
+
+        for (index, ordinal) in circuit.capacitors.ic_branch_indices.iter().enumerate() {
+            let Some(ordinal) = ordinal else {
+                continue;
+            };
+            let name = &circuit.capacitors.names[index];
+            let slot = ordinal
+                .checked_sub(1)
+                .and_then(|index| registrations.get_mut(index))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "capacitor '{name}' has an invalid periodic branch ordinal"
+                    ))
+                })?;
+            if slot
+                .replace(PeriodicMnaRegistration::Capacitor(index))
+                .is_some()
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "capacitor '{name}' duplicates a periodic branch"
+                )));
+            }
+        }
 
         for (index, source) in circuit
             .behavioral_sources
@@ -824,6 +850,29 @@ impl Engine {
                     "periodic MNA canonical branch ordinal {branch_ordinal} is unassigned"
                 ))
             })? {
+                PeriodicMnaRegistration::Capacitor(index) => {
+                    let name = &canonical_branch_names[slot_index];
+                    let stamp = circuit.capacitors.stamps[index];
+                    solver
+                        .try_add_periodic_constitutive_port_branch(
+                            stamp.pp.row,
+                            stamp.nn.row,
+                            branch_ordinal,
+                            name,
+                        )
+                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                    if circuit.capacitors.value_expressions[index].is_none() {
+                        solver
+                            .try_add_exact_periodic_network(ExactPeriodicNetwork::Capacitor {
+                                name: name.clone(),
+                                node_pos: stamp.pp.row,
+                                node_neg: stamp.nn.row,
+                                branch: circuit.num_nodes() + slot_index,
+                                capacitance: circuit.capacitors.capacitances[index],
+                            })
+                            .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                    }
+                }
                 PeriodicMnaRegistration::BjtBase(index) => {
                     let bjt = &circuit.bjts.devices[index];
                     solver

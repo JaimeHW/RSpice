@@ -10,11 +10,11 @@ fn engine() -> Engine {
     Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
 }
 
-fn deck(capacitance: &str) -> Netlist {
+fn deck(capacitance: &str, ic: &str) -> Netlist {
     Netlist::parse_with_options(
         &format!(
             "Clocked series RC\nVdrive drive 0 SIN(0 0.2 1k)\n\
-             C1 drive out C={{{capacitance}}}\nR1 out 0 1k\n.end\n"
+             C1 drive out C={{{capacitance}}} {ic}\nR1 out 0 1k\n.end\n"
         ),
         NetlistParseOptions {
             expression_dialect: ExpressionDialect::Xyce,
@@ -78,7 +78,7 @@ fn qpss_capacitor_clocks_and_nested_memory_match_carrier_and_qpac() {
             1 => format!("100n*(1+0.1*(2*pi*{second})*SDT(0.2*sin(2*pi*{second}*time)))"),
             _ => format!("100n*(1+0.1*(2*pi*{second})^2*SDT(SDT(0.2*cos(2*pi*{second}*time))))"),
         };
-        let netlist = deck(&law);
+        let netlist = deck(&law, if depth == 2 { "IC=.3" } else { "" });
         let mut config = QpssConfig::new(vec![1e3, second], vec![2, 2]);
         config.solver.relative_tolerance = 1e-10;
         config.solver.current_absolute_tolerance = 1e-14;
@@ -102,6 +102,11 @@ fn qpss_capacitor_clocks_and_nested_memory_match_carrier_and_qpac() {
                 .position(|name| name.eq_ignore_ascii_case("Vdrive"))
                 .unwrap();
         let mut drive = vec![Complex64::ZERO; grid.len()];
+        let cap_branch = point
+            .branch_names()
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("C1"));
+        assert_eq!(cap_branch.is_some(), depth == 2);
         drive[grid.index_of(&[1, 0]).unwrap()] = Complex64::new(0.0, -0.1);
         drive[grid.index_of(&[-1, 0]).unwrap()] = Complex64::new(0.0, 0.1);
         for (index, expected) in response(&grid, 0.0, &drive).into_iter().enumerate() {
@@ -110,6 +115,13 @@ fn qpss_capacitor_clocks_and_nested_memory_match_carrier_and_qpac() {
                 "depth {depth}, carrier {index}"
             );
             assert!((point.spectra()[source][index] + expected / 1e3).norm() < 1e-11);
+            if let Some(branch) = cap_branch {
+                assert!(
+                    (point.spectra()[point.node_names().len() + branch][index] - expected / 1e3)
+                        .norm()
+                        < 1e-11
+                );
+            }
         }
         for input in [[0, 0], [-1, 1]] {
             let request = QpacRequest {
@@ -155,7 +167,7 @@ fn qpss_capacitor_clocks_reject_nonstationary_and_unregistered_forcing() {
     ] {
         let error = engine()
             .run_qpss(
-                &deck(law),
+                &deck(law, ""),
                 QpssConfig::new(vec![1e3, 1e3 * SQRT_2], vec![2, 2]),
             )
             .unwrap_err()

@@ -9,6 +9,8 @@ pub(super) struct PeriodicCapacitor {
     pub pos: usize,
     pub neg: usize,
     pub multiplier: Value,
+    /// Global physical current coordinate, when the circuit owns an IC branch.
+    pub branch: Option<usize>,
 }
 
 impl PeriodicCapacitor {
@@ -33,7 +35,16 @@ impl PeriodicCapacitor {
             .sample_periodic_capacitance(point, integral_start)?;
         let capacitance = self.multiplier * sample.value;
         let current = capacitance * frequency * solution[rate];
-        for (node, sign) in [(self.pos, 1.0), (self.neg, -1.0)] {
+        let terminals = if let Some(branch) = self.branch {
+            // Nodal KCL already comes from the registered constitutive port.
+            // Its physical current equation is Ibranch - C*f0*r = 0.
+            f.stamp_rhs(branch + 1, -solution[branch]);
+            f.stamp(branch + 1, branch + 1, 1.0);
+            [(branch + 1, -1.0), (0, 0.0)]
+        } else {
+            [(self.pos, 1.0), (self.neg, -1.0)]
+        };
+        for (node, sign) in terminals {
             f.stamp_rhs(node, -sign * current);
             f.stamp(node, rate + 1, sign * capacitance * frequency);
             for &(column, partial) in &sample.partials {
@@ -85,8 +96,17 @@ impl HbSolver {
             expression
                 .validate_periodic_integral_rates()
                 .map_err(HbError::InvalidCircuit)?;
-            if capacitors.ic_branch_indices[index].is_some() {
-                return Err(fail("periodic IC branch equations are unavailable"));
+            let branch =
+                capacitors.ic_branch_indices[index].map(|ordinal| self.num_nodes + ordinal - 1);
+            if let Some(branch) = branch {
+                let registered = self.exact_mna_branches().get(branch - self.num_nodes);
+                if !matches!(registered, Some(ExactMnaBranch::ConstitutivePort { node_pos, node_neg, .. })
+                    if *node_pos == capacitors.stamps[index].pp.row && *node_neg == capacitors.stamps[index].nn.row)
+                {
+                    return Err(fail(
+                        "capacitor current branch has no matching periodic port",
+                    ));
+                }
             }
             // QPSS validates clocks while lifting onto its actual tone grid,
             // after all physical and integral coordinates have been counted.
@@ -127,6 +147,7 @@ impl HbSolver {
                 pos: capacitors.stamps[index].pp.row,
                 neg: capacitors.stamps[index].nn.row,
                 multiplier: capacitors.capacitances[index],
+                branch,
             });
         }
         self.periodic_capacitors = devices;
@@ -141,5 +162,12 @@ impl HbSolver {
                 .iter()
                 .map(|cap| cap.expression.program.sdt_count)
                 .sum::<usize>()
+    }
+
+    pub(super) fn is_capacitor_current_row(&self, row: usize) -> bool {
+        self.periodic_capacitors.iter().any(|cap| cap.branch == Some(row))
+            || self.exact_periodic_networks.iter().any(|network| {
+                matches!(network, ExactPeriodicNetwork::Capacitor { branch, .. } if *branch == row)
+            })
     }
 }
