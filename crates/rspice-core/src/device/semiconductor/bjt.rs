@@ -2204,8 +2204,7 @@ impl Bjt {
         // The VBIC reference equations define their own k/q pair, shared by
         // ngspice vbicload.c/vbictemp.c and Xyce's generated VBIC13 vtv expression.
         // Xyce 7.10's legacy native device package retains the SPICE
-        // constants from N_DEV_Const.h. ngspice's native BJTload uses
-        // CONSTKoverQ from const.h, which has the same legacy pair.
+        // constants from N_DEV_Const.h; ngspice retains the pair in const.h.
         // Best-available mode uses current SI constants. The distinction is observable
         // in exponential junction models and is therefore part of dialect
         // compatibility rather than a unit-conversion approximation.
