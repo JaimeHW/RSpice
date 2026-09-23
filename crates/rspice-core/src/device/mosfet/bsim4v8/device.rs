@@ -37,6 +37,7 @@ use crate::{Complex64, NodeId, Value};
 const TRNQS_SCALING: Value = 1.0e-9;
 
 mod ac_response;
+mod periodic;
 #[cfg(test)]
 mod charge_tests;
 
