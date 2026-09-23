@@ -18,9 +18,12 @@ pub use checkpoint::MonteCarloCheckpoint;
 
 /// Optional retained outcomes and a commit hook for completed (including failed)
 /// trials. A missing row is unfinished, while a present None is a failed trial.
+type RestoreTrial<'a, T> = dyn Fn(usize) -> Option<Option<T>> + Sync + 'a;
+type CommitTrial<'a, T> = dyn Fn(usize, &Option<T>) -> Result<(), SimulationError> + Sync + 'a;
+
 struct MonteCarloTrialJournal<'a, T> {
-    restore: &'a (dyn Fn(usize) -> Option<Option<T>> + Sync),
-    commit: &'a (dyn Fn(usize, &Option<T>) -> Result<(), SimulationError> + Sync),
+    restore: &'a RestoreTrial<'a, T>,
+    commit: &'a CommitTrial<'a, T>,
 }
 mod deck_statistics;
 pub use deck_statistics::{MonteCarloVariationSource, monte_carlo_deck_trial_seed};
