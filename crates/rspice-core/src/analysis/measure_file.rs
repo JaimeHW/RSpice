@@ -611,6 +611,3 @@ mod tests {
         assert!(parse_prn_or_csv_column(prn, 1).is_err());
     }
 }
-
-#[cfg(test)]
-mod bound_reference_tests;

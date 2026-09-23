@@ -1,19 +1,18 @@
-use super::*;
-use crate::analysis::MeasureEngine;
-use crate::netlist::measure::{MeasureStatement, MeasureType};
+use rspice_core::analysis::{MeasureEngine, bind_error_measurement_reference};
+use rspice_core::netlist::measure::{MeasureStatement, MeasureType};
 use std::collections::HashMap;
 
 fn statement(family: &str, norm: &str) -> MeasureStatement {
     let source = format!(
         "Bound comparison\nV1 out 0 1\nR1 out 0 1k\n.MEAS {family} fit ERROR V(out) FILE=unavailable-reference.csv COMP_FUNCTION={norm} INDEPVARCOL=0 DEPVARCOL=1\n.end\n"
     );
-    crate::Netlist::parse(&source)
+    rspice_core::Netlist::parse(&source)
         .unwrap()
         .measurements
         .remove(0)
 }
 
-fn evaluated(statement: MeasureStatement) -> crate::MeasureResult {
+fn evaluated(statement: MeasureStatement) -> rspice_core::MeasureResult {
     let mut engine = MeasureEngine::new();
     engine.add(statement);
     let values = [0.0, 1.0, 2.0];
@@ -81,14 +80,14 @@ fn sealed_measurement_reference_clones_are_isolated_and_invalid_rebinds_are_atom
 #[test]
 fn sealed_measurement_reference_reaches_live_equation_reads_without_file_access() {
     let source = "Bound live reference\nV1 out 0 1\nR1 out 0 1k\n.MEAS TRAN fit ERROR V(out) FILE=unavailable-live.csv COMP_FUNCTION=L2NORM INDEPVARCOL=0 DEPVARCOL=1\n.MEAS TRAN doubled EQN='fit*2'\n.end\n";
-    let mut netlist = crate::Netlist::parse(source).unwrap();
-    let identity = |netlist: &crate::Netlist| {
-        crate::Engine::default()
+    let mut netlist = rspice_core::Netlist::parse(source).unwrap();
+    let identity = |netlist: &rspice_core::Netlist| {
+        rspice_core::Engine::default()
             .new_monte_carlo_checkpoint(
                 netlist,
-                &crate::engine::MonteCarloStudyConfig::new(1, 7, vec!["fit".into()]),
+                &rspice_core::engine::MonteCarloStudyConfig::new(1, 7, vec!["fit".into()]),
                 [0; 32],
-                &crate::NoAbort,
+                &rspice_core::NoAbort,
             )
             .unwrap()
             .population_identity()
@@ -96,7 +95,7 @@ fn sealed_measurement_reference_reaches_live_equation_reads_without_file_access(
     let unbound_identity = identity(&netlist);
     bind_error_measurement_reference(&mut netlist.measurements[0], "TIME,V(out)\n0,2\n").unwrap();
     assert_ne!(unbound_identity, identity(&netlist));
-    let waveform = crate::engine::TransientResult {
+    let waveform = rspice_core::engine::TransientResult {
         current_impulses: None,
         time: vec![0.0, 1.0, 2.0],
         step_sizes: vec![0.0; 3],
@@ -112,7 +111,7 @@ fn sealed_measurement_reference_reaches_live_equation_reads_without_file_access(
         store_traces: Vec::new(),
         fft_results: Vec::new(),
     };
-    let results = crate::analysis::evaluate_tran_measurements(&netlist, &waveform);
+    let results = rspice_core::analysis::evaluate_tran_measurements(&netlist, &waveform);
     assert_eq!(results[0].value, Some(2.0), "{:?}", results[0]);
     assert_eq!(results[1].value, Some(4.0), "{:?}", results[1]);
 }
