@@ -28,6 +28,22 @@ use super::SimulationError;
 
 const TEST_NAMESPACE: uuid::Uuid = uuid::Uuid::from_u128(0x0f22_9f3a_51b8_4cd7_9e21_7c60_5d18_a4b3);
 
+pub(in crate::simulation) fn run_standalone_spec(
+    deck: &str,
+    spec: AnalysisSpec,
+) -> super::SimulationResult {
+    super::spec::run_spec_request(
+        &crate::simulation::EngineBridge::new(),
+        spec,
+        Default::default(),
+        deck,
+        None,
+        &crate::simulation::execution::ResolvedExecutionDependencies::default(),
+        &NoAbort,
+    )
+    .unwrap()
+}
+
 /// Real OP-to-HB execution for output/transport fixtures. Keep the mandatory
 /// dependency contract even when a test does not need a complete plan graph.
 pub(in crate::simulation) fn run_hb_spec_with_op(

@@ -5,6 +5,7 @@
 //! the run that produced them has actually completed.
 
 use super::*;
+mod multirate_envelope;
 use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 use crate::simulation::plan::AnalysisKind;
 use crate::state::{ComponentType, Point, PreparedSourceCheckReceipt, SimulationRunProvenance};

@@ -10,6 +10,7 @@
 
 use super::*;
 mod catalog;
+mod multirate_envelope;
 mod soa_curves;
 
 use crate::product::AnalysisInstanceId;
