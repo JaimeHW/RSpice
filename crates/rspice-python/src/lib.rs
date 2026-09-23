@@ -272,6 +272,8 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "NoiseResult",
             "NoiseContribution",
             "MonteCarloResult",
+            "DcMatchContributor",
+            "DcMatchResult",
             "AcSensitivity",
             "AcSensitivityResult",
             "ElementSensitivity",
