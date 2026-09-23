@@ -500,13 +500,11 @@ impl TransmissionLine {
             return None;
         }
 
-        let mut f1 = (t - t2) * (t - t3);
-        let mut f2 = (t - t1) * (t - t3);
-        let mut f3 = (t - t1) * (t - t2);
-
-        f1 /= (t1 - t2) * (t1 - t3);
-        f2 /= (t2 - t1) * (t2 - t3);
-        f3 /= (t3 - t1) * (t3 - t2);
+        // Form dimensionless ratios before multiplication. Products of two
+        // physical time intervals can underflow/overflow at valid time scales.
+        let f1 = ((t - t2) / (t1 - t2)) * ((t - t3) / (t1 - t3));
+        let f3 = ((t - t1) / (t3 - t1)) * ((t - t2) / (t3 - t2));
+        let f2 = 1.0 - f1 - f3;
         Some((f1, f2, f3))
     }
 
@@ -554,12 +552,16 @@ impl TransmissionLine {
         F: Fn(&TlineStateSample) -> Value + Copy,
     {
         let sample0 = prev2?;
-        let (q0, q1, q2) =
+        let (q0, _, q2) =
             Self::quadratic_interp_coefficients(target, sample0.time, prev.time, next.time)?;
         let v0 = selector(sample0);
         let v1 = selector(prev);
         let v2 = selector(next);
-        Some(q0 * v0 + q1 * v1 + q2 * v2)
+        // A breakpoint restart can make q0 and q1 large with opposite signs.
+        // Anchor at the middle sample instead of subtracting large multiples
+        // of its DC level. This is the same quadratic, with exact preservation
+        // of a constant wave and no spurious DC amplification in delay loops.
+        Some(q0.mul_add(v0 - v1, q2.mul_add(v2 - v1, v1)))
     }
 
     #[inline]
@@ -1934,6 +1936,42 @@ impl TransmissionLine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quadratic_interpolation_preserves_restart_polynomials_at_extreme_time_scales() {
+        for scale in [1e-200, 1.0, 1e200] {
+            for degree in 0..=2 {
+                let polynomial = |x: Value| match degree {
+                    0 => 0.3,
+                    1 => 2.0 + 4.0 * x,
+                    _ => 2.0 + 4.0 * x + 8.0 * x * x,
+                };
+                let samples = [0.0, 2.0_f64.powi(-24), 1.0].map(|phase| TlineStateSample {
+                    time: scale * phase,
+                    v1: polynomial(phase),
+                    i1: 0.0,
+                    v2: 0.0,
+                    i2: 0.0,
+                });
+                let actual = TransmissionLine::quadratic_interpolate(
+                    Some(&samples[0]),
+                    &samples[1],
+                    &samples[2],
+                    0.25 * scale,
+                    |sample| sample.v1,
+                )
+                .unwrap();
+                let expected = polynomial(0.25);
+                assert!(
+                    (actual - expected).abs() < 128.0 * Value::EPSILON * expected.abs(),
+                    "scale={scale}, degree={degree}: {actual} vs {expected}"
+                );
+                if degree == 0 {
+                    assert_eq!(actual, expected);
+                }
+            }
+        }
+    }
 
     fn distributed_line(samples: &[(Value, Value)]) -> TransmissionLine {
         let mut line = TransmissionLine::new("TLTRA".to_string(), 1, 0, 2, 0, 1.0, 1.0);
