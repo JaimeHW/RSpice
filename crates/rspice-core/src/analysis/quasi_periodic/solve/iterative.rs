@@ -27,7 +27,7 @@ impl Workspace<'_> {
     /// Fixed equation scaling keeps inverse-column qualification independent
     /// of the units of a behavioral integral. Physical Newton acceptance is
     /// still measured by evaluate(), with the user's original tolerances.
-    fn equation_divisors(
+    pub(super) fn equation_divisors(
         &self,
         evaluation: &Evaluation,
         abort: &dyn AbortSignal,

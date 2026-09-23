@@ -8,9 +8,9 @@ use super::*;
 use crate::ResourceLimits;
 use crate::analysis::quasi_periodic::{
     QuasiPeriodicAcConfig, QuasiPeriodicAcSolution, QuasiPeriodicAdjointSolution,
-    QuasiPeriodicError as Error, QuasiPeriodicGrid, QuasiPeriodicLinearConfig,
-    QuasiPeriodicNoiseConfig, QuasiPeriodicNoisePoint, QuasiPeriodicNoiseSource,
-    QuasiPeriodicSolution, QuasiPeriodicSolveConfig,
+    QuasiPeriodicAutonomousConfig, QuasiPeriodicError as Error, QuasiPeriodicGrid,
+    QuasiPeriodicLinearConfig, QuasiPeriodicNoiseConfig, QuasiPeriodicNoisePoint,
+    QuasiPeriodicNoiseSource, QuasiPeriodicSolution, QuasiPeriodicSolveConfig,
     solve::{self, Circuit, LinearEntry, Sample},
 };
 use std::sync::Arc;
@@ -23,6 +23,79 @@ fn device_error(error: HbError) -> Error {
 }
 
 impl HbSolver {
+    /// Solve one free-running tone together with the complete MNA waveforms.
+    /// Other tone frequencies and source phases remain fixed. The caller
+    /// supplies a nonzero oscillator seed and a node-voltage phase reference.
+    pub fn solve_autonomous_quasi_periodic_with_abort(
+        &mut self,
+        grid: Arc<QuasiPeriodicGrid>,
+        config: &QuasiPeriodicSolveConfig,
+        oscillator: &QuasiPeriodicAutonomousConfig,
+        sources: &[Vec<Complex64>],
+        seed: &[Vec<Complex64>],
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<QuasiPeriodicSolution, Error> {
+        if abort.is_aborted() {
+            return Err(Error::Aborted);
+        }
+        config.validate()?;
+        oscillator.phase_index(&grid, self.unknowns())?;
+        self.validate_quasi_periodic_circuit()?;
+        if oscillator.phase_coordinate >= self.num_nodes {
+            return Err(Error::InvalidConfig(
+                "the oscillator phase reference must be a node voltage".into(),
+            ));
+        }
+        let uses_phase = self
+            .behavioral_sources
+            .voltage_sources
+            .iter()
+            .any(|source| source.uses_quasi_periodic_phase(oscillator.tone, self.unknowns()))
+            || self
+                .behavioral_sources
+                .current_sources
+                .iter()
+                .any(|source| source.uses_quasi_periodic_phase(oscillator.tone, self.unknowns()))
+            || self
+                .periodic_capacitors
+                .iter()
+                .any(|cap| cap.expression.uses_quasi_periodic_phase(oscillator.tone));
+        if uses_phase {
+            return Err(Error::InvalidConfig(
+                "an authored behavioral or capacitance clock drives the selected autonomous tone"
+                    .into(),
+            ));
+        }
+        solve::validate_spectra(sources, self.unknowns(), &grid, "source", abort)?;
+        solve::validate_spectra(seed, self.unknowns(), &grid, "oscillator seed", abort)?;
+        if sources.iter().any(|row| {
+            row.iter()
+                .zip(grid.indices())
+                .any(|(value, tuple)| tuple[oscillator.tone] != 0 && *value != Complex64::ZERO)
+        }) {
+            return Err(Error::InvalidConfig(
+                "the autonomous tone cannot be independently driven".into(),
+            ));
+        }
+        solve::check_workload(self.unknowns(), &grid, &config.linear, limits)?;
+        // Only structurally prescribed inputs are eliminated here. All
+        // oscillator-dependent integral coordinates remain in the joint F/Q
+        // system. Prescribed inputs contain only fixed clocks; their primitive
+        // and row scale stay constant as the free frequency changes.
+        let limits = self.prepare_quasi_periodic_integrals(
+            grid.clone(),
+            limits,
+            false,
+            Some(sources),
+            None,
+            abort,
+        )?;
+        solve::solve_autonomous_with_abort(
+            self, grid, config, oscillator, sources, seed, &limits, abort,
+        )
+    }
+
     /// Solve the registered circuit on independent tone phases. `sources`
     /// supplies the entire MNA right hand side in full signed Fourier-series
     /// coefficients (a cosine of peak A has coefficients A/2). Existing HB
@@ -500,6 +573,36 @@ impl Circuit for HbSolver {
         self.quasi_periodic_linear_entries(frequency_hz, false)
     }
 
+    fn linear_frequency_derivative(&self, frequency_hz: Value) -> Result<Vec<LinearEntry>, Error> {
+        let jf = Complex64::new(0.0, std::f64::consts::TAU);
+        let mut entries = self
+            .c_matrix
+            .iter()
+            .map(|&(row, col, value)| (row, col, jf * value))
+            .collect::<Vec<_>>();
+        for (index, branch) in self.periodic_mna_branches.iter().enumerate() {
+            if let ExactMnaBranch::Inductor { inductance, .. } = branch {
+                let row = self.num_nodes + index;
+                entries.push((row, row, -jf * inductance));
+            }
+        }
+        entries.extend(
+            self.exact_mna_inductance_entries
+                .iter()
+                .map(|&(row, col, value)| (row, col, -jf * value)),
+        );
+        for network in &self.exact_periodic_networks {
+            network
+                .try_visit_frequency_derivative_entries(
+                    std::f64::consts::TAU * frequency_hz,
+                    self.unknowns(),
+                    |row, col, value| entries.push((row, col, jf * value)),
+                )
+                .map_err(device_error)?;
+        }
+        Ok(entries)
+    }
+
     fn small_signal_entries(&self, frequency_hz: Value) -> Result<Vec<LinearEntry>, Error> {
         self.quasi_periodic_linear_entries(frequency_hz, true)
     }
@@ -591,5 +694,7 @@ impl HbSolver {
     }
 }
 
+#[cfg(test)]
+mod autonomous_tests;
 #[cfg(test)]
 mod tests;

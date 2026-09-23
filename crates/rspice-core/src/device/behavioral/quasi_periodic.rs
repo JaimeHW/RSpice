@@ -400,6 +400,16 @@ macro_rules! lift_source {
                         |equations| equations.has_phase_basis(dimensions),
                     )
             }
+
+            pub(crate) fn uses_quasi_periodic_phase(&self, phase: usize, unknowns: usize) -> bool {
+                self.integral_equations.as_ref().map_or_else(
+                    || {
+                        self.node_bindings
+                            .contains(&Some(unknowns.saturating_add(phase)))
+                    },
+                    |equations| equations.uses_phase(phase),
+                )
+            }
         }
     };
 }

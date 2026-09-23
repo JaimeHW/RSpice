@@ -36,6 +36,12 @@ impl SolutionDependentCapacitor {
                 .is_some_and(|equations| equations.has_phase_basis(dimensions))
     }
 
+    pub(crate) fn uses_quasi_periodic_phase(&self, phase: usize) -> bool {
+        self.integral_equations
+            .as_ref()
+            .is_some_and(|equations| equations.uses_phase(phase))
+    }
+
     fn integral_bindings(&self, time: Value, state_start: usize) -> IntegralBindings<'_> {
         IntegralBindings {
             name: &self.name,

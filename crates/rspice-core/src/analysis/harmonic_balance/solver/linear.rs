@@ -5,6 +5,16 @@ use std::cell::RefCell;
 use std::f64::consts::PI;
 
 impl ExactPeriodicNetwork {
+    /// Exact zero-increment limit dY/d(j omega), without subtracting stamps.
+    pub(crate) fn try_visit_frequency_derivative_entries(
+        &self,
+        omega: Value,
+        unknowns: usize,
+        visitor: impl FnMut(usize, usize, Complex64),
+    ) -> Result<(), HbError> {
+        self.try_visit_frequency_entries(omega, Some(0.0), unknowns, visitor)
+    }
+
     pub(crate) fn try_visit_direct_entries(
         &self,
         omega: Value,

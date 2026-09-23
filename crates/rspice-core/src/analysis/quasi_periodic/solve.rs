@@ -5,7 +5,10 @@
 //! evaluate the same physical F/Q model on independent phases. Workspace is
 //! checked before allocating the selected backend.
 
+mod autonomous;
 mod coordinates;
+pub use autonomous::QuasiPeriodicAutonomousConfig;
+pub(crate) use autonomous::solve_autonomous_with_abort;
 pub(crate) use coordinates::validate as validate_spectra;
 mod evaluation;
 mod iterative;
@@ -131,6 +134,18 @@ pub(crate) trait Circuit {
     fn unknowns(&self) -> usize;
     fn voltage_equation(&self, row: usize) -> bool;
     fn linear_entries(&self, frequency_hz: Value) -> Result<Vec<LinearEntry>, Error>;
+    /// Analytic dY/df in Hz, needed when one carrier frequency is unknown.
+    /// A model must supply its own derivative rather than silently treating
+    /// a frequency-dependent network as a constant matrix.
+    fn linear_frequency_derivative(&self, frequency_hz: Value) -> Result<Vec<LinearEntry>, Error> {
+        if self.linear_entries(frequency_hz)?.is_empty() {
+            Ok(Vec::new())
+        } else {
+            Err(Error::InvalidCircuit(
+                "autonomous QPSS needs the linear network frequency derivative".into(),
+            ))
+        }
+    }
     fn small_signal_entries(&self, frequency_hz: Value) -> Result<Vec<LinearEntry>, Error> {
         self.linear_entries(frequency_hz)
     }

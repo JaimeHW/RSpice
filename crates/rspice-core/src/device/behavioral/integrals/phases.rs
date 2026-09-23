@@ -46,4 +46,12 @@ impl IntegralEquations {
     pub(crate) fn has_phase_basis(&self, dimensions: usize) -> bool {
         self.phase_dimensions == Some(dimensions)
     }
+
+    /// Structural dependency, including rates of nested integral states.
+    pub(crate) fn uses_phase(&self, phase: usize) -> bool {
+        self.rates
+            .iter()
+            .chain(std::iter::once(&self.output))
+            .any(|equation| equation.inputs.contains(&Input::Phase(phase)))
+    }
 }

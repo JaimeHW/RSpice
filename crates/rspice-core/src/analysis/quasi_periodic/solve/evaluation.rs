@@ -9,6 +9,8 @@ pub(super) struct JacobianSample {
 
 pub(super) struct Evaluation {
     pub residual: Vec<Vec<Complex64>>,
+    /// Delivered nonlinear charge, before multiplying by signed frequency.
+    pub charge: Vec<Vec<Complex64>>,
     pub jacobian: Vec<JacobianSample>,
     pub merit: Value,
 }
@@ -143,12 +145,14 @@ impl Workspace<'_> {
                 });
             }
         }
+        let mut charge_spectra = vec![vec![Complex64::ZERO; entries]; self.unknowns];
         for (terms, is_charge) in [(current, false), (charge, true)] {
             for (row, wave) in terms {
                 check_abort(abort)?;
                 let spectrum = self.transform.to_spectrum_with_abort(&wave, abort)?;
                 for (k, mut term) in spectrum.into_iter().enumerate() {
                     if is_charge {
+                        charge_spectra[row][k] += term;
                         term *= Complex64::new(
                             0.0,
                             std::f64::consts::TAU * self.grid.frequencies_hz()[k],
@@ -178,6 +182,7 @@ impl Workspace<'_> {
         }
         Ok(Evaluation {
             residual,
+            charge: charge_spectra,
             jacobian,
             merit,
         })

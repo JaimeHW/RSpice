@@ -21,8 +21,8 @@ pub use small_signal::{
     QuasiPeriodicAcConfig, QuasiPeriodicAcSolution, QuasiPeriodicAdjointSolution,
 };
 pub use solve::{
-    QuasiPeriodicLinearConfig, QuasiPeriodicLinearMethod, QuasiPeriodicSolution,
-    QuasiPeriodicSolveConfig,
+    QuasiPeriodicAutonomousConfig, QuasiPeriodicLinearConfig, QuasiPeriodicLinearMethod,
+    QuasiPeriodicSolution, QuasiPeriodicSolveConfig,
 };
 pub use transform::{QuasiPeriodicSampleSpectrum, QuasiPeriodicTransform};
 
