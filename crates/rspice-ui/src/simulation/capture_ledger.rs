@@ -184,7 +184,7 @@ pub struct CaptureLedger {
     /// Retained engine state shared by deferred outputs, counted once for the
     /// plan.
     shared_source_bytes: u64,
-    /// The Save All allowance, when that mode is selected.
+    /// Engine results retained by Save All or Automatic without output contracts.
     engine_ceiling_bytes: Option<u64>,
     indeterminate: Vec<IndeterminateOutput>,
 }
@@ -251,6 +251,28 @@ impl CaptureLedger {
         }
         let save_all = selection_mode == OutputSelectionMode::SaveAll;
         let per_analysis_engine_bytes = retained_engine_source_upper_bound_bytes(1);
+        let engine_points = if save_all {
+            workload.engine_task_points()
+        } else if selection_mode == OutputSelectionMode::Automatic {
+            let contracted = reports
+                .iter()
+                .flat_map(|report| {
+                    report
+                        .bytes_by_analysis()
+                        .iter()
+                        .map(|(id, _)| *id)
+                        .chain(report.retained_engine_source_analysis_ids().iter().copied())
+                })
+                .collect::<std::collections::HashSet<_>>();
+            let contracted_points = contracted.iter().fold(0u64, |total, analysis| {
+                total.saturating_add(workload.points_for(*analysis))
+            });
+            workload
+                .engine_task_points()
+                .saturating_sub(contracted_points)
+        } else {
+            0
+        };
         Self {
             rows,
             // In Save All the whole engine result set is already reserved
@@ -265,8 +287,8 @@ impl CaptureLedger {
                     )
                 })
             },
-            engine_ceiling_bytes: save_all
-                .then(|| per_analysis_engine_bytes.saturating_mul(workload.engine_task_points())),
+            engine_ceiling_bytes: (save_all || engine_points > 0)
+                .then(|| per_analysis_engine_bytes.saturating_mul(engine_points)),
             indeterminate,
         }
     }
@@ -427,6 +449,32 @@ mod tests {
             &CaptureWorkload::uniform(27, 2),
         );
         assert_eq!(uniform.total_bytes(), 200 * 27);
+    }
+
+    #[test]
+    fn automatic_native_results_are_budgeted_once_at_their_run_set_points() {
+        let selected = crate::product::AnalysisInstanceId::new();
+        let native = crate::product::AnalysisInstanceId::new();
+        let outputs = vec![output("a", "V(n)"), output("b", "V(m)")];
+        let reports = vec![exact_for(selected, 100), exact_for(selected, 200)];
+        let membership = CaptureGroupMembership::resolve(&[], &outputs);
+        let workload = CaptureWorkload::narrowed(
+            std::collections::HashMap::from([(selected, 1), (native, 3)]),
+            3,
+            4,
+        );
+        let ledger = CaptureLedger::resolve(
+            &[],
+            &outputs,
+            &reports,
+            &membership,
+            OutputSelectionMode::Automatic,
+            &workload,
+        );
+        let native_bytes = retained_engine_source_upper_bound_bytes(3);
+        assert_eq!(ledger.engine_ceiling_bytes(), Some(native_bytes));
+        assert_eq!(ledger.total_bytes(), native_bytes + 300);
+        assert!(ledger.indeterminate().is_empty());
     }
 
     #[test]

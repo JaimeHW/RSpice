@@ -197,6 +197,22 @@ impl PreparedSavedOutput {
         spec: &AnalysisSpec,
     ) -> Result<Option<Self>, String> {
         output.validate()?;
+        // Automatic node probes belong to ordinary circuit waveforms. Other
+        // families retain their native spectra, study statistics or reports.
+        // Explicit output requests still use the full compatibility contract.
+        if output.origin == crate::state::SavedOutputOrigin::Automatic
+            && (!matches!(
+                spec.run_type(),
+                AnalysisRunType::DcOp
+                    | AnalysisRunType::DcSweep
+                    | AnalysisRunType::Transient
+                    | AnalysisRunType::Ac
+                    | AnalysisRunType::TransientNoise
+            ) || matches!(spec, AnalysisSpec::AcData { frequencies, table_options, .. }
+                if table_options.from_netlist && frequencies.is_empty()))
+        {
+            return Ok(None);
+        }
         let selected = match &output.compatible_analyses {
             SavedOutputCompatibility::OpTranAc => {
                 matches!(
@@ -240,6 +256,12 @@ impl PreparedSavedOutput {
             (
                 SavedOutputPolicy::SelectedAndFinalPoints,
                 AnalysisSpec::Transient {
+                    stop_time,
+                    step_time,
+                    start_time,
+                    ..
+                }
+                | AnalysisSpec::TransientNoise {
                     stop_time,
                     step_time,
                     start_time,
@@ -364,7 +386,7 @@ pub(in crate::simulation) fn compile_saved_output_contracts<'a>(
             contracts.push(contract);
         }
     }
-    if contracts.is_empty() {
+    if contracts.is_empty() && output.origin != crate::state::SavedOutputOrigin::Automatic {
         return Err(format!(
             "saved output '{}' has no compatible enabled analysis",
             output.name
@@ -678,22 +700,23 @@ fn deterministic_sample_count(
             start2,
             stop2,
             step2,
+            hysteresis,
+            modes,
             ..
         } => {
-            let primary = rspice_core::netlist::DcSweepSpec::linear(*start, *stop, *step)
-                .points()
-                .len();
+            let primary = modes.primary.spec(*start, *stop, *step).points().len();
             if source2.is_some() {
                 match (start2, stop2, step2) {
-                    (Some(start), Some(stop), Some(step)) => Some(
-                        primary.saturating_mul(
-                            rspice_core::netlist::DcSweepSpec::linear(*start, *stop, *step)
-                                .points()
-                                .len(),
-                        ),
-                    ),
+                    (Some(start), Some(stop), Some(step)) => {
+                        Some(primary.saturating_mul(
+                            modes.secondary.spec(*start, *stop, *step).points().len(),
+                        ))
+                    }
                     _ => None,
                 }
+            } else if *hysteresis {
+                // Retained forward/reverse curves both include the turnaround.
+                Some(primary.saturating_mul(2))
             } else {
                 Some(primary)
             }

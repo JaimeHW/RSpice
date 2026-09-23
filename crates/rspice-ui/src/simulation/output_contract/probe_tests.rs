@@ -10,6 +10,93 @@ const DECK: &str =
     "Grounded probes\nV1 pos 0 DC 2 AC 1 0\nV2 neg 0 DC -1 AC 1 180\nR1 pos neg 1k\n.end\n";
 
 #[test]
+fn automatic_outputs_retain_dc_sweeps_and_native_noise_results() {
+    let automatic = output(SavedOutputKind::RawVoltageOrCurrent, "V(pos)", "V(pos)")
+        .with_origin(crate::state::SavedOutputOrigin::Automatic);
+    let dc_run = run(
+        DECK,
+        "DC automatic",
+        dc(false, false),
+        ".dc V1 -1 1 1",
+        std::slice::from_ref(&automatic),
+        OutputSelectionMode::Automatic,
+    );
+    let result = &dc_run.analyses[0];
+    assert!(result.success, "{:?}", result.error_message);
+    let wave = &result.waveforms[0];
+    assert_eq!(*wave.x, [-1.0, 0.0, 1.0]);
+    assert_eq!(*wave.y, [-1.0, 0.0, 1.0]);
+    assert_eq!(result.saved_output_receipts.len(), 1);
+    result.validate_retained_evidence().unwrap();
+
+    let noise = AnalysisSpec::Noise {
+        output_node: "out".into(),
+        reference_node: "0".into(),
+        input_source: "V1".into(),
+        start_freq: 1e3,
+        stop_freq: 1e3,
+        points_per_decade: 1,
+        sweep: NoiseSweepType::Linear,
+        explicit_frequencies: None,
+        data_table_name: None,
+        contribution_detail: Default::default(),
+        integration_mode: crate::simulation::config::NoiseIntegrationMode::Disabled,
+        temperature: 300.0,
+    };
+    let id = AnalysisInstanceId::new();
+    assert!(
+        compile_saved_output_contracts(&automatic, [(id, &noise)])
+            .unwrap()
+            .is_empty()
+    );
+    let mut authored = automatic.clone();
+    authored.origin = crate::state::SavedOutputOrigin::Plan;
+    authored.compatible_analyses = SavedOutputCompatibility::OpTranAc;
+    assert!(
+        compile_saved_output_contracts(&authored, [(id, &noise)]).is_err(),
+        "an incompatible explicit request must still be refused"
+    );
+    let noise_run = run(
+        "Noise automatic\nV1 in 0 AC 1\nR1 in out 1k\nR2 out 0 1k\n.end\n",
+        "Noise automatic",
+        noise,
+        ".noise V(out) V1 lin 1 1k 1k",
+        &[automatic],
+        OutputSelectionMode::Automatic,
+    );
+    let result = &noise_run.analyses[0];
+    assert!(result.success, "{:?}", result.error_message);
+    assert!(
+        !result.waveforms.is_empty(),
+        "automatic selection erased the noise spectra"
+    );
+    assert!(
+        result
+            .waveforms
+            .iter()
+            .any(|wave| wave.y.iter().any(|value| *value > 0.0))
+    );
+    assert!(result.saved_output_receipts.is_empty());
+    result.validate_retained_evidence().unwrap();
+    let mut explicit = result.clone();
+    apply_saved_output_policy(
+        &mut explicit,
+        crate::simulation::execution::SavePolicy::PlanOwned {
+            output_selection_mode: OutputSelectionMode::ExplicitOnly,
+            retained_dataset_limit: 10,
+            maximum_storage_bytes: u64::MAX,
+            live_streaming_enabled: false,
+            retain_failure_diagnostics: true,
+        },
+        &[],
+    );
+    assert!(
+        explicit.waveforms.is_empty(),
+        "explicit-only selection still selects no waveforms"
+    );
+}
+
+#[test]
 fn hb_device_current_saved_terminal_probes_preserve_hierarchy_phase_and_receipts() {
     let outputs = [
         ("Gate", "@/X1/M1[ig]"),
@@ -128,6 +215,61 @@ fn dc(nested: bool, retraced: bool) -> AnalysisSpec {
         step2: nested.then_some(1.0),
         hysteresis: retraced,
         modes: Default::default(),
+    }
+}
+
+#[test]
+fn dc_output_forecasts_count_authored_modes_and_both_retrace_members() {
+    use crate::simulation::config::DcAxisMode;
+    for (mode, count) in [
+        (DcAxisMode::Linear, 8),
+        (
+            DcAxisMode::List {
+                values: vec![1.0, 2.0, 4.0, 8.0],
+            },
+            4,
+        ),
+        (
+            DcAxisMode::Decade {
+                points_per_decade: 1,
+            },
+            1,
+        ),
+        (
+            DcAxisMode::Octave {
+                points_per_octave: 1,
+            },
+            4,
+        ),
+    ] {
+        for (nested, retraced, multiplier) in
+            [(false, false, 1), (false, true, 2), (true, false, 3)]
+        {
+            let spec = AnalysisSpec::DcSweep {
+                source_name: "V1".into(),
+                start: 1.0,
+                stop: 8.0,
+                step: 1.0,
+                source2: nested.then(|| "V2".into()),
+                start2: nested.then_some(0.0),
+                stop2: nested.then_some(0.0),
+                step2: nested.then_some(0.0),
+                hysteresis: retraced,
+                modes: crate::simulation::config::DcSweepModes {
+                    primary: mode.clone(),
+                    secondary: DcAxisMode::List {
+                        values: vec![0.0, 1.0, 3.0],
+                    },
+                },
+            };
+            let output = output(SavedOutputKind::RawVoltageOrCurrent, "V(pos)", "V(pos)");
+            let report = preflight_saved_output(&output, [(AnalysisInstanceId::new(), &spec)]);
+            assert_eq!(
+                report.storage_estimate(),
+                &SavedOutputStorageEstimate::ExactBytes(count * multiplier * 16),
+                "{mode:?}, nested={nested}, retraced={retraced}"
+            );
+        }
     }
 }
 

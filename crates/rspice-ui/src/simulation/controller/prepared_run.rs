@@ -1367,10 +1367,10 @@ impl SimulationController {
         let mut advisories = generated.warnings;
         if used_automatic_outputs {
             advisories.push(if effective_saved_outputs.is_empty() {
-                "Automatic output selection found no eligible top-level voltage; the run will publish a guided empty waveform result.".to_owned()
+                "Automatic output selection found no eligible node voltage; analyses without selected outputs retain their native results.".to_owned()
             } else {
                 format!(
-                    "Automatic output selection retained {} bounded top-level voltage{} because the plan has no explicit outputs.",
+                    "Automatic output selection retained {} bounded node voltage{} for circuit waveforms. Other analyses retain their native results.",
                     effective_saved_outputs.len(),
                     if effective_saved_outputs.len() == 1 { "" } else { "s" }
                 )

@@ -263,6 +263,14 @@ pub(in crate::simulation) fn apply_saved_output_policy(
     ) {
         return;
     }
+    // Automatic selection must not discard an analysis's native results just
+    // because it has no ordinary node-waveform output contract (for example,
+    // Monte Carlo statistics, a noise spectrum or an FFT).
+    if policy.output_selection_mode() == crate::state::OutputSelectionMode::Automatic
+        && contracts.is_empty()
+    {
+        return;
+    }
     if policy.output_selection_mode() == crate::state::OutputSelectionMode::SaveAll {
         for waveform in &mut analysis.waveforms {
             waveform.visible = false;

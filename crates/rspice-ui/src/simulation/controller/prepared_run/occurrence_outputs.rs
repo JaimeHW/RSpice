@@ -354,7 +354,7 @@ fn automatic_outputs(
             crate::state::SavedOutputKind::RawVoltageOrCurrent,
             candidate.spelling.display().to_owned(),
             candidate.spelling.engine().to_owned(),
-            crate::state::SavedOutputCompatibility::OpTranAc,
+            crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
             crate::state::SavedOutputPolicy::SelectedAndFinalPoints,
             crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
             crate::state::SavedOutputStreaming::StoreOnly,
@@ -368,6 +368,7 @@ fn automatic_outputs(
                 ),
             )
         })?
+        .with_origin(crate::state::SavedOutputOrigin::Automatic)
         .with_display_intent(if candidate.priority <= 1 {
             crate::state::SavedOutputDisplayIntent::Plot
         } else {

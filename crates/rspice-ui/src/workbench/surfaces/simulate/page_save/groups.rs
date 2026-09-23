@@ -214,7 +214,11 @@ pub(super) fn capture_groups(
                 plan_level_row(
                     ui,
                     "Engine result set",
-                    "reserved for every enabled analysis",
+                    if selection_mode == OutputSelectionMode::SaveAll {
+                        "reserved for every enabled analysis"
+                    } else {
+                        "automatic results without selected outputs"
+                    },
                     engine_ceiling,
                 );
             }

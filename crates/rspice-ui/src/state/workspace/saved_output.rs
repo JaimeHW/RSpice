@@ -65,6 +65,8 @@ pub enum SavedOutputOrigin {
     #[default]
     Plan,
     SchematicProbe,
+    /// A bounded node selection synthesized for the prepared run.
+    Automatic,
 }
 
 /// Initial presentation intent, independent from whether and how the full
