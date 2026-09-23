@@ -1500,7 +1500,12 @@ impl TransmissionLine {
     /// wave is necessary because different fallback decisions for V and I are
     /// not algebraically equivalent to the canonical device equation.
     fn lossless_delayed_wave(&self, time: Value, forward: bool) -> Value {
-        let target = time - self.td;
+        self.lossless_wave_at(time - self.td, forward)
+    }
+
+    /// Sample an outgoing wave at an absolute accepted-history time. Shooting
+    /// state projection must use the same interpolator as the native stamp.
+    pub(crate) fn lossless_wave_at(&self, target: Value, forward: bool) -> Value {
         let initial = self.initial_state();
         let wave = |sample: &TlineStateSample| {
             if forward {
@@ -1513,33 +1518,83 @@ impl TransmissionLine {
             return wave(&initial);
         }
 
-        let mut prev2: Option<&TlineStateSample> = None;
-        let mut prev: Option<&TlineStateSample> = None;
-        for sample in &self.state_history {
-            if sample.time >= target {
-                if let Some(prev_sample) = prev {
-                    if sample.time <= prev_sample.time {
-                        return wave(sample);
-                    }
-                    return Self::delayed_interpolate(
-                        self.lossless_interpolation_mode,
-                        prev2,
-                        prev_sample,
-                        sample,
-                        target,
-                        wave,
-                    );
-                }
-                return wave(sample);
-            }
-            prev2 = prev;
-            prev = Some(sample);
-        }
+        let next = self
+            .state_history
+            .partition_point(|sample| sample.time < target);
+        let Some(sample) = self.state_history.get(next) else {
+            return self
+                .state_history
+                .back()
+                .map(&wave)
+                .unwrap_or_else(|| wave(&initial));
+        };
+        let Some(previous) = next
+            .checked_sub(1)
+            .and_then(|index| self.state_history.get(index))
+        else {
+            return wave(sample);
+        };
+        Self::delayed_interpolate(
+            self.lossless_interpolation_mode,
+            next.checked_sub(2)
+                .and_then(|index| self.state_history.get(index)),
+            previous,
+            sample,
+            target,
+            wave,
+        )
+    }
 
-        self.state_history
-            .back()
-            .map(&wave)
-            .unwrap_or_else(|| wave(&initial))
+    pub(crate) fn accepted_history_time(&self) -> Value {
+        self.current_time
+    }
+
+    pub(crate) fn history_sample_count(&self) -> usize {
+        self.state_history.len()
+    }
+
+    pub(crate) fn has_state_dependent_lossless_interpolation(&self) -> bool {
+        !self.is_memoryless_two_port()
+            && matches!(
+                self.lossless_interpolation_mode,
+                DelayedInterpolationMode::Mixed | DelayedInterpolationMode::XyceTra
+            )
+    }
+
+    /// Translate accepted lossless history to a new continuation origin.
+    /// Slopes, physical samples and launched waves remain unchanged; only the
+    /// clock moves. Validate the whole translated snapshot before replacing it.
+    pub(crate) fn rebase_lossless_history(&mut self, time: Value) -> Result<(), String> {
+        if !time.is_finite() || time < 0.0 {
+            return Err("transmission-line history origin must be finite and non-negative".into());
+        }
+        let mut checkpoint = self.checkpoint_state()?;
+        if !checkpoint.history_initialized {
+            return Ok(());
+        }
+        let previous = checkpoint.current_time;
+        let translate = |sample_time: Value| {
+            if sample_time == previous {
+                time
+            } else {
+                time + (sample_time - previous)
+            }
+        };
+        checkpoint.current_time = time;
+        if let Some(initial) = &mut checkpoint.initial_state {
+            initial[0] = translate(initial[0]);
+        }
+        for sample in &mut checkpoint.state_history {
+            sample[0] = translate(sample[0]);
+        }
+        for sample in checkpoint
+            .forward_history
+            .iter_mut()
+            .chain(&mut checkpoint.backward_history)
+        {
+            sample[0] = translate(sample[0]);
+        }
+        self.restore_checkpoint_state(&checkpoint)
     }
 
     fn distributed_rc_response(
