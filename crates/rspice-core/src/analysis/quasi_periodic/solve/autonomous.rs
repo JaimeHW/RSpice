@@ -80,8 +80,8 @@ impl Workspace<'_> {
             if rate == 0.0 {
                 continue;
             }
-            for row in 0..self.unknowns {
-                column[row][k] =
+            for (row, output) in column.iter_mut().enumerate() {
+                output[k] =
                     -Complex64::new(0.0, std::f64::consts::TAU * rate) * evaluation.charge[row][k];
             }
             for (row, col, derivative) in
@@ -191,6 +191,7 @@ impl Workspace<'_> {
         Ok(correction)
     }
 
+    #[expect(clippy::too_many_arguments, reason = "the bordered solve keeps its numerical inputs explicit")]
     fn bordered_krylov(
         &mut self,
         evaluation: &Evaluation,
@@ -309,6 +310,7 @@ fn workspace<'a>(
     Ok(work)
 }
 
+#[expect(clippy::too_many_arguments, reason = "the autonomous solve keeps its numerical inputs explicit")]
 pub(crate) fn solve_autonomous_with_abort(
     circuit: &mut impl Circuit,
     grid: Arc<QuasiPeriodicGrid>,
