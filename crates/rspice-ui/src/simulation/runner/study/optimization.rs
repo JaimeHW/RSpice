@@ -64,9 +64,9 @@ pub(crate) fn run_optimization(
         && (!point.temperature_celsius.is_finite()
             || point.temperature_celsius <= -273.15
             || point.supply_voltage.is_some() != point.nominal_supply_voltage.is_some())
-        {
-            return Err(SimulationError::InvalidConfig("Optimization Run Set requires a physical temperature and a complete supply/nominal pair".into()));
-        }
+    {
+        return Err(SimulationError::InvalidConfig("Optimization Run Set requires a physical temperature and a complete supply/nominal pair".into()));
+    }
     let engine = rspice_core::Engine::default().resolved_for_netlist(&circuit);
     let mut limits = engine.config().resource_limits;
     let retained_objectives = base
@@ -349,7 +349,6 @@ mod tests {
                     stop_freq: 1000.0,
                     num_points: 1,
                     sweep_type: AcSweepType::Linear,
-                    ..Default::default()
                 }),
                 "gain",
                 1.0 / 1.0_f64.hypot(std::f64::consts::TAU * 2.0),

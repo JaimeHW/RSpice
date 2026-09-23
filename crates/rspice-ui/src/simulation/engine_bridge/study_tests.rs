@@ -14,7 +14,6 @@ fn monte_carlo_bases_execute_configured_ac_and_transient_measurements_on_each_tr
                 stop_freq: 1000.0,
                 num_points: 1,
                 sweep_type: AcSweepType::Linear,
-                ..Default::default()
             }),
             "gain",
         ),
@@ -80,7 +79,6 @@ fn materialized_studies_retain_worker_resource_limits() {
             stop_freq: 10.0,
             num_points: 10,
             sweep_type: AcSweepType::Linear,
-            ..Default::default()
         }),
         &netlist,
         &NoAbort,

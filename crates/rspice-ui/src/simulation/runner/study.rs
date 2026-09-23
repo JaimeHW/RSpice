@@ -159,7 +159,6 @@ mod tests {
             stop_freq: 1000.0,
             num_points: 1,
             sweep_type: AcSweepType::Linear,
-            ..Default::default()
         })
     }
     fn spec(source: McVariationSource) -> AnalysisSpec {

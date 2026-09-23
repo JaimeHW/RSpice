@@ -304,7 +304,6 @@ fn authored_plan_measurements_validate_context_ownership_and_duplicate_names() {
                 stop_freq: 1000.0,
                 num_points: 1,
                 sweep_type: crate::simulation::config::AcSweepType::Linear,
-                ..Default::default()
             }),
             &composed,
             &rspice_core::NoAbort,
