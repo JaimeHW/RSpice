@@ -12,6 +12,15 @@ const VBIC13_TEST_NBBE: f64 = 5.0;
 const VBIC13_TEST_IBBE: f64 = 1e-9;
 const VBIC13_TEST_VBE: f64 = -2.4;
 
+fn gp_thermal_voltage(dialect: SpiceDialect, temperature: f64) -> f64 {
+    let constants = match dialect {
+        SpiceDialect::Ngspice => rspice_core::constants::NoisePhysicalConstants::NGSPICE_46,
+        SpiceDialect::Xyce => rspice_core::constants::NoisePhysicalConstants::XYCE_7_10,
+        _ => rspice_core::constants::NoisePhysicalConstants::MODERN,
+    };
+    constants.boltzmann * temperature / constants.electron_charge
+}
+
 #[test]
 fn vbic_nonpositive_activation_energies_match_xyce710_dc_and_ac() {
     use rspice_core::Complex64;
@@ -781,24 +790,27 @@ fn xyce_dialect_uses_xyce710_bjt_thermal_voltage_constants() {
         1.0e-8,
     );
 
-    // The compatibility selection is isolated: native best-available and
-    // explicit ngspice operation retain current SI/CODATA k and q.
+    // Each dialect selects its own physical-constant pair.
     let modern_vt: f64 = 300.15 * 1.380_649e-23 / 1.602_176_634e-19;
     let modern_expected = -(1.0e-16 / 100.0) * (0.7 / modern_vt).exp_m1();
-    for (label, config) in [
-        ("best-available", SimulationConfig::default()),
-        (
-            "ngspice",
+    assert_rel_close(
+        "best-available level-1 BJT I(VB)",
+        branch_current_with_config(&deck, "vb", SimulationConfig::default()),
+        modern_expected,
+        1.0e-8,
+    );
+    let ngspice_vt = gp_thermal_voltage(SpiceDialect::Ngspice, 300.15);
+    let ngspice_expected = -(1.0e-16 / 100.0) * (0.7 / ngspice_vt).exp_m1();
+    assert_rel_close(
+        "ngspice level-1 BJT I(VB)",
+        branch_current_with_config(
+            &deck,
+            "vb",
             SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice),
         ),
-    ] {
-        assert_rel_close(
-            &format!("{label} level-1 BJT I(VB)"),
-            branch_current_with_config(&deck, "vb", config),
-            modern_expected,
-            1.0e-8,
-        );
-    }
+        ngspice_expected,
+        1.0e-8,
+    );
 }
 
 #[test]
@@ -2353,12 +2365,7 @@ fn legacy_temperature_controls_and_cryogenic_currents_preserve_the_equations() {
         (SpiceDialect::Xyce, 3.0, 1.11, -196.15, 1.0, 0.9, None),
     ] {
         let temp = temperature + 273.15;
-        let vt = if dialect == SpiceDialect::Xyce {
-            rspice_core::constants::XYCE_K_BOLTZMANN * temp
-                / rspice_core::constants::XYCE_Q_ELECTRON
-        } else {
-            rspice_core::constants::thermal_voltage(temp)
-        };
+        let vt = gp_thermal_voltage(dialect, temp);
         let ratio = temp / 300.15;
         let log_factor = (ratio - 1.0) * energy / vt + exponent * ratio.ln();
         let beta = ratio.powf(-0.7);
@@ -2475,12 +2482,7 @@ fn legacy_temperature_controls_and_cryogenic_currents_preserve_the_equations() {
 #[test]
 fn legacy_junction_exponentials_preserve_tiny_and_large_finite_currents() {
     for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
-        let vt = if dialect == SpiceDialect::Xyce {
-            rspice_core::constants::XYCE_K_BOLTZMANN * 300.15
-                / rspice_core::constants::XYCE_Q_ELECTRON
-        } else {
-            rspice_core::constants::thermal_voltage(300.15)
-        };
+        let vt = gp_thermal_voltage(dialect, 300.15);
         let engine = Engine::new(SimulationConfig {
             spice_dialect: dialect,
             convergence_config: ConvergenceConfig {
@@ -2531,12 +2533,7 @@ fn cryogenic_bjt_coefficients_reach_terminal_currents_and_diffusion_charge() {
         (SpiceDialect::Xyce, false),
     ] {
         let temperature = 10.0;
-        let vt = if dialect == SpiceDialect::Xyce {
-            rspice_core::constants::XYCE_K_BOLTZMANN * temperature
-                / rspice_core::constants::XYCE_Q_ELECTRON
-        } else {
-            rspice_core::constants::thermal_voltage(temperature)
-        };
+        let vt = gp_thermal_voltage(dialect, temperature);
         let ratio = temperature / 300.15;
         let thermal = (ratio - 1.0) * 1.11 / vt + 3.0 * ratio.ln();
         let beta = ratio.powf(-0.7);
@@ -2582,21 +2579,21 @@ fn cryogenic_bjt_coefficients_reach_terminal_currents_and_diffusion_charge() {
         if dialect == SpiceDialect::Ngspice {
             let golden = if split {
                 [
-                    0.00017589292587624807,
-                    2.8410195418056978e-5,
-                    2.4121464932853505e-9,
-                    7.503594100408108e-10,
-                    7.319227689842334e-11,
-                    0.00010993307867265505,
+                    1.7589479520834886e-4,
+                    2.8410463780865103e-5,
+                    2.4121678561820098e-9,
+                    7.503664979384974e-10,
+                    7.31927707366933e-11,
+                    1.0993424700521804e-4,
                 ]
             } else {
                 [
-                    8.794646293812403e-5,
-                    8.117198690873422e-6,
-                    2.4121464932853505e-9,
-                    7.503594100408108e-10,
-                    7.319227689842334e-11,
-                    4.397323146906202e-5,
+                    8.794739760417443e-5,
+                    8.117275365961458e-6,
+                    2.4121678561820098e-9,
+                    7.503664979384974e-10,
+                    7.31927707366933e-11,
+                    4.3973698802087215e-5,
                 ]
             };
             for ((current, _), expected) in branches(1.1).into_iter().zip(golden) {
@@ -2742,7 +2739,7 @@ fn legacy_split_currents_reach_dc_ac_and_transient() {
         ),
     ] {
         let temp = temperature + 273.15;
-        let vt = rspice_core::constants::thermal_voltage(temp);
+        let vt = gp_thermal_voltage(SpiceDialect::Ngspice, temp);
         let ratio = temp / 300.15;
         let log_factor = (ratio - 1.0) * 1.11 / vt + 3.0 * ratio.ln();
         let bc_area = if subs == 1 { 3.0 } else { 5.0 };
@@ -2914,7 +2911,7 @@ fn legacy_substrate_current_and_charge_flow_through_the_intrinsic_lead() {
         )),
         ..Default::default()
     });
-    let nvt = 1.2 * rspice_core::constants::thermal_voltage(300.15);
+    let nvt = 1.2 * gp_thermal_voltage(SpiceDialect::Ngspice, 300.15);
     let isat = 8e-12; // Unsplit ISS uses AREA*M, independently of AREAB/C.
     let resistance = 1000.0; // Authored 8 kohm / (AREA=2 * M=4).
     for (subs, lead, capacitance) in [(1, "RC=8k", 40e-12), (-1, "RB=8k RBM=1k", 24e-12)] {
@@ -3080,7 +3077,7 @@ fn legacy_tlev_current_laws_match_ngspice_and_dynamic_equations() {
     ] {
         let t = celsius + 273.15;
         let dt = celsius - 27.0;
-        let vt = rspice_core::constants::thermal_voltage(t);
+        let vt = gp_thermal_voltage(SpiceDialect::Ngspice, t);
         let ratio = t / 300.15;
         let factlog = (ratio - 1.0) * 1.11 / vt + 3.0 * ratio.ln();
         let xtb = if law == 1 { 0.005 } else { -0.7 };
@@ -3325,7 +3322,7 @@ fn legacy_tlev_validates_domains_and_preserves_power_limits() {
     }
     // Zero nominal values follow pow's zero-exponent rule, but an absent
     // ISS never creates a substrate diode, even for a zero or negative power.
-    let vt = rspice_core::constants::thermal_voltage(301.15);
+    let vt = gp_thermal_voltage(SpiceDialect::Ngspice, 301.15);
     for (substrate, power, current) in [
         ("", -1.0, 0.0),
         ("", -2.0, 0.0),
@@ -3453,7 +3450,7 @@ fn legacy_emission_temperature_controls_match_ngspice_and_dynamic_equations() {
     ] {
         let temperature = celsius + 273.15;
         let delta = celsius - 27.0;
-        let vt = rspice_core::constants::thermal_voltage(temperature);
+        let vt = gp_thermal_voltage(SpiceDialect::Ngspice, temperature);
         let ratio = temperature / 300.15;
         let factlog = (ratio - 1.0) * 1.11 / vt + 3.0 * ratio.ln();
         let beta = ratio.powf(-0.7);
@@ -3683,7 +3680,7 @@ fn legacy_split_current_presence_and_validation_follow_the_model_family() {
         ..Default::default()
     };
     let engine = Engine::new(config);
-    let vt = rspice_core::constants::thermal_voltage(300.15);
+    let vt = gp_thermal_voltage(SpiceDialect::Ngspice, 300.15);
     for (fields, be, bc) in [
         ("IBE=0 IBC=7p", 0.0, 7e-12),
         ("IBE=2p IBC=0", 2e-12, 0.0),
