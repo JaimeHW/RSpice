@@ -1173,11 +1173,10 @@ fn study_base_row(
 ) {
     let mut choices = vec![(None, default_label.to_owned())];
     choices.extend(bases.iter().map(|(id, label)| (Some(*id), label.clone())));
-    if let Some(id) = *selected_base {
-        if !choices.iter().any(|(candidate, _)| *candidate == Some(id)) {
+    if let Some(id) = *selected_base
+        && !choices.iter().any(|(candidate, _)| *candidate == Some(id)) {
             choices.push((Some(id), format!("Unavailable analysis ({id})")));
         }
-    }
     let mut selected = choices
         .iter()
         .position(|(id, _)| *id == *selected_base)
