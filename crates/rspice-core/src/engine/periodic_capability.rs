@@ -481,10 +481,10 @@ pub(crate) const fn periodic_capability_descriptor(
             envelope: Complete,
         },
         F::Bsim4v8 => PeriodicCapabilityDescriptor {
-            residual_jacobian: Absent("native BSIM4"),
+            residual_jacobian: Complete,
             dynamic_state: Complete,
-            small_signal: Inapplicable,
-            noise: Absent("periodic BSIM4 noise sources need the exact periodic BSIM4 residual"),
+            small_signal: Complete,
+            noise: Absent("native BSIM4 orbit-dependent noise sources"),
             pss_state: Absent("BSIM4 charge and NQS history"),
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
@@ -1572,6 +1572,20 @@ pub(in crate::engine) fn cyclostationary_noise_gaps(circuit: &CircuitData) -> Ve
     use PeriodicDeviceFamily as F;
     let mut gaps = Vec::new();
 
+    // Carrier admission does not imply noise support. A newly integrated
+    // nonlinear family must never disappear from the noise-source catalog.
+    for family in PeriodicDeviceFamily::ALL {
+        let count = family.instance_count(circuit);
+        if count > 0
+            && let Some(missing) = absent_detail(family, Cap)
+        {
+            gaps.push(CapabilityGap::new(
+                family,
+                format!("{missing} ({count} {})", count_noun(count)),
+            ));
+        }
+    }
+
     if !capability_support(F::Resistor, Cap).admits_every_instance() {
         for (index, flicker) in circuit.resistors.flicker.iter().enumerate() {
             if !circuit.resistors.noisy[index] {
@@ -1723,7 +1737,7 @@ mod tests {
             F::Bjt => [R, R, C, C, R, R],
             F::Mosfet => [R, C, C, R, A, A],
             F::Bsim3v3 => [C, C, C, C, C, C],
-            F::Bsim4v8 => [A, C, I, A, A, A],
+            F::Bsim4v8 => [C, C, C, A, A, A],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],
             F::Ekv26 | F::Ekv3 | F::Vdmos => [I, C, A, A, A, A],
             F::Jfet => [R, C, C, R, R, R],

@@ -1154,6 +1154,14 @@ impl Engine {
             .iter()
             .filter(|device| device.uses_ac_nqs())
             .count()
+            .saturating_add(
+                circuit
+                    .bsim4v8
+                    .devices
+                    .iter()
+                    .filter(|device| device.uses_ac_nqs())
+                    .count(),
+            )
             .saturating_mul(3)
     }
 

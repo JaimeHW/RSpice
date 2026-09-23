@@ -164,6 +164,41 @@ impl HbSolver {
                 });
             }
         }
+        if !self.native_bsim4.is_empty() {
+            let count = self.fft.size();
+            let waves = self.native_state_waveforms(state)?;
+            let mut solution = vec![0.0; waves.len()];
+            for index in 0..self.native_bsim4.len() {
+                let device = self.native_bsim4[index].clone();
+                let mut f = vec![vec![0.0; count]; 4];
+                let mut q = f.clone();
+                for time in 0..count {
+                    if abort.is_aborted() {
+                        return Err(HbError::Aborted);
+                    }
+                    for (value, wave) in solution.iter_mut().zip(&waves) {
+                        *value = wave[time];
+                    }
+                    let (currents, charges) = device
+                        .periodic_lead_fq(&solution)
+                        .map_err(HbError::InvalidCircuit)?;
+                    for terminal in 0..4 {
+                        f[terminal][time] = currents[terminal];
+                        q[terminal][time] = charges[terminal];
+                    }
+                }
+                let currents = f
+                    .iter()
+                    .zip(&q)
+                    .map(|(f, q)| self.lead_phasors(f, q))
+                    .collect::<Result<_, _>>()?;
+                result.push(HbDeviceLeadSpectra {
+                    name: device.name.clone(),
+                    terminals: &["d", "g", "s", "b"],
+                    currents,
+                });
+            }
+        }
         if !self.periodic_capacitors.is_empty() {
             let waves = self.native_state_waveforms(state)?;
             let count = self.fft.size();

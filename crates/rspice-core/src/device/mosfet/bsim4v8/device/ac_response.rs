@@ -13,6 +13,13 @@ impl<S: MatrixStamper> MatrixStamper for Derivatives<'_, S> {
 }
 
 impl Bsim4v8Device {
+    pub(crate) fn ac_nqs_response_names(&self) -> impl Iterator<Item = String> + '_ {
+        ["channel_current", "drain_charge", "source_charge"]
+            .into_iter()
+            .filter(|_| self.uses_ac_nqs())
+            .map(|name| format!("M:{}:ac_nqs:{name}", self.name))
+    }
+
     /// Complete ACNQSMOD=1 G+sC response at the raw bias. Three distinct
     /// auxiliary nodes outside the device topology must be registered by the
     /// caller. Gate/body resistance networks, leakage, NF, M and all overlap

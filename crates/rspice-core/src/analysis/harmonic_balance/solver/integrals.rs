@@ -34,6 +34,11 @@ impl HbSolver {
                     .iter()
                     .flat_map(|device| device.ac_nqs_response_names()),
             )
+            .chain(
+                self.native_bsim4
+                    .iter()
+                    .flat_map(|device| device.ac_nqs_response_names()),
+            )
             .collect::<Vec<_>>();
         if physical != self.exact_mna_branches().len() {
             if self.exact_mna_branch_names()[physical..] != names

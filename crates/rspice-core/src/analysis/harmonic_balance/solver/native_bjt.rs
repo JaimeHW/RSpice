@@ -111,6 +111,7 @@ impl HbSolver {
     pub(super) fn has_native_periodic_devices(&self) -> bool {
         !self.native_bjts.is_empty()
             || !self.native_bsim3.is_empty()
+            || !self.native_bsim4.is_empty()
             || !self.behavioral_sources.is_empty()
             || !self.periodic_capacitors.is_empty()
     }
@@ -393,6 +394,38 @@ impl HbSolver {
         Ok(())
     }
 
+    pub(crate) fn add_native_bsim4(
+        &mut self,
+        device: crate::device::mosfet::bsim4v8::Bsim4v8Device,
+    ) -> Result<(), HbError> {
+        if device
+            .periodic_coupling_nodes()
+            .iter()
+            .any(|&node| node > self.num_nodes)
+            || (device.uses_trnqs() && device.node_charge_deficit == 0)
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "BSIM4 '{}' has unregistered periodic MNA coordinates",
+                device.name,
+            )));
+        }
+        let node = device.node_charge_deficit;
+        if node != 0
+            && let Err(index) = self.non_electrical_nodes.binary_search(&(node - 1))
+        {
+            self.non_electrical_nodes.insert(index, node - 1);
+        }
+        for name in device.ac_nqs_response_names() {
+            let branch_ordinal = self.exact_mna_branches().len() + 1;
+            self.try_push_periodic_mna_branch(
+                ExactMnaBranch::AuxiliaryState { branch_ordinal },
+                &name,
+            )?;
+        }
+        self.native_bsim4.push(device);
+        Ok(())
+    }
+
     fn sample_native_devices(
         &mut self,
         solution: &[Value],
@@ -485,6 +518,44 @@ impl HbSolver {
             if f.invalid || q.invalid {
                 return Err(HbError::InvalidCircuit(format!(
                     "BSIM3 '{}' produced invalid physical F/Q entries",
+                    device.name,
+                )));
+            }
+        }
+        for device in &self.native_bsim4 {
+            let auxiliary = device.uses_ac_nqs().then(|| {
+                let nodes = [response_start + 1, response_start + 2, response_start + 3];
+                response_start += 3;
+                nodes
+            });
+            if selected.is_some_and(|rows| {
+                !device
+                    .periodic_coupling_nodes()
+                    .iter()
+                    .any(|&node| node > 0 && rows[node - 1])
+                    && !auxiliary.is_some_and(|nodes| nodes.into_iter().any(|node| rows[node - 1]))
+            }) {
+                continue;
+            }
+            if small_signal && let Some(auxiliary) = auxiliary {
+                device
+                    .stamp_ac_nqs_response(solution, auxiliary, f, q)
+                    .map_err(HbError::InvalidCircuit)?;
+            } else {
+                device
+                    .stamp_periodic_fq(solution, f, q)
+                    .map_err(HbError::InvalidCircuit)?;
+                if let Some(auxiliary) = auxiliary {
+                    // Response-only states remain exactly zero in the carrier.
+                    for node in auxiliary {
+                        f.stamp(node, node, 1.0);
+                        f.stamp_rhs(node, -solution[node - 1]);
+                    }
+                }
+            }
+            if f.invalid || q.invalid {
+                return Err(HbError::InvalidCircuit(format!(
+                    "BSIM4 '{}' produced invalid physical F/Q entries",
                     device.name,
                 )));
             }

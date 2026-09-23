@@ -26,7 +26,7 @@ impl Engine {
                     "analysis.pnoise.colored_noise"
                 },
                 format!(
-                    "driven {analysis} requires exact cyclostationary colored-noise folding, which is not implemented for {summary}; set the listed noise coefficient exactly to zero to disable that mechanism"
+                    "driven {analysis} requires exact cyclostationary colored-noise folding, which is not implemented for {summary}"
                 ),
             ));
         }

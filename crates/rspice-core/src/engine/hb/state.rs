@@ -491,6 +491,13 @@ impl Engine {
                     .iter()
                     .flat_map(|device| device.ac_nqs_response_names()),
             )
+            .chain(
+                circuit
+                    .bsim4v8
+                    .devices
+                    .iter()
+                    .flat_map(|device| device.ac_nqs_response_names()),
+            )
             .collect::<Vec<_>>();
         let spectra = operating_point.integral_spectra();
         if spectra.len() != auxiliary_names.len()
@@ -974,6 +981,11 @@ impl Engine {
             result
                 .continuation_limitations
                 .push(HbContinuationLimitation::Bsim3ChargeHistoryNotRetained);
+        }
+        if !circuit.bsim4v8.is_empty() {
+            result
+                .continuation_limitations
+                .push(HbContinuationLimitation::Bsim4ChargeHistoryNotRetained);
         }
 
         for index in 0..circuit.inductors.len() {

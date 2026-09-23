@@ -3108,6 +3108,7 @@ pub enum HbContinuationLimitationTag {
     VerilogAInternalStateNotRetained,
     CapacitorChargeHistoryNotRetained,
     Bsim3ChargeHistoryNotRetained,
+    Bsim4ChargeHistoryNotRetained,
 }
 
 impl From<&HbContinuationLimitation> for HbContinuationLimitationTag {
@@ -3115,6 +3116,9 @@ impl From<&HbContinuationLimitation> for HbContinuationLimitationTag {
         match limitation {
             HbContinuationLimitation::Bsim3ChargeHistoryNotRetained => {
                 Self::Bsim3ChargeHistoryNotRetained
+            }
+            HbContinuationLimitation::Bsim4ChargeHistoryNotRetained => {
+                Self::Bsim4ChargeHistoryNotRetained
             }
             HbContinuationLimitation::CapacitorChargeHistoryNotRetained => {
                 Self::CapacitorChargeHistoryNotRetained
@@ -3137,6 +3141,9 @@ impl From<HbContinuationLimitationTag> for HbContinuationLimitation {
         match limitation {
             HbContinuationLimitationTag::Bsim3ChargeHistoryNotRetained => {
                 Self::Bsim3ChargeHistoryNotRetained
+            }
+            HbContinuationLimitationTag::Bsim4ChargeHistoryNotRetained => {
+                Self::Bsim4ChargeHistoryNotRetained
             }
             HbContinuationLimitationTag::CapacitorChargeHistoryNotRetained => {
                 Self::CapacitorChargeHistoryNotRetained

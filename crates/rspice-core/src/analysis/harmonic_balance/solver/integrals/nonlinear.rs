@@ -310,6 +310,15 @@ impl HbSolver {
                 }
             }
         }
+        for device in &self.native_bsim4 {
+            for row in device.periodic_coupling_nodes() {
+                for col in device.periodic_coupling_nodes() {
+                    if row > 0 && col > 0 {
+                        insert(row - 1, col - 1)?;
+                    }
+                }
+            }
+        }
         let response_start = self.num_nodes + self.ac_response_branch_start();
         for row in response_start..self.num_nodes + self.exact_mna_branches().len() {
             insert(row, row)?;

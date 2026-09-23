@@ -73,7 +73,7 @@ pub use quasi_periodic::{
 };
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 
-const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 42;
+const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 43;
 
 fn hb_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1148,6 +1148,13 @@ impl Engine {
             .devices
             .iter()
             .flat_map(|device| device.ac_nqs_response_names())
+            .chain(
+                circuit
+                    .bsim4v8
+                    .devices
+                    .iter()
+                    .flat_map(|device| device.ac_nqs_response_names()),
+            )
             .collect::<Vec<_>>();
         let physical_count = branch_names
             .len()

@@ -83,6 +83,12 @@ impl Engine {
                 .map_err(|error| SimulationError::Circuit(error.to_string()))?;
         }
 
+        for device in &circuit.bsim4v8.devices {
+            solver
+                .add_native_bsim4(device.clone())
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+        }
+
         for diode in &circuit.diodes.devices {
             let anode = Self::hb_node_to_solver_index(diode.node_anode, num_nodes);
             let cathode = Self::hb_node_to_solver_index(diode.node_cathode, num_nodes);

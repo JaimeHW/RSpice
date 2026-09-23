@@ -3,7 +3,6 @@
 //! reference simulator involved — so a failure is unambiguous.
 
 use rspice_core::analysis::harmonic_balance::HbConfig;
-use rspice_core::analysis::pac::{PacConfig, PacSweepType};
 use rspice_core::analysis::pss::PssConfig;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
@@ -30,16 +29,6 @@ fn bsim4_rf_deck() -> String {
          .end\n",
         bsim4_models45()
     )
-}
-
-fn assert_bsim4_periodic_rejection(err: rspice_core::engine::SimulationError) {
-    let message = err.to_string();
-    assert!(
-        message.contains("HB runtime does not yet support")
-            && message.contains("native BSIM4")
-            && message.contains("1 device"),
-        "periodic analysis must loudly reject unsupported native BSIM4, got: {message}"
-    );
 }
 
 /// Fundamental-coefficient ratio of two nodes from an HB result —
@@ -118,40 +107,17 @@ fn hb_linear_rc_matches_the_ac_transfer_function() {
 }
 
 #[test]
-fn hb_rejects_native_bsim4_instead_of_solving_without_its_nonlinearity() {
-    let netlist = Netlist::parse(&bsim4_rf_deck()).expect("deck parses");
-    let err = engine()
-        .run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(5))
-        .expect_err("native BSIM4 is not adapted into HB yet");
-
-    assert_bsim4_periodic_rejection(err);
-}
-
-#[test]
-fn pac_rejects_native_bsim4_before_periodic_operating_point() {
-    let netlist = Netlist::parse(&bsim4_rf_deck()).expect("deck parses");
-    let config = PacConfig::new()
-        .with_fundamental(1.0e6)
-        .with_sweep(1.0e3, 1.0e3, 1)
-        .with_sweep_type(PacSweepType::Linear)
-        .with_sidebands(-1, 1)
-        .with_input_source("vg")
-        .with_output_node("d");
-    let err = engine()
-        .run_pac(&netlist, config)
-        .expect_err("native BSIM4 is not adapted into PAC yet");
-
-    assert_bsim4_periodic_rejection(err);
-}
-
-#[test]
 fn pnoise_rejects_native_bsim4_before_noise_folding() {
     let netlist = Netlist::parse(&bsim4_rf_deck()).expect("deck parses");
     let err = engine()
-        .run_pnoise(&netlist, 1.0e6, &[1.0e3], "d", None, Some("vg"), 1)
+        .run_pnoise(&netlist, 1.0e6, &[1.0e3], "g", None, Some("vg"), 1)
         .expect_err("native BSIM4 is not adapted into PNoise yet");
 
-    assert_bsim4_periodic_rejection(err);
+    assert!(
+        err.to_string()
+            .contains("native BSIM4 orbit-dependent noise sources"),
+        "{err}"
+    );
 }
 
 /// Square-law distortion: a level-1 MOSFET in saturation with LAMBDA=0

@@ -70,6 +70,9 @@ pub(crate) fn hb_limitation_label(limitation: &HbContinuationLimitation) -> &'st
         HbContinuationLimitation::Bsim3ChargeHistoryNotRetained => {
             "bsim3_charge_history_not_retained"
         }
+        HbContinuationLimitation::Bsim4ChargeHistoryNotRetained => {
+            "bsim4_charge_history_not_retained"
+        }
         HbContinuationLimitation::CapacitorChargeHistoryNotRetained => {
             "capacitor_charge_history_not_retained"
         }
@@ -89,6 +92,9 @@ pub(crate) fn hb_limitation_from_label(label: &str) -> PyResult<HbContinuationLi
     match label {
         "bsim3_charge_history_not_retained" => {
             Ok(HbContinuationLimitation::Bsim3ChargeHistoryNotRetained)
+        }
+        "bsim4_charge_history_not_retained" => {
+            Ok(HbContinuationLimitation::Bsim4ChargeHistoryNotRetained)
         }
         "capacitor_charge_history_not_retained" => {
             Ok(HbContinuationLimitation::CapacitorChargeHistoryNotRetained)

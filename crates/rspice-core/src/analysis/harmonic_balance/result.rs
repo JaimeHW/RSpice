@@ -65,6 +65,9 @@ pub enum HbContinuationLimitation {
     /// Native BSIM3 node charge and NQS integration histories require an
     /// explicit transient initializer; a voltage projection is insufficient.
     Bsim3ChargeHistoryNotRetained,
+    /// Native BSIM4 gate/body charge and NQS integration histories need an
+    /// explicit transient initializer, including the split internal nodes.
+    Bsim4ChargeHistoryNotRetained,
 }
 
 /// One reactive element evaluated at a carrier phase.
