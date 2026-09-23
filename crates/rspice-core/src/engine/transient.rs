@@ -810,7 +810,8 @@ pub use fft::{
 mod history;
 use history::*;
 pub(in crate::engine) use history::{
-    BjtTransientHistory, Bsim3TransientHistory, Bsim4TransientHistory, JfetTransientHistory,
+    AcceptedJunctionHistories, BjtTransientHistory, Bsim3TransientHistory, Bsim4TransientHistory,
+    JfetTransientHistory,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -994,6 +995,7 @@ struct ScheduledCheckpointIntegration<'a> {
 struct ScheduledCheckpointHistories<'a> {
     bsim3_history: &'a Bsim3TransientHistory,
     bsim4_history: &'a Bsim4TransientHistory,
+    mosfet_history: &'a MosfetTransientHistory,
     jfet_history: &'a JfetTransientHistory,
     bjt_history: &'a BjtTransientHistory,
     diode_history: &'a DiodeTransientHistory,
@@ -3545,11 +3547,6 @@ impl Engine {
         let mut blockers = Vec::new();
         block_if_present(
             &mut blockers,
-            !circuit.mosfets.is_empty(),
-            "classic MOSFET accepted transient integration history is not checkpointed",
-        );
-        block_if_present(
-            &mut blockers,
             !circuit.vdmoses.is_empty(),
             "VDMOS accepted transient integration history is not checkpointed",
         );
@@ -3761,6 +3758,7 @@ impl Engine {
         let ScheduledCheckpointHistories {
             bsim3_history,
             bsim4_history,
+            mosfet_history,
             jfet_history,
             bjt_history,
             diode_history,
@@ -3812,12 +3810,15 @@ impl Engine {
         let accepted_junction_history =
             Self::capture_accepted_junction_transient_history_checkpoint(
                 circuit,
-                bjt_history,
-                diode_history,
-                jfet_history,
-                vbic_snapshot_cache,
-                bsim3_history,
-                bsim4_history,
+                crate::engine::transient::AcceptedJunctionHistories {
+                    bjt_history,
+                    diode_history,
+                    jfet_history,
+                    vbic_snapshot_cache,
+                    bsim3_history,
+                    bsim4_history,
+                    mosfet_history,
+                },
             );
         let restart_normalized = at_integration_endpoint
             || integration_continuation
@@ -5788,9 +5789,14 @@ impl Engine {
         let mut bsim4_history = Self::initialize_bsim4_history(&circuit, &solution);
         bsim4_history.accepted_dt_prev = accepted_dt_seed;
         bsim4_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
+        let mut mosfet_history =
+            Self::initialize_mosfet_history(&circuit, &solution, reactive_seed);
+        mosfet_history.accepted_dt_prev = accepted_dt_seed;
+        mosfet_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
         if let Some(restored) = restored_accepted_junction_history {
             bsim3_history = restored.bsim3;
             bsim4_history = restored.bsim4;
+            mosfet_history = restored.mosfet;
             bjt_history = restored.bjt;
             diode_history = restored.diode;
             jfet_history = restored.jfet;
@@ -5923,7 +5929,7 @@ impl Engine {
                                 &jfet_history.accepted_cqgd,
                                 &jfet_history.accepted_cqds,
                             ]),
-                            None,
+                            Some(&mosfet_history.accepted_displacement_currents),
                         )
                         .map_err(SimulationError::Circuit)?,
                 ),
@@ -5944,10 +5950,6 @@ impl Engine {
         // indices instead of a hash lookup per matrix entry.
         let mut mosfet_companion_slots = Self::link_mosfet_companion_slots(&circuit, &matrix);
         let vdmos_companion_slots = Self::link_vdmos_companion_slots(&circuit, &matrix);
-        let mut mosfet_history =
-            Self::initialize_mosfet_history(&circuit, &solution, reactive_seed);
-        mosfet_history.accepted_dt_prev = accepted_dt_seed;
-        mosfet_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
         let mut vdmos_history = Self::initialize_vdmos_history(&circuit, &solution);
         vdmos_history.accepted_dt_prev = accepted_dt_seed;
         vdmos_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
@@ -6198,6 +6200,7 @@ impl Engine {
             ScheduledCheckpointHistories {
                 bsim3_history: &bsim3_history,
                 bsim4_history: &bsim4_history,
+                mosfet_history: &mosfet_history,
                 jfet_history: &jfet_history,
                 bjt_history: &bjt_history,
                 diode_history: &diode_history,
@@ -10575,6 +10578,7 @@ impl Engine {
                         ScheduledCheckpointHistories {
                             bsim3_history: &bsim3_history,
                             bsim4_history: &bsim4_history,
+                            mosfet_history: &mosfet_history,
                             jfet_history: &jfet_history,
                             bjt_history: &bjt_history,
                             diode_history: &diode_history,
@@ -11304,6 +11308,7 @@ impl Engine {
                 ScheduledCheckpointHistories {
                     bsim3_history: &bsim3_history,
                     bsim4_history: &bsim4_history,
+                    mosfet_history: &mosfet_history,
                     jfet_history: &jfet_history,
                     bjt_history: &bjt_history,
                     diode_history: &diode_history,
@@ -11455,12 +11460,15 @@ impl Engine {
             let final_accepted_junction_history =
                 Self::capture_accepted_junction_transient_history_checkpoint(
                     &circuit,
-                    &bjt_history,
-                    &diode_history,
-                    &jfet_history,
-                    &vbic_snapshot_cache,
-                    &bsim3_history,
-                    &bsim4_history,
+                    crate::engine::transient::AcceptedJunctionHistories {
+                        bjt_history: &bjt_history,
+                        diode_history: &diode_history,
+                        jfet_history: &jfet_history,
+                        vbic_snapshot_cache: &vbic_snapshot_cache,
+                        bsim3_history: &bsim3_history,
+                        bsim4_history: &bsim4_history,
+                        mosfet_history: &mosfet_history,
+                    },
                 );
             let final_accepted_junction_history =
                 if final_accepted_junction_history.resume_blockers.is_empty() {

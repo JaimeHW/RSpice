@@ -647,12 +647,15 @@ impl Engine {
             Some(
                 Self::capture_accepted_junction_transient_history_checkpoint(
                     &circuit,
-                    &bjt_history,
-                    &history,
-                    &jfet_history,
-                    &vec![None; circuit.bjts.len()],
-                    &bsim3_history,
-                    &bsim4_history,
+                    crate::engine::transient::AcceptedJunctionHistories {
+                        bjt_history: &bjt_history,
+                        diode_history: &history,
+                        jfet_history: &jfet_history,
+                        vbic_snapshot_cache: &vec![None; circuit.bjts.len()],
+                        bsim3_history: &bsim3_history,
+                        bsim4_history: &bsim4_history,
+                        mosfet_history: &Default::default(),
+                    },
                 ),
             )
         };

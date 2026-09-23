@@ -45,6 +45,7 @@ mod behavioral;
 mod bsim3;
 mod bsim4;
 mod capacitor_sdt;
+mod mosfet;
 mod solver_state;
 use crate::device::behavioral::BehavioralAcceptedState;
 
@@ -102,7 +103,7 @@ use solver_state::{read_solver_state, write_solver_state};
 use std::io::Read;
 
 use super::damped_status::XyceDampedAcceptedBoundaryCheckpoint;
-use super::history::RestoredJunctionTransientHistories;
+use super::history::{MosfetTransientHistory, RestoredJunctionTransientHistories};
 use super::{
     AcceptedJunctionTransientHistoryCheckpoint, BjtPredictorLinearBranchState, BjtTransientHistory,
     DiodeTransientHistory, Engine, JfetTransientHistory, SimulationError, TransientStartupMode,
@@ -200,7 +201,9 @@ fn checkpoint_operation_result<T>(
 /// Version 51 retains capacitor value-expression SDT accepted histories.
 /// Version 52 retains native BSIM3 limiter/evaluation and charge-integration state.
 /// Version 53 retains native BSIM4 limiter, junction, and charge-integration state.
-const FORMAT_VERSION: u32 = 53;
+/// Version 54 retains classic-MOS limiter, capacitance, charge, and lead-current history.
+const FORMAT_VERSION: u32 = 54;
+const MOSFET_STATE_FORMAT_VERSION: u32 = 54;
 const BSIM4_STATE_FORMAT_VERSION: u32 = 53;
 const BSIM3_STATE_FORMAT_VERSION: u32 = 52;
 const CAPACITOR_SDT_FORMAT_VERSION: u32 = 51;
@@ -3475,6 +3478,15 @@ fn accepted_junction_history_payload_is_empty(
             .all(|(_, values)| values.is_empty())
         && checkpoint.bsim4_history.accepted_dt_prev.to_bits() == 0
         && checkpoint.bsim4_history.accepted_dt_prev_prev.to_bits() == 0
+        && checkpoint.mosfet_states.is_empty()
+        && checkpoint
+            .mosfet_history
+            .columns()
+            .iter()
+            .all(|(_, values)| values.is_empty())
+        && checkpoint.mosfet_history.accepted_dt_prev.to_bits() == 0
+        && checkpoint.mosfet_history.accepted_dt_prev_prev.to_bits() == 0
+        && checkpoint.mosfet_history.accepted_displacement_currents.is_empty()
         && checkpoint.jfet_names.is_empty()
         && checkpoint.jfet_runtime_tags.is_empty()
         && checkpoint
@@ -3543,6 +3555,7 @@ fn validate_accepted_junction_transient_history_numeric_state(
 
     bsim3::validate(checkpoint, budget)?;
     bsim4::validate(checkpoint, budget)?;
+    mosfet::validate(checkpoint, budget)?;
     validate_checkpoint_identity_vector(
         "JFET",
         &checkpoint.jfet_names,
@@ -6477,6 +6490,7 @@ impl TransientCheckpoint {
             && circuit.jfets.is_empty()
             && circuit.bsim3v3.is_empty()
             && circuit.bsim4v8.is_empty()
+            && circuit.mosfets.is_empty()
         {
             AcceptedJunctionTransientHistoryCheckpoint {
                 available: true,
@@ -6487,6 +6501,7 @@ impl TransientCheckpoint {
             && circuit.jfets.is_empty()
             && circuit.bsim3v3.is_empty()
             && circuit.bsim4v8.is_empty()
+            && circuit.mosfets.is_empty()
             && circuit
                 .diodes
                 .devices
@@ -6503,12 +6518,15 @@ impl TransientCheckpoint {
             );
             Engine::capture_accepted_junction_transient_history_checkpoint(
                 circuit,
-                &BjtTransientHistory::default(),
-                &diode_history,
-                &JfetTransientHistory::default(),
-                &[],
-                &Default::default(),
-                &Default::default(),
+                crate::engine::transient::AcceptedJunctionHistories {
+                    bjt_history: &BjtTransientHistory::default(),
+                    diode_history: &diode_history,
+                    jfet_history: &JfetTransientHistory::default(),
+                    vbic_snapshot_cache: &[],
+                    bsim3_history: &Default::default(),
+                    bsim4_history: &Default::default(),
+                    mosfet_history: &Default::default(),
+                },
             )
         } else {
             AcceptedJunctionTransientHistoryCheckpoint::unavailable(
@@ -6846,6 +6864,7 @@ impl TransientCheckpoint {
                 && circuit.jfets.is_empty()
                 && circuit.bsim3v3.is_empty()
                 && circuit.bsim4v8.is_empty()
+                && circuit.mosfets.is_empty()
             {
                 return Ok(());
             }
@@ -7135,6 +7154,14 @@ impl TransientCheckpoint {
             .devices
             .iter_mut()
             .zip(&self.accepted_junction_history.bsim4_states)
+        {
+            device.restore_accepted_nonlinear_checkpoint(state)?;
+        }
+        for (device, state) in circuit
+            .mosfets
+            .devices
+            .iter_mut()
+            .zip(&self.accepted_junction_history.mosfet_states)
         {
             device.restore_accepted_nonlinear_checkpoint(state)?;
         }
@@ -7766,6 +7793,16 @@ impl TransientCheckpoint {
                 count
                     .saturating_add(state.values.len())
                     .saturating_add(43)
+                    .saturating_add(state.instance_name.len().div_ceil(8))
+                    .saturating_add(state.runtime_tag.len().div_ceil(8))
+            });
+        count = junction
+            .mosfet_states
+            .iter()
+            .fold(count.saturating_add(3), |count, state| {
+                count
+                    .saturating_add(state.values.len())
+                    .saturating_add(49)
                     .saturating_add(state.instance_name.len().div_ceil(8))
                     .saturating_add(state.runtime_tag.len().div_ceil(8))
             });
@@ -8428,6 +8465,7 @@ impl TransientCheckpoint {
         ));
         bsim3::write(&mut out, junction, abort)?;
         bsim4::write(&mut out, junction, abort)?;
+        mosfet::write(&mut out, junction, abort)?;
         out.push_str(&format!(
             "tline_state_available {}\n",
             u8::from(self.tline_state_available)
@@ -9296,6 +9334,9 @@ impl TransientCheckpoint {
         }
         if version >= BSIM4_STATE_FORMAT_VERSION {
             bsim4::read(lines, budget, &mut accepted_junction_history)?;
+        }
+        if version >= MOSFET_STATE_FORMAT_VERSION {
+            mosfet::read(lines, budget, &mut accepted_junction_history)?;
         }
         let (tline_state_available, tline_resume_blockers, tline_states) = if version >= 14 {
             let availability_line = lines
@@ -10951,6 +10992,175 @@ mod tests {
     }
 
     #[test]
+    fn classic_mos_checkpoint_preserves_all_lanes_and_optional_junction_history() {
+        for level in [1, 4] {
+            let tox = if level == 4 { 0.02 } else { 20e-9 };
+            let netlist = Netlist::parse(&format!(
+                    "MOS checkpoint\nM1 d g 0 0 mm L=1u W=10u OFF\n.model mm NMOS LEVEL={level} TOX={tox}\n.end\n"
+                ))
+                .unwrap();
+            let mut circuit = Engine::default().build_circuit(&netlist).unwrap();
+            let mut state = circuit.mosfets.devices[0]
+                .accepted_nonlinear_checkpoint()
+                .unwrap();
+            for (i, value) in state.values.iter_mut().enumerate() {
+                *value = match i {
+                    2 => -0.0,
+                    3 => Value::from_bits(1),
+                    _ => 0.125 * (i + 1) as Value,
+                };
+            }
+            state.flags[0] = true;
+            state.flags[1] = true;
+            state.region = 2;
+            state.seed_evaluations = 2;
+            circuit.mosfets.devices[0]
+                .restore_accepted_nonlinear_checkpoint(&state)
+                .unwrap();
+            let restored = circuit.mosfets.devices[0]
+                .accepted_nonlinear_checkpoint()
+                .unwrap();
+            assert_eq!(state, restored);
+            for (a, b) in state.values.iter().zip(restored.values) {
+                assert_eq!(a.to_bits(), b.to_bits());
+            }
+            let mut original = sample();
+            let history = &mut original.accepted_junction_history;
+            history.mosfet_states.push(state);
+            for (i, (name, values)) in history.mosfet_history.columns_mut().into_iter().enumerate() {
+                if level == 4 || !MosfetTransientHistory::is_extended_column(name) {
+                    values.push(if i == 0 { -0.0 } else { 0.125 * i as Value });
+                }
+            }
+            history.mosfet_history.accepted_displacement_currents.push([
+                -0.0,
+                Value::from_bits(1),
+                0.2,
+                -0.3,
+                0.4,
+            ]);
+            history.mosfet_history.accepted_dt_prev = 2e-12;
+            history.mosfet_history.accepted_dt_prev_prev = 3e-12;
+            for encoding in [
+                TransientCheckpointEncoding::Unpacked,
+                TransientCheckpointEncoding::Packed,
+            ] {
+                let decoded =
+                    TransientCheckpoint::from_bytes(&original.to_bytes(encoding).unwrap()).unwrap();
+                assert_eq!(
+                    decoded.accepted_junction_history.mosfet_states,
+                    original.accepted_junction_history.mosfet_states
+                );
+                for (a, b) in decoded.accepted_junction_history.mosfet_states[0]
+                    .values
+                    .iter()
+                    .zip(original.accepted_junction_history.mosfet_states[0].values)
+                {
+                    assert_eq!(a.to_bits(), b.to_bits());
+                }
+                assert_eq!(
+                    decoded.accepted_junction_history.mosfet_history,
+                    original.accepted_junction_history.mosfet_history
+                );
+                for ((_, a), (_, b)) in decoded
+                    .accepted_junction_history
+                    .mosfet_history
+                    .columns()
+                    .into_iter()
+                    .zip(original.accepted_junction_history.mosfet_history.columns())
+                {
+                    assert_eq!(a.len(), b.len());
+                    for (a, b) in a.iter().zip(b) {
+                        assert_eq!(a.to_bits(), b.to_bits());
+                    }
+                }
+                for (a, b) in decoded
+                    .accepted_junction_history
+                    .mosfet_history
+                    .accepted_displacement_currents
+                    .iter()
+                    .flatten()
+                    .zip(
+                        original
+                            .accepted_junction_history
+                            .mosfet_history
+                            .accepted_displacement_currents
+                            .iter()
+                            .flatten(),
+                    )
+                {
+                    assert_eq!(a.to_bits(), b.to_bits());
+                }
+            }
+            let text = original.to_text();
+            for malformed in [
+                text.replace(
+                    "native-classic-mos-accepted-v1",
+                    "native-classic-mos-accepted-v0",
+                ),
+                text.replace(
+                    "accepted_mosfet_states 1",
+                    "accepted_mosfet_states 18446744073709551615",
+                ),
+                text.replace(
+                    "accepted_mosfet_transient_dt 0.000000000002",
+                    "accepted_mosfet_transient_dt NaN",
+                ),
+                text.replace(
+                    &format!(
+                        "accepted_mosfet_extended_junction_history {}",
+                        usize::from(level == 4)
+                    ),
+                    &format!(
+                        "accepted_mosfet_extended_junction_history {}",
+                        usize::from(level != 4)
+                    ),
+                ),
+            ] {
+                assert_ne!(malformed, text);
+                assert!(TransientCheckpoint::from_text(&malformed).is_err());
+            }
+            let old = TransientCheckpoint::from_text(&legacy_text(&original, 53)).unwrap();
+            assert!(
+                old.restore_accepted_junction_transient_history(&circuit)
+                    .unwrap_err()
+                    .contains("MOSFET")
+            );
+            let mut wrong_model = restored.clone();
+            wrong_model.level += 1;
+            assert!(
+                circuit.mosfets.devices[0]
+                    .restore_accepted_nonlinear_checkpoint(&wrong_model)
+                    .is_err()
+            );
+            assert_eq!(
+                circuit.mosfets.devices[0]
+                    .accepted_nonlinear_checkpoint()
+                    .unwrap(),
+                restored
+            );
+            let mut normalized = original.accepted_junction_history.mosfet_history.clone();
+            normalized.normalize_for_order_one(1e-12);
+            normalized.validate(1, level == 4).unwrap();
+            assert_eq!(
+                normalized.accepted_displacement_currents,
+                original
+                    .accepted_junction_history
+                    .mosfet_history
+                    .accepted_displacement_currents
+            );
+            assert_eq!(normalized.qgs_prev, normalized.qgs_prev_prev_prev);
+            assert_eq!(
+                normalized.capgs_prev_half,
+                original
+                    .accepted_junction_history
+                    .mosfet_history
+                    .capgs_prev_half
+            );
+        }
+    }
+
+    #[test]
     fn bsim4_checkpoint_wire_restores_all_lanes_and_rejects_missing_or_invalid_state() {
         let netlist = Netlist::parse(
             "BSIM4 checkpoint\nM1 d g 0 0 mm L=1u W=10u\n.model mm NMOS LEVEL=54 TRNQSMOD=1 RGATEMOD=3 RBODYMOD=2 RSHG=100\n.end\n",
@@ -11183,6 +11393,8 @@ mod tests {
             bsim3_history: Default::default(),
             bsim4_states: Vec::new(),
             bsim4_history: Default::default(),
+            mosfet_states: Vec::new(),
+            mosfet_history: Default::default(),
             bjt_names: vec!["qcheck".to_string()],
             bjt_runtime_tags: vec![super::super::BJT_TRANSIENT_HISTORY_RUNTIME_TAG.to_string()],
             bjt_history: BjtTransientHistory {
@@ -11684,6 +11896,16 @@ mod tests {
                     let count: usize = line.split_whitespace().nth(1).unwrap().parse().unwrap();
                     for _ in 0..count {
                         lines.next().expect("complete BSIM4 state rows");
+                    }
+                }
+                continue;
+            }
+            if version < MOSFET_STATE_FORMAT_VERSION && line.starts_with("accepted_mosfet_") {
+                if line.starts_with("accepted_mosfet_states ") {
+                    let count: usize = line.split_whitespace().nth(1).unwrap().parse().unwrap();
+                    lines.next().expect("MOSFET extended history flag");
+                    for _ in 0..count {
+                        lines.next().expect("complete MOSFET state rows");
                     }
                 }
                 continue;
@@ -13435,12 +13657,15 @@ mod tests {
         checkpoint.accepted_junction_history =
             Engine::capture_accepted_junction_transient_history_checkpoint(
                 &circuit,
-                &bjt_history,
-                &diode_history,
-                &JfetTransientHistory::default(),
-                &[None],
-                &Default::default(),
-                &Default::default(),
+                crate::engine::transient::AcceptedJunctionHistories {
+                    bjt_history: &bjt_history,
+                    diode_history: &diode_history,
+                    jfet_history: &JfetTransientHistory::default(),
+                    vbic_snapshot_cache: &[None],
+                    bsim3_history: &Default::default(),
+                    bsim4_history: &Default::default(),
+                    mosfet_history: &Default::default(),
+                },
             );
         (engine, netlist, checkpoint)
     }
@@ -13592,6 +13817,7 @@ mod tests {
         let RestoredJunctionTransientHistories {
             bsim3: _,
             bsim4: _,
+            mosfet: _,
             bjt,
             diode,
             jfet,
@@ -13671,6 +13897,7 @@ mod tests {
         let RestoredJunctionTransientHistories {
             bsim3: _,
             bsim4: _,
+            mosfet: _,
             bjt,
             diode,
             jfet,
@@ -14137,7 +14364,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 37] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 38] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -14175,6 +14402,7 @@ mod tests {
         (51, 13),
         (52, 13),
         (53, 13),
+        (54, 13),
     ];
 
     #[cfg(feature = "veriloga")]

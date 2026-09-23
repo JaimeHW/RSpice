@@ -1999,12 +1999,15 @@ impl Engine {
         }
         let junction_history = Self::capture_accepted_junction_transient_history_checkpoint(
             &circuit,
-            &circuit.bjt_history,
-            &circuit.diode_history,
-            &circuit.jfet_history,
-            &circuit.bjt_snapshot_cache,
-            &circuit.bsim3_history,
-            &circuit.bsim4_history,
+            crate::engine::transient::AcceptedJunctionHistories {
+                bjt_history: &circuit.bjt_history,
+                diode_history: &circuit.diode_history,
+                jfet_history: &circuit.jfet_history,
+                vbic_snapshot_cache: &circuit.bjt_snapshot_cache,
+                bsim3_history: &circuit.bsim3_history,
+                bsim4_history: &circuit.bsim4_history,
+                mosfet_history: &Default::default(),
+            },
         );
         let junction_history =
             Self::normalize_accepted_junction_transient_history_checkpoint_for_order_one(

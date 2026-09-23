@@ -423,6 +423,61 @@ fn assert_scheduled_deck_resumes_exactly(
 }
 
 #[test]
+fn classic_mos_checkpoints_resume_capacitance_charge_and_lead_currents_exactly() {
+    // One case per native model, alternating polarity and integration method.
+    for (level, dialect) in [
+        (1, SpiceDialect::Ngspice),
+        (2, SpiceDialect::Ngspice),
+        (3, SpiceDialect::Ngspice),
+        (4, SpiceDialect::Ngspice),
+        (5, SpiceDialect::Ngspice),
+        (6, SpiceDialect::Ngspice),
+        (9, SpiceDialect::Ngspice),
+        (1, SpiceDialect::Xyce),
+        (3, SpiceDialect::Xyce),
+    ] {
+        let polarity = if level % 2 == 0 { -1.0 } else { 1.0 };
+        let kind = if polarity > 0.0 { "NMOS" } else { "PMOS" };
+        let method = if level % 2 == 0 {
+            IntegrationMethod::Gear2
+        } else {
+            IntegrationMethod::Trapezoidal
+        };
+        let model = if level == 4 || level == 5 {
+            "VFB=-0.8 PHI=0.7 K1=0.5 TOX=0.02".to_string()
+        } else {
+            format!("VTO={} KP=50u GAMMA=0.5 PHI=0.7 TOX=20n", polarity * 0.6)
+        };
+        let deck = format!(
+            "Classic MOS accepted history\nVDD supply 0 {}\nVIN in 0 SIN({} {} 100meg)\nRD supply out 500\nRG in gate 100\nRS source 0 10\nM1 out gate source 0 mm L=1u W=10u AD=4p AS=5p PD=20u PS=22u M=2 OFF\n.model mm {kind} LEVEL={level} {model} CGSO=1e-9 CGDO=2e-9 CGBO=1e-9 CJ=0.001 CJSW=1e-10 RSH=10\n.options TEMP=60\n.save all\n.print tran ID(M1) IG(M1) IS(M1) IB(M1)\n.end\n",
+            polarity * 1.8,
+            polarity * 0.9,
+            polarity * 0.15
+        );
+        let label = format!("{dialect:?} classic MOS {level} {kind} {method:?}");
+        let result = assert_scheduled_deck_resumes_exactly(
+            &label,
+            &deck,
+            15e-9,
+            6.13e-9,
+            100e-12,
+            SimulationConfig {
+                spice_dialect: dialect,
+                integration_method: method,
+                ..Default::default()
+            },
+        );
+        let gate = result.try_voltage_waveform_named("gate").unwrap();
+        assert!(
+            gate.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+                - gate.iter().copied().fold(f64::INFINITY, f64::min)
+                > 0.1,
+            "{label}: exercise dynamic charge"
+        );
+    }
+}
+
+#[test]
 fn bsim3_checkpoints_preserve_qs_and_nqs_accepted_trajectories() {
     for (nqs, kind, polarity, method) in [
         (0, "NMOS", 1.0, IntegrationMethod::Trapezoidal),

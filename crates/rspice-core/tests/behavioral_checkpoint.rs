@@ -125,10 +125,13 @@ fn capacitor_checkpoint_rejects_malformed_mismatched_and_missing_integrals() {
 
     let mut old = String::new();
     let mut lines = text.lines();
-    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 53"));
+    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 54"));
     old.push_str("RSPICE-CHECKPOINT 50\n");
     while let Some(line) = lines.next() {
-        if line.starts_with("accepted_bsim3_") || line.starts_with("accepted_bsim4_") {
+        if line.starts_with("accepted_bsim3_")
+            || line.starts_with("accepted_bsim4_")
+            || line.starts_with("accepted_mosfet_")
+        {
             continue;
         }
         if line.starts_with("capacitor_sdt_state_available ") {
@@ -278,10 +281,13 @@ fn behavioral_checkpoint_legacy_state_remains_unknown() {
     let (engine, netlist, checkpoint) = fixture();
     let text = checkpoint.to_text();
     let mut lines = text.lines();
-    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 53"));
+    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 54"));
     let mut old = "RSPICE-CHECKPOINT 49\n".to_owned();
     while let Some(line) = lines.next() {
-        if line.starts_with("accepted_bsim3_") || line.starts_with("accepted_bsim4_") {
+        if line.starts_with("accepted_bsim3_")
+            || line.starts_with("accepted_bsim4_")
+            || line.starts_with("accepted_mosfet_")
+        {
             continue;
         }
         if line.starts_with("capacitor_sdt_state_available ") || line == "capacitor_sdt_states 0" {

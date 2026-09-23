@@ -322,12 +322,15 @@ fn physical_startup_publishes_one_sided_gp_anchor_and_finite_currents() {
             assert!(history.charge_cq_prev[0].iter().any(|i| *i != 0.0));
             let checkpoint = Engine::capture_accepted_junction_transient_history_checkpoint(
                 &circuit,
-                &history,
-                &Default::default(),
-                &Default::default(),
-                &[None],
-                &Default::default(),
-                &Default::default(),
+                crate::engine::transient::AcceptedJunctionHistories {
+                    bjt_history: &history,
+                    diode_history: &Default::default(),
+                    jfet_history: &Default::default(),
+                    vbic_snapshot_cache: &[None],
+                    bsim3_history: &Default::default(),
+                    bsim4_history: &Default::default(),
+                    mosfet_history: &Default::default(),
+                },
             );
             Engine::validate_accepted_junction_transient_history_checkpoint(&circuit, &checkpoint)
                 .unwrap();
