@@ -4,9 +4,9 @@ use super::parse_si_value;
 use crate::simulation::reliability_engine::{
     ReliabilityBinding, ReliabilityMissionPhase, ReliabilityStudy, ReliabilityTransientWindow,
 };
-use rspice_core::analysis::reliability::{
-    AgingModelPack, MAX_AGING_PACK_BYTES, SECONDS_PER_AGING_YEAR,
-};
+use rspice_core::analysis::reliability::{AgingModelPack, SECONDS_PER_AGING_YEAR};
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_core::analysis::reliability::MAX_AGING_PACK_BYTES;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
