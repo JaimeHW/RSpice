@@ -61,7 +61,7 @@ pub use pnoise::{
 pub use psp::{PreparedPsp, PspAnalysisResult, PspNoiseCorrelation};
 pub use quasi_periodic::{
     EnvelopeCarrierBasis, EnvelopeSourceEvent, EnvelopeSourceSide, NetlistEnvelopeAdvance,
-    NetlistEnvelopeState, PreparedSpectralEnvelope, SpectralEnvelopeConfig,
+    NetlistEnvelopeEvent, NetlistEnvelopeState, PreparedSpectralEnvelope, SpectralEnvelopeConfig,
     QpacAnalysisResult, QpacInputQuantity, QpacRequest, QpacResultMetadata, QpnoiseAnalysisResult,
     QpnoiseContributorRank, QpnoiseFrequencyAxis, QpnoiseInput, QpnoiseIntegrated,
     QpnoiseIntegration, QpnoiseIntegrationMethod, QpnoiseLattices, QpnoiseNoiseFigure,

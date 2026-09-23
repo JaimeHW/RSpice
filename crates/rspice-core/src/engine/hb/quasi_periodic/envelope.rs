@@ -3,13 +3,15 @@ use super::*;
 use crate::ResourceLimits;
 use crate::analysis::quasi_periodic::{
     SpectralEnvelopeControl, SpectralEnvelopeMethod, SpectralEnvelopeState,
-    advance_spectral_envelope_with_abort,
+    SpectralEnvelopeEventConfig, advance_spectral_envelope_with_abort,
 };
 use crate::circuit::SourceTimeSide;
 use crate::engine::PeriodicDcOperatingPointSeed;
 use crate::engine::transient::source_events::{PhysicalSourceEvents, PhysicalSourceOwner};
 mod events;
+mod event_topology;
 pub use events::EnvelopeSourceEvent;
+pub use events::NetlistEnvelopeEvent;
 
 #[cfg(test)]
 mod tests;
@@ -80,11 +82,15 @@ struct Coordinates {
 pub struct NetlistEnvelopeState {
     coordinates: Arc<Coordinates>,
     numerical: SpectralEnvelopeState,
+    source_side: EnvelopeSourceSide,
 }
 
 impl NetlistEnvelopeState {
     pub fn time(&self) -> Value {
         self.numerical.time()
+    }
+    pub fn source_side(&self) -> EnvelopeSourceSide {
+        self.source_side
     }
     pub fn grid(&self) -> &Arc<QuasiPeriodicGrid> {
         &self.coordinates.grid
@@ -368,10 +374,15 @@ impl PreparedSpectralEnvelope {
         Ok(())
     }
 
-    fn bind(&self, numerical: SpectralEnvelopeState) -> NetlistEnvelopeState {
+    fn bind(
+        &self,
+        numerical: SpectralEnvelopeState,
+        source_side: EnvelopeSourceSide,
+    ) -> NetlistEnvelopeState {
         NetlistEnvelopeState {
             coordinates: self.coordinates.clone(),
             numerical,
+            source_side,
         }
     }
 
@@ -448,7 +459,7 @@ impl PreparedSpectralEnvelope {
             .solver
             .initialize_spectral_envelope_with_abort(time, &solution, &limits, abort)
             .map_err(numerical_error)?;
-        Ok(self.bind(numerical))
+        Ok(self.bind(numerical, side))
     }
 
     fn dc_guess(
@@ -495,13 +506,14 @@ impl PreparedSpectralEnvelope {
     ) -> Result<NetlistEnvelopeState, SimulationError> {
         check_abort(abort)?;
         self.validate_state(previous)?;
+        self.require_outgoing_event(previous)?;
         self.validate_time(time)?;
         let limits = source_workspace_limits(self.carrier_sources.len(), self.grid(), &self.limits)
             .map_err(numerical_error)?;
         let numerical = self
             .trial(&previous.numerical, time, method, side, &limits, abort)
             .map_err(numerical_error)?;
-        Ok(self.bind(numerical))
+        Ok(self.bind(numerical, side))
     }
 
     #[expect(
@@ -550,6 +562,7 @@ impl PreparedSpectralEnvelope {
     ) -> Result<NetlistEnvelopeAdvance, SimulationError> {
         check_abort(abort)?;
         self.validate_state(previous)?;
+        self.require_outgoing_event(previous)?;
         self.validate_time(deadline)?;
         let (deadline, deadline_side) = match self.next_source_event_after(previous.time())? {
             Some(event) if event <= deadline => (event, EnvelopeSourceSide::LeftLimit),
@@ -574,8 +587,13 @@ impl PreparedSpectralEnvelope {
             },
         )
         .map_err(numerical_error)?;
+        let side = if advance.state.time().to_bits() == deadline.to_bits() {
+            deadline_side
+        } else {
+            EnvelopeSourceSide::Published
+        };
         Ok(NetlistEnvelopeAdvance {
-            state: self.bind(advance.state),
+            state: self.bind(advance.state, side),
             suggested_step: advance.suggested_step,
             error_ratio: advance.error_ratio,
             rejected_steps: advance.rejected_steps,

@@ -144,7 +144,7 @@ pub use error::{
 };
 pub use hb::{
     EnvelopeCarrierBasis, EnvelopeSourceEvent, EnvelopeSourceSide, NetlistEnvelopeAdvance,
-    NetlistEnvelopeState, PreparedSpectralEnvelope, SpectralEnvelopeConfig,
+    NetlistEnvelopeEvent, NetlistEnvelopeState, PreparedSpectralEnvelope, SpectralEnvelopeConfig,
     EnvelopeResult, HbAnalysisResult, HbCurrentSpectrum, HbEnvelopeContinuationState,
     HbEnvelopeStateGuarantee, HbIntegralSpectrum, HbNoiseFigureRequest, HbOperatingPoint,
     HbOperatingPointIdentity, PacAnalysisResult, PeriodicNoiseEdge, PeriodicNoiseEdgeDirection,

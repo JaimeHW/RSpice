@@ -4,7 +4,7 @@ mod bindings;
 mod envelope;
 pub use envelope::{
     EnvelopeCarrierBasis, EnvelopeSourceEvent, EnvelopeSourceSide, NetlistEnvelopeAdvance,
-    NetlistEnvelopeState, PreparedSpectralEnvelope, SpectralEnvelopeConfig,
+    NetlistEnvelopeEvent, NetlistEnvelopeState, PreparedSpectralEnvelope, SpectralEnvelopeConfig,
 };
 pub use autonomous::{QpssOscillator, QpssOscillatorSeed};
 mod card;
