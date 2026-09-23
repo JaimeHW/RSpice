@@ -227,11 +227,10 @@ impl HbSolver {
             }
             let structure: Vec<_> = pattern
                 .iter()
-                .filter_map(|&(row, col)| {
-                    (row_index[row] != usize::MAX).then(|| {
-                        debug_assert_ne!(col_index[col], usize::MAX, "closed linear equations");
-                        (row_index[row], col_index[col], 0.0)
-                    })
+                .filter(|&&(row, _col)| row_index[row] != usize::MAX)
+                .map(|&(row, col)| {
+                    debug_assert_ne!(col_index[col], usize::MAX, "closed linear equations");
+                    (row_index[row], col_index[col], 0.0)
                 })
                 .collect();
             let structure = StaticMatrix::from_triplets(size, size, &structure)?;

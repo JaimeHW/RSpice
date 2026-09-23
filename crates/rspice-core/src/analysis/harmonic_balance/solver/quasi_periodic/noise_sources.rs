@@ -218,7 +218,7 @@ impl HbSolver {
             )
             .saturating_add(grid.sample_count().saturating_mul(8));
         budget(resident, limits)?;
-        let mut remaining = limits.clone();
+        let mut remaining = *limits;
         remaining.max_result_values = limits
             .max_result_values
             .min(32_000_000)

@@ -344,7 +344,7 @@ fn quasi_periodic_solver_refuses_singular_malformed_unbounded_and_cancelled_work
     solver.add_conductance(0, 0, 1e-3);
     let restricted = ResourceLimits {
         max_matrix_unknowns: 8,
-        ..limits.clone()
+        ..limits
     };
     assert!(matches!(
         solver.solve_quasi_periodic_with_abort(
@@ -359,7 +359,7 @@ fn quasi_periodic_solver_refuses_singular_malformed_unbounded_and_cancelled_work
     ));
     let restricted = ResourceLimits {
         max_result_values: 100,
-        ..limits.clone()
+        ..limits
     };
     assert!(matches!(
         solver.solve_quasi_periodic_with_abort(

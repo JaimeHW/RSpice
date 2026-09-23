@@ -57,6 +57,81 @@ pub(in crate::analysis::harmonic_balance::solver) fn coordinate_group(
     }
 }
 
+impl HbSolver {
+    /// Each source component gets its own reference. Original source equations
+    /// remain in MNA, so inconsistent/redundant loops are still diagnosed.
+    /// Callers charge 12*(nodes+branches+1) before allocating the topology.
+    pub(in crate::analysis::harmonic_balance::solver) fn forced_voltage_forest(
+        &self,
+        authored_hb: bool,
+        abort: &dyn AbortSignal,
+    ) -> Result<ForcedVoltages, HbError> {
+        let mut adjacent = vec![Vec::new(); self.num_nodes + 1];
+        for (index, branch) in self.exact_mna_branches().iter().enumerate() {
+            if abort.is_aborted() {
+                return Err(HbError::Aborted);
+            }
+            let ExactMnaBranch::VoltageSource {
+                node_pos,
+                node_neg,
+                source,
+                ..
+            } = branch
+            else {
+                continue;
+            };
+            if authored_hb && source.is_none() {
+                continue;
+            }
+            if *node_pos > self.num_nodes || *node_neg > self.num_nodes || node_pos == node_neg {
+                return Err(HbError::InvalidCircuit(
+                    "invalid ideal-source terminals in integral preparation".into(),
+                ));
+            }
+            adjacent[*node_neg].push((*node_pos, index, 1.0));
+            adjacent[*node_pos].push((*node_neg, index, -1.0));
+        }
+        let mut seen = vec![false; self.num_nodes + 1];
+        let mut groups = vec![0; self.num_nodes];
+        let mut queue = VecDeque::new();
+        let mut tree = Vec::new();
+        for root in 0..=self.num_nodes {
+            if abort.is_aborted() {
+                return Err(HbError::Aborted);
+            }
+            if std::mem::replace(&mut seen[root], true) {
+                continue;
+            }
+            if root > 0 {
+                groups[root - 1] = root;
+            }
+            queue.push_back(root);
+            while let Some(parent) = queue.pop_front() {
+                if abort.is_aborted() {
+                    return Err(HbError::Aborted);
+                }
+                for &(node, branch, sign) in &adjacent[parent] {
+                    if std::mem::replace(&mut seen[node], true) {
+                        continue;
+                    }
+                    groups[node - 1] = root;
+                    tree.push(ForcedNode {
+                        node: node - 1,
+                        parent: parent.checked_sub(1),
+                        branch,
+                        sign,
+                    });
+                    queue.push_back(node);
+                }
+            }
+        }
+        Ok(ForcedVoltages {
+            nodes: tree,
+            groups,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,80 +277,5 @@ mod tests {
             state.x, original,
             "a consumer cannot change the producer's integral constraints"
         );
-    }
-}
-
-impl HbSolver {
-    /// Each source component gets its own reference. Original source equations
-    /// remain in MNA, so inconsistent/redundant loops are still diagnosed.
-    /// Callers charge 12*(nodes+branches+1) before allocating the topology.
-    pub(in crate::analysis::harmonic_balance::solver) fn forced_voltage_forest(
-        &self,
-        authored_hb: bool,
-        abort: &dyn AbortSignal,
-    ) -> Result<ForcedVoltages, HbError> {
-        let mut adjacent = vec![Vec::new(); self.num_nodes + 1];
-        for (index, branch) in self.exact_mna_branches().iter().enumerate() {
-            if abort.is_aborted() {
-                return Err(HbError::Aborted);
-            }
-            let ExactMnaBranch::VoltageSource {
-                node_pos,
-                node_neg,
-                source,
-                ..
-            } = branch
-            else {
-                continue;
-            };
-            if authored_hb && source.is_none() {
-                continue;
-            }
-            if *node_pos > self.num_nodes || *node_neg > self.num_nodes || node_pos == node_neg {
-                return Err(HbError::InvalidCircuit(
-                    "invalid ideal-source terminals in integral preparation".into(),
-                ));
-            }
-            adjacent[*node_neg].push((*node_pos, index, 1.0));
-            adjacent[*node_pos].push((*node_neg, index, -1.0));
-        }
-        let mut seen = vec![false; self.num_nodes + 1];
-        let mut groups = vec![0; self.num_nodes];
-        let mut queue = VecDeque::new();
-        let mut tree = Vec::new();
-        for root in 0..=self.num_nodes {
-            if abort.is_aborted() {
-                return Err(HbError::Aborted);
-            }
-            if std::mem::replace(&mut seen[root], true) {
-                continue;
-            }
-            if root > 0 {
-                groups[root - 1] = root;
-            }
-            queue.push_back(root);
-            while let Some(parent) = queue.pop_front() {
-                if abort.is_aborted() {
-                    return Err(HbError::Aborted);
-                }
-                for &(node, branch, sign) in &adjacent[parent] {
-                    if std::mem::replace(&mut seen[node], true) {
-                        continue;
-                    }
-                    groups[node - 1] = root;
-                    tree.push(ForcedNode {
-                        node: node - 1,
-                        parent: parent.checked_sub(1),
-                        branch,
-                        sign,
-                    });
-                    queue.push_back(node);
-                }
-            }
-        }
-        Ok(ForcedVoltages {
-            nodes: tree,
-            groups,
-        })
     }
 }

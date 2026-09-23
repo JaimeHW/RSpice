@@ -420,7 +420,7 @@ impl HbSolver {
                 column_index[col] = i;
                 selected[row] = true;
             }
-            let mut working = limits.clone();
+            let mut working = *limits;
             // Selected RHS and seed coexist with the shared solver workspace.
             let retained = storage
                 .saturating_add(component.len().saturating_mul(grid.len()).saturating_mul(4));
@@ -682,7 +682,7 @@ mod tests {
                 &[true, false],
                 &ResourceLimits {
                     max_result_values: 1,
-                    ..limits.clone()
+                    ..limits
                 },
                 &NoAbort
             ),

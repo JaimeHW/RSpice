@@ -130,7 +130,7 @@ pub(crate) fn visit_with_abort(
         resident,
         limits.max_result_values.min(32_000_000),
     )?;
-    let mut noise_limits = limits.clone();
+    let mut noise_limits = *limits;
     noise_limits.max_result_values = limits
         .max_result_values
         .min(32_000_000)

@@ -99,14 +99,11 @@ pub fn bind_error_measurement_reference(
         independent,
         *dependent_column,
     )?;
-    if let Some(axis) = columns.independent {
-        if axis.first().is_some_and(|value| *value < 0.0)
-            || axis.windows(2).any(|pair| pair[1] < pair[0])
-        {
-            return Err(
-                "non-DC ERROR reference axis must be non-negative and nondecreasing".into(),
-            );
-        }
+    if let Some(axis) = columns.independent
+        && (axis.first().is_some_and(|value| *value < 0.0)
+            || axis.windows(2).any(|pair| pair[1] < pair[0]))
+    {
+        return Err("non-DC ERROR reference axis must be non-negative and nondecreasing".into());
     }
     file.bind_contents(contents);
     Ok(())

@@ -211,13 +211,13 @@ impl QuasiPeriodicGrid {
                 return Err(invalid("each phase grid must have at least 2H+1 points"));
             }
             strides.push(sample_count);
-            sample_count = sample_count.checked_mul(size).unwrap_or(usize::MAX);
+            sample_count = sample_count.saturating_mul(size);
             ResourceLimitError::ensure(ResourceKind::AnalysisPoints, sample_count, point_limit)?;
             dimensions.push(size);
         }
         // FFT workspace, input/output and scratch are accounted for before any
         // plans are allocated. Each lattice tuple adds its own retained cost.
-        let workspace_values = sample_count.checked_mul(8).unwrap_or(usize::MAX);
+        let workspace_values = sample_count.saturating_mul(8);
         ResourceLimitError::ensure(
             ResourceKind::ResultValues,
             workspace_values,

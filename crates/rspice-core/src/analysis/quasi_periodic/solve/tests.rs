@@ -130,7 +130,7 @@ fn quasi_periodic_certificate_keeps_dc_out_of_small_ac_tolerance() {
         .evaluate(
             &mut CancellingBias,
             &spectra,
-            &vec![vec![Complex64::ZERO; size]],
+            &[vec![Complex64::ZERO; size]],
             false,
             &NoAbort,
         )

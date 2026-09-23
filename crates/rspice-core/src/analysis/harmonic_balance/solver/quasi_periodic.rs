@@ -197,7 +197,7 @@ impl HbSolver {
             limits.max_result_values,
         )?;
         // Charge the retained sweep alongside the numerical workspace.
-        let mut working_limits = limits.clone();
+        let mut working_limits = *limits;
         working_limits.max_result_values = limits.max_result_values.saturating_sub(values);
         self.validate_quasi_periodic_response()?;
         let working_limits = self.prepare_quasi_periodic_integrals(
@@ -294,7 +294,7 @@ impl HbSolver {
             values,
             limits.max_result_values,
         )?;
-        let mut working_limits = limits.clone();
+        let mut working_limits = *limits;
         working_limits.max_result_values = limits.max_result_values.saturating_sub(values);
         self.validate_quasi_periodic_response()?;
         let working_limits = self.prepare_quasi_periodic_integrals(

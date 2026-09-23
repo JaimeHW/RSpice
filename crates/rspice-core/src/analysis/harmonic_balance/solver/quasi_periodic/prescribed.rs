@@ -161,7 +161,7 @@ impl HbSolver {
                 .as_ref()
                 .map_or(0, |cache| cache.primitives.iter().flatten().count());
             let retained_seed = if prepared.is_some() { seed_values } else { 0 };
-            let mut preparing = remaining.clone();
+            let mut preparing = remaining;
             preparing.max_result_values = preparing
                 .max_result_values
                 .saturating_sub(input_values(&inputs))
@@ -205,7 +205,7 @@ impl HbSolver {
                 }
             }
             let driven_values = input_values(&inputs);
-            let mut preparing = limits.clone();
+            let mut preparing = *limits;
             preparing.max_result_values = preparing
                 .max_result_values
                 .saturating_sub(driven_values)
@@ -221,7 +221,7 @@ impl HbSolver {
             let primitive_values = preparing
                 .max_result_values
                 .saturating_sub(available.max_result_values);
-            remaining = limits.clone();
+            remaining = *limits;
             remaining.max_result_values =
                 remaining.max_result_values.saturating_sub(primitive_values);
             needed = unresolved;
@@ -311,7 +311,7 @@ impl HbSolver {
                 .map_err(Error::InvalidCircuit)?;
         }
         if plans.is_empty() {
-            return Ok((limits.clone(), Vec::new()));
+            return Ok((*limits, Vec::new()));
         }
         let budget = |values| {
             ResourceLimitError::ensure(
@@ -560,7 +560,7 @@ impl HbSolver {
                 rate_scale = rate_scale.max(value.abs());
                 samples.push(value);
             }
-            let mut projection_limits = limits.clone();
+            let mut projection_limits = *limits;
             projection_limits.max_result_values = limits
                 .max_result_values
                 .saturating_sub(values)
@@ -635,7 +635,7 @@ impl HbSolver {
                 .complete_real_samples_with_abort(&spectrum, abort)?;
             primitives.push(Some(Primitive { spectrum, samples }));
         }
-        let mut remaining = limits.clone();
+        let mut remaining = *limits;
         if primitives.iter().any(Option::is_some) {
             remaining.max_result_values = remaining.max_result_values.saturating_sub(values);
             self.quasi_prescribed_integrals = Some(QuasiPrescribedIntegrals {
@@ -684,7 +684,7 @@ mod tests {
             .unwrap();
         let limited = ResourceLimits {
             max_result_values: 8 * grid.sample_count() + 10,
-            ..limits.clone()
+            ..limits
         };
         assert!(matches!(
             solver.prepare_quasi_periodic_integrals(

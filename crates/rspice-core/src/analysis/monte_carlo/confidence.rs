@@ -149,18 +149,17 @@ impl MonteCarloResult {
                 "Monte Carlo trial range overflows the supported index range".into(),
             )
         })?;
-        if let Some(indices) = &self.successful_trial_indices {
-            if indices.len() != samples
+        if let Some(indices) = &self.successful_trial_indices
+            && (indices.len() != samples
                 || indices
                     .iter()
                     .any(|&index| index < first_trial || index >= end_trial)
-                || indices.windows(2).any(|pair| pair[0] >= pair[1])
-            {
-                return Err(SimulationError::Circuit(
-                    "Monte Carlo successful trial identities disagree with the retained population"
-                        .into(),
-                ));
-            }
+                || indices.windows(2).any(|pair| pair[0] >= pair[1]))
+        {
+            return Err(SimulationError::Circuit(
+                "Monte Carlo successful trial identities disagree with the retained population"
+                    .into(),
+            ));
         }
         validate_request(level_pct, method, samples, self.variables.len(), limits)?;
         let retained_values = self.variables.values().try_fold(

@@ -144,7 +144,7 @@ impl QuasiPeriodicNoiseProjector {
             transform,
             selected,
             coordinates,
-            limits: limits.clone(),
+            limits: *limits,
         })
     }
 
@@ -288,14 +288,12 @@ impl QuasiPeriodicNoiseProjector {
     }
 
     fn workspace_values(&self, outputs: usize, extra: usize) -> usize {
-        let values = self
-            .grid
+        self.grid
             .sample_count()
             .saturating_mul(8usize.saturating_add(outputs.saturating_mul(2)))
             .saturating_add(outputs.saturating_mul(self.grid.len()).saturating_mul(12))
             .saturating_add(outputs.saturating_mul(outputs).saturating_mul(6))
-            .saturating_add(extra);
-        values
+            .saturating_add(extra)
     }
 
     fn white(
