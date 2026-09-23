@@ -1319,33 +1319,53 @@ fn level9_acnqsmod1_deck_runs_natively_for_xyce_compatibility() {
 }
 
 #[test]
-fn acnqsmod1_is_rejected_for_pole_zero_until_charge_deficit_state_exists() {
-    let deck = format!(
-        "* bsim3 acnqs pz rejection\n\
+fn acnqsmod1_pole_zero_response_matches_native_ac() {
+    for nqs in [0, 1] {
+        let deck = format!(
+            "* bsim3 acnqs explicit pole-zero response\n\
          vdd vdd 0 dc 1.8\n\
          vin in 0 dc 0.9 ac 1\n\
          {}\
          cl out 0 10f\n\
          {}\n\
          .end\n",
-        inverter_pair("1", "in", "out"),
-        models018_acnqsmod1()
-    );
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let circuit = engine().build_circuit(&netlist).expect("circuit builds");
-    let input = circuit.get_node_by_name("in").expect("input node");
-    let output = circuit.get_node_by_name("out").expect("output node");
-    let err = engine()
-        .run_pz(&netlist, input, output)
-        .expect_err("ACNQSMOD=1 is rational and must not use G+sC PZ extraction");
-    let message = err.to_string();
-    assert!(
-        message.contains("Pole-zero")
-            && message.contains("BSIM3")
-            && message.contains("ACNQSMOD=1")
-            && message.contains("charge-deficit"),
-        "typed PZ rejection should name BSIM3 ACNQSMOD=1 and the missing state: {message}"
-    );
+            inverter_pair("1", "in", "out"),
+            models018_acnqsmod1().replace("acnqsmod=1", &format!("acnqsmod=1 nqsmod={nqs}"))
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let circuit = engine().build_circuit(&netlist).expect("circuit builds");
+        let input = circuit.get_node_by_name("in").expect("input node");
+        let output = circuit.get_node_by_name("out").expect("output node");
+        let pz = engine()
+            .run_pz_ports(&netlist, input, None, output, None, false, true, true)
+            .expect("AC-only NQS has an explicit rational descriptor");
+        assert!(!pz.poles.is_empty());
+        assert!(!pz.zeros.is_empty());
+        let dc = pz.dc_gain.expect("finite DC voltage gain");
+        for ac in engine().run_ac(&netlist, &[1e3, 1e8, 1e10, 1e12]).unwrap() {
+            let s = num_complex::Complex64::new(0.0, std::f64::consts::TAU * ac.frequency);
+            let mut transfer = num_complex::Complex64::new(dc, 0.0);
+            for zero in &pz.zeros {
+                transfer *= 1.0 - s / zero;
+            }
+            for pole in &pz.poles {
+                transfer /= 1.0 - s / pole;
+            }
+            let out = ac
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let expected = ac.voltages[out];
+            assert!(
+                (transfer - expected).norm() <= 1e-9 + 2e-5 * expected.norm(),
+                "NQSMOD={nqs}, f={}: PZ={transfer}, AC={expected}; poles={:?}; zeros={:?}",
+                ac.frequency,
+                pz.poles,
+                pz.zeros
+            );
+        }
+    }
 }
 
 #[test]

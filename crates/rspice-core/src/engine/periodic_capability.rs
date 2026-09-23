@@ -474,10 +474,7 @@ pub(crate) const fn periodic_capability_descriptor(
         },
         F::Bsim3v3 => PeriodicCapabilityDescriptor {
             residual_jacobian: Complete,
-            dynamic_state: Restricted(
-                "AC-only NQS requires the response auxiliary states allocated by the periodic \
-                 solver; generic fixed-size G+sC extraction supports ACNQSMOD=0",
-            ),
+            dynamic_state: Complete,
             small_signal: Complete,
             noise: Complete,
             pss_state: Complete,
@@ -1527,16 +1524,6 @@ pub(in crate::engine) fn dynamic_state_descriptor_gaps(
                         }
                     }
                 }
-                F::Bsim3v3 => {
-                    for dev in &circuit.bsim3v3.devices {
-                        if dev.core.model.acnqs_mod != 0 {
-                            gaps.push(CapabilityGap::new(
-                                family,
-                                format!("BSIM3 '{}' with ACNQSMOD=1: {condition}", dev.name),
-                            ));
-                        }
-                    }
-                }
                 F::Bsim4v8 => {
                     for dev in &circuit.bsim4v8.devices {
                         if dev.core.model.acnqs_mod != 0 {
@@ -1749,7 +1736,7 @@ mod tests {
             // complete charge descriptor; VBIC's finite delay states remain.
             F::Bjt => [R, R, C, C, R, R],
             F::Mosfet => [R, C, C, R, A, A],
-            F::Bsim3v3 => [C, R, C, C, C, C],
+            F::Bsim3v3 => [C, C, C, C, C, C],
             F::Bsim4v8 => [A, R, I, A, A, A],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],
             F::Ekv26 | F::Ekv3 | F::Vdmos => [I, C, A, A, A, A],

@@ -1872,6 +1872,7 @@ impl Engine {
         op_voltages: &[Value],
         frequency_hz: Value,
         physical_analysis: SmallSignalAnalysisKind,
+        include_reduced_dynamic_stamps: bool,
     ) -> Result<(), SimulationError> {
         // The analysis identity remains part of this shared stamping contract
         // even when neither Verilog-A backend is compiled into the build.
@@ -1918,10 +1919,12 @@ impl Engine {
         // BSIM3: the DC linearization at the operating point is the real
         // part of the small-signal admittance (b3acld.c stamps the same
         // gm/gds/gmbs/gbd/gbs/substrate-current groups as the DC load).
-        circuit
-            .bsim3v3
-            .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
         for dev in &circuit.bsim3v3.devices {
+            if dev.uses_ac_nqs() && !include_reduced_dynamic_stamps {
+                // PZ allocates and stamps the complete finite-state response.
+                continue;
+            }
+            dev.stamp_nonlinear(op_voltages, &mut stamper, &mut rhs_dummy);
             if dev.uses_trnqs() && !dev.uses_ac_nqs() {
                 // b3acld.c retains the transient charge-deficit relaxation
                 // when ACNQSMOD does not override it. ag0=0 extracts its
@@ -2247,13 +2250,15 @@ impl Engine {
     /// workspace keeps its sparsity pattern and shared symbolic
     /// factorization across calls, so a sweep pays the structure cost once
     /// instead of once per point.
+    /// PZ disables reduced dynamic stamps and supplies the explicit VBIC and
+    /// AC-only BSIM3 descriptor states after assembling this base operator.
     pub(super) fn try_fill_small_signal_matrix_with_vbic_delay_mode(
         circuit: &CircuitData,
         ac_matrix: &mut ComplexMatrix,
         op_voltages: &[Value],
         omega: Value,
         physical_analysis: SmallSignalAnalysisKind,
-        include_vbic_dynamic_stamp: bool,
+        include_reduced_dynamic_stamps: bool,
         include_vbic_delay_branches: bool,
     ) -> Result<(), SimulationError> {
         let has_nonlinear = circuit.has_nonlinear_devices();
@@ -2323,9 +2328,10 @@ impl Engine {
                 op_voltages,
                 frequency_hz,
                 physical_analysis,
+                include_reduced_dynamic_stamps,
             )?;
             for bjt in &circuit.bjts.devices {
-                if include_vbic_dynamic_stamp || bjt.uses_legacy_gummel_poon() {
+                if include_reduced_dynamic_stamps || bjt.uses_legacy_gummel_poon() {
                     Self::stamp_bjt_dynamic_ac(
                         ac_matrix,
                         bjt,
@@ -2504,6 +2510,9 @@ impl Engine {
                 );
             }
             for dev in &circuit.bsim3v3.devices {
+                if dev.uses_ac_nqs() && !include_reduced_dynamic_stamps {
+                    continue;
+                }
                 let (charge, mode) = dev.charge_at_with_probe(op_voltages, true);
                 if dev.uses_trnqs() && !dev.uses_ac_nqs() {
                     dev.stamp_trnqs_charge_matrix(&charge, mode, omega, &mut stamper);
@@ -2528,7 +2537,9 @@ impl Engine {
                 });
             }
         }
-        Self::stamp_bsim3_ac_nqs_corrections(ac_matrix, circuit, op_voltages, omega);
+        if include_reduced_dynamic_stamps {
+            Self::stamp_bsim3_ac_nqs_corrections(ac_matrix, circuit, op_voltages, omega);
+        }
         Self::stamp_bsim4_ac_nqs_corrections(ac_matrix, circuit, op_voltages, omega);
         Self::stamp_bsim4_trnqs_ac_charge_node_anchors(ac_matrix, circuit);
 
@@ -2855,9 +2866,8 @@ impl Engine {
         op_voltages: &[Value],
         omega: Value,
     ) -> Result<ComplexMatrix, SimulationError> {
-        // PZ descriptor construction handles VBIC hidden dynamic states
-        // explicitly in `engine/advanced/mod.rs`, so keep the base AC
-        // linearization free of frequency-dependent VBIC companion reduction.
+        // PZ adds explicit VBIC and AC-only BSIM3 states in pole_zero.rs.
+        // Their frequency-dependent reductions must not enter the base G/C.
         let mut ac_matrix = ComplexMatrix::from_real_structure(matrix);
         Self::try_fill_small_signal_matrix_with_vbic_delay_mode(
             circuit,

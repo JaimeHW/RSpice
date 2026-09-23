@@ -8,6 +8,8 @@ use crate::device::semiconductor::{
 };
 use crate::{CircuitData, Netlist, Value};
 
+mod bsim3;
+
 impl Engine {
     /// Reduce a sparse `G + sC` descriptor to a dense state-space model whose
     /// dimension is the number of dynamic states, not the full MNA size.
@@ -383,10 +385,9 @@ impl Engine {
     /// finite state in a rational `G + sC` descriptor.
     ///
     /// Pole-zero extraction is the consumer of the charge/dynamic-state
-    /// capability: a delay line's descriptor is irrational, and an AC-NQS BSIM
-    /// charge deficit needs a hidden state the descriptor pair has no room
-    /// for. Both answers come from the declaration table rather than from a
-    /// list maintained here.
+    /// capability: delay lines are irrational, while rational models require
+    /// an implemented explicit state expansion. The declaration table owns
+    /// those answers rather than a separate list maintained here.
     fn ensure_supported_pz_dynamic_state_descriptors(
         circuit: &CircuitData,
     ) -> Result<(), SimulationError> {
@@ -732,7 +733,9 @@ impl Engine {
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&dc_solution);
         }
-        let matrix_size = circuit.matrix_size();
+        let matrix_size = circuit
+            .matrix_size()
+            .saturating_add(Self::bsim3_pz_response_state_count(&circuit));
         self.ensure_result_shape(matrix_size, matrix_size.saturating_mul(8).saturating_add(1))?;
 
         // Reuse the AC linearization path so pole-zero analysis sees the same
@@ -797,16 +800,15 @@ impl Engine {
         config.compute_poles = compute_poles;
         config.compute_zeros = compute_zeros;
 
-        // VBIC can introduce descriptor states that are not represented in
-        // the frozen AC matrix. All other native small-signal devices expose
-        // their complete G/C topology there and are eligible for sparse
-        // algebraic elimination before dense eigenvalue work.
+        // VBIC and AC-only BSIM3 introduce descriptor states outside the
+        // frozen AC matrix. Their expansion precedes eigenvalue extraction.
         let has_external_vbic_descriptor_states = circuit
             .bjts
             .devices
             .iter()
             .any(|bjt| bjt.uses_vbic_dynamic_charges());
         if !has_external_vbic_descriptor_states
+            && Self::bsim3_pz_response_state_count(&circuit) == 0
             && let Some(result) =
                 Self::try_sparse_pz_state_space(&g_descriptor, &c_descriptor, &config, abort)?
         {
@@ -828,6 +830,12 @@ impl Engine {
         let mut g_matrix = Matrix::from_dense(g_descriptor.to_dense_real());
         let mut c_matrix = Matrix::from_dense(c_descriptor.to_dense_imag());
         Self::stamp_vbic_pz_descriptor_states(&circuit, &dc_solution, &mut g_matrix, &mut c_matrix);
+        Self::stamp_bsim3_pz_descriptor_states(
+            &circuit,
+            &dc_solution,
+            &mut g_matrix,
+            &mut c_matrix,
+        )?;
         let analyzer = PoleZeroAnalyzer::new(g_matrix, c_matrix);
 
         let result = analyzer
