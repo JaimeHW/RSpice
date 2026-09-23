@@ -478,6 +478,24 @@ mod fft_pickle_tests {
     }
 
     #[test]
+    fn parameterized_fft_windows_survive_persistence() {
+        for (window, label) in [
+            (FftWindow::Gaussian, "gaussian"),
+            (FftWindow::Kaiser, "kaiser"),
+        ] {
+            let mut original = spectrum();
+            original.window = window;
+            original.window_name = label.to_ascii_uppercase();
+            let state = transient_fft_persistence_state(std::slice::from_ref(&original))
+                .expect("parameterized FFT window serializes");
+            assert_eq!(state.1[0].2.2, label);
+            let rebuilt = rebuild_transient_fft_results(Some(state))
+                .expect("parameterized FFT window reconstructs");
+            assert_eq!(rebuilt, [original]);
+        }
+    }
+
+    #[test]
     fn fft_state_uses_stable_tags_and_preserves_source_order() {
         let expression = spectrum();
         let mut probe = spectrum();
