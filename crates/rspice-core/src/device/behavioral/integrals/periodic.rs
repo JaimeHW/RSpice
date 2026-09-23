@@ -366,6 +366,12 @@ impl BehavioralSources {
         let active = |row: usize| selected.is_none_or(|rows| rows[row]);
         if !point.time.is_finite()
             || point.num_nodes > point.integral_start
+            || self.voltage_sources.iter().any(|source| {
+                point
+                    .num_nodes
+                    .checked_add(source.branch_ordinal)
+                    .is_none_or(|end| end > point.integral_start)
+            })
             || point
                 .integral_start
                 .checked_add(self.integral_count())
