@@ -269,14 +269,18 @@ fn partially_tied_bjt_matches_its_independent_diode_and_charge() {
         SpiceDialect::Ngspice,
         SpiceDialect::Xyce,
     ] {
-        // The standalone diode retains ngspice's older k/q constants, while
-        // the native GP model uses SI constants outside Xyce mode. Match n*VT
-        // so this comparison isolates the terminal and charge topology.
-        let diode_n = if dialect == SpiceDialect::Xyce {
-            1.0
-        } else {
-            (rspice_core::constants::K_BOLTZMANN / rspice_core::constants::Q_ELECTRON)
-                / (1.38064852e-23 / 1.6021766208e-19)
+        // Match each GP dialect's k/q to the standalone diode's pair so the
+        // comparison isolates terminal and charge topology.
+        let diode_n = match dialect {
+            SpiceDialect::Xyce => 1.0,
+            SpiceDialect::Ngspice => {
+                (rspice_core::constants::XYCE_K_BOLTZMANN / rspice_core::constants::XYCE_Q_ELECTRON)
+                    / (1.38064852e-23 / 1.6021766208e-19)
+            }
+            SpiceDialect::BestAvailable => {
+                (rspice_core::constants::K_BOLTZMANN / rspice_core::constants::Q_ELECTRON)
+                    / (1.38064852e-23 / 1.6021766208e-19)
+            }
         };
         let engine = Engine::new(SimulationConfig {
             spice_dialect: dialect,
