@@ -13,14 +13,10 @@
 //! (`engine/config_resolver.rs:242-262`), and the engine reads that field at
 //! the site each entry cites.
 //!
-//! One caveat a reader should have from the table rather than from a surprise:
-//! the four tolerances and the NOX switch are read through the Xyce transient
-//! solver contract, so what they change is the Xyce dialect's weighted update
-//! and residual tests. Under the ngspice and best-available dialects the same
-//! getters answer with the dialect's own tolerances unless the deck states
-//! these, which is exactly what stating them does — the field is read in every
-//! dialect; which *test* consumes it is the dialect's choice. The step budget
-//! and the device-convergence policy are read the same way.
+//! The four tolerances, MAXSTEP, and NOX are consumed by the Xyce policy.
+//! RSpice/ngspice use the global physical tolerances and ITL4 instead.
+//! ENFORCEDEVICECONV applies under every policy. The Solver page selects
+//! compatibility explicitly, or inherits a source-authored RSPICE_DIALECT.
 
 use super::{
     NumericOverrideOption, OptionPackage, OptionReach, OptionSpec, OverrideSection,
@@ -33,7 +29,7 @@ pub(super) const NONLIN_TRAN: [OptionSpec; 7] = [
         key: "RELTOL",
         package: OptionPackage::NonlinTran,
         section: OverrideSection::TransientNewton,
-        label: "Step update bound · NONLIN-TRAN RELTOL",
+        label: "Step update bound · Xyce NONLIN-TRAN RELTOL",
         value_kind: OverrideValueKind::PositiveReal,
         value_hint: "positive real",
         config_field: "transient_nonlinear_reltol",
@@ -45,7 +41,7 @@ pub(super) const NONLIN_TRAN: [OptionSpec; 7] = [
         key: "ABSTOL",
         package: OptionPackage::NonlinTran,
         section: OverrideSection::TransientNewton,
-        label: "Step update floor · NONLIN-TRAN ABSTOL",
+        label: "Step update floor · Xyce NONLIN-TRAN ABSTOL",
         value_kind: OverrideValueKind::PositiveReal,
         value_hint: "positive real",
         config_field: "transient_nonlinear_abstol",
@@ -60,7 +56,7 @@ pub(super) const NONLIN_TRAN: [OptionSpec; 7] = [
         key: "DELTAXTOL",
         package: OptionPackage::NonlinTran,
         section: OverrideSection::TransientNewton,
-        label: "Accepted correction norm · NONLIN-TRAN DELTAXTOL",
+        label: "Accepted correction norm · Xyce NONLIN-TRAN DELTAXTOL",
         value_kind: OverrideValueKind::PositiveReal,
         value_hint: "positive real",
         config_field: "transient_nonlinear_deltaxtol",
@@ -72,7 +68,7 @@ pub(super) const NONLIN_TRAN: [OptionSpec; 7] = [
         key: "RHSTOL",
         package: OptionPackage::NonlinTran,
         section: OverrideSection::TransientNewton,
-        label: "Accepted residual norm · NONLIN-TRAN RHSTOL",
+        label: "Accepted residual norm · Xyce NONLIN-TRAN RHSTOL",
         value_kind: OverrideValueKind::PositiveReal,
         value_hint: "positive real",
         config_field: "transient_nonlinear_rhstol",
@@ -87,7 +83,7 @@ pub(super) const NONLIN_TRAN: [OptionSpec; 7] = [
         key: "MAXSTEP",
         package: OptionPackage::NonlinTran,
         section: OverrideSection::TransientNewton,
-        label: "Newton budget per step · NONLIN-TRAN MAXSTEP",
+        label: "Newton budget per step · Xyce NONLIN-TRAN MAXSTEP",
         value_kind: OverrideValueKind::IterationCount,
         value_hint: "whole iteration count",
         config_field: "transient_nonlinear_max_iterations",
@@ -113,7 +109,7 @@ pub(super) const NONLIN_TRAN: [OptionSpec; 7] = [
         key: "NOX",
         package: OptionPackage::NonlinTran,
         section: OverrideSection::TransientNewton,
-        label: "Undamped transient Newton · NONLIN-TRAN NOX",
+        label: "Use NOX transient Newton · Xyce NONLIN-TRAN NOX",
         value_kind: OverrideValueKind::Flag,
         value_hint: "on or off",
         config_field: "transient_nonlinear_nox",

@@ -5,8 +5,8 @@
 //! transaction; nothing else writes them.
 
 use super::{
-    DampingStrategy, IntegrationMethod, MatrixSolver, SimulationOptions, format_si_value,
-    parse_si_value,
+    DampingStrategy, IntegrationMethod, MatrixSolver, SimulationCompatibility, SimulationOptions,
+    format_si_value, parse_si_value,
 };
 
 /// UI state for options dialog (string buffers for text editing).
@@ -18,6 +18,7 @@ use super::{
 /// continuation all behaved that way before they were given buffers.
 #[derive(Debug, Clone)]
 pub struct OptionsDialogState {
+    pub compatibility: SimulationCompatibility,
     pub reltol: String,
     pub residual_reltol: String,
     pub abstol: String,
@@ -59,6 +60,7 @@ impl OptionsDialogState {
     /// Create dialog state from options.
     pub fn from_options(opts: &SimulationOptions) -> Self {
         Self {
+            compatibility: opts.compatibility,
             reltol: format_si_value(opts.reltol),
             residual_reltol: format_si_value(opts.residual_reltol),
             abstol: format_si_value(opts.abstol),
@@ -155,6 +157,7 @@ impl OptionsDialogState {
         }
 
         Ok(SimulationOptions {
+            compatibility: self.compatibility,
             reltol,
             residual_reltol,
             abstol,

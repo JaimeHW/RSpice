@@ -1,6 +1,6 @@
 //! Solver & convergence.
 //!
-//! Seven cards in the order the solve happens: what counts as converged, how
+//! Compatibility and the solve policy: what counts as converged, how
 //! the solve recovers when it is not, how many iterations each stage gets,
 //! how time advances, how the matrix is factored, what temperature the models
 //! are read at, and what the topology refuses outright — closing on the ledger
@@ -41,7 +41,8 @@ use egui::Ui;
 use crate::product::AnalysisInstanceId;
 use crate::simulation::accuracy::AnalysisAccuracy;
 use crate::simulation::dialog::{
-    DampingStrategy, IntegrationMethod, MatrixSolver, OptionsDialogState, SimulationOptions,
+    DampingStrategy, IntegrationMethod, MatrixSolver, OptionsDialogState, SimulationCompatibility,
+    SimulationOptions,
 };
 use crate::simulation::plan::{AnalysisNumericOverride, NumericOverrideOption};
 use crate::ui::theme::{self, FontWeight};
@@ -77,6 +78,7 @@ pub(super) fn active_preset(app: &RSpiceApp) -> Option<&'static str> {
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     policy_strip(ui, app);
+    compatibility_policy(ui, app);
     card_row(ui, app, convergence_criteria, continuation_ladder);
     card_row(ui, app, iteration_budgets, time_integration);
     card_row(ui, app, matrix_policy, |ui, app| {
@@ -89,6 +91,51 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 // ---------------------------------------------------------------- preset strip
+
+fn compatibility_policy(ui: &mut Ui, app: &mut RSpiceApp) {
+    card(ui, "Simulation compatibility", None, |ui| {
+        card_body(ui, |ui| {
+            let choices: Vec<String> = SimulationCompatibility::ALL
+                .iter()
+                .map(|policy| policy.label().to_owned())
+                .collect();
+            let current = app
+                .state
+                .sim_setup
+                .options_draft
+                .compatibility
+                .label()
+                .to_owned();
+            let mut picked = None;
+            field_pair(
+                ui,
+                (
+                    "Numerical and device-model policy",
+                    &mut |ui: &mut Ui, width: f32| {
+                        picked = select(
+                            ui,
+                            "simulation.solver.compatibility",
+                            "Simulation compatibility",
+                            &current,
+                            &choices,
+                            width,
+                        );
+                    },
+                ),
+                None,
+            );
+            if let Some(index) = picked {
+                app.state.sim_setup.options_draft.compatibility =
+                    SimulationCompatibility::ALL[index];
+                commit_draft(app);
+            }
+        });
+        card_note(
+            ui,
+            "Xyce-specific Newton controls require Xyce compatibility. This policy also selects available device-model variants; source syntax is unchanged.",
+        );
+    });
+}
 
 /// The chooser, what the active policy means, and the apply/revert pair.
 ///
@@ -171,7 +218,8 @@ fn policy_strip(ui: &mut Ui, app: &mut RSpiceApp) {
             .iter()
             .find(|(name, _)| *name == label)
     {
-        let options = build();
+        let mut options = build();
+        options.compatibility = app.state.sim_setup.options.compatibility;
         app.state.sim_setup.options_draft = OptionsDialogState::from_options(&options);
         apply_options(app, &options);
     }

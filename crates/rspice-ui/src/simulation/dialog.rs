@@ -112,5 +112,5 @@ pub use soa::SoaDialogState;
 // Re-exports - Framework
 pub use options::{
     DampingStrategy, HbTimeDomainMode, IntegrationMethod, MatrixSolver, OptionsDialogState,
-    SimulationOptions, format_si_value, parse_si_value,
+    SimulationCompatibility, SimulationOptions, format_si_value, parse_si_value,
 };

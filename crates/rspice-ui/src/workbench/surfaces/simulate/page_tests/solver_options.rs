@@ -27,6 +27,12 @@ fn the_solver_page_publishes_no_override_authoring_control() {
         names.iter().any(|name| name == "Balanced"),
         "the route has to have been drawn for this to mean anything: {names:?}"
     );
+    assert!(
+        names
+            .iter()
+            .any(|name| name.contains("Simulation compatibility")),
+        "compatibility selector must be accessible: {names:?}"
+    );
     for gone in [
         "Add override\u{2026}",
         "Override value",
@@ -158,4 +164,33 @@ fn solver_options_transaction_rejects_invalid_policy_before_mutation() {
         serde_json::to_value(&app.state.sim_setup.options).unwrap(),
         before
     );
+}
+
+#[test]
+fn simulation_compatibility_commits_through_the_solver_transaction() {
+    use crate::simulation::dialog::SimulationCompatibility;
+    let mut app = RSpiceApp::test_instance();
+    app.state.sim_setup.options_draft.compatibility = SimulationCompatibility::Xyce;
+    page_solver::commit_draft(&mut app);
+    assert!(!app.state.workbench.analysis_lifecycle_status.is_refusal());
+    assert_eq!(
+        app.state.sim_setup.options.compatibility,
+        SimulationCompatibility::Xyce
+    );
+    let deck = crate::simulation::SimulationController::apply_simulation_options_to_netlist(
+        "solver choice\nV1 in 0 1\nR1 in 0 1k\n.end\n",
+        &app.state.sim_setup.options,
+    );
+    let parsed = rspice_core::Netlist::parse(&deck).unwrap();
+    assert_eq!(
+        crate::services::simulation_runner::build_engine_config(&parsed, None).spice_dialect,
+        rspice_core::SpiceDialect::Xyce
+    );
+    app.state.sim_setup.options_draft.itl1 = "81".into();
+    page_solver::commit_draft(&mut app);
+    assert_eq!(
+        app.state.sim_setup.options.compatibility,
+        SimulationCompatibility::Xyce
+    );
+    assert_eq!(app.state.sim_setup.options.itl1, 81);
 }

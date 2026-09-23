@@ -2,7 +2,9 @@
 //!
 //! The tolerances, limits, and integration settings a run is executed under.
 
-use super::{DampingStrategy, IntegrationMethod, MatrixSolver, ValidationError};
+use super::{
+    DampingStrategy, IntegrationMethod, MatrixSolver, SimulationCompatibility, ValidationError,
+};
 
 /// A named numerical policy: its label and how to build it.
 pub type NamedPreset = (&'static str, fn() -> SimulationOptions);
@@ -16,6 +18,9 @@ const fn default_trtol() -> f64 {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(from = "PersistedSimulationOptions")]
 pub struct SimulationOptions {
+    /// Numerical and available device-model variants, not the source syntax.
+    #[serde(default, skip_serializing_if = "SimulationCompatibility::is_inherited")]
+    pub compatibility: SimulationCompatibility,
     pub reltol: f64,
     pub residual_reltol: f64,
     pub vntol: f64,
@@ -81,6 +86,8 @@ pub struct SimulationOptions {
 #[serde(deny_unknown_fields)]
 struct PersistedSimulationOptions {
     #[serde(default)]
+    compatibility: SimulationCompatibility,
+    #[serde(default)]
     #[allow(dead_code)]
     itl2: serde::de::IgnoredAny,
     #[serde(default)]
@@ -130,6 +137,7 @@ struct PersistedSimulationOptions {
 impl From<PersistedSimulationOptions> for SimulationOptions {
     fn from(fields: PersistedSimulationOptions) -> Self {
         Self {
+            compatibility: fields.compatibility,
             reltol: fields.reltol,
             residual_reltol: fields.residual_reltol,
             vntol: fields.vntol,
@@ -196,6 +204,56 @@ mod tests {
             Some(&netlist.options),
             &rspice_core::SimulationConfigOverrides::default(),
         )
+    }
+
+    #[test]
+    fn simulation_compatibility_survives_draft_persistence_and_execution_routes() {
+        use crate::simulation::dialog::OptionsDialogState;
+        for compatibility in SimulationCompatibility::ALL {
+            let options = SimulationOptions {
+                compatibility,
+                ..Default::default()
+            };
+            let draft = OptionsDialogState::from_options(&options);
+            let restored: SimulationOptions =
+                serde_json::from_str(&serde_json::to_string(&draft.to_options().unwrap()).unwrap())
+                    .unwrap();
+            assert_eq!(restored.compatibility, compatibility);
+            // Inherited source policy must survive; each explicit choice must
+            // override it through both the prepared deck and direct API path.
+            let source =
+                "compatibility\nV1 in 0 1\nR1 in 0 1k\n.options RSPICE_DIALECT=XYCE\n.end\n";
+            let authored = rspice_core::Netlist::parse(source).unwrap();
+            let deck = crate::simulation::SimulationController::apply_simulation_options_to_netlist(
+                source, &restored,
+            );
+            let parsed = rspice_core::Netlist::parse(&deck).unwrap();
+            let engine = crate::services::simulation_runner::build_engine_config(&parsed, None);
+            let expected = compatibility
+                .core_override()
+                .unwrap_or(rspice_core::SpiceDialect::Xyce);
+            assert_eq!(engine.spice_dialect, expected);
+            assert_eq!(
+                restored
+                    .resolve_simulation_config(Some(&authored.options))
+                    .spice_dialect,
+                expected
+            );
+            assert_eq!(
+                restored.preset_name(),
+                SimulationOptions::default().preset_name()
+            );
+        }
+        let mut legacy = serde_json::to_value(SimulationOptions::default()).unwrap();
+        assert!(
+            legacy.get("compatibility").is_none(),
+            "inheriting must preserve the legacy serialized options"
+        );
+        let restored: SimulationOptions = serde_json::from_value(legacy.clone()).unwrap();
+        assert_eq!(restored.compatibility, SimulationCompatibility::Inherit);
+        assert!(!restored.to_spice_options().contains("RSPICE_DIALECT"));
+        legacy["compatibility"] = serde_json::json!("unknown-policy");
+        assert!(serde_json::from_value::<SimulationOptions>(legacy).is_err());
     }
 
     #[test]
@@ -994,6 +1052,7 @@ mod tests {
 impl Default for SimulationOptions {
     fn default() -> Self {
         Self {
+            compatibility: SimulationCompatibility::Inherit,
             reltol: 1e-3,
             residual_reltol: 1e-3,
             vntol: 1e-6,
@@ -1093,14 +1152,16 @@ impl SimulationOptions {
     /// Which named preset these options are exactly, if any.
     ///
     /// Compared by serialized value rather than by a remembered "last preset
-    /// pressed": editing any field leaves the preset, and reporting otherwise
-    /// would misstate what the next run will use. Returns `None` for options
-    /// that match no preset, which is a real state rather than an error.
+    /// pressed": editing a numerical field leaves the preset. Compatibility
+    /// is selected independently and is preserved when applying a preset.
+    /// Returns `None` for options that match no preset.
     #[must_use]
     pub fn preset_name(&self) -> Option<&'static str> {
         let current = serde_json::to_vec(self).ok()?;
         Self::PRESETS.iter().find_map(|(label, build)| {
-            serde_json::to_vec(&build())
+            let mut preset = build();
+            preset.compatibility = self.compatibility;
+            serde_json::to_vec(&preset)
                 .ok()
                 .filter(|preset| *preset == current)
                 .map(|_| *label)
@@ -1172,7 +1233,7 @@ impl SimulationOptions {
             residual_reltol: Some(self.residual_reltol),
             gmin_initial: Some(self.gmin),
             device_voltage_limiting: None,
-            spice_dialect: None,
+            spice_dialect: self.compatibility.core_override(),
             jfet_level2_model: None,
             ramptime: None,
             digital_delay_type: None,
@@ -1293,6 +1354,9 @@ impl SimulationOptions {
         let mut lines = vec![".OPTIONS".to_string()];
         let default = Self::default();
 
+        if let Some(policy) = self.compatibility.option_value() {
+            lines.push(format!("+ RSPICE_DIALECT={policy}"));
+        }
         if self.reltol != default.reltol {
             lines.push(format!("+ RELTOL={:e}", self.reltol));
         }
