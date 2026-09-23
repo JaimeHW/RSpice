@@ -249,6 +249,7 @@ fn format_time(t: f64) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::{FourierConfig, FourierDialogState};
 

@@ -1312,6 +1312,7 @@ fn drc_violation_type_tag(violation_type: DrcViolationType) -> u8 {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use crate::services::drc::{DrcLocation, DrcViolation};

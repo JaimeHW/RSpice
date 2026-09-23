@@ -783,6 +783,7 @@ fn last_waveform_by_name<'a>(
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod transfer_function_tests {
     use super::*;
     use crate::simulation::multi_run::{TfAccuracy, TfNormalization};

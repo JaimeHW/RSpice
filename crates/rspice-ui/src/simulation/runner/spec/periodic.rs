@@ -1490,6 +1490,7 @@ fn fourier_output_unit(output_expression: &str) -> &'static str {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 

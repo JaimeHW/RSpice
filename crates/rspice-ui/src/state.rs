@@ -246,6 +246,7 @@ pub use workspace::{
 };
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod symbol_document_tests {
     use super::{
         PinFindingKind, PinSummary, Point, PortDirection, PortSpec, SymbolDocument, View, ViewType,
