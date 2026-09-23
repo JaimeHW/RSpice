@@ -6,6 +6,10 @@ use crate::simulation::multi_run::AnalysisSpec;
 #[derive(Debug, Clone)]
 pub enum StudyAnalysis {
     Basic(AnalysisConfig),
+    #[allow(
+        dead_code,
+        reason = "native study selection is exercised by focused tests"
+    )]
     Native(AnalysisSpec),
     Pss(Box<super::StudyPssConfig>),
     Qpss(Box<super::StudyQpssConfig>),

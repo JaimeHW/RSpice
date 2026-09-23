@@ -47,6 +47,7 @@ pub(crate) fn is_branch_current_output(output_var: &str) -> bool {
     parse_branch_current_name(output_var).is_some()
 }
 
+#[allow(dead_code, reason = "retained sensitivity output selector")]
 pub(crate) fn collect_sensitivity_parameters(
     netlist: &rspice_core::Netlist,
 ) -> Vec<(String, Value)> {
@@ -62,6 +63,7 @@ pub(crate) fn collect_sensitivity_parameters(
     params
 }
 
+#[allow(dead_code, reason = "retained sensitivity frequency selector")]
 pub(crate) fn resolve_sensitivity_ac_frequency(
     ac_mode: bool,
     frequency: Option<Value>,
@@ -199,6 +201,7 @@ pub(crate) fn parse_output_voltage_spec(
 /// `v = 0` — so the spec is refused with the engine's own sentence instead of
 /// being answered with that zero. `role` names which half of a differential
 /// spec failed, since both halves come through here.
+#[allow(dead_code, reason = "retained DC output evaluator")]
 fn dc_node_voltage(
     dc_result: &rspice_core::SimulationResult,
     node: usize,
@@ -229,6 +232,7 @@ fn dc_node_voltage(
     })
 }
 
+#[allow(dead_code, reason = "retained DC output evaluator")]
 pub(crate) fn dc_output_value(
     dc_result: &rspice_core::SimulationResult,
     output_spec: &OutputSpec,
@@ -257,6 +261,7 @@ pub(crate) fn dc_output_value(
     }
 }
 
+#[allow(dead_code, reason = "retained AC output evaluator")]
 pub(crate) fn ac_output_value(
     ac_result: &AcResult,
     output_spec: &OutputSpec,

@@ -493,6 +493,7 @@ impl AnalysisInstance {
     /// for the role as the plan's own order resolves it; everything that binds
     /// or validates an edge uses that one.
     #[must_use]
+    #[allow(dead_code, reason = "retained plan inspection method used by tests")]
     pub fn prerequisite_roles(&self) -> &'static [AnalysisKind] {
         self.draft.prerequisite_roles()
     }

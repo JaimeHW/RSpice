@@ -22,6 +22,7 @@ pub(crate) struct MonteCarloContinuation<'a> {
     pub publish: &'a (dyn Fn(&StudyMonteCarloCheckpoint) -> Result<(), SimulationError> + Sync),
 }
 
+#[allow(dead_code, reason = "retained Monte Carlo study adapter used by tests")]
 pub(crate) fn run_monte_carlo(
     base: &StudyRunConfig,
     variation_source: McVariationSource,
@@ -262,9 +263,9 @@ where
                 || last_published.load(Ordering::Relaxed) == initial)
             && let Err(error) =
                 (continuation.publish)(continuation.checkpoint.as_ref().expect("captured"))
-            {
-                fatal.lock().unwrap().get_or_insert(error);
-            }
+        {
+            fatal.lock().unwrap().get_or_insert(error);
+        }
         result
     } else {
         engine.run_monte_carlo_measurements_with_abort(&circuit, &study, &signal, evaluate)

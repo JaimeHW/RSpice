@@ -52,10 +52,18 @@ impl MonteCarloCheckpointInput {
         checkpoint.validate_for_resume()?;
         Ok(checkpoint)
     }
+    #[allow(
+        dead_code,
+        reason = "browser worker checkpoint transport uses this method"
+    )]
     pub(super) fn take_bytes(&mut self) -> Result<Vec<u8>, SimulationError> {
         self.decode()?;
         Ok(std::mem::take(&mut self.bytes))
     }
+    #[allow(
+        dead_code,
+        reason = "browser worker checkpoint transport uses this method"
+    )]
     pub(super) fn restore_bytes(&mut self, bytes: Vec<u8>) -> Result<(), SimulationError> {
         if !self.bytes.is_empty() {
             return Err(SimulationError::InvalidConfig(
@@ -89,12 +97,12 @@ impl MonteCarloCheckpointRequest {
     pub(crate) fn validate(&self) -> Result<(), SimulationError> {
         let limits = ResourceLimits::default();
         if let Some(range) = &self.trial_range
-            && (range.is_empty() || range.end - range.start > limits.max_batch_runs) {
-                return Err(SimulationError::InvalidConfig(
-                    "Monte Carlo checkpoint range must be nonempty and within the batch limit"
-                        .into(),
-                ));
-            }
+            && (range.is_empty() || range.end - range.start > limits.max_batch_runs)
+        {
+            return Err(SimulationError::InvalidConfig(
+                "Monte Carlo checkpoint range must be nonempty and within the batch limit".into(),
+            ));
+        }
         if let Some(input) = &self.resume {
             input.decode()?;
         }
@@ -114,6 +122,10 @@ pub(super) fn replace_checkpoint(queue: &CheckpointQueue, bytes: Arc<[u8]>) {
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(bytes);
 }
 
+#[allow(
+    dead_code,
+    reason = "browser worker checkpoint transport uses this validator"
+)]
 pub(super) fn validate_checkpoint_bytes_size(length: usize) -> Result<(), String> {
     let limit = ResourceLimits::default().max_external_data_bytes;
     if length == 0 || length > limit {

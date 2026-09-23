@@ -149,6 +149,10 @@ impl TransientEventHistory {
 
 /// Container for all simulation results
 #[derive(Debug, Clone)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "result variants preserve the existing typed payload shape"
+)]
 pub enum SimulationResult {
     /// DC operating point. Boxed: the operating-point result is three
     /// times the next largest variant, and every result value paid for it.

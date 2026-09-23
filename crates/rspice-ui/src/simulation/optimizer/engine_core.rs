@@ -78,6 +78,10 @@ impl OptimizerEngine {
     ///
     /// Uses central differences for accuracy: ∂f/∂x ≈ (f(x+h) - f(x-h)) / 2h
     /// This is the standard approach used in Spectre's optimizer
+    #[allow(
+        dead_code,
+        reason = "retained optimizer entry point used by focused tests"
+    )]
     pub fn compute_gradient<F, S>(&mut self, cost_fn: &mut F) -> Vec<f64>
     where
         F: FnMut(&HashMap<String, f64>) -> S,
