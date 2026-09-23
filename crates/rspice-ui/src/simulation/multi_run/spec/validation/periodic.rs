@@ -217,12 +217,15 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             adaptive_mode,
             extraction_path: _,
         } => {
+            let carriers = std::iter::once(*fundamental_freq)
+                .chain(additional_carrier_tones.iter().copied())
+                .collect::<Vec<_>>();
             match initial_periodic_solve {
                 EnvelopeInitialPeriodicSolve::HarmonicBalance => {
-                    initialization.hb_config(*fundamental_freq, *num_harmonics)?;
+                    initialization.hb_config(&carriers, *num_harmonics)?;
                 }
                 EnvelopeInitialPeriodicSolve::PeriodicSteadyState => {
-                    initialization.pss_config(*fundamental_freq, *num_harmonics)?;
+                    initialization.pss_config(&carriers, *num_harmonics)?;
                 }
                 EnvelopeInitialPeriodicSolve::TransientSpectralEstimate => {}
             }

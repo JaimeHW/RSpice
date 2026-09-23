@@ -185,6 +185,10 @@ pub(super) fn fields(
         locale,
     );
     envelope_harmonic_order_row(ui, &mut setup.harmonic_order);
+    super::field_note(
+        ui,
+        "Periodic initialization uses the carriers' common period. Harmonic order sets the upper frequency to the first carrier × order.",
+    );
     envelope_modulation_source_row(
         ui,
         &mut setup.modulation_sources,

@@ -95,11 +95,11 @@ impl EnvelopeConfig {
         match self.initial_periodic_solve {
             EnvelopeInitialPeriodicSolve::HarmonicBalance => {
                 self.initialization
-                    .hb_config(self.carrier_tones[0], self.harmonic_order as usize)?;
+                    .hb_config(&self.carrier_tones, self.harmonic_order as usize)?;
             }
             EnvelopeInitialPeriodicSolve::PeriodicSteadyState => {
                 self.initialization
-                    .pss_config(self.carrier_tones[0], self.harmonic_order as usize)?;
+                    .pss_config(&self.carrier_tones, self.harmonic_order as usize)?;
             }
             EnvelopeInitialPeriodicSolve::TransientSpectralEstimate => {}
         }

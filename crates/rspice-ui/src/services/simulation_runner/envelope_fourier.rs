@@ -47,12 +47,16 @@ impl EnvelopeRunConfig {
     fn validate(&self) -> Result<(), String> {
         match self.initial_periodic_solve {
             EnvelopeInitialPeriodicSolve::HarmonicBalance => {
-                self.initialization
-                    .hb_config(self.fundamental_freq, self.num_harmonics)?;
+                self.initialization.hb_config(
+                    &self.carrier_tones().collect::<Vec<_>>(),
+                    self.num_harmonics,
+                )?;
             }
             EnvelopeInitialPeriodicSolve::PeriodicSteadyState => {
-                self.initialization
-                    .pss_config(self.fundamental_freq, self.num_harmonics)?;
+                self.initialization.pss_config(
+                    &self.carrier_tones().collect::<Vec<_>>(),
+                    self.num_harmonics,
+                )?;
             }
             EnvelopeInitialPeriodicSolve::TransientSpectralEstimate => {}
         }
@@ -393,11 +397,12 @@ fn run_pss_initialized_envelope_transient(
     step_time: Value,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<TransientData> {
-    validate_commensurate_carriers(config, "PSS")?;
-
     let pss_config = config
         .initialization
-        .pss_config(config.fundamental_freq, config.num_harmonics)
+        .pss_config(
+            &config.carrier_tones().collect::<Vec<_>>(),
+            config.num_harmonics,
+        )
         .map_err(ServiceRunError::Failure)?;
 
     let engine = Engine::new(build_engine_config(netlist, None));
@@ -439,10 +444,12 @@ fn run_hb_initialized_envelope_transient(
     step_time: Value,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<TransientData> {
-    validate_commensurate_carriers(config, "HB")?;
     let hb_config = config
         .initialization
-        .hb_config(config.fundamental_freq, config.num_harmonics)
+        .hb_config(
+            &config.carrier_tones().collect::<Vec<_>>(),
+            config.num_harmonics,
+        )
         .map_err(ServiceRunError::Failure)?;
     let engine = Engine::new(build_engine_config(netlist, None));
     let (periodic, state) = engine
@@ -483,27 +490,6 @@ fn run_hb_initialized_envelope_transient(
     });
     data.convergence = Some(std::sync::Arc::new(quality));
     Ok(data)
-}
-
-fn validate_commensurate_carriers(
-    config: &EnvelopeRunConfig,
-    initializer: &str,
-) -> ServiceRunResult<()> {
-    for tone in &config.additional_carrier_tones {
-        let ratio = *tone / config.fundamental_freq;
-        let nearest_harmonic = ratio.round();
-        let tolerance = 128.0 * Value::EPSILON * ratio.abs().max(1.0);
-        if nearest_harmonic < 1.0
-            || (ratio - nearest_harmonic).abs() > tolerance
-            || nearest_harmonic > config.num_harmonics as Value
-        {
-            return Err(ServiceRunError::Failure(format!(
-                "Envelope {initializer} initialization requires every additional carrier to be an integer harmonic within order {}; tone {tone:.12e}Hz is not compatible with fundamental {:.12e}Hz",
-                config.num_harmonics, config.fundamental_freq
-            )));
-        }
-    }
-    Ok(())
 }
 
 #[derive(Clone, Copy)]
