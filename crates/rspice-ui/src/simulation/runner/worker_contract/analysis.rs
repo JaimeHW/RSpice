@@ -1486,6 +1486,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 verbose: *verbose,
             }),
             AnalysisSpec::Envelope {
+                multirate,
                 initialization,
                 fundamental_freq,
                 additional_carrier_tones,
@@ -1497,6 +1498,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 adaptive_mode,
                 extraction_path,
             } => Ok(Self::Envelope {
+                multirate: multirate.clone(),
                 initialization: initialization.clone(),
                 fundamental_freq: *fundamental_freq,
                 additional_carrier_tones: additional_carrier_tones.clone(),
@@ -1899,6 +1901,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 verbose,
             },
             WorkerAnalysisSpec::Envelope {
+                multirate,
                 initialization,
                 fundamental_freq,
                 additional_carrier_tones,
@@ -1910,6 +1913,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 adaptive_mode,
                 extraction_path,
             } => Self::Envelope {
+                multirate,
                 initialization,
                 fundamental_freq,
                 additional_carrier_tones,

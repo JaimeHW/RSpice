@@ -203,6 +203,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             Ok(())
         }
         AnalysisSpec::Envelope {
+            multirate,
             initialization,
             fundamental_freq,
             additional_carrier_tones,
@@ -217,6 +218,17 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             let carriers = std::iter::once(*fundamental_freq)
                 .chain(additional_carrier_tones.iter().copied())
                 .collect::<Vec<_>>();
+            if let Some(settings) = multirate {
+                return settings
+                    .core_config(
+                        &carriers,
+                        *num_harmonics,
+                        *stop_time,
+                        envelope_step.unwrap_or(*stop_time / 1200.0),
+                        modulation_sources,
+                    )
+                    .map(|_| ());
+            }
             match initial_periodic_solve {
                 EnvelopeInitialPeriodicSolve::HarmonicBalance => {
                     initialization.hb_config(&carriers, *num_harmonics)?;

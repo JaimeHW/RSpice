@@ -112,6 +112,7 @@ fn hbnoise_reference_changes_identity_and_absence_preserves_legacy_bytes() {
 fn envelope_initializer_authenticates_every_control_and_preserves_legacy_identity() {
     use crate::services::simulation_runner::EnvelopeInitializationConfig;
     let spec = AnalysisSpec::Envelope {
+        multirate: None,
         initialization: Default::default(),
         fundamental_freq: 1e6,
         additional_carrier_tones: vec![],
@@ -1029,6 +1030,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.bool(*do_noise);
         }
         AnalysisSpec::Envelope {
+            multirate,
             initialization,
             fundamental_freq,
             additional_carrier_tones,
@@ -1083,6 +1085,12 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
 
             encode_envelope_adaptive_mode(writer, *adaptive_mode);
             encode_envelope_extraction_path(writer, *extraction_path);
+            if let Some(settings) = multirate {
+                writer.string("envelope-multirate-v1");
+                writer.string(
+                    &serde_json::to_string(settings).expect("serializable envelope controls"),
+                );
+            }
         }
         AnalysisSpec::Fourier {
             fundamental_freq,

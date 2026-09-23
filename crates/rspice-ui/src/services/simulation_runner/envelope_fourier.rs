@@ -19,6 +19,8 @@ use rspice_core::abort_signal::AbortSignal;
 use rspice_core::abort_signal::NoAbort;
 mod current;
 mod initialization;
+mod multirate;
+pub use multirate::EnvelopeMultirateConfig;
 mod reporting;
 mod trajectory;
 pub use initialization::{EnvelopeInitializationConfig, EnvelopeShootingIntegration};
@@ -35,6 +37,7 @@ const MAX_ENVELOPE_PROJECTION_WORK: usize = 100_000_000;
 /// Configuration for envelope analysis.
 #[derive(Debug, Clone)]
 pub struct EnvelopeRunConfig {
+    pub multirate: Option<EnvelopeMultirateConfig>,
     pub initialization: EnvelopeInitializationConfig,
     pub fundamental_freq: Value,
     pub additional_carrier_tones: Vec<Value>,
@@ -49,6 +52,17 @@ pub struct EnvelopeRunConfig {
 
 impl EnvelopeRunConfig {
     fn validate(&self) -> Result<(), String> {
+        if let Some(settings) = &self.multirate {
+            return settings
+                .core_config(
+                    &self.carrier_tones().collect::<Vec<_>>(),
+                    self.num_harmonics,
+                    self.stop_time,
+                    self.envelope_step.unwrap_or(self.stop_time / 1200.0),
+                    &self.modulation_sources,
+                )
+                .map(|_| ());
+        }
         match self.initial_periodic_solve {
             EnvelopeInitialPeriodicSolve::HarmonicBalance => {
                 self.initialization.hb_config(
@@ -124,12 +138,14 @@ impl EnvelopeRunConfig {
 pub struct EnvelopeWaveform {
     pub name: String,
     pub unit: &'static str,
+    pub is_complex: bool,
     pub values: Vec<Complex64>,
 }
 
 /// Envelope analysis output.
 #[derive(Debug, Clone)]
 pub struct EnvelopeData {
+    pub measurements: Vec<rspice_core::MeasureResult>,
     pub time: Vec<Value>,
     /// Complex carrier envelopes using
     /// `signal(t) = Re{envelope(t) * exp(j*omega*t)}`.
@@ -152,6 +168,9 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
     validation.map_err(ServiceRunError::Failure)?;
 
     let parsed = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    if let Some(settings) = &config.multirate {
+        return multirate::run(&parsed, config, settings, abort);
+    }
     let samples_per_cycle = (config.num_harmonics.max(1) as f64 * 16.0).max(32.0);
     let highest_carrier = config.carrier_tones().fold(0.0, Value::max);
     let carrier_step = 1.0 / (highest_carrier * samples_per_cycle);
@@ -302,6 +321,7 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
                 format!("ENV({name}@{carrier:.12e}Hz)")
             };
             waveforms.push(EnvelopeWaveform {
+                is_complex: true,
                 name: label,
                 unit,
                 values: env,
@@ -316,6 +336,7 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
 
     ensure_not_aborted(abort)?;
     Ok(EnvelopeData {
+        measurements: Vec::new(),
         time: output_time,
         waveforms,
         convergence: transient.convergence,
@@ -1675,6 +1696,7 @@ mod tests {
     #[test]
     fn envelope_service_preserves_selected_voltage_outputs() {
         let config = EnvelopeRunConfig {
+            multirate: None,
             initialization: Default::default(),
             fundamental_freq: 1e6,
             additional_carrier_tones: Vec::new(),
@@ -1706,7 +1728,7 @@ mod tests {
             assert_eq!(selected.time, all.time);
             assert!(!selected.time.is_empty());
             assert_eq!(selected.waveforms.len(), 1);
-            let EnvelopeWaveform { name, values, unit } = &selected.waveforms[0];
+            let EnvelopeWaveform { name, values, unit, .. } = &selected.waveforms[0];
             assert_eq!(*unit, "V");
             assert!(name.eq_ignore_ascii_case(&format!("ENV(V({selection}))")));
             let reference = &all
@@ -1752,6 +1774,7 @@ mod tests {
             EnvelopeInitialPeriodicSolve::HarmonicBalance,
         ] {
             let config = EnvelopeRunConfig {
+                multirate: None,
                 initialization: Default::default(),
                 fundamental_freq: 1e6,
                 additional_carrier_tones: Vec::new(),

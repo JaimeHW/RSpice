@@ -2375,6 +2375,7 @@ mod tests {
     #[test]
     fn envelope_owned_controls_are_bound_into_the_config_digest() {
         let base = AnalysisSpec::Envelope {
+            multirate: None,
             initialization: Default::default(),
             fundamental_freq: 1.0e6,
             additional_carrier_tones: vec![2.0e6],

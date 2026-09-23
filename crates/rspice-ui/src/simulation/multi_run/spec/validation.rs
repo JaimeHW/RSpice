@@ -325,6 +325,7 @@ mod tests {
         assert_eq!(
             spec,
             AnalysisSpec::Envelope {
+                multirate: None,
                 initialization: Default::default(),
                 fundamental_freq: 1.0e6,
                 additional_carrier_tones: Vec::new(),
@@ -343,6 +344,7 @@ mod tests {
     #[test]
     fn envelope_validation_rejects_duplicate_tones_and_invalid_source_names() {
         let spec = |additional_carrier_tones, modulation_sources| AnalysisSpec::Envelope {
+            multirate: None,
             initialization: Default::default(),
             fundamental_freq: 1.0e6,
             additional_carrier_tones,

@@ -133,6 +133,7 @@ pub(super) fn run_periodic_spec(
             run_harmonic_balance(netlist, &config, true, source_path, dependencies, abort)
         }
         AnalysisSpec::Envelope {
+            multirate,
             initialization,
             fundamental_freq,
             additional_carrier_tones,
@@ -146,6 +147,7 @@ pub(super) fn run_periodic_spec(
         } => run_envelope(
             netlist,
             svc_runner::EnvelopeRunConfig {
+                multirate,
                 initialization,
                 fundamental_freq,
                 additional_carrier_tones,
@@ -979,7 +981,17 @@ fn run_envelope(
         }
         waveforms.insert(
             name.clone(),
-            WaveformData::new_complex_in_unit(name, waveform_time, real, imaginary, waveform.unit),
+            if waveform.is_complex {
+                WaveformData::new_complex_in_unit(
+                    name,
+                    waveform_time,
+                    real,
+                    imaginary,
+                    waveform.unit,
+                )
+            } else {
+                WaveformData::new_time_domain_in_unit(name, waveform_time, real, waveform.unit)
+            },
         );
     }
 
@@ -987,7 +999,7 @@ fn run_envelope(
         spectra: Vec::new(),
         time: data.time,
         waveforms,
-        measurements: Vec::new(),
+        measurements: data.measurements,
         periodic_state: None,
         convergence: data.convergence,
         events: Default::default(),
@@ -1498,6 +1510,7 @@ mod tests {
         method: crate::simulation::multi_run::EnvelopeInitialPeriodicSolve,
     ) -> svc_runner::EnvelopeRunConfig {
         svc_runner::EnvelopeRunConfig {
+            multirate: None,
             initialization: svc_runner::EnvelopeInitializationConfig {
                 pss_stabilization_periods: 0,
                 pss_points_per_period: Some(64),

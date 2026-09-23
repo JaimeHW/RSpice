@@ -384,6 +384,7 @@ fn analysis_spec_round_trips_supported_variants() {
             verbose: false,
         },
         AnalysisSpec::Envelope {
+            multirate: None,
             initialization: crate::services::simulation_runner::EnvelopeInitializationConfig {
                 max_iterations: 73,
                 reltol: 2.5e-7,

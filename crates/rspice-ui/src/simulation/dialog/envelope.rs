@@ -15,12 +15,15 @@ use crate::simulation::multi_run::{
 
 use super::options::parse_si_value;
 mod initialization;
+mod multirate;
+pub use multirate::EnvelopeMultirateState;
 use crate::services::simulation_runner::EnvelopeInitializationConfig;
 pub use initialization::EnvelopeInitializationState;
 
 /// Complete mockup-owned envelope configuration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnvelopeConfig {
+    pub multirate: Option<crate::services::simulation_runner::EnvelopeMultirateConfig>,
     pub initialization: EnvelopeInitializationConfig,
     pub carrier_tones: Vec<f64>,
     pub stop_time: f64,
@@ -35,6 +38,7 @@ pub struct EnvelopeConfig {
 impl Default for EnvelopeConfig {
     fn default() -> Self {
         Self {
+            multirate: None,
             initialization: Default::default(),
             carrier_tones: vec![1.0e6],
             stop_time: 10.0e-3,
@@ -78,10 +82,27 @@ impl EnvelopeConfig {
                     .expect("initializer contains only serializable scalar settings")
             ));
         }
+        if let Some(settings) = &self.multirate {
+            line.push_str(&format!(
+                " multirate={}",
+                serde_json::to_string(settings).expect("finite validated envelope controls")
+            ));
+        }
         line
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(settings) = &self.multirate {
+            return settings
+                .core_config(
+                    &self.carrier_tones,
+                    self.harmonic_order as usize,
+                    self.stop_time,
+                    self.envelope_step,
+                    &self.modulation_sources,
+                )
+                .map(|_| ());
+        }
         validate_carrier_tones(&self.carrier_tones)?;
         if !self.stop_time.is_finite() || self.stop_time <= 0.0 {
             return Err("Envelope stop must be finite and positive".to_owned());
@@ -123,6 +144,10 @@ impl EnvelopeConfig {
 #[serde(deny_unknown_fields)]
 pub struct EnvelopeDialogState {
     #[serde(default)]
+    pub multirate_enabled: bool,
+    #[serde(default)]
+    pub multirate: EnvelopeMultirateState,
+    #[serde(default)]
     pub initialization: EnvelopeInitializationState,
     #[serde(default = "default_carrier_tones_text", alias = "fundamental")]
     pub carrier_tones: String,
@@ -155,6 +180,12 @@ pub struct EnvelopeDialogState {
 impl EnvelopeDialogState {
     pub fn from_config(config: &EnvelopeConfig) -> Self {
         Self {
+            multirate_enabled: config.multirate.is_some(),
+            multirate: config
+                .multirate
+                .as_ref()
+                .map(EnvelopeMultirateState::from_config)
+                .unwrap_or_default(),
             initialization: EnvelopeInitializationState::from_config(&config.initialization),
             carrier_tones: config
                 .carrier_tones
@@ -194,11 +225,15 @@ impl EnvelopeDialogState {
             .parse::<u32>()
             .map_err(|_| "Harmonic order must be a positive integer (minimum 1)".to_owned())?;
         let modulation_sources = parse_source_list(&self.modulation_sources)?;
-        let initial_periodic_solve = match self.initial_periodic_solve_idx {
-            0 => EnvelopeInitialPeriodicSolve::HarmonicBalance,
-            1 => EnvelopeInitialPeriodicSolve::PeriodicSteadyState,
-            2 => EnvelopeInitialPeriodicSolve::TransientSpectralEstimate,
-            _ => return Err("Invalid initial periodic solve selection".to_owned()),
+        let initial_periodic_solve = if self.multirate_enabled {
+            EnvelopeInitialPeriodicSolve::HarmonicBalance
+        } else {
+            match self.initial_periodic_solve_idx {
+                0 => EnvelopeInitialPeriodicSolve::HarmonicBalance,
+                1 => EnvelopeInitialPeriodicSolve::PeriodicSteadyState,
+                2 => EnvelopeInitialPeriodicSolve::TransientSpectralEstimate,
+                _ => return Err("Invalid initial periodic solve selection".to_owned()),
+            }
         };
         let adaptive_mode = match self.adaptive_mode_idx {
             0 => EnvelopeAdaptiveMode::Enabled,
@@ -209,9 +244,16 @@ impl EnvelopeDialogState {
         // One path, and no control that could ask for another.
         let extraction_path = EnvelopeExtractionPath::Projection;
         let config = EnvelopeConfig {
-            initialization: self
-                .initialization
-                .to_config(self.initial_periodic_solve_idx)?,
+            multirate: self
+                .multirate_enabled
+                .then(|| self.multirate.to_config(carrier_tones.len()))
+                .transpose()?,
+            initialization: if self.multirate_enabled {
+                Default::default()
+            } else {
+                self.initialization
+                    .to_config(self.initial_periodic_solve_idx)?
+            },
             carrier_tones,
             stop_time,
             envelope_step,

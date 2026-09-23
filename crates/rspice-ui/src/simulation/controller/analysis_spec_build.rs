@@ -673,6 +673,7 @@ impl SimulationController {
             .map(|(first, additional)| (*first, additional.to_vec()))
             .ok_or_else(|| "invalid envelope settings: carrier tone list is empty".to_owned())?;
         Ok(AnalysisSpec::Envelope {
+            multirate: envelope_cfg.multirate,
             initialization: envelope_cfg.initialization,
             fundamental_freq,
             additional_carrier_tones,
@@ -1495,6 +1496,7 @@ mod manifest_tests {
         assert_eq!(
             spec,
             AnalysisSpec::Envelope {
+                multirate: None,
                 initialization: Default::default(),
                 fundamental_freq: 1.0e6,
                 additional_carrier_tones: vec![2.5e6],

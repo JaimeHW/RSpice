@@ -555,6 +555,8 @@ pub enum AnalysisSpec {
     },
     /// Envelope transient analysis
     Envelope {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        multirate: Option<crate::services::simulation_runner::EnvelopeMultirateConfig>,
         #[serde(default)]
         initialization: crate::services::simulation_runner::EnvelopeInitializationConfig,
         /// First carrier frequency. Retained as a scalar for legacy payload

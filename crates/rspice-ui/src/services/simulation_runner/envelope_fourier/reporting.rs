@@ -92,6 +92,7 @@ mod tests {
     #[test]
     fn envelope_reporting_controls_reach_complex_voltage_and_current_results() {
         let config = EnvelopeRunConfig {
+            multirate: None,
             initialization: Default::default(),
             fundamental_freq: 1e6,
             additional_carrier_tones: Vec::new(),

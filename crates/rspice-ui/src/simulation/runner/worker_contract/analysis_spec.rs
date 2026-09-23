@@ -300,6 +300,8 @@ pub(crate) enum WorkerAnalysisSpec {
         verbose: bool,
     },
     Envelope {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        multirate: Option<crate::services::simulation_runner::EnvelopeMultirateConfig>,
         #[serde(default)]
         initialization: crate::services::simulation_runner::EnvelopeInitializationConfig,
         fundamental_freq: f64,

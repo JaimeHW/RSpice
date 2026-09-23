@@ -113,7 +113,7 @@ pub(super) fn envelope_choice_row(
             select_mono_with_response(ui, &salt, label, current, &options, ui.available_width());
         if label == ENVELOPE_FIELD_LABELS[6] {
             selection.response.on_hover_text(
-                "Output controls can override this schedule with a strobe interval or explicit reporting times. Each reported envelope needs a complete carrier window centered on its time.",
+                "Output controls can override this schedule with a strobe interval or explicit reporting times.",
             );
         }
         if let Some(index) = selection.picked {
@@ -173,6 +173,7 @@ pub(super) fn fields(
     policy: QuantityPresentationPolicy,
     locale: UiNumberLocale,
 ) {
+    super::switch_row(ui, "Multirate solver", &mut setup.multirate_enabled);
     input_row(ui, ENVELOPE_FIELD_LABELS[0], &mut setup.carrier_tones);
     envelope_time_input_row(
         ui,
@@ -188,27 +189,175 @@ pub(super) fn fields(
         policy,
         locale,
     );
-    envelope_harmonic_order_row(ui, &mut setup.harmonic_order).on_hover_text(
-        "Periodic initialization uses the carriers' common period. Harmonic order sets the upper frequency to the first carrier × order.",
-    );
+    envelope_harmonic_order_row(ui, &mut setup.harmonic_order).on_hover_text(if setup.multirate_enabled {
+        "Harmonic order applies to each independent carrier unless overridden below."
+    } else { "Periodic initialization uses the carriers' common period. Harmonic order sets the upper frequency to the first carrier × order." });
     envelope_modulation_source_row(
         ui,
         &mut setup.modulation_sources,
         envelope_modulation_sources,
     );
-    envelope_choice_row(
-        ui,
-        ENVELOPE_FIELD_LABELS[5],
-        ENVELOPE_INITIAL_SOLVE_CHOICES,
-        &mut setup.initial_periodic_solve_idx,
-    );
+    if !setup.multirate_enabled {
+        envelope_choice_row(
+            ui,
+            ENVELOPE_FIELD_LABELS[5],
+            ENVELOPE_INITIAL_SOLVE_CHOICES,
+            &mut setup.initial_periodic_solve_idx,
+        );
+    }
     envelope_choice_row(
         ui,
         ENVELOPE_FIELD_LABELS[6],
         ENVELOPE_ADAPTIVE_CHOICES,
         &mut setup.adaptive_mode_idx,
     );
-    initializer_fields(ui, setup, policy, locale);
+    if setup.multirate_enabled {
+        multirate_fields(ui, setup, policy, locale);
+    } else {
+        initializer_fields(ui, setup, policy, locale);
+    }
+}
+
+fn multirate_fields(
+    ui: &mut Ui,
+    setup: &mut EnvelopeDialogState,
+    policy: QuantityPresentationPolicy,
+    locale: UiNumberLocale,
+) {
+    use super::{choice_row, field_note, input_row_enabled, sub_header, switch_row};
+    use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod as Linear;
+    let c = &mut setup.multirate;
+    field_note(
+        ui,
+        "Multirate evolves Fourier coefficients between source events. It starts from a frozen periodic solution. Use full-waveform execution for models without supported slow-time storage or event equations.",
+    );
+    sub_header(ui, "Slow-time integration");
+    switch_row(ui, "Adaptive integration", &mut c.adaptive);
+    let mut method = usize::from(c.bdf2);
+    choice_row(
+        ui,
+        "Integration method",
+        &["Backward Euler", "BDF2"],
+        &mut method,
+    );
+    c.bdf2 = method == 1;
+    envelope_time_input_row(ui, "Maximum slow step", &mut c.maximum_step, policy, locale);
+    field_note(
+        ui,
+        "Blank maximum step uses Envelope step, which also sets the initial integration step. Output schedule selects reports independently.",
+    );
+    ui.add_enabled_ui(c.adaptive, |ui| {
+        envelope_time_input_row(ui, "Minimum slow step", &mut c.minimum_step, policy, locale);
+        for (label, value) in [
+            ("Relative error tolerance", &mut c.relative_tolerance),
+            (
+                "Voltage error tolerance (V)",
+                &mut c.voltage_absolute_tolerance,
+            ),
+            (
+                "Current error tolerance (A)",
+                &mut c.current_absolute_tolerance,
+            ),
+            (
+                "Auxiliary error tolerance",
+                &mut c.auxiliary_absolute_tolerance,
+            ),
+            ("Maximum rejections per step", &mut c.maximum_rejections),
+        ] {
+            input_row(ui, label, value);
+        }
+    });
+    input_row(ui, "Maximum accepted steps", &mut c.maximum_steps);
+    sub_header(ui, "Carrier solution");
+    for (label, value) in [
+        ("Harmonic orders (optional)", &mut c.harmonics),
+        ("Exact phase points (optional)", &mut c.collocation_points),
+        ("AC-only source tones", &mut c.source_tones),
+    ] {
+        input_row(ui, label, value);
+    }
+    input_row_enabled(
+        ui,
+        "Mixing order (blank: full grid)",
+        &mut c.max_mixing_order,
+        setup
+            .carrier_tones
+            .split([',', ';', '\n'])
+            .filter(|s| !s.trim().is_empty())
+            .count()
+            > 1,
+    );
+    input_row_enabled(
+        ui,
+        "Oversampling per carrier",
+        &mut c.oversample,
+        c.collocation_points.trim().is_empty(),
+    );
+    field_note(
+        ui,
+        "Counts accept one value for all carriers or one per carrier. Blank harmonic orders uses Harmonic order above. AC assignments use Vrf=1; waveforms use their authored frequencies.",
+    );
+    switch_row(
+        ui,
+        "DC operating point initial guess",
+        &mut c.dc_initialization,
+    );
+    envelope_time_input_row(
+        ui,
+        "Waveform default step",
+        &mut c.source_time_step,
+        policy,
+        locale,
+    );
+    field_note(
+        ui,
+        "Blank uses Envelope step for omitted waveform timing parameters. This basis stays fixed during adaptive integration.",
+    );
+    for (label, value) in [
+        ("Newton relative tolerance", &mut c.solver_relative),
+        ("Newton current tolerance (A)", &mut c.solver_current),
+        ("Newton voltage tolerance (V)", &mut c.solver_voltage),
+        ("Newton iteration limit", &mut c.solver_iterations),
+        ("Maximum Newton backtracks", &mut c.solver_backtracks),
+    ] {
+        input_row(ui, label, value);
+    }
+    let mut method = match c.linear_method {
+        Linear::Auto => 0,
+        Linear::Direct => 1,
+        Linear::Krylov => 2,
+    };
+    choice_row(
+        ui,
+        "Linear solver",
+        &["Automatic", "Direct", "Krylov"],
+        &mut method,
+    );
+    c.linear_method = match method {
+        1 => Linear::Direct,
+        2 => Linear::Krylov,
+        _ => Linear::Auto,
+    };
+    ui.add_enabled_ui(c.linear_method != Linear::Direct, |ui| {
+        for (label, value) in [
+            ("Krylov restart vectors", &mut c.linear_restart),
+            ("Krylov restart cycles", &mut c.linear_cycles),
+            ("Linear relative tolerance", &mut c.linear_relative),
+        ] {
+            input_row(ui, label, value);
+        }
+    });
+    sub_header(ui, "Source-event tolerances");
+    for (label, value) in [
+        ("Charge conservation (C)", &mut c.event_charge),
+        ("Flux conservation (Wb)", &mut c.event_flux),
+        ("Event current (A)", &mut c.event_current),
+        ("Event voltage (V)", &mut c.event_voltage),
+        ("Current rate (A/s)", &mut c.event_current_rate),
+        ("Voltage rate (V/s)", &mut c.event_voltage_rate),
+    ] {
+        input_row(ui, label, value);
+    }
 }
 
 fn initializer_fields(

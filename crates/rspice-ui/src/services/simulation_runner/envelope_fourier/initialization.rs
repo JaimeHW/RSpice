@@ -270,6 +270,7 @@ mod tests {
             dialog.initialization.pss_points_per_period = "64".into();
             let authored = dialog.to_config().unwrap();
             let config = EnvelopeRunConfig {
+                multirate: None,
                 initialization: authored.initialization,
                 fundamental_freq: authored.carrier_tones[0],
                 additional_carrier_tones: authored.carrier_tones[1..].to_vec(),
@@ -297,7 +298,7 @@ mod tests {
             for ((frequency, amplitude), waveform) in
                 [(2e3, 0.8), (3e3, 0.3)].into_iter().zip(&result.waveforms)
             {
-                let super::super::EnvelopeWaveform { name, values, unit } = waveform;
+                let super::super::EnvelopeWaveform { name, values, unit, .. } = waveform;
                 assert_eq!(*unit, "V");
                 assert!(name.eq_ignore_ascii_case(&format!("ENV(V(out)@{frequency:.12e}Hz)")));
                 let expected = num_complex::Complex64::new(0.0, -amplitude)
@@ -365,6 +366,7 @@ mod tests {
             EnvelopeInitialPeriodicSolve::PeriodicSteadyState,
         ] {
             let mut config = EnvelopeRunConfig {
+                multirate: None,
                 initialization: EnvelopeInitializationConfig {
                     pss_stabilization_periods: 0,
                     pss_points_per_period: Some(64),

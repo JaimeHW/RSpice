@@ -686,7 +686,9 @@ impl AnalysisDraft {
                 ..SolverOwnership::NONE
             },
             Self::Envelope(state) => SolverOwnership {
-                hb_initializer: Some(state.initial_periodic_solve_idx == 0),
+                hb_initializer: Some(
+                    !state.multirate_enabled && state.initial_periodic_solve_idx == 0,
+                ),
                 ..SolverOwnership::NONE
             },
             _ => SolverOwnership::NONE,
