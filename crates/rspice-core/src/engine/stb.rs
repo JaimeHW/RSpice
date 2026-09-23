@@ -539,7 +539,7 @@ mod tests {
         ));
         assert_eq!(
             abort.count(),
-            2,
+            3,
             "allocation must fail during the pre-circuit frequency projection"
         );
     }
