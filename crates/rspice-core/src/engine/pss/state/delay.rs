@@ -15,6 +15,9 @@ struct LineCoordinates {
     /// Explicit physical clocks retain corners that a uniform projection loses.
     /// None preserves the compact legacy uniform-grid identity.
     knots: Option<std::sync::Arc<[Value]>>,
+    /// A published incoming limit can share the event's exact clock. Its
+    /// coordinate must remain incoming after sampled history becomes owned.
+    incoming_knots: std::sync::Arc<[Value]>,
 }
 
 impl LineCoordinates {
@@ -31,12 +34,34 @@ impl LineCoordinates {
     fn name(&self, line: &str, knot: usize, port: usize) -> String {
         match &self.knots {
             Some(knots) => format!(
-                "W{port}:{line}[{knot}/{}@{:016x}]",
+                "W{port}:{line}[{knot}/{}@{:016x}{}]",
                 self.intervals,
-                knots[knot].to_bits()
+                knots[knot].to_bits(),
+                if self.is_incoming(knots[knot]) {
+                    ":in"
+                } else {
+                    ""
+                },
             ),
             None => format!("W{port}:{line}[{knot}/{}]", self.intervals),
         }
+    }
+
+    fn is_incoming(&self, clock: Value) -> bool {
+        self.incoming_knots
+            .binary_search_by(|value| value.total_cmp(&clock))
+            .is_ok()
+    }
+
+    fn with_incoming_edges(&mut self, edges: &[[Value; 3]]) {
+        let mut incoming = self.incoming_knots.to_vec();
+        incoming.extend(edges.iter().filter_map(|edge| {
+            (edge[0] == edge[1] && edge[0] >= -self.delay && edge[0] <= 0.0)
+                .then_some(if edge[0] == 0.0 { 0.0 } else { edge[0] })
+        }));
+        incoming.sort_by(Value::total_cmp);
+        incoming.dedup();
+        self.incoming_knots = incoming.into();
     }
 }
 
@@ -115,6 +140,7 @@ impl PssDelayBasis {
                 intervals,
                 delay: line.delay(),
                 knots: None,
+                incoming_knots: std::sync::Arc::from([]),
             };
             if let Some(mesh) = mesh {
                 let edges = mesh.pending_sampled_edges(line.delay(), 0.0, limits, abort)?;
@@ -177,6 +203,7 @@ impl PssDelayBasis {
                 knots.dedup();
                 coordinates.intervals = knots.len() - 1;
                 coordinates.knots = Some(knots.into());
+                coordinates.with_incoming_edges(&edges);
             }
             basis.push(coordinates, limits)?;
         }
@@ -299,14 +326,13 @@ impl PssDelayBasis {
             }
             knots.sort_by(Value::total_cmp);
             knots.dedup();
-            basis.push(
-                LineCoordinates {
-                    intervals: knots.len() - 1,
-                    knots: Some(knots.into()),
-                    ..coordinates.clone()
-                },
-                limits,
-            )?;
+            let mut enriched = LineCoordinates {
+                intervals: knots.len() - 1,
+                knots: Some(knots.into()),
+                ..coordinates.clone()
+            };
+            enriched.with_incoming_edges(&edges);
+            basis.push(enriched, limits)?;
         }
         Ok(basis)
     }
@@ -342,6 +368,7 @@ impl PssDelayBasis {
                 intervals,
                 delay: line.delay(),
                 knots: None,
+                incoming_knots: std::sync::Arc::from([]),
             };
             let dimension = basis
                 .dimension
@@ -375,22 +402,33 @@ impl PssDelayBasis {
                         )
                     })?;
                 let mut knots = Vec::new();
+                let mut incoming = Vec::new();
                 knots.try_reserve_exact(intervals + 1).map_err(|_| {
                     SimulationError::Circuit("retained PSS delay-state allocation failed".into())
                 })?;
                 for pair in entries.chunks_exact(2) {
-                    let bits = pair[0]
+                    let field = pair[0]
                         .rsplit_once('@')
                         .and_then(|(_, bits)| bits.strip_suffix(']'))
-                        .and_then(|bits| u64::from_str_radix(bits, 16).ok())
                         .ok_or_else(|| {
                             SimulationError::Circuit(
                                 "retained PSS delay-state clock is invalid".into(),
                             )
                         })?;
-                    knots.push(Value::from_bits(bits));
+                    let bits = u64::from_str_radix(field.strip_suffix(":in").unwrap_or(field), 16)
+                        .map_err(|_| {
+                            SimulationError::Circuit(
+                                "retained PSS delay-state clock is invalid".into(),
+                            )
+                        })?;
+                    let clock = Value::from_bits(bits);
+                    knots.push(clock);
+                    if field.ends_with(":in") {
+                        incoming.push(clock);
+                    }
                 }
                 coordinates.knots = Some(knots.into());
+                coordinates.incoming_knots = incoming.into();
             }
             basis.push(coordinates, limits)?;
         }
@@ -434,10 +472,12 @@ impl PssDelayBasis {
                     } else {
                         line.accepted_history_time() + coordinates.offset(knot)
                     };
-                    [
-                        line.lossless_wave_at(time, true),
-                        line.lossless_wave_at(time, false),
-                    ]
+                    let side = if coordinates.is_incoming(coordinates.offset(knot)) {
+                        crate::device::TransmissionLineTimeSide::Incoming
+                    } else {
+                        crate::device::TransmissionLineTimeSide::Outgoing
+                    };
+                    [true, false].map(|forward| line.lossless_wave_at_on_side(time, forward, side))
                 })
             })
             .collect()

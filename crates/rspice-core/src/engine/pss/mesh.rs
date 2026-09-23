@@ -860,6 +860,108 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sampled_delay_incoming_coordinates_survive_projection_refinement_and_restore() {
+        let engine = Engine::default();
+        let deck = Netlist::parse(
+            "Incoming coordinate\nR1 a 0 50\nR2 b 0 50\nT1 a 0 b 0 Z0=50 TD=1.1875\n.end\n",
+        )
+        .unwrap();
+        let mut mesh =
+            PssIntegrationMesh::from_times(1.0, vec![0.0, 0.5, 0.5_f64.next_up(), 1.0]).unwrap();
+        let original = mesh.clone();
+        mesh.sampled_edges = vec![SampledEdge {
+            time: 0.5,
+            incoming: 0.5,
+            outgoing: 0.5_f64.next_up(),
+        }]
+        .into();
+        let edges = mesh
+            .pending_sampled_edges(1.1875, 0.0, Default::default(), &NoAbort)
+            .unwrap();
+        assert_eq!(edges.len(), 1);
+        for enrich in [false, true] {
+            let mut circuit = PssCircuit::new(engine.build_circuit(&deck).unwrap()).unwrap();
+            circuit.integration_mesh = Some(if enrich {
+                original.clone()
+            } else {
+                mesh.clone()
+            });
+            circuit
+                .configure_delay_basis(1.0, 3, Default::default(), &NoAbort)
+                .unwrap();
+            if enrich {
+                circuit.delay_basis = circuit
+                    .delay_basis
+                    .with_events(1.0, &[], &mesh, Default::default(), &NoAbort)
+                    .unwrap();
+            }
+            circuit
+                .set_state(&vec![0.0; circuit.state_dimension()])
+                .unwrap();
+            let values: Vec<_> = circuit.tlines[0]
+                .checkpoint_state()
+                .unwrap()
+                .state_history
+                .iter()
+                .flat_map(|sample| {
+                    let wave = if sample[0] <= edges[0][0] { 1.0 } else { 3.0 };
+                    [wave, -wave]
+                })
+                .collect();
+            circuit.set_state(&values).unwrap();
+            let names = circuit.state_basis_names();
+            let incoming = names
+                .iter()
+                .position(|name| name.ends_with(":in]"))
+                .unwrap();
+            assert_eq!(&values[incoming..incoming + 2], &[1.0, -1.0]);
+            circuit.tlines[0]
+                .promote_sampled_history_events(&edges)
+                .unwrap();
+            assert_eq!(circuit.extract_state(), values);
+            let mut worker = circuit.clone();
+            worker
+                .restore_delay_basis(&names, Default::default())
+                .unwrap();
+            assert_eq!(worker.extract_state(), values);
+            assert_eq!(worker.state_basis_names(), names);
+            let mut malformed = names;
+            malformed[incoming + 1] = malformed[incoming + 1].replace(":in]", "]");
+            assert!(
+                worker
+                    .restore_delay_basis(&malformed, Default::default())
+                    .is_err()
+            );
+            worker.delay_basis = worker
+                .delay_basis
+                .refined(Default::default(), &NoAbort)
+                .unwrap();
+            let refined = worker.extract_state();
+            let names = worker.state_basis_names();
+            let incoming = names
+                .iter()
+                .position(|name| name.ends_with(":in]"))
+                .unwrap();
+            assert_eq!(&refined[incoming..incoming + 2], &[1.0, -1.0]);
+            worker.set_state(&refined).unwrap();
+            assert_eq!(worker.extract_state(), refined);
+            assert_eq!(circuit.extract_state(), values);
+            worker.tlines[0]
+                .accept_history_event(crate::device::TransmissionLineHistoryEvent {
+                    time: 0.5,
+                    incoming: [7.0, 0.0, -7.0, 0.0],
+                    outgoing: [11.0, 0.0, -11.0, 0.0],
+                    incoming_wave_slopes: [8.0, -8.0],
+                    outgoing_wave_slopes: [0.0; 2],
+                })
+                .unwrap();
+            worker.tlines[0].update_history(1.0, 11.0, 0.0, -11.0, 0.0);
+            let advanced = worker.extract_state();
+            assert_eq!(&advanced[incoming..incoming + 4], &[7.0, -7.0, 11.0, -11.0]);
+        }
+    }
+
+    #[test]
     fn sampled_delay_boundary_anchors_survive_basis_creation_and_enrichment() {
         let engine = Engine::default();
         let deck = Netlist::parse(

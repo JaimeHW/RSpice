@@ -1587,13 +1587,9 @@ impl TransmissionLine {
     /// wave is necessary because different fallback decisions for V and I are
     /// not algebraically equivalent to the canonical device equation.
     ///
-    /// Sample an outgoing wave at an absolute accepted-history time. Shooting
-    /// state projection must use the same interpolator as the native stamp.
-    pub(crate) fn lossless_wave_at(&self, target: Value, forward: bool) -> Value {
-        self.lossless_wave_at_on_side(target, forward, TransmissionLineTimeSide::Outgoing)
-    }
-
-    fn lossless_wave_at_on_side(
+    /// Sample a wave at an absolute accepted-history time, retaining its side
+    /// at an owned event. Shooting uses the native interpolation policy.
+    pub(crate) fn lossless_wave_at_on_side(
         &self,
         target: Value,
         forward: bool,
