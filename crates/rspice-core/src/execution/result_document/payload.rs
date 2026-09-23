@@ -2287,7 +2287,9 @@ pub struct MonteCarloPayload {
 impl MonteCarloPayload {
     fn validate(&self) -> Result<(), ResultDocumentError> {
         if let Some(indices) = &self.successful_trial_indices
-            && (indices.windows(2).any(|pair| pair[0] >= pair[1])
+            && (indices
+                .windows(2)
+                .any(|pair| matches!(pair, [left, right] if left >= right))
                 || self
                     .statistics
                     .iter()

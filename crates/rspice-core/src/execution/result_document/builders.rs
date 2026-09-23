@@ -2678,7 +2678,9 @@ impl AnalysisResultDocument {
                 || indices
                     .iter()
                     .any(|&index| index < first_trial || index >= end_trial)
-                || indices.windows(2).any(|pair| pair[0] >= pair[1]))
+                || indices
+                    .windows(2)
+                    .any(|pair| matches!(pair, [left, right] if left >= right)))
         {
             return Err(source_error(
                 LOCATION,
