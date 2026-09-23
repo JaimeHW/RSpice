@@ -13,7 +13,10 @@
 //! own default. A parser that filled the gaps would be a second copy of the
 //! defaults, free to disagree with the first.
 
-use super::analysis_card_scan::*;
+use super::analysis_card_scan::{
+    at_card_end, at_keyword, bind_once, card_bool, card_count, card_count_list, card_error,
+    card_name, card_number, take_keyword,
+};
 use super::*;
 
 const CARD: AnalysisCard = AnalysisCard::Hb;

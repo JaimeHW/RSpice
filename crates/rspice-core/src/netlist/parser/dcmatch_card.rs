@@ -6,7 +6,10 @@
 //! dropped statistical control would silently answer a different question
 //! from the one the deck asked.
 
-use super::analysis_card_scan::*;
+use super::analysis_card_scan::{
+    at_card_end, bind_once, card_bool, card_count, card_error, card_name, card_number,
+    card_output_probe, take_keyword,
+};
 use super::*;
 
 const CARD: AnalysisCard = AnalysisCard::DcMatch;
