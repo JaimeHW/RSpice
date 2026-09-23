@@ -19,7 +19,8 @@
 //! accepted diode/BJT/JFET charge, derivative, predictor, lead-current, timestep,
 //! trap/power and optional charge-snapshot histories; complete JFET nonlinear
 //! state and explicit uninitialized-bias markers; ordinary lossless scalar
-//! transmission-line delay histories; generated Verilog-A `ddt`/`idt`
+//! transmission-line delay histories; native BSIM3 limiter/evaluation state
+//! and terminal/NQS charge histories; generated Verilog-A `ddt`/`idt`
 //! histories and limiter anchors; behavioral-source and capacitor SDT histories;
 //! XSPICE model-owned checkpoint state; and the accepted LTE, Trap/Gear,
 //! static-residual/DAE, nonlinear-solver, cooldown, livelock, and global
@@ -41,6 +42,7 @@
 //! envelope with declared lengths and a BLAKE3 integrity seal.
 
 mod behavioral;
+mod bsim3;
 mod capacitor_sdt;
 mod solver_state;
 use crate::device::behavioral::BehavioralAcceptedState;
@@ -195,7 +197,9 @@ fn checkpoint_operation_result<T>(
 /// Version 49 retains the separately selected GP Weil filter's accepted memory.
 /// Version 50 retains named behavioral-source SDT accepted histories.
 /// Version 51 retains capacitor value-expression SDT accepted histories.
-const FORMAT_VERSION: u32 = 51;
+/// Version 52 retains native BSIM3 limiter/evaluation and charge-integration state.
+const FORMAT_VERSION: u32 = 52;
+const BSIM3_STATE_FORMAT_VERSION: u32 = 52;
 const CAPACITOR_SDT_FORMAT_VERSION: u32 = 51;
 const BEHAVIORAL_SDT_FORMAT_VERSION: u32 = 50;
 const BJT_WEIL_HISTORY_FORMAT_VERSION: u32 = 49;
@@ -3452,6 +3456,14 @@ fn accepted_junction_history_payload_is_empty(
     let bjt = &checkpoint.bjt_history;
     let diode = &checkpoint.diode_history;
     checkpoint.bjt_names.is_empty()
+        && checkpoint.bsim3_states.is_empty()
+        && checkpoint
+            .bsim3_history
+            .columns()
+            .iter()
+            .all(|(_, values)| values.is_empty())
+        && checkpoint.bsim3_history.accepted_dt_prev.to_bits() == 0
+        && checkpoint.bsim3_history.accepted_dt_prev_prev.to_bits() == 0
         && checkpoint.jfet_names.is_empty()
         && checkpoint.jfet_runtime_tags.is_empty()
         && checkpoint
@@ -3518,6 +3530,7 @@ fn validate_accepted_junction_transient_history_numeric_state(
         return Ok(());
     }
 
+    bsim3::validate(checkpoint, budget)?;
     validate_checkpoint_identity_vector(
         "JFET",
         &checkpoint.jfet_names,
@@ -6447,7 +6460,11 @@ impl TransientCheckpoint {
         let accepted_junction_history = if let Some(history) = junction_history {
             Engine::validate_accepted_junction_transient_history_checkpoint(circuit, &history)?;
             history
-        } else if circuit.bjts.is_empty() && circuit.diodes.is_empty() && circuit.jfets.is_empty() {
+        } else if circuit.bjts.is_empty()
+            && circuit.diodes.is_empty()
+            && circuit.jfets.is_empty()
+            && circuit.bsim3v3.is_empty()
+        {
             AcceptedJunctionTransientHistoryCheckpoint {
                 available: true,
                 ..AcceptedJunctionTransientHistoryCheckpoint::default()
@@ -6455,6 +6472,7 @@ impl TransientCheckpoint {
         } else if time.to_bits() == 0.0_f64.to_bits()
             && circuit.bjts.is_empty()
             && circuit.jfets.is_empty()
+            && circuit.bsim3v3.is_empty()
             && circuit
                 .diodes
                 .devices
@@ -6475,6 +6493,7 @@ impl TransientCheckpoint {
                 &diode_history,
                 &JfetTransientHistory::default(),
                 &[],
+                &Default::default(),
             )
         } else {
             AcceptedJunctionTransientHistoryCheckpoint::unavailable(
@@ -6807,7 +6826,11 @@ impl TransientCheckpoint {
             ));
         }
         if !self.accepted_junction_history.available {
-            if circuit.bjts.is_empty() && circuit.diodes.is_empty() && circuit.jfets.is_empty() {
+            if circuit.bjts.is_empty()
+                && circuit.diodes.is_empty()
+                && circuit.jfets.is_empty()
+                && circuit.bsim3v3.is_empty()
+            {
                 return Ok(());
             }
             return Err(
@@ -7083,6 +7106,14 @@ impl TransientCheckpoint {
         // cannot fail after this point without a violated internal invariant.
         circuit
             .restore_accepted_native_nonlinear_checkpoint_states(&self.accepted_nonlinear_states)?;
+        for (device, state) in circuit
+            .bsim3v3
+            .devices
+            .iter_mut()
+            .zip(&self.accepted_junction_history.bsim3_states)
+        {
+            device.restore_accepted_nonlinear_checkpoint(state)?;
+        }
         circuit.restore_xyce_team_resistance_noise_checkpoints(
             &self.xyce_team_resistance_noise_states,
             self.time,
@@ -7694,6 +7725,16 @@ impl TransientCheckpoint {
 
         let junction = &self.accepted_junction_history;
         let bjt = &junction.bjt_history;
+        count = junction
+            .bsim3_states
+            .iter()
+            .fold(count.saturating_add(2), |count, state| {
+                count
+                    .saturating_add(state.values.len())
+                    .saturating_add(31)
+                    .saturating_add(state.instance_name.len().div_ceil(8))
+                    .saturating_add(state.runtime_tag.len().div_ceil(8))
+            });
         count = count
             .saturating_add(
                 self.accepted_nonlinear_states
@@ -8351,6 +8392,7 @@ impl TransientCheckpoint {
             "accepted_jfet_transient_dt {} {}\n",
             junction.jfet_history.accepted_dt_prev, junction.jfet_history.accepted_dt_prev_prev
         ));
+        bsim3::write(&mut out, junction, abort)?;
         out.push_str(&format!(
             "tline_state_available {}\n",
             u8::from(self.tline_state_available)
@@ -9213,6 +9255,9 @@ impl TransientCheckpoint {
                 &mut accepted_junction_history,
                 version,
             )?;
+        }
+        if version >= BSIM3_STATE_FORMAT_VERSION {
+            bsim3::read(lines, budget, &mut accepted_junction_history)?;
         }
         let (tline_state_available, tline_resume_blockers, tline_states) = if version >= 14 {
             let availability_line = lines
@@ -10763,6 +10808,111 @@ mod tests {
     }
 
     #[test]
+    fn bsim3_checkpoint_wire_restores_all_lanes_and_rejects_missing_or_invalid_state() {
+        let netlist = Netlist::parse(
+            "BSIM3 checkpoint\nM1 d g 0 0 mm L=1u W=10u\n.model mm NMOS LEVEL=49 NQSMOD=1\n.end\n",
+        )
+        .unwrap();
+        let mut circuit = Engine::default().build_circuit(&netlist).unwrap();
+        let mut state = circuit.bsim3v3.devices[0]
+            .accepted_nonlinear_checkpoint()
+            .unwrap();
+        // Distinct lanes expose swaps/omissions. Preserve signed zero and a
+        // subnormal through both the device mapping and each portable encoding.
+        for (index, value) in state.values.iter_mut().enumerate() {
+            *value = if index == 1 {
+                -0.0
+            } else if index == 2 {
+                Value::from_bits(1)
+            } else {
+                0.125 * index as Value
+            };
+        }
+        state.flags[5] = true;
+        state.flags[6] = true;
+        state.mode = -1;
+        state.seed_evaluations = 2;
+        circuit.bsim3v3.devices[0]
+            .restore_accepted_nonlinear_checkpoint(&state)
+            .unwrap();
+        let recaptured = circuit.bsim3v3.devices[0]
+            .accepted_nonlinear_checkpoint()
+            .unwrap();
+        assert_eq!(state, recaptured);
+        for (a, b) in state.values.iter().zip(recaptured.values) {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+        let mut original = sample();
+        let history = &mut original.accepted_junction_history;
+        history.bsim3_states.push(state);
+        for (index, (_, values)) in history.bsim3_history.columns_mut().into_iter().enumerate() {
+            values.push(if index == 0 {
+                -0.0
+            } else {
+                -0.125 * index as Value
+            });
+        }
+        history.bsim3_history.accepted_dt_prev = 2e-12;
+        history.bsim3_history.accepted_dt_prev_prev = 3e-12;
+        for encoding in [
+            TransientCheckpointEncoding::Unpacked,
+            TransientCheckpointEncoding::Packed,
+        ] {
+            let restored =
+                TransientCheckpoint::from_bytes(&original.to_bytes(encoding).unwrap()).unwrap();
+            assert_eq!(
+                restored.accepted_junction_history.bsim3_states,
+                original.accepted_junction_history.bsim3_states
+            );
+            for ((_, a), (_, b)) in restored
+                .accepted_junction_history
+                .bsim3_history
+                .columns()
+                .into_iter()
+                .zip(original.accepted_junction_history.bsim3_history.columns())
+            {
+                assert_eq!(a[0].to_bits(), b[0].to_bits());
+            }
+        }
+        let text = original.to_text();
+        for malformed in [
+            text.replace(
+                "accepted_bsim3_states 1",
+                "accepted_bsim3_states 18446744073709551615",
+            ),
+            text.replace(
+                "accepted_bsim3_transient_dt 0.000000000002",
+                "accepted_bsim3_transient_dt NaN",
+            ),
+            text.replace("native-bsim3v3-accepted-v1", "native-bsim3v3-accepted-v0"),
+        ] {
+            assert_ne!(malformed, text);
+            assert!(TransientCheckpoint::from_text(&malformed).is_err());
+        }
+        let legacy = TransientCheckpoint::from_text(&legacy_text(&original, 51)).unwrap();
+        assert!(legacy.accepted_junction_history.bsim3_states.is_empty());
+        assert!(
+            legacy
+                .restore_accepted_junction_transient_history(&circuit)
+                .unwrap_err()
+                .contains("BSIM3")
+        );
+        let mut wrong_name = recaptured.clone();
+        wrong_name.instance_name.push_str("_other");
+        assert!(
+            circuit.bsim3v3.devices[0]
+                .restore_accepted_nonlinear_checkpoint(&wrong_name)
+                .is_err()
+        );
+        assert_eq!(
+            circuit.bsim3v3.devices[0]
+                .accepted_nonlinear_checkpoint()
+                .unwrap(),
+            recaptured
+        );
+    }
+
+    #[test]
     fn jfet_checkpoint_wire_preserves_every_lane_and_refuses_legacy_state() {
         let mut original = sample();
         let device = crate::device::Jfet::njf("J1", 1, 2, 0);
@@ -10886,6 +11036,8 @@ mod tests {
             jfet_names: Vec::new(),
             jfet_runtime_tags: Vec::new(),
             jfet_history: JfetTransientHistory::default(),
+            bsim3_states: Vec::new(),
+            bsim3_history: Default::default(),
             bjt_names: vec!["qcheck".to_string()],
             bjt_runtime_tags: vec![super::super::BJT_TRANSIENT_HISTORY_RUNTIME_TAG.to_string()],
             bjt_history: BjtTransientHistory {
@@ -11373,6 +11525,15 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < BSIM3_STATE_FORMAT_VERSION && line.starts_with("accepted_bsim3_") {
+                if line.starts_with("accepted_bsim3_states ") {
+                    let count: usize = line.split_whitespace().nth(1).unwrap().parse().unwrap();
+                    for _ in 0..count {
+                        lines.next().expect("complete BSIM3 state rows");
+                    }
+                }
+                continue;
+            }
             if version < CAPACITOR_SDT_FORMAT_VERSION
                 && line.starts_with("capacitor_sdt_state_available ")
             {
@@ -13124,6 +13285,7 @@ mod tests {
                 &diode_history,
                 &JfetTransientHistory::default(),
                 &[None],
+                &Default::default(),
             );
         (engine, netlist, checkpoint)
     }
@@ -13273,6 +13435,7 @@ mod tests {
             .build_circuit(&Netlist::default())
             .expect("empty target circuit builds");
         let RestoredJunctionTransientHistories {
+            bsim3: _,
             bjt,
             diode,
             jfet,
@@ -13350,6 +13513,7 @@ mod tests {
             &empty_checkpoint.accepted_junction_history
         ));
         let RestoredJunctionTransientHistories {
+            bsim3: _,
             bjt,
             diode,
             jfet,

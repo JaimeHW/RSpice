@@ -423,6 +423,46 @@ fn assert_scheduled_deck_resumes_exactly(
 }
 
 #[test]
+fn bsim3_checkpoints_preserve_qs_and_nqs_accepted_trajectories() {
+    for (nqs, kind, polarity, method) in [
+        (0, "NMOS", 1.0, IntegrationMethod::Trapezoidal),
+        (0, "PMOS", -1.0, IntegrationMethod::Gear2),
+        (1, "NMOS", 1.0, IntegrationMethod::Gear2),
+        (1, "PMOS", -1.0, IntegrationMethod::Trapezoidal),
+    ] {
+        let label = format!("BSIM3 {kind} NQS={nqs} {method:?}");
+        let deck = format!(
+            "BSIM3 accepted state continuation\nVDD supply 0 {}\nVIN in 0 SIN({} {} 1G)\nRD supply out 500\nRG in gate 100\nRS source 0 10\nM1 out gate source 0 mm L=.18u W=10u AD=4p AS=4p PD=20u PS=20u M=2 OFF\n.model mm {kind}(LEVEL=49 TOX=4.1n VTH0={} U0=270 K1=.59 K2=.0026 CAPMOD=3 NQSMOD={nqs} RSH=10 CGDO=7.9e-10 CGSO=6.3e-10 CJ=9.5e-4 CJSW=2.4e-10)\n.end\n",
+            polarity * 1.8,
+            polarity * 0.7,
+            polarity * 0.05,
+            polarity * 0.37,
+        );
+        let full = assert_scheduled_deck_resumes_exactly(
+            &label,
+            &deck,
+            2e-9,
+            0.713e-9,
+            25e-12,
+            SimulationConfig {
+                integration_method: method,
+                ..Default::default()
+            },
+        );
+        let out = full.try_voltage_waveform_named("out").unwrap();
+        let (min, max) = out
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), &value| {
+                (min.min(value), max.max(value))
+            });
+        assert!(
+            max - min > 1e-3,
+            "{label}: fixture must exercise dynamic charge"
+        );
+    }
+}
+
+#[test]
 fn jfet_charge_and_trap_checkpoints_resume_every_accepted_point_exactly() {
     use rspice_core::numerics::integration::IntegrationMethod;
     for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {

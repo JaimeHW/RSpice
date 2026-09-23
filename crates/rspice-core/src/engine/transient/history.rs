@@ -297,8 +297,9 @@ fn bjt_history_runtime_tag(bjt: &crate::device::Bjt, weil: bool) -> &'static str
 // or negative. That lost history cannot be reconstructed from a capture.
 pub(super) const DIODE_TRANSIENT_HISTORY_RUNTIME_TAG: &str = "native-diode-transient-history-v2";
 
-/// Versionable image of the accepted BJT/diode/JFET integration state owned by the
-/// transient engine rather than by the device instances.
+/// Versionable image of accepted native junction and BSIM3 integration state.
+/// BSIM3's device-owned limiter/evaluation image travels with its charge history
+/// so neither half can be restored independently.
 ///
 /// The histories remain in their runtime struct-of-arrays form. Parallel name
 /// and runtime-tag vectors bind every ordinal to the exact elaborated device;
@@ -306,6 +307,9 @@ pub(super) const DIODE_TRANSIENT_HISTORY_RUNTIME_TAG: &str = "native-diode-trans
 /// or duplicating the in-memory payload here.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(in crate::engine) struct AcceptedJunctionTransientHistoryCheckpoint {
+    pub(super) bsim3_states:
+        Vec<crate::device::mosfet::bsim3v3::device::checkpoint::AcceptedBsim3NonlinearCheckpoint>,
+    pub(super) bsim3_history: Bsim3TransientHistory,
     pub(super) jfet_names: Vec<String>,
     pub(super) jfet_runtime_tags: Vec<String>,
     pub(super) jfet_history: JfetTransientHistory,
@@ -322,6 +326,7 @@ pub(in crate::engine) struct AcceptedJunctionTransientHistoryCheckpoint {
 
 #[derive(Debug, Default)]
 pub(super) struct RestoredJunctionTransientHistories {
+    pub(super) bsim3: Bsim3TransientHistory,
     pub(super) bjt: BjtTransientHistory,
     pub(super) diode: DiodeTransientHistory,
     pub(super) jfet: JfetTransientHistory,
@@ -413,6 +418,7 @@ impl Engine {
         diode_history: &DiodeTransientHistory,
         jfet_history: &JfetTransientHistory,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
+        bsim3_history: &Bsim3TransientHistory,
     ) -> AcceptedJunctionTransientHistoryCheckpoint {
         let mut resume_blockers = Vec::new();
         let mut encoded_snapshot_cache = Vec::with_capacity(vbic_snapshot_cache.len());
@@ -440,6 +446,19 @@ impl Engine {
         }
 
         let mut checkpoint = AcceptedJunctionTransientHistoryCheckpoint {
+            bsim3_states: circuit
+                .bsim3v3
+                .devices
+                .iter()
+                .filter_map(|device| match device.accepted_nonlinear_checkpoint() {
+                    Ok(state) => Some(state),
+                    Err(error) => {
+                        resume_blockers.push(error);
+                        None
+                    }
+                })
+                .collect(),
+            bsim3_history: bsim3_history.clone(),
             jfet_names: circuit.jfets.iter().map(|jfet| jfet.name.clone()).collect(),
             jfet_runtime_tags: circuit
                 .jfets
@@ -521,6 +540,13 @@ impl Engine {
         circuit: &crate::circuit::CircuitData,
         checkpoint: &AcceptedJunctionTransientHistoryCheckpoint,
     ) -> Result<(), String> {
+        if checkpoint.bsim3_states.len() != circuit.bsim3v3.len() {
+            return Err("BSIM3 accepted state count does not match the target circuit".to_string());
+        }
+        for (device, state) in circuit.bsim3v3.devices.iter().zip(&checkpoint.bsim3_states) {
+            device.validate_accepted_nonlinear_checkpoint(state)?;
+        }
+        checkpoint.bsim3_history.validate(circuit.bsim3v3.len())?;
         if checkpoint.jfet_names.len() != circuit.jfets.len()
             || checkpoint.jfet_runtime_tags.len() != circuit.jfets.len()
         {
@@ -829,6 +855,9 @@ impl Engine {
         );
         normalized.vbic_snapshot_cache.fill(None);
         normalized
+            .bsim3_history
+            .normalize_for_order_one(accepted_dt_seed);
+        normalized
             .jfet_history
             .normalize_for_order_one(accepted_dt_seed);
         Self::validate_accepted_junction_transient_history_checkpoint(circuit, &normalized)?;
@@ -853,6 +882,7 @@ impl Engine {
             });
         }
         Ok(RestoredJunctionTransientHistories {
+            bsim3: checkpoint.bsim3_history.clone(),
             bjt: checkpoint.bjt_history.clone(),
             diode: checkpoint.diode_history.clone(),
             jfet: checkpoint.jfet_history.clone(),
@@ -1025,8 +1055,8 @@ pub(super) struct B3SoiTransientHistory {
 /// `BSIM3qb = qbulk + qbd + qbs` — the junction depletion charges are folded
 /// in, b3ld.c:2796-2801), with the last integrated charge-current `cq*` per
 /// state. `b3trunc.c` runs `CKTterr` over exactly these three states.
-#[derive(Debug, Clone, Default)]
-pub(super) struct Bsim3TransientHistory {
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(in crate::engine) struct Bsim3TransientHistory {
     pub(super) qg_prev: Vec<Value>,
     pub(super) qg_prev_prev: Vec<Value>,
     pub(super) qg_prev_prev_prev: Vec<Value>,
@@ -1049,6 +1079,87 @@ pub(super) struct Bsim3TransientHistory {
     pub(super) cqcdump_prev: Vec<Value>,
     pub(super) accepted_dt_prev: Value,
     pub(super) accepted_dt_prev_prev: Value,
+}
+
+impl Bsim3TransientHistory {
+    pub(super) fn columns(&self) -> [(&'static str, &Vec<Value>); 20] {
+        [
+            ("qg_prev", &self.qg_prev),
+            ("qg_prev_prev", &self.qg_prev_prev),
+            ("qg_prev_prev_prev", &self.qg_prev_prev_prev),
+            ("cqg_prev", &self.cqg_prev),
+            ("qb_prev", &self.qb_prev),
+            ("qb_prev_prev", &self.qb_prev_prev),
+            ("qb_prev_prev_prev", &self.qb_prev_prev_prev),
+            ("cqb_prev", &self.cqb_prev),
+            ("qd_prev", &self.qd_prev),
+            ("qd_prev_prev", &self.qd_prev_prev),
+            ("qd_prev_prev_prev", &self.qd_prev_prev_prev),
+            ("cqd_prev", &self.cqd_prev),
+            ("qcheq_prev", &self.qcheq_prev),
+            ("qcheq_prev_prev", &self.qcheq_prev_prev),
+            ("qcheq_prev_prev_prev", &self.qcheq_prev_prev_prev),
+            ("cqcheq_prev", &self.cqcheq_prev),
+            ("qcdump_prev", &self.qcdump_prev),
+            ("qcdump_prev_prev", &self.qcdump_prev_prev),
+            ("qcdump_prev_prev_prev", &self.qcdump_prev_prev_prev),
+            ("cqcdump_prev", &self.cqcdump_prev),
+        ]
+    }
+
+    pub(super) fn columns_mut(&mut self) -> [(&'static str, &mut Vec<Value>); 20] {
+        [
+            ("qg_prev", &mut self.qg_prev),
+            ("qg_prev_prev", &mut self.qg_prev_prev),
+            ("qg_prev_prev_prev", &mut self.qg_prev_prev_prev),
+            ("cqg_prev", &mut self.cqg_prev),
+            ("qb_prev", &mut self.qb_prev),
+            ("qb_prev_prev", &mut self.qb_prev_prev),
+            ("qb_prev_prev_prev", &mut self.qb_prev_prev_prev),
+            ("cqb_prev", &mut self.cqb_prev),
+            ("qd_prev", &mut self.qd_prev),
+            ("qd_prev_prev", &mut self.qd_prev_prev),
+            ("qd_prev_prev_prev", &mut self.qd_prev_prev_prev),
+            ("cqd_prev", &mut self.cqd_prev),
+            ("qcheq_prev", &mut self.qcheq_prev),
+            ("qcheq_prev_prev", &mut self.qcheq_prev_prev),
+            ("qcheq_prev_prev_prev", &mut self.qcheq_prev_prev_prev),
+            ("cqcheq_prev", &mut self.cqcheq_prev),
+            ("qcdump_prev", &mut self.qcdump_prev),
+            ("qcdump_prev_prev", &mut self.qcdump_prev_prev),
+            ("qcdump_prev_prev_prev", &mut self.qcdump_prev_prev_prev),
+            ("cqcdump_prev", &mut self.cqcdump_prev),
+        ]
+    }
+
+    pub(super) fn validate(&self, count: usize) -> Result<(), String> {
+        for (name, values) in self.columns() {
+            validate_history_vector_shapes("BSIM3", count, &[(name, values.len())])?;
+            validate_history_finite_values(name, values.iter().copied())?;
+        }
+        validate_history_dt("bsim3.accepted_dt_prev", self.accepted_dt_prev)?;
+        validate_history_dt("bsim3.accepted_dt_prev_prev", self.accepted_dt_prev_prev)
+    }
+
+    pub(super) fn normalize_for_order_one(&mut self, dt: Value) {
+        self.qg_prev_prev.clone_from(&self.qg_prev);
+        self.qg_prev_prev_prev.clone_from(&self.qg_prev);
+        self.cqg_prev.fill(0.0);
+        self.qb_prev_prev.clone_from(&self.qb_prev);
+        self.qb_prev_prev_prev.clone_from(&self.qb_prev);
+        self.cqb_prev.fill(0.0);
+        self.qd_prev_prev.clone_from(&self.qd_prev);
+        self.qd_prev_prev_prev.clone_from(&self.qd_prev);
+        self.cqd_prev.fill(0.0);
+        self.qcheq_prev_prev.clone_from(&self.qcheq_prev);
+        self.qcheq_prev_prev_prev.clone_from(&self.qcheq_prev);
+        self.cqcheq_prev.fill(0.0);
+        self.qcdump_prev_prev.clone_from(&self.qcdump_prev);
+        self.qcdump_prev_prev_prev.clone_from(&self.qcdump_prev);
+        self.cqcdump_prev.fill(0.0);
+        self.accepted_dt_prev = dt;
+        self.accepted_dt_prev_prev = dt;
+    }
 }
 
 /// Per-instance BSIM4 v4.8 (MOS level 14/54) charge-integration history.
@@ -1206,6 +1317,7 @@ D1 b 0 DM
             &diode_history,
             &JfetTransientHistory::default(),
             &snapshot_cache,
+            &Default::default(),
         );
         assert!(checkpoint.available);
         assert!(checkpoint.resume_blockers.is_empty());
@@ -1229,6 +1341,7 @@ D1 b 0 DM
             .expect("captured history validates");
 
         let RestoredJunctionTransientHistories {
+            bsim3: _,
             bjt: restored_bjt,
             diode: restored_diode,
             jfet: restored_jfet,
@@ -1261,6 +1374,7 @@ D1 b 0 DM
             &diode_history,
             &JfetTransientHistory::default(),
             &snapshot_cache,
+            &Default::default(),
         );
         let mut expected_bjt = bjt_history.clone();
         let mut expected_diode = diode_history.clone();
@@ -1297,6 +1411,7 @@ D1 b 0 DM
             &diode_history,
             &JfetTransientHistory::default(),
             &snapshot_cache,
+            &Default::default(),
         );
 
         let mut wrong_name = checkpoint.clone();

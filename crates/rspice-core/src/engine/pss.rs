@@ -2003,6 +2003,7 @@ impl Engine {
             &circuit.diode_history,
             &circuit.jfet_history,
             &circuit.bjt_snapshot_cache,
+            &Default::default(),
         );
         let junction_history =
             Self::normalize_accepted_junction_transient_history_checkpoint_for_order_one(
