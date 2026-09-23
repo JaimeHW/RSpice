@@ -34,12 +34,7 @@ fn configured_ports_are_resolved_after_hierarchy_and_shared_with_noise() {
                 &rspice_core::NoAbort,
             )
         } else {
-            engine.run_sp_over_grid_with_abort(
-                &netlist,
-                &[10.0, 20.0],
-                true,
-                &rspice_core::NoAbort,
-            )
+            engine.run_sp_over_grid_with_abort(&netlist, &[10.0, 20.0], true, &rspice_core::NoAbort)
         }
         .unwrap();
         let expected_z0 = if declaration.is_empty() { 50.0 } else { 75.0 };
