@@ -46,6 +46,7 @@ mod state;
 pub(in crate::engine) use state::PssCircuit;
 mod history_events;
 mod mesh;
+mod time_control;
 pub(in crate::engine) use mesh::PssIntegrationMesh;
 
 type AutonomousNewtonStep = (Vec<Value>, Value, Vec<Vec<Value>>);
@@ -116,8 +117,8 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-// Owned delay events and incoming-coordinate provenance change the period map.
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 100;
+// The resolved timestep ceiling now bounds the retained period map.
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 101;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -2261,7 +2262,10 @@ impl Engine {
             .max()
             .unwrap_or(0);
         self.ensure_analysis_points(delay_steps)?;
-        circuit.integration_steps = circuit.integration_steps.max(delay_steps);
+        circuit.integration_steps = circuit
+            .integration_steps
+            .max(delay_steps)
+            .max(self.pss_minimum_grid_steps(config.period())?);
         circuit.integration_mesh =
             self.pss_source_mesh(&circuit, &config, circuit.integration_steps, abort)?;
         circuit.configure_delay_basis(
@@ -2353,7 +2357,8 @@ impl Engine {
             .filter(|line| !line.is_memoryless_two_port())
             .map(|line| (2.0 * detected_period / line.delay()).ceil() as usize)
             .max()
-            .unwrap_or(0);
+            .unwrap_or(0)
+            .max(self.pss_minimum_grid_steps(detected_period)?);
         if detected_delay_steps > circuit.integration_steps {
             self.ensure_analysis_points(detected_delay_steps)?;
             circuit.integration_steps = detected_delay_steps;
@@ -2492,7 +2497,7 @@ impl Engine {
                     "PSS grid {steps} -> {finer_steps}: normalized waveform error {error:.6e}"
                 );
             }
-            if error <= 1.0 {
+            if error <= 1.0 && self.pss_waveform_within_step_ceiling(&coarse.waveform) {
                 circuit.integration_steps = steps;
                 circuit.integration_mesh = coarse_mesh;
                 circuit.delay_basis = coarse_delay_basis;
@@ -4459,6 +4464,14 @@ impl Engine {
                 "PSS transient traversal maximum step must be finite and positive, got {max_step:e}"
             )));
         }
+        // Fixed shooting meshes are bounded before Newton starts and checked
+        // again after the autonomous period has converged. Never change their
+        // steps inside a derivative worker; only stabilization adapts here.
+        let max_step = if fixed_grid {
+            max_step
+        } else {
+            max_step.min(self.pss_step_ceiling())
+        };
         if fixed_grid {
             self.pss_promote_line_history_events(
                 circuit,
@@ -4542,7 +4555,7 @@ impl Engine {
         let initial_step = (max_step / 10.0).min(tstop / 100.0).min(delay_step_limit);
         let mut timestep = TimestepController::new(
             initial_step,
-            self.config.min_timestep,
+            self.config.min_timestep.min(max_step),
             max_step.min(delay_step_limit),
         );
         // Stabilization uses adaptive breakpoint scheduling. Shooting and its
