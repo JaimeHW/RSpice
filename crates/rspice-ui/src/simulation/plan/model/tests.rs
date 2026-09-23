@@ -11,6 +11,61 @@ fn snapshot(plan: &SimulationPlan) -> String {
 }
 
 #[test]
+fn dc_study_restore_keeps_effective_controls_and_base_changes_are_atomic() {
+    for kind in [AnalysisKind::MonteCarlo, AnalysisKind::Optimization] {
+        let mut plan = SimulationPlan::empty();
+        let (transient, _) = plan.insert(AnalysisKind::Transient).unwrap();
+        let (dc, _) = plan.insert(kind).unwrap();
+        let (configured, _) = plan.insert(kind).unwrap();
+        let select = |draft: &mut AnalysisDraft, base| match draft {
+            AnalysisDraft::MonteCarlo(state) => state.base_analysis = base,
+            AnalysisDraft::Optimization(state) => state.base_analysis = base,
+            _ => unreachable!(),
+        };
+        plan.edit(configured, |draft| select(draft, Some(transient)))
+            .unwrap();
+        let legacy: AnalysisNumericOverride = serde_json::from_str(
+            r#"{"reltol":0.0001,"itl4":150,"strobe_interval":0.00000001,"retain_every_signal":true}"#,
+        ).unwrap();
+        for id in [dc, configured, transient] {
+            let index = plan.index_of(id).unwrap();
+            plan.instances[index].numeric_override = Some(legacy.clone());
+        }
+        let history = serde_json::to_value(&plan.receipts).unwrap();
+        let mut restored: SimulationPlan = serde_json::from_str(&snapshot(&plan)).unwrap();
+        restored.prepare_after_restore();
+        let dc_options = restored.instance(dc).unwrap().numeric_override().unwrap();
+        assert!(dc_options.value(NumericOverrideOption::Reltol).is_some());
+        for option in [
+            NumericOverrideOption::Itl4,
+            NumericOverrideOption::StrobeInterval,
+            NumericOverrideOption::RetainEverySignal,
+        ] {
+            assert!(dc_options.value(option).is_none());
+        }
+        for id in [configured, transient] {
+            assert_eq!(
+                restored.instance(id).unwrap().numeric_override(),
+                Some(&legacy)
+            );
+        }
+        assert_eq!(serde_json::to_value(&restored.receipts).unwrap(), history);
+        let once = snapshot(&restored);
+        restored.prepare_after_restore();
+        assert_eq!(snapshot(&restored), once);
+        let error = restored
+            .edit(configured, |draft| select(draft, None))
+            .unwrap_err();
+        assert!(error.to_string().contains("only DC operating points"));
+        assert_eq!(snapshot(&restored), once);
+        restored.set_numeric_override(configured, None).unwrap();
+        restored
+            .edit(configured, |draft| select(draft, None))
+            .unwrap();
+    }
+}
+
+#[test]
 fn reliability_output_ownership_restore_preserves_effective_controls_and_history() {
     let mut plan = SimulationPlan::empty();
     let (dc, _) = plan.insert(AnalysisKind::Reliability).unwrap();

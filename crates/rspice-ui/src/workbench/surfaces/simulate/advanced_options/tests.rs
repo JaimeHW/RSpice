@@ -11,6 +11,52 @@ use crate::simulation::dialog::OpHomotopy;
 use crate::simulation::plan::NumericOverrideOption as O;
 
 #[test]
+fn dc_study_solver_controls_match_the_selected_base_mode() {
+    for kind in [AnalysisKind::MonteCarlo, AnalysisKind::Optimization] {
+        let mut draft = AnalysisDraft::for_kind(kind);
+        let options = SimulationOptions::default();
+        for configured_base in [false, true] {
+            let base = configured_base.then(AnalysisInstanceId::new);
+            match &mut draft {
+                AnalysisDraft::MonteCarlo(state) => state.base_analysis = base,
+                AnalysisDraft::Optimization(state) => state.base_analysis = base,
+                _ => unreachable!(),
+            }
+            let form: Vec<_> = form_rows(kind, &draft, None, &options)
+                .into_iter()
+                .flat_map(|section| section.rows)
+                .map(|row| row.option)
+                .collect();
+            let ledger = rows_with(kind, &draft, None, &options);
+            let ownership = draft.solver_ownership();
+            for option in [
+                O::Itl4,
+                O::Trtol,
+                O::IntegrationMethod,
+                O::StrobeInterval,
+                O::OutputTimePoints,
+                O::RetainEverySignal,
+            ] {
+                assert_eq!(form.contains(&option), configured_base);
+                if !configured_base {
+                    let reason = option.refusal_for_instance(kind, ownership).unwrap();
+                    assert!(reason.contains("only DC operating points"));
+                    assert_eq!(origin_of(&ledger, option), reason);
+                    assert!(
+                        AnalysisNumericOverride::default()
+                            .set_for_instance(kind, ownership, option, "1")
+                            .is_err()
+                    );
+                }
+            }
+            for option in [O::Reltol, O::Itl1, O::Gmin] {
+                assert!(option.refusal_for_instance(kind, ownership).is_none());
+            }
+        }
+    }
+}
+
+#[test]
 fn periodic_consumer_solver_ownership_matches_form_ledger_and_authoring() {
     for kind in [
         AnalysisKind::Pac,

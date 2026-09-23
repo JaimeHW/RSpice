@@ -1131,23 +1131,27 @@ impl SimulationPlan {
             if instance.kind == AnalysisKind::Fourier {
                 instance.numeric_override = None;
             }
-            // Older Reliability drafts offered reporting switches with no
-            // consumer, and time-integration controls even under DC stress.
+            // Older drafts offered time-integration controls for DC-only
+            // studies and stress, plus unused Reliability reporting switches.
             // Retire only those fields; preserve effective solver departures.
-            if instance.kind == AnalysisKind::Reliability
-                && let Some(record) = instance.numeric_override.as_mut()
+            if matches!(
+                instance.kind,
+                AnalysisKind::Reliability | AnalysisKind::MonteCarlo | AnalysisKind::Optimization
+            ) && let Some(record) = instance.numeric_override.as_mut()
             {
                 let ownership = instance.draft.solver_ownership();
                 for option in NumericOverrideOption::all() {
-                    if matches!(
-                        option,
-                        NumericOverrideOption::StrobeInterval
-                            | NumericOverrideOption::OutputTimePoints
-                            | NumericOverrideOption::RetainEverySignal
-                    ) || (option.refusal_for(instance.kind).is_none()
-                        && option
-                            .refusal_for_instance(instance.kind, ownership)
-                            .is_some())
+                    if (instance.kind == AnalysisKind::Reliability
+                        && matches!(
+                            option,
+                            NumericOverrideOption::StrobeInterval
+                                | NumericOverrideOption::OutputTimePoints
+                                | NumericOverrideOption::RetainEverySignal
+                        ))
+                        || (option.refusal_for(instance.kind).is_none()
+                            && option
+                                .refusal_for_instance(instance.kind, ownership)
+                                .is_some())
                     {
                         record.clear(option);
                     }

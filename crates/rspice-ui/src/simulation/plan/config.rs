@@ -642,6 +642,14 @@ impl AnalysisDraft {
                 time_integration: Some(state.study.transient_stress),
                 ..SolverOwnership::NONE
             },
+            Self::MonteCarlo(state) if state.base_analysis.is_none() => SolverOwnership {
+                time_integration: Some(false),
+                ..SolverOwnership::NONE
+            },
+            Self::Optimization(state) if state.base_analysis.is_none() => SolverOwnership {
+                time_integration: Some(false),
+                ..SolverOwnership::NONE
+            },
             Self::Envelope(state) => SolverOwnership {
                 hb_initializer: Some(state.initial_periodic_solve_idx == 0),
                 ..SolverOwnership::NONE
