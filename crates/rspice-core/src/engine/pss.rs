@@ -117,8 +117,8 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-// Resolved timestep and truncation bounds qualify the retained period map.
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 102;
+// Timepoint Newton uses the resolved transient iteration policy.
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 103;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -3859,7 +3859,12 @@ impl Engine {
             }
         }
 
-        for _iter in 0..self.config.max_iterations {
+        let iteration_budget = if step.initialization {
+            self.config.max_iterations
+        } else {
+            self.transient_newton_iteration_budget(false)
+        };
+        for _iter in 0..iteration_budget {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
@@ -5715,7 +5720,8 @@ mod tests {
             let coeff = CompanionCoefficients::for_method(method);
             for cancelled in [false, true] {
                 let limited = Engine::new(SimulationConfig {
-                    max_iterations: 1,
+                    spice_dialect: crate::SpiceDialect::Xyce,
+                    transient_nonlinear_max_iterations: Some(1),
                     ..SimulationConfig::default()
                 });
                 let abort = crate::abort_signal::CountingAbort::new(1);
@@ -5916,7 +5922,8 @@ mod tests {
             Netlist::parse("bounded PSS retries\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n")
                 .unwrap();
         let engine = Engine::new(SimulationConfig {
-            max_iterations: 1,
+            spice_dialect: crate::SpiceDialect::Xyce,
+            transient_nonlinear_max_iterations: Some(1),
             min_timestep: 1e-12,
             ..SimulationConfig::default()
         });

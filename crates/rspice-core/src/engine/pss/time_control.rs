@@ -48,6 +48,66 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pss_timepoint_budget_uses_transient_options_in_each_dialect() {
+        // A staircase control requires successive Newton updates; its local
+        // derivative is zero. The DC limit deliberately permits every case,
+        // so borrowing that limit for a timepoint would hide both failures.
+        for (dialect, options, target, converges) in [
+            (
+                crate::SpiceDialect::Ngspice,
+                ".options ITL4=100",
+                150,
+                false,
+            ),
+            (crate::SpiceDialect::Ngspice, ".options ITL4=200", 150, true),
+            (
+                crate::SpiceDialect::Xyce,
+                ".options NONLIN-TRAN MAXSTEP=2",
+                5,
+                false,
+            ),
+            (
+                crate::SpiceDialect::Xyce,
+                ".options NONLIN-TRAN MAXSTEP=10",
+                5,
+                true,
+            ),
+        ] {
+            let netlist = Netlist::parse(&format!(
+                "PSS timestep budget\nB1 out 0 V={{min(floor(V(out))+1,{target})}}\nR1 out 0 1k\n.options ITL1=500\n{options}\n.end\n"
+            )).unwrap();
+            let engine = Engine::new(crate::SimulationConfig {
+                spice_dialect: dialect,
+                ..Default::default()
+            })
+            .resolved_for_netlist(&netlist);
+            let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
+            let mut matrix = engine.build_matrix(&circuit).unwrap();
+            circuit.link_indices(&matrix);
+            let start = vec![0.0; circuit.matrix_size()];
+            let coeff = CompanionCoefficients::backward_euler();
+            let result = engine
+                .pss_newton_trial(
+                    &mut circuit,
+                    &mut matrix,
+                    PssCompanionStep {
+                        coeff: &coeff,
+                        t_next: 1e-6,
+                        dt: 1e-6,
+                        initialization: false,
+                    },
+                    &start,
+                    &NoAbort,
+                )
+                .unwrap();
+            assert_eq!(result.is_some(), converges, "{dialect:?}: {options}");
+            if let Some(solution) = result {
+                assert!((solution[0] - target as Value).abs() < 1e-10);
+            }
+        }
+    }
+
+    #[test]
     fn pss_timeint_tolerances_control_stabilization_and_orbit_accuracy() {
         let run = |reltol: Value, abstol: Value| {
             let netlist = Netlist::parse(&format!(

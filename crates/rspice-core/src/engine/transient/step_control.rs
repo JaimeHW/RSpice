@@ -164,7 +164,10 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn transient_newton_iteration_budget(&self, startup_recovery: bool) -> usize {
+    pub(in crate::engine) fn transient_newton_iteration_budget(
+        &self,
+        startup_recovery: bool,
+    ) -> usize {
         let standard_budget = match self.config.spice_dialect {
             // Xyce's NOX transient parameter set owns an independent MAXSTEP
             // budget whose 7.10 default is 20.
