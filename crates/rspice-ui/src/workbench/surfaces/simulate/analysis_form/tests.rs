@@ -1647,6 +1647,7 @@ fn envelope_initializer_form_paints_each_active_solver_control() {
         }
         for label in [
             "Stabilization periods",
+            "Stabilization time",
             "Points per period",
             "Shooting integration",
         ] {

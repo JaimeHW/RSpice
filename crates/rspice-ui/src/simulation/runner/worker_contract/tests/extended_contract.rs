@@ -390,6 +390,7 @@ fn analysis_spec_round_trips_supported_variants() {
                 damping: 0.8,
                 verbose: true,
                 pss_stabilization_periods: 7,
+                pss_stabilization_time: 12.5e-6,
                 pss_points_per_period: Some(512),
                 pss_integration:
                     crate::services::simulation_runner::EnvelopeShootingIntegration::Gear2,

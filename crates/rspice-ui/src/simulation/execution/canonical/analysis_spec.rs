@@ -145,12 +145,16 @@ fn envelope_initializer_authenticates_every_control_and_preserves_legacy_identit
     let changes = serde_json::json!({
         "max_iterations": 73, "reltol": 2.5e-7, "abstol": 3e-13,
         "damping": 0.8, "verbose": true, "pss_stabilization_periods": 7,
+        "pss_stabilization_time": 12.5e-6,
         "pss_points_per_period": 512, "pss_integration": "Gear2",
         "hb_min_damping": 0.025, "hb_oversample": 4, "hb_collocation_points": 33,
         "hb_use_krylov": true, "hb_gmres_restart": 19, "hb_source_stepping": true,
         "hb_exact_jacobian": false
     });
-    let default = serde_json::to_value(EnvelopeInitializationConfig::default()).unwrap();
+    let mut default = serde_json::to_value(EnvelopeInitializationConfig::default()).unwrap();
+    // The absent zero time keeps existing serialized initializer statements.
+    assert!(default.get("pss_stabilization_time").is_none());
+    default["pss_stabilization_time"] = serde_json::json!(0.0);
     assert_eq!(
         changes.as_object().unwrap().len(),
         default.as_object().unwrap().len()
@@ -1061,6 +1065,10 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                 writer.bool(initialization.hb_source_stepping);
                 writer.bool(initialization.hb_exact_jacobian);
                 writer.u8(initialization.pss_integration as u8);
+                if initialization.pss_stabilization_time != 0.0 {
+                    writer.string("envelope-stabilization-time-v1");
+                    writer.f64(initialization.pss_stabilization_time);
+                }
             }
 
             encode_envelope_adaptive_mode(writer, *adaptive_mode);

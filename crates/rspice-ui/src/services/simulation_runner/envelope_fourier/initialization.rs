@@ -37,6 +37,9 @@ pub struct EnvelopeInitializationConfig {
     pub damping: f64,
     pub verbose: bool,
     pub pss_stabilization_periods: usize,
+    /// Positive seconds override the cycle count; zero keeps the cycle policy.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub pss_stabilization_time: f64,
     pub pss_points_per_period: Option<usize>,
     pub pss_integration: EnvelopeShootingIntegration,
     pub hb_min_damping: f64,
@@ -57,6 +60,7 @@ impl Default for EnvelopeInitializationConfig {
             damping: 1.0,
             verbose: false,
             pss_stabilization_periods: 20,
+            pss_stabilization_time: 0.0,
             pss_points_per_period: None,
             pss_integration: EnvelopeShootingIntegration::Automatic,
             hb_min_damping: 0.01,
@@ -84,7 +88,14 @@ impl EnvelopeInitializationConfig {
         config.damping_factor = self.damping;
         config.verbose = self.verbose;
         config.tstab_periods = self.pss_stabilization_periods;
-        config.tstab = self.pss_stabilization_periods as f64 / frequency;
+        if !self.pss_stabilization_time.is_finite() || self.pss_stabilization_time < 0.0 {
+            return Err("Envelope stabilization time must be finite and nonnegative".into());
+        }
+        config.tstab = if self.pss_stabilization_time > 0.0 {
+            self.pss_stabilization_time
+        } else {
+            self.pss_stabilization_periods as f64 / frequency
+        };
         config.points_per_period = self
             .pss_points_per_period
             .unwrap_or_else(|| harmonics.saturating_mul(16).max(256));
@@ -120,6 +131,10 @@ impl EnvelopeInitializationConfig {
         )
         .map_err(|error| error.to_string())
     }
+}
+
+fn is_zero(value: &f64) -> bool {
+    *value == 0.0
 }
 
 /// Keep the authored spectral ceiling (first carrier × harmonic order), while
@@ -309,6 +324,12 @@ mod tests {
         let mut zero = controls;
         zero.pss_stabilization_periods = 0;
         assert_eq!(zero.pss_config(&[1e6], 3).unwrap().effective_tstab(), 0.0);
+        zero.pss_stabilization_periods = 100;
+        zero.pss_stabilization_time = 2.5e-6;
+        assert_eq!(
+            zero.pss_config(&[2e6, 3e6], 3).unwrap().effective_tstab(),
+            2.5e-6
+        );
     }
 
     #[test]
@@ -324,6 +345,11 @@ mod tests {
         cfg.pss_points_per_period = Some(16);
         assert!(cfg.pss_config(&[1e6], 9).is_err());
         cfg.pss_points_per_period = None;
+        for invalid in [-1.0, f64::NAN, f64::INFINITY] {
+            cfg.pss_stabilization_time = invalid;
+            assert!(cfg.pss_config(&[1e6], 3).is_err());
+        }
+        cfg.pss_stabilization_time = 0.0;
         cfg.max_iterations = 0;
         assert!(cfg.hb_config(&[1e6], 3).is_err());
         assert!(cfg.pss_config(&[1e6], 3).is_err());

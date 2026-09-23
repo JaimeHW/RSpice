@@ -184,9 +184,7 @@ pub(super) fn fields(
         policy,
         locale,
     );
-    envelope_harmonic_order_row(ui, &mut setup.harmonic_order);
-    super::field_note(
-        ui,
+    envelope_harmonic_order_row(ui, &mut setup.harmonic_order).on_hover_text(
         "Periodic initialization uses the carriers' common period. Harmonic order sets the upper frequency to the first carrier × order.",
     );
     envelope_modulation_source_row(
@@ -206,10 +204,15 @@ pub(super) fn fields(
         ENVELOPE_ADAPTIVE_CHOICES,
         &mut setup.adaptive_mode_idx,
     );
-    initializer_fields(ui, setup);
+    initializer_fields(ui, setup, policy, locale);
 }
 
-fn initializer_fields(ui: &mut Ui, setup: &mut EnvelopeDialogState) {
+fn initializer_fields(
+    ui: &mut Ui,
+    setup: &mut EnvelopeDialogState,
+    policy: QuantityPresentationPolicy,
+    locale: UiNumberLocale,
+) {
     use super::{choice_row, field_note, input_row, sub_header, switch_row};
     if setup.initial_periodic_solve_idx == 2 {
         return;
@@ -227,10 +230,12 @@ fn initializer_fields(ui: &mut Ui, setup: &mut EnvelopeDialogState) {
             "Stabilization periods",
             &mut controls.pss_stabilization_periods,
         );
+        envelope_time_input_row(ui, "Stabilization time", &mut controls.pss_stabilization_time, policy, locale)
+            .on_hover_text("A positive time replaces the stabilization periods. Empty or zero uses the period count.");
         input_row(ui, "Points per period", &mut controls.pss_points_per_period);
         field_note(
             ui,
-            "Empty points uses max(256, 16 × harmonic order). Zero stabilization starts shooting immediately.",
+            "Empty points chooses an automatic grid. Use zero periods and no stabilization time to start shooting immediately.",
         );
         choice_row(
             ui,

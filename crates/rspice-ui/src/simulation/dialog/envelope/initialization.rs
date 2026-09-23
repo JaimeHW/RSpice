@@ -14,6 +14,7 @@ pub struct EnvelopeInitializationState {
     pub damping: String,
     pub verbose: bool,
     pub pss_stabilization_periods: String,
+    pub pss_stabilization_time: String,
     pub pss_points_per_period: String,
     pub hb_min_damping: String,
     pub hb_oversample: String,
@@ -40,6 +41,11 @@ impl EnvelopeInitializationState {
             damping: config.damping.to_string(),
             verbose: config.verbose,
             pss_stabilization_periods: config.pss_stabilization_periods.to_string(),
+            pss_stabilization_time: if config.pss_stabilization_time == 0.0 {
+                String::new()
+            } else {
+                config.pss_stabilization_time.to_string()
+            },
             pss_points_per_period: config
                 .pss_points_per_period
                 .map(|value| value.to_string())
@@ -84,6 +90,12 @@ impl EnvelopeInitializationState {
         if method == 1 {
             config.pss_stabilization_periods =
                 parse_integer(&self.pss_stabilization_periods, "pss_stabilization_periods")?;
+            config.pss_stabilization_time = if self.pss_stabilization_time.trim().is_empty() {
+                0.0
+            } else {
+                parse_si_value(&self.pss_stabilization_time)
+                    .map_err(|error| format!("Initializer stabilization time: {error}"))?
+            };
         }
         if method == 1 {
             config.pss_points_per_period = if self.pss_points_per_period.trim().is_empty() {
@@ -174,6 +186,7 @@ mod tests {
                 config.initialization.hb_exact_jacobian = false;
             } else {
                 config.initialization.pss_stabilization_periods = 7;
+                config.initialization.pss_stabilization_time = 12.5e-6;
                 config.initialization.pss_points_per_period = Some(512);
                 config.initialization.pss_integration = EnvelopeShootingIntegration::Gear2;
             }
@@ -184,6 +197,33 @@ mod tests {
             assert_eq!(json.to_config().unwrap(), config);
             assert_eq!(ron.to_config().unwrap(), config);
             assert!(config.to_spice().contains("initializer="));
+            if method == EnvelopeInitialPeriodicSolve::PeriodicSteadyState {
+                let resolved = json.to_config().unwrap();
+                assert_eq!(
+                    resolved
+                        .initialization
+                        .pss_config(&resolved.carrier_tones, resolved.harmonic_order as usize)
+                        .unwrap()
+                        .effective_tstab(),
+                    12.5e-6
+                );
+                let mut old_controls = serde_json::to_value(&draft).unwrap();
+                old_controls["initialization"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("pss_stabilization_time");
+                let old_controls: EnvelopeDialogState =
+                    serde_json::from_value(old_controls).unwrap();
+                let restored = old_controls.to_config().unwrap();
+                assert_eq!(
+                    restored
+                        .initialization
+                        .pss_config(&restored.carrier_tones, restored.harmonic_order as usize)
+                        .unwrap()
+                        .effective_tstab(),
+                    7e-6
+                );
+            }
             let mut old = serde_json::to_value(&draft).unwrap();
             old.as_object_mut().unwrap().remove("initialization");
             let old: EnvelopeDialogState = serde_json::from_value(old).unwrap();
@@ -202,5 +242,11 @@ mod tests {
         assert!(state.to_config(1).is_ok());
         state.reltol = "unfinished".into();
         assert!(state.to_config(2).is_ok());
+        state = EnvelopeInitializationState::default();
+        state.pss_stabilization_time = "unfinished".into();
+        assert!(state.to_config(0).is_ok());
+        assert!(state.to_config(1).is_err());
+        state.pss_stabilization_time = "12.5u".into();
+        assert!((state.to_config(1).unwrap().pss_stabilization_time - 12.5e-6).abs() < 1e-18);
     }
 }
