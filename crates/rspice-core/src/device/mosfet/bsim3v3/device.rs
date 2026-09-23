@@ -28,6 +28,8 @@ use super::{Bsim3v3, eval};
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::{Complex64, NodeId, Value};
 
+mod periodic;
+
 const TRNQS_SCALING: Value = 1.0e-9;
 
 /// Mode-assembled charge-companion conductance matrix: the `gc**` of
