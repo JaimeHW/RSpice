@@ -745,7 +745,7 @@ mod impulses;
 mod checkpoint;
 mod companion_stamps;
 #[cfg_attr(not(test), allow(dead_code))]
-mod source_events;
+pub(super) mod source_events;
 use companion_stamps::{CompactTwoTerminalStampSlots, TwoTerminalStampSlots};
 mod charge_stamper;
 // The physical event operator is qualified independently before the main

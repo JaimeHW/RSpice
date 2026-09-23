@@ -371,3 +371,119 @@ fn netlist_spectral_envelope_preserves_event_sides_and_rejects_foreign_history()
         Err(SimulationError::Aborted)
     ));
 }
+
+#[test]
+fn netlist_spectral_envelope_modulation_events_bound_steps_without_enumerating_rf_cycles() {
+    let event = 0.00073_f64;
+    let adjacent = event.next_up();
+    let deck = format!(
+        "selected physical clocks\nVrf rf 0 PULSE(0 1 0 1n 1n 400n 1u)\nRrf rf 0 1k\nVmod out 0 PWL(0 0 {event:.17e} 0 {event:.17e} 1 2m 1)\nRmod out 0 1k\nVnear near 0 PWL(0 0 {adjacent:.17e} 0 {adjacent:.17e} 2 2m 2)\nRnear near 0 1k\nImod load 0 PWL(0 0 {event:.17e} 0 {event:.17e} -1m 2m -1m)\nRload load 0 1k\nVdefault d 0 PULSE(0 1 1.2m)\nRdefault d 0 1k\n.end\n"
+    );
+    let netlist = Netlist::parse(&deck).unwrap();
+    let mut settings = SimulationConfig::default();
+    settings.spice_dialect = crate::config::SpiceDialect::Ngspice;
+    settings.resource_limits.max_analysis_points = 64;
+    let mut request = config(&["vmod", "VNEAR", "Imod", "Vdefault"]);
+    request.source_time_step = 20e-6;
+    let mut prepared = Engine::new(settings)
+        .prepare_spectral_envelope_with_abort(&netlist, request, &NoAbort)
+        .unwrap();
+    assert_eq!(prepared.next_source_event_after(0.0).unwrap(), Some(event));
+    assert_eq!(
+        prepared.next_source_event_after(event).unwrap(),
+        Some(adjacent)
+    );
+    assert_eq!(
+        prepared.next_source_event_after(adjacent).unwrap(),
+        Some(0.0012)
+    );
+    assert_eq!(
+        prepared.next_source_event_after(0.0012).unwrap(),
+        Some(0.0012 + 20e-6)
+    );
+    let events = prepared
+        .source_events_at(event)
+        .unwrap()
+        .collect::<Vec<_>>();
+    assert_eq!(events.len(), 2);
+    let voltage = events
+        .iter()
+        .find(|e| e.source.eq_ignore_ascii_case("Vmod"))
+        .unwrap();
+    assert_eq!((voltage.left_value, voltage.right_value), (0.0, 1.0));
+    let current = events
+        .iter()
+        .find(|e| e.source.eq_ignore_ascii_case("Imod"))
+        .unwrap();
+    assert_eq!((current.left_value, current.right_value), (0.0, -0.001));
+    assert!(
+        events
+            .iter()
+            .all(|e| e.derivative_order_lower_bound == Some(0))
+    );
+    assert_eq!(
+        prepared
+            .source_events_at(adjacent)
+            .unwrap()
+            .next()
+            .unwrap()
+            .source,
+        "VNEAR"
+    );
+    assert!(prepared.source_events_at(0.0004).unwrap().next().is_none());
+    assert!(prepared.source_events_at(Value::NAN).is_err());
+    assert!(prepared.next_source_event_after(0.003).is_err());
+    let initial = prepared
+        .initialize_with_abort(0.0, EnvelopeSourceSide::RightLimit, None, &NoAbort)
+        .unwrap();
+    let control = SpectralEnvelopeControl {
+        method: SpectralEnvelopeMethod::Bdf2,
+        minimum_step: 1e-9,
+        maximum_step: 0.002,
+        relative_tolerance: 1e-3,
+        absolute_tolerances: vec![1e-9; initial.spectra().len()],
+        max_rejections: 5,
+    };
+    let accepted = prepared
+        .advance_with_abort(
+            &initial,
+            0.002,
+            0.002,
+            EnvelopeSourceSide::Published,
+            &control,
+            &NoAbort,
+        )
+        .unwrap();
+    assert_eq!(accepted.state.time().to_bits(), event.to_bits());
+    assert_eq!(accepted.rejected_steps, 0);
+    close(
+        coefficient(&accepted.state, "out", &[0]),
+        Complex64::ZERO,
+        1e-10,
+    );
+    close(
+        coefficient(&accepted.state, "load", &[0]),
+        Complex64::ZERO,
+        1e-10,
+    );
+    // Queries and accepted steps do not consume clocks or merge adjacent roots.
+    assert_eq!(prepared.next_source_event_after(0.0).unwrap(), Some(event));
+    assert_eq!(
+        prepared
+            .next_source_event_after(accepted.state.time())
+            .unwrap(),
+        Some(adjacent)
+    );
+    // The unchanged all-source collection would include thousands of RF
+    // edges and exceed this deliberately small event budget.
+    assert!(
+        Engine::collect_selected_physical_source_events(
+            &prepared.circuit,
+            0.002,
+            None,
+            &prepared.limits,
+            &NoAbort
+        )
+        .is_err()
+    );
+}

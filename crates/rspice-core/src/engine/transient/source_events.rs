@@ -10,20 +10,20 @@ use rspice_veriloga_runtime::transport_delay::DelayEventOrder;
 use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum PhysicalSourceOwner {
+pub(in crate::engine) enum PhysicalSourceOwner {
     Voltage(usize),
     Current(usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct PhysicalSourceEvent {
+pub(in crate::engine) struct PhysicalSourceEvent {
     pub time: Value,
     pub owner: PhysicalSourceOwner,
     pub order: DelayEventOrder,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(super) struct PhysicalSourceEvents {
+pub(in crate::engine) struct PhysicalSourceEvents {
     events: Vec<PhysicalSourceEvent>,
 }
 
@@ -32,7 +32,16 @@ fn failure(message: impl Into<String>) -> SimulationError {
 }
 
 impl PhysicalSourceEvents {
-    pub(super) fn at(&self, time: Value) -> Result<&[PhysicalSourceEvent], SimulationError> {
+    pub(in crate::engine) fn retained_values(&self) -> usize {
+        self.events.len().saturating_mul(
+            std::mem::size_of::<PhysicalSourceEvent>().div_ceil(std::mem::size_of::<Value>()),
+        )
+    }
+
+    pub(in crate::engine) fn at(
+        &self,
+        time: Value,
+    ) -> Result<&[PhysicalSourceEvent], SimulationError> {
         if !time.is_finite() || time < 0.0 {
             return Err(failure("invalid event query time"));
         }
@@ -41,7 +50,7 @@ impl PhysicalSourceEvents {
         Ok(&self.events[first..end])
     }
 
-    pub(super) fn next_after(
+    pub(in crate::engine) fn next_after(
         &self,
         time: Value,
         stop: Value,
@@ -263,6 +272,18 @@ impl Engine {
         limits: &crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<PhysicalSourceEvents, SimulationError> {
+        Self::collect_selected_physical_source_events(circuit, stop, None, limits, abort)
+    }
+
+    /// Selection occurs before clock enumeration, so a multirate analysis
+    /// does not allocate or march the unselected RF carrier's edge train.
+    pub(in crate::engine) fn collect_selected_physical_source_events(
+        circuit: &crate::CircuitData,
+        stop: Value,
+        selected: Option<&BTreeSet<String>>,
+        limits: &crate::resource::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<PhysicalSourceEvents, SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -311,6 +332,9 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             seen += 1;
+            if selected.is_some_and(|names| !names.contains(&name.to_ascii_lowercase())) {
+                continue;
+            }
             let remaining = maximum.saturating_sub(events.len());
             let mut clocks = ExactClocks {
                 times: BTreeSet::new(),

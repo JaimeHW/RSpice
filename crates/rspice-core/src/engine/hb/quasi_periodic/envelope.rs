@@ -7,6 +7,9 @@ use crate::analysis::quasi_periodic::{
 };
 use crate::circuit::SourceTimeSide;
 use crate::engine::PeriodicDcOperatingPointSeed;
+use crate::engine::transient::source_events::{PhysicalSourceEvents, PhysicalSourceOwner};
+mod events;
+pub use events::EnvelopeSourceEvent;
 
 #[cfg(test)]
 mod tests;
@@ -140,6 +143,7 @@ pub struct PreparedSpectralEnvelope {
     coordinates: Arc<Coordinates>,
     carrier_sources: Vec<Vec<Complex64>>,
     slow_sources: Vec<SlowSource>,
+    source_events: PhysicalSourceEvents,
     limits: ResourceLimits,
 }
 
@@ -166,7 +170,7 @@ impl Engine {
         }
         config.solver.validate().map_err(numerical_error)?;
         let engine = self.resolved_for_netlist(netlist);
-        let limits = engine.config.resource_limits;
+        let mut limits = engine.config.resource_limits;
         let grid = Arc::new(
             match &config.carrier {
                 EnvelopeCarrierBasis::Periodic {
@@ -257,6 +261,15 @@ impl Engine {
             .saturating_add(circuit.capacitors.periodic_auxiliary_count())
             .saturating_add(Self::hb_device_auxiliary_count(&circuit));
         let bounded = source_workspace_limits(unknowns, &grid, &limits).map_err(numerical_error)?;
+        let source_events = Self::collect_selected_physical_source_events(
+            &circuit,
+            config.stop_time,
+            Some(&selected),
+            &bounded,
+            abort,
+        )?;
+        limits.max_result_values -= source_events.retained_values();
+        let bounded = source_workspace_limits(unknowns, &grid, &limits).map_err(numerical_error)?;
         crate::analysis::quasi_periodic::solve::check_workload(
             unknowns,
             &grid,
@@ -288,6 +301,7 @@ impl Engine {
             solver,
             carrier_sources,
             slow_sources,
+            source_events,
             limits,
             coordinates: Arc::new(Coordinates {
                 grid,
@@ -516,9 +530,11 @@ impl PreparedSpectralEnvelope {
     }
 
     /// Take one error-controlled step, landing no later than `deadline`.
-    /// `deadline_side` is used only at that exact endpoint; interior probes
-    /// use the published waveform. The caller must provide the next event or
-    /// output deadline and handle algebraic jumps before continuing past it.
+    /// Selected modulation events shorten that deadline automatically and
+    /// are approached from the left. At an ordinary output deadline,
+    /// `deadline_side` selects the source value; interior probes use the
+    /// published waveform. The caller must handle event algebraic jumps and
+    /// restart multistep history before continuing past a discontinuity.
     #[expect(
         clippy::too_many_arguments,
         reason = "accepted state, controller and event endpoint are independent"
@@ -535,6 +551,10 @@ impl PreparedSpectralEnvelope {
         check_abort(abort)?;
         self.validate_state(previous)?;
         self.validate_time(deadline)?;
+        let (deadline, deadline_side) = match self.next_source_event_after(previous.time())? {
+            Some(event) if event <= deadline => (event, EnvelopeSourceSide::LeftLimit),
+            _ => (deadline, deadline_side),
+        };
         let limits = source_workspace_limits(self.carrier_sources.len(), self.grid(), &self.limits)
             .map_err(numerical_error)?;
         let advance = advance_spectral_envelope_with_abort(

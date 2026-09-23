@@ -143,8 +143,8 @@ pub use error::{
     SimulationErrorDescriptor, UnsupportedCapabilityError,
 };
 pub use hb::{
-    EnvelopeCarrierBasis, EnvelopeSourceSide, NetlistEnvelopeAdvance, NetlistEnvelopeState,
-    PreparedSpectralEnvelope, SpectralEnvelopeConfig,
+    EnvelopeCarrierBasis, EnvelopeSourceEvent, EnvelopeSourceSide, NetlistEnvelopeAdvance,
+    NetlistEnvelopeState, PreparedSpectralEnvelope, SpectralEnvelopeConfig,
     EnvelopeResult, HbAnalysisResult, HbCurrentSpectrum, HbEnvelopeContinuationState,
     HbEnvelopeStateGuarantee, HbIntegralSpectrum, HbNoiseFigureRequest, HbOperatingPoint,
     HbOperatingPointIdentity, PacAnalysisResult, PeriodicNoiseEdge, PeriodicNoiseEdgeDirection,

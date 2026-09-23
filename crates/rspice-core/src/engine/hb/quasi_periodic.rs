@@ -3,8 +3,8 @@ mod autonomous;
 mod bindings;
 mod envelope;
 pub use envelope::{
-    EnvelopeCarrierBasis, EnvelopeSourceSide, NetlistEnvelopeAdvance, NetlistEnvelopeState,
-    PreparedSpectralEnvelope, SpectralEnvelopeConfig,
+    EnvelopeCarrierBasis, EnvelopeSourceEvent, EnvelopeSourceSide, NetlistEnvelopeAdvance,
+    NetlistEnvelopeState, PreparedSpectralEnvelope, SpectralEnvelopeConfig,
 };
 pub use autonomous::{QpssOscillator, QpssOscillatorSeed};
 mod card;
