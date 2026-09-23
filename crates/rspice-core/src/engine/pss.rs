@@ -4044,6 +4044,7 @@ impl Engine {
         let initial_charge_rates = pss.has_initial_charge_rates();
         let PssCircuit {
             circuit,
+            capacitor_trial_currents,
             diode_history,
             bjt_history,
             jfet_history,
@@ -4080,8 +4081,8 @@ impl Engine {
             }
         }
 
-        // Reuse the transient capacitor companion so shooting PSS has exactly
-        // the same branch-current convention and numerical scaling as TRAN.
+        // Retain the transient charge law and physical branch-current
+        // convention, using the fixed-history step Jacobian for shooting.
         if !initialization {
             circuit
                 .capacitors
@@ -4101,7 +4102,7 @@ impl Engine {
             } else {
                 circuit
                     .capacitors
-                    .stamp_solution_dependent_transient_companion(
+                    .stamp_solution_dependent_shooting_companion(
                         matrix,
                         rhs,
                         linearize_at,
@@ -4111,6 +4112,8 @@ impl Engine {
                             coeff,
                             num_nodes,
                         },
+                        capacitor_trial_currents,
+                        physical_probe,
                     )
                     .map_err(SimulationError::Circuit)?;
             }
@@ -4536,6 +4539,15 @@ impl Engine {
                     &coeff,
                     nodes,
                 );
+            // Retain the same cancellation-free current used to certify this
+            // accepted shooting step. IC branches already own solved currents.
+            for index in 0..circuit.capacitors.len() {
+                if circuit.capacitors.value_expression(index).is_some()
+                    && circuit.capacitors.ic_branch_indices[index].is_none()
+                {
+                    circuit.capacitors.i_prev[index] = circuit.capacitor_trial_currents[index];
+                }
+            }
             circuit
                 .behavioral_sources
                 .accept_transient_step(&new_solution, t)

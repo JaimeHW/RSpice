@@ -25,20 +25,39 @@ const T_REF: f64 = 400.15;
 
 #[test]
 fn expression_capacitor_oscillator_noise_matches_radial_phase_diffusion() {
-    use rspice_core::NoAbort;
-    use rspice_core::config::{ExpressionDialect, SpiceDialect};
-    use rspice_core::netlist::NetlistParseOptions;
     // Each B current multiplies the radial vector field by its capacitor's
     // actual C(x,noise). This leaves a unit-circle oscillator with a known PPV,
     // while exercising terminal/control derivatives and physical IC branches.
     // A noise voltage also modulates C; its v'*dC/dnoise contribution must
     // cancel the same modulation of the B current's deterministic component.
-    let cx = "(1+.2*v(x)*v(x)+.3*v(nx))";
-    let cy = "(1+.15*v(y)*v(y)+.25*v(nx))";
+    check_capacitor_radial_noise(
+        "(1+.2*v(x)*v(x)+.3*v(nx))",
+        "(1+.15*v(y)*v(y)+.25*v(nx))",
+        1.0,
+        0,
+    );
+}
+
+#[test]
+fn mutually_controlled_capacitor_oscillator_noise_matches_radial_phase_diffusion() {
+    for (initial_x, stabilization) in [(0.1, 25), (1.0, 0)] {
+        check_capacitor_radial_noise(
+            "(1+.2*v(x)*v(x)+.3*v(y)*v(y))",
+            "(1+.15*v(x)*v(x))",
+            initial_x,
+            stabilization,
+        );
+    }
+}
+
+fn check_capacitor_radial_noise(cx: &str, cy: &str, initial_x: f64, stabilization: usize) {
+    use rspice_core::NoAbort;
+    use rspice_core::config::{ExpressionDialect, SpiceDialect};
+    use rspice_core::netlist::NetlistParseOptions;
     let netlist = Netlist::parse_with_options(
         &format!(
             "Radial capacitance noise\n\
-        cx x 0 C={{1m*{cx}}} IC=1\ncy y 0 C={{1m*{cy}}} IC=0\n\
+        cx x 0 C={{1m*{cx}}} IC={initial_x}\ncy y 0 C={{1m*{cy}}} IC=0\n\
         bx x 0 I={{-{cx}*((1-v(x)*v(x)-v(y)*v(y))*v(x)/10-v(y)+v(nx))}}\n\
         by y 0 I={{-{cy}*((1-v(x)*v(x)-v(y)*v(y))*v(y)/10+v(x)+1k*i(vsense))}}\n\
         rnx nx 0 1k\nrny ny 0 1k\nvsense ny 0 0\n.options temp=127\n.end\n"
@@ -54,12 +73,25 @@ fn expression_capacitor_oscillator_noise_matches_radial_phase_diffusion() {
     let config = PssConfig::autonomous()
         .with_period_guess(std::f64::consts::TAU / 1e3)
         .with_oscillator_node("x")
-        .with_tstab_periods(0)
+        .with_tstab_periods(stabilization)
         .with_points_per_period(256)
         .with_tolerance(1e-8);
     let point = engine
         .run_pss_operating_point_with_abort(&netlist, config.clone(), &NoAbort)
         .unwrap();
+    let orbit = &point.analysis().result;
+    let coordinate = |name: &str| {
+        &orbit.waveforms[orbit
+            .node_names
+            .iter()
+            .position(|node| node.eq_ignore_ascii_case(name))
+            .unwrap()]
+        .values
+    };
+    assert!((point.analysis().period * 1e3 / std::f64::consts::TAU - 1.0).abs() < 1e-3);
+    for (&x, &y) in coordinate("x").iter().zip(coordinate("y")) {
+        assert!((x * x + y * y - 1.0).abs() < 2e-3, "orbit ({x}, {y})");
+    }
     let offsets = [10.0, 100.0];
     let result = engine
         .run_pnoise_oscillator_from_pss_with_abort(&netlist, config, &offsets, &point, &NoAbort)

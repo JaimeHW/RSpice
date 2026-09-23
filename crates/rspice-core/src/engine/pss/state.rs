@@ -1434,7 +1434,10 @@ impl PssCircuit {
             .enumerate()
             .filter_map(move |(index, branch)| {
                 branch
-                    .filter(|_| !self.charge_source_rates.is_empty())
+                    .filter(|_| {
+                        !self.charge_source_rates.is_empty()
+                            || self.circuit.capacitors.value_expression(index).is_some()
+                    })
                     .map(|branch| {
                         (
                             solution[nodes + branch - 1],
