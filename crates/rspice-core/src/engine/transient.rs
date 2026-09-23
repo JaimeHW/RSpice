@@ -802,7 +802,10 @@ use checkpoint::{
 pub(crate) use checkpoint::{
     netlist_checkpoint_identity, restart_checkpoint_identity, simulation_checkpoint_identity,
 };
-pub use fft::{transient_fft_window_coherent_gain, transient_fft_window_coherent_gain_with_alpha};
+pub use fft::{
+    transient_fft_window_coefficient_with_alpha, transient_fft_window_coherent_gain,
+    transient_fft_window_coherent_gain_with_alpha,
+};
 
 mod history;
 use history::*;

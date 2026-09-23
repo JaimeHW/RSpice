@@ -287,8 +287,12 @@ fn evaluate_one(
         if sample.is_multiple_of(64) && abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        let window =
-            window_coefficient_with_alpha(analysis.window, sample, denominator, analysis.alpha);
+        let window = transient_fft_window_coefficient_with_alpha(
+            analysis.window,
+            sample,
+            denominator,
+            analysis.alpha,
+        );
         window_sum += window;
         if !status.is_complete() {
             continue;
@@ -667,7 +671,10 @@ fn interpolate_at(
     Some(values[interval] + fraction * (values[next] - values[interval]))
 }
 
-fn window_coefficient_with_alpha(
+/// Return the exact coefficient applied by the transient FFT engine.
+/// Result publishers use this to validate calibration, including
+/// ALFA-dependent windows.
+pub fn transient_fft_window_coefficient_with_alpha(
     window: FftWindow,
     index: usize,
     denominator: Value,
@@ -788,7 +795,8 @@ pub fn transient_fft_window_coherent_gain_with_alpha(
         if index.is_multiple_of(64) && abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        window_sum += window_coefficient_with_alpha(window, index, denominator, alpha);
+        window_sum +=
+            transient_fft_window_coefficient_with_alpha(window, index, denominator, alpha);
     }
     let coherent_gain = window_sum / points as Value;
     if !coherent_gain.is_finite() || coherent_gain <= 0.0 {
@@ -883,7 +891,7 @@ mod tests {
         ];
         for window in windows {
             let coefficients = (0..64)
-                .map(|index| window_coefficient_with_alpha(window, index, 63.0, 3.0))
+                .map(|index| transient_fft_window_coefficient_with_alpha(window, index, 63.0, 3.0))
                 .collect::<Vec<_>>();
             assert!(
                 coefficients
@@ -899,12 +907,16 @@ mod tests {
 
     #[test]
     fn gaussian_and_kaiser_alpha_change_the_window_shape() {
-        let gaussian_default = window_coefficient_with_alpha(FftWindow::Gaussian, 0, 63.0, 3.0);
-        let gaussian_narrow = window_coefficient_with_alpha(FftWindow::Gaussian, 0, 63.0, 6.0);
+        let gaussian_default =
+            transient_fft_window_coefficient_with_alpha(FftWindow::Gaussian, 0, 63.0, 3.0);
+        let gaussian_narrow =
+            transient_fft_window_coefficient_with_alpha(FftWindow::Gaussian, 0, 63.0, 6.0);
         assert!(gaussian_narrow < gaussian_default);
 
-        let kaiser_default = window_coefficient_with_alpha(FftWindow::Kaiser, 0, 63.0, 3.0);
-        let kaiser_narrow = window_coefficient_with_alpha(FftWindow::Kaiser, 0, 63.0, 12.0);
+        let kaiser_default =
+            transient_fft_window_coefficient_with_alpha(FftWindow::Kaiser, 0, 63.0, 3.0);
+        let kaiser_narrow =
+            transient_fft_window_coefficient_with_alpha(FftWindow::Kaiser, 0, 63.0, 12.0);
         assert!(kaiser_narrow < kaiser_default);
         for alpha in [1.0, 3.0, 20.0] {
             let gain = transient_fft_window_coherent_gain_with_alpha(

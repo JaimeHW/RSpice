@@ -429,6 +429,8 @@ const fn fft_window_name(window: rspice_core::netlist::FftWindow) -> &'static st
         rspice_core::netlist::FftWindow::HalfCycleSine6 => "half_cycle_sine_6",
         rspice_core::netlist::FftWindow::Cosine2 => "cosine_2",
         rspice_core::netlist::FftWindow::Cosine4 => "cosine_4",
+        rspice_core::netlist::FftWindow::Gaussian => "gaussian",
+        rspice_core::netlist::FftWindow::Kaiser => "kaiser",
     }
 }
 
@@ -510,52 +512,6 @@ fn fft_expected_frequency_bin(
         ));
     }
     Ok(bin)
-}
-
-fn fft_validation_window_coefficient(
-    window: rspice_core::netlist::FftWindow,
-    index: usize,
-    points: usize,
-    denominator: f64,
-) -> f64 {
-    use std::f64::consts::PI;
-
-    if window == rspice_core::netlist::FftWindow::Rectangular {
-        return 1.0;
-    }
-    let x = index as f64 / denominator;
-    let cosine = |multiple: f64| (multiple * 2.0 * PI * x).cos();
-    match window {
-        rspice_core::netlist::FftWindow::Rectangular => 1.0,
-        rspice_core::netlist::FftWindow::Bartlett => {
-            if (index as f64) < 0.5 * (points - 1) as f64 {
-                2.0 * x
-            } else {
-                2.0 - 2.0 * x
-            }
-        }
-        rspice_core::netlist::FftWindow::BartlettHann => {
-            0.62 - 0.48 * (x - 0.5).abs() + 0.38 * (2.0 * PI * (x - 0.5)).cos()
-        }
-        rspice_core::netlist::FftWindow::Hamming => 0.54 - 0.46 * cosine(1.0),
-        rspice_core::netlist::FftWindow::Hann | rspice_core::netlist::FftWindow::Cosine2 => {
-            0.5 - 0.5 * cosine(1.0)
-        }
-        rspice_core::netlist::FftWindow::Blackman67Db => {
-            0.42323 - 0.49755 * cosine(1.0) + 0.07922 * cosine(2.0)
-        }
-        rspice_core::netlist::FftWindow::Blackman => 0.42 - 0.5 * cosine(1.0) + 0.08 * cosine(2.0),
-        rspice_core::netlist::FftWindow::BlackmanHarris => {
-            0.35875 - 0.48829 * cosine(1.0) + 0.14128 * cosine(2.0) - 0.01168 * cosine(3.0)
-        }
-        rspice_core::netlist::FftWindow::Nuttall => {
-            0.3635819 - 0.4891775 * cosine(1.0) + 0.1365995 * cosine(2.0) - 0.0106411 * cosine(3.0)
-        }
-        rspice_core::netlist::FftWindow::HalfCycleSine => (PI * x).sin(),
-        rspice_core::netlist::FftWindow::HalfCycleSine3 => (PI * x).sin().powi(3),
-        rspice_core::netlist::FftWindow::HalfCycleSine6 => (PI * x).sin().powi(6),
-        rspice_core::netlist::FftWindow::Cosine4 => 0.375 - 0.5 * cosine(1.0) + 0.125 * cosine(2.0),
-    }
 }
 
 /// Check every spectrum the transient produced against the `.FFT` card that
@@ -689,11 +645,11 @@ fn validate_fft_publication(
         };
         let expected_coherent_gain = (0..result.point_count)
             .map(|sample| {
-                fft_validation_window_coefficient(
+                rspice_core::engine::transient_fft_window_coefficient_with_alpha(
                     request.window,
                     sample,
-                    result.point_count,
                     denominator,
+                    request.alpha,
                 )
             })
             .sum::<f64>()
