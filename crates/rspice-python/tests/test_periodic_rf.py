@@ -506,7 +506,9 @@ MAXPERIODCHANGE=0.05
     assert oscillator["period"] == pytest.approx(result.period)
     assert oscillator["cornerFrequency"] == pytest.approx(result.corner_frequency)
     assert document["payload"]["outputNode"] == "V(OSC)"
-    assert [signal.name for signal in result.signals()] == ["phase_noise"]
+    assert [signal.name for signal in result.signals()] == [
+        "phase_noise", "phase_error_psd", "contribution:r1"
+    ]
     assert {scalar.name for scalar in result.scalars()} >= {"carrier_frequency", "converged"}
 
 
