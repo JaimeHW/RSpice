@@ -11,6 +11,24 @@ impl Engine {
         time: Value,
         _tline_dc_refs: &[(Value, Value)],
     ) {
+        Self::stamp_tline_companions_on_side(
+            circuit,
+            matrix,
+            rhs,
+            time,
+            _tline_dc_refs,
+            crate::device::TransmissionLineTimeSide::Outgoing,
+        );
+    }
+
+    pub(super) fn stamp_tline_companions_on_side(
+        circuit: &crate::circuit::CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        time: Value,
+        _tline_dc_refs: &[(Value, Value)],
+        side: crate::device::TransmissionLineTimeSide,
+    ) {
         for tl in &circuit.tlines {
             if tl.is_memoryless_two_port() {
                 Self::stamp_tline_companions_for_memoryless_line(matrix, rhs, tl);
@@ -22,7 +40,7 @@ impl Engine {
                 let response = tl.transient_port_response(time);
                 Self::stamp_ltra_branch_runtime(matrix, rhs, tl, response);
             } else {
-                let response = tl.transient_port_response(time);
+                let response = tl.transient_port_response_on_side(time, side);
                 Self::stamp_tline_two_port(matrix, rhs, tl, response);
             }
         }

@@ -223,13 +223,13 @@ fn visit_next_matching(
 
 /// Accepted transport samples must retain the time used in their equations.
 pub(in crate::engine::transient) fn validate_clock(
-    has_phase: bool,
+    has_transport_history: bool,
     solved: Value,
     accepted: Value,
 ) -> Result<(), SimulationError> {
-    if has_phase && solved.to_bits() != accepted.to_bits() {
+    if has_transport_history && solved.to_bits() != accepted.to_bits() {
         return Err(SimulationError::Circuit(
-            "GP phase state cannot be relabelled after its transient solve".into(),
+            "transport history cannot be relabelled after its transient solve".into(),
         ));
     }
     Ok(())

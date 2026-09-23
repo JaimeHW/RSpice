@@ -5805,7 +5805,10 @@ impl Engine {
             vbic_snapshot_cache = restored.vbic_snapshot_cache;
         }
 
-        let physical_sources = if bjt_history.phase.iter().any(Option::is_some) {
+        let has_line_events =
+            charge_event::circuit::PreparedEventCircuit::supports_scalar_line_events(&circuit)
+                && bjt_history.weil_phase.iter().all(Option::is_none);
+        let physical_sources = if bjt_history.phase.iter().any(Option::is_some) || has_line_events {
             Some(Self::collect_physical_source_events(
                 &circuit,
                 tstop,
@@ -6628,8 +6631,9 @@ impl Engine {
         // Model membership is fixed, including after checkpoint restoration.
         // Ordinary zero-PTF circuits need no per-attempt phase-history scan.
         let has_bjt_delay_history = bjt_history.phase.iter().any(Option::is_some);
-        let has_bjt_phase_history =
-            has_bjt_delay_history || bjt_history.weil_phase.iter().any(Option::is_some);
+        let has_exact_transient_history = has_bjt_delay_history
+            || bjt_history.weil_phase.iter().any(Option::is_some)
+            || has_line_events;
 
         // Adaptive integration may legitimately take far more attempts than
         // `TSTOP / DELMAX`: rejected local trials and accepted steps below the
@@ -6707,14 +6711,33 @@ impl Engine {
                 .map(|sources| sources.next_after(t, tstop))
                 .transpose()?
                 .flatten();
+            let mut line_arrival_time: Option<Value> = None;
+            if has_line_events {
+                for line in &circuit.tlines {
+                    if abort.is_aborted() {
+                        return Err(SimulationError::Aborted);
+                    }
+                    if let Some(arrival) = line
+                        .next_history_event_arrival_after(t)
+                        .map_err(SimulationError::Circuit)?
+                        .filter(|time| *time <= tstop)
+                    {
+                        line_arrival_time =
+                            Some(line_arrival_time.map_or(arrival, |old| old.min(arrival)));
+                    }
+                }
+            }
             let physical_event_time = source_event_time
                 .into_iter()
                 .chain(phase_arrival.map(|arrival| arrival.time))
+                .chain(line_arrival_time)
                 .reduce(Value::min);
-            if physical_event_time.is_some_and(|time| time - t < timestep.hard_min_dt()) {
-                return Err(SimulationError::Circuit(
-                    "physical source/GP event is below the minimum integration interval".into(),
-                ));
+            if let Some(time) = physical_event_time.filter(|time| time - t < timestep.hard_min_dt())
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "physical source/delay event at {time:.17e} s cannot be reached from {t:.17e} s with minimum integration interval {:.17e} s (source={source_event_time:?}, line={line_arrival_time:?})",
+                    timestep.hard_min_dt()
+                )));
             }
             let pending_exact_event_time = pending_veriloga_event_time
                 .into_iter()
@@ -6772,7 +6795,7 @@ impl Engine {
             // additional targets: an unsupported interval still needs refusal.
             if let Some(grid) = locked_grid.as_ref() {
                 while grid.get(locked_cursor).is_some_and(|&target| {
-                    target <= t || (!has_bjt_phase_history && target - t < dialect_min_dt)
+                    target <= t || (!has_exact_transient_history && target - t < dialect_min_dt)
                 }) {
                     locked_cursor += 1;
                 }
@@ -6858,7 +6881,7 @@ impl Engine {
                     {
                         step_target = step_target.min(t + hinted_max_step);
                     }
-                    locked_step_lands_on_grid = if has_bjt_phase_history {
+                    locked_step_lands_on_grid = if has_exact_transient_history {
                         step_target == target
                     } else {
                         (step_target - target).abs() <= tolerance
@@ -6962,7 +6985,7 @@ impl Engine {
             }
             // A retained phase history cannot be solved at an approximate
             // endpoint and then renamed to a recorded grid clock on acceptance.
-            let exact_grid_time = if has_bjt_phase_history
+            let exact_grid_time = if has_exact_transient_history
                 && locked_step_lands_on_grid
                 && !locked_replay_hidden_attempt
             {
@@ -7064,6 +7087,44 @@ impl Engine {
                         Self::max_expected_source_delta(&circuit, t, candidate_step_time);
                 }
             }
+            // Approximate source/line breakpoints can fall a few ulps before
+            // an owned arrival. Fit the still-unaccepted interval so its next
+            // gap is representable and respects the minimum; never consume
+            // the arrival early or manufacture a subminimum follow-up step.
+            if locked_grid.is_none()
+                && pending_exact_event_time == physical_event_time
+                && let Some(deadline) = physical_event_time.filter(|deadline| {
+                    *deadline > candidate_step_time
+                        && *deadline - candidate_step_time < timestep.hard_min_dt()
+                })
+            {
+                let bound = timestep.max_dt().min(max_step);
+                dt = breakpoints::fit_model_interval(
+                    t,
+                    deadline,
+                    dt,
+                    timestep.hard_min_dt(),
+                    max_step,
+                    bound,
+                    false,
+                )?;
+                if dt > bound {
+                    return Err(SimulationError::Circuit(
+                        "physical event fitting exceeds the step bound".into(),
+                    ));
+                }
+                exact_device_event_time = (t + dt >= deadline).then_some(deadline);
+                candidate_step_time = canonical_transient_step_time_with_device_event(
+                    t,
+                    dt,
+                    tstop,
+                    exact_device_event_time,
+                );
+                at_breakpoint = exact_device_event_time.is_some()
+                    || breakpoints.at_breakpoint(candidate_step_time);
+                expected_source_delta =
+                    Self::max_expected_source_delta(&circuit, t, candidate_step_time);
+            }
             // Reapply after replay, source bias and interval fitting. Even an
             // addition rounded onto the deadline must use its original clock.
             if let Some(deadline) = physical_event_time
@@ -7109,7 +7170,7 @@ impl Engine {
             };
             let trial_source_side = if physical_event {
                 crate::circuit::SourceTimeSide::LeftLimit
-            } else if has_bjt_phase_history {
+            } else if has_exact_transient_history {
                 crate::circuit::SourceTimeSide::RightLimit
             } else {
                 crate::circuit::SourceTimeSide::Published
@@ -9874,7 +9935,7 @@ impl Engine {
                     if hit_breakpoint {
                         if scheduled_breakpoint
                             && !landed_device_event
-                            && !has_bjt_phase_history
+                            && !has_exact_transient_history
                             && !analysis_final_step
                         {
                             let snapped = breakpoints.snap_to_breakpoint(t);
@@ -9910,7 +9971,7 @@ impl Engine {
                         veriloga_refinement_approach_step = None;
                     }
 
-                    bjt::arrival::validate_clock(has_bjt_phase_history, step_time, t)?;
+                    bjt::arrival::validate_clock(has_exact_transient_history, step_time, t)?;
                     let method_after_step = current_integration_method(&trapgear);
                     let accepted_step_trap_order =
                         if native_predictor_local && current_method == IntegrationMethod::Gear2 {
@@ -10690,7 +10751,7 @@ impl Engine {
             // solve because its candidate was evaluated at the root's own time.
             if hit_breakpoint
                 && !landed_device_event
-                && !has_bjt_phase_history
+                && !has_exact_transient_history
                 && !locked_step_lands_on_grid
                 && !analysis_final_step
             {
@@ -10700,7 +10761,7 @@ impl Engine {
                     t = snapped;
                 }
             }
-            bjt::arrival::validate_clock(has_bjt_phase_history, step_time, t)?;
+            bjt::arrival::validate_clock(has_exact_transient_history, step_time, t)?;
             let method_after_step = current_integration_method(&trapgear);
             if circuit.has_nonlinear_devices() && !nonlinear_state_matches_new_solution {
                 self.update_transient_nonlinear_devices(&mut circuit, &new_solution)?;

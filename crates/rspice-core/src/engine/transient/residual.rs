@@ -1725,7 +1725,18 @@ impl Engine {
             dt,
             ctx.ekv26_history,
         );
-        Self::stamp_tline_companions(circuit, matrix, rhs, time, ctx.tline_dc_refs);
+        Self::stamp_tline_companions_on_side(
+            circuit,
+            matrix,
+            rhs,
+            time,
+            ctx.tline_dc_refs,
+            if ctx.source_time_side == crate::circuit::SourceTimeSide::LeftLimit {
+                crate::device::TransmissionLineTimeSide::Incoming
+            } else {
+                crate::device::TransmissionLineTimeSide::Outgoing
+            },
+        );
         Self::stamp_coupled_tline_companions(
             circuit,
             matrix,

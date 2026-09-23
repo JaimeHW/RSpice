@@ -8,6 +8,54 @@ fn aligned(name: &str, count: usize, lengths: &[usize]) -> Result<()> {
 }
 
 impl<'a> PreparedEventCircuit<'a> {
+    fn admitted_family(family: PeriodicDeviceFamily) -> bool {
+        use PeriodicDeviceFamily::*;
+        matches!(
+            family,
+            Resistor
+                | ResistorBranch
+                | Capacitor
+                | Inductor
+                | VoltageSource
+                | CurrentSource
+                | Bjt
+                | InductorCoupling
+                | CoupledInductorPair
+                | TransmissionLine
+        )
+    }
+
+    /// The ordinary line path can opt into physical events only when every
+    /// device has the corresponding equations. Other populations retain
+    /// their existing transient owner until their event sampler is available.
+    pub(in crate::engine::transient) fn supports_scalar_line_events(
+        circuit: &crate::CircuitData,
+    ) -> bool {
+        !circuit.tlines.is_empty()
+            && PeriodicDeviceFamily::ALL
+                .into_iter()
+                .all(|family| family.instance_count(circuit) == 0 || Self::admitted_family(family))
+            && circuit.tlines.iter().all(|line| {
+                line.supports_sided_history_events() && line.ltra_branch_matrix_indices().is_none()
+            })
+            && circuit.resistors.thermal.iter().all(Option::is_none)
+            && circuit
+                .capacitors
+                .value_expressions
+                .iter()
+                .all(Option::is_none)
+            && circuit
+                .capacitors
+                .ic_branch_indices
+                .iter()
+                .all(Option::is_none)
+            && circuit
+                .bjts
+                .devices
+                .iter()
+                .all(|model| model.uses_legacy_gummel_poon())
+    }
+
     pub(in crate::engine::transient) fn new(
         circuit: &'a crate::CircuitData,
         flux_tolerance: Value,
@@ -41,23 +89,7 @@ impl<'a> PreparedEventCircuit<'a> {
             if family.instance_count(circuit) == 0 {
                 continue;
             }
-            use PeriodicDeviceFamily::{
-                Bjt, Capacitor, CoupledInductorPair, CurrentSource, Inductor, InductorCoupling,
-                Resistor, ResistorBranch, TransmissionLine, VoltageSource,
-            };
-            if !matches!(
-                family,
-                Resistor
-                    | ResistorBranch
-                    | Capacitor
-                    | Inductor
-                    | VoltageSource
-                    | CurrentSource
-                    | Bjt
-                    | InductorCoupling
-                    | CoupledInductorPair
-                    | TransmissionLine
-            ) {
+            if !Self::admitted_family(family) {
                 return Err(error(format!(
                     "{} require a prepared physical event sampler",
                     family.label()

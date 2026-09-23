@@ -15,6 +15,11 @@ fn shooting_delay_preserves_ideal_repeating_pwl_steps() {
         ),
         (
             SpiceDialect::Xyce,
+            0.1875,
+            "VIN in 0 PWL(0 0 .375 0 .375 1 .625 1 .625 0 1 0) R=0",
+        ),
+        (
+            SpiceDialect::Xyce,
             1.1875,
             "VIN in 0 PWL(0 0 .375 0 .375 1 .625 1 .625 0 1 0) R=0",
         ),
@@ -64,6 +69,31 @@ fn shooting_delay_preserves_ideal_repeating_pwl_steps() {
                 "TD={delay} t={time:.17e}: {actual} vs {}",
                 expected(time)
             );
+        }
+        // This short history has no pre-origin jump pending at the receiver.
+        // Long-delay sampled PSS edges need their own event provenance.
+        if delay < 1.0 {
+            let (continued, checkpoint) = engine
+                .run_tran_from_pss_state(&deck, &state, 0.7, 0.001)
+                .unwrap();
+            let checkpoint = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
+            let (resumed, _) = engine
+                .run_tran_resume(&deck, &checkpoint, 1.5, 0.001)
+                .unwrap();
+            for transient in [&continued, &resumed] {
+                let far = transient
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("far"))
+                    .unwrap();
+                for (&time, &actual) in transient.time.iter().zip(&transient.voltages[far]) {
+                    assert!(
+                        (actual - expected(time)).abs() < 1e-6,
+                        "continued {dialect:?} TD={delay} t={time:.17e}: {actual} vs {}",
+                        expected(time)
+                    );
+                }
+            }
         }
     }
 }

@@ -171,6 +171,26 @@ pub(super) fn classify(
             Ok(())
         },
     )?;
+    for line in &circuit.tlines {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if let Some(time) = line
+            .next_history_event_arrival_after(*accepted_time)
+            .map_err(failure)?
+            && time <= step.time
+        {
+            if time != step.time {
+                return Err(failure(
+                    "incoming interval crossed an unprocessed transmission-line event",
+                ));
+            }
+            has_cause = true;
+            has_unknown = true;
+            invariant = false;
+            propagated = propagated.merge(DelayEventOrder::Unknown);
+        }
+    }
     if !has_cause {
         return Err(failure(
             "no physical source or delay cause at the requested clock",
