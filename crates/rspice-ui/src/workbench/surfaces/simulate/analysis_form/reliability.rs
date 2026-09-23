@@ -14,6 +14,10 @@ use super::{
 /// Render the reliability fields.
 pub(super) fn fields(ui: &mut Ui, setup: &mut ReliabilityDialogState) {
     input_row(ui, "Years", &mut setup.years_csv);
+    field_note(
+        ui,
+        "Years selects the lifetime checkpoints. Every bound-device stress sample is retained for aging calculations and evidence export.",
+    );
     input_row(ui, "Min stress V", &mut setup.min_stress_voltage);
     field_note(
         ui,

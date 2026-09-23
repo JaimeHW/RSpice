@@ -1131,6 +1131,31 @@ impl SimulationPlan {
             if instance.kind == AnalysisKind::Fourier {
                 instance.numeric_override = None;
             }
+            // Older Reliability drafts offered reporting switches with no
+            // consumer, and time-integration controls even under DC stress.
+            // Retire only those fields; preserve effective solver departures.
+            if instance.kind == AnalysisKind::Reliability
+                && let Some(record) = instance.numeric_override.as_mut()
+            {
+                let ownership = instance.draft.solver_ownership();
+                for option in NumericOverrideOption::all() {
+                    if matches!(
+                        option,
+                        NumericOverrideOption::StrobeInterval
+                            | NumericOverrideOption::OutputTimePoints
+                            | NumericOverrideOption::RetainEverySignal
+                    ) || (option.refusal_for(instance.kind).is_none()
+                        && option
+                            .refusal_for_instance(instance.kind, ownership)
+                            .is_some())
+                    {
+                        record.clear(option);
+                    }
+                }
+                if record.is_empty() {
+                    instance.numeric_override = None;
+                }
+            }
             // These consumers now reuse a bound HB state. Their old startup
             // override was never read and must not block editing a restored
             // plan or be silently transferred to its shared carrier producer.

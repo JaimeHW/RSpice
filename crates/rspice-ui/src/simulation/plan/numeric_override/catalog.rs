@@ -338,6 +338,8 @@ pub(super) const CARRIER_OWNS_HB_INITIAL_STATE: &str =
 pub(super) const ENVELOPE_HAS_NO_HB_INITIALIZER: &str =
     "select HB under Initial periodic solve to configure its initial state";
 pub(super) const PSS_RETAINS_COMPLETE_ORBIT: &str = "PSS always retains every orbit signal for dependent analyses; reporting times only change display sampling";
+pub(super) const RELIABILITY_OWNS_REPORTING: &str = "Reliability reports the Years checkpoints and retains all bound-device stress evidence; transient output sampling and signal-retention switches do not control this result";
+pub(super) const RELIABILITY_CONSTANT_STRESS: &str = "this Reliability mission uses constant operating-point stress; enable Transient stress to configure time integration";
 pub(super) const TRANSIENT_OWNS_STEP_CEILING: &str =
     "the transient's own Max step field owns this, and one bound cannot have two copies";
 /// `.OPTIONS METHOD` on a PSS analysis.
@@ -634,6 +636,11 @@ impl NumericOverrideOption {
             return Some(reason);
         }
         match self {
+            Self::StrobeInterval | Self::OutputTimePoints | Self::RetainEverySignal
+                if matches!(kind, AnalysisKind::Reliability) =>
+            {
+                Some(RELIABILITY_OWNS_REPORTING)
+            }
             Self::RetainEverySignal if matches!(kind, AnalysisKind::Pss) => {
                 Some(PSS_RETAINS_COMPLETE_ORBIT)
             }
@@ -677,6 +684,11 @@ impl NumericOverrideOption {
         ownership: SolverOwnership,
     ) -> Option<&'static str> {
         self.refusal_for(kind).or_else(|| match self {
+            _ if ownership.time_integration == Some(false)
+                && self.spec().reach == OptionReach::TimeStepped =>
+            {
+                Some(RELIABILITY_CONSTANT_STRESS)
+            }
             Self::HbInitialState if ownership.hb_initializer == Some(false) => {
                 Some(ENVELOPE_HAS_NO_HB_INITIALIZER)
             }
@@ -721,6 +733,9 @@ pub struct SolverOwnership {
     /// Envelope's selected initializer; `None` leaves applicability to the
     /// analysis kind, while `Some(false)` excludes an unused HB startup control.
     pub hb_initializer: Option<bool>,
+    /// Reliability can use constant operating-point stress or integrate a
+    /// representative transient. `None` leaves the decision to the kind.
+    pub time_integration: Option<bool>,
 }
 
 impl SolverOwnership {
@@ -729,6 +744,7 @@ impl SolverOwnership {
         accuracy: None,
         homotopy: None,
         hb_initializer: None,
+        time_integration: None,
     };
 
     /// Who assigns the four continuation flags, when someone does.
