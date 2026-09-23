@@ -3,11 +3,46 @@ use super::*;
 use crate::ResourceLimits;
 use crate::analysis::quasi_periodic::{
     QuasiPeriodicError as Error, QuasiPeriodicSolution, QuasiPeriodicSolveConfig,
-    SpectralEnvelopeMethod, SpectralEnvelopeState,
+    SpectralEnvelopeMethod, SpectralEnvelopeState, SpectralEnvelopeEvent,
+    SpectralEnvelopeEventConfig, SpectralEnvelopeEventEquation,
     solve::{JacobianEntry, envelope},
 };
 
 impl HbSolver {
+    /// Resolve a sided source event in the retained Fourier basis. The
+    /// structural event equations must be prepared from the physical circuit,
+    /// not inferred from a Jacobian's numerical rank at one bias point.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "event topology, sided forcing, solver policy and resources are independent"
+    )]
+    pub fn transition_spectral_envelope_with_abort(
+        &mut self,
+        previous: &SpectralEnvelopeState,
+        rows: &[SpectralEnvelopeEventEquation],
+        config: &SpectralEnvelopeEventConfig,
+        sources: &[Vec<Complex64>],
+        slow_source_rates: &[Vec<Complex64>],
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<SpectralEnvelopeEvent, Error> {
+        if abort.is_aborted() {
+            return Err(Error::Aborted);
+        }
+        let storage = self.envelope_storage()?;
+        envelope::event::transition(
+            self,
+            previous,
+            rows,
+            config,
+            sources,
+            slow_source_rates,
+            &storage,
+            limits,
+            abort,
+        )
+    }
+
     pub(crate) fn validate_spectral_envelope_circuit(&self) -> Result<(), Error> {
         self.envelope_storage().map(|_| ())
     }
@@ -91,3 +126,5 @@ impl HbSolver {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod event_tests;

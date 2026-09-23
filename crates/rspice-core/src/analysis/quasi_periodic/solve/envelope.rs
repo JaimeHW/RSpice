@@ -6,6 +6,8 @@
 use super::*;
 use crate::analysis::quasi_periodic::{check_abort, finite};
 mod adaptive;
+pub(crate) mod event;
+pub use event::{SpectralEnvelopeEvent, SpectralEnvelopeEventConfig, SpectralEnvelopeEventEquation};
 pub use adaptive::{
     SpectralEnvelopeAdvance, SpectralEnvelopeControl, advance_spectral_envelope_with_abort,
 };

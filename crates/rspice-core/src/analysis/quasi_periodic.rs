@@ -21,6 +21,7 @@ pub use small_signal::{
     QuasiPeriodicAcConfig, QuasiPeriodicAcSolution, QuasiPeriodicAdjointSolution,
 };
 pub use solve::{
+    SpectralEnvelopeEvent, SpectralEnvelopeEventConfig, SpectralEnvelopeEventEquation,
     QuasiPeriodicAutonomousConfig, QuasiPeriodicLinearConfig, QuasiPeriodicLinearMethod,
     QuasiPeriodicSolution, QuasiPeriodicSolveConfig, SpectralEnvelopeAdvance,
     SpectralEnvelopeControl, SpectralEnvelopeMethod, SpectralEnvelopeState,

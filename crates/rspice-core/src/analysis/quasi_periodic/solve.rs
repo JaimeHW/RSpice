@@ -13,6 +13,7 @@ pub(crate) use coordinates::validate as validate_spectra;
 mod evaluation;
 pub(crate) mod envelope;
 pub use envelope::{
+    SpectralEnvelopeEvent, SpectralEnvelopeEventConfig, SpectralEnvelopeEventEquation,
     SpectralEnvelopeAdvance, SpectralEnvelopeControl, SpectralEnvelopeMethod,
     SpectralEnvelopeState, advance_spectral_envelope_with_abort,
 };
