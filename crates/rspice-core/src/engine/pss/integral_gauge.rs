@@ -94,10 +94,13 @@ impl PssCircuit {
                 Some(all)
             });
             if let Some(dependencies) = &known {
-                for col in 0..self.state_dimension() {
+                for (col, value) in jacobian[physical + index]
+                    .iter_mut()
+                    .enumerate()
+                    .take(self.state_dimension())
+                {
                     if col < physical || !dependencies.contains(&(col - physical)) {
-                        jacobian[physical + index][col] =
-                            Value::from(!subtract_identity && col == physical + index);
+                        *value = Value::from(!subtract_identity && col == physical + index);
                     }
                 }
             }
@@ -220,8 +223,9 @@ fn solve_preserving_integral_constants(
         }
         for row in rank + 1..n {
             let factor = matrix[row][col];
-            for column in 0..=n {
-                matrix[row][column] -= factor * matrix[rank][column];
+            let (earlier, current) = matrix.split_at_mut(row);
+            for (value, pivot_value) in current[0].iter_mut().zip(&earlier[rank]) {
+                *value -= factor * pivot_value;
             }
             matrix[row][col] = 0.0;
         }
