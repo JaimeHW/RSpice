@@ -385,6 +385,7 @@ mod tests {
     mod qpnoise;
     mod qpss;
     mod qpxf;
+    mod reliability;
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;

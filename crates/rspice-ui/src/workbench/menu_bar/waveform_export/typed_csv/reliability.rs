@@ -93,11 +93,29 @@ pub(super) fn prepare(response: &ReliabilityRunResult) -> Option<PreparedTypedRe
                     &contribution.model_id,
                     Some(checkpoint.years),
                     None,
-                    "equivalent_age",
+                    if contribution.trap_occupancies.is_empty() {
+                        "equivalent_age"
+                    } else {
+                        "elapsed_history"
+                    },
                     Some(contribution.equivalent_seconds),
                     "s",
                     "",
                 );
+                for trap in &contribution.trap_occupancies {
+                    row(
+                        "trap_occupancy",
+                        None,
+                        &device.device,
+                        &contribution.model_id,
+                        Some(checkpoint.years),
+                        None,
+                        &trap.trap_id,
+                        Some(trap.occupancy),
+                        "1",
+                        "",
+                    );
+                }
                 if let Some(value) = contribution.electromigration_lifetime_fraction {
                     row(
                         "aging",
@@ -213,31 +231,53 @@ pub(super) fn prepare(response: &ReliabilityRunResult) -> Option<PreparedTypedRe
 mod tests {
     #[test]
     fn reliability_mission_csv_preserves_stress_shifts_and_electrical_coordinates() {
-        let analysis =
-            crate::simulation::SimulationResult::reliability_mission_retained_test_fixture();
-        let export = super::super::prepare_typed_result_csv(&analysis).unwrap();
-        let mut csv = csv::Reader::from_reader(export.contents.as_bytes());
-        assert_eq!(csv.headers().unwrap().len(), 10);
-        let records: Vec<_> = csv.records().collect::<Result<_, _>>().unwrap();
-        for kind in [
-            "request",
-            "stress",
-            "aging",
-            "shift",
-            "fresh_parameter",
-            "aged_parameter",
-            "fresh_operating_point",
-            "aged_operating_point",
-        ] {
-            assert!(records.iter().any(|r| &r[0] == kind), "missing {kind}");
+        for recovery in [false, true] {
+            let analysis = if recovery {
+                crate::simulation::SimulationResult::reliability_recovery_retained_test_fixture()
+            } else {
+                crate::simulation::SimulationResult::reliability_mission_retained_test_fixture()
+            };
+            let export = super::super::prepare_typed_result_csv(&analysis).unwrap();
+            let mut csv = csv::Reader::from_reader(export.contents.as_bytes());
+            assert_eq!(csv.headers().unwrap().len(), 10);
+            let records: Vec<_> = csv.records().collect::<Result<_, _>>().unwrap();
+            for kind in [
+                "request",
+                "stress",
+                "aging",
+                "shift",
+                "fresh_parameter",
+                "aged_parameter",
+                "fresh_operating_point",
+                "aged_operating_point",
+            ] {
+                assert!(records.iter().any(|r| &r[0] == kind), "missing {kind}");
+            }
+            let request = records.iter().find(|r| &r[0] == "request").unwrap();
+            let _: rspice_core::analysis::reliability::ReliabilityRunRequest =
+                serde_json::from_str(&request[9]).unwrap();
+            assert!(
+                records
+                    .iter()
+                    .any(|r| &r[6] == "Vgs" && r[7].parse::<f64>().unwrap() < 0.0)
+            );
+            if recovery {
+                let occupations: Vec<_> = records
+                    .iter()
+                    .filter(|r| &r[0] == "trap_occupancy")
+                    .collect();
+                assert_eq!(occupations.len(), 2);
+                for (row, expected) in occupations.iter().zip([
+                    1.0 - (-2.0f64).exp(),
+                    (1.0 - (-2.0f64).exp()) * (-3.0f64).exp(),
+                ]) {
+                    assert_eq!(&row[6], "interface");
+                    assert_eq!(&row[8], "1");
+                    assert!((row[7].parse::<f64>().unwrap() - expected).abs() < 1e-12);
+                }
+                assert!(records.iter().any(|r| &r[6] == "elapsed_history"));
+                assert!(!records.iter().any(|r| &r[6] == "equivalent_age"));
+            }
         }
-        let request = records.iter().find(|r| &r[0] == "request").unwrap();
-        let _: rspice_core::analysis::reliability::ReliabilityRunRequest =
-            serde_json::from_str(&request[9]).unwrap();
-        assert!(
-            records
-                .iter()
-                .any(|r| &r[6] == "Vgs" && r[7].parse::<f64>().unwrap() < 0.0)
-        );
     }
 }

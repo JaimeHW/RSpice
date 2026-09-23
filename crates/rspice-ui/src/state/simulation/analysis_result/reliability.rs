@@ -39,10 +39,23 @@ impl AnalysisResultPayload {
                     .collect();
                 let label = format!("{} / {}", device.device, contribution.model_id);
                 push(
-                    format!("Equivalent age({label})"),
+                    if contribution.trap_occupancies.is_empty() {
+                        format!("Equivalent age({label})")
+                    } else {
+                        format!("Elapsed history({label})")
+                    },
                     "s",
                     rows.iter().map(|c| c.equivalent_seconds).collect(),
                 )?;
+                for (index, trap) in contribution.trap_occupancies.iter().enumerate() {
+                    push(
+                        format!("Occupancy({label} / {})", trap.trap_id),
+                        "1",
+                        rows.iter()
+                            .map(|c| c.trap_occupancies[index].occupancy)
+                            .collect(),
+                    )?;
+                }
                 if contribution.electromigration_lifetime_fraction.is_some() {
                     push(
                         format!("EM consumed lifetime({label})"),

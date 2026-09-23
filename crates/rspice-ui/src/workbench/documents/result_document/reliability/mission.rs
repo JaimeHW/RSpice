@@ -134,20 +134,34 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
                 }
             });
         });
-    ui.collapsing("Equivalent aging and electromigration lifetime", |ui| {
-        for device in &response.stress.checkpoints[age].devices {
-            for c in &device.contributions {
-                ui.label(format!(
-                    "{} / {}: {:.8e} reference seconds{}",
-                    device.device,
-                    c.model_id,
-                    c.equivalent_seconds,
-                    c.electromigration_lifetime_fraction
-                        .map_or_else(String::new, |v| format!(", {v:.8e} consumed lifetime"))
-                ));
+    ui.collapsing(
+        "Aging clocks, trap occupancy and electromigration lifetime",
+        |ui| {
+            for device in &response.stress.checkpoints[age].devices {
+                for c in &device.contributions {
+                    ui.label(format!(
+                        "{} / {}: {:.8e} {} seconds{}",
+                        device.device,
+                        c.model_id,
+                        c.equivalent_seconds,
+                        if c.trap_occupancies.is_empty() {
+                            "reference"
+                        } else {
+                            "elapsed"
+                        },
+                        c.electromigration_lifetime_fraction
+                            .map_or_else(String::new, |v| format!(", {v:.8e} consumed lifetime"))
+                    ));
+                    for trap in &c.trap_occupancies {
+                        ui.label(format!(
+                            "{}: {:.8e} occupied fraction",
+                            trap.trap_id, trap.occupancy
+                        ));
+                    }
+                }
             }
-        }
-    });
+        },
+    );
     ui.data_mut(|d| d.insert_temp(key, (phase, age, selected_trace)));
 }
 
@@ -173,7 +187,7 @@ pub(super) fn details(ui: &mut Ui, state: &AppState) {
     }
     panel_note(
         ui,
-        "Stress comes from the fresh circuit. Fits accumulate irreversible equivalent age; recovery is not modeled. EM consumed lifetime is not a failure probability. CSV export retains all stress samples, model changes and electrical observations.",
+        "Stress comes from the fresh circuit. Power-law fits accumulate irreversible age; two-state tables retain capture and recovery in mission order. EM consumed lifetime is not a failure probability. CSV export retains stress samples, trap occupancies, model changes and electrical observations.",
     );
 }
 

@@ -15,6 +15,10 @@ use super::{
 pub(super) fn fields(ui: &mut Ui, setup: &mut ReliabilityDialogState) {
     input_row(ui, "Years", &mut setup.years_csv);
     input_row(ui, "Min stress V", &mut setup.min_stress_voltage);
+    field_note(
+        ui,
+        "Below the minimum gate stress, power-law aging and trap capture stop. Trap recovery continues at the observed bias and temperature.",
+    );
     switch_row(ui, "Hot carrier (HCI)", &mut setup.enable_hci);
     switch_row(ui, "Bias instability (NBTI)", &mut setup.enable_nbti);
     switch_row(ui, "Electromigration", &mut setup.enable_em);
@@ -33,7 +37,7 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut ReliabilityDialogState) {
     }
     field_note(
         ui,
-        "Load calibration with its process, source, units and validity limits. The project retains a copy of the loaded data.",
+        "Load calibration with its process, source, units and validity limits. Two-state tables include capture/emission rates, initial occupancies and parameter couplings. The project retains a copy of the loaded data.",
     );
     ui.collapsing("Model pack JSON", |ui| {
         ui.add(

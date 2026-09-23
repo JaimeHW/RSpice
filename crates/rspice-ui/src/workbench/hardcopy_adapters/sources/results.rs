@@ -1583,8 +1583,9 @@ pub(super) fn semantic_result_summary(
                         "Years",
                         "Device",
                         "Aging model",
-                        "Equivalent seconds",
+                        "Reference / elapsed seconds",
                         "EM consumed lifetime",
+                        "Trap occupancies",
                     ]
                     .map(str::to_owned)
                     .to_vec(),
@@ -1602,6 +1603,17 @@ pub(super) fn semantic_result_summary(
                                         exact_number(c.equivalent_seconds),
                                         c.electromigration_lifetime_fraction
                                             .map_or_else(String::new, exact_number),
+                                        c.trap_occupancies
+                                            .iter()
+                                            .map(|t| {
+                                                format!(
+                                                    "{} = {}",
+                                                    t.trap_id,
+                                                    exact_number(t.occupancy)
+                                                )
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join("; "),
                                     ]
                                 })
                             })
