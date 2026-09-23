@@ -20,10 +20,6 @@ pub(super) struct PhaseTangent {
 }
 
 impl Linearization {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "independent orbit, phase, resource and cancellation inputs"
-    )]
     pub(crate) fn prepare_autonomous(
         &mut self,
         circuit: &impl Circuit,
@@ -225,10 +221,6 @@ impl Linearization {
         Ok(applied)
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "independent spectral operator and source inputs"
-    )]
     pub(super) fn solve_phase(
         &mut self,
         circuit: &impl Circuit,
