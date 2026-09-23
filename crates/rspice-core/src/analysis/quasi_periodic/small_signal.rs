@@ -2,6 +2,7 @@
 mod adjoint;
 mod linear;
 mod operator;
+mod phase;
 mod stationary;
 #[cfg(test)]
 mod tests;
@@ -59,6 +60,8 @@ pub struct QuasiPeriodicAcSolution {
     pub offset_hz: Value,
     /// MNA-coordinate order, then the operating point's signed tuple order.
     pub spectra: Vec<Vec<Complex64>>,
+    /// Physical residual for a driven orbit; for an autonomous orbit this
+    /// certifies the phase-bordered equations before reconstructing the pole.
     pub normalized_residual: Value,
 }
 
@@ -72,6 +75,7 @@ pub struct QuasiPeriodicAdjointSolution {
     pub sensitivities: Vec<Vec<Complex64>>,
     /// Infinity-norm equilibrated adjoint residual divided by the relative tolerance.
     /// This is an algebraic adjoint certificate, not a KCL/KVL residual.
+    /// Autonomous orbits certify the complete phase-bordered adjoint.
     pub normalized_residual: Value,
 }
 
@@ -97,6 +101,7 @@ pub(crate) struct Linearization {
     stationary: Derivatives,
     base_values: usize,
     value_limit: usize,
+    phase: Option<phase::PhaseTangent>,
 }
 
 impl Linearization {
@@ -172,6 +177,7 @@ impl Linearization {
             stationary,
             base_values,
             value_limit,
+            phase: None,
             voltage_rows: (0..unknowns)
                 .map(|row| circuit.voltage_equation(row))
                 .collect(),
@@ -311,6 +317,9 @@ impl Linearization {
             frequencies.push(frequency);
         }
         let rhs: Vec<_> = sources.iter().flatten().copied().collect();
+        if self.phase.is_some() {
+            return self.solve_phase(circuit, offset_hz, &frequencies, &linear, &rhs, abort);
+        }
         let divisors = self.equation_divisors(&frequencies, &linear, abort)?;
         let solution = if config.linear.uses_krylov(rhs.len()) {
             self.iterative(&frequencies, &linear, &divisors, &rhs, &config, abort)?

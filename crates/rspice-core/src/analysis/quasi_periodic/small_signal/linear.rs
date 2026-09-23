@@ -4,7 +4,7 @@ use crate::numerics::krylov::{GmresError, try_gmres_with_abort};
 use crate::solver::{ComplexMatrix, SolverError, StaticMatrix};
 use std::collections::BTreeMap;
 
-fn matrix(n: usize, entries: &[LinearEntry]) -> Result<ComplexMatrix, Error> {
+pub(super) fn matrix(n: usize, entries: &[LinearEntry]) -> Result<ComplexMatrix, Error> {
     let mut pattern: Vec<_> = (0..n).map(|i| (i, i, 0.0)).collect();
     pattern.extend(entries.iter().map(|&(r, c, _)| (r, c, 0.0)));
     let structure = StaticMatrix::from_triplets(n, n, &pattern)?;
@@ -15,14 +15,14 @@ fn matrix(n: usize, entries: &[LinearEntry]) -> Result<ComplexMatrix, Error> {
     Ok(matrix)
 }
 
-struct Blocks {
+pub(super) struct Blocks {
     matrices: Vec<Option<ComplexMatrix>>,
     unknowns: usize,
     exact: bool,
 }
 
 impl Blocks {
-    fn build(
+    pub(super) fn build(
         work: &Linearization,
         frequencies: &[Value],
         linear: &[Vec<LinearEntry>],
@@ -87,7 +87,9 @@ impl Blocks {
             let mut block = matrix(work.unknowns, &entries)?;
             match block.solve(&vec![Complex64::ZERO; work.unknowns]) {
                 Ok(_) => matrices.push(Some(block)),
-                Err(SolverError::SingularMatrix | SolverError::InaccurateSolution(_)) if !exact => {
+                Err(SolverError::SingularMatrix | SolverError::InaccurateSolution(_))
+                    if !exact || work.phase.is_some() =>
+                {
                     matrices.push(None)
                 }
                 Err(error) => return Err(error.into()),
@@ -100,7 +102,7 @@ impl Blocks {
         })
     }
 
-    fn apply(
+    pub(super) fn apply(
         &mut self,
         direction: &[Complex64],
         divisors: &[Value],

@@ -149,6 +149,26 @@ pub(crate) trait Circuit {
     fn small_signal_entries(&self, frequency_hz: Value) -> Result<Vec<LinearEntry>, Error> {
         self.linear_entries(frequency_hz)
     }
+    /// (Y(f + offset) - Y(f)) / (j 2 pi offset), evaluated without
+    /// subtracting nearby stamps. Required by autonomous phase response.
+    fn small_signal_frequency_difference(
+        &self,
+        frequency_hz: Value,
+        offset_hz: Value,
+    ) -> Result<Vec<LinearEntry>, Error> {
+        if self.small_signal_entries(frequency_hz)?.is_empty()
+            && self
+                .small_signal_entries(frequency_hz + offset_hz)?
+                .is_empty()
+        {
+            Ok(Vec::new())
+        } else {
+            Err(Error::InvalidCircuit(
+                "autonomous QP response needs the linear network divided frequency difference"
+                    .into(),
+            ))
+        }
+    }
     fn sample(&mut self, state: &[Value], jacobian: bool) -> Result<Sample, Error>;
     fn sample_at_phases(
         &mut self,
@@ -201,12 +221,22 @@ pub(crate) fn check_workload(
     linear: &QuasiPeriodicLinearConfig,
     limits: &ResourceLimits,
 ) -> Result<(usize, usize), Error> {
+    check_bordered_workload(unknowns, grid, linear, limits, 0)
+}
+
+pub(crate) fn check_bordered_workload(
+    unknowns: usize,
+    grid: &QuasiPeriodicGrid,
+    linear: &QuasiPeriodicLinearConfig,
+    limits: &ResourceLimits,
+    border: usize,
+) -> Result<(usize, usize), Error> {
     if unknowns == 0 {
         return Err(Error::InvalidCircuit(
             "circuit has no MNA coordinates".into(),
         ));
     }
-    let size = unknowns.saturating_mul(grid.len());
+    let size = unknowns.saturating_mul(grid.len()).saturating_add(border);
     ResourceLimitError::ensure(
         ResourceKind::MatrixUnknowns,
         size,

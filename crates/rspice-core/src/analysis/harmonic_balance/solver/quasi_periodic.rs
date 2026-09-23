@@ -180,6 +180,28 @@ impl HbSolver {
         limits: &ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<QuasiPeriodicAcSolution>, Error> {
+        self.solve_quasi_periodic_ac_from_orbit_with_abort(
+            grid, config, orbit, None, offsets_hz, sources, limits, abort,
+        )
+    }
+
+    /// The optional phase policy identifies the free tone and the retained
+    /// orbit's relative accuracy. Ordinary driven solves keep the existing API.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "independent orbit, probe and resource inputs"
+    )]
+    pub(crate) fn solve_quasi_periodic_ac_from_orbit_with_abort(
+        &mut self,
+        grid: Arc<QuasiPeriodicGrid>,
+        config: &QuasiPeriodicAcConfig,
+        orbit: &[Vec<Complex64>],
+        autonomous_phase: Option<(usize, Value)>,
+        offsets_hz: &[Value],
+        sources: &[Vec<Complex64>],
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<QuasiPeriodicAcSolution>, Error> {
         if abort.is_aborted() {
             return Err(Error::Aborted);
         }
@@ -224,6 +246,9 @@ impl HbSolver {
             &working_limits,
             abort,
         )?;
+        if let Some((tone, tolerance)) = autonomous_phase {
+            work.prepare_autonomous(self, orbit, tone, tolerance, &working_limits, abort)?;
+        }
         offsets_hz
             .iter()
             .map(|&offset| work.solve(self, offset, sources, abort))
@@ -271,6 +296,35 @@ impl HbSolver {
         grid: Arc<QuasiPeriodicGrid>,
         linear: &QuasiPeriodicLinearConfig,
         orbit: &[Vec<Complex64>],
+        frequencies_hz: &[Value],
+        frequency_anchor: &[i32],
+        observation: &[Vec<Complex64>],
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<QuasiPeriodicAdjointSolution>, Error> {
+        self.solve_quasi_periodic_adjoint_from_orbit_with_abort(
+            grid,
+            linear,
+            orbit,
+            None,
+            frequencies_hz,
+            frequency_anchor,
+            observation,
+            limits,
+            abort,
+        )
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "independent orbit, observation and resource inputs"
+    )]
+    pub(crate) fn solve_quasi_periodic_adjoint_from_orbit_with_abort(
+        &mut self,
+        grid: Arc<QuasiPeriodicGrid>,
+        linear: &QuasiPeriodicLinearConfig,
+        orbit: &[Vec<Complex64>],
+        autonomous_phase: Option<(usize, Value)>,
         frequencies_hz: &[Value],
         frequency_anchor: &[i32],
         observation: &[Vec<Complex64>],
@@ -330,6 +384,9 @@ impl HbSolver {
                 &working_limits,
                 abort,
             )?;
+        if let Some((tone, tolerance)) = autonomous_phase {
+            work.prepare_autonomous(self, orbit, tone, tolerance, &working_limits, abort)?;
+        }
         frequencies_hz
             .iter()
             .map(|&offset| {
@@ -625,6 +682,40 @@ impl Circuit for HbSolver {
 
     fn small_signal_entries(&self, frequency_hz: Value) -> Result<Vec<LinearEntry>, Error> {
         self.quasi_periodic_linear_entries(frequency_hz, true)
+    }
+
+    fn small_signal_frequency_difference(
+        &self,
+        frequency_hz: Value,
+        offset_hz: Value,
+    ) -> Result<Vec<LinearEntry>, Error> {
+        let mut entries: Vec<_> = self
+            .c_matrix
+            .iter()
+            .map(|&(row, col, value)| (row, col, Complex64::new(value, 0.0)))
+            .collect();
+        for (index, branch) in self.periodic_mna_branches.iter().enumerate() {
+            if let ExactMnaBranch::Inductor { inductance, .. } = branch {
+                let row = self.num_nodes + index;
+                entries.push((row, row, Complex64::new(-inductance, 0.0)));
+            }
+        }
+        entries.extend(
+            self.exact_mna_inductance_entries
+                .iter()
+                .map(|&(row, col, value)| (row, col, Complex64::new(-value, 0.0))),
+        );
+        for network in &self.exact_periodic_networks {
+            network
+                .try_visit_frequency_difference_entries(
+                    std::f64::consts::TAU * frequency_hz,
+                    std::f64::consts::TAU * offset_hz,
+                    self.unknowns(),
+                    |row, col, value| entries.push((row, col, value)),
+                )
+                .map_err(device_error)?;
+        }
+        Ok(entries)
     }
 
     fn sample(&mut self, state: &[Value], jacobian: bool) -> Result<Sample, Error> {
