@@ -1049,6 +1049,7 @@ impl Engine {
                     std::slice::from_ref(&projection),
                     &sources,
                     autonomous_tolerance,
+                    &self.config.resource_limits,
                     abort,
                     |_, covariance| {
                         per_source.push(covariance[0].re);
@@ -1233,6 +1234,7 @@ mod publication_tests {
     #[test]
     fn contributor_publication_rejects_shape_and_range_failures() {
         let source = |name: &str| PeriodicNoiseSource {
+            correlated: None,
             name: name.to_string(),
             node_pos: 0,
             node_neg: usize::MAX,

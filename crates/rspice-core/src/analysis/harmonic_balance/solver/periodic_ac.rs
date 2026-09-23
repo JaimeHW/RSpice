@@ -1993,6 +1993,7 @@ impl HbSolver {
                 )));
             }
             sources.push(PeriodicNoiseSource {
+                correlated: None,
                 name,
                 node_pos: p,
                 node_neg: q,
@@ -2212,6 +2213,9 @@ pub struct PeriodicNoiseSource {
     /// Independent stationary colored noise multiplied by a real periodic
     /// amplitude, with the resulting inter-sideband correlations retained.
     pub flicker: Option<PeriodicFlickerNoise>,
+    /// One shared channel/gate process whose ports and frequency shape vary
+    /// over the orbit. Mutually exclusive with the scalar mechanisms above.
+    pub correlated: Option<crate::analysis::noise::Bsim4CorrelatedNoiseWaveform>,
 }
 
 /// Modulated stationary colored-noise model: i(t) = u(t) n(t), where n has
@@ -2617,6 +2621,7 @@ mod matrix_free_tests {
         solver.add_conductance(0, 0, 1.0);
         let state = HbSolverState::new(1, 1);
         let invalid_source = |density| PeriodicNoiseSource {
+            correlated: None,
             name: "invalid source".to_string(),
             node_pos: 0,
             node_neg: usize::MAX,
@@ -2658,6 +2663,7 @@ mod matrix_free_tests {
         for (source, expected) in [
             (
                 PeriodicNoiseSource {
+                    correlated: None,
                     name: "infinite source".to_string(),
                     node_pos: 0,
                     node_neg: usize::MAX,
@@ -2669,6 +2675,7 @@ mod matrix_free_tests {
             ),
             (
                 PeriodicNoiseSource {
+                    correlated: None,
                     name: "complex DC source".to_string(),
                     node_pos: 0,
                     node_neg: usize::MAX,
@@ -2680,6 +2687,7 @@ mod matrix_free_tests {
             ),
             (
                 PeriodicNoiseSource {
+                    correlated: None,
                     name: "empty source".to_string(),
                     node_pos: 0,
                     node_neg: usize::MAX,
@@ -2691,6 +2699,7 @@ mod matrix_free_tests {
             ),
             (
                 PeriodicNoiseSource {
+                    correlated: None,
                     name: "invalid flicker source".to_string(),
                     node_pos: 0,
                     node_neg: usize::MAX,
@@ -2742,6 +2751,7 @@ mod matrix_free_tests {
         }
 
         let flicker = PeriodicNoiseSource {
+            correlated: None,
             name: "flicker source".to_string(),
             node_pos: 0,
             node_neg: usize::MAX,
@@ -2816,6 +2826,7 @@ mod matrix_free_tests {
         for phase in [0.0, 0.7] {
             for exponent in [0.0, 1.0, 1.5] {
                 let source = PeriodicNoiseSource {
+                    correlated: None,
                     name: "signed sinusoidal flicker".into(),
                     node_pos: 0,
                     node_neg: usize::MAX,
@@ -2964,6 +2975,7 @@ mod matrix_free_tests {
             (1.0000000000000009, 1.675927045963589e24, 0.9999999974867314),
         ] {
             let source = PeriodicNoiseSource {
+                correlated: None,
                 name: "cancelling flicker".into(),
                 node_pos: 0,
                 node_neg: usize::MAX,
@@ -3089,6 +3101,7 @@ mod matrix_free_tests {
         solver.add_conductance(0, 0, 2.0);
         let state = HbSolverState::new(1, 1);
         let source = PeriodicNoiseSource {
+            correlated: None,
             name: "joint source".into(),
             node_pos: 0,
             node_neg: usize::MAX,

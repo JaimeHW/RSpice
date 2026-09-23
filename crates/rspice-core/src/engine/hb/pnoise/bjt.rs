@@ -2,7 +2,10 @@
 
 use super::*;
 use crate::analysis::harmonic_balance::normalize_scaled_noise_waveform;
-use crate::analysis::noise::{NoiseSource, NoiseSourceIdentity, NoiseSourceType};
+use crate::analysis::noise::{
+    Bsim4CorrelatedNoiseSample, Bsim4CorrelatedNoiseWaveform, NoiseSource, NoiseSourceIdentity,
+    NoiseSourceType,
+};
 use std::collections::HashMap;
 
 pub(in crate::engine::hb) struct NativeNoiseWaveform {
@@ -10,6 +13,42 @@ pub(in crate::engine::hb) struct NativeNoiseWaveform {
     pub(in crate::engine::hb) nodes: [usize; 2],
     pub(in crate::engine::hb) frequency_exponent: Option<Value>,
     pub(in crate::engine::hb) samples: Vec<ScaledNonnegative>,
+}
+
+pub(in crate::engine::hb) struct NativeCorrelatedNoiseWaveform {
+    pub(in crate::engine::hb) name: String,
+    samples: Vec<Bsim4CorrelatedNoiseSample>,
+    amplitudes: Vec<ScaledNonnegative>,
+}
+
+impl NativeCorrelatedNoiseWaveform {
+    pub(in crate::engine::hb) fn finish(
+        mut self,
+    ) -> Result<(String, Bsim4CorrelatedNoiseWaveform), SimulationError> {
+        let (amplitudes, exponent) = normalize_scaled_noise_waveform(&self.amplitudes)
+            .map_err(|reason| SimulationError::Circuit(format!("{}: {reason}", self.name)))?;
+        for (sample, amplitude) in self.samples.iter_mut().zip(amplitudes) {
+            let original = sample.drain_amplitude;
+            sample.drain_amplitude *= amplitude;
+            sample.gate_amplitude = amplitude;
+            if original != 0.0 && amplitude != 0.0 && sample.drain_amplitude == 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "{} correlated amplitude underflows",
+                    self.name
+                )));
+            }
+        }
+        let binary_scale_exponent = exponent.checked_mul(2).ok_or_else(|| {
+            SimulationError::Circuit("correlated noise binary scale overflows".into())
+        })?;
+        Ok((
+            self.name,
+            Bsim4CorrelatedNoiseWaveform {
+                samples: self.samples,
+                binary_scale_exponent,
+            },
+        ))
+    }
 }
 
 /// The native stationary source law at 1 Hz, without materializing a density
@@ -108,6 +147,8 @@ fn scaled_native_density(
 pub(in crate::engine::hb) struct NativeNoiseWaveforms {
     indices: HashMap<(NoiseSourceIdentity, usize, usize), usize>,
     pub(in crate::engine::hb) waveforms: Vec<NativeNoiseWaveform>,
+    pub(in crate::engine::hb) correlated: Vec<NativeCorrelatedNoiseWaveform>,
+    correlated_indices: HashMap<NoiseSourceIdentity, usize>,
     elementary: Vec<NoiseSource>,
     temperatures: HashMap<NoiseSourceIdentity, Value>,
     ambient: Value,
@@ -118,6 +159,8 @@ impl NativeNoiseWaveforms {
         Self {
             indices: HashMap::new(),
             waveforms: Vec::new(),
+            correlated: Vec::new(),
+            correlated_indices: HashMap::new(),
             elementary: Vec::new(),
             temperatures: HashMap::new(),
             ambient,
@@ -174,7 +217,79 @@ impl NativeNoiseWaveforms {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let sources = Engine::collect_bsim4_periodic_noise_sources(device, solution)?;
+            let (sources, mut pairs) =
+                Engine::collect_bsim4_periodic_noise_sources(device, solution)?;
+            Engine::configure_noise_physical_constants(
+                &mut [],
+                &mut pairs,
+                engine.config.spice_dialect,
+            );
+            for pair in pairs {
+                let name = Engine::noise_source_label(&pair.identity);
+                let [gamma, ctnoi, tau, multiplier] = pair.bsim4_factor_parameters();
+                if !ctnoi.is_finite() || !tau.is_finite() {
+                    return Err(SimulationError::Circuit(format!(
+                        "{name} has invalid correlation parameters"
+                    )));
+                }
+                let temperature = device.core.model_temp.temp + pair.temperature_offset;
+                if !temperature.is_finite() || temperature <= 0.0 {
+                    return Err(SimulationError::Circuit(format!(
+                        "{name} has invalid absolute temperature"
+                    )));
+                }
+                let mut amplitude = checked_scaled_positive_product(
+                    &[
+                        4.0,
+                        pair.physical_constants.boltzmann,
+                        temperature,
+                        gamma,
+                        multiplier,
+                    ],
+                    &name,
+                )?;
+                amplitude.mantissa = (amplitude.mantissa
+                    * if amplitude.exponent.rem_euclid(2) == 0 {
+                        1.0
+                    } else {
+                        2.0
+                    })
+                .sqrt();
+                amplitude.exponent = amplitude.exponent.div_euclid(2);
+                let index = if let Some(&index) = self.correlated_indices.get(&pair.identity) {
+                    index
+                } else {
+                    let values = count.saturating_mul(
+                        self.correlated
+                            .len()
+                            .saturating_add(1)
+                            .saturating_mul(10)
+                            .saturating_add(self.waveforms.len().saturating_mul(2)),
+                    );
+                    crate::ResourceLimitError::ensure(
+                        crate::ResourceKind::ResultValues,
+                        values,
+                        self.value_limit,
+                    )?;
+                    let index = self.correlated.len();
+                    self.correlated.push(NativeCorrelatedNoiseWaveform {
+                        name,
+                        samples: vec![Bsim4CorrelatedNoiseSample::ZERO; count],
+                        amplitudes: vec![ScaledNonnegative::ZERO; count],
+                    });
+                    self.correlated_indices.insert(pair.identity, index);
+                    index
+                };
+                let node = |n: usize| n.checked_sub(1).unwrap_or(usize::MAX);
+                self.correlated[index].samples[time] = Bsim4CorrelatedNoiseSample {
+                    drain_port: [node(pair.first.node_pos), node(pair.first.node_neg)],
+                    gate_port: [node(pair.second.node_pos), node(pair.second.node_neg)],
+                    drain_amplitude: ctnoi.clamp(0.0, 1.0),
+                    gate_amplitude: 1.0,
+                    gate_time_constant: tau.abs(),
+                };
+                self.correlated[index].amplitudes[time] = amplitude;
+            }
             for source in &sources {
                 self.temperatures
                     .insert(source.identity.clone(), device.core.model_temp.temp);
@@ -229,7 +344,12 @@ impl NativeNoiseWaveforms {
                     })?;
                 crate::ResourceLimitError::ensure(
                     crate::ResourceKind::ResultValues,
-                    values.saturating_mul(2),
+                    values.saturating_mul(2).saturating_add(
+                        self.correlated
+                            .len()
+                            .saturating_mul(count)
+                            .saturating_mul(10),
+                    ),
                     self.value_limit,
                 )?;
                 let mut samples = Vec::new();
@@ -324,6 +444,7 @@ impl Engine {
                 .checked_periodic_spectrum(&samples, (samples.len() - 1) / 2, &waveform.name)
                 .map_err(|error| SimulationError::Circuit(error.to_string()))?;
             let mut source = PeriodicNoiseSource {
+                correlated: None,
                 name: waveform.name,
                 node_pos: waveform.nodes[0].checked_sub(1).unwrap_or(usize::MAX),
                 node_neg: waveform.nodes[1].checked_sub(1).unwrap_or(usize::MAX),
@@ -345,6 +466,21 @@ impl Engine {
                 });
             }
             sources.push(source);
+        }
+        for waveform in frames.correlated {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let (name, waveform) = waveform.finish()?;
+            sources.push(PeriodicNoiseSource {
+                name,
+                node_pos: usize::MAX,
+                node_neg: usize::MAX,
+                psd: vec![],
+                binary_scale_exponent: 0,
+                flicker: None,
+                correlated: Some(waveform),
+            });
         }
         Ok(sources)
     }

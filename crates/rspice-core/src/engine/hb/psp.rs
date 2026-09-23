@@ -39,6 +39,7 @@ pub struct PspAnalysisResult {
 /// Authenticated periodic setup, ready to sweep all physical ports together.
 /// Port selection can be validated through [`Self::ports`] before solving.
 pub struct PreparedPsp {
+    noise_limits: crate::ResourceLimits,
     solver: HbSolver,
     state: HbSolverState,
     ports: Vec<SParameterPort>,
@@ -251,6 +252,7 @@ impl Engine {
             None
         };
         Ok(PreparedPsp {
+            noise_limits: self.config.resource_limits,
             solver,
             state,
             ports,
@@ -394,6 +396,7 @@ impl PreparedPsp {
                     &self.nodes,
                     &self.physical_references,
                     sources,
+                    &self.noise_limits,
                     abort,
                     &self.authored_references,
                 )?);

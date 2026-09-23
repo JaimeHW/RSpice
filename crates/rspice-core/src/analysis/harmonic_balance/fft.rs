@@ -271,6 +271,28 @@ impl HbFft {
         spectrum
     }
 
+    /// Complete real interpolant for a sampled noise amplitude. An even
+    /// grid's Nyquist coefficient is split equally between +/-N/2, retaining
+    /// a real cosine without wrapping a stationary noise input into the basis.
+    pub(crate) fn complete_noise_spectrum(&mut self, waveform: &[Value]) -> Vec<Complex64> {
+        let n = self.fft_size;
+        debug_assert_eq!(waveform.len(), n);
+        let mut buffer: Vec<_> = waveform.iter().map(|&v| Complex64::new(v, 0.0)).collect();
+        self.fft
+            .process_with_scratch(&mut buffer, &mut self.scratch);
+        buffer.truncate(n / 2 + 1);
+        for (k, value) in buffer.iter_mut().enumerate() {
+            *value /= n as Value;
+            if k == 0 || (n.is_multiple_of(2) && k == n / 2) {
+                value.im = 0.0;
+            }
+            if n.is_multiple_of(2) && k == n / 2 {
+                *value *= 0.5;
+            }
+        }
+        buffer
+    }
+
     /// Compute total signal power via Parseval's theorem
     pub fn total_power(&self, spectrum: &[Complex64]) -> Value {
         // For real signal: P = |X₀|² + 2*Σ|Xₖ|² for k > 0

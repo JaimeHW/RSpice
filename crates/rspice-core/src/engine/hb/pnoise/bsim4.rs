@@ -1,7 +1,7 @@
 //! Native BSIM4 elementary noise, including externalized resistor mechanisms.
 
 use super::*;
-use crate::analysis::noise::{NoiseSource, NoiseSourceIdentity};
+use crate::analysis::noise::{CorrelatedNoisePair, NoiseSource, NoiseSourceIdentity};
 use crate::device::Bsim4v8Device;
 
 impl Engine {
@@ -25,15 +25,8 @@ impl Engine {
     pub(super) fn collect_bsim4_periodic_noise_sources(
         device: &Bsim4v8Device,
         solution: &[Value],
-    ) -> Result<Vec<NoiseSource>, SimulationError> {
-        if device.core.model.tnoi_mod == 2 {
-            return Err(SimulationError::Circuit(format!(
-                "BSIM4 '{}' TNOIMOD=2 requires periodic correlated gate/drain noise",
-                device.name
-            )));
-        }
+    ) -> Result<(Vec<NoiseSource>, Vec<CorrelatedNoisePair>), SimulationError> {
         let (mut sources, correlated) = Self::collect_bsim4v8_noise_sources(device)?;
-        debug_assert!(correlated.is_empty());
         let (op, bias) = device.noise_operating_point();
         let model = &device.core.model;
         let size = &device.core.size;
@@ -97,6 +90,6 @@ impl Engine {
             )?,
             _ => {}
         }
-        Ok(sources)
+        Ok((sources, correlated))
     }
 }

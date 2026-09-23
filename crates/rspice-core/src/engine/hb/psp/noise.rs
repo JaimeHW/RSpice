@@ -24,6 +24,7 @@ pub(super) fn solve_noise_waves(
     nodes: &[(Option<usize>, Option<usize>)],
     physical: &[Value],
     sources: &[PeriodicNoiseSource],
+    limits: &crate::ResourceLimits,
     abort: &dyn AbortSignal,
     authored: &[Value],
 ) -> Result<PspNoiseCorrelation, SimulationError> {
@@ -90,7 +91,7 @@ pub(super) fn solve_noise_waves(
     let mut sums = vec![Complex64::ZERO; entries];
     let mut corrections = vec![Complex64::ZERO; entries];
     solver
-        .solve_periodic_noise_projected_correlations_each(
+        .solve_periodic_noise_projected_correlations_with_adjoints_each(
             state,
             PeriodicSidebandWindow {
                 offset_hz: scattering.frequency,
@@ -99,6 +100,8 @@ pub(super) fn solve_noise_waves(
             },
             &observations,
             sources,
+            None,
+            limits,
             abort,
             |_, covariance| {
                 for (index, &value) in covariance.iter().enumerate() {

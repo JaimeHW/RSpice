@@ -114,6 +114,7 @@ impl Engine {
                     ))
                 })?;
                 sources.push(PeriodicNoiseSource {
+                    correlated: None,
                     name: format!("RSHUNT:{node_name} thermal"),
                     node_pos: node_index,
                     node_neg: usize::MAX,
@@ -165,6 +166,7 @@ impl Engine {
                 &format!("pnoise resistor '{name}' thermal-noise density"),
             )?;
             sources.push(PeriodicNoiseSource {
+                correlated: None,
                 name: Self::periodic_resistor_thermal_noise_name(circuit, i),
                 node_pos: Self::hb_node_to_solver_index(np, num_nodes),
                 node_neg: Self::hb_node_to_solver_index(nn, num_nodes),
@@ -216,6 +218,7 @@ impl Engine {
                     modulation.push(voltage(node_pos)? - voltage(node_neg)?);
                 }
                 sources.push(PeriodicNoiseSource {
+                    correlated: None,
                     name: format!("{name} flicker"),
                     node_pos,
                     node_neg,
@@ -267,6 +270,7 @@ impl Engine {
                 &format!("pnoise branch-form resistor '{name}' thermal-noise density"),
             )?;
             sources.push(PeriodicNoiseSource {
+                correlated: None,
                 name: format!("{name} thermal"),
                 node_pos: Self::hb_node_to_solver_index(
                     circuit.resistor_branches.node_pos[i],
@@ -315,6 +319,7 @@ impl Engine {
                     })?;
                 modulation.extend_from_slice(current);
                 sources.push(PeriodicNoiseSource {
+                    correlated: None,
                     name: format!("{name} flicker"),
                     node_pos: Self::hb_node_to_solver_index(
                         circuit.resistor_branches.node_pos[i],

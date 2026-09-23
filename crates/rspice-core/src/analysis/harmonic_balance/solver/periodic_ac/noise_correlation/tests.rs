@@ -35,12 +35,125 @@ fn covariance(
 
 fn source() -> PeriodicNoiseSource {
     PeriodicNoiseSource {
+        correlated: None,
         name: "Idevice".into(),
         node_pos: 0,
         node_neg: usize::MAX,
         psd: vec![Complex64::new(2.0, 0.0), Complex64::new(0.2, 0.3)],
         binary_scale_exponent: 0,
         flicker: None,
+    }
+}
+
+#[test]
+fn bsim4_correlated_periodic_noise_retains_port_and_signed_sideband_covariance() {
+    use crate::analysis::noise::{Bsim4CorrelatedNoiseSample, Bsim4CorrelatedNoiseWaveform};
+    let mut solver = HbSolver::new(HbConfig::new(1.0).with_harmonics(3), 2);
+    solver.add_resistor(0, usize::MAX, 1.0);
+    solver.add_resistor(1, usize::MAX, 1.0);
+    let outputs = [
+        observe(Some(0), None, 0),
+        observe(Some(1), None, 0),
+        observe(Some(0), Some(1), 0),
+        observe(Some(0), None, 1),
+        observe(Some(1), None, -1),
+    ];
+    let count = solver.fft.size();
+    let samples = (0..count)
+        .map(|i| {
+            let phase = std::f64::consts::TAU * i as Value / count as Value;
+            Bsim4CorrelatedNoiseSample {
+                drain_port: [0, usize::MAX],
+                gate_port: [1, usize::MAX],
+                drain_amplitude: 1.0 + 0.25 * phase.sin(),
+                gate_amplitude: 2.0 + phase.cos(),
+                gate_time_constant: 1.0 / std::f64::consts::TAU,
+            }
+        })
+        .collect();
+    let mut source = PeriodicNoiseSource {
+        name: "channel/gate".into(),
+        node_pos: usize::MAX,
+        node_neg: usize::MAX,
+        psd: vec![],
+        binary_scale_exponent: 0,
+        flicker: None,
+        correlated: Some(Bsim4CorrelatedNoiseWaveform {
+            samples,
+            binary_scale_exponent: -4,
+        }),
+    };
+    let window = PeriodicSidebandWindow {
+        offset_hz: 0.25,
+        sideband_min: -1,
+        sideband_max: 1,
+    };
+    let actual = covariance(
+        &mut solver,
+        window,
+        &outputs,
+        std::slice::from_ref(&source),
+        &NoAbort,
+    )
+    .unwrap();
+    let transfer = |output: &PeriodicNoiseOutput, m: i32| {
+        let d = output.sideband - m;
+        let first = match d {
+            0 => Complex64::ONE,
+            1 => Complex64::new(0.0, -0.125),
+            -1 => Complex64::new(0.0, 0.125),
+            _ => Complex64::ZERO,
+        };
+        let second = match d {
+            0 => 2.0,
+            -1 | 1 => 0.5,
+            _ => 0.0,
+        };
+        let f = window.offset_hz + m as Value;
+        let gate = Complex64::new(0.0, second * f / (1.0 + f * f).sqrt());
+        let at = |node| match node {
+            Some(0) => first,
+            Some(1) => gate,
+            _ => Complex64::ZERO,
+        };
+        at(output.node_pos) - at(output.node_neg)
+    };
+    for (r, left) in outputs.iter().enumerate() {
+        for (c, right) in outputs.iter().enumerate() {
+            let expected = (-2..=2)
+                .map(|m| transfer(left, m) * transfer(right, m).conj())
+                .sum::<Complex64>()
+                / 16.0;
+            assert!(
+                (actual[0][r * outputs.len() + c] - expected).norm() < 2e-14,
+                "{r},{c}: {:?} vs {expected:?}",
+                actual[0][r * outputs.len() + c]
+            );
+        }
+    }
+    assert!(
+        actual[0][1].im.abs() > 0.01,
+        "gate/drain quadrature must survive"
+    );
+    // A port reversal is one signed process, including a pure Nyquist
+    // modulation. Splitting the two ports into independent noise sources
+    // would lose the negative cross correlation and double-count power.
+    let waveform = source.correlated.as_mut().unwrap();
+    waveform.binary_scale_exponent = 0;
+    for (i, sample) in waveform.samples.iter_mut().enumerate() {
+        sample.drain_port = if i % 2 == 0 { [0, 1] } else { [1, 0] };
+        sample.drain_amplitude = 1.0;
+        sample.gate_amplitude = 0.0;
+    }
+    let window = PeriodicSidebandWindow {
+        offset_hz: 0.25,
+        sideband_min: 0,
+        sideband_max: 0,
+    };
+    let values = covariance(&mut solver, window, &outputs[..3], &[source], &NoAbort).unwrap();
+    let expected = [0.5, -0.5, 1.0, -0.5, 0.5, -1.0, 1.0, -1.0, 2.0];
+    for (actual, expected) in values[0].iter().zip(expected) {
+        assert!((*actual - Complex64::new(expected, 0.0)).norm() < 1e-14);
     }
 }
 

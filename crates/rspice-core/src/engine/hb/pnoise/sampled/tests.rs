@@ -23,6 +23,7 @@ fn prepare(request: &PeriodicNoiseSampling) -> Result<PreparedSampling, Simulati
 
 fn source() -> PeriodicNoiseSource {
     PeriodicNoiseSource {
+        correlated: None,
         name: "modulated noise".into(),
         node_pos: 0,
         node_neg: usize::MAX,

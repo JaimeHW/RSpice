@@ -5,6 +5,7 @@
 //! exclude physical port terminations without subtracting large noise totals.
 
 use super::*;
+mod correlated;
 
 /// One differential voltage observed at a signed output sideband.
 #[derive(Debug, Clone, Copy)]
@@ -140,6 +141,7 @@ impl HbSolver {
     }
 
     /// Correlate complex linear observations of all retained noise sidebands.
+    #[cfg(test)]
     pub(crate) fn solve_periodic_noise_projected_correlations_each(
         &mut self,
         state: &HbSolverState,
@@ -150,7 +152,14 @@ impl HbSolver {
         consume: impl FnMut(usize, &[Complex64]) -> Result<(), HbError>,
     ) -> Result<(), HbError> {
         self.solve_periodic_noise_projected_correlations_with_adjoints_each(
-            state, window, outputs, sources, None, abort, consume,
+            state,
+            window,
+            outputs,
+            sources,
+            None,
+            &crate::ResourceLimits::default(),
+            abort,
+            consume,
         )
         .map(|_| ())
     }
@@ -170,6 +179,7 @@ impl HbSolver {
         outputs: &[PeriodicNoiseProjection],
         sources: &[PeriodicNoiseSource],
         autonomous_tolerance: Option<Value>,
+        limits: &crate::ResourceLimits,
         abort: &dyn AbortSignal,
         mut consume: impl FnMut(usize, &[Complex64]) -> Result<(), HbError>,
     ) -> Result<Vec<Complex64>, HbError> {
@@ -218,6 +228,27 @@ impl HbSolver {
             }
         }
         for source in sources {
+            if let Some(waveform) = &source.correlated {
+                if waveform.samples.len() != self.fft.size()
+                    || source.flicker.is_some()
+                    || source.psd.iter().any(|v| *v != Complex64::ZERO)
+                    || source.binary_scale_exponent != 0
+                {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "pnoise source '{}' has an invalid correlated waveform or mixed source laws",
+                        source.name
+                    )));
+                }
+                for sample in &waveform.samples {
+                    sample.validate(n).map_err(|reason| {
+                        HbError::InvalidCircuit(format!(
+                            "pnoise source '{}': {reason}",
+                            source.name
+                        ))
+                    })?;
+                }
+                continue;
+            }
             let normalized_pos = (source.node_pos < n).then_some(source.node_pos);
             let normalized_neg = (source.node_neg < n).then_some(source.node_neg);
             if normalized_pos == normalized_neg {
@@ -420,6 +451,26 @@ impl HbSolver {
         for (source_index, source) in sources.iter().enumerate() {
             if abort.is_aborted() {
                 return Err(HbError::Aborted);
+            }
+            if let Some(waveform) = &source.correlated {
+                let folded = self.fold_correlated_noise(
+                    waveform, &adjoints, channels, size, window, limits, abort,
+                )?;
+                for row in 0..channels {
+                    for column in row..channels {
+                        let value = correlated::covariance(
+                            &folded,
+                            row,
+                            column,
+                            waveform.binary_scale_exponent,
+                            abort,
+                        )?;
+                        covariance[row * channels + column] = value;
+                        covariance[column * channels + row] = value.conj();
+                    }
+                }
+                consume(source_index, &covariance)?;
+                continue;
             }
             for channel in 0..channels {
                 for band in 0..s {
