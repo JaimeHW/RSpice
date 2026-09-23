@@ -82,10 +82,10 @@ fn hb_device_current_saved_terminal_probes_preserve_hierarchy_phase_and_receipts
     let mut state = loaded.into_simulation_state().unwrap();
     let run = &mut state.runs[0];
     materialize_deferred_saved_output(&mut run.analyses[0], 3).unwrap();
-    let gate = materialized(&run, "Gate", 1)[0];
-    let drain = materialized(&run, "Drain", 1)[0];
-    let drive = materialized(&run, "Drive", 1)[0];
-    let deferred = materialized(&run, "Deferred gate", 1)[0];
+    let gate = materialized(run, "Gate", 1)[0];
+    let drain = materialized(run, "Drain", 1)[0];
+    let drive = materialized(run, "Drive", 1)[0];
+    let deferred = materialized(run, "Deferred gate", 1)[0];
     assert_eq!(deferred.y, gate.y);
     assert_eq!(
         deferred.complex.as_ref().unwrap().real,

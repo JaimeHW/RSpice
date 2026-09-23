@@ -1727,8 +1727,8 @@ fn soa_derating_survives_studio_worker_thermal_transient_and_saved_results() {
     assert_eq!(temps.unit.as_deref(), Some("K"));
     assert_eq!(limits.unit.as_deref(), Some("W"));
     assert!(temps.y.last().unwrap() - temps.y[0] > 70.0);
-    assert!(limits.y.iter().any(|v| *v == 0.05));
-    assert!(limits.y.iter().any(|v| *v == 0.0));
+    assert!(limits.y.contains(&0.05));
+    assert!(limits.y.contains(&0.0));
     for (&temp, &limit) in temps.y.iter().zip(limits.y.iter()) {
         assert_eq!(limit, curve.limit(0.05, temp));
     }

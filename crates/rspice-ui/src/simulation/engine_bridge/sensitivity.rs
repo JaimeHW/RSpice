@@ -442,7 +442,7 @@ mod tests {
                 "filter {filter:?}: {names:?}"
             );
             assert_eq!(
-                names.iter().any(|name| *name == "R1"),
+                names.contains(&"R1"),
                 expect_device,
                 "filter {filter:?}: {names:?}"
             );
