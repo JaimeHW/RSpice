@@ -470,16 +470,22 @@ mod tests {
 
     #[test]
     fn quasi_periodic_waveform_lifting_keeps_one_integral_per_authored_occurrence() {
-        use crate::abort_signal::NoAbort;
-        use crate::analysis::quasi_periodic::{
-            QuasiPeriodicGrid, QuasiPeriodicGridConfig, QuasiPeriodicSampling,
-        };
-        let mut config =
-            QuasiPeriodicGridConfig::new(vec![1e3, 1e3 * std::f64::consts::SQRT_2], vec![1, 1]);
-        config.sampling = QuasiPeriodicSampling::Exact(vec![8, 8]);
-        let grid =
-            QuasiPeriodicGrid::new_with_abort(config, &crate::ResourceLimits::default(), &NoAbort)
-                .unwrap();
+        use crate::device::behavioral::QuasiPeriodicClockBasis;
+        struct FixtureClock;
+        impl QuasiPeriodicClockBasis for FixtureClock {
+            fn clock_tuple(&self, frequency: Value) -> Result<Vec<i32>, String> {
+                if frequency == 1e3 {
+                    Ok(vec![1, 0])
+                } else {
+                    Err(format!("unexpected fixture clock {frequency}"))
+                }
+            }
+
+            fn dimensions(&self) -> &[usize] {
+                &[8, 8]
+            }
+        }
+        let grid = FixtureClock;
         let mut source = BehavioralVoltageSource::new(
             "BV".into(),
             2,
