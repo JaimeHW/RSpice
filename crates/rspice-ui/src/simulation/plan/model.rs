@@ -1125,6 +1125,17 @@ impl SimulationPlan {
             self.instances[index].draft.prepare_after_restore();
             let required_roles = Self::resolved_prerequisite_roles(&self.instances, index);
             let instance = &mut self.instances[index];
+            // These consumers now reuse a bound HB state. Their old startup
+            // override was never read and must not block editing a restored
+            // plan or be silently transferred to its shared carrier producer.
+            if matches!(instance.kind, AnalysisKind::Hbsp | AnalysisKind::Hbnoise)
+                && let Some(record) = instance.numeric_override.as_mut()
+            {
+                record.clear(NumericOverrideOption::HbInitialState);
+                if record.is_empty() {
+                    instance.numeric_override = None;
+                }
+            }
             // Schema migrations may retire a dependency role. Retaining such
             // an edge would make an otherwise valid saved plan structurally
             // corrupt, so restore prunes only roles the current typed draft no

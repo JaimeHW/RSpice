@@ -331,6 +331,10 @@ pub(super) const FFT_HAS_NO_SOLVE_OF_ITS_OWN: &str =
     "an FFT analysis runs no solve of its own; state the option on the transient it is bound to";
 pub(super) const NOT_HARMONIC_BALANCE: &str =
     "only a harmonic-balance solve reads this package, and this analysis does not run one";
+pub(super) const CARRIER_OWNS_HB_INITIAL_STATE: &str =
+    "this analysis reuses the bound HB solution; configure initial state on that HB analysis";
+pub(super) const ENVELOPE_HAS_NO_HB_INITIALIZER: &str =
+    "select HB under Initial periodic solve to configure its initial state";
 pub(super) const TRANSIENT_OWNS_STEP_CEILING: &str =
     "the transient's own Max step field owns this, and one bound cannot have two copies";
 /// `.OPTIONS METHOD` on a PSS analysis.
@@ -396,13 +400,9 @@ pub enum OptionReach {
     EverySolve,
     /// Only a solve that advances time, which is [`AnalysisKind::advances_time`].
     TimeStepped,
-    /// Only the harmonic-balance family's solve.
-    ///
-    /// Three kinds run one today: harmonic balance itself, and HBSP and
-    /// HBNOISE, which both solve an HB fixed point first
-    /// (`services/simulation_runner/hbnoise.rs:279`). The quasi-periodic kinds
-    /// will join them when their solves exist; until one runs, a control on
-    /// its form would author a value no run reads.
+    /// A fresh HB solve, either standalone or internal to Envelope. Studies
+    /// configure this on their selected HB base. Retained-carrier consumers
+    /// such as HBSP and HBNOISE do not construct another initial state.
     HarmonicBalanceFamily,
 }
 
@@ -419,10 +419,7 @@ impl OptionReach {
                 }
             }
             Self::HarmonicBalanceFamily => {
-                if matches!(
-                    kind,
-                    AnalysisKind::HarmonicBalance | AnalysisKind::Hbsp | AnalysisKind::Hbnoise
-                ) {
+                if matches!(kind, AnalysisKind::HarmonicBalance | AnalysisKind::Envelope) {
                     None
                 } else {
                     Some(NOT_HARMONIC_BALANCE)
@@ -622,6 +619,11 @@ impl NumericOverrideOption {
         if matches!(kind, AnalysisKind::Fft) {
             return Some(FFT_HAS_NO_SOLVE_OF_ITS_OWN);
         }
+        if self == Self::HbInitialState
+            && matches!(kind, AnalysisKind::Hbsp | AnalysisKind::Hbnoise)
+        {
+            return Some(CARRIER_OWNS_HB_INITIAL_STATE);
+        }
         if let Some(reason) = self.spec().reach.refusal_for(kind) {
             return Some(reason);
         }
@@ -666,6 +668,9 @@ impl NumericOverrideOption {
         ownership: SolverOwnership,
     ) -> Option<&'static str> {
         self.refusal_for(kind).or_else(|| match self {
+            Self::HbInitialState if ownership.hb_initializer == Some(false) => {
+                Some(ENVELOPE_HAS_NO_HB_INITIALIZER)
+            }
             Self::GminStepping | Self::SourceStepping | Self::PseudoTransient | Self::ArcLength => {
                 ownership.continuation_aid_owner()
             }
@@ -696,14 +701,17 @@ impl NumericOverrideOption {
 /// Five catalog options land on fields those two assign, so whether such an
 /// option reaches the solve is a property of the instance, not of its kind.
 ///
-/// [`Self::NONE`] is the honest answer for every kind that offers neither
-/// control: nothing overwrites, so nothing is refused.
+/// Envelope also selects whether HB initialization runs. Other instances can
+/// use [`Self::NONE`] and rely on the kind's applicability rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SolverOwnership {
     /// The tier this instance carries, for the kinds that offer one.
     pub accuracy: Option<AnalysisAccuracy>,
     /// The homotopy choice this instance carries, for the operating point.
     pub homotopy: Option<OpHomotopy>,
+    /// Envelope's selected initializer; `None` leaves applicability to the
+    /// analysis kind, while `Some(false)` excludes an unused HB startup control.
+    pub hb_initializer: Option<bool>,
 }
 
 impl SolverOwnership {
@@ -711,6 +719,7 @@ impl SolverOwnership {
     pub const NONE: Self = Self {
         accuracy: None,
         homotopy: None,
+        hb_initializer: None,
     };
 
     /// Who assigns the four continuation flags, when someone does.

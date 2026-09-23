@@ -7,8 +7,9 @@
 //! an authored control rather than a heuristic.
 //!
 //! Admitted under the fourth route. `resolve_simulation_config` has no arm for
-//! it; `Engine::hb_config_for_netlist` reads the parsed record on the way into
-//! every HB solve, including the ones HBSP and HBNOISE run first.
+//! it; `Engine::hb_initial_state_strategy` reads the parsed record on the way
+//! into a fresh HB solve, including Envelope initialization. HBSP and HBNOISE
+//! reuse an existing carrier, whose producer owns this choice.
 //!
 //! The package's other two keys are excluded, and `catalog.rs`'s header says
 //! why: `NUMFREQ` is read only by the deck translators the command line and

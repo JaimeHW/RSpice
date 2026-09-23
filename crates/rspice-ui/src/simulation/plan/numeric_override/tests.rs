@@ -249,6 +249,7 @@ fn every_option_an_operating_point_accepts_reaches_the_engine_it_is_built_from()
             let ownership = SolverOwnership {
                 accuracy: Some(accuracy),
                 homotopy: Some(homotopy),
+                ..SolverOwnership::NONE
             };
             let baseline = resolve_for_op(&AnalysisNumericOverride::default(), &config);
             for option in NumericOverrideOption::all() {
@@ -295,6 +296,7 @@ fn an_owned_option_is_refused_by_the_owner_that_assigns_it() {
     let robust = SolverOwnership {
         accuracy: Some(AnalysisAccuracy::Robust),
         homotopy: Some(OpHomotopy::Adaptive),
+        ..SolverOwnership::NONE
     };
     let refusal = NumericOverrideOption::GminStepping
         .refusal_for_instance(AnalysisKind::OperatingPoint, robust)
@@ -309,6 +311,7 @@ fn an_owned_option_is_refused_by_the_owner_that_assigns_it() {
     let tf = SolverOwnership {
         accuracy: Some(AnalysisAccuracy::Fast),
         homotopy: None,
+        ..SolverOwnership::NONE
     };
     assert!(
         NumericOverrideOption::Damping
@@ -322,6 +325,7 @@ fn an_owned_option_is_refused_by_the_owner_that_assigns_it() {
     let stepping = SolverOwnership {
         accuracy: Some(AnalysisAccuracy::Robust),
         homotopy: Some(OpHomotopy::SourceStepping),
+        ..SolverOwnership::NONE
     };
     let refusal = NumericOverrideOption::ArcLength
         .refusal_for_instance(AnalysisKind::OperatingPoint, stepping)
@@ -339,6 +343,7 @@ fn an_owned_option_is_refused_by_the_owner_that_assigns_it() {
             SolverOwnership {
                 accuracy: Some(AnalysisAccuracy::Balanced),
                 homotopy: Some(OpHomotopy::SourceStepping),
+                ..SolverOwnership::NONE
             }
         ),
         None
@@ -353,6 +358,7 @@ fn an_owned_option_is_refused_by_the_owner_that_assigns_it() {
             SolverOwnership {
                 accuracy: Some(AnalysisAccuracy::Balanced),
                 homotopy: Some(OpHomotopy::Adaptive),
+                ..SolverOwnership::NONE
             },
             NumericOverrideOption::GminStepping,
             "on",
@@ -744,16 +750,18 @@ fn the_time_stepped_options_are_refused_by_a_kind_that_never_steps() {
             kind.label()
         );
     }
-    for kind in [
-        AnalysisKind::HarmonicBalance,
-        AnalysisKind::Hbsp,
-        AnalysisKind::Hbnoise,
-    ] {
+    for kind in [AnalysisKind::HarmonicBalance, AnalysisKind::Envelope] {
         assert_eq!(
             NumericOverrideOption::HbInitialState.refusal_for(kind),
             None,
             "{} solves a harmonic-balance fixed point first",
             kind.label()
+        );
+    }
+    for kind in [AnalysisKind::Hbsp, AnalysisKind::Hbnoise] {
+        assert_eq!(
+            NumericOverrideOption::HbInitialState.refusal_for(kind),
+            Some(catalog::CARRIER_OWNS_HB_INITIAL_STATE)
         );
     }
     // And a kind that does step carries all of them but the one the transient
@@ -1225,27 +1233,31 @@ fn an_hb_integration_option_reaches_the_engine() {
             rspice_core::netlist::XyceHbTimeDomainMode::DcOperatingPoint,
         ),
     ] {
-        let mut record = AnalysisNumericOverride::default();
-        record
-            .set_for_instance(
-                AnalysisKind::HarmonicBalance,
-                SolverOwnership::NONE,
-                NumericOverrideOption::HbInitialState,
-                authored,
-            )
-            .unwrap_or_else(|error| panic!("{authored:?} is an authorable initial state: {error}"));
-        let (resolved, options) = resolve_and_parse(&record);
-        assert_eq!(
-            options.hb_time_domain_mode,
-            Some(expected),
-            "{authored:?} must reach the record the HB engine reads"
-        );
-        assert_eq!(
-            format!("{resolved:?}"),
-            format!("{:?}", baseline.0),
-            "TAHB reaches the engine without passing through SimulationConfig, which is the \
+        for kind in [AnalysisKind::HarmonicBalance, AnalysisKind::Envelope] {
+            let mut record = AnalysisNumericOverride::default();
+            record
+                .set_for_instance(
+                    kind,
+                    SolverOwnership::NONE,
+                    NumericOverrideOption::HbInitialState,
+                    authored,
+                )
+                .unwrap_or_else(|error| {
+                    panic!("{authored:?} is an authorable initial state: {error}")
+                });
+            let (resolved, options) = resolve_and_parse(&record);
+            assert_eq!(
+                options.hb_time_domain_mode,
+                Some(expected),
+                "{authored:?} must reach the record the HB engine reads"
+            );
+            assert_eq!(
+                format!("{resolved:?}"),
+                format!("{:?}", baseline.0),
+                "TAHB reaches the engine without passing through SimulationConfig, which is the \
              fourth admission route and the reason this option needs it"
-        );
+            );
+        }
     }
 }
 

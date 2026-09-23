@@ -614,10 +614,8 @@ impl AnalysisDraft {
 
     /// What this instance's own controls assign after the deck is resolved.
     ///
-    /// Two kinds answer with something: the operating point carries both an
-    /// accuracy tier and a homotopy choice, and the transfer function carries
-    /// the tier. Every other kind resolves to the deck and states nothing on
-    /// top of it, so it owns nothing and refuses nothing extra.
+    /// Operating point and transfer function carry numerical policies;
+    /// Envelope additionally decides whether an HB initializer will run.
     ///
     /// Read off the draft's stored index rather than through `to_config`,
     /// because a draft that does not yet validate — a half-typed temperature —
@@ -633,10 +631,16 @@ impl AnalysisDraft {
             Self::OperatingPoint(state) => SolverOwnership {
                 accuracy: AnalysisAccuracy::ALL.get(state.accuracy_idx).copied(),
                 homotopy: OpHomotopy::ALL.get(state.homotopy_idx).copied(),
+                ..SolverOwnership::NONE
             },
             Self::TransferFunction(state) => SolverOwnership {
                 accuracy: AnalysisAccuracy::ALL.get(state.accuracy_idx).copied(),
                 homotopy: None,
+                ..SolverOwnership::NONE
+            },
+            Self::Envelope(state) => SolverOwnership {
+                hb_initializer: Some(state.initial_periodic_solve_idx == 0),
+                ..SolverOwnership::NONE
             },
             _ => SolverOwnership::NONE,
         }

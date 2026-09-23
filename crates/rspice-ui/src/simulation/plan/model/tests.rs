@@ -10,6 +10,72 @@ fn snapshot(plan: &SimulationPlan) -> String {
     serde_json::to_string(plan).expect("plan serializes")
 }
 
+#[test]
+fn restore_retires_only_unused_hb_consumer_startup_overrides() {
+    use crate::simulation::plan::SolverOwnership;
+    let mut plan = SimulationPlan::empty();
+    let (hb, _) = plan.insert(AnalysisKind::HarmonicBalance).unwrap();
+    let (sp, _) = plan.insert(AnalysisKind::Hbsp).unwrap();
+    let (noise, _) = plan.insert(AnalysisKind::Hbnoise).unwrap();
+    let mut startup = AnalysisNumericOverride::default();
+    startup
+        .set_for_instance(
+            AnalysisKind::HarmonicBalance,
+            SolverOwnership::NONE,
+            NumericOverrideOption::HbInitialState,
+            "0",
+        )
+        .unwrap();
+    for id in [hb, sp, noise] {
+        let index = plan.index_of(id).unwrap();
+        plan.instances[index].numeric_override = Some(startup.clone());
+    }
+    let index = plan.index_of(sp).unwrap();
+    plan.instances[index]
+        .numeric_override
+        .as_mut()
+        .unwrap()
+        .set_for_instance(
+            AnalysisKind::Hbsp,
+            SolverOwnership::NONE,
+            NumericOverrideOption::Reltol,
+            "1u",
+        )
+        .unwrap();
+    let mut restored: SimulationPlan = serde_json::from_str(&snapshot(&plan)).unwrap();
+    let history = serde_json::to_value(&restored.receipts).unwrap();
+    assert!(!restored.receipts.is_empty());
+    restored.prepare_after_restore();
+    assert_eq!(
+        restored.instance(hb).unwrap().numeric_override(),
+        Some(&startup)
+    );
+    assert!(
+        restored
+            .instance(noise)
+            .unwrap()
+            .numeric_override()
+            .is_none()
+    );
+    let remaining = restored.instance(sp).unwrap().numeric_override().unwrap();
+    assert!(
+        remaining
+            .value(NumericOverrideOption::HbInitialState)
+            .is_none()
+    );
+    assert_eq!(
+        remaining.value(NumericOverrideOption::Reltol),
+        Some("1u".into())
+    );
+    assert_eq!(serde_json::to_value(&restored.receipts).unwrap(), history);
+    let once = snapshot(&restored);
+    restored.prepare_after_restore();
+    assert_eq!(snapshot(&restored), once);
+    restored
+        .edit(sp, |_| ())
+        .expect("restored consumer remains editable");
+}
+
 /// A plan written before participation existed states no `run_at`, and must
 /// reload running every analysis at every point.
 ///

@@ -16,6 +16,42 @@ use super::*;
 use crate::simulation::plan::{AnalysisKind, NumericOverrideOption as O, SolverOwnership};
 use crate::workbench::state::SimulationPage;
 
+#[test]
+fn hb_startup_field_tracks_selected_envelope_initializer() {
+    let mut draft = AnalysisDraft::for_kind(AnalysisKind::Envelope);
+    for method in [0, 1, 2] {
+        let AnalysisDraft::Envelope(state) = &mut draft else {
+            unreachable!()
+        };
+        state.initial_periodic_solve_idx = method;
+        let offered = form_rows(
+            AnalysisKind::Envelope,
+            &draft,
+            None,
+            &SimulationOptions::default(),
+        );
+        assert_eq!(
+            offered
+                .iter()
+                .flat_map(|section| &section.rows)
+                .any(|row| row.option == O::HbInitialState),
+            method == 0
+        );
+        let mut record = AnalysisNumericOverride::default();
+        assert_eq!(
+            record
+                .set_for_instance(
+                    AnalysisKind::Envelope,
+                    draft.solver_ownership(),
+                    O::HbInitialState,
+                    "0"
+                )
+                .is_ok(),
+            method == 0
+        );
+    }
+}
+
 /// The test instance, with one analysis of `kind` selected on the Analyses
 /// route.
 fn studio(kind: AnalysisKind) -> (RSpiceApp, AnalysisInstanceId) {
@@ -157,11 +193,7 @@ fn a_form_offers_the_options_its_own_kind_owns() {
          the accepted steps are reported"
     );
 
-    // The harmonic-balance family's own package, on the family's own forms and
-    // nowhere else. Its solve is where `TAHB` is read, so it is the only form
-    // that can offer a control for it. Asked of the kind's own draft rather
-    // than of a plan instance, because two of the three carry a prerequisite
-    // and what decides this is the kind, not whether a plan admits one.
+    // A fresh HB solve owns startup. Consumers reuse its retained solution.
     for kind in [
         AnalysisKind::HarmonicBalance,
         AnalysisKind::Hbsp,
@@ -175,8 +207,12 @@ fn a_form_offers_the_options_its_own_kind_owns() {
             .collect();
         assert_eq!(
             offered,
-            vec![O::HbInitialState],
-            "{} owns how its harmonic-balance solve starts and nothing else",
+            if kind == AnalysisKind::HarmonicBalance {
+                vec![O::HbInitialState]
+            } else {
+                vec![]
+            },
+            "{} must offer startup only when it computes a fresh carrier",
             kind.label()
         );
     }
