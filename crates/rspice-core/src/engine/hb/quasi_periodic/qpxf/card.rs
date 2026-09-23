@@ -16,18 +16,20 @@ fn request_fields(card: &QpxfCard) -> Result<QpxfRequest, SimulationError> {
         "OFFSET" => QpxfFrequencyAxis::Offset,
         _ => return Err(qpxf_error("AXIS must be OUTPUT or OFFSET")),
     };
-    let mut linear = QuasiPeriodicLinearConfig::default();
-    linear.method = match card
-        .linear_solver
-        .as_deref()
-        .unwrap_or("AUTO")
-        .to_ascii_uppercase()
-        .as_str()
-    {
-        "AUTO" => QuasiPeriodicLinearMethod::Auto,
-        "DIRECT" => QuasiPeriodicLinearMethod::Direct,
-        "KRYLOV" => QuasiPeriodicLinearMethod::Krylov,
-        _ => return Err(qpxf_error("SOLVER must be AUTO, DIRECT or KRYLOV")),
+    let mut linear = QuasiPeriodicLinearConfig {
+        method: match card
+            .linear_solver
+            .as_deref()
+            .unwrap_or("AUTO")
+            .to_ascii_uppercase()
+            .as_str()
+        {
+            "AUTO" => QuasiPeriodicLinearMethod::Auto,
+            "DIRECT" => QuasiPeriodicLinearMethod::Direct,
+            "KRYLOV" => QuasiPeriodicLinearMethod::Krylov,
+            _ => return Err(qpxf_error("SOLVER must be AUTO, DIRECT or KRYLOV")),
+        },
+        ..Default::default()
     };
     if let Some(v) = card.krylov_restart {
         linear.restart = v;

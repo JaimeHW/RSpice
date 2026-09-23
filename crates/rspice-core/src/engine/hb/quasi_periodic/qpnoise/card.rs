@@ -14,12 +14,14 @@ fn fields(card: &QpnoiseCard) -> Result<QpnoiseRequest, SimulationError> {
         "OFFSET" => QpnoiseFrequencyAxis::Offset,
         _ => return Err(qpnoise_error("AXIS must be OUTPUT or OFFSET")),
     };
-    let mut linear = QuasiPeriodicLinearConfig::default();
-    linear.method = match choice(&card.linear_solver, "AUTO").as_str() {
-        "AUTO" => QuasiPeriodicLinearMethod::Auto,
-        "DIRECT" => QuasiPeriodicLinearMethod::Direct,
-        "KRYLOV" => QuasiPeriodicLinearMethod::Krylov,
-        _ => return Err(qpnoise_error("SOLVER must be AUTO, DIRECT or KRYLOV")),
+    let mut linear = QuasiPeriodicLinearConfig {
+        method: match choice(&card.linear_solver, "AUTO").as_str() {
+            "AUTO" => QuasiPeriodicLinearMethod::Auto,
+            "DIRECT" => QuasiPeriodicLinearMethod::Direct,
+            "KRYLOV" => QuasiPeriodicLinearMethod::Krylov,
+            _ => return Err(qpnoise_error("SOLVER must be AUTO, DIRECT or KRYLOV")),
+        },
+        ..Default::default()
     };
     if let Some(value) = card.krylov_restart {
         linear.restart = value;

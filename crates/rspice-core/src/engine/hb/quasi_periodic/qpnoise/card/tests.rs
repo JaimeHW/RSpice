@@ -107,8 +107,10 @@ fn qpnoise_card_rejects_inert_ambiguous_and_unbounded_options() {
         assert!(result.is_err(), "accepted {suffix}");
     }
     let card = parse(".QPNOISE LIN 1000000 1 1e6 OUT=V(out) OUTLATTICE=(0,0)").unwrap();
-    let mut limits = ResourceLimits::default();
-    limits.max_analysis_points = 20;
+    let limits = ResourceLimits {
+        max_analysis_points: 20,
+        ..Default::default()
+    };
     assert!(matches!(
         QpnoiseRequest::validate_qpnoise_card(&card, &limits),
         Err(SimulationError::ResourceLimit(_))
