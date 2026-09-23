@@ -152,32 +152,49 @@ impl Default for SensitivityConfig {
 }
 
 impl SensitivityConfig {
+    /// Preserve historical positive spot cards; DC-limit spots use a linear grid.
+    pub(crate) fn ac_sweep_config(&self) -> Option<super::AcAnalysisConfig> {
+        if !self.ac_mode {
+            return None;
+        }
+        let start_freq = self.frequency?;
+        let sweep = self.sweep.unwrap_or(SensitivitySweep {
+            stop_frequency: start_freq,
+            points: 1,
+            variation: if start_freq == 0.0 {
+                AcSweepType::Linear
+            } else {
+                AcSweepType::Decade
+            },
+        });
+        Some(super::AcAnalysisConfig {
+            sweep_type: sweep.variation,
+            num_points: sweep.points as usize,
+            start_freq,
+            stop_freq: sweep.stop_frequency,
+        })
+    }
+
     /// Generate SPICE .sens command
     ///
     /// The card the Studio writes is the card `rspice run` reads: one output,
     /// the filter list if there is one, and the AC sweep if the run has a
-    /// frequency. One frequency is written as the degenerate decade sweep
-    /// `AC DEC 1 f f`, which is what the engine's grid function turns back
-    /// into exactly that one frequency.
+    /// frequency. Positive spot frequencies keep the historical `AC DEC 1 f f`
+    /// spelling; the zero-frequency limit is written as `AC LIN 1 0 0`.
     pub fn to_spice(&self) -> String {
         let mut card = format!(".sens {}", self.output_var);
         if !self.filter.trim().is_empty() {
             card.push(' ');
             card.push_str(self.filter.trim());
         }
-        if self.ac_mode
-            && let Some(start) = self.frequency
-        {
-            match self.sweep {
-                Some(sweep) => card.push_str(&format!(
-                    " AC {} {} {} {}",
-                    sweep.variation.spice_name().to_uppercase(),
-                    sweep.points,
-                    start,
-                    sweep.stop_frequency
-                )),
-                None => card.push_str(&format!(" AC DEC 1 {start} {start}")),
-            }
+        if let Some(sweep) = self.ac_sweep_config() {
+            card.push_str(&format!(
+                " AC {} {} {} {}",
+                sweep.sweep_type.spice_name().to_uppercase(),
+                sweep.num_points,
+                sweep.start_freq,
+                sweep.stop_freq,
+            ));
         }
         card
     }
@@ -186,13 +203,26 @@ impl SensitivityConfig {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 
-        if self.output_var.is_empty() {
+        if self.output_var.trim().is_empty() {
             errors.push("Output variable is required".to_string());
+        }
+        if let Err(error) = validate_sensitivity_filter(&self.filter) {
+            errors.push(error);
         }
         if self.ac_mode {
             match self.frequency {
-                Some(freq) if !freq.is_finite() || freq <= 0.0 => errors
-                    .push("Frequency must be finite and positive for AC sensitivity".to_string()),
+                Some(freq) if !freq.is_finite() || freq < 0.0 => errors.push(
+                    "Frequency must be finite and nonnegative for AC sensitivity".to_string(),
+                ),
+                Some(0.0)
+                    if self
+                        .sweep
+                        .is_some_and(|sweep| sweep.variation != AcSweepType::Linear) =>
+                {
+                    errors.push(
+                        "DEC/OCT sensitivity requires a positive start frequency".to_string(),
+                    );
+                }
                 // An AC study with no frequency has no grid to solve on. It
                 // used to run silently at 1 Hz, which answered a question
                 // nobody asked.
@@ -200,9 +230,9 @@ impl SensitivityConfig {
                 Some(_) => {}
             }
             if let Some(sweep) = self.sweep {
-                if !sweep.stop_frequency.is_finite() || sweep.stop_frequency <= 0.0 {
+                if !sweep.stop_frequency.is_finite() || sweep.stop_frequency < 0.0 {
                     errors.push(
-                        "Stop frequency must be finite and positive for an AC sensitivity sweep"
+                        "Stop frequency must be finite and nonnegative for an AC sensitivity sweep"
                             .to_string(),
                     );
                 }
@@ -210,6 +240,8 @@ impl SensitivityConfig {
                     errors.push("An AC sensitivity sweep needs at least one point".to_string());
                 }
             }
+        } else if self.frequency.is_some() {
+            errors.push("A sensitivity frequency is only valid in AC mode".to_string());
         } else if self.sweep.is_some() {
             errors.push("A sensitivity sweep is only valid in AC mode".to_string());
         }
@@ -241,7 +273,7 @@ mod tests {
         assert!(
             errors
                 .iter()
-                .any(|message| message.contains("Frequency must be finite and positive"))
+                .any(|message| message.contains("Frequency must be finite and nonnegative"))
         );
     }
 

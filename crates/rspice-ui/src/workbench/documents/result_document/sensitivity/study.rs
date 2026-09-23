@@ -191,8 +191,8 @@ pub(in crate::workbench::documents::result_document) struct StudyPlan {
     /// range, so a row that matters nowhere paints flat beside one that
     /// dominates the band — which is the comparison the column exists to make.
     sweep_max_magnitude: f64,
-    /// Where each solved point sits across the profile cell, on a log
-    /// frequency axis, in `[0, 1]`. One walk over the grid rather than one
+    /// Where each solved point sits across the profile cell, in `[0, 1]`.
+    /// Uses a linear axis when the band contains zero. One walk rather than one
     /// per painted row.
     profile_x: Vec<f32>,
 }
@@ -209,10 +209,8 @@ impl StudyPlan {
 
 /// Where each solved frequency sits across the profile cell.
 ///
-/// Logarithmic, because an AC sensitivity band is authored in decades and a
-/// linear axis would crush every point but the last into the left edge. A
-/// degenerate band puts everything at the left, which is the honest picture
-/// of a sweep that covers no span.
+/// Positive bands use logarithmic spacing. A band containing the DC limit
+/// uses linear spacing so its zero-frequency sample remains visible.
 fn profile_positions(basis: &SensitivityBasisEvidence) -> Vec<f32> {
     let SensitivityBasisEvidence::Ac { frequencies_hz, .. } = basis else {
         return vec![0.0];
@@ -220,13 +218,20 @@ fn profile_positions(basis: &SensitivityBasisEvidence) -> Vec<f32> {
     let (Some(first), Some(last)) = (frequencies_hz.first(), frequencies_hz.last()) else {
         return Vec::new();
     };
-    let (low, high) = (first.log10(), last.log10());
+    let coordinate = |frequency: f64| {
+        if *first == 0.0 {
+            frequency
+        } else {
+            frequency.log10()
+        }
+    };
+    let (low, high) = (coordinate(*first), coordinate(*last));
     let span = high - low;
     frequencies_hz
         .iter()
         .map(|frequency| {
             if span > 0.0 {
-                (((frequency.log10() - low) / span) as f32).clamp(0.0, 1.0)
+                (((coordinate(*frequency) - low) / span) as f32).clamp(0.0, 1.0)
             } else {
                 0.0
             }
@@ -1015,6 +1020,18 @@ mod tests {
 
         // Log-frequency positions across a decade-spaced band.
         assert_eq!(plan.profile_x, vec![0.0, 0.5, 1.0]);
+        for frequencies in [vec![0.0, 250.0, 1000.0], vec![0.0]] {
+            let basis = SensitivityBasisEvidence::Ac {
+                frequencies_hz: frequencies.clone(),
+                output: Vec::new(),
+            };
+            let expected = if frequencies.len() == 1 {
+                vec![0.0]
+            } else {
+                vec![0.0, 0.25, 1.0]
+            };
+            assert_eq!(profile_positions(&basis), expected);
+        }
 
         // A band that covers no span puts everything at the left rather than
         // dividing by zero.

@@ -73,23 +73,16 @@ impl SensConfig {
         if self.output_expr.trim().is_empty() {
             return Err("Output expression required".into());
         }
-        if self.sens_type == SensType::Ac && (!self.ac_freq.is_finite() || self.ac_freq <= 0.0) {
-            return Err("AC frequency must be finite and positive".into());
+        let ac_mode = self.sens_type == SensType::Ac;
+        crate::simulation::config::SensitivityConfig {
+            output_var: self.output_expr.clone(),
+            ac_mode,
+            frequency: ac_mode.then_some(self.ac_freq),
+            filter: self.filter.clone(),
+            sweep: self.sweep,
         }
-        crate::simulation::config::validate_sensitivity_filter(&self.filter)?;
-        // Whether a band belongs to a DC basis at all is the plan's question,
-        // not this field's: refusing it here would make every band a form
-        // error the moment the mode changed, and would hide which of the
-        // band's own fields was being edited.
-        if let Some(sweep) = self.sweep {
-            if !sweep.stop_frequency.is_finite() || sweep.stop_frequency <= 0.0 {
-                return Err("Stop frequency must be finite and positive".into());
-            }
-            if sweep.points == 0 {
-                return Err("A sweep needs at least one point".into());
-            }
-        }
-        Ok(())
+        .validate()
+        .map_err(|errors| errors.join("; "))
     }
 }
 
@@ -207,12 +200,9 @@ impl SensDialogState {
         // An empty stop frequency is one point, which is what the hint beside
         // the field says and what the form wrote before it could sweep. The
         // point count and the sweep kind are only read once a band exists.
-        //
-        // The band is read whatever the mode says, and a DC plan that states
-        // one is refused by the plan's own validation rather than having its
-        // band quietly dropped here: a reader who typed a band and then chose
-        // DC asked for two incompatible things, and is owed the sentence.
-        let sweep = if !self.ac_stop.trim().is_empty() {
+        // Disabled AC fields stay in the draft for switching back, but cannot
+        // block or alter a DC request.
+        let sweep = if sens_type == SensType::Ac && !self.ac_stop.trim().is_empty() {
             let stop_frequency = super::options::parse_si_value(&self.ac_stop)
                 .map_err(|err| format!("Invalid stop frequency: {err}"))?;
             let points = self

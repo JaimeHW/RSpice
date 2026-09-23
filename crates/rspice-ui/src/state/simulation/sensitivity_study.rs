@@ -171,9 +171,9 @@ impl SensitivityStudyEvidence {
         {
             let mut previous: Option<f64> = None;
             for frequency in frequencies_hz {
-                if !frequency.is_finite() || *frequency <= 0.0 {
+                if !frequency.is_finite() || *frequency < 0.0 {
                     return Err(format!(
-                        "sensitivity study was solved at {frequency} Hz, which is not a positive \
+                        "sensitivity study was solved at {frequency} Hz, which is not a nonnegative \
                          finite frequency"
                     ));
                 }

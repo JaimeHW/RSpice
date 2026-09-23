@@ -30,7 +30,7 @@ pub use recorded_fft::{
 };
 pub use sensitivity::{
     DESIGN_PARAMETERS_FILTER, SensitivityConfig, SensitivitySweep, canonical_sensitivity_filter,
-    design_parameters_filter, validate_sensitivity_filter,
+    design_parameters_filter,
 };
 pub use transient::TransientAnalysisConfig;
 

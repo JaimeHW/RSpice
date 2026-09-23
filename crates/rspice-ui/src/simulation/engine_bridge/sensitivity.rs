@@ -161,9 +161,8 @@ impl EngineBridge {
 
     /// The grid the card asks for, built by the engine's own sweep function.
     ///
-    /// `None` is a DC study. A single frequency goes through the same
-    /// function as a sweep, as `DEC 1 f f`, so the Studio and the command
-    /// line cannot disagree about what one point means.
+    /// `None` is a DC study. Spot and swept frequencies use the same grid
+    /// configuration as the emitted card, including the zero-frequency limit.
     fn sensitivity_frequencies(
         &self,
         config: &SensitivityConfig,
@@ -177,16 +176,15 @@ impl EngineBridge {
                 "AC sensitivity requires a start frequency".to_owned(),
             ));
         };
-        let (variation, points, stop) = match config.sweep {
-            Some(sweep) => (
-                sweep.variation.freq_variation(),
-                sweep.points as usize,
-                sweep.stop_frequency,
-            ),
-            None => (rspice_core::netlist::FreqVariation::Dec, 1, start),
-        };
+        let sweep = config
+            .ac_sweep_config()
+            .expect("AC start was resolved above");
         rspice_core::analysis::ac::try_ac_sweep_frequencies_with_abort(
-            variation, points, start, stop, abort,
+            sweep.sweep_type.freq_variation(),
+            sweep.num_points,
+            start,
+            sweep.stop_freq,
+            abort,
         )
         .map(Some)
         // The engine's own sentence, verbatim: the grid this refuses is the

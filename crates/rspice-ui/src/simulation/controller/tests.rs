@@ -13,6 +13,139 @@ use std::cell::RefCell;
 use std::path::Path;
 
 #[test]
+fn sensitivity_dc_limit_and_disabled_ac_fields_reach_the_solver_and_results() {
+    use crate::simulation::dialog::sens::{SensConfig, SensDialogState};
+    use crate::simulation::plan::AnalysisDraft;
+    use crate::simulation::runner::worker_contract::{WorkerAnalysisSpec, WorkerSimulationResult};
+    use crate::simulation::results::SimulationResult;
+    use crate::state::SensitivityBasisEvidence;
+    let source = "DC-limit sensitivity\n.param rt=1k\nV1 in 0 DC 1 AC 1\nR1 in out {rt}\nR2 out 0 1k\n.end\n";
+    let controller = SimulationController::new();
+    for (ac_mode, stop, expected_frequencies) in [
+        (true, "", vec![0.0]),
+        (true, "1000", vec![0.0, 500.0, 1000.0]),
+        (true, "0", vec![0.0]),
+        (false, "not-a-frequency", Vec::new()),
+    ] {
+        let mut draft = SensDialogState::from_config(&SensConfig::default());
+        draft.output_expr = "V(out)".into();
+        draft.filter = "PARAM:rt".into();
+        draft.sens_type_idx = usize::from(ac_mode);
+        draft.ac_freq = if ac_mode {
+            "0"
+        } else {
+            "invalid retained frequency"
+        }
+        .into();
+        draft.ac_stop = stop.into();
+        draft.ac_points = if ac_mode {
+            "3"
+        } else {
+            "invalid retained count"
+        }
+        .into();
+        draft.ac_sweep_idx = if ac_mode { 2 } else { 99 };
+        let json = serde_json::to_value(&draft).unwrap();
+        let restored: SensDialogState = serde_json::from_value(json.clone()).unwrap();
+        let mut restored = AnalysisDraft::Sensitivity(restored);
+        restored.prepare_after_restore();
+        let mut state = AppState::default();
+        state.sim_setup.apply_analysis_draft_projection(&restored);
+        let spec = controller.build_sensitivity_spec(&state).unwrap();
+        spec.validate().unwrap();
+        assert_eq!(serde_json::to_value(&state.sim_setup.sens).unwrap(), json);
+        let wire = WorkerAnalysisSpec::try_from(&spec).unwrap();
+        let restored: WorkerAnalysisSpec =
+            serde_json::from_value(serde_json::to_value(&wire).unwrap()).unwrap();
+        let spec = AnalysisSpec::from(restored);
+        spec.validate().unwrap();
+        let config = controller.analysis_spec_to_config(&state, &spec).unwrap();
+        let AnalysisConfig::Sensitivity(sensitivity) = &config else {
+            panic!("SENS config")
+        };
+        let card = sensitivity.to_spice();
+        if ac_mode {
+            assert!(card.contains(" AC LIN "), "{card}");
+        } else {
+            assert_eq!(card, ".sens V(out) PARAM:RT");
+        }
+        rspice_core::Netlist::parse(&source.replace(".end", &format!("{card}\n.end"))).unwrap();
+        let result = crate::simulation::EngineBridge::new()
+            .run(&config, source)
+            .unwrap();
+        let wire = WorkerSimulationResult::try_from(result).unwrap();
+        let restored: WorkerSimulationResult =
+            serde_json::from_value(serde_json::to_value(&wire).unwrap()).unwrap();
+        let SimulationResult::SensitivityStudy { evidence } = SimulationResult::from(restored)
+        else {
+            panic!("SENS evidence")
+        };
+        evidence.validate().unwrap();
+        if let SensitivityBasisEvidence::Ac { frequencies_hz, .. } = &evidence.basis {
+            assert_eq!(*frequencies_hz, expected_frequencies);
+        } else {
+            assert!(!ac_mode);
+        }
+        let row = evidence
+            .rows
+            .iter()
+            .find(|row| row.parameter == "PARAM:RT")
+            .unwrap();
+        for (raw, normalized) in row.raw.iter().zip(&row.normalized) {
+            assert!((raw.value().unwrap() + 0.00025).abs() < 1e-10);
+            assert!((normalized.value().unwrap() + 0.5).abs() < 1e-6);
+        }
+        let retained = super::sensitivity_result::analysis_result(
+            AnalysisType::Sensitivity,
+            "SENS",
+            evidence.clone(),
+        );
+        assert!(retained.success);
+        let payload: crate::state::AnalysisResultPayload = serde_json::from_value(
+            serde_json::to_value(retained.result_payload.as_ref().unwrap()).unwrap(),
+        )
+        .unwrap();
+        payload.validate_for(AnalysisType::Sensitivity).unwrap();
+        if ac_mode {
+            let mut invalid = (*evidence).clone();
+            let SensitivityBasisEvidence::Ac { frequencies_hz, .. } = &mut invalid.basis else {
+                unreachable!()
+            };
+            frequencies_hz[0] = -1.0;
+            assert!(invalid.validate().is_err());
+        }
+    }
+
+    for frequency in [None, Some(f64::NAN), Some(f64::INFINITY), Some(-1.0)] {
+        let spec = AnalysisSpec::Sensitivity {
+            output_var: "V(out)".into(),
+            ac_mode: true,
+            frequency,
+            filter: String::new(),
+            sweep: None,
+        };
+        assert!(spec.validate().is_err(), "{spec:?}");
+    }
+    for variation in [
+        crate::simulation::multi_run::FrequencySweep::Decade,
+        crate::simulation::multi_run::FrequencySweep::Octave,
+    ] {
+        let spec = AnalysisSpec::Sensitivity {
+            output_var: "V(out)".into(),
+            ac_mode: true,
+            frequency: Some(0.0),
+            filter: String::new(),
+            sweep: Some(crate::simulation::multi_run::SensitivitySweepSpec {
+                stop_frequency: 1000.0,
+                points: 3,
+                variation,
+            }),
+        };
+        assert!(spec.validate().is_err());
+    }
+}
+
+#[test]
 fn transient_specialized_views_never_outlive_their_retained_source() {
     let mut controller = SimulationController::new();
     let mut state = AppState::default();
