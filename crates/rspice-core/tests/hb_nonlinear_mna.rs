@@ -228,34 +228,18 @@ fn nonlinear_hb_matrix_budget_counts_branch_spectrum_unknowns() {
 }
 
 #[test]
-fn nonlinear_hb_fails_closed_before_solving_unrepresented_periodic_families() {
-    let cases = [(
-        "\
-* solution-dependent capacitance requires periodic charge linearization
+fn nonlinear_hb_accepts_solution_dependent_capacitance_with_periodic_charge() {
+    let deck = "\
+* solution-dependent capacitance has exact periodic charge linearization
 iin 0 out dc 0
 vctrl ctrl 0 dc 0.5
 c1 out 0 C={1p*(1+V(ctrl))}
 r1 out 0 1k
 .end
-",
-        "solution-dependent capacitor",
-    )];
-
-    for (deck, expected_family) in cases {
-        let netlist = Netlist::parse(deck).expect("unsupported HB deck still parses");
-        let error = Engine::new(SimulationConfig::default())
-            .run_hb(&netlist, HbConfig::new(F0).with_harmonics(1))
-            .expect_err("an unrepresented periodic family must fail before exact HB solving");
-        let message = error.to_string();
-        assert!(
-            message.contains("exact HB MNA is unavailable"),
-            "failure must identify the exact-MNA preflight: {message}"
-        );
-        assert!(
-            message.contains(expected_family),
-            "failure must identify unsupported family '{expected_family}': {message}"
-        );
-    }
+";
+    let result = run(deck, false, 1);
+    assert!(result.converged);
+    assert!(coefficient(&result, "out", 0).norm() < 1e-12);
 }
 
 #[test]
