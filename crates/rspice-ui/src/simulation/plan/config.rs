@@ -642,6 +642,17 @@ impl AnalysisDraft {
                 time_integration: Some(state.study.transient_stress),
                 ..SolverOwnership::NONE
             },
+            Self::Temperature(state) => SolverOwnership {
+                time_integration: Some(state.base_idx == 1),
+                ..SolverOwnership::NONE
+            },
+            Self::Corner(state) => SolverOwnership {
+                time_integration: Some(matches!(
+                    state.base_analysis(),
+                    crate::simulation::dialog::corner::CornerBaseAnalysis::Transient
+                )),
+                ..SolverOwnership::NONE
+            },
             Self::MonteCarlo(state) if state.base_analysis.is_none() => SolverOwnership {
                 time_integration: Some(false),
                 ..SolverOwnership::NONE

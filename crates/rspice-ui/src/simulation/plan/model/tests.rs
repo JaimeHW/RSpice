@@ -11,6 +11,64 @@ fn snapshot(plan: &SimulationPlan) -> String {
 }
 
 #[test]
+fn pvt_base_controls_restore_and_mode_changes_preserve_effective_settings() {
+    for kind in [AnalysisKind::Temperature, AnalysisKind::Corner] {
+        let mut plan = SimulationPlan::empty();
+        let select = |draft: &mut AnalysisDraft, transient| match draft {
+            AnalysisDraft::Temperature(state) => state.base_idx = if transient { 1 } else { 2 },
+            AnalysisDraft::Corner(state) => state.base_analysis_idx = if transient { 0 } else { 1 },
+            _ => unreachable!(),
+        };
+        let (dynamic, _) = plan.insert(kind).unwrap();
+        let (static_base, _) = plan.insert(kind).unwrap();
+        plan.edit(dynamic, |draft| select(draft, true)).unwrap();
+        plan.edit(static_base, |draft| select(draft, false))
+            .unwrap();
+        let legacy: AnalysisNumericOverride = serde_json::from_str(
+            r#"{"reltol":0.0001,"itl4":150,"strobe_interval":0.000001,"retain_every_signal":true}"#,
+        )
+        .unwrap();
+        for id in [dynamic, static_base] {
+            let index = plan.index_of(id).unwrap();
+            plan.instances[index].numeric_override = Some(legacy.clone());
+        }
+        let history = serde_json::to_value(&plan.receipts).unwrap();
+        let mut restored: SimulationPlan = serde_json::from_str(&snapshot(&plan)).unwrap();
+        restored.prepare_after_restore();
+        assert_eq!(
+            restored.instance(dynamic).unwrap().numeric_override(),
+            Some(&legacy)
+        );
+        let record = restored
+            .instance(static_base)
+            .unwrap()
+            .numeric_override()
+            .unwrap();
+        assert!(record.value(NumericOverrideOption::Reltol).is_some());
+        for option in [
+            NumericOverrideOption::Itl4,
+            NumericOverrideOption::StrobeInterval,
+            NumericOverrideOption::RetainEverySignal,
+        ] {
+            assert!(record.value(option).is_none());
+        }
+        assert_eq!(serde_json::to_value(&restored.receipts).unwrap(), history);
+        let once = snapshot(&restored);
+        restored.prepare_after_restore();
+        assert_eq!(snapshot(&restored), once);
+        let error = restored
+            .edit(dynamic, |draft| select(draft, false))
+            .unwrap_err();
+        assert!(error.to_string().contains("select Transient under Base"));
+        assert_eq!(snapshot(&restored), once);
+        restored.set_numeric_override(dynamic, None).unwrap();
+        restored
+            .edit(dynamic, |draft| select(draft, false))
+            .unwrap();
+    }
+}
+
+#[test]
 fn dc_study_restore_keeps_effective_controls_and_base_changes_are_atomic() {
     for kind in [AnalysisKind::MonteCarlo, AnalysisKind::Optimization] {
         let mut plan = SimulationPlan::empty();

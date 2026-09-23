@@ -11,6 +11,64 @@ use crate::simulation::dialog::OpHomotopy;
 use crate::simulation::plan::NumericOverrideOption as O;
 
 #[test]
+fn pvt_base_controls_match_the_selected_analysis() {
+    for kind in [AnalysisKind::Temperature, AnalysisKind::Corner] {
+        let mut draft = AnalysisDraft::for_kind(kind);
+        for base in 0..4 {
+            let transient = match &mut draft {
+                AnalysisDraft::Temperature(state) => {
+                    state.base_idx = base;
+                    base == 1
+                }
+                AnalysisDraft::Corner(state) => {
+                    state.base_analysis_idx = base;
+                    base == 0
+                }
+                _ => unreachable!(),
+            };
+            let options = SimulationOptions::default();
+            let form: Vec<_> = form_rows(kind, &draft, None, &options)
+                .into_iter()
+                .flat_map(|section| section.rows)
+                .map(|row| row.option)
+                .collect();
+            let ledger = rows_with(kind, &draft, None, &options);
+            let ownership = draft.solver_ownership();
+            for option in [
+                O::Itl4,
+                O::IntegrationMethod,
+                O::MaximumTimestep,
+                O::LteReltol,
+                O::TransientNewtonBudget,
+                O::StrobeInterval,
+                O::OutputTimePoints,
+                O::RetainEverySignal,
+            ] {
+                assert_eq!(
+                    form.contains(&option),
+                    transient,
+                    "{kind:?}: {}",
+                    option.key()
+                );
+                assert_eq!(
+                    option.refusal_for_instance(kind, ownership).is_none(),
+                    transient
+                );
+                if !transient {
+                    assert!(origin_of(&ledger, option).contains("select Transient under Base"));
+                    let mut record = AnalysisNumericOverride::default();
+                    assert!(
+                        record
+                            .set_for_instance(kind, ownership, option, "1")
+                            .is_err()
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn dc_study_solver_controls_match_the_selected_base_mode() {
     for kind in [AnalysisKind::MonteCarlo, AnalysisKind::Optimization] {
         let mut draft = AnalysisDraft::for_kind(kind);

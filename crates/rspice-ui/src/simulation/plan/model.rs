@@ -1138,7 +1138,11 @@ impl SimulationPlan {
             // Retire only those fields; preserve effective solver departures.
             if matches!(
                 instance.kind,
-                AnalysisKind::Reliability | AnalysisKind::MonteCarlo | AnalysisKind::Optimization
+                AnalysisKind::Reliability
+                    | AnalysisKind::MonteCarlo
+                    | AnalysisKind::Optimization
+                    | AnalysisKind::Temperature
+                    | AnalysisKind::Corner
             ) && let Some(record) = instance.numeric_override.as_mut()
             {
                 let ownership = instance.draft.solver_ownership();

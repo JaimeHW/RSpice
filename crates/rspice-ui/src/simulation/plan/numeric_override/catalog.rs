@@ -342,6 +342,7 @@ pub(super) const PSS_RETAINS_COMPLETE_ORBIT: &str = "PSS always retains every or
 pub(super) const RELIABILITY_OWNS_REPORTING: &str = "Reliability reports the Years checkpoints and retains all bound-device stress evidence; transient output sampling and signal-retention switches do not control this result";
 pub(super) const RELIABILITY_CONSTANT_STRESS: &str = "this Reliability mission uses constant operating-point stress; enable Transient stress to configure time integration";
 pub(super) const STUDY_DC_BASE: &str = "this study's built-in base runs only DC operating points; select a configured time-domain base analysis to use time-integration controls";
+const PVT_STATIC_BASE: &str = "the selected study base does not advance time; select Transient under Base to configure time integration and transient reporting";
 const STUDY_OPTION_NOT_INHERITED: &str = "the selected base and its active prerequisites do not inherit this study default; configure the option on the analysis that owns it";
 const HB_TRANSIENT_INITIALIZER: &str =
     "select Transient-assisted under Initial state to configure the HB startup integration";
@@ -711,6 +712,8 @@ impl NumericOverrideOption {
             {
                 Some(if matches!(kind, AnalysisKind::Reliability) {
                     RELIABILITY_CONSTANT_STRESS
+                } else if matches!(kind, AnalysisKind::Temperature | AnalysisKind::Corner) {
+                    PVT_STATIC_BASE
                 } else {
                     STUDY_DC_BASE
                 })
