@@ -44,6 +44,7 @@ mod integral_gauge;
 mod integral_replay_tests;
 mod state;
 pub(in crate::engine) use state::PssCircuit;
+mod history_events;
 mod mesh;
 pub(in crate::engine) use mesh::PssIntegrationMesh;
 
@@ -2027,27 +2028,6 @@ impl Engine {
         for line in &mut circuit.circuit.tlines {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
-            }
-            if !line.is_memoryless_two_port()
-                && let Some(mesh) = &circuit.integration_mesh
-            {
-                let edges = mesh.pending_sampled_edges(
-                    line.delay(),
-                    period,
-                    self.config.resource_limits,
-                    abort,
-                )?;
-                // The replacement checkpoint and the accepted history coexist
-                // during validation; bound their aggregate scratch first.
-                if !edges.is_empty() {
-                    self.ensure_result_values(
-                        line.history_storage_values()
-                            .saturating_mul(3)
-                            .saturating_add(edges.len().saturating_mul(24)),
-                    )?;
-                    line.promote_sampled_history_events(&edges)
-                        .map_err(SimulationError::Circuit)?;
-                }
             }
             line.rebase_lossless_history(0.0)
                 .map_err(SimulationError::Circuit)?;
@@ -4455,6 +4435,15 @@ impl Engine {
                 "PSS transient traversal maximum step must be finite and positive, got {max_step:e}"
             )));
         }
+        if fixed_grid {
+            self.pss_promote_line_history_events(
+                circuit,
+                &solution,
+                0.0,
+                matrix.solver_options(),
+                abort,
+            )?;
+        }
         let num_nodes = circuit.num_nodes();
         circuit
             .behavioral_sources
@@ -4892,6 +4881,16 @@ impl Engine {
             solution = new_solution;
             accepted_step_history.accept(dt);
             circuit.accept_source_time(t);
+
+            if fixed_grid && t == tstop {
+                self.pss_promote_line_history_events(
+                    circuit,
+                    &solution,
+                    t,
+                    matrix.solver_options(),
+                    abort,
+                )?;
+            }
 
             if let Some(tr) = trace.as_deref_mut() {
                 tr.times.push(t);

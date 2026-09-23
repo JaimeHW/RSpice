@@ -117,11 +117,13 @@ impl PssDelayBasis {
                 knots: None,
             };
             if let Some(mesh) = mesh {
+                let edges = mesh.pending_sampled_edges(line.delay(), 0.0, limits, abort)?;
                 let cycles = (line.delay() / period).ceil() as usize;
                 let capacity = cycles
                     .saturating_mul(mesh.steps())
                     .saturating_add(intervals)
-                    .saturating_add(2);
+                    .saturating_add(2)
+                    .saturating_add(edges.len().saturating_mul(3));
                 let dimension = basis
                     .dimension
                     .saturating_add(2usize.saturating_mul(capacity));
@@ -140,6 +142,16 @@ impl PssDelayBasis {
                     SimulationError::Circuit("PSS delay-state allocation failed".into())
                 })?;
                 knots.extend((0..=intervals).map(|knot| coordinates.offset(knot)));
+                // A wrapped edge can own an incoming anchor just before zero,
+                // outside the positive integration mesh. Retain its declared
+                // clocks explicitly instead of reconstructing them from phases.
+                knots.extend(
+                    edges
+                        .iter()
+                        .flatten()
+                        .copied()
+                        .filter(|time| *time > -line.delay() && *time < 0.0),
+                );
                 for cycle in 1..=cycles {
                     if abort.is_aborted() {
                         return Err(SimulationError::Aborted);
@@ -232,19 +244,19 @@ impl PssDelayBasis {
         &self,
         period: Value,
         events: &[Value],
+        mesh: &PssIntegrationMesh,
         limits: crate::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<Self, SimulationError> {
-        if events.is_empty() {
-            return Ok(self.clone());
-        }
         let mut basis = Self::default();
         for coordinates in &self.lines {
+            let edges = mesh.pending_sampled_edges(coordinates.delay, 0.0, limits, abort)?;
             let cycles = (coordinates.delay / period).ceil() as usize;
             let capacity = coordinates
                 .intervals
                 .saturating_add(1)
-                .saturating_add(cycles.saturating_mul(events.len()));
+                .saturating_add(cycles.saturating_mul(events.len()))
+                .saturating_add(edges.len().saturating_mul(3));
             let dimension = basis
                 .dimension
                 .saturating_add(2usize.saturating_mul(capacity));
@@ -263,6 +275,13 @@ impl PssDelayBasis {
                 SimulationError::Circuit("PSS delay event allocation failed".into())
             })?;
             knots.extend((0..=coordinates.intervals).map(|knot| coordinates.offset(knot)));
+            knots.extend(
+                edges
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .filter(|time| *time > -coordinates.delay && *time < 0.0),
+            );
             for cycle in 1..=cycles {
                 for index in 0..events.len() {
                     if index & 0xff == 0 && abort.is_aborted() {

@@ -6,11 +6,77 @@ use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect, TransientCheck
 use std::f64::consts::TAU;
 
 #[test]
+fn shooting_delay_keeps_a_period_endpoint_jump_and_its_outgoing_ramp() {
+    for (dialect, delay) in [
+        (SpiceDialect::Ngspice, 0.1875_f64),
+        (SpiceDialect::Xyce, 0.1875),
+        (SpiceDialect::Xyce, 1.1875),
+        (SpiceDialect::Ngspice, 2.1875),
+    ] {
+        let deck = Netlist::parse(&format!("Endpoint PWL delay\nVIN in 0 PWL(0 0 .25 .25 .25 1 1 1 1 0) R=0\nRS in near 50\nT1 near 0 far 0 Z0=50 TD={delay}\nRL far 0 50\n.save all\n.end\n")).unwrap();
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.resource_limits.max_result_values = 2_000_000;
+        let engine = Engine::new(config);
+        let (pss, state) = engine
+            .run_pss_with_continuation_state(
+                &deck,
+                PssConfig::new(1.0)
+                    .with_harmonics(1)
+                    .with_points_per_period(16)
+                    .with_tstab_periods(0),
+            )
+            .unwrap();
+        assert!(pss.is_stable);
+        let expected = |time: f64| {
+            // Reduce the exact whole-period delay first. Subtracting a long
+            // TD can round a point just before an edge onto the edge itself.
+            let phase = (time.rem_euclid(1.0) - delay.rem_euclid(1.0)).rem_euclid(1.0);
+            if phase < 0.25 { 0.5 * phase } else { 0.5 }
+        };
+        let far = pss
+            .result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("far"))
+            .unwrap();
+        for (&time, &value) in pss
+            .result
+            .time
+            .iter()
+            .zip(&pss.result.waveforms[far].values)
+        {
+            assert!(
+                (value - expected(time)).abs() < 1e-6,
+                "{dialect:?}, TD={delay}: PSS {time:.17e}, {value} vs {}",
+                expected(time)
+            );
+        }
+        let (first, checkpoint) = engine
+            .run_tran_from_pss_state(&deck, &state, 0.7, 0.001)
+            .unwrap();
+        let checkpoint = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
+        let (resumed, _) = engine
+            .run_tran_resume(&deck, &checkpoint, 2.0 * delay + 1.0, 0.001)
+            .unwrap();
+        for transient in [&first, &resumed] {
+            let far = transient.try_voltage_waveform_named("far").unwrap();
+            for (&time, &value) in transient.time.iter().zip(far) {
+                assert!(
+                    (value - expected(time)).abs() < 1e-6,
+                    "{dialect:?}, TD={delay}: resumed {time:.17e}, {value} vs {}",
+                    expected(time)
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn shooting_delay_preserves_ideal_repeating_pwl_steps() {
     for (dialect, delay, source) in [
         (
             SpiceDialect::Ngspice,
-            0.1875,
+            0.1875_f64,
             "VIN in 0 PWL(0 0 .375 0 .375 1 .625 1 .625 0 1 0) R=0",
         ),
         (
@@ -47,7 +113,7 @@ fn shooting_delay_preserves_ideal_repeating_pwl_steps() {
                     .with_points_per_period(16)
                     .with_tstab_periods(0),
             )
-            .unwrap();
+            .unwrap_or_else(|error| panic!("{dialect:?}, TD={delay}: {error}"));
         assert_eq!(state.time_origin(), 0.0);
         assert!(pss.is_stable);
         let far = pss
@@ -57,7 +123,8 @@ fn shooting_delay_preserves_ideal_repeating_pwl_steps() {
             .position(|name| name.eq_ignore_ascii_case("far"))
             .unwrap();
         let expected = |time: f64| {
-            if (0.375..0.625).contains(&(time - delay).rem_euclid(1.0)) {
+            let phase = (time.rem_euclid(1.0) - delay.rem_euclid(1.0)).rem_euclid(1.0);
+            if (0.375..0.625).contains(&phase) {
                 0.5
             } else {
                 0.0

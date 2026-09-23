@@ -46,7 +46,7 @@ impl PssIntegrationMesh {
         if self.sampled_edges.is_empty() {
             return Ok(Vec::new());
         }
-        if endpoint != self.period || !delay.is_finite() || delay <= 0.0 {
+        if (endpoint != self.period && endpoint != 0.0) || !delay.is_finite() || delay <= 0.0 {
             return Err(SimulationError::Circuit(
                 "invalid periodic delay event window".into(),
             ));
@@ -462,8 +462,7 @@ impl Engine {
             }
             let (enriched, retained, events) =
                 self.pss_propagated_source_mesh(&mesh, circuit, abort)?;
-            if events.is_empty() {
-                circuit.integration_mesh = Some(enriched);
+            if events.is_empty() && enriched.sampled_edges == mesh.sampled_edges {
                 return Ok(coarse);
             }
             let steps = circuit.integration_steps;
@@ -472,6 +471,7 @@ impl Engine {
             circuit.delay_basis = basis.with_events(
                 coarse.state.period,
                 &events,
+                &enriched,
                 self.config.resource_limits,
                 abort,
             )?;
@@ -858,6 +858,64 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sampled_delay_boundary_anchors_survive_basis_creation_and_enrichment() {
+        let engine = Engine::default();
+        let deck = Netlist::parse(
+            "Wrapped history\nR1 a 0 50\nR2 b 0 50\nT1 a 0 b 0 Z0=50 TD=1.1875\n.end\n",
+        )
+        .unwrap();
+        let mut mesh = PssIntegrationMesh::from_times(1.0, vec![0.0, 0.5, 1.0]).unwrap();
+        let original = mesh.clone();
+        mesh.sampled_edges = vec![SampledEdge {
+            time: 0.0,
+            incoming: -Value::EPSILON / 2.0,
+            outgoing: 0.0,
+        }]
+        .into();
+        let edges = mesh
+            .pending_sampled_edges(1.1875, 0.0, Default::default(), &NoAbort)
+            .unwrap();
+        assert_eq!(edges[0][1], (-1.0_f64).next_down());
+        for enrich in [false, true] {
+            let mut circuit = PssCircuit::new(engine.build_circuit(&deck).unwrap()).unwrap();
+            circuit.integration_mesh = Some(if enrich {
+                original.clone()
+            } else {
+                mesh.clone()
+            });
+            circuit
+                .configure_delay_basis(1.0, 2, Default::default(), &NoAbort)
+                .unwrap();
+            if enrich {
+                // Provenance can change even when all positive clocks exist.
+                circuit.delay_basis = circuit
+                    .delay_basis
+                    .with_events(1.0, &[], &mesh, Default::default(), &NoAbort)
+                    .unwrap();
+            }
+            circuit
+                .set_state(&vec![0.0; circuit.state_dimension()])
+                .unwrap();
+            let history = circuit.tlines[0].checkpoint_state().unwrap();
+            for &clock in edges.iter().flatten() {
+                assert!(
+                    history
+                        .state_history
+                        .iter()
+                        .any(|sample| sample[0] == clock)
+                );
+            }
+            circuit.tlines[0]
+                .promote_sampled_history_events_with_endpoint_rates(&edges, Some([0.0; 2]))
+                .unwrap();
+            assert_eq!(
+                circuit.tlines[0].checkpoint_state().unwrap().events.len(),
+                2
+            );
+        }
+    }
 
     #[test]
     fn sampled_delay_event_provenance_survives_refinement_and_full_history_windows() {
