@@ -60,6 +60,22 @@ impl DelayBuffer {
         }
     }
 
+    /// Replace only the accepted endpoint; event callers have validated the
+    /// clock and keep the incoming value separately from this outgoing slope.
+    pub(in crate::device::transmission_line) fn replace_endpoint(
+        &mut self,
+        time: Value,
+        value: Value,
+        slope: Value,
+    ) {
+        if let Some(last) = self.data.back_mut() {
+            debug_assert_eq!(last.time, time);
+            *last = Sample { time, value, slope };
+            self.prev_time = time;
+            self.prev_value = value;
+        }
+    }
+
     /// Capture the interpolation state retained by this delay buffer.
     ///
     /// The slope on the oldest retained sample can depend on a predecessor
@@ -117,6 +133,15 @@ impl DelayBuffer {
         current_time: Value,
         delay: Value,
     ) -> Value {
+        self.get_delayed_with_incoming(current_time, delay, |_| None)
+    }
+
+    pub(in crate::device::transmission_line) fn get_delayed_with_incoming(
+        &self,
+        current_time: Value,
+        delay: Value,
+        incoming: impl Fn(Value) -> Option<(Value, Value)>,
+    ) -> Value {
         let target_time = current_time - delay;
 
         if self.data.is_empty() {
@@ -129,6 +154,19 @@ impl DelayBuffer {
 
         for s in self.data.iter() {
             if s.time >= target_time {
+                let left;
+                let s = if s.time > target_time
+                    && let Some((value, slope)) = incoming(s.time)
+                {
+                    left = Sample {
+                        time: s.time,
+                        value,
+                        slope,
+                    };
+                    &left
+                } else {
+                    s
+                };
                 if let Some(p) = prev {
                     return Self::cubic_hermite(p, s, target_time);
                 }

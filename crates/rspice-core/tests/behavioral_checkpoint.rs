@@ -125,7 +125,7 @@ fn capacitor_checkpoint_rejects_malformed_mismatched_and_missing_integrals() {
 
     let mut old = String::new();
     let mut lines = text.lines();
-    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 54"));
+    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 55"));
     old.push_str("RSPICE-CHECKPOINT 50\n");
     while let Some(line) = lines.next() {
         if line.starts_with("accepted_bsim3_")
@@ -281,7 +281,7 @@ fn behavioral_checkpoint_legacy_state_remains_unknown() {
     let (engine, netlist, checkpoint) = fixture();
     let text = checkpoint.to_text();
     let mut lines = text.lines();
-    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 54"));
+    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 55"));
     let mut old = "RSPICE-CHECKPOINT 49\n".to_owned();
     while let Some(line) = lines.next() {
         if line.starts_with("accepted_bsim3_")

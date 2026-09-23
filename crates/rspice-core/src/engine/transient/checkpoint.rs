@@ -202,7 +202,9 @@ fn checkpoint_operation_result<T>(
 /// Version 52 retains native BSIM3 limiter/evaluation and charge-integration state.
 /// Version 53 retains native BSIM4 limiter, junction, and charge-integration state.
 /// Version 54 retains classic-MOS limiter, capacitance, charge, and lead-current history.
-const FORMAT_VERSION: u32 = 54;
+/// Version 55 retains both limits and one-sided slopes of scalar-line events.
+const FORMAT_VERSION: u32 = 55;
+const TLINE_EVENT_FORMAT_VERSION: u32 = 55;
 const MOSFET_STATE_FORMAT_VERSION: u32 = 54;
 const BSIM4_STATE_FORMAT_VERSION: u32 = 53;
 const BSIM3_STATE_FORMAT_VERSION: u32 = 52;
@@ -2073,6 +2075,7 @@ fn read_canonical_nonempty_line_vector(
 
 fn read_tline_states(
     lines: &mut CheckpointLines<'_>,
+    version: u32,
     budget: &mut CheckpointParseBudget,
 ) -> Result<Vec<TransmissionLineCheckpoint>, String> {
     let header = lines
@@ -2136,6 +2139,15 @@ fn read_tline_states(
             .ok_or_else(|| format!("tline state row {row} is missing its backward sample count"))?
             .parse::<usize>()
             .map_err(|_| format!("tline state row {row} has an invalid backward sample count"))?;
+        let event_count = if version >= TLINE_EVENT_FORMAT_VERSION {
+            fields
+                .next()
+                .ok_or_else(|| format!("tline state row {row} is missing its event count"))?
+                .parse::<usize>()
+                .map_err(|_| format!("tline state row {row} has an invalid event count"))?
+        } else {
+            0
+        };
         if let Some(extra) = fields.next() {
             return Err(format!("tline state row {row}: extra field '{extra}'"));
         }
@@ -2203,6 +2215,31 @@ fn read_tline_states(
         for _ in 0..backward_count {
             backward_history.push(read_delay_sample(lines, "tline_backward")?);
         }
+        if event_count > sample_count {
+            return Err("transmission-line event count exceeds its accepted sample count".into());
+        }
+        let mut events = allocate_checkpoint_rows(lines, event_count, "tline_events", budget)?;
+        for _ in 0..event_count {
+            let row = lines
+                .next()
+                .ok_or_else(|| "missing tline_event row".to_string())?;
+            let mut fields = row.split_whitespace();
+            if fields.next() != Some("tline_event") {
+                return Err("malformed tline_event row".into());
+            }
+            let mut event = [0.0; 9];
+            for value in &mut event {
+                *value = fields
+                    .next()
+                    .ok_or_else(|| "short tline_event row".to_string())?
+                    .parse::<Value>()
+                    .map_err(|_| "invalid tline_event value".to_string())?;
+            }
+            if fields.next().is_some() {
+                return Err("extra tline_event field".into());
+            }
+            events.push(event);
+        }
         states.push(TransmissionLineCheckpoint {
             name: copy_checkpoint_string(name, "tline state name", budget)?,
             impedance,
@@ -2210,6 +2247,7 @@ fn read_tline_states(
             state_history,
             forward_history,
             backward_history,
+            events,
             launched_forward,
             launched_backward,
             history_initialized: initialized,
@@ -7915,7 +7953,8 @@ impl TransientCheckpoint {
                 .saturating_add(usize::from(state.initial_state.is_some()).saturating_mul(5))
                 .saturating_add(state.state_history.len().saturating_mul(5))
                 .saturating_add(state.forward_history.len().saturating_mul(3))
-                .saturating_add(state.backward_history.len().saturating_mul(3));
+                .saturating_add(state.backward_history.len().saturating_mul(3))
+                .saturating_add(state.events.len().saturating_mul(9));
         }
         for instance in &self.xspice_instance_states {
             count = count
@@ -8483,7 +8522,7 @@ impl TransientCheckpoint {
         for (state_index, state) in self.tline_states.iter().enumerate() {
             poll_checkpoint_abort(abort, state_index)?;
             out.push_str(&format!(
-                "tline_state {} {} {} {} {} {} {} {} {} {}\n",
+                "tline_state {} {} {} {} {} {} {} {} {} {} {}\n",
                 state.name,
                 state.impedance,
                 u8::from(state.history_initialized),
@@ -8493,7 +8532,8 @@ impl TransientCheckpoint {
                 u8::from(state.initial_state.is_some()),
                 state.state_history.len(),
                 state.forward_history.len(),
-                state.backward_history.len()
+                state.backward_history.len(),
+                state.events.len()
             ));
             if let Some(sample) = state.initial_state {
                 out.push_str(&format!(
@@ -8520,6 +8560,21 @@ impl TransientCheckpoint {
                 out.push_str(&format!(
                     "tline_backward {} {} {}\n",
                     sample[0], sample[1], sample[2]
+                ));
+            }
+            for (index, event) in state.events.iter().enumerate() {
+                poll_checkpoint_abort(abort, index)?;
+                out.push_str(&format!(
+                    "tline_event {} {} {} {} {} {} {} {} {}\n",
+                    event[0],
+                    event[1],
+                    event[2],
+                    event[3],
+                    event[4],
+                    event[5],
+                    event[6],
+                    event[7],
+                    event[8]
                 ));
             }
         }
@@ -9364,7 +9419,7 @@ impl TransientCheckpoint {
             (
                 available,
                 read_nonempty_line_vector(lines, "tline_blockers", budget)?,
-                read_tline_states(lines, budget)?,
+                read_tline_states(lines, version, budget)?,
             )
         } else {
             (false, Vec::new(), Vec::new())
@@ -11515,6 +11570,73 @@ mod tests {
                 .join("\n");
             assert!(TransientCheckpoint::from_text(&text).is_err(), "{fields}");
         }
+    }
+
+    #[test]
+    fn sided_line_event_checkpoint_round_trips_and_reads_legacy_histories() {
+        use crate::device::TransmissionLineHistoryEvent;
+        let mut checkpoint = sample();
+        let mut line = TransmissionLine::new("T1".into(), 1, 0, 2, 0, 50.0, 1e-6);
+        line.update_history(0.0, 0.0, 0.0, 0.0, 0.0);
+        line.accept_history_event(TransmissionLineHistoryEvent {
+            time: checkpoint.time * 0.5,
+            incoming: [0.0; 4],
+            outgoing: [1.0, 0.0, -2.0, 0.0],
+            incoming_wave_slopes: [3.0, -4.0],
+            outgoing_wave_slopes: [5.0, -6.0],
+        })
+        .unwrap();
+        line.update_history(checkpoint.time, 1.0, 0.0, -2.0, 0.0);
+        checkpoint.tline_states = vec![line.checkpoint_state().unwrap()];
+        checkpoint.tline_state_available = true;
+        for encoding in [
+            TransientCheckpointEncoding::Unpacked,
+            TransientCheckpointEncoding::Packed,
+        ] {
+            let bytes = checkpoint.to_bytes(encoding).unwrap();
+            let restored = TransientCheckpoint::from_bytes(&bytes).unwrap();
+            assert_eq!(restored.tline_states, checkpoint.tline_states);
+        }
+        let mut invalid = checkpoint.clone();
+        invalid.tline_states[0].events[0][0] = 0.25;
+        assert!(TransientCheckpoint::from_text(&invalid.to_text()).is_err());
+        invalid = checkpoint.clone();
+        invalid.tline_states[0].events[0][7] = 99.0;
+        assert!(TransientCheckpoint::from_text(&invalid.to_text()).is_err());
+
+        line.reset();
+        line.update_history(0.0, 0.0, 0.0, 0.0, 0.0);
+        line.update_history(checkpoint.time, 0.0, 0.0, 0.0, 0.0);
+        checkpoint.tline_states = vec![line.checkpoint_state().unwrap()];
+        let legacy = checkpoint
+            .to_text()
+            .lines()
+            .map(|row| {
+                if row.starts_with(TEXT_HEADER_PREFIX) {
+                    format!("{TEXT_HEADER_PREFIX}54")
+                } else if row.starts_with("tline_state ") {
+                    row.rsplit_once(' ').unwrap().0.to_string()
+                } else {
+                    row.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        assert_eq!(
+            TransientCheckpoint::from_text(&legacy)
+                .unwrap()
+                .tline_states,
+            checkpoint.tline_states
+        );
+
+        let text = "tline_states 1\ntline_state T1 50 0 0 0 0 0 0 0 0 1000000\n";
+        let mut budget = CheckpointParseBudget::new(4096);
+        assert!(
+            read_tline_states(&mut CheckpointLines::new(text), FORMAT_VERSION, &mut budget)
+                .unwrap_err()
+                .contains("event count exceeds")
+        );
     }
 
     fn sample() -> TransientCheckpoint {
@@ -14364,7 +14486,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 38] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 39] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -14403,6 +14525,7 @@ mod tests {
         (52, 13),
         (53, 13),
         (54, 13),
+        (55, 13),
     ];
 
     #[cfg(feature = "veriloga")]

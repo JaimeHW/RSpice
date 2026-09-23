@@ -78,12 +78,12 @@ pub use sources::{CurrentSource, VoltageSource};
 pub use stamp_error::{NonFiniteTrialError, StampError};
 pub use switch::{CurrentSwitch, GenericSwitch, SwitchState, VoltageSwitch};
 pub use traits::*;
-pub use transmission_line::TransmissionLine;
 pub(crate) use transmission_line::{
     DISTRIBUTED_RLC_COMPACT_ABSTOL_DEFAULT, DISTRIBUTED_RLC_COMPACT_RELTOL_DEFAULT,
     DistributedRlgc, LtraRgTwoPort, TransmissionLineCheckpoint,
 };
 pub(crate) use transmission_line::{TlineTransientResponse, TxlTransientStamp};
+pub use transmission_line::{TransmissionLine, TransmissionLineHistoryEvent, TransmissionLineTimeSide};
 
 use crate::Value;
 

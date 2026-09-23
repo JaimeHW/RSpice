@@ -1,5 +1,9 @@
 use super::*;
 
+mod events;
+use events::HistoryEvent;
+pub use events::{TransmissionLineHistoryEvent, TransmissionLineTimeSide};
+
 #[derive(Debug, Clone, Copy)]
 struct TlineStateSample {
     time: Value,
@@ -23,6 +27,7 @@ pub(crate) struct TransmissionLineCheckpoint {
     pub(crate) state_history: Vec<[Value; 5]>,
     pub(crate) forward_history: Vec<[Value; 3]>,
     pub(crate) backward_history: Vec<[Value; 3]>,
+    pub(crate) events: Vec<[Value; 9]>,
     pub(crate) launched_forward: Value,
     pub(crate) launched_backward: Value,
     pub(crate) history_initialized: bool,
@@ -195,6 +200,8 @@ pub struct TransmissionLine {
     initial_state: Option<TlineStateSample>,
     /// Absolute port state history used by distributed-RLC kernels.
     state_history: VecDeque<TlineStateSample>,
+    /// Incoming limits and slopes anchored to the outgoing state clocks.
+    history_events: VecDeque<HistoryEvent>,
     /// Optional distributed RLC transient kernel configuration.
     distributed_rlc: Option<DistributedRlcKernel>,
     /// Optional distributed RC transient kernel configuration.
@@ -281,6 +288,11 @@ impl TransmissionLine {
                 .collect(),
             forward_history: self.history_forward.checkpoint_samples(),
             backward_history: self.history_backward.checkpoint_samples(),
+            events: self
+                .history_events
+                .iter()
+                .map(HistoryEvent::checkpoint)
+                .collect(),
             launched_forward: self.launched_forward,
             launched_backward: self.launched_backward,
             history_initialized: self.history_initialized,
@@ -434,6 +446,7 @@ impl TransmissionLine {
                 ));
             }
         }
+        Self::validate_history_events(checkpoint)?;
         Ok(())
     }
 
@@ -462,7 +475,15 @@ impl TransmissionLine {
             ));
         }
 
+        Self::validate_event_arrivals(&checkpoint.events, self.td)?;
         self.reset();
+        self.history_events.extend(
+            checkpoint
+                .events
+                .iter()
+                .copied()
+                .map(HistoryEvent::from_checkpoint),
+        );
         self.initial_state = checkpoint.initial_state.map(Self::sample_from_checkpoint);
         self.history_initialized = checkpoint.history_initialized;
         for sample in checkpoint.state_history.iter().copied() {
@@ -672,6 +693,7 @@ impl TransmissionLine {
             history_initialized: false,
             initial_state: None,
             state_history: VecDeque::new(),
+            history_events: VecDeque::new(),
             distributed_rlc: None,
             distributed_rc: None,
             distributed_rlc_cache: Cell::new(None),
@@ -1507,13 +1529,19 @@ impl TransmissionLine {
     /// independent signals. Keeping the derivative decision on that combined
     /// wave is necessary because different fallback decisions for V and I are
     /// not algebraically equivalent to the canonical device equation.
-    fn lossless_delayed_wave(&self, time: Value, forward: bool) -> Value {
-        self.lossless_wave_at(time - self.td, forward)
-    }
-
+    ///
     /// Sample an outgoing wave at an absolute accepted-history time. Shooting
     /// state projection must use the same interpolator as the native stamp.
     pub(crate) fn lossless_wave_at(&self, target: Value, forward: bool) -> Value {
+        self.lossless_wave_at_on_side(target, forward, TransmissionLineTimeSide::Outgoing)
+    }
+
+    fn lossless_wave_at_on_side(
+        &self,
+        target: Value,
+        forward: bool,
+        side: TransmissionLineTimeSide,
+    ) -> Value {
         let initial = self.initial_state();
         let wave = |sample: &TlineStateSample| {
             if forward {
@@ -1522,7 +1550,15 @@ impl TransmissionLine {
                 sample.v2 + self.z0 * sample.i2
             }
         };
-        if self.state_history.is_empty() || target <= initial.time {
+        if let Some(event) = self.history_event_at(target)
+            && side == TransmissionLineTimeSide::Incoming
+        {
+            return wave(&event.incoming);
+        }
+        if self.state_history.is_empty()
+            || target < initial.time
+            || (target == initial.time && self.history_event_at(target).is_none())
+        {
             return wave(&initial);
         }
 
@@ -1536,6 +1572,14 @@ impl TransmissionLine {
                 .map(&wave)
                 .unwrap_or_else(|| wave(&initial));
         };
+        if sample.time == target {
+            return wave(sample);
+        }
+        // The incoming value closes the interval ending at an event. The
+        // outgoing value remains the exact sample at the event itself.
+        let sample = self
+            .history_event_at(sample.time)
+            .map_or(sample, |event| &event.incoming);
         let Some(previous) = next
             .checked_sub(1)
             .and_then(|index| self.state_history.get(index))
@@ -1544,8 +1588,12 @@ impl TransmissionLine {
         };
         Self::delayed_interpolate(
             self.lossless_interpolation_mode,
-            next.checked_sub(2)
-                .and_then(|index| self.state_history.get(index)),
+            if self.history_event_at(previous.time).is_some() {
+                None
+            } else {
+                next.checked_sub(2)
+                    .and_then(|index| self.state_history.get(index))
+            },
             previous,
             sample,
             target,
@@ -1557,8 +1605,11 @@ impl TransmissionLine {
         self.current_time
     }
 
-    pub(crate) fn history_sample_count(&self) -> usize {
-        self.state_history.len()
+    pub(crate) fn history_storage_values(&self) -> usize {
+        self.state_history
+            .len()
+            .saturating_mul(11)
+            .saturating_add(self.history_events.len().saturating_mul(9))
     }
 
     pub(crate) fn has_state_dependent_lossless_interpolation(&self) -> bool {
@@ -1606,6 +1657,12 @@ impl TransmissionLine {
             checkpoint.forward_history[index][0] = shifted;
             checkpoint.backward_history[index][0] = shifted;
             next_clock = Some(shifted);
+        }
+        for event in &mut checkpoint.events {
+            let index = self
+                .state_history
+                .partition_point(|sample| sample.time < event[0]);
+            event[0] = checkpoint.state_history[index][0];
         }
         if let Some(initial) = &mut checkpoint.initial_state {
             initial[0] = if self
@@ -1819,6 +1876,14 @@ impl TransmissionLine {
 
     /// Return the transient companion conductance and equivalent currents.
     pub(crate) fn transient_port_response(&self, time: Value) -> TlineTransientResponse {
+        self.transient_port_response_on_side(time, TransmissionLineTimeSide::Outgoing)
+    }
+
+    pub(crate) fn transient_port_response_on_side(
+        &self,
+        time: Value,
+        side: TransmissionLineTimeSide,
+    ) -> TlineTransientResponse {
         if let Some(kernel) = &self.distributed_rc {
             if let Some((cached_time, response)) = self.distributed_rlc_cache.get()
                 && (cached_time - time).abs() < 1e-18
@@ -1841,8 +1906,8 @@ impl TransmissionLine {
         }
 
         let g = self.conductance();
-        let i_eq_port1 = self.attenuation * g * self.lossless_delayed_wave(time, false);
-        let i_eq_port2 = self.attenuation * g * self.lossless_delayed_wave(time, true);
+        let i_eq_port1 = self.attenuation * g * self.lossless_wave_on_side(time, false, side);
+        let i_eq_port2 = self.attenuation * g * self.lossless_wave_on_side(time, true, side);
         TlineTransientResponse::uncoupled(g, i_eq_port1, i_eq_port2)
     }
 
@@ -1889,6 +1954,15 @@ impl TransmissionLine {
                 }
             }
         }
+        if let Some(first) = self.state_history.front() {
+            while self
+                .history_events
+                .front()
+                .is_some_and(|event| event.incoming.time < first.time)
+            {
+                self.history_events.pop_front();
+            }
+        }
         self.current_time = time;
     }
 
@@ -1914,12 +1988,30 @@ impl TransmissionLine {
 
     /// Get the delayed forward history wave without applying one-way attenuation.
     pub fn delayed_forward_raw_at(&self, time: Value) -> Value {
-        self.history_forward.get_delayed(time, self.td)
+        if self.history_events.is_empty() {
+            return self.history_forward.get_delayed(time, self.td);
+        }
+        self.history_event_limit(time, true, TransmissionLineTimeSide::Outgoing)
+            .unwrap_or_else(|| {
+                self.history_forward
+                    .get_delayed_with_incoming(time, self.td, |clock| {
+                        self.incoming_buffer_sample(clock, true)
+                    })
+            })
     }
 
     /// Get the delayed backward history wave without applying one-way attenuation.
     pub fn delayed_backward_raw_at(&self, time: Value) -> Value {
-        self.history_backward.get_delayed(time, self.td)
+        if self.history_events.is_empty() {
+            return self.history_backward.get_delayed(time, self.td);
+        }
+        self.history_event_limit(time, false, TransmissionLineTimeSide::Outgoing)
+            .unwrap_or_else(|| {
+                self.history_backward
+                    .get_delayed_with_incoming(time, self.td, |clock| {
+                        self.incoming_buffer_sample(clock, false)
+                    })
+            })
     }
 
     #[inline]
@@ -1941,6 +2033,7 @@ impl TransmissionLine {
         self.history_initialized = false;
         self.initial_state = None;
         self.state_history.clear();
+        self.history_events.clear();
         self.distributed_rlc_cache.set(None);
         if let Some(txl) = &mut self.txl {
             txl.reset();

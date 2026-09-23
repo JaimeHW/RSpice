@@ -4462,7 +4462,7 @@ impl Engine {
             0
         });
         let initial_delay_values = circuit.tlines.iter().fold(0usize, |sum, line| {
-            sum.saturating_add(line.history_sample_count().saturating_mul(11))
+            sum.saturating_add(line.history_storage_values())
         });
         if fixed_grid {
             self.ensure_result_values(
@@ -4695,11 +4695,7 @@ impl Engine {
                     .iter()
                     .filter(|line| !line.is_memoryless_two_port())
                     .fold(0usize, |sum, line| {
-                        sum.saturating_add(
-                            line.history_sample_count()
-                                .saturating_add(1)
-                                .saturating_mul(11),
-                        )
+                        sum.saturating_add(line.history_storage_values().saturating_add(11))
                     });
                 self.ensure_analysis_points(total_iterations)?;
                 self.ensure_result_values(
