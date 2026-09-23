@@ -175,14 +175,14 @@ impl StbConfig {
         if self.probe_source.is_empty() {
             return Err("Probe source required".into());
         }
-        if self.start_freq <= 0.0 {
-            return Err("Start frequency must be positive".into());
+        if !self.start_freq.is_finite() || self.start_freq <= 0.0 {
+            return Err("Start frequency must be finite and positive".into());
         }
-        if self.stop_freq <= 0.0 {
-            return Err("Stop frequency must be positive".into());
+        if !self.stop_freq.is_finite() || self.stop_freq <= 0.0 {
+            return Err("Stop frequency must be finite and positive".into());
         }
-        if self.start_freq >= self.stop_freq {
-            return Err("Start must be less than stop".into());
+        if self.start_freq > self.stop_freq {
+            return Err("Start must not exceed stop".into());
         }
         if self.num_points == 0 {
             return Err("Point count must be at least 1".into());

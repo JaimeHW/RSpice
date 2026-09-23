@@ -122,9 +122,9 @@ impl NoiseDraft {
                 let num_points = parse_positive_usize(&self.points, "noise point count")?;
                 let start_freq = parse_positive(&self.fstart, "noise start frequency")?;
                 let stop_freq = parse_positive(&self.fstop, "noise stop frequency")?;
-                if stop_freq <= start_freq {
+                if stop_freq < start_freq {
                     return Err(
-                        "noise stop frequency must be greater than start frequency".to_owned()
+                        "noise stop frequency must be at least the start frequency".to_owned()
                     );
                 }
                 let sweep_type = match self.sweep {

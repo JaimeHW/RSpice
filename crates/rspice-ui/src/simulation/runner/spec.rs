@@ -386,6 +386,7 @@ mod tests {
     mod qpss;
     mod qpxf;
     mod reliability;
+    mod spot_frequency;
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;

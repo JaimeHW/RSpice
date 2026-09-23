@@ -20,14 +20,11 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             f2_over_f1,
             ..
         } => {
-            if *start_freq <= 0.0 {
-                return Err("DISTO start_freq must be > 0".to_string());
+            if !start_freq.is_finite() || *start_freq <= 0.0 {
+                return Err("DISTO start_freq must be finite and > 0".to_string());
             }
-            if *stop_freq <= 0.0 {
-                return Err("DISTO stop_freq must be > 0".to_string());
-            }
-            if *stop_freq <= *start_freq {
-                return Err("DISTO stop_freq must be > start_freq".to_string());
+            if !stop_freq.is_finite() || *stop_freq < *start_freq {
+                return Err("DISTO stop_freq must be finite and >= start_freq".to_string());
             }
             if *points_per_unit == 0 {
                 return Err("DISTO points_per_unit must be > 0".to_string());

@@ -21,14 +21,11 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             if probe_node.trim().is_empty() {
                 return Err("STB probe_node is required".to_string());
             }
-            if *start_freq <= 0.0 {
-                return Err("STB start_freq must be > 0".to_string());
+            if !start_freq.is_finite() || *start_freq <= 0.0 {
+                return Err("STB start_freq must be finite and > 0".to_string());
             }
-            if *stop_freq <= 0.0 {
-                return Err("STB stop_freq must be > 0".to_string());
-            }
-            if *stop_freq <= *start_freq {
-                return Err("STB stop_freq must be > start_freq".to_string());
+            if !stop_freq.is_finite() || *stop_freq < *start_freq {
+                return Err("STB stop_freq must be finite and >= start_freq".to_string());
             }
             if *points_per_decade == 0 {
                 return Err("STB points_per_decade must be > 0".to_string());

@@ -1046,6 +1046,80 @@ mod manifest_tests {
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 
     #[test]
+    fn single_frequency_noise_stb_and_disto_drafts_reach_valid_worker_specs() {
+        use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        for (index, noise_sweep) in [
+            NoiseSweepType::Decade,
+            NoiseSweepType::Octave,
+            NoiseSweepType::Linear,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let noise = crate::simulation::plan::NoiseDraft {
+                output: "out".into(),
+                input: "VIN".into(),
+                fstart: "1k".into(),
+                fstop: "1k".into(),
+                points: "1".into(),
+                sweep: noise_sweep,
+                ..Default::default()
+            };
+            noise.to_config().unwrap();
+            let mut disto = crate::simulation::plan::DistoDraft::default();
+            disto.sweep.fstart = "1k".into();
+            disto.sweep.fstop = "1k".into();
+            disto.sweep.points = "1".into();
+            disto.sweep.sweep = index;
+
+            state.sim_setup.stb.ensure_initialized();
+            state.sim_setup.stb.start_freq = "1k".into();
+            state.sim_setup.stb.stop_freq = "1k".into();
+            state.sim_setup.stb.num_points = "1".into();
+            state.sim_setup.stb.sweep_type_idx = index;
+
+            let specs = [
+                controller
+                    .build_manifest_preview_spec(&state, &AnalysisDraft::Noise(noise))
+                    .unwrap()
+                    .unwrap(),
+                controller
+                    .build_manifest_preview_spec(&state, &AnalysisDraft::Disto(disto))
+                    .unwrap()
+                    .unwrap(),
+                controller.build_stb_spec(&state).unwrap(),
+            ];
+            for spec in specs {
+                spec.validate().unwrap();
+                let packet = WorkerAnalysisSpec::try_from(&spec).unwrap();
+                let encoded = serde_json::to_string(&packet).unwrap();
+                let restored = AnalysisSpec::from(
+                    serde_json::from_str::<WorkerAnalysisSpec>(&encoded).unwrap(),
+                );
+                restored.validate().unwrap();
+                assert_eq!(
+                    serde_json::to_value(&restored).unwrap(),
+                    serde_json::to_value(&spec).unwrap()
+                );
+
+                for invalid in [0.0, 999.0, f64::NAN, f64::INFINITY] {
+                    let mut invalid_spec = spec.clone();
+                    match &mut invalid_spec {
+                        AnalysisSpec::Noise { stop_freq, .. }
+                        | AnalysisSpec::Stb { stop_freq, .. }
+                        | AnalysisSpec::Disto { stop_freq, .. } => *stop_freq = invalid,
+                        _ => unreachable!(),
+                    }
+                    assert!(invalid_spec.validate().is_err(), "{invalid_spec:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn noise_manifest_freezes_every_selected_field_without_singleton_fallback() {
         let controller = SimulationController::new();
         let mut state = AppState::default();

@@ -50,9 +50,9 @@ impl DistoRunConfig {
                 "DISTO start frequency must be positive".to_string(),
             ));
         }
-        if !self.stop_freq.is_finite() || self.stop_freq <= self.start_freq {
+        if !self.stop_freq.is_finite() || self.stop_freq < self.start_freq {
             return Err(DistoRunError::Validation(
-                "DISTO stop frequency must be greater than start frequency".to_string(),
+                "DISTO stop frequency must be finite and at least the start frequency".to_string(),
             ));
         }
         if self.points_per_unit == 0 {

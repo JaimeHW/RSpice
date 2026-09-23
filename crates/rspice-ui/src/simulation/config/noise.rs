@@ -348,9 +348,9 @@ impl NoiseAnalysisConfig {
             }
             if self.start_freq.is_finite()
                 && self.stop_freq.is_finite()
-                && self.start_freq >= self.stop_freq
+                && self.start_freq > self.stop_freq
             {
-                errors.push("Start frequency must be less than stop frequency".to_owned());
+                errors.push("Start frequency must not exceed stop frequency".to_owned());
             }
             if self.num_points == 0 {
                 errors.push("Number of points must be positive".to_owned());
