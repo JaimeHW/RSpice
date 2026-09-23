@@ -93,9 +93,14 @@ impl PoleZeroAnalyzer {
         config: &PoleZeroConfig,
         quantity: &'static str,
     ) -> Result<(), PoleZeroAnalysisError> {
+        // Default extraction reports every numerically qualified finite root.
+        // Fast internal device modes must not hit an arbitrary hidden cutoff.
+        if config.max_pole_freq == Value::INFINITY {
+            return Ok(());
+        }
         if !config.max_pole_freq.is_finite() || config.max_pole_freq <= 0.0 {
             return Err(PoleZeroAnalysisError::InvalidSystem(
-                "max_pole_freq must be finite and positive".to_string(),
+                "max_pole_freq must be positive, or positive infinity for no limit".to_string(),
             ));
         }
         let limit = config.max_pole_freq * (2.0 * PI);

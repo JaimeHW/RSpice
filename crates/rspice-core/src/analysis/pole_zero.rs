@@ -501,7 +501,8 @@ pub struct PoleZeroConfig {
     pub compute_poles: bool,
     /// Whether to compute zeros
     pub compute_zeros: bool,
-    /// Maximum pole magnitude to include (filter spurious)
+    /// Optional pole/zero magnitude limit in Hz; positive infinity disables
+    /// the limit. Exceeding a finite limit is an error, never silent filtering.
     pub max_pole_freq: Value,
 }
 
@@ -579,7 +580,7 @@ impl PoleZeroConfig {
             input_voltage_gain: 1.0,
             compute_poles: true,
             compute_zeros: true,
-            max_pole_freq: 1e15,
+            max_pole_freq: Value::INFINITY,
         }
     }
 }

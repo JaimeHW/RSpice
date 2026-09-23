@@ -29,6 +29,23 @@ fn assert_root_present(actual: &[Complex64], expected: Complex64, relative_toler
 }
 
 #[test]
+fn default_pole_zero_extraction_retains_qualified_fast_device_modes() {
+    let analyzer = PoleZeroAnalyzer::new(
+        PzMatrix::from_dense(vec![vec![1.0]]),
+        PzMatrix::from_dense(vec![vec![1e-17]]),
+    );
+    let mut config = poles_only(0, 0);
+    let result = analyzer.analyze(&config).unwrap();
+    assert_eq!(result.poles.len(), 1);
+    assert_root_present(&result.poles, Complex64::new(-1e17, 0.0), 1e-12);
+    config.max_pole_freq = 1e15;
+    assert!(matches!(
+        analyzer.analyze(&config),
+        Err(PoleZeroAnalysisError::FrequencyLimitExceeded { .. })
+    ));
+}
+
+#[test]
 fn voltage_port_dc_gain_uses_the_selected_source_equation() {
     for source_orientation in [None, Some(1.0), Some(-1.0)] {
         let mut g = vec![vec![1e-3, -1e-3], vec![-1e-3, 2e-3]];
