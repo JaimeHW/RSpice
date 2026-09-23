@@ -561,27 +561,33 @@ fn an_empty_record_adds_nothing_to_a_deck() {
 
 #[test]
 fn a_step_ceiling_is_emitted_through_the_timeint_package() {
-    let mut record = AnalysisNumericOverride::default();
-    record
-        .set_for_instance(
-            AnalysisKind::Fourier,
-            SolverOwnership::NONE,
-            NumericOverrideOption::MaximumTimestep,
-            "500p",
-        )
-        .expect("a Fourier measurement runs a transient");
-    let emitted = record.to_spice_options();
-    assert_eq!(emitted, ".OPTIONS TIMEINT\n+ DELMAX=5e-10");
-    assert_eq!(
-        resolve(&record).transient_timeint_max_timestep,
-        Some(5.0e-10)
-    );
-    assert_eq!(
+    for kind in [
+        AnalysisKind::Fourier,
+        AnalysisKind::Reliability,
+        AnalysisKind::Optimization,
+    ] {
+        let mut record = AnalysisNumericOverride::default();
         record
-            .value(NumericOverrideOption::MaximumTimestep)
-            .unwrap(),
-        format_si_value(5.0e-10)
-    );
+            .set_for_instance(
+                kind,
+                SolverOwnership::NONE,
+                NumericOverrideOption::MaximumTimestep,
+                "500p",
+            )
+            .expect("the measurement or configured study can run a transient");
+        let emitted = record.to_spice_options();
+        assert_eq!(emitted, ".OPTIONS TIMEINT\n+ DELMAX=5e-10");
+        assert_eq!(
+            resolve(&record).transient_timeint_max_timestep,
+            Some(5.0e-10)
+        );
+        assert_eq!(
+            record
+                .value(NumericOverrideOption::MaximumTimestep)
+                .unwrap(),
+            format_si_value(5.0e-10)
+        );
+    }
 }
 
 /// A global key and a packaged key on one record produce two cards, global

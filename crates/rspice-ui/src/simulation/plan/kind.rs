@@ -616,10 +616,9 @@ impl AnalysisKind {
     ///
     /// This is the domain gate for every time-integration control: a bound on
     /// the step controller reaches a solve only if that solve takes steps. The
-    /// list is what each kind's service actually runs, not what its name
-    /// suggests — reliability and optimization both drive a DC operating point
-    /// per candidate, while the sweep kinds are included because their base
-    /// mode may be a transient.
+    /// list includes studies whose selected base or stress window can run a
+    /// transient. Reliability can integrate a representative stress window;
+    /// optimization can evaluate transient measurements for each candidate.
     pub const fn advances_time(self) -> bool {
         matches!(
             self,
@@ -630,6 +629,8 @@ impl AnalysisKind {
                 | Self::Soa
                 | Self::TransientNoise
                 | Self::MonteCarlo
+                | Self::Reliability
+                | Self::Optimization
                 | Self::Temperature
                 | Self::Corner
         )
@@ -864,7 +865,17 @@ mod tests {
         assert_eq!(
             stepping,
             [
-                "tran", "mc", "pss", "temp", "corner", "envelope", "fourier", "soa", "tnoise"
+                "tran",
+                "mc",
+                "pss",
+                "temp",
+                "corner",
+                "envelope",
+                "fourier",
+                "reliability",
+                "opt",
+                "soa",
+                "tnoise"
             ]
         );
     }
