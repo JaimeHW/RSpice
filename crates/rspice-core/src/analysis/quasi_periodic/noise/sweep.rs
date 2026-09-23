@@ -35,6 +35,7 @@ pub(crate) fn visit_with_abort(
     grid: Arc<QuasiPeriodicGrid>,
     config: &QuasiPeriodicNoiseConfig,
     orbit: &[Vec<Complex64>],
+    autonomous_phase: Option<(usize, Value)>,
     observations: &[Vec<Vec<Complex64>>],
     sources: &[QuasiPeriodicNoiseSource],
     limits: &ResourceLimits,
@@ -193,6 +194,9 @@ pub(crate) fn visit_with_abort(
         &linear_limits,
         abort,
     )?;
+    if let Some((tone, tolerance)) = autonomous_phase {
+        linear.prepare_autonomous(circuit, orbit, tone, tolerance, &linear_limits, abort)?;
+    }
     for (frequency_index, &frequency) in config.frequencies_hz.iter().enumerate() {
         check_abort(abort)?;
         let adjoints = observations

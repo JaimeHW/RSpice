@@ -1,4 +1,5 @@
 //! Authenticated multi-output noise about an independent-tone operating point.
+mod autonomous;
 mod card;
 mod derived;
 mod integration;
@@ -50,7 +51,6 @@ impl Engine {
                 .saturating_mul(request.outputs.len()),
         )?;
         let producer = state::Producer::capture(netlist, &engine.config, point.config())?;
-        point.require_driven_response("QPNOISE")?;
         let grid = engine.validate_qpss_operating_point_with_abort(netlist, point, abort)?;
         let input_lattices = request.input_lattices.resolve(&grid)?;
         for output in &request.outputs {
@@ -110,6 +110,7 @@ impl Engine {
             .iter()
             .map(|output| bindings::output(netlist, point, &output.observation))
             .collect::<Result<Vec<_>, _>>()?;
+        autonomous::validate_integration(&request, point, &grid, &observations, abort)?;
         let sources = request
             .sources
             .select(engine.prepare_quasi_periodic_noise_sources(
@@ -228,10 +229,15 @@ impl Engine {
         };
         let mut points = Vec::with_capacity(config.frequencies_hz.len());
         solver
-            .visit_quasi_periodic_noise_with_abort(
+            .visit_quasi_periodic_noise_from_orbit_with_abort(
                 grid.clone(),
                 &config,
                 point.complete_spectra(),
+                point
+                    .config()
+                    .oscillator
+                    .as_ref()
+                    .map(|oscillator| (oscillator.tone, point.config().solver.relative_tolerance)),
                 &observations,
                 &sources,
                 &limits,

@@ -248,7 +248,6 @@ mod tests {
                 .validate_retained_payload_with_abort(&limits, &NoAbort)
                 .is_err()
         );
-        assert!(point.require_driven_response("QPNOISE").is_err());
         for fields in [
             "OSCNODE=x",
             "OSCTONE=0 OSCNODE=x",

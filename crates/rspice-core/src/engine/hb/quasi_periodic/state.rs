@@ -155,14 +155,6 @@ impl QpssOperatingPoint {
     pub fn resolved_grid_config(&self) -> Result<QuasiPeriodicGridConfig, SimulationError> {
         resolved_grid(&self.config, self.oscillator_frequency_hz)
     }
-    pub(super) fn require_driven_response(&self, analysis: &str) -> Result<(), SimulationError> {
-        if self.config.oscillator.is_some() {
-            return Err(invalid(format!(
-                "{analysis} on an autonomous QPSS orbit requires oscillator phase-response equations, which are not connected"
-            )));
-        }
-        Ok(())
-    }
     pub fn node_names(&self) -> &[String] {
         &self.node_names
     }

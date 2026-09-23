@@ -416,6 +416,35 @@ impl HbSolver {
         abort: &dyn AbortSignal,
         consume: impl FnMut(usize, QuasiPeriodicNoisePoint) -> Result<(), Error>,
     ) -> Result<(), Error> {
+        self.visit_quasi_periodic_noise_from_orbit_with_abort(
+            grid,
+            config,
+            orbit,
+            None,
+            observations,
+            sources,
+            limits,
+            abort,
+            consume,
+        )
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "independent orbit, noise, resource and streaming inputs"
+    )]
+    pub(crate) fn visit_quasi_periodic_noise_from_orbit_with_abort(
+        &mut self,
+        grid: Arc<QuasiPeriodicGrid>,
+        config: &QuasiPeriodicNoiseConfig,
+        orbit: &[Vec<Complex64>],
+        autonomous_phase: Option<(usize, Value)>,
+        observations: &[Vec<Vec<Complex64>>],
+        sources: &[QuasiPeriodicNoiseSource],
+        limits: &ResourceLimits,
+        abort: &dyn AbortSignal,
+        consume: impl FnMut(usize, QuasiPeriodicNoisePoint) -> Result<(), Error>,
+    ) -> Result<(), Error> {
         if abort.is_aborted() {
             return Err(Error::Aborted);
         }
@@ -427,6 +456,7 @@ impl HbSolver {
             grid,
             config,
             orbit,
+            autonomous_phase,
             observations,
             sources,
             &limits,

@@ -60,6 +60,208 @@ fn close(actual: Value, expected: Value) {
     );
 }
 #[test]
+fn autonomous_qpnoise_matches_rotating_oscillator_noise_and_cross_spectrum() {
+    use crate::analysis::quasi_periodic::QuasiPeriodicSampling;
+    use std::f64::consts::{SQRT_2, TAU};
+    let netlist = Netlist::parse("Autonomous noise\nCx x 0 1\nCy y 0 1\nRx x 0 1\nRy y 0 1\nIprobe 0 x DC 0\nBx 0 x I={(2-v(x)^2-v(y)^2)*v(x)-v(y)}\nBy 0 y I={(2-v(x)^2-v(y)^2)*v(y)+v(x)}\n.end\n").unwrap();
+    let engine = Engine::default();
+    let mut config = QpssConfig::new(vec![1.2 / TAU, SQRT_2 / TAU], vec![3, 1]);
+    config.grid.sampling = QuasiPeriodicSampling::Exact(vec![17, 9]);
+    config.solver.relative_tolerance = 1e-9;
+    let mut oscillator = QpssOscillator::new(0, "x".into());
+    oscillator.initial_amplitude = 0.8;
+    oscillator.additional_seeds.push(QpssOscillatorSeed {
+        node: "y".into(),
+        amplitude: 0.8,
+        phase_degrees: -90.0,
+    });
+    config.oscillator = Some(oscillator);
+    let point = engine.run_qpss(&netlist, config).unwrap();
+    let request = QpnoiseRequest {
+        frequencies_hz: vec![1e-7, 0.005, 0.02],
+        frequency_axis: QpnoiseFrequencyAxis::Offset,
+        outputs: ["x", "y"]
+            .into_iter()
+            .map(|node| QpnoiseOutput {
+                observation: QpnoiseObservation::Voltage {
+                    positive: node.into(),
+                    negative: "0".into(),
+                },
+                lattice: vec![1, 0],
+            })
+            .collect(),
+        input: Some(QpnoiseInput {
+            source: "Iprobe".into(),
+            lattice: vec![1, 0],
+        }),
+        input_lattices: QpnoiseLattices::AllRetained,
+        sources: QpnoiseSources::Only(vec!["RX thermal".into(), "RY thermal".into()]),
+        integration: Some(QpnoiseIntegration {
+            band_hz: None,
+            method: QpnoiseIntegrationMethod::Linear,
+        }),
+        contributor_ranking: true,
+        noise_figure: None,
+        linear: Default::default(),
+    };
+    let result = engine
+        .run_qpnoise_from_qpss(&netlist, request.clone(), &point)
+        .unwrap();
+    let s = 4.0
+        * super::super::super::pnoise::pnoise_physical_constants(engine.config.spice_dialect)
+            .boltzmann
+        * 300.15;
+    let mut expected_densities = vec![];
+    for (i, offset) in request.frequencies_hz.iter().enumerate() {
+        // In rotating coordinates, independent equal x/y noise remains
+        // isotropic. Radial relaxation is 2; phase is an integrator. Each
+        // physical output mixes their spectra at omega +/- omega_carrier.
+        let d = TAU * offset;
+        let power = |w: Value| 1.0 / (4.0 + w * w) + 1.0 / (w * w);
+        let psd = s / 4.0 * (power(d) + power(2.0 + d));
+        expected_densities.push(psd);
+        let cross = Complex64::new(0.0, s / 4.0 * (power(d) - power(2.0 + d)));
+        let covariance = &result.total_covariances[i].values;
+        close(covariance[0].re, psd);
+        close(covariance[3].re, psd);
+        assert!((covariance[1] - cross).norm() < psd * 2e-8);
+        assert_eq!(covariance[2], covariance[1].conj());
+        let transfer =
+            |w| Complex64::ONE / Complex64::new(2.0, w) + Complex64::ONE / Complex64::new(0.0, w);
+        let gain = (transfer(d) + transfer(2.0 + d)) * 0.25;
+        assert!(
+            (result.outputs[0].input_transfer.as_ref().unwrap()[i] - gain).norm()
+                < gain.norm() * 2e-8
+        );
+        let QpnoiseValue::Finite(referred) = result.outputs[0].input_noise.as_ref().unwrap()[i]
+        else {
+            panic!("finite input referral expected")
+        };
+        close(referred, psd / gain.norm_sqr());
+    }
+    let expected_power: Value = request
+        .frequencies_hz
+        .windows(2)
+        .zip(expected_densities.windows(2))
+        .map(|(f, q)| (f[1] - f[0]) * (q[0] + q[1]) * 0.5)
+        .sum();
+    let QpnoiseValue::Finite(rms) = result.outputs[0].integrated.as_ref().unwrap().output_rms
+    else {
+        panic!("finite integral expected")
+    };
+    close(rms, expected_power.sqrt());
+    let ranking = result.outputs[0].ranking.as_ref().unwrap();
+    close(ranking.iter().map(|r| r.percentage).sum(), 100.0);
+    assert_eq!(ranking.len(), 2);
+    let (metadata, buffers) = result
+        .clone()
+        .into_transfer_parts_with_abort(&engine.config.resource_limits, &NoAbort)
+        .unwrap();
+    let restored = QpnoiseAnalysisResult::from_transfer_parts_with_abort(
+        metadata,
+        buffers,
+        &engine.config.resource_limits,
+        &NoAbort,
+    )
+    .unwrap();
+    assert_eq!(restored, result);
+    let mut zero = request.clone();
+    zero.frequencies_hz = vec![0.0];
+    assert!(
+        engine
+            .run_qpnoise_from_qpss(&netlist, zero, &point)
+            .unwrap_err()
+            .to_string()
+            .contains("nonzero")
+    );
+    let mut crossing = request.clone();
+    crossing.frequencies_hz = vec![-0.01, 0.01];
+    assert!(
+        engine
+            .run_qpnoise_from_qpss(&netlist, crossing.clone(), &point)
+            .unwrap_err()
+            .to_string()
+            .contains("spectral line")
+    );
+    let grid = engine
+        .validate_qpss_operating_point_with_abort(&netlist, &point, &NoAbort)
+        .unwrap();
+    let carrier = point.oscillator_frequency_hz().unwrap();
+    let mut clipped = request.clone();
+    clipped.frequencies_hz = vec![-0.01, 0.01, 0.02];
+    clipped.integration.as_mut().unwrap().band_hz = Some([carrier + 0.005, carrier + 0.015]);
+    assert!(
+        autonomous::validate_integration(
+            &clipped,
+            &point,
+            &grid,
+            &result.metadata.observations,
+            &NoAbort
+        )
+        .is_err()
+    );
+    // The unused crossing interval must not invalidate an otherwise usable
+    // clipped band. The absolute-frequency axis obeys the same rule.
+    clipped.frequencies_hz = vec![-0.01, 0.003, 0.01, 0.02];
+    autonomous::validate_integration(
+        &clipped,
+        &point,
+        &grid,
+        &result.metadata.observations,
+        &NoAbort,
+    )
+    .unwrap();
+    clipped.frequency_axis = QpnoiseFrequencyAxis::Output;
+    clipped
+        .frequencies_hz
+        .iter_mut()
+        .for_each(|f| *f += carrier);
+    autonomous::validate_integration(
+        &clipped,
+        &point,
+        &grid,
+        &result.metadata.observations,
+        &NoAbort,
+    )
+    .unwrap();
+    clipped.frequencies_hz.remove(1);
+    assert!(
+        autonomous::validate_integration(
+            &clipped,
+            &point,
+            &grid,
+            &result.metadata.observations,
+            &NoAbort
+        )
+        .is_err()
+    );
+    crossing.integration = None;
+    crossing.contributor_ranking = false;
+    engine
+        .run_qpnoise_from_qpss(&netlist, crossing, &point)
+        .unwrap();
+    let mut narrow = request;
+    narrow.input_lattices = QpnoiseLattices::Explicit {
+        tuples: vec![vec![1, 0]],
+    };
+    narrow.sources = QpnoiseSources::Only(vec!["RX thermal".into()]);
+    let narrow = engine
+        .run_qpnoise_from_qpss(&netlist, narrow, &point)
+        .unwrap();
+    assert_eq!(narrow.sources.len(), 1);
+    assert_eq!(narrow.metadata.input_lattices, [vec![1, 0]]);
+    for (i, offset) in narrow.metadata.request.frequencies_hz.iter().enumerate() {
+        let d = TAU * offset;
+        let transfer =
+            |w| Complex64::ONE / Complex64::new(2.0, w) + Complex64::ONE / Complex64::new(0.0, w);
+        close(
+            narrow.total_covariances[i].values[0].re,
+            s * ((transfer(d) + transfer(2.0 + d)) * 0.25).norm_sqr(),
+        );
+    }
+}
+
+#[test]
 fn qpnoise_engine_multioutput_referral_figure_and_integrated_contributors_match_rc() {
     let (engine, netlist, point) = fixture();
     let result = engine
