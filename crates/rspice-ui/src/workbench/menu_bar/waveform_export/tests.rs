@@ -997,6 +997,7 @@ fn csv_export_publishes_complete_soa_rules_and_exact_events() {
             evaluations: vec![SoaEvaluationEvidence {
                 duration: None,
                 thresholds: Default::default(),
+                envelope: None,
                 derating: None,
                 device_id: "M1".to_owned(),
                 parameter: SoaParameterEvidence::DrainSourceVoltage,
@@ -2494,6 +2495,7 @@ fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
             evaluations: vec![SoaEvaluationEvidence {
                 duration: None,
                 thresholds: Default::default(),
+                envelope: None,
                 derating: Some(SoaPowerDeratingEvidence {
                     rated_power_w: 1.0,
                     curve: SoaPowerDerating {
@@ -2585,6 +2587,79 @@ fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
 }
 
 #[test]
+fn soa_current_envelope_csv_retains_voltage_limits_and_authored_curves() {
+    use crate::services::safety::{SoaCurrentEnvelope, SoaCurrentEnvelopeEvidence};
+    let curve = SoaCurrentEnvelope::test_fixture();
+    let mut traces = Vec::new();
+    for (name, unit, values) in [
+        ("SOA_ID(M1)", "A", vec![0.001, 0.002, 0.003]),
+        ("SOA_ID_CURVE_VOLTAGE(M1)", "V", vec![1.0, 5.0, 12.0]),
+        (
+            "SOA_ID_CURVE_LIMIT(M1)",
+            "A",
+            [1.0, 5.0, 12.0]
+                .map(|v| curve.limit(v).unwrap().min(0.015))
+                .to_vec(),
+        ),
+    ] {
+        let mut trace = waveform(name, vec![0.0, 1e-9, 2e-9], values);
+        trace.unit = Some(unit.into());
+        traces.push(trace);
+    }
+    let analysis = AnalysisResult::new(1, AnalysisType::Soa, "Current curve SOA")
+        .with_waveforms(traces)
+        .with_family_metadata(AnalysisResultFamilyMetadata::Soa {
+            time: vec![0.0, 1e-9, 2e-9],
+        })
+        .with_result_payload(AnalysisResultPayload::Soa {
+            evaluations: vec![SoaEvaluationEvidence {
+                envelope: Some(SoaCurrentEnvelopeEvidence {
+                    maximum_current_a: 0.015,
+                    curve,
+                }),
+                duration: None,
+                thresholds: Default::default(),
+                derating: None,
+                device_id: "M1".into(),
+                parameter: SoaParameterEvidence::DrainCurrent,
+                limit_value: 0.0,
+                worst_actual_value: 0.003,
+                worst_time_s: 2e-9,
+                sample_count: 3,
+                unit: "A".into(),
+                description: "Synthetic current curve".into(),
+                verdict: SoaRuleVerdictEvidence::Critical,
+            }],
+            violations: vec![SoaViolationEvidence {
+                device_id: "M1".into(),
+                parameter: SoaParameterEvidence::DrainCurrent,
+                limit_value: 0.0,
+                actual_value: 0.003,
+                time_s: 2e-9,
+                severity: SoaViolationSeverityEvidence::Critical,
+            }],
+        });
+    analysis.validate_retained_evidence().unwrap();
+    let csv = prepare_typed_result_csv(&analysis).unwrap().contents;
+    assert!(
+        csv.lines()
+            .next()
+            .unwrap()
+            .ends_with("curve_voltage_v,curve_maximum_current_a,curve_definition_json")
+    );
+    assert!(csv.contains("Synthetic SOA fixture"));
+    assert!(csv.contains("\"\"voltages_v\"\":[0.0,1.0,10.0]"));
+    assert_eq!(csv.lines().filter(|l| l.starts_with("sample,")).count(), 3);
+    assert!(
+        csv.lines()
+            .filter(|l| l.starts_with("sample,"))
+            .last()
+            .unwrap()
+            .contains(&format!(",{:.17e},", 12.0))
+    );
+}
+
+#[test]
 fn soa_duration_csv_preserves_short_spikes_and_qualified_excursions() {
     check_soa_duration_csv(None);
 }
@@ -2648,6 +2723,7 @@ fn check_soa_duration_csv(
             evaluations: vec![SoaEvaluationEvidence {
                 duration: Some(duration),
                 thresholds: Default::default(),
+                envelope: None,
                 derating: None,
                 device_id: "M1".into(),
                 parameter: SoaParameterEvidence::DrainSourceVoltage,

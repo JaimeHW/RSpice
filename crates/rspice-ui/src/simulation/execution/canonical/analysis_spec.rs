@@ -296,6 +296,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
     rules.push(SoaRuleConfig {
         duration_mode: Default::default(),
         minimum_duration_s: None,
+        current_envelope: None,
         power_derating: None,
         voltage_basis: Default::default(),
         parameter: SoAParameter::Vgs,
@@ -376,6 +377,35 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
             curve.watts_per_kelvin = 0.002;
         }
         assert_ne!(digest(&changed), digest(&derated));
+    }
+    let mut curves = configured.clone();
+    let AnalysisSpec::Soa { rules, .. } = &mut curves else {
+        unreachable!()
+    };
+    rules[0].parameter = SoAParameter::Id;
+    rules[0].current_envelope = Some(crate::services::safety::SoaCurrentEnvelope::test_fixture());
+    assert_ne!(digest(&curves), digest(&configured));
+    for field in 0..10 {
+        let mut changed = curves.clone();
+        let AnalysisSpec::Soa { rules, .. } = &mut changed else {
+            unreachable!()
+        };
+        let c = rules[0].current_envelope.as_mut().unwrap();
+        match field {
+            0 => c.source.push('x'),
+            1 => c.conditions.push('x'),
+            2 => c.voltages_v[1] *= 1.1,
+            3 => c.dc_currents_a.as_mut().unwrap()[1] *= 0.9,
+            4 => c.pulse_width_s = None,
+            5 => c.voltage_interpolation = crate::services::safety::SoaVoltageInterpolation::Linear,
+            6 => {
+                c.pulse_interpolation = crate::services::safety::SoaPulseInterpolation::LongerPulse
+            }
+            7 => c.pulses[0].duration_s *= 0.9,
+            8 => c.pulses[0].currents_a[1] *= 1.1,
+            _ => c.pulses.pop().map(|_| ()).unwrap(),
+        }
+        assert_ne!(digest(&changed), digest(&curves), "curve field {field}");
     }
 }
 
@@ -928,6 +958,36 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                     writer.option(rule.power_derating.as_ref(), |writer, curve| {
                         writer.f64(curve.reference_temperature_kelvin);
                         writer.f64(curve.watts_per_kelvin);
+                    });
+                }
+            }
+            if rules.iter().any(|rule| rule.current_envelope.is_some()) {
+                writer.string("soa-current-voltage-curves-v1");
+                writer.sequence(rules.len());
+                for rule in rules {
+                    writer.option(rule.current_envelope.as_ref(), |writer, curve| {
+                        writer.string(&curve.source);
+                        writer.string(&curve.conditions);
+                        encode_f64_slice(writer, &curve.voltages_v);
+                        writer.option(curve.dc_currents_a.as_ref(), |writer, row| {
+                            encode_f64_slice(writer, row)
+                        });
+                        writer.option(curve.pulse_width_s.as_ref(), |writer, width| {
+                            writer.f64(*width)
+                        });
+                        writer.bool(
+                            curve.voltage_interpolation
+                                == crate::services::safety::SoaVoltageInterpolation::Logarithmic,
+                        );
+                        writer.bool(
+                            curve.pulse_interpolation
+                                == crate::services::safety::SoaPulseInterpolation::Logarithmic,
+                        );
+                        writer.sequence(curve.pulses.len());
+                        for pulse in &curve.pulses {
+                            writer.f64(pulse.duration_s);
+                            encode_f64_slice(writer, &pulse.currents_a);
+                        }
                     });
                 }
             }

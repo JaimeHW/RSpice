@@ -463,6 +463,7 @@ fn analysis_spec_round_trips_supported_variants() {
             rules: vec![crate::services::simulation_runner::SoaRuleConfig {
                 duration_mode: Default::default(),
                 minimum_duration_s: None,
+                current_envelope: None,
                 power_derating: None,
                 voltage_basis: Default::default(),
                 parameter: crate::services::safety::SoAParameter::Id,

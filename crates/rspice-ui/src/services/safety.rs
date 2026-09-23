@@ -12,7 +12,13 @@ pub use soa_manager::{
 mod thresholds;
 pub use thresholds::SoaThresholds;
 
+mod current_envelope;
 mod power_derating;
+pub use current_envelope::{
+    SoaCurrentEnvelope, SoaCurrentEnvelopeEvidence, SoaEnvelopeSamples, SoaPulseCurve,
+    SoaPulseInterpolation, SoaVoltageInterpolation, soa_envelope_limit_waveform_name,
+    soa_envelope_voltage_waveform_name,
+};
 pub use power_derating::{
     SoaDeratingSamples, SoaPowerDerating, SoaPowerDeratingEvidence, compare_soa_stress,
     soa_derating_temperature_waveform_name, soa_power_limit_waveform_name,

@@ -1840,6 +1840,7 @@ fn soa_evidence_analysis() -> AnalysisResult {
         evaluations.push(SoaEvaluationEvidence {
             duration: None,
             thresholds: Default::default(),
+            envelope: None,
             derating: None,
             device_id: device_id.clone(),
             parameter: SoaParameterEvidence::DrainSourceVoltage,

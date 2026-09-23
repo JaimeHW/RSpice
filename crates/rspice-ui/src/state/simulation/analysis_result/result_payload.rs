@@ -3,6 +3,7 @@
 use super::*;
 mod soa_derating;
 mod soa_duration;
+mod soa_envelope;
 
 pub(super) fn validate_pss_floquet_payload(
     period_s: Option<f64>,
@@ -1365,16 +1366,29 @@ impl AnalysisResult {
                 let mut exact_worst_events = std::collections::BTreeSet::new();
                 let mut derating_event_counts = std::collections::BTreeMap::<_, usize>::new();
                 let mut derating_traces = std::collections::BTreeMap::new();
-                for evaluation in evaluations
-                    .iter()
-                    .filter(|e| e.derating.is_some() || e.duration.is_some())
-                {
+                for evaluation in evaluations.iter().filter(|e| {
+                    e.derating.is_some() || e.envelope.is_some() || e.duration.is_some()
+                }) {
                     let duration = evaluation
                         .duration
                         .map(|_| soa_duration::validate(self, time, evaluation))
                         .transpose()?;
                     let mut events = duration.as_ref().map_or(0, |duration| duration.events);
-                    let limits = if evaluation.derating.is_some() {
+                    let limits = if evaluation.envelope.is_some() {
+                        let raw_events = soa_envelope::validate(self, time, evaluation)?;
+                        if duration.is_none() {
+                            events = raw_events;
+                        }
+                        Some(soa_derating::trace(
+                            self,
+                            &crate::services::safety::soa_envelope_limit_waveform_name(
+                                &evaluation.device_id,
+                                evaluation.parameter.runtime_parameter(),
+                            ),
+                            time,
+                            "A",
+                        )?)
+                    } else if evaluation.derating.is_some() {
                         let raw_events = soa_derating::validate(self, time, evaluation)?;
                         if duration.is_none() {
                             events = raw_events;
@@ -1486,7 +1500,10 @@ impl AnalysisResult {
                     }
                 }
                 for evaluation in evaluations {
-                    if evaluation.derating.is_some() || evaluation.duration.is_some() {
+                    if evaluation.derating.is_some()
+                        || evaluation.envelope.is_some()
+                        || evaluation.duration.is_some()
+                    {
                         let key = (evaluation.device_id.as_str(), evaluation.parameter);
                         let expected_events = derating_traces[&key].2;
                         if derating_event_counts.get(&key).copied().unwrap_or(0) != expected_events

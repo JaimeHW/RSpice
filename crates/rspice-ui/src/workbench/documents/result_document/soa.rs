@@ -764,10 +764,16 @@ fn derating_waveform<'a>(
     evaluation: &SoaEvaluationEvidence,
     temperature: bool,
 ) -> Option<&'a WaveformData> {
-    evaluation.derating?;
-    let name = if temperature {
+    let name = if evaluation.envelope.is_some() && !temperature {
+        crate::services::safety::soa_envelope_limit_waveform_name(
+            &evaluation.device_id,
+            evaluation.parameter.runtime_parameter(),
+        )
+    } else if temperature {
+        evaluation.derating?;
         crate::services::safety::soa_derating_temperature_waveform_name(&evaluation.device_id)
     } else {
+        evaluation.derating?;
         crate::services::safety::soa_power_limit_waveform_name(&evaluation.device_id)
     };
     let AnalysisResultFamilyMetadata::Soa { time } = analysis.family_metadata.as_ref()? else {
@@ -795,7 +801,7 @@ fn stress_waveform<'a>(
         evaluation.parameter.runtime_parameter(),
     );
     let limits = derating_waveform(analysis, evaluation, false);
-    if evaluation.derating.is_some() && limits.is_none() {
+    if (evaluation.derating.is_some() || evaluation.envelope.is_some()) && limits.is_none() {
         return None;
     }
     analysis.waveforms.iter().find(|waveform| {
@@ -1067,7 +1073,7 @@ fn stress_trace_card(
                 parameter_label(evaluation.parameter)
             );
             let detail = format!(
-                "Exact retained stress samples; limit at the worst point is {:.17e} {}. Worst point {:.17e} {} at {:.17e} seconds. A derated rule uses its retained limit trace at each time.",
+                "Exact retained stress samples; limit at the worst point is {:.17e} {}. Worst point {:.17e} {} at {:.17e} seconds. A varying limit uses its retained trace at each time.",
                 evaluation.limit_value,
                 evaluation.unit,
                 evaluation.worst_actual_value,
@@ -1094,7 +1100,7 @@ fn stress_trace_card(
             );
             if let Some(limits) = limits {
                 spec.traces.push(Trace::new(limits.x.as_slice(), limits.y.as_slice(), t.color.err).cache_key(facts.stress_cache_key ^ 0x7BD3_815F_A904_260C));
-                mono(ui, if evaluation.duration.is_some() { "Red trace: temperature-derated power limit. Worst point follows duration-qualified severity, then utilization." } else { "Red trace: temperature-derated power limit. Worst point: highest power / allowed-power ratio." });
+                mono(ui, if evaluation.duration.is_some() { "Red trace: allowed limit at each sample. Worst point follows duration-qualified severity, then utilization." } else { "Red trace: allowed limit at each sample. Worst point: highest stress / allowed-limit ratio." });
             } else {
                 spec.limit_lines.push(LimitLine {
                     y: evaluation.limit_value,
@@ -1434,6 +1440,7 @@ mod tests {
             evaluations.push(SoaEvaluationEvidence {
                 duration: None,
                 thresholds: Default::default(),
+                envelope: None,
                 derating: None,
                 device_id: device_id.clone(),
                 parameter: SoaParameterEvidence::DrainSourceVoltage,

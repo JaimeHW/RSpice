@@ -9,6 +9,7 @@
 //! guarantee without anyone remembering to add a case.
 
 use super::*;
+mod soa_curves;
 
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::simulation::plan::{AnalysisKind, SimulationPlan};
@@ -700,6 +701,7 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
             config.rules.push(SoaRuleConfig {
                 duration_mode: Default::default(),
                 minimum_duration_s: None,
+                current_envelope: None,
                 power_derating: None,
                 voltage_basis: Default::default(),
                 parameter,
@@ -720,6 +722,7 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
     config.rules.push(SoaRuleConfig {
         duration_mode: Default::default(),
         minimum_duration_s: None,
+        current_envelope: None,
         power_derating: None,
         voltage_basis: Default::default(),
         parameter: SoAParameter::Pdiss,
@@ -891,6 +894,7 @@ fn soa_temperature_limits_survive_studio_worker_execution_and_saved_results() {
         rules: vec![SoaRuleConfig {
             duration_mode: Default::default(),
             minimum_duration_s: None,
+            current_envelope: None,
             power_derating: None,
             voltage_basis: Default::default(),
             parameter: SoAParameter::Temp,
@@ -1000,6 +1004,7 @@ fn soa_body_and_backgate_limits_follow_model_pins_through_studio_and_saved_resul
             config.rules.push(SoaRuleConfig {
                 duration_mode: Default::default(),
                 minimum_duration_s: None,
+                current_envelope: None,
                 power_derating: None,
                 voltage_basis: Default::default(),
                 parameter,
@@ -1157,6 +1162,7 @@ fn soa_diode_and_bjt_substrate_limits_survive_studio_worker_and_saved_results() 
             config.rules.push(SoaRuleConfig {
                 duration_mode: Default::default(),
                 minimum_duration_s: None,
+                current_envelope: None,
                 power_derating: None,
                 voltage_basis: Default::default(),
                 parameter,
@@ -1170,6 +1176,7 @@ fn soa_diode_and_bjt_substrate_limits_survive_studio_worker_and_saved_results() 
         config.rules.push(SoaRuleConfig {
             duration_mode: Default::default(),
             minimum_duration_s: None,
+            current_envelope: None,
             power_derating: None,
             voltage_basis: Default::default(),
             parameter,
@@ -1342,6 +1349,7 @@ fn soa_intrinsic_voltage_rules_survive_studio_worker_and_saved_results() {
         config.rules.push(SoaRuleConfig {
             duration_mode: Default::default(),
             minimum_duration_s: None,
+            current_envelope: None,
             power_derating: None,
             parameter,
             voltage_basis,
@@ -1474,6 +1482,7 @@ fn soa_model_voltage_ratings_survive_studio_worker_and_saved_results() {
         rules: vec![SoaRuleConfig {
             duration_mode: Default::default(),
             minimum_duration_s: None,
+            current_envelope: None,
             power_derating: None,
             parameter: SoAParameter::VgsPositive,
             voltage_basis: Default::default(),
@@ -1653,6 +1662,7 @@ fn soa_derating_survives_studio_worker_thermal_transient_and_saved_results() {
         rules: vec![SoaRuleConfig {
             duration_mode: Default::default(),
             minimum_duration_s: Some(1e-12),
+            current_envelope: None,
             power_derating: Some(curve),
             voltage_basis: Default::default(),
             parameter: SoAParameter::Pdiss,
@@ -2044,6 +2054,7 @@ fn check_soa_duration_round_trip(
         rules: vec![SoaRuleConfig {
             duration_mode: mode,
             minimum_duration_s: Some(minimum),
+            current_envelope: None,
             power_derating: None,
             voltage_basis: Default::default(),
             parameter: SoAParameter::Vds,

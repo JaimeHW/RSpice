@@ -468,6 +468,7 @@ fn soa_duration_qualifies_interpolated_excursions_and_reclassifies_worst_point()
                     limits: vec![SoALimit {
                         duration_mode: Default::default(),
                         minimum_duration_s: Some(2.),
+                        current_envelope: None,
                         power_derating: None,
                         voltage_basis: Default::default(),
                         parameter: SoAParameter::Vds,

@@ -94,6 +94,8 @@ const PARAMETERS: [SoAParameter; 83] = [
 #[serde(deny_unknown_fields)]
 pub struct SoaRuleDraft {
     #[serde(default)]
+    pub current_envelope: super::SoaEnvelopeDraft,
+    #[serde(default)]
     pub cumulative_duration: bool,
     #[serde(default)]
     pub recovery_time: String,
@@ -123,6 +125,7 @@ fn default_derating_slope() -> String {
 impl Default for SoaRuleDraft {
     fn default() -> Self {
         Self {
+            current_envelope: Default::default(),
             cumulative_duration: false,
             recovery_time: String::new(),
             minimum_duration: String::new(),
@@ -139,6 +142,11 @@ impl Default for SoaRuleDraft {
 }
 
 impl SoaRuleDraft {
+    pub fn supports_current_envelope(&self) -> bool {
+        PARAMETERS.get(self.parameter).is_some_and(|p| {
+            crate::services::safety::SoaCurrentEnvelope::voltage_parameter(*p).is_some()
+        })
+    }
     pub const PARAMETER_LABELS: [&'static str; 83] = [
         "Vgs",
         "Vds",
@@ -246,6 +254,9 @@ impl SoaRuleDraft {
 
     pub(super) fn from_config(config: &SoaRuleConfig) -> Self {
         Self {
+            current_envelope: super::SoaEnvelopeDraft::from_config(
+                config.current_envelope.as_ref(),
+            ),
             cumulative_duration: matches!(config.duration_mode, SoaDurationMode::Cumulative { .. }),
             recovery_time: match config.duration_mode {
                 SoaDurationMode::Cumulative {
@@ -323,6 +334,11 @@ impl SoaRuleDraft {
                     parse_si_value(&self.minimum_duration)
                         .map_err(|error| format!("Invalid SOA duration threshold: {error}"))?,
                 )
+            },
+            current_envelope: if self.supports_current_envelope() {
+                self.current_envelope.to_config()?
+            } else {
+                None
             },
             power_derating: if self.is_power() && self.derate_power {
                 Some(crate::services::safety::SoaPowerDerating {

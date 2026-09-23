@@ -892,6 +892,7 @@ fn reliability_and_soa_evidence_are_field_sensitive_v4_content_identity() {
             evaluations: vec![SoaEvaluationEvidence {
                 duration: None,
                 thresholds: Default::default(),
+                envelope: None,
                 derating: None,
                 device_id: "M1".to_owned(),
                 parameter: SoaParameterEvidence::DrainSourceVoltage,
@@ -996,6 +997,47 @@ fn reliability_and_soa_evidence_are_field_sensitive_v4_content_identity() {
             _ => derating.curve.watts_per_kelvin = 0.02,
         }
         assert_ne!(derated.result_data_digest(), changed.result_data_digest());
+    }
+    let mut curved = soa.clone();
+    let Some(AnalysisResultPayload::Soa { evaluations, .. }) = curved.result_payload.as_mut()
+    else {
+        unreachable!()
+    };
+    evaluations[0].envelope = Some(crate::services::safety::SoaCurrentEnvelopeEvidence {
+        maximum_current_a: 1.0,
+        curve: crate::services::safety::SoaCurrentEnvelope::test_fixture(),
+    });
+    assert_ne!(soa.result_data_digest(), curved.result_data_digest());
+    for field in 0..10 {
+        let mut changed = curved.clone();
+        let Some(AnalysisResultPayload::Soa { evaluations, .. }) = changed.result_payload.as_mut()
+        else {
+            unreachable!()
+        };
+        let e = evaluations[0].envelope.as_mut().unwrap();
+        match field {
+            0 => e.maximum_current_a *= 2.0,
+            1 => e.curve.source.push('x'),
+            2 => e.curve.conditions.push('x'),
+            3 => e.curve.voltages_v[1] *= 1.1,
+            4 => e.curve.dc_currents_a.as_mut().unwrap()[1] *= 0.9,
+            5 => e.curve.pulse_width_s = None,
+            6 => {
+                e.curve.voltage_interpolation =
+                    crate::services::safety::SoaVoltageInterpolation::Linear
+            }
+            7 => {
+                e.curve.pulse_interpolation =
+                    crate::services::safety::SoaPulseInterpolation::LongerPulse
+            }
+            8 => e.curve.pulses[0].duration_s *= 0.9,
+            _ => e.curve.pulses[0].currents_a[1] *= 1.1,
+        }
+        assert_ne!(
+            curved.result_data_digest(),
+            changed.result_data_digest(),
+            "curve field {field}"
+        );
     }
 }
 /// Two results whose event histories are identical, one of which says

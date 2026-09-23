@@ -432,6 +432,8 @@ pub enum SoaVoltageBasis {
 /// A specific limit definition for a device type or model
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SoALimit {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_envelope: Option<super::SoaCurrentEnvelope>,
     #[serde(default, skip_serializing_if = "super::SoaDurationMode::is_default")]
     pub duration_mode: super::SoaDurationMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -500,6 +502,8 @@ pub enum SoARuleVerdict {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SoAEvaluation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope: Option<super::SoaCurrentEnvelopeEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration: Option<crate::services::safety::SoaDurationEvidence>,
     #[serde(default, skip_serializing_if = "super::SoaThresholds::is_default")]
     pub thresholds: super::SoaThresholds,
@@ -535,6 +539,7 @@ pub struct SoAManager {
     /// history can never disagree with the worst point derived from it.
     stress_history: HashMap<(String, SoAParameter), Vec<f64>>,
     derating_history: HashMap<(String, SoAParameter), SoaDeratingSamples>,
+    envelope_history: HashMap<(String, SoAParameter), super::SoaEnvelopeSamples>,
 }
 
 impl Default for SoAManager {
@@ -552,6 +557,7 @@ impl SoAManager {
             evaluations: HashMap::new(),
             stress_history: HashMap::new(),
             derating_history: HashMap::new(),
+            envelope_history: HashMap::new(),
         }
     }
 
@@ -594,6 +600,17 @@ impl SoAManager {
                 ));
             }
             limit.duration_mode.validate(limit.minimum_duration_s)?;
+            if let Some(curve) = &limit.current_envelope {
+                curve.validate()?;
+                if limit.max_value <= 0.0 {
+                    return Err(
+                        "SOA current/voltage curves require a positive maximum-current cap".into(),
+                    );
+                }
+                if super::SoaCurrentEnvelope::voltage_parameter(limit.parameter).is_none() {
+                    return Err("SOA current/voltage curves require Id, Ic or Ia".into());
+                }
+            }
             if let Some(curve) = limit.power_derating {
                 curve.validate()?;
                 if limit.parameter != SoAParameter::Pdiss {
@@ -621,13 +638,24 @@ impl SoAManager {
         self.evaluations.clear();
         self.stress_history.clear();
         self.derating_history.clear();
+        self.envelope_history.clear();
     }
 
     /// Check a single measurement point for all registered devices
+    #[cfg(test)]
     pub fn check_point(
         &mut self,
         time: f64,
         values: &HashMap<String, HashMap<SoAParameter, f64>>,
+    ) -> Result<(), String> {
+        self.check_point_with_curve_voltages(time, values, &HashMap::new())
+    }
+
+    pub fn check_point_with_curve_voltages(
+        &mut self,
+        time: f64,
+        values: &HashMap<String, HashMap<SoAParameter, f64>>,
+        curve_voltages: &HashMap<(String, SoAParameter), f64>,
     ) -> Result<(), String> {
         if !time.is_finite() || time < 0.0 {
             return Err("SOA sample time must be finite and nonnegative".to_owned());
@@ -653,14 +681,23 @@ impl SoAManager {
                         } else {
                             None
                         };
-                        let maximum = limit
+                        let mut maximum = limit
                             .power_derating
                             .zip(temperature)
                             .map_or(limit.max_value, |(curve, temperature)| {
                                 curve.limit(limit.max_value, temperature)
                             });
-                        let verdict = self.thresholds.verdict(actual, maximum);
                         let key = (device_id.clone(), limit.parameter);
+                        if let Some(curve) = &limit.current_envelope {
+                            let voltage = *curve_voltages
+                                .get(&key)
+                                .ok_or("SOA current curve is missing terminal voltage")?;
+                            maximum = maximum.min(curve.limit(voltage)?);
+                            let history = self.envelope_history.entry(key.clone()).or_default();
+                            history.voltages_v.push(voltage);
+                            history.limits_a.push(maximum);
+                        }
+                        let verdict = self.thresholds.verdict(actual, maximum);
                         if let Some(temperature) = temperature {
                             let history = self.derating_history.entry(key.clone()).or_default();
                             history.temperatures_kelvin.push(temperature);
@@ -676,6 +713,12 @@ impl SoAManager {
                                 .or_insert_with(|| SoAEvaluation {
                                     duration: None,
                                     thresholds: self.thresholds,
+                                    envelope: limit.current_envelope.clone().map(|curve| {
+                                        super::SoaCurrentEnvelopeEvidence {
+                                            maximum_current_a: limit.max_value,
+                                            curve,
+                                        }
+                                    }),
                                     derating: limit.power_derating.map(|curve| {
                                         SoaPowerDeratingEvidence {
                                             rated_power_w: limit.max_value,
@@ -788,6 +831,10 @@ impl SoAManager {
                 .map_or(SoaLimitTrace::Constant(maximum), |history| {
                     SoaLimitTrace::Samples(&history.limits_w)
                 });
+            let limits = self
+                .envelope_history
+                .get(&key)
+                .map_or(limits, |history| SoaLimitTrace::Samples(&history.limits_a));
             let scan = qualify_soa_duration_with_mode(time, stress, limits, minimum, mode, abort)?;
             let mut worst = 0;
             let mut verdict = soa_duration_verdict(
@@ -845,6 +892,15 @@ impl SoAManager {
         Ok(true)
     }
 
+    /// Retained external voltage and allowed current for a curve rule.
+    pub fn envelope_history(
+        &self,
+        device: &str,
+        parameter: SoAParameter,
+    ) -> Option<&super::SoaEnvelopeSamples> {
+        self.envelope_history.get(&(device.into(), parameter))
+    }
+
     /// Get all detected violations
     pub fn violations(&self) -> &[SoAViolation] {
         &self.violations
@@ -894,6 +950,7 @@ mod tests {
                     limits: vec![SoALimit {
                         duration_mode: Default::default(),
                         minimum_duration_s: None,
+                        current_envelope: None,
                         power_derating: None,
                         voltage_basis: Default::default(),
                         parameter: SoAParameter::Vds,
@@ -912,6 +969,7 @@ mod tests {
                         limits: vec![SoALimit {
                             duration_mode: Default::default(),
                             minimum_duration_s: None,
+                            current_envelope: None,
                             power_derating: None,
                             voltage_basis: Default::default(),
                             parameter: SoAParameter::Vds,
@@ -975,6 +1033,7 @@ fn soa_derating_selects_highest_utilization_and_retains_zero_limit_events() {
                 limits: vec![SoALimit {
                     duration_mode: Default::default(),
                     minimum_duration_s: None,
+                    current_envelope: None,
                     power_derating: Some(curve),
                     voltage_basis: Default::default(),
                     parameter: SoAParameter::Pdiss,

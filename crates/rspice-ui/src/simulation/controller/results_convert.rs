@@ -981,6 +981,7 @@ impl SimulationController {
                     .map(|evaluation| SoaEvaluationEvidence {
                         duration: evaluation.duration,
                         thresholds: evaluation.thresholds,
+                        envelope: evaluation.envelope,
                         derating: evaluation.derating,
                         device_id: evaluation.device_id,
                         parameter: retain_soa_parameter(evaluation.parameter),

@@ -6,6 +6,7 @@ fn rule(parameter: SoAParameter, limit: f64, devices: &[&str], models: &[&str]) 
     SoaRuleConfig {
         duration_mode: Default::default(),
         minimum_duration_s: None,
+        current_envelope: None,
         power_derating: None,
         voltage_basis: Default::default(),
         parameter,

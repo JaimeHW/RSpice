@@ -9,6 +9,53 @@
 use super::*;
 
 #[test]
+fn soa_current_envelope_worker_buffers_preserve_curve_metadata() {
+    use crate::services::safety::*;
+    let curve = SoaCurrentEnvelope::test_fixture();
+    let result = SimulationResult::Soa {
+        convergence: None,
+        time: vec![0.0, 1e-9],
+        waveforms: HashMap::from([(
+            "SOA_ID_CURVE_VOLTAGE(M1)".into(),
+            WaveformData::new_time_domain(
+                "SOA_ID_CURVE_VOLTAGE(M1)",
+                vec![0.0, 1e-9],
+                vec![1.0, 2.0],
+            ),
+        )]),
+        violations: vec![],
+        evaluations: vec![SoAEvaluation {
+            envelope: Some(SoaCurrentEnvelopeEvidence {
+                maximum_current_a: 0.01,
+                curve,
+            }),
+            duration: None,
+            thresholds: Default::default(),
+            derating: None,
+            device_id: "M1".into(),
+            parameter: SoAParameter::Id,
+            limit_value: 0.01,
+            worst_actual_value: 0.001,
+            worst_time: 0.0,
+            sample_count: 2,
+            unit: "A".into(),
+            description: "Synthetic curve".into(),
+            verdict: SoARuleVerdict::Pass,
+        }],
+    };
+    let expected = WorkerResponse::from_result_for_transfer(53, Ok(result));
+    let transport = WorkerResponseTransport::from_response(expected.clone()).unwrap();
+    assert!(!transport.buffers.is_empty());
+    let metadata = serde_json::to_string(&transport.response).unwrap();
+    assert!(metadata.contains("Synthetic SOA fixture"));
+    let transport = WorkerResponseTransport {
+        response: serde_json::from_str(&metadata).unwrap(),
+        ..transport
+    };
+    assert_eq!(transport.into_response().unwrap(), expected);
+}
+
+#[test]
 fn transient_convergence_survives_worker_round_trip() {
     let mut convergence = rspice_core::diagnostics::ConvergenceQuality {
         total_iterations: 19,
@@ -331,6 +378,7 @@ fn worker_result_round_trip() {
         evaluations: vec![crate::services::safety::SoAEvaluation {
             duration: None,
             thresholds: Default::default(),
+            envelope: None,
             derating: None,
             device_id: "M1".to_string(),
             parameter: crate::services::safety::SoAParameter::Vgs,

@@ -350,6 +350,8 @@ impl From<WorkerParamShift> for ParamShift {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerSoAEvaluation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope: Option<crate::services::safety::SoaCurrentEnvelopeEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration: Option<crate::services::safety::SoaDurationEvidence>,
     #[serde(
         default,
@@ -373,6 +375,16 @@ pub(crate) struct WorkerSoAEvaluation {
 impl WorkerSoAEvaluation {
     pub(super) fn estimated_numeric_payload_bytes(&self) -> usize {
         f64_payload_bytes(if self.derating.is_some() { 6 } else { 3 })
+            .saturating_add(f64_payload_bytes(self.envelope.as_ref().map_or(0, |e| {
+                1 + usize::from(e.curve.pulse_width_s.is_some())
+                    + e.curve.voltages_v.len()
+                    + e.curve.dc_currents_a.as_ref().map_or(0, Vec::len)
+                    + e.curve
+                        .pulses
+                        .iter()
+                        .map(|p| 1 + p.currents_a.len())
+                        .sum::<usize>()
+            })))
             .saturating_add(f64_payload_bytes(if self.duration.is_some() {
                 6
             } else {
@@ -393,6 +405,7 @@ impl From<SoAEvaluation> for WorkerSoAEvaluation {
         Self {
             duration: value.duration,
             thresholds: value.thresholds,
+            envelope: value.envelope,
             derating: value.derating,
             device_id: value.device_id,
             parameter: WorkerSoAParameter::from(value.parameter),
@@ -412,6 +425,7 @@ impl From<WorkerSoAEvaluation> for SoAEvaluation {
         Self {
             duration: value.duration,
             thresholds: value.thresholds,
+            envelope: value.envelope,
             derating: value.derating,
             device_id: value.device_id,
             parameter: SoAParameter::from(value.parameter),

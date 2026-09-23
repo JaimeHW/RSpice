@@ -41,7 +41,17 @@ pub(super) fn validate(
         time,
         unit,
     )?;
-    let limits = if evaluation.derating.is_some() {
+    let limits = if evaluation.envelope.is_some() {
+        SoaLimitTrace::Samples(super::soa_derating::trace(
+            analysis,
+            &crate::services::safety::soa_envelope_limit_waveform_name(
+                &evaluation.device_id,
+                parameter,
+            ),
+            time,
+            "A",
+        )?)
+    } else if evaluation.derating.is_some() {
         SoaLimitTrace::Samples(super::soa_derating::trace(
             analysis,
             &soa_power_limit_waveform_name(&evaluation.device_id),

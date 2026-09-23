@@ -383,6 +383,30 @@ fn run_soa(
     );
     for trace in &data.stress_history {
         super::ensure_not_aborted(abort)?;
+        if let Some(envelope) = &trace.envelope {
+            insert_scalar_waveform(
+                &mut waveforms,
+                crate::services::safety::soa_envelope_limit_waveform_name(
+                    &trace.device_id,
+                    trace.parameter,
+                ),
+                data.time.clone(),
+                envelope.limits_a.clone(),
+                "A",
+                "s",
+            );
+            insert_scalar_waveform(
+                &mut waveforms,
+                crate::services::safety::soa_envelope_voltage_waveform_name(
+                    &trace.device_id,
+                    trace.parameter,
+                ),
+                data.time.clone(),
+                envelope.voltages_v.clone(),
+                "V",
+                "s",
+            );
+        }
         if let Some(derating) = &trace.derating {
             insert_scalar_waveform(
                 &mut waveforms,

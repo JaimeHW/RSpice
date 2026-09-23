@@ -1535,6 +1535,42 @@ pub(super) fn semantic_result_summary(
                     })
                     .collect(),
             });
+            for evaluation in evaluations {
+                if let Some(envelope) = &evaluation.envelope {
+                    let curve = &envelope.curve;
+                    let mut rows = Vec::new();
+                    if let Some(dc) = &curve.dc_currents_a {
+                        for (v, i) in curve.voltages_v.iter().zip(dc) {
+                            rows.push(vec!["DC".into(), exact_number(*v), exact_number(*i)]);
+                        }
+                    }
+                    for pulse in &curve.pulses {
+                        for (v, i) in curve.voltages_v.iter().zip(&pulse.currents_a) {
+                            rows.push(vec![
+                                exact_number(pulse.duration_s),
+                                exact_number(*v),
+                                exact_number(*i),
+                            ]);
+                        }
+                    }
+                    tables.push(SemanticTable {
+                        title: format!(
+                            "{} SOA curves · {} · {} · voltage {:?}, pulse {:?}",
+                            evaluation.device_id,
+                            curve.source,
+                            curve.conditions,
+                            curve.voltage_interpolation,
+                            curve.pulse_interpolation
+                        ),
+                        columns: vec![
+                            "Pulse (s) / DC".into(),
+                            "Voltage (V)".into(),
+                            "Allowed current (A)".into(),
+                        ],
+                        rows,
+                    });
+                }
+            }
         }
         ResultViewer::Reliability => {
             if let Some(AnalysisResultPayload::ReliabilityMission { response }) =

@@ -41,6 +41,7 @@ pub(super) fn soa_analysis() -> AnalysisResult {
             evaluations: vec![SoaEvaluationEvidence {
                 duration: None,
                 thresholds: Default::default(),
+                envelope: None,
                 derating: None,
                 device_id: "M1".to_owned(),
                 parameter: SoaParameterEvidence::DrainSourceVoltage,

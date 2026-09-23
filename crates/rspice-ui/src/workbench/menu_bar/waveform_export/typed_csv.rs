@@ -741,6 +741,28 @@ pub(super) fn prepare_typed_result_csv(
             let dynamic = evaluations
                 .iter()
                 .any(|evaluation| evaluation.derating.is_some());
+            let has_envelope = evaluations.iter().any(|e| e.envelope.is_some());
+            let append_envelope = |contents: &mut String,
+                                   evaluation: &crate::state::SoaEvaluationEvidence,
+                                   voltage: Option<f64>,
+                                   definition: bool|
+             -> Option<()> {
+                if has_envelope {
+                    contents.push(',');
+                    if let Some(voltage) = voltage {
+                        contents.push_str(&format!("{voltage:.17e}"));
+                    }
+                    contents.push(',');
+                    if let Some(envelope) = &evaluation.envelope {
+                        contents.push_str(&format!("{:.17e}", envelope.maximum_current_a));
+                    }
+                    contents.push(',');
+                    if definition && let Some(envelope) = &evaluation.envelope {
+                        contents.push_str(&csv_text(&serde_json::to_string(&envelope.curve).ok()?));
+                    }
+                }
+                Some(())
+            };
             let has_duration = evaluations
                 .iter()
                 .any(|evaluation| evaluation.duration.is_some());
@@ -837,6 +859,9 @@ pub(super) fn prepare_typed_result_csv(
                 contents
                     .push_str(",duration_policy,recovery_time_s,peak_exposure_s,final_exposure_s");
             }
+            if has_envelope {
+                contents.push_str(",curve_voltage_v,curve_maximum_current_a,curve_definition_json");
+            }
             contents.push('\n');
             for evaluation in evaluations {
                 contents.push_str(&format!(
@@ -865,17 +890,37 @@ pub(super) fn prepare_typed_result_csv(
                 }
                 append_thresholds(&mut contents, evaluation.thresholds);
                 append_duration(&mut contents, evaluation.duration);
+                append_envelope(&mut contents, evaluation, None, true)?;
                 contents.push('\n');
-                if evaluation.derating.is_some() || evaluation.duration.is_some() {
+                if evaluation.derating.is_some()
+                    || evaluation.envelope.is_some()
+                    || evaluation.duration.is_some()
+                {
                     let find =
                         |name: String| analysis.waveforms.iter().find(|wave| wave.name == name);
                     let stress = find(crate::services::safety::soa_stress_waveform_name(
                         &evaluation.device_id,
                         evaluation.parameter.runtime_parameter(),
                     ))?;
-                    let limits = evaluation.derating.and_then(|_| {
-                        find(crate::services::safety::soa_power_limit_waveform_name(
+                    let limits = evaluation
+                        .derating
+                        .and_then(|_| {
+                            find(crate::services::safety::soa_power_limit_waveform_name(
+                                &evaluation.device_id,
+                            ))
+                        })
+                        .or_else(|| {
+                            evaluation.envelope.as_ref().and_then(|_| {
+                                find(crate::services::safety::soa_envelope_limit_waveform_name(
+                                    &evaluation.device_id,
+                                    evaluation.parameter.runtime_parameter(),
+                                ))
+                            })
+                        });
+                    let curve_voltages = evaluation.envelope.as_ref().and_then(|_| {
+                        find(crate::services::safety::soa_envelope_voltage_waveform_name(
                             &evaluation.device_id,
+                            evaluation.parameter.runtime_parameter(),
                         ))
                     });
                     let temperatures = evaluation.derating.and_then(|_| {
@@ -898,7 +943,9 @@ pub(super) fn prepare_typed_result_csv(
                             format!("{:.17e}", stress.x[i]),
                             "1".into(),
                             csv_text(&evaluation.unit),
-                            if evaluation.derating.is_some() {
+                            if evaluation.envelope.is_some() {
+                                "Current/voltage SOA curve".into()
+                            } else if evaluation.derating.is_some() {
                                 "Temperature-derated power".into()
                             } else {
                                 "Duration-qualified stress".into()
@@ -921,6 +968,12 @@ pub(super) fn prepare_typed_result_csv(
                         }
                         append_thresholds(&mut contents, evaluation.thresholds);
                         append_duration(&mut contents, evaluation.duration);
+                        append_envelope(
+                            &mut contents,
+                            evaluation,
+                            curve_voltages.map(|v| v.y[i]),
+                            false,
+                        )?;
                         contents.push('\n');
                     }
                 }
@@ -950,6 +1003,9 @@ pub(super) fn prepare_typed_result_csv(
                         .get(&(violation.device_id.as_str(), violation.parameter))?
                         .1,
                 );
+                if has_envelope {
+                    contents.push_str(",,,");
+                }
                 contents.push('\n');
             }
             Some(PreparedTypedResultCsv {

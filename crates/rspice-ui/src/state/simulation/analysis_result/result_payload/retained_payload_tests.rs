@@ -808,6 +808,7 @@ fn soa_payload_requires_complete_rule_coverage_consistent_events_and_axis() {
     let evaluation = SoaEvaluationEvidence {
         duration: None,
         thresholds: Default::default(),
+        envelope: None,
         derating: None,
         device_id: "M1".to_owned(),
         parameter: SoaParameterEvidence::DrainSourceVoltage,

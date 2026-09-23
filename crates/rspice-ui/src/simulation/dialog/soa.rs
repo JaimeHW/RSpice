@@ -4,7 +4,9 @@
 
 use super::options::parse_si_value;
 use crate::services::simulation_runner::{SoaObservationConfig, SoaRuleConfig};
+mod curves;
 mod rules;
+pub use curves::SoaEnvelopeDraft;
 pub use rules::SoaRuleDraft;
 
 /// Typed SOA analysis configuration.
@@ -62,6 +64,9 @@ impl SoaConfig {
         self.observation.validate(self.stop_time)?;
         for rule in &self.rules {
             rule.validate()?;
+            if let Some(curve) = &rule.current_envelope {
+                curve.validate_window(self.observation.start_time, self.stop_time)?;
+            }
         }
         if self.stop_time <= 0.0 || !self.stop_time.is_finite() {
             return Err("SOA stop_time must be finite and > 0".to_string());
@@ -152,6 +157,12 @@ impl SoaConfig {
                 rule.devices.join(" "),
                 rule.models.join(" ")
             ));
+            if let Some(curve) = &rule.current_envelope {
+                card.push_str(&format!(" current_voltage_curve=({} source={:?} conditions={:?} pulse={} voltage_interpolation={:?} pulse_interpolation={:?} voltages={:?} dc={:?} pulses={:?})",
+                    rule.parameter.stress_code(), curve.source, curve.conditions,
+                    curve.pulse_width_s.map_or_else(|| "DC".into(), |v| v.to_string()),
+                    curve.voltage_interpolation, curve.pulse_interpolation, curve.voltages_v, curve.dc_currents_a, curve.pulses));
+            }
             if let Some(duration) = rule.minimum_duration_s {
                 card.push_str(&format!(
                     " min_duration=({} {}s)",
@@ -431,6 +442,7 @@ mod tests {
             rules: vec![SoaRuleConfig {
                 duration_mode: Default::default(),
                 minimum_duration_s: None,
+                current_envelope: None,
                 power_derating: None,
                 voltage_basis: Default::default(),
                 parameter: crate::services::safety::SoAParameter::Id,

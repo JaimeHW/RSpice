@@ -446,6 +446,7 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
             evaluations: vec![crate::services::safety::SoAEvaluation {
                 duration: None,
                 thresholds: Default::default(),
+                envelope: None,
                 derating: None,
                 device_id: "M1".to_owned(),
                 parameter: crate::services::safety::SoAParameter::Vgs,

@@ -80,6 +80,9 @@ impl SoaRunConfig {
         self.observation.validate(self.stop_time)?;
         for rule in &self.rules {
             rule.validate()?;
+            if let Some(curve) = &rule.current_envelope {
+                curve.validate_window(self.observation.start_time, self.stop_time)?;
+            }
         }
         if !self.stop_time.is_finite() || self.stop_time <= 0.0 {
             return Err("SOA stop_time must be finite and > 0".to_string());
@@ -118,6 +121,7 @@ impl SoaRunConfig {
 /// The complete sampled stress magnitude behind one evaluated rule.
 #[derive(Debug, Clone)]
 pub struct SoaStressTrace {
+    pub envelope: Option<crate::services::safety::SoaEnvelopeSamples>,
     pub derating: Option<crate::services::safety::SoaDeratingSamples>,
     /// Device the rule constrains.
     pub device_id: String,
@@ -389,6 +393,7 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
     for (idx, &time) in transient.time.iter().enumerate() {
         poll_periodically(abort, idx)?;
         let mut values: HashMap<String, HashMap<SoAParameter, Value>> = HashMap::new();
+        let mut curve_voltages = HashMap::new();
 
         for (element_index, definition) in &resolved {
             poll_periodically(abort, *element_index)?;
@@ -432,6 +437,25 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
                 }
                 device_values.insert(limit.parameter, limit.parameter.measured_stress(value));
             }
+            for limit in &definition.limits {
+                if limit.current_envelope.is_some() {
+                    let parameter = crate::services::safety::SoaCurrentEnvelope::voltage_parameter(
+                        limit.parameter,
+                    )
+                    .ok_or_else(|| ServiceRunError::Failure("Invalid SOA curve current".into()))?;
+                    let (positive, negative) =
+                        rules::terminal_pair(parameter, layouts.get(&element.name).copied())
+                            .ok_or_else(|| {
+                                ServiceRunError::Failure(
+                                    "SOA current curve has no voltage terminal pair".into(),
+                                )
+                            })?;
+                    let voltage =
+                        sample_node_waveform(&node_waveforms, &element.nodes[positive], idx)?
+                            - sample_node_waveform(&node_waveforms, &element.nodes[negative], idx)?;
+                    curve_voltages.insert((element.name.clone(), limit.parameter), voltage.abs());
+                }
+            }
             if definition
                 .limits
                 .iter()
@@ -457,7 +481,7 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         }
 
         manager
-            .check_point(time, &values)
+            .check_point_with_curve_voltages(time, &values, &curve_voltages)
             .map_err(ServiceRunError::Failure)?;
         violation_count.push(manager.violations().len() as Value);
     }
@@ -531,6 +555,9 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
             ));
         }
         stress_history.push(SoaStressTrace {
+            envelope: manager
+                .envelope_history(&evaluation.device_id, evaluation.parameter)
+                .cloned(),
             derating,
             device_id: evaluation.device_id.clone(),
             parameter: evaluation.parameter,

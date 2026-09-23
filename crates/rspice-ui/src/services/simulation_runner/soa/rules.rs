@@ -7,6 +7,8 @@ use super::*;
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoaRuleConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_envelope: Option<crate::services::safety::SoaCurrentEnvelope>,
     #[serde(
         default,
         skip_serializing_if = "crate::services::safety::SoaDurationMode::is_default"
@@ -29,6 +31,19 @@ pub struct SoaRuleConfig {
 
 impl SoaRuleConfig {
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(curve) = &self.current_envelope {
+            curve.validate()?;
+            if self.max_value <= 0.0 {
+                return Err(
+                    "SOA current/voltage curves require a positive maximum-current cap".into(),
+                );
+            }
+            if crate::services::safety::SoaCurrentEnvelope::voltage_parameter(self.parameter)
+                .is_none()
+            {
+                return Err("SOA current/voltage curves apply to Id, Ic or Ia (including directional rules)".into());
+            }
+        }
         self.duration_mode.validate(self.minimum_duration_s)?;
         if !matches!(
             self.parameter.base_parameter(),
@@ -263,6 +278,7 @@ pub(super) fn resolve(
                             SoALimit {
                                 duration_mode: Default::default(),
                                 minimum_duration_s: None,
+                                current_envelope: None,
                                 power_derating: None,
                                 parameter: half,
                                 ..default.clone()
@@ -304,6 +320,7 @@ pub(super) fn resolve(
                             SoALimit {
                                 duration_mode: Default::default(),
                                 minimum_duration_s: None,
+                                current_envelope: None,
                                 power_derating: None,
                                 parameter: half,
                                 ..maximum.clone()
@@ -343,6 +360,17 @@ pub(super) fn resolve(
                 limit.minimum_duration_s = rule.minimum_duration_s;
                 limit.duration_mode = rule.duration_mode;
                 limit.power_derating = rule.power_derating;
+                limit.current_envelope = rule.current_envelope.clone();
+                if let Some(curve) = &rule.current_envelope {
+                    limit.description.push_str(&format!(
+                        "; current/voltage curve: {}; conditions: {}; {}",
+                        curve.source,
+                        curve.conditions,
+                        curve
+                            .pulse_width_s
+                            .map_or_else(|| "DC".into(), |width| format!("pulse {width} s"))
+                    ));
+                }
                 if let Some(curve) = rule.power_derating {
                     limit.description.push_str(&format!("; rated {} W through {} K, derated by {} W/K above that temperature, clamped to zero", rule.max_value, curve.reference_temperature_kelvin, curve.watts_per_kelvin));
                 }
@@ -387,6 +415,7 @@ fn explicit_limit(
     SoALimit {
         duration_mode: Default::default(),
         minimum_duration_s: None,
+        current_envelope: None,
         power_derating: None,
         voltage_basis,
         parameter,

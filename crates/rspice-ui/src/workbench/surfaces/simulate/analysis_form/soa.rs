@@ -156,6 +156,9 @@ pub(super) fn fields(
                 }
             }
             input_row(ui, "Devices", &mut rule.devices);
+            if rule.supports_current_envelope() {
+                current_envelope_fields(ui, &mut rule.current_envelope);
+            }
             input_row(ui, "Models", &mut rule.models);
             if action_line(ui, "Remove rule") {
                 remove = Some(index);
@@ -168,4 +171,61 @@ pub(super) fn fields(
     if action_line(ui, "+ Add device rule") {
         setup.rules.push(Default::default());
     }
+}
+
+fn current_envelope_fields(
+    ui: &mut Ui,
+    draft: &mut crate::simulation::dialog::soa::SoaEnvelopeDraft,
+) {
+    switch_row(ui, "Use current/voltage SOA curves", &mut draft.enabled);
+    if !draft.enabled {
+        return;
+    }
+    input_row(ui, "Curve source", &mut draft.source);
+    input_row(ui, "Rated operating conditions", &mut draft.conditions);
+    field_note(
+        ui,
+        "Enter curves already rated for your case temperature, duty and device. This checks supplied boundaries; it does not calculate thermal recovery or temperature derating. Voltage uses the magnitude across the external drain–source, collector–emitter or anode–cathode pins. The current rule retains its chosen polarity and maximum-current cap.",
+    );
+    input_row(ui, "Voltage columns (V)", &mut draft.voltages);
+    input_row(ui, "DC current row (A)", &mut draft.dc_currents);
+    input_row(ui, "Selected pulse width (s)", &mut draft.pulse_width);
+    field_note(
+        ui,
+        "Space or comma separated values accept SI suffixes. Voltage columns must increase from zero. Each current row needs one value per column. Leave DC blank if unavailable; leave selected pulse width blank to use DC. A pulse width must cover the entire checked time window, including gaps between pulses.",
+    );
+    switch_row(
+        ui,
+        "Logarithmic voltage/current interpolation",
+        &mut draft.logarithmic_voltage,
+    );
+    switch_row(
+        ui,
+        "Interpolate between pulse durations",
+        &mut draft.interpolate_pulses,
+    );
+    field_note(
+        ui,
+        "Pulse interpolation is logarithmic. When off, the next longer supplied pulse is used. Voltage segments touching zero in any row use linear interpolation for all rows. Beyond the longest pulse, a supplied DC curve is required. Voltage above the final column allows zero current. No higher rating is extrapolated.",
+    );
+    let mut remove = None;
+    for (index, pulse) in draft.pulses.iter_mut().enumerate() {
+        ui.push_id(("soa-pulse-curve", index), |ui| {
+            input_row(ui, "Pulse duration (s)", &mut pulse.duration);
+            input_row(ui, "Current row (A)", &mut pulse.currents);
+            if action_line(ui, "Remove pulse curve") {
+                remove = Some(index);
+            }
+        });
+    }
+    if let Some(index) = remove {
+        draft.pulses.remove(index);
+    }
+    if action_line(ui, "+ Add pulse curve") {
+        draft.pulses.push(Default::default());
+    }
+    field_note(
+        ui,
+        "Order pulse rows from shortest to longest. Allowed current must not increase with duration; a DC row must be no greater than the longest pulse.",
+    );
 }

@@ -1492,6 +1492,7 @@ fn typed_result_payloads_round_trip_and_reject_payload_tampering() {
                 evaluations: vec![crate::state::SoaEvaluationEvidence {
                     duration: None,
                     thresholds: Default::default(),
+                    envelope: None,
                     derating: None,
                     device_id: "M1".to_owned(),
                     parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,

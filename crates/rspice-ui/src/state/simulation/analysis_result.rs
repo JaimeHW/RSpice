@@ -1014,6 +1014,8 @@ impl SoaRuleVerdictEvidence {
 #[serde(deny_unknown_fields)]
 pub struct SoaEvaluationEvidence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope: Option<crate::services::safety::SoaCurrentEnvelopeEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration: Option<crate::services::safety::SoaDurationEvidence>,
     #[serde(
         default,
@@ -2232,7 +2234,9 @@ impl AnalysisResultPayload {
                 }
                 let derated_rules = evaluations
                     .iter()
-                    .filter(|evaluation| evaluation.derating.is_some())
+                    .filter(|evaluation| {
+                        evaluation.derating.is_some() || evaluation.envelope.is_some()
+                    })
                     .map(|evaluation| (evaluation.device_id.as_str(), evaluation.parameter))
                     .collect::<std::collections::BTreeSet<_>>();
                 let thresholds = evaluations
@@ -2273,10 +2277,25 @@ impl AnalysisResultPayload {
                             return Err("SOA temperature derating requires a power-dissipation rule in watts".into());
                         }
                     }
+                    if let Some(envelope) = &evaluation.envelope {
+                        envelope.curve.validate()?;
+                        if !envelope.maximum_current_a.is_finite()
+                            || envelope.maximum_current_a <= 0.0
+                            || evaluation.unit != "A"
+                            || crate::services::safety::SoaCurrentEnvelope::voltage_parameter(
+                                evaluation.parameter.runtime_parameter(),
+                            )
+                            .is_none()
+                            || evaluation.derating.is_some()
+                        {
+                            return Err("SOA current/voltage evidence requires a positive current cap and an Id/Ic/Ia rule in amperes".into());
+                        }
+                    }
                     if evaluation.limit_value < 0.0
                         || (evaluation.limit_value == 0.0
                             && !evaluation.parameter.is_directional()
-                            && evaluation.derating.is_none())
+                            && evaluation.derating.is_none()
+                            && evaluation.envelope.is_none())
                     {
                         return Err(format!(
                             "SOA evaluation for '{}' has an invalid limit",

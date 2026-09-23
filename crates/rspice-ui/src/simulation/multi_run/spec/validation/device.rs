@@ -151,6 +151,9 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             observation.validate(*stop_time)?;
             for rule in rules {
                 rule.validate()?;
+                if let Some(curve) = &rule.current_envelope {
+                    curve.validate_window(observation.start_time, *stop_time)?;
+                }
             }
             if !stop_time.is_finite() || *stop_time <= 0.0 {
                 return Err("SOA stop_time must be finite and > 0".to_string());

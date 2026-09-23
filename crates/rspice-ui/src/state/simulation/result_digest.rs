@@ -1145,6 +1145,38 @@ fn encode_result_payload(
                     });
                 }
             }
+            if evaluations.iter().any(|e| e.envelope.is_some()) {
+                writer.string("soa-current-voltage-evidence-v1");
+                writer.sequence(evaluations.len());
+                for evaluation in evaluations {
+                    writer.option(evaluation.envelope.as_ref(), |writer, envelope| {
+                        writer.f64(envelope.maximum_current_a);
+                        let curve = &envelope.curve;
+                        writer.string(&curve.source);
+                        writer.string(&curve.conditions);
+                        writer.f64_slice(&curve.voltages_v);
+                        writer.option(curve.dc_currents_a.as_ref(), |writer, row| {
+                            writer.f64_slice(row)
+                        });
+                        writer.option(curve.pulse_width_s.as_ref(), |writer, width| {
+                            writer.f64(*width)
+                        });
+                        writer.bool(
+                            curve.voltage_interpolation
+                                == crate::services::safety::SoaVoltageInterpolation::Logarithmic,
+                        );
+                        writer.bool(
+                            curve.pulse_interpolation
+                                == crate::services::safety::SoaPulseInterpolation::Logarithmic,
+                        );
+                        writer.sequence(curve.pulses.len());
+                        for pulse in &curve.pulses {
+                            writer.f64(pulse.duration_s);
+                            writer.f64_slice(&pulse.currents_a);
+                        }
+                    });
+                }
+            }
             if evaluations
                 .iter()
                 .any(|evaluation| !evaluation.thresholds.is_default())
