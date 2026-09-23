@@ -177,7 +177,7 @@ fn qpnoise_colored_matches_noncyclic_convolution_including_outside_window() {
     let solutions = [one, two];
     let mut transfers: BTreeMap<Vec<i32>, [Complex64; 2]> = BTreeMap::new();
     for k in 0..grid.len() {
-        for j in 0..grid.len() {
+        for (j, &amplitude) in modulation.iter().enumerate().take(grid.len()) {
             let m: Vec<_> = grid.indices()[k]
                 .iter()
                 .zip(&grid.indices()[j])
@@ -185,7 +185,7 @@ fn qpnoise_colored_matches_noncyclic_convolution_including_outside_window() {
                 .collect();
             let transfer = transfers.entry(m).or_default();
             for r in 0..2 {
-                transfer[r] += solutions[r].sensitivities[0][k].conj() * modulation[j];
+                transfer[r] += solutions[r].sensitivities[0][k].conj() * amplitude;
             }
         }
     }

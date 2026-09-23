@@ -176,7 +176,7 @@ mod tests {
         for dimensions in [vec![4, 6], vec![5, 4, 3]] {
             let tones = dimensions.len();
             let mut config = QuasiPeriodicGridConfig::new(
-                vec![1.0, 1.414, 3.14][..tones].to_vec(),
+                vec![1.0, 1.414, std::f64::consts::PI][..tones].to_vec(),
                 vec![1; tones],
             );
             config.sampling = QuasiPeriodicSampling::Exact(dimensions.clone());

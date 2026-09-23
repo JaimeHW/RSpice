@@ -185,8 +185,10 @@ fn lattice_controls_preserve_axis_harmonics_and_reject_degenerate_frequencies() 
 #[test]
 fn lattice_and_transform_enforce_shape_finiteness_resources_and_cancellation() {
     let config = QuasiPeriodicGridConfig::new(vec![1.0, 2.0_f64.sqrt()], vec![2, 2]);
-    let mut limits = ResourceLimits::default();
-    limits.max_analysis_points = 16;
+    let limits = ResourceLimits {
+        max_analysis_points: 16,
+        ..Default::default()
+    };
     assert!(matches!(
         QuasiPeriodicGrid::new_with_abort(config.clone(), &limits, &NoAbort),
         Err(QuasiPeriodicError::ResourceLimit(_))
