@@ -257,7 +257,7 @@ impl Engine {
             Some(blockers) => Err(SimulationError::unsupported_capability(
                 "analysis.hb.envelope.continuation",
                 format!(
-                    "HB Envelope continuation is unavailable because the circuit contains {blockers}; the initializer supports R/L/C networks with expression capacitance, fixed mutual inductance, diodes, and independent, controlled or behavioral sources"
+                    "HB Envelope continuation is unavailable because the circuit contains {blockers}; the initializer supports R/L/C networks with expression capacitance, fixed mutual inductance, diodes, classic JFETs, and independent, controlled or behavioral sources"
                 ),
             )),
         }
@@ -531,12 +531,29 @@ impl Engine {
             )
             .map_err(SimulationError::Circuit)?;
 
-        let junction_history = if circuit.diodes.is_empty() {
+        let junction_history = if circuit.diodes.is_empty() && circuit.jfets.is_empty() {
             None
         } else {
             circuit.set_semiconductor_junction_gmin(
                 self.effective_device_junction_gmin(self.config.convergence_config.gmin_target),
             );
+            let mut node_rates = vec![0.0; circuit.num_nodes()];
+            for spectrum in &result.spectral_voltages {
+                let node = circuit
+                    .get_node_by_name(&spectrum.node_name)
+                    .expect("phase projection validated the node basis");
+                if node != 0 {
+                    node_rates[node - 1] = spectrum
+                        .coefficients
+                        .iter()
+                        .enumerate()
+                        .skip(1)
+                        .map(|(harmonic, coefficient)| {
+                            -(TAU * config.fundamental_freq * harmonic as Value) * coefficient.im
+                        })
+                        .sum();
+                }
+            }
             let mut history = crate::numerics::integration::TwoTerminalChargeHistory::default();
             for diode in &mut circuit.diodes.devices {
                 let voltage = diode.terminal_voltage(&solutions[3]);
@@ -572,12 +589,19 @@ impl Engine {
             }
             history.accepted_dt_prev = history_step;
             history.accepted_dt_prev_prev = history_step;
+            let jfet_history = Self::initialize_periodic_jfet_history(
+                &mut circuit,
+                [&solutions[1], &solutions[2], &solutions[3]],
+                &node_rates,
+                history_step,
+            )
+            .map_err(SimulationError::Circuit)?;
             Some(
                 Self::capture_accepted_junction_transient_history_checkpoint(
                     &circuit,
                     &crate::engine::transient::BjtTransientHistory::default(),
                     &history,
-                    &crate::engine::transient::JfetTransientHistory::default(),
+                    &jfet_history,
                     &[],
                 ),
             )
@@ -662,7 +686,7 @@ impl Engine {
             .map_err(SimulationError::Circuit)?;
         let guarantee = if original_circuit.capacitors.has_solution_dependent_values() {
             HbEnvelopeStateGuarantee::ExpressionChargeRestartV1
-        } else if !original_circuit.diodes.is_empty() {
+        } else if !original_circuit.diodes.is_empty() || !original_circuit.jfets.is_empty() {
             HbEnvelopeStateGuarantee::ExactJunctionRlcMnaV1
         } else if !original_circuit.behavioral_sources.is_empty() {
             HbEnvelopeStateGuarantee::ExactBehavioralRlcMnaV1

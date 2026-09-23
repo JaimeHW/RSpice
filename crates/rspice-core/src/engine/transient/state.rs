@@ -608,6 +608,67 @@ impl Engine {
         history
     }
 
+    /// Project conservative classic-JFET junction state from three ordered
+    /// periodic samples and the analytic node derivatives at the last sample.
+    pub(in crate::engine) fn initialize_periodic_jfet_history(
+        circuit: &mut crate::circuit::CircuitData,
+        solutions: [&[Value]; 3],
+        node_rates: &[Value],
+        history_step: Value,
+    ) -> Result<JfetTransientHistory, String> {
+        if solutions
+            .iter()
+            .any(|solution| solution.len() != circuit.matrix_size())
+            || node_rates.len() != circuit.num_nodes()
+            || node_rates.iter().any(|rate| !rate.is_finite())
+            || !history_step.is_finite()
+            || history_step <= 0.0
+        {
+            return Err("periodic JFET history has invalid sample dimensions or rates".into());
+        }
+        for jfet in &mut circuit.jfets {
+            if jfet.params.channel_model != crate::device::JfetChannelModel::ShichmanHodges {
+                return Err(format!(
+                    "JFET '{}' has no periodic charge initializer",
+                    jfet.name
+                ));
+            }
+            jfet.seed_accepted_periodic_bias(solutions[2]);
+        }
+        let mut history =
+            Self::initialize_jfet_history(circuit, solutions[2], ReactiveHistorySeed::SolvedBias);
+        for (index, jfet) in circuit.jfets.iter().enumerate() {
+            let sample = |solution| {
+                let (vgs, vgd) = Self::jfet_branch_voltages(jfet, solution);
+                let charge = jfet
+                    .analytic_gate_charge_state(vgs, vgd, jfet.analysis_temperature(), None)
+                    .expect("classic JFET has conservative gate charge");
+                (vgs, vgd, charge)
+            };
+            let (vgs_prev, vgd_prev, previous) = sample(solutions[1]);
+            let (_, _, older) = sample(solutions[0]);
+            let (_, _, current) = sample(solutions[2]);
+            let (vgs_rate, vgd_rate) = Self::jfet_branch_voltages(jfet, node_rates);
+            history.vgs_prev_prev[index] = vgs_prev;
+            history.vgd_prev_prev[index] = vgd_prev;
+            history.qgs_prev_prev[index] = previous.qgs;
+            history.qgd_prev_prev[index] = previous.qgd;
+            history.qgs_prev_prev_prev[index] = older.qgs;
+            history.qgd_prev_prev_prev[index] = older.qgd;
+            history.cqgs_prev[index] = current.cgs * vgs_rate;
+            history.cqgd_prev[index] = current.cgd * vgd_rate;
+            history.accepted_cqgs[index] = history.cqgs_prev[index];
+            history.accepted_cqgd[index] = history.cqgd_prev[index];
+            // The admitted classic model has only GS/GD charge. Keep its
+            // non-storage DS voltage predictor consistent with those branches.
+            history.vds_prev_prev[index] = vgs_prev - vgd_prev;
+        }
+        history.accepted_dt_prev = history_step;
+        history.accepted_dt_prev_prev = history_step;
+        history.validate(circuit.jfets.len())?;
+        Ok(history)
+    }
+
     #[inline]
     pub(super) fn refresh_jfet2_transient_linearizations(
         circuit: &mut crate::circuit::CircuitData,

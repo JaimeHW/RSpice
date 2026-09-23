@@ -100,6 +100,16 @@ impl Jfet {
         self.cache_operating_terms_at(vgs, vds, vgd, external_vd, external_vs, false);
     }
 
+    /// A periodic endpoint is already a solved bias, including OFF instances.
+    /// Anchor both limiter generations there instead of entering OP startup.
+    pub(crate) fn seed_accepted_periodic_bias(&mut self, voltages: &[Value]) {
+        self.update_static_linearization(voltages);
+        self.vgs_prev = self.vgs;
+        self.vds_prev = self.vds;
+        self.last_raw_vgs_prev = self.last_raw_vgs;
+        self.last_raw_vgd_prev = self.last_raw_vgd;
+    }
+
     /// Link this device to a StaticMatrix for O(1) direct stamping.
     pub fn link(&mut self, matrix: &StaticMatrix) {
         let d = self.drain;

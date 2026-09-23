@@ -349,7 +349,7 @@ use CapabilitySupport::{Absent, Complete, Inapplicable, Restricted};
 /// Shared phrase for the envelope initializer's supported subset. The gap query
 /// reports the offending family by name; this states why it is a gap.
 const ENVELOPE_LINEAR_SUBSET: &str = "the envelope initializer supports R/L/C networks with expression \
-     capacitance, fixed mutual inductance, diodes, and independent, controlled or behavioral sources";
+     capacitance, fixed mutual inductance, diodes, classic JFETs, and independent, controlled or behavioral sources";
 const CYCLOSTATIONARY_FLICKER: &str = "stationary thermal/shot noise is exact; a nonzero flicker coefficient needs cyclostationary \
      colored-noise folding rather than a DC-bias substitution";
 const RESISTOR_CYCLOSTATIONARY_FLICKER: &str = "thermal noise and AF=2 signed-current flicker modulation are exact; other AF values \
@@ -554,7 +554,7 @@ pub(crate) const fn periodic_capability_descriptor(
             small_signal: Complete,
             noise: Restricted(CYCLOSTATIONARY_FLICKER),
             pss_state: Restricted("classic Shichman-Hodges gate-junction charge history"),
-            envelope: Absent(ENVELOPE_LINEAR_SUBSET),
+            envelope: Restricted("classic Shichman-Hodges gate-junction charge history"),
         },
         F::XyceMemristor => PeriodicCapabilityDescriptor {
             residual_jacobian: Absent("native Xyce memristor"),
@@ -1455,6 +1455,15 @@ pub(in crate::engine) fn envelope_gaps(circuit: &CircuitData) -> Vec<CapabilityG
                         family,
                         "thermal resistor accepted temperature state",
                     ));
+                } else if family == F::Jfet
+                    && circuit.jfets.iter().any(|jfet| {
+                        jfet.params.channel_model != crate::device::JfetChannelModel::ShichmanHodges
+                    })
+                {
+                    gaps.push(CapabilityGap::new(
+                        family,
+                        "non-classic JFET accepted charge state",
+                    ));
                 }
             }
         }
@@ -1730,7 +1739,7 @@ mod tests {
             F::Bsim3v3 | F::Bsim4v8 => [A, R, I, A, A, A],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],
             F::Ekv26 | F::Ekv3 | F::Vdmos => [I, C, A, A, A, A],
-            F::Jfet => [R, C, C, R, R, A],
+            F::Jfet => [R, C, C, R, R, R],
             F::XyceMemristor => [A, A, I, A, A, A],
             F::VoltageSwitch => [R, I, C, I, A, A],
             F::CurrentSwitch | F::GenericSwitch => [A, I, I, I, A, A],
