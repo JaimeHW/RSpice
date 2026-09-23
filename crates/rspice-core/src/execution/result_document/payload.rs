@@ -3107,11 +3107,15 @@ pub enum HbContinuationLimitationTag {
     InductorDcCurrentUsesShortSurrogate,
     VerilogAInternalStateNotRetained,
     CapacitorChargeHistoryNotRetained,
+    Bsim3ChargeHistoryNotRetained,
 }
 
 impl From<&HbContinuationLimitation> for HbContinuationLimitationTag {
     fn from(limitation: &HbContinuationLimitation) -> Self {
         match limitation {
+            HbContinuationLimitation::Bsim3ChargeHistoryNotRetained => {
+                Self::Bsim3ChargeHistoryNotRetained
+            }
             HbContinuationLimitation::CapacitorChargeHistoryNotRetained => {
                 Self::CapacitorChargeHistoryNotRetained
             }
@@ -3131,6 +3135,9 @@ impl From<&HbContinuationLimitation> for HbContinuationLimitationTag {
 impl From<HbContinuationLimitationTag> for HbContinuationLimitation {
     fn from(limitation: HbContinuationLimitationTag) -> Self {
         match limitation {
+            HbContinuationLimitationTag::Bsim3ChargeHistoryNotRetained => {
+                Self::Bsim3ChargeHistoryNotRetained
+            }
             HbContinuationLimitationTag::CapacitorChargeHistoryNotRetained => {
                 Self::CapacitorChargeHistoryNotRetained
             }

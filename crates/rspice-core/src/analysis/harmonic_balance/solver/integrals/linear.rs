@@ -150,6 +150,11 @@ impl HbSolver {
                 exclude_node(node);
             }
         }
+        for device in &self.native_bsim3 {
+            for node in device.periodic_coupling_nodes() {
+                exclude_node(node);
+            }
+        }
         for capacitor in &self.periodic_capacitors {
             if capacitor.branch.is_none() {
                 exclude_node(capacitor.pos);

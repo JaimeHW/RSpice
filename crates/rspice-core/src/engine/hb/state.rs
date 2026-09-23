@@ -947,6 +947,11 @@ impl Engine {
                 .continuation_limitations
                 .push(HbContinuationLimitation::CapacitorChargeHistoryNotRetained);
         }
+        if !circuit.bsim3v3.is_empty() {
+            result
+                .continuation_limitations
+                .push(HbContinuationLimitation::Bsim3ChargeHistoryNotRetained);
+        }
 
         for index in 0..circuit.inductors.len() {
             let voltage_coefficients = Self::hb_terminal_voltage_spectrum(

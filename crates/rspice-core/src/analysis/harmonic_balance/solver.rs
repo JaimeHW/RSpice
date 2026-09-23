@@ -1033,6 +1033,7 @@ pub struct HbSolver {
     nonlinear_devices: Vec<HbNonlinearDevice>,
     /// Native physical BJT models retain every internal MNA state.
     native_bjts: Vec<crate::device::Bjt>,
+    native_bsim3: Vec<crate::device::mosfet::bsim3v3::Bsim3v3Device>,
     periodic_capacitors: Vec<capacitors::PeriodicCapacitor>,
 
     /// Bound constitutive expressions over the complete physical/integral basis.

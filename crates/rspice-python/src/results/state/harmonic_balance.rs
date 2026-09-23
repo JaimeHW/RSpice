@@ -67,6 +67,9 @@ fn hb_reactive_kind_from_label(label: &str) -> PyResult<HbReactiveKind> {
 /// later one that reorders the enum.
 pub(crate) fn hb_limitation_label(limitation: &HbContinuationLimitation) -> &'static str {
     match limitation {
+        HbContinuationLimitation::Bsim3ChargeHistoryNotRetained => {
+            "bsim3_charge_history_not_retained"
+        }
         HbContinuationLimitation::CapacitorChargeHistoryNotRetained => {
             "capacitor_charge_history_not_retained"
         }
@@ -84,6 +87,9 @@ pub(crate) fn hb_limitation_label(limitation: &HbContinuationLimitation) -> &'st
 
 pub(crate) fn hb_limitation_from_label(label: &str) -> PyResult<HbContinuationLimitation> {
     match label {
+        "bsim3_charge_history_not_retained" => {
+            Ok(HbContinuationLimitation::Bsim3ChargeHistoryNotRetained)
+        }
         "capacitor_charge_history_not_retained" => {
             Ok(HbContinuationLimitation::CapacitorChargeHistoryNotRetained)
         }

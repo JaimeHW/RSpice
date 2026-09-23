@@ -300,6 +300,15 @@ impl HbSolver {
                 }
             }
         }
+        for device in &self.native_bsim3 {
+            for row in device.periodic_coupling_nodes() {
+                for col in device.periodic_coupling_nodes() {
+                    if row > 0 && col > 0 {
+                        insert(row - 1, col - 1)?;
+                    }
+                }
+            }
+        }
         let mut capacitor_state = physical + self.behavioral_sources.integral_count();
         for (index, capacitor) in self.periodic_capacitors.iter().enumerate() {
             let rate = rate_start + index;

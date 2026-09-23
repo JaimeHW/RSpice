@@ -1,4 +1,4 @@
-//! Native BJT and behavioral F/Q sampling over the complete periodic MNA state.
+//! Native device and behavioral F/Q sampling over the complete periodic MNA state.
 
 use super::*;
 use crate::device::MatrixStamper;
@@ -67,12 +67,12 @@ fn record_native_terms(
 ) -> Result<(), HbError> {
     if time == 0 {
         waveforms.try_reserve_exact(terms.len()).map_err(|error| {
-            HbError::InvalidCircuit(format!("native BJT term allocation failed: {error}"))
+            HbError::InvalidCircuit(format!("native device term allocation failed: {error}"))
         })?;
         for &(row, _) in terms {
             let mut values = Vec::new();
             values.try_reserve_exact(count).map_err(|error| {
-                HbError::InvalidCircuit(format!("native BJT waveform allocation failed: {error}"))
+                HbError::InvalidCircuit(format!("native device waveform allocation failed: {error}"))
             })?;
             values.resize(count, 0.0);
             waveforms.push((row, values));
@@ -80,13 +80,13 @@ fn record_native_terms(
     }
     if waveforms.len() != terms.len() {
         return Err(HbError::InvalidCircuit(
-            "native BJT physical term count changes over the orbit".into(),
+            "native device physical term count changes over the orbit".into(),
         ));
     }
     for ((row, waveform), &(actual_row, value)) in waveforms.iter_mut().zip(terms) {
         if *row != actual_row {
             return Err(HbError::InvalidCircuit(
-                "native BJT physical term changes its row over the orbit".into(),
+                "native device physical term changes its row over the orbit".into(),
             ));
         }
         waveform[time] = value;
@@ -97,6 +97,7 @@ fn record_native_terms(
 impl HbSolver {
     pub(super) fn has_native_periodic_devices(&self) -> bool {
         !self.native_bjts.is_empty()
+            || !self.native_bsim3.is_empty()
             || !self.behavioral_sources.is_empty()
             || !self.periodic_capacitors.is_empty()
     }
@@ -347,6 +348,31 @@ impl HbSolver {
         Ok(())
     }
 
+    pub(crate) fn add_native_bsim3(
+        &mut self,
+        device: crate::device::mosfet::bsim3v3::Bsim3v3Device,
+    ) -> Result<(), HbError> {
+        if device
+            .periodic_coupling_nodes()
+            .iter()
+            .any(|&node| node > self.num_nodes)
+            || (device.uses_trnqs() && device.node_charge_deficit == 0)
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "BSIM3 '{}' has unregistered periodic MNA coordinates",
+                device.name,
+            )));
+        }
+        let node = device.node_charge_deficit;
+        if node != 0
+            && let Err(index) = self.non_electrical_nodes.binary_search(&(node - 1))
+        {
+            self.non_electrical_nodes.insert(index, node - 1);
+        }
+        self.native_bsim3.push(device);
+        Ok(())
+    }
+
     fn sample_native_devices(
         &mut self,
         solution: &[Value],
@@ -401,6 +427,25 @@ impl HbSolver {
                 return Err(HbError::InvalidCircuit(format!(
                     "BJT '{}' produced invalid physical F/Q entries",
                     bjt.name
+                )));
+            }
+        }
+        for device in &self.native_bsim3 {
+            if selected.is_some_and(|rows| {
+                !device
+                    .periodic_coupling_nodes()
+                    .iter()
+                    .any(|&node| node > 0 && rows[node - 1])
+            }) {
+                continue;
+            }
+            device
+                .stamp_periodic_fq(solution, f, q)
+                .map_err(HbError::InvalidCircuit)?;
+            if f.invalid || q.invalid {
+                return Err(HbError::InvalidCircuit(format!(
+                    "BSIM3 '{}' produced invalid physical F/Q entries",
+                    device.name,
                 )));
             }
         }
@@ -574,12 +619,12 @@ impl HbSolver {
         &mut self,
         state: &HbSolverState,
     ) -> Result<Vec<Vec<Value>>, HbError> {
-        let mut waves = self.periodic_state_waveforms(state, "native BJT F/Q evaluation")?;
+        let mut waves = self.periodic_state_waveforms(state, "native device F/Q evaluation")?;
         for spectrum in &state.mna_branch_currents {
             let waveform = self.fft.to_time_domain(spectrum);
             if waveform.len() != self.fft.size() || waveform.iter().any(|v| !v.is_finite()) {
                 return Err(HbError::InvalidCircuit(
-                    "native BJT branch-current waveform is invalid".into(),
+                    "native device branch-current waveform is invalid".into(),
                 ));
             }
             waves.push(waveform);
@@ -673,9 +718,9 @@ impl HbSolver {
                 &waveform,
                 self.num_harmonics,
                 if charge {
-                    "native BJT charge term"
+                    "native device charge term"
                 } else {
-                    "native BJT current term"
+                    "native device current term"
                 },
             )?;
             let (residual, scale) = if row < self.num_nodes {
@@ -736,7 +781,7 @@ impl HbSolver {
                 *sum += value;
                 if !sum.is_finite() {
                     return Err(HbError::InvalidCircuit(
-                        "native BJT Jacobian accumulation is non-finite".into(),
+                        "native device Jacobian accumulation is non-finite".into(),
                     ));
                 }
             }
@@ -744,7 +789,7 @@ impl HbSolver {
         let mut spectra = Vec::with_capacity(entries.len());
         for ((row, col), wave) in entries {
             let spectrum =
-                self.checked_periodic_spectrum(&wave, harmonics, "native BJT Jacobian")?;
+                self.checked_periodic_spectrum(&wave, harmonics, "native device Jacobian")?;
             if !spectrum.is_empty() {
                 spectra.push((row, col, spectrum));
             }

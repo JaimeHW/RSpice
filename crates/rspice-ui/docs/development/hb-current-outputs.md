@@ -19,10 +19,19 @@ name when arithmetic is needed. Study selectors include `bin:1:real:@M1[ig]`.
 The core evaluates nonlinear lead F/Q with the solved periodic state, resolved
 model parameters, and the residual's transform grid, then forms `F + jωQ`.
 Observation coordinates preserve distinct leads even when their circuit nodes
-are tied. MOS overlap charge is added from the linear capacitance operator.
+are tied. Classic MOS overlap charge is added from the linear capacitance operator.
 Native BJT observations include authored series networks, external BC charge,
 and external contributions of delay states. This does not change the solved
 equations or the retained operating-point identity.
+
+Native BSIM3 (`LEVEL=8/9/49`, subject to the selected SPICE dialect) contributes
+its own channel, junction, substrate and displacement currents. `CAPMOD=0..3`,
+`XPART`, geometry, temperature, multiplier and series resistance retain their
+native model meanings. `NQSMOD=1` includes the channel charge-deficit state in
+HB and QPSS. AC-only `ACNQSMOD=1` does not change the carrier equations; periodic
+response analyses currently reject that option because their AC-only NQS
+operator is not implemented. BSIM3 periodic noise and PSS/Envelope charge-history
+continuation remain unavailable. Saved HB results carry that continuation limit.
 
 The current observer covers the native devices already admitted by HB. It does
 not enable previously unsupported model families or provide Verilog-A terminal

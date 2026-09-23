@@ -62,6 +62,9 @@ pub enum HbContinuationLimitation {
     /// Variable capacitance has path-dependent accepted charge history that
     /// an instantaneous voltage/current phase projection does not reconstruct.
     CapacitorChargeHistoryNotRetained,
+    /// Native BSIM3 node charge and NQS integration histories require an
+    /// explicit transient initializer; a voltage projection is insufficient.
+    Bsim3ChargeHistoryNotRetained,
 }
 
 /// One reactive element evaluated at a carrier phase.
