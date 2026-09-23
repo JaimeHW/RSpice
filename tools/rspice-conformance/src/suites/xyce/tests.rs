@@ -6811,6 +6811,7 @@ fn authored_fail_value_verifier_rejects_altered_result_contract_fields() {
             failure_limit: Some(failure_limit),
             failure_limit_exceeded: false,
             event_axis: None,
+            units: None,
         };
     let actual = vec![
         result("first", 1.0e-9, 1.0e-6),
@@ -7264,7 +7265,7 @@ fn scalar_tran_measurement_admission_rejects_unrepresented_semantics_and_resolve
         .measurements
         .iter()
         .find_map(|measurement| match &measurement.measure_type {
-            rspice_core::analysis::MeasureType::FileError { file, .. } => Some(PathBuf::from(file)),
+            rspice_core::analysis::MeasureType::FileError { file, .. } => Some(PathBuf::from(file.path())),
             _ => None,
         })
         .expect("root ERROR measurement file");
@@ -7332,7 +7333,7 @@ R1 out 0 1\n\
         .measurements
         .iter()
         .find_map(|measurement| match &measurement.measure_type {
-            rspice_core::analysis::MeasureType::FileError { file, .. } => Some(PathBuf::from(file)),
+            rspice_core::analysis::MeasureType::FileError { file, .. } => Some(PathBuf::from(file.path())),
             _ => None,
         })
         .expect("included ERROR measurement file");

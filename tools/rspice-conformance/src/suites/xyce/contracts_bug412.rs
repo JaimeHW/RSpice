@@ -1076,6 +1076,7 @@ mod tests {
             failure_limit: None,
             failure_limit_exceeded: false,
             event_axis: Some(value),
+            units: None,
         };
         let valid = [result("T1", FIRST_CROSSING), result("T2", THIRD_CROSSING)];
         XyceTestRunner::validate_bug412_production_measures(&valid).unwrap();

@@ -1517,6 +1517,7 @@ mod tests {
             failure_limit: None,
             failure_limit_exceeded: false,
             event_axis: Some(0.0),
+            units: None,
         }
     }
 
