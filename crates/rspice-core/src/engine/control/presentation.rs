@@ -694,8 +694,8 @@ fn bind_selected<'a>(
 }
 
 fn binary_unit(op: BinOpKind, a: SignalUnit, b: SignalUnit) -> SignalUnit {
-    use BinOpKind::*;
-    use SignalUnit::*;
+    use BinOpKind::{Add, And, Div, Eq, Ge, Gt, Le, Lt, Mul, Ne, Or, Sub};
+    use SignalUnit::{Ampere, Dimensionless, Ohm, Siemens, Unspecified, Volt, Watt};
     match op {
         Gt | Lt | Ge | Le | Eq | Ne | And | Or => Dimensionless,
         Add | Sub if a == b => a,

@@ -41,7 +41,10 @@ impl<'a> PreparedEventCircuit<'a> {
             if family.instance_count(circuit) == 0 {
                 continue;
             }
-            use PeriodicDeviceFamily::*;
+            use PeriodicDeviceFamily::{
+                Bjt, Capacitor, CoupledInductorPair, CurrentSource, Inductor, InductorCoupling,
+                Resistor, ResistorBranch, VoltageSource,
+            };
             if !matches!(
                 family,
                 Resistor

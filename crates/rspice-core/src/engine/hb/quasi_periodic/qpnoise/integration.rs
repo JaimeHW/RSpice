@@ -8,7 +8,10 @@ pub(super) fn integrate(
     config: &QpnoiseIntegration,
     abort: &dyn AbortSignal,
 ) -> Result<Result<ScaledPositiveSum, QpnoiseUnavailable>, SimulationError> {
-    use QpnoiseUnavailable::*;
+    use QpnoiseUnavailable::{
+        IncompleteIntegrationBand, NegativeIntegrationFrequency, NoFrequencyInterval,
+        OutsideNumericRange, UndefinedIntegrationSample,
+    };
     check_abort(abort)?;
     if frequencies.len() != values.len() {
         return Err(qpnoise_error(
