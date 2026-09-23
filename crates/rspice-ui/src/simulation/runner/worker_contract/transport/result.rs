@@ -296,12 +296,20 @@ impl WorkerSimulationResultTransport {
                 converged,
             },
             WorkerSimulationResult::Soa {
+                source_history,
                 convergence,
                 time,
                 waveforms,
                 violations,
                 evaluations,
             } => Self::Soa {
+                source_history: source_history
+                    .map(|source| {
+                        source.map_series(|values| {
+                            Ok::<_, String>(WorkerF64Series::from_vec(values, buffers))
+                        })
+                    })
+                    .transpose()?,
                 convergence: convergence.as_ref().map(|quality| {
                     crate::simulation::results::ConvergenceTransport::from_evidence(
                         quality,
@@ -681,12 +689,16 @@ impl WorkerSimulationResultTransport {
                 })
             }
             Self::Soa {
+                source_history,
                 convergence,
                 time,
                 waveforms,
                 violations,
                 evaluations,
             } => Ok(WorkerSimulationResult::Soa {
+                source_history: source_history
+                    .map(|source| source.map_series(|values| values.into_vec(buffers)))
+                    .transpose()?,
                 convergence: convergence
                     .map(|quality| {
                         quality.into_evidence(WorkerF64Series::len, |series| {

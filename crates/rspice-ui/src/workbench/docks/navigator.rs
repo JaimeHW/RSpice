@@ -3521,6 +3521,7 @@ fn retained_result_artifacts(
                 ResultViewer::Reliability,
             ),
             AnalysisResultPayload::Soa {
+                source_history: _,
                 evaluations,
                 violations,
             } => (

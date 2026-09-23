@@ -6,6 +6,8 @@
 //! distinction is what lets the UI say so.
 
 mod soa_parameter;
+mod soa_source;
+pub use soa_source::{SoaSourceHistory, SoaSourceWaveform};
 
 use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
@@ -1458,6 +1460,8 @@ pub enum AnalysisResultPayload {
         devices: Vec<ReliabilityDeviceEvidence>,
     },
     Soa {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_history: Option<std::sync::Arc<SoaSourceHistory>>,
         evaluations: Vec<SoaEvaluationEvidence>,
         violations: Vec<SoaViolationEvidence>,
     },
@@ -2221,6 +2225,7 @@ impl AnalysisResultPayload {
                 }
             }
             Self::Soa {
+                source_history: _,
                 evaluations,
                 violations,
             } => {

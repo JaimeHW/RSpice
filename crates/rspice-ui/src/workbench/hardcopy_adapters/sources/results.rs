@@ -1498,6 +1498,7 @@ pub(super) fn semantic_result_summary(
         }
         ResultViewer::Soa => {
             let Some(AnalysisResultPayload::Soa {
+                source_history: _,
                 evaluations,
                 violations,
             }) = &analysis.result_payload

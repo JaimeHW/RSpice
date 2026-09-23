@@ -1865,6 +1865,7 @@ fn soa_evidence_analysis() -> AnalysisResult {
         .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::Soa { time })
         .with_waveforms(waveforms)
         .with_result_payload(crate::state::AnalysisResultPayload::Soa {
+            source_history: None,
             evaluations,
             violations,
         })

@@ -938,13 +938,16 @@ impl SimulationController {
             }
 
             SimulationResult::Soa {
+                source_history,
                 time,
                 waveforms,
                 violations,
                 evaluations,
                 convergence: _,
             } => {
-                let retained_time = time.clone();
+                let retained_time = source_history
+                    .as_ref()
+                    .map_or_else(|| time.clone(), |source| source.time.clone());
                 let retained_waveforms = self.build_waveforms_with_shared_x_owned(time, waveforms);
                 let mut violations = violations
                     .into_iter()
@@ -1013,6 +1016,7 @@ impl SimulationController {
                         .then_with(|| left.parameter.cmp(&right.parameter))
                 });
                 let payload = AnalysisResultPayload::Soa {
+                    source_history,
                     evaluations,
                     violations,
                 };

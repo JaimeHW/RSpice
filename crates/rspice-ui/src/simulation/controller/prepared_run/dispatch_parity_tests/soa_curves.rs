@@ -67,6 +67,7 @@ fn soa_current_envelope_studio_dispatch_retains_limits_and_saved_configuration()
         assert!(retained.success, "{:?}", retained.error_message);
         retained.validate_retained_evidence().unwrap();
         let Some(crate::state::AnalysisResultPayload::Soa {
+            source_history: _,
             evaluations,
             violations,
         }) = &retained.result_payload

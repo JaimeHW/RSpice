@@ -451,8 +451,10 @@ pub enum SimulationResult {
 
     /// Safety / SOA analysis result.
     Soa {
+        /// Complete observation history when waveforms use a reporting grid.
+        source_history: Option<std::sync::Arc<crate::state::SoaSourceHistory>>,
         convergence: Option<std::sync::Arc<crate::state::TransientConvergenceEvidence>>,
-        /// Time axis for SOA checks.
+        /// Reporting time axis; source_history retains the full check axis when resampled.
         time: Vec<f64>,
         /// Waveforms indexed by signal name.
         waveforms: HashMap<String, WaveformData>,

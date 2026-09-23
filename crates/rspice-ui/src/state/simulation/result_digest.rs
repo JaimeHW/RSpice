@@ -1106,10 +1106,21 @@ fn encode_result_payload(
             }
         }
         AnalysisResultPayload::Soa {
+            source_history,
             evaluations,
             violations,
         } => {
             writer.u8(4);
+            if let Some(source) = source_history {
+                writer.string("soa-complete-observation-history-v1");
+                writer.f64_slice(&source.time);
+                writer.sequence(source.waveforms.len());
+                for wave in &source.waveforms {
+                    writer.string(&wave.name);
+                    writer.string(&wave.unit);
+                    writer.f64_slice(&wave.values);
+                }
+            }
             writer.sequence(evaluations.len());
             for evaluation in evaluations {
                 writer.string(&evaluation.device_id);

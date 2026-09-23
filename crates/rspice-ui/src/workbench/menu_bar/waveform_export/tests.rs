@@ -994,6 +994,7 @@ fn csv_export_publishes_complete_soa_rules_and_exact_events() {
     let analysis = AnalysisResult::new(1, AnalysisType::Soa, "SOA")
         .with_family_metadata(AnalysisResultFamilyMetadata::Soa { time: vec![1.0e-6] })
         .with_result_payload(AnalysisResultPayload::Soa {
+            source_history: None,
             evaluations: vec![SoaEvaluationEvidence {
                 duration: None,
                 thresholds: Default::default(),
@@ -2492,6 +2493,7 @@ fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
             time: vec![0.0, 1.0, 2.0],
         })
         .with_result_payload(AnalysisResultPayload::Soa {
+            source_history: None,
             evaluations: vec![SoaEvaluationEvidence {
                 duration: None,
                 thresholds: Default::default(),
@@ -2535,6 +2537,7 @@ fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
     analysis.validate_retained_evidence().unwrap();
     let mut custom = analysis.clone();
     let Some(AnalysisResultPayload::Soa {
+        source_history: _,
         evaluations,
         violations,
     }) = custom.result_payload.as_mut()
@@ -2561,6 +2564,55 @@ fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
         assert_eq!(row.split(',').count(), 16);
         assert!(row.ends_with(",off,off"));
     }
+    // Reporting cadence must not thin the separate SOA evidence CSV.
+    let mut reported = analysis.clone();
+    let mut source = crate::state::SoaSourceHistory {
+        time: vec![0.0, 1.0, 2.0],
+        waveforms: analysis
+            .waveforms
+            .iter()
+            .map(|wave| crate::state::SoaSourceWaveform {
+                name: wave.name.clone(),
+                unit: wave.unit.clone().unwrap(),
+                values: wave.y.as_ref().clone(),
+            })
+            .collect(),
+    };
+    source.waveforms.push(crate::state::SoaSourceWaveform {
+        name: "SOA_VIOLATION_COUNT".into(),
+        unit: "count".into(),
+        values: vec![0.0, 1.0, 2.0],
+    });
+    let projection =
+        rspice_core::analysis::transient::TransientOutputProjection::interpolate_times(
+            &source.time,
+            &[0.5, 2.0],
+            2,
+        )
+        .unwrap();
+    reported.waveforms = source
+        .waveforms
+        .iter()
+        .map(|wave| {
+            WaveformData::new(
+                &wave.name,
+                projection.times().to_vec(),
+                source.report_values(wave, &projection).unwrap(),
+                "#00aaff",
+            )
+            .with_unit(&wave.unit)
+        })
+        .collect();
+    let Some(AnalysisResultPayload::Soa { source_history, .. }) = &mut reported.result_payload
+    else {
+        unreachable!()
+    };
+    *source_history = Some(std::sync::Arc::new(source));
+    reported.validate_retained_evidence().unwrap();
+    assert_eq!(
+        prepare_typed_result_csv(&reported).unwrap().contents,
+        prepare_typed_result_csv(&analysis).unwrap().contents
+    );
     let mut state = state_with_typed_result(analysis);
     let io = MockExportWorkflowIo::default();
     action_export_csv_with_io(&mut state, &io);
@@ -2612,6 +2664,7 @@ fn soa_current_envelope_csv_retains_voltage_limits_and_authored_curves() {
             time: vec![0.0, 1e-9, 2e-9],
         })
         .with_result_payload(AnalysisResultPayload::Soa {
+            source_history: None,
             evaluations: vec![SoaEvaluationEvidence {
                 envelope: Some(SoaCurrentEnvelopeEvidence {
                     maximum_current_a: 0.015,
@@ -2719,6 +2772,7 @@ fn check_soa_duration_csv(
             time: vec![0., 1., 2., 3., 4., 5., 6.],
         })
         .with_result_payload(AnalysisResultPayload::Soa {
+            source_history: None,
             evaluations: vec![SoaEvaluationEvidence {
                 duration: Some(duration),
                 thresholds: Default::default(),

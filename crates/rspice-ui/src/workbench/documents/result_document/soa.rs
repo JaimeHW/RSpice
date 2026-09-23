@@ -33,6 +33,7 @@ fn active_soa(
     let analysis = simulation.active_analysis()?;
     let payload = analysis.result_payload.as_ref()?;
     let AnalysisResultPayload::Soa {
+        source_history: _,
         evaluations,
         violations,
     } = payload
@@ -134,24 +135,9 @@ fn build_soa_plan(
             let limits = derating_waveform(analysis, evaluation, false);
             let temperature = derating_waveform(analysis, evaluation, true);
             SoaRuleFacts {
-                limit_waveform: limits.and_then(|found| {
-                    analysis
-                        .waveforms
-                        .iter()
-                        .position(|w| std::ptr::eq(w, found))
-                }),
-                temperature_waveform: temperature.and_then(|found| {
-                    analysis
-                        .waveforms
-                        .iter()
-                        .position(|w| std::ptr::eq(w, found))
-                }),
-                stress_waveform: stress.and_then(|found| {
-                    analysis
-                        .waveforms
-                        .iter()
-                        .position(|w| std::ptr::eq(w, found))
-                }),
+                limit_waveform: limits.map(|found| found.index),
+                temperature_waveform: temperature.map(|found| found.index),
+                stress_waveform: stress.map(|found| found.index),
                 interval_compact: worst_interval_text(
                     stress,
                     limits.map(|w| w.y.as_slice()),
@@ -346,7 +332,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         if let Some((facts, waveform)) = plan.facts(rule).and_then(|facts| {
             facts
                 .stress_waveform
-                .and_then(|index| analysis.waveforms.get(index))
+                .and_then(|index| evidence_trace(analysis, index))
                 .map(|waveform| (facts, waveform))
         }) {
             stress_trace_card(
@@ -355,10 +341,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 waveform,
                 evaluation,
                 facts,
-                facts.limit_waveform.and_then(|i| analysis.waveforms.get(i)),
+                facts
+                    .limit_waveform
+                    .and_then(|i| evidence_trace(analysis, i)),
                 facts
                     .temperature_waveform
-                    .and_then(|i| analysis.waveforms.get(i)),
+                    .and_then(|i| evidence_trace(analysis, i)),
             );
         } else {
             legacy_stress_history_note(ui);
@@ -542,6 +530,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         return;
     };
     let Some(AnalysisResultPayload::Soa {
+        source_history: _,
         evaluations,
         violations,
     }) = analysis.result_payload.as_ref()
@@ -759,11 +748,62 @@ fn threshold_text(fraction: Option<f64>) -> String {
         .unwrap_or_else(|| "Disabled".into())
 }
 
+/// Borrow either the complete SOA observations or a legacy full-grid trace.
+#[derive(Clone, Copy)]
+struct SoaTrace<'a> {
+    index: usize,
+    name: &'a str,
+    x: &'a Vec<f64>,
+    y: &'a Vec<f64>,
+}
+
+impl<'a> From<&'a WaveformData> for SoaTrace<'a> {
+    fn from(wave: &'a WaveformData) -> Self {
+        Self {
+            index: usize::MAX,
+            name: &wave.name,
+            x: &wave.x,
+            y: &wave.y,
+        }
+    }
+}
+
+fn evidence_trace(analysis: &AnalysisResult, index: usize) -> Option<SoaTrace<'_>> {
+    if let Some(AnalysisResultPayload::Soa {
+        source_history: Some(source),
+        ..
+    }) = &analysis.result_payload
+    {
+        let wave = source.waveforms.get(index)?;
+        Some(SoaTrace {
+            index,
+            name: &wave.name,
+            x: &source.time,
+            y: &wave.values,
+        })
+    } else {
+        let mut trace = SoaTrace::from(analysis.waveforms.get(index)?);
+        trace.index = index;
+        Some(trace)
+    }
+}
+
+fn evidence_traces(analysis: &AnalysisResult) -> impl Iterator<Item = SoaTrace<'_>> {
+    let count = match &analysis.result_payload {
+        Some(AnalysisResultPayload::Soa {
+            source_history: Some(source),
+            ..
+        }) => source.waveforms.len(),
+        _ => analysis.waveforms.len(),
+    };
+    (0..count).filter_map(|index| evidence_trace(analysis, index))
+}
+
 fn derating_waveform<'a>(
     analysis: &'a AnalysisResult,
     evaluation: &SoaEvaluationEvidence,
     temperature: bool,
-) -> Option<&'a WaveformData> {
+) -> Option<SoaTrace<'a>> {
     let name = if evaluation.envelope.is_some() && !temperature {
         crate::services::safety::soa_envelope_limit_waveform_name(
             &evaluation.device_id,
@@ -779,7 +819,7 @@ fn derating_waveform<'a>(
     let AnalysisResultFamilyMetadata::Soa { time } = analysis.family_metadata.as_ref()? else {
         return None;
     };
-    analysis.waveforms.iter().find(|wave| {
+    evidence_traces(analysis).find(|wave| {
         wave.name == name && wave.x.as_slice() == time.as_slice() && wave.y.len() == time.len()
     })
 }
@@ -787,7 +827,7 @@ fn derating_waveform<'a>(
 fn stress_waveform<'a>(
     analysis: &'a AnalysisResult,
     evaluation: &SoaEvaluationEvidence,
-) -> Option<&'a WaveformData> {
+) -> Option<SoaTrace<'a>> {
     frame_work::note(DatasetWalk::SoaStressScan);
     let expected_samples = usize::try_from(evaluation.sample_count).ok()?;
     if expected_samples == 0 {
@@ -804,7 +844,7 @@ fn stress_waveform<'a>(
     if (evaluation.derating.is_some() || evaluation.envelope.is_some()) && limits.is_none() {
         return None;
     }
-    analysis.waveforms.iter().find(|waveform| {
+    evidence_traces(analysis).find(|waveform| {
         if waveform.name != name
             || waveform.x.as_slice() != time.as_slice()
             || waveform.x.len() != expected_samples
@@ -834,7 +874,7 @@ fn stress_waveform<'a>(
 }
 
 fn worst_interval_text(
-    stress: Option<&WaveformData>,
+    stress: Option<SoaTrace<'_>>,
     limits: Option<&[f64]>,
     evaluation: &SoaEvaluationEvidence,
     compact: bool,
@@ -1024,11 +1064,11 @@ fn legacy_stress_history_note(ui: &mut Ui) {
 fn stress_trace_card(
     ui: &mut Ui,
     results: &mut super::ResultsState,
-    waveform: &WaveformData,
+    waveform: SoaTrace<'_>,
     evaluation: &SoaEvaluationEvidence,
     facts: &SoaRuleFacts,
-    limits: Option<&WaveformData>,
-    temperatures: Option<&WaveformData>,
+    limits: Option<SoaTrace<'_>>,
+    temperatures: Option<SoaTrace<'_>>,
 ) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
@@ -1403,7 +1443,12 @@ mod tests {
         };
         let mut evaluation = evaluations[0].clone();
         evaluation.thresholds.warning_fraction = Some(0.5);
-        let text = worst_interval_text(Some(&analysis.waveforms[0]), None, &evaluation, false);
+        let text = worst_interval_text(
+            Some((&analysis.waveforms[0]).into()),
+            None,
+            &evaluation,
+            false,
+        );
         assert_eq!(
             text,
             format!("Warning band: {:.17e} s to {:.17e} s", 2e-12, 3e-12)
@@ -1466,6 +1511,7 @@ mod tests {
             .with_family_metadata(AnalysisResultFamilyMetadata::Soa { time })
             .with_waveforms(waveforms)
             .with_result_payload(AnalysisResultPayload::Soa {
+                source_history: None,
                 evaluations,
                 violations,
             });

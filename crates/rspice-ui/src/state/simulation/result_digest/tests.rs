@@ -889,6 +889,7 @@ fn reliability_and_soa_evidence_are_field_sensitive_v4_content_identity() {
 
     let soa = AnalysisResult::new(1, AnalysisType::Soa, "SOA").with_result_payload(
         AnalysisResultPayload::Soa {
+            source_history: None,
             evaluations: vec![SoaEvaluationEvidence {
                 duration: None,
                 thresholds: Default::default(),

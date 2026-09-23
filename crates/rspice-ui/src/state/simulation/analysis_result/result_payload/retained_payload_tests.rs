@@ -833,6 +833,7 @@ fn soa_payload_requires_complete_rule_coverage_consistent_events_and_axis() {
             time: vec![0.0, 1.0],
         })
         .with_result_payload(AnalysisResultPayload::Soa {
+            source_history: None,
             evaluations: vec![evaluation.clone()],
             violations: vec![event.clone()],
         });
@@ -840,6 +841,7 @@ fn soa_payload_requires_complete_rule_coverage_consistent_events_and_axis() {
 
     let payload_without_axis = AnalysisResult::new(1, AnalysisType::Soa, "SOA")
         .with_result_payload(AnalysisResultPayload::Soa {
+            source_history: None,
             evaluations: vec![evaluation.clone()],
             violations: vec![event.clone()],
         });
@@ -854,6 +856,7 @@ fn soa_payload_requires_complete_rule_coverage_consistent_events_and_axis() {
     invalid_event.severity = SoaViolationSeverityEvidence::Critical;
     assert!(
         AnalysisResultPayload::Soa {
+            source_history: None,
             evaluations: vec![evaluation.clone()],
             violations: vec![invalid_event],
         }
@@ -867,6 +870,7 @@ fn soa_payload_requires_complete_rule_coverage_consistent_events_and_axis() {
             time: vec![0.0, 1.0],
         })
         .with_result_payload(AnalysisResultPayload::Soa {
+            source_history: None,
             evaluations: vec![evaluation.clone()],
             violations: vec![SoaViolationEvidence {
                 limit_value: 3.4,
@@ -885,6 +889,7 @@ fn soa_payload_requires_complete_rule_coverage_consistent_events_and_axis() {
             time: vec![0.0, 1.0],
         })
         .with_result_payload(AnalysisResultPayload::Soa {
+            source_history: None,
             evaluations: vec![evaluation.clone()],
             violations: Vec::new(),
         });
@@ -900,6 +905,7 @@ fn soa_payload_requires_complete_rule_coverage_consistent_events_and_axis() {
             time: vec![0.0, 0.5, 1.0],
         })
         .with_result_payload(AnalysisResultPayload::Soa {
+            source_history: None,
             evaluations: vec![evaluation],
             violations: Vec::new(),
         });

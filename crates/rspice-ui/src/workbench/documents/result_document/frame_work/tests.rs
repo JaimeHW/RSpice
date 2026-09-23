@@ -376,6 +376,7 @@ fn soa_analysis() -> AnalysisResult {
         .with_family_metadata(AnalysisResultFamilyMetadata::Soa { time })
         .with_waveforms(waveforms)
         .with_result_payload(AnalysisResultPayload::Soa {
+            source_history: None,
             evaluations,
             violations,
         })

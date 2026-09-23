@@ -10,6 +10,72 @@ fn plan(state: &mut AppState) -> Arc<SoaPlan> {
     soa_plan(state, key).expect("valid active SOA evidence")
 }
 
+#[test]
+fn soa_reporting_detail_uses_complete_history_and_hashes_its_samples() {
+    let mut state = soa_state(1, 64, 3.0);
+    let analysis = &mut state.simulation.runs[0].analyses[0];
+    let full = analysis.waveforms[0].clone();
+    let mut count = vec![0.0; full.x.len()];
+    *count.last_mut().unwrap() = 1.0;
+    let source = crate::state::SoaSourceHistory {
+        time: full.x.as_ref().clone(),
+        waveforms: vec![
+            crate::state::SoaSourceWaveform {
+                name: full.name.clone(),
+                unit: "V".into(),
+                values: full.y.as_ref().clone(),
+            },
+            crate::state::SoaSourceWaveform {
+                name: "SOA_VIOLATION_COUNT".into(),
+                unit: "count".into(),
+                values: count,
+            },
+        ],
+    };
+    let report_time = vec![full.x[0], *full.x.last().unwrap()];
+    analysis.waveforms = vec![
+        WaveformData::new(
+            &full.name,
+            report_time.clone(),
+            vec![full.y[0], *full.y.last().unwrap()],
+            "#00aaff",
+        )
+        .with_unit("V"),
+        WaveformData::new(
+            "SOA_VIOLATION_COUNT",
+            report_time,
+            vec![0.0, 1.0],
+            "#00aaff",
+        )
+        .with_unit("count"),
+    ];
+    let Some(AnalysisResultPayload::Soa { source_history, .. }) = &mut analysis.result_payload
+    else {
+        unreachable!()
+    };
+    *source_history = Some(Arc::new(source));
+    analysis.validate_retained_evidence().unwrap();
+    let facts = plan(&mut state);
+    let analysis = &state.simulation.runs[0].analyses[0];
+    let trace = evidence_trace(analysis, facts.facts(0).unwrap().stress_waveform.unwrap()).unwrap();
+    assert_eq!(trace.x.len(), 64);
+    assert_eq!(analysis.waveforms[0].x.len(), 2);
+    pick(&mut state);
+    state.ui.results.soa_stress_trace_open = true;
+    assert!(paint(&mut state, false).contains("64 exact samples"));
+    let before = state.simulation.runs[0].analyses[0].result_data_digest();
+    let analysis = &mut state.simulation.runs[0].analyses[0];
+    let Some(AnalysisResultPayload::Soa {
+        source_history: Some(source),
+        ..
+    }) = &mut analysis.result_payload
+    else {
+        unreachable!()
+    };
+    Arc::make_mut(source).waveforms[0].values[20] += 0.01;
+    assert_ne!(before, state.simulation.runs[0].analyses[0].result_data_digest());
+}
+
 fn replace_stress(state: &mut AppState, samples: usize, peak: f64) {
     let mut donor = soa_state(1, samples, peak);
     let replacement = donor.simulation.runs[0].analyses.remove(0);
@@ -177,6 +243,7 @@ fn soa_source_rule_selection_survives_navigation_but_not_rule_removal() {
     assert!(reordered.contains("SELECTED SOA RULE"), "{reordered}");
     assert!(reordered.contains("M0000"), "{reordered}");
     let Some(AnalysisResultPayload::Soa {
+        source_history: _,
         evaluations,
         violations,
     }) = state.simulation.runs[0].analyses[0].result_payload.as_mut()

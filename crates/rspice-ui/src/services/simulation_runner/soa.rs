@@ -19,6 +19,7 @@ use std::path::Path;
 mod model_ratings;
 mod observation;
 mod probes;
+mod reporting;
 mod rules;
 #[cfg(test)]
 mod rules_tests;
@@ -136,6 +137,7 @@ pub struct SoaStressTrace {
 /// SOA analysis output.
 #[derive(Debug, Clone)]
 pub struct SoaData {
+    pub reporting: Option<rspice_core::analysis::transient::TransientOutputProjection>,
     pub convergence: Option<std::sync::Arc<crate::state::TransientConvergenceEvidence>>,
     /// Transient time vector.
     pub time: Vec<Value>,
@@ -264,6 +266,11 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         abort,
     )?;
 
+    // The outer SOA analysis owns reporting. Its internal transient must retain
+    // every accepted sample and must not require an authored .TRAN directive.
+    let reporting_options = netlist.options.clone();
+    netlist.options.output_interval_schedule = None;
+    netlist.options.output_time_points.clear();
     let result = engine
         .run_tran_with_startup_mode_and_abort(
             &netlist,
@@ -566,7 +573,22 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         });
     }
     ensure_not_aborted(abort)?;
+    let reporting = reporting::projection(
+        &transient.time,
+        &reporting_options,
+        config.observation.start_time,
+        engine.config().resource_limits,
+        1 + stress_history
+            .iter()
+            .map(|trace| {
+                1 + 2 * usize::from(trace.envelope.is_some())
+                    + 2 * usize::from(trace.derating.is_some())
+            })
+            .sum::<usize>(),
+        abort,
+    )?;
     Ok(SoaData {
+        reporting,
         convergence: transient.convergence,
         time: transient.time,
         violation_count,

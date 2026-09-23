@@ -435,9 +435,44 @@ fn run_soa(
         );
     }
 
+    let (time, source_history) = if let Some(reporting) = data.reporting {
+        let mut source = crate::state::SoaSourceHistory {
+            time: data.time,
+            waveforms: waveforms
+                .drain()
+                .map(|(name, wave)| crate::state::SoaSourceWaveform {
+                    name,
+                    unit: wave.y_unit,
+                    values: wave.y_values,
+                })
+                .collect(),
+        };
+        source.waveforms.sort_by(|a, b| a.name.cmp(&b.name));
+        for wave in &source.waveforms {
+            super::ensure_not_aborted(abort)?;
+            let values = source
+                .report_values(wave, &reporting)
+                .map_err(SimulationError::SolverError)?;
+            insert_scalar_waveform(
+                &mut waveforms,
+                wave.name.clone(),
+                reporting.times().to_vec(),
+                values,
+                &wave.unit,
+                "s",
+            );
+        }
+        (
+            reporting.times().to_vec(),
+            Some(std::sync::Arc::new(source)),
+        )
+    } else {
+        (data.time, None)
+    };
     Ok(SimulationResult::Soa {
+        source_history,
         convergence: data.convergence,
-        time: data.time,
+        time,
         waveforms,
         violations: data.violations,
         evaluations: data.evaluations,
@@ -496,3 +531,6 @@ mod reliability_tests {
         assert!(response.aged.iter().all(|p| !p.parameters.is_empty()));
     }
 }
+
+#[cfg(test)]
+mod soa_reporting_tests;

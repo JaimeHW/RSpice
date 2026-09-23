@@ -550,6 +550,7 @@ pub(super) fn reliability(ui: &mut Ui, app: &mut RSpiceApp) {
         latest_validated_analysis(app, crate::state::AnalysisType::Soa).and_then(|analysis| {
             match &analysis.result_payload {
                 Some(crate::state::AnalysisResultPayload::Soa {
+                    source_history: _,
                     evaluations,
                     violations,
                 }) => Some((evaluations.as_slice(), violations.as_slice())),

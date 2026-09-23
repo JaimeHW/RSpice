@@ -1251,6 +1251,7 @@ pub(super) fn retained_component_soa(
             continue;
         }
         let Some(AnalysisResultPayload::Soa {
+            source_history: _,
             evaluations: retained,
             violations: retained_violations,
         }) = analysis.result_payload.as_ref()

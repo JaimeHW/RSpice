@@ -80,8 +80,9 @@ pub use analysis_result::{
     PstbFloquetModeEvidence, PstbStabilityClassificationEvidence, RealEventPointEvidence,
     RealEventTraceEvidence, ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence,
     ReliabilityShiftEvidence, ReliabilityStressEvidence, SensitivityResultMode,
-    SensitivityResultRow, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
-    SoaViolationEvidence, SoaViolationSeverityEvidence, TransferFunctionAccuracyEvidence,
+    SensitivityResultRow, SoaSourceHistory, SoaSourceWaveform, SoaEvaluationEvidence,
+    SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
+    SoaViolationSeverityEvidence, TransferFunctionAccuracyEvidence,
     TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
     TransferFunctionScalarEvidence,
 };

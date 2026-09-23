@@ -1225,6 +1225,7 @@ fn payload_values_label(payload: &AnalysisResultPayload) -> String {
             format!("{} reliability devices", devices.len())
         }
         AnalysisResultPayload::Soa {
+            source_history: _,
             evaluations,
             violations,
         } => format!(

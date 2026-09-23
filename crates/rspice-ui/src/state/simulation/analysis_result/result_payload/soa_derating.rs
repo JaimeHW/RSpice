@@ -11,6 +11,23 @@ pub(super) fn trace<'a>(
     time: &[f64],
     unit: &str,
 ) -> Result<&'a [f64], String> {
+    if let Some(AnalysisResultPayload::Soa {
+        source_history: Some(source),
+        ..
+    }) = &analysis.result_payload
+    {
+        let wave = source
+            .waveforms
+            .iter()
+            .find(|wave| wave.name == name)
+            .ok_or_else(|| format!("SOA is missing retained source trace '{name}'"))?;
+        if source.time != time || wave.values.len() != time.len() || wave.unit != unit {
+            return Err(format!(
+                "SOA source trace '{name}' has invalid coverage or units"
+            ));
+        }
+        return Ok(&wave.values);
+    }
     let wave = analysis
         .waveforms
         .iter()

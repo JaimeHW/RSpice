@@ -4,6 +4,7 @@ use super::*;
 mod soa_derating;
 mod soa_duration;
 mod soa_envelope;
+mod soa_reporting;
 
 pub(super) fn validate_pss_floquet_payload(
     period_s: Option<f64>,
@@ -1350,10 +1351,15 @@ impl AnalysisResult {
             (
                 Some(AnalysisResultFamilyMetadata::Soa { time }),
                 Some(AnalysisResultPayload::Soa {
+                    source_history,
                     evaluations,
                     violations,
                 }),
             ) => {
+                if let Some(source) = source_history {
+                    source.validate_report(time, &self.waveforms)?;
+                    soa_reporting::validate(self, time, evaluations, violations)?;
+                }
                 let rules = evaluations
                     .iter()
                     .map(|evaluation| {

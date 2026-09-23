@@ -1489,6 +1489,7 @@ fn typed_result_payloads_round_trip_and_reject_payload_tampering() {
                 time: vec![0.0, 1.0],
             })
             .with_result_payload(AnalysisResultPayload::Soa {
+                source_history: None,
                 evaluations: vec![crate::state::SoaEvaluationEvidence {
                     duration: None,
                     thresholds: Default::default(),

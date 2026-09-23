@@ -439,6 +439,7 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
 
     let soa = controller.convert_to_analysis_result_with_metadata_owned(
         crate::simulation::SimulationResult::Soa {
+            source_history: None,
             convergence: None,
             time: vec![0.0, 1.0e-9],
             waveforms: empty_waveforms(),
@@ -471,6 +472,7 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
     assert!(matches!(
         soa.result_payload,
         Some(AnalysisResultPayload::Soa {
+            source_history: None,
             ref evaluations,
             ref violations,
         }) if evaluations.len() == 1 && violations.is_empty()
@@ -688,6 +690,7 @@ fn incomplete_reliability_and_soa_results_fail_closed_without_retained_payloads(
 
     let soa = controller.convert_to_analysis_result_with_metadata_owned(
         crate::simulation::SimulationResult::Soa {
+            source_history: None,
             convergence: None,
             time: vec![0.0, 1.0],
             waveforms: std::collections::HashMap::new(),

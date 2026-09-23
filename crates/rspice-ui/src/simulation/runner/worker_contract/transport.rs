@@ -1390,6 +1390,8 @@ pub(crate) enum WorkerSimulationResultTransport {
         converged: bool,
     },
     Soa {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_history: Option<crate::state::SoaSourceHistory<WorkerF64Series>>,
         convergence: Option<crate::simulation::results::ConvergenceTransport<WorkerF64Series>>,
         time: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
@@ -1480,6 +1482,19 @@ fn validate_transient_source_payload_size(result: &WorkerSimulationResult) -> Re
         .saturating_add(quality.as_ref().map_or(0, |quality| {
             2 + usize::from(quality.initialization.is_some())
         }));
+    if let WorkerSimulationResult::Soa {
+        source_history: Some(source),
+        ..
+    } = result
+    {
+        values = values.saturating_add(source.value_count());
+        buffers = buffers
+            .saturating_add(1)
+            .saturating_add(source.waveforms.len());
+        if values > MAX_WORKER_F64_VALUES || buffers > MAX_WORKER_TRANSFER_BUFFERS {
+            return Err("SOA observation history exceeds the worker transfer limit".into());
+        }
+    }
     if let WorkerSimulationResult::Transient { events, .. } = result
         && let Some(history) = &events.current_impulses
     {
@@ -1505,6 +1520,26 @@ fn validate_transient_source_payload_size(result: &WorkerSimulationResult) -> Re
         return Err(
             "Waveform and convergence evidence exceed the worker transfer limit".to_owned(),
         );
+    }
+    if let WorkerSimulationResult::Soa {
+        source_history: Some(source),
+        time,
+        waveforms,
+        ..
+    } = result
+    {
+        source.validate_report_columns(
+            time,
+            waveforms.iter().map(|wave| {
+                (
+                    wave.name.as_str(),
+                    wave.x_values.as_slice(),
+                    wave.y_values.as_slice(),
+                    Some(wave.y_unit.as_str()),
+                    wave.is_complex || wave.y_imag.is_some(),
+                )
+            }),
+        )?;
     }
     Ok(())
 }

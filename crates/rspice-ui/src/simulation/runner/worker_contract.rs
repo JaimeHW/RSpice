@@ -1021,6 +1021,8 @@ pub(crate) enum WorkerSimulationResult {
         converged: bool,
     },
     Soa {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_history: Option<crate::state::SoaSourceHistory>,
         convergence: Option<crate::state::TransientConvergenceEvidence>,
         time: Vec<f64>,
         waveforms: Vec<WorkerWaveform>,
@@ -1698,12 +1700,16 @@ impl WorkerSimulationResult {
                 f64_payload_bytes(1),
             ]),
             WorkerSimulationResult::Soa {
+                source_history,
                 convergence,
                 time,
                 waveforms,
                 violations,
                 evaluations,
             } => sum_payload_bytes([
+                source_history
+                    .as_ref()
+                    .map_or(0, |source| f64_payload_bytes(source.value_count())),
                 convergence.as_ref().map_or(0, |quality| {
                     f64_payload_bytes(quality.transfer_value_count())
                 }),
@@ -1740,7 +1746,8 @@ impl WorkerSimulationResult {
 /// 32: sampled noise retains the sampling configuration and spectra.
 /// 33: retained HB results carry separate behavioral integral spectra.
 /// 34: QPSS results retain typed behavioral integral coordinates.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 34;
+/// 35: SOA reporting views retain the complete observation history.
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 35;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
@@ -2137,12 +2144,14 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 })
             }
             SimulationResult::Soa {
+                source_history,
                 convergence,
                 time,
                 waveforms,
                 violations,
                 evaluations,
             } => Ok(Self::Soa {
+                source_history: source_history.map(std::sync::Arc::unwrap_or_clone),
                 convergence: convergence.map(std::sync::Arc::unwrap_or_clone),
                 time,
                 waveforms: worker_waveforms(waveforms),
@@ -2496,12 +2505,14 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 converged,
             },
             WorkerSimulationResult::Soa {
+                source_history,
                 convergence,
                 time,
                 waveforms,
                 violations,
                 evaluations,
             } => Self::Soa {
+                source_history: source_history.map(std::sync::Arc::new),
                 convergence: convergence.map(std::sync::Arc::new),
                 time,
                 waveforms: waveform_map(waveforms),

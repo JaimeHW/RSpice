@@ -510,7 +510,7 @@ impl SimulationController {
                 ..
             } => {
                 state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "SOA: {} sampled points, {} violations",
+                    "SOA: {} reporting points, {} violations",
                     time.len(),
                     violations.len()
                 )));

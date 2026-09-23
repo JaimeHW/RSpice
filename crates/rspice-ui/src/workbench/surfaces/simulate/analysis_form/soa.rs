@@ -58,6 +58,10 @@ pub(super) fn fields(
         "Use initial conditions",
         &mut setup.use_initial_conditions,
     );
+    field_note(
+        ui,
+        "Output reporting times affect waveform plots and export. SOA checks and the detailed stress history retain every solver sample.",
+    );
     input_row(ui, "Devices", &mut setup.devices);
     input_row(ui, "Models", &mut setup.models);
     field_note(
@@ -155,7 +159,8 @@ pub(super) fn fields(
                     field_note(ui, "Full rated power applies through the reference temperature. Above it, the allowed power decreases at this rate, down to zero. Uses the model's accepted device temperature, including supported self-heating.");
                 }
             }
-            input_row(ui, "Devices", &mut rule.devices);
+            field_note(ui, "Output reporting times affect waveform plots and export. SOA checks and the detailed stress history retain every solver sample.");
+    input_row(ui, "Devices", &mut rule.devices);
             if rule.supports_current_envelope() {
                 current_envelope_fields(ui, &mut rule.current_envelope);
             }

@@ -1817,6 +1817,7 @@ mod tests {
                 ),
             ])
             .with_result_payload(AnalysisResultPayload::Soa {
+                source_history: None,
                 evaluations: vec![SoaEvaluationEvidence {
                     duration: None,
                     thresholds: Default::default(),

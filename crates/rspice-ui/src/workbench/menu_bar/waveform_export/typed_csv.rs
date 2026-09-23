@@ -735,6 +735,7 @@ pub(super) fn prepare_typed_result_csv(
             })
         }
         AnalysisResultPayload::Soa {
+            source_history,
             evaluations,
             violations,
         } => {
@@ -896,8 +897,26 @@ pub(super) fn prepare_typed_result_csv(
                     || evaluation.envelope.is_some()
                     || evaluation.duration.is_some()
                 {
-                    let find =
-                        |name: String| analysis.waveforms.iter().find(|wave| wave.name == name);
+                    #[derive(Clone, Copy)]
+                    struct Samples<'a> {
+                        x: &'a [f64],
+                        y: &'a [f64],
+                    }
+                    let find = |name: String| {
+                        if let Some(source) = source_history {
+                            let wave = source.waveforms.iter().find(|wave| wave.name == name)?;
+                            Some(Samples {
+                                x: &source.time,
+                                y: &wave.values,
+                            })
+                        } else {
+                            let wave = analysis.waveforms.iter().find(|wave| wave.name == name)?;
+                            Some(Samples {
+                                x: &wave.x,
+                                y: &wave.y,
+                            })
+                        }
+                    };
                     let stress = find(crate::services::safety::soa_stress_waveform_name(
                         &evaluation.device_id,
                         evaluation.parameter.runtime_parameter(),

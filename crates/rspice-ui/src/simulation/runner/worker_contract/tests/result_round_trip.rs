@@ -9,10 +9,70 @@
 use super::*;
 
 #[test]
+fn soa_reporting_worker_detaches_source_and_rejects_changed_reports() {
+    let source = crate::state::SoaSourceHistory {
+        time: vec![0.0, 0.5, 1.0],
+        waveforms: vec![crate::state::SoaSourceWaveform {
+            name: "SOA_VGS(M1)".into(),
+            unit: "V".into(),
+            values: vec![0.0, 3.0, 0.0],
+        }],
+    };
+    let result = SimulationResult::Soa {
+        source_history: Some(Arc::new(source)),
+        convergence: None,
+        time: vec![0.25, 1.0],
+        waveforms: HashMap::from([(
+            "SOA_VGS(M1)".into(),
+            WaveformData::new_time_domain_in_unit(
+                "SOA_VGS(M1)",
+                vec![0.25, 1.0],
+                vec![1.5, 0.0],
+                "V",
+            ),
+        )]),
+        violations: vec![],
+        evaluations: vec![],
+    };
+    let expected = WorkerResponse::from_result_for_transfer(53, Ok(result));
+    let mut packet = WorkerResponseTransport::from_response(expected.clone()).unwrap();
+    let metadata = serde_json::to_value(&packet.response).unwrap();
+    let encoded = serde_json::to_string(&metadata).unwrap();
+    assert!(encoded.contains("source_history"));
+    assert_eq!(
+        packet.buffers.len(),
+        5,
+        "report axis, x/y, source axis and values"
+    );
+    assert_eq!(packet.clone().into_response().unwrap(), expected);
+    let source_values = packet
+        .buffers
+        .iter_mut()
+        .find(|buffer| **buffer == vec![0.0, 3.0, 0.0])
+        .unwrap();
+    source_values[1] = 4.0;
+    assert!(packet.into_response().unwrap_err().contains("contradicts"));
+    let mut changed = expected;
+    let WorkerOutcome::Success(result) = &mut changed.outcome else {
+        unreachable!()
+    };
+    let WorkerSimulationResult::Soa { waveforms, .. } = result.as_mut() else {
+        unreachable!()
+    };
+    waveforms[0].y_values[0] = 2.0;
+    assert!(
+        WorkerResponseTransport::from_response(changed)
+            .unwrap_err()
+            .contains("contradicts")
+    );
+}
+
+#[test]
 fn soa_current_envelope_worker_buffers_preserve_curve_metadata() {
     use crate::services::safety::*;
     let curve = SoaCurrentEnvelope::test_fixture();
     let result = SimulationResult::Soa {
+        source_history: None,
         convergence: None,
         time: vec![0.0, 1e-9],
         waveforms: HashMap::from([(
@@ -361,6 +421,7 @@ fn worker_result_round_trip() {
     }
 
     let soa = SimulationResult::Soa {
+        source_history: None,
         convergence: None,
         time: vec![0.0, 1e-6],
         waveforms: HashMap::from([(
@@ -394,6 +455,7 @@ fn worker_result_round_trip() {
     let soa = round_trip_result(soa);
     match soa {
         SimulationResult::Soa {
+            source_history: _,
             time,
             waveforms,
             violations,
@@ -658,6 +720,7 @@ fn convergence_source_evidence_survives_derived_worker_transports() {
             convergence: Some(quality.clone()),
         },
         SimulationResult::Soa {
+            source_history: None,
             time: vec![0.6, 1.0],
             waveforms: HashMap::new(),
             violations: Vec::new(),

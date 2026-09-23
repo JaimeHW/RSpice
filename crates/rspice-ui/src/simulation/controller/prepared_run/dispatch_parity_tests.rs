@@ -1716,6 +1716,7 @@ fn soa_derating_survives_studio_worker_thermal_transient_and_saved_results() {
     assert!(retained.success, "{:?}", retained.error_message);
     retained.validate_retained_evidence().unwrap();
     let Some(crate::state::AnalysisResultPayload::Soa {
+        source_history: _,
         evaluations,
         violations,
     }) = &retained.result_payload
@@ -1965,6 +1966,7 @@ fn soa_thresholds_survive_studio_worker_execution_and_saved_results() {
         assert!(retained.success, "{:?}", retained.error_message);
         retained.validate_retained_evidence().unwrap();
         let Some(crate::state::AnalysisResultPayload::Soa {
+            source_history: _,
             evaluations,
             violations,
         }) = &retained.result_payload
@@ -2124,6 +2126,7 @@ fn check_soa_duration_round_trip(
     assert!(retained.success, "{:?}", retained.error_message);
     retained.validate_retained_evidence().unwrap();
     let Some(crate::state::AnalysisResultPayload::Soa {
+        source_history: _,
         evaluations,
         violations,
     }) = &retained.result_payload
