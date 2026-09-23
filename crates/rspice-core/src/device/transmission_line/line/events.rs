@@ -62,6 +62,10 @@ fn arrival(time: Value, delay: Value) -> Value {
 }
 
 impl TransmissionLine {
+    pub(crate) fn owns_history_event(&self, time: Value) -> bool {
+        self.history_event_at(time).is_some()
+    }
+
     pub(crate) fn supports_sided_history_events(&self) -> bool {
         self.td.is_finite()
             && self.td > 0.0

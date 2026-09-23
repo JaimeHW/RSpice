@@ -11,6 +11,85 @@ fn event(time: Value) -> TransmissionLineHistoryEvent {
 }
 
 #[test]
+fn sampled_delay_event_promotion_preserves_existing_side_ownership() {
+    let mut line = TransmissionLine::new("T1".into(), 1, 0, 2, 0, 50.0, 2.0);
+    let first = 0.5_f64;
+    let last = 1.0_f64;
+    for (clock, wave) in [
+        (0.0, 1.0),
+        (first.next_down(), 2.0 * first.next_down() + 1.0),
+        (first, 4.0),
+        (last.next_down(), 5.0 - 2.0 * last.next_down()),
+        (last, 7.0),
+    ] {
+        line.update_history(clock, wave, 0.0, -wave, 0.0);
+    }
+    line.promote_sampled_history_events_with_endpoint_rates(
+        &[[last, last.next_down(), last]],
+        Some([5.0, -5.0]),
+    )
+    .unwrap();
+    let retained = line.checkpoint_state().unwrap().events[0];
+    line.promote_sampled_history_events(&[[first, first.next_down(), first]])
+        .unwrap();
+    assert_eq!(line.checkpoint_state().unwrap().events[1], retained);
+    let slope = line
+        .lossless_wave_slope_on_side(2.5, true, TransmissionLineTimeSide::Outgoing)
+        .unwrap();
+    assert!((slope + 2.0).abs() < 1e-14);
+    let wave = line.lossless_wave_on_side(2.75, true, TransmissionLineTimeSide::Outgoing);
+    assert!((wave - 3.5).abs() < 1e-14);
+    let saved = line.checkpoint_state().unwrap();
+    assert!(
+        line.promote_sampled_history_events(&[[0.75, 0.0, 1.0]])
+            .is_err()
+    );
+    assert_eq!(line.checkpoint_state().unwrap(), saved);
+}
+
+#[test]
+fn sampled_delay_endpoint_event_requires_owned_finite_rates() {
+    let mut line = TransmissionLine::new("T1".into(), 1, 0, 2, 0, 50.0, 2.0);
+    let time = 1.0_f64;
+    let left = time.next_down();
+    for (clock, wave) in [
+        (0.0, 1.0),
+        (0.5, 2.0),
+        (left, 2.0 * left + 1.0),
+        (time, 7.0),
+    ] {
+        line.update_history(clock, wave, 0.0, -wave, 0.0);
+    }
+    let original = line.checkpoint_state().unwrap();
+    let edges = [[time, left, time]];
+    assert!(line.promote_sampled_history_events(&edges).is_err());
+    for (edges, rates) in [(&edges[..], [Value::NAN, 0.0]), (&[][..], [1.0, 2.0])] {
+        assert!(
+            line.promote_sampled_history_events_with_endpoint_rates(edges, Some(rates))
+                .is_err()
+        );
+        assert_eq!(line.checkpoint_state().unwrap(), original);
+    }
+    line.promote_sampled_history_events_with_endpoint_rates(&edges, Some([5.0, -6.0]))
+        .unwrap();
+    for (side, wave, slope) in [
+        (TransmissionLineTimeSide::Incoming, 3.0, 2.0),
+        (TransmissionLineTimeSide::Outgoing, 7.0, 5.0),
+    ] {
+        assert!((line.lossless_wave_on_side(3.0, true, side) - wave).abs() < 1e-14);
+        assert!((line.lossless_wave_slope_on_side(3.0, true, side).unwrap() - slope).abs() < 1e-14);
+    }
+    assert_eq!(
+        line.lossless_wave_slope_on_side(3.0, false, TransmissionLineTimeSide::Outgoing)
+            .unwrap(),
+        -6.0
+    );
+    let checkpoint = line.checkpoint_state().unwrap();
+    line.restore_checkpoint_state(&checkpoint).unwrap();
+    assert_eq!(line.checkpoint_state().unwrap(), checkpoint);
+}
+
+#[test]
 fn sampled_delay_event_promotion_preserves_rates_and_rejects_partial_state() {
     for outgoing_at_event in [false, true] {
         let time = -1.0_f64;

@@ -10,6 +10,32 @@ impl TransmissionLine {
         &mut self,
         edges: &[[Value; 3]],
     ) -> Result<(), String> {
+        self.promote_sampled_history_events_with_endpoint_rates(edges, None)
+    }
+
+    /// An event at the newest sample has no outgoing interpolation interval.
+    /// Its owner must independently solve the finite outgoing wave rates.
+    pub(crate) fn promote_sampled_history_events_with_endpoint_rates(
+        &mut self,
+        edges: &[[Value; 3]],
+        endpoint_rates: Option<[Value; 2]>,
+    ) -> Result<(), String> {
+        if let Some(rates) = endpoint_rates {
+            if rates.iter().any(|rate| !rate.is_finite())
+                || !edges.last().is_some_and(|edge| {
+                    edge[0] == edge[2]
+                        && self
+                            .state_history
+                            .back()
+                            .is_some_and(|sample| sample.time == edge[0])
+                })
+            {
+                return Err(format!(
+                    "transmission line '{}': invalid sampled endpoint rate owner",
+                    self.name
+                ));
+            }
+        }
         if edges.is_empty() {
             return Ok(());
         }
@@ -19,7 +45,7 @@ impl TransmissionLine {
                 self.name
             )
         };
-        if !self.supports_sided_history_events() || !self.history_events.is_empty() {
+        if !self.supports_sided_history_events() {
             return Err(fail());
         }
         let mut checkpoint = self.checkpoint_state()?;
@@ -36,6 +62,16 @@ impl TransmissionLine {
             {
                 return Err(fail());
             }
+            let owned = self
+                .history_events
+                .partition_point(|event| event.incoming.time < incoming);
+            if self
+                .history_events
+                .get(owned)
+                .is_some_and(|event| event.incoming.time <= outgoing)
+            {
+                return Err(fail());
+            }
             let at = |clock| {
                 let index = self
                     .state_history
@@ -44,17 +80,30 @@ impl TransmissionLine {
                     .get(index)
                     .filter(|sample| sample.time == clock)
                     .map(|_| index)
-                    .ok_or_else(&fail)
+                    .ok_or_else(|| format!(
+                        "transmission line '{}': declared event at {time:.17e} s is missing its sampled anchor at {clock:.17e} s",
+                        self.name
+                    ))
             };
             let left = at(incoming)?;
             let right = at(outgoing)?;
             // The outgoing derivative needs a same-side smooth interval. An
             // endpoint-only event must be supplied by a physical rate solver.
-            let after = self.state_history.get(right + 1).ok_or_else(|| format!(
-                "transmission line '{}': sampled event at {time:.17e} s requires an independently resolved outgoing rate at the history endpoint",
-                self.name
-            ))?;
-            if left >= right || edges.get(ordinal + 1).is_some_and(|e| after.time > e[1]) {
+            let after = self.state_history.get(right + 1).map(|sample| {
+                self.history_event_at(sample.time)
+                    .map_or(sample, |event| &event.incoming)
+            });
+            if after.is_none() && endpoint_rates.is_none() {
+                return Err(format!(
+                    "transmission line '{}': sampled event at {time:.17e} s requires an independently resolved outgoing rate at the history endpoint",
+                    self.name
+                ));
+            }
+            if left >= right
+                || edges
+                    .get(ordinal + 1)
+                    .is_some_and(|e| after.is_none_or(|after| after.time > e[1]))
+            {
                 return Err(fail());
             }
             let mut limits = [[0.0; 2]; 2];
@@ -76,10 +125,11 @@ impl TransmissionLine {
                         .checked_sub(2)
                         .and_then(|i| self.state_history.get(i))
                         .filter(|_| {
-                            !ordinal
-                                .checked_sub(1)
-                                .and_then(|i| edges.get(i))
-                                .is_some_and(|e| e[2] == previous.time)
+                            !self.owns_history_event(previous.time)
+                                && !ordinal
+                                    .checked_sub(1)
+                                    .and_then(|i| edges.get(i))
+                                    .is_some_and(|e| e[2] == previous.time)
                         });
                     Self::delayed_interpolate_with_slope(
                         self.lossless_interpolation_mode,
@@ -93,15 +143,19 @@ impl TransmissionLine {
                 } else {
                     0.0
                 };
-                let outgoing_slope = Self::delayed_interpolate_with_slope(
-                    self.lossless_interpolation_mode,
-                    None,
-                    outgoing_sample,
-                    after,
-                    outgoing,
-                    wave,
-                )
-                .1;
+                let outgoing_slope = if let Some(after) = after {
+                    Self::delayed_interpolate_with_slope(
+                        self.lossless_interpolation_mode,
+                        None,
+                        outgoing_sample,
+                        after,
+                        outgoing,
+                        wave,
+                    )
+                    .1
+                } else {
+                    endpoint_rates.expect("validated endpoint rate owner")[port]
+                };
                 slopes[0][port] = incoming_slope;
                 slopes[1][port] = outgoing_slope;
                 limits[0][port] = incoming_slope.mul_add(time - incoming, wave(incoming_sample));
@@ -148,6 +202,9 @@ impl TransmissionLine {
         checkpoint.state_history = state;
         checkpoint.forward_history = forward;
         checkpoint.backward_history = backward;
+        checkpoint
+            .events
+            .sort_by(|left, right| left[0].total_cmp(&right[0]));
         self.restore_checkpoint_state(&checkpoint)
     }
 }
