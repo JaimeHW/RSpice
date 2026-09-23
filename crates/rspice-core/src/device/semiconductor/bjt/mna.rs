@@ -1121,6 +1121,27 @@ impl Bjt {
         self.update_mna_from_solution(voltages, false);
     }
 
+    /// A retained periodic solution owns the accepted bias, including OFF
+    /// instances. Install the unlimited model there before starting Newton.
+    pub(crate) fn seed_accepted_periodic_bias(&mut self, voltages: &[Value]) {
+        if self.mna_promoted() {
+            self.update_mna_from_solution(voltages, false);
+            self.vbic_startup_load_pending = false;
+        } else {
+            let limiting = self.voltage_limiting_enabled;
+            let off = self.initial_off;
+            self.voltage_limiting_enabled = false;
+            self.initial_off = false;
+            self.reduced_linearization_cache_valid.set(false);
+            self.update(voltages);
+            self.voltage_limiting_enabled = limiting;
+            self.initial_off = off;
+            self.previous_reduced_linearization = self.reduced_linearization_cache.get();
+        }
+        self.remember_mna_iteration();
+        self.previous_reduced_linearization_valid = true;
+    }
+
     /// Recompute the dynamic charge branches and excess-phase rows at the
     /// limited bias just written by `update_mna`.
     fn refresh_mna_dynamic_state(&mut self) {

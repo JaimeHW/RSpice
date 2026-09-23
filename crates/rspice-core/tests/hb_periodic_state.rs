@@ -520,8 +520,8 @@ fn hb_envelope_source_selection_and_circuit_subset_fail_closed() {
 
     for (label, deck) in [
         (
-            "BJT history",
-            "unsupported BJT history\nV1 in 0 SIN(.7 .01 1meg)\nR1 in out 1k\nQ1 out in 0 QM\n.model QM NPN\n.end\n",
+            "VBIC history",
+            "unsupported VBIC history\nV1 in 0 SIN(.7 .01 1meg)\nR1 in out 1k\nQ1 out in 0 QM\n.model QM NPN LEVEL=4\n.end\n",
         ),
         (
             "MOS charge history",

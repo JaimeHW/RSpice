@@ -349,7 +349,7 @@ use CapabilitySupport::{Absent, Complete, Inapplicable, Restricted};
 /// Shared phrase for the envelope initializer's supported subset. The gap query
 /// reports the offending family by name; this states why it is a gap.
 const ENVELOPE_LINEAR_SUBSET: &str = "the envelope initializer supports R/L/C networks with expression \
-     capacitance, fixed mutual inductance, diodes, classic JFETs, and independent, controlled or behavioral sources";
+     capacitance, fixed mutual inductance, diodes, classic JFETs, Gummel-Poon BJTs, and independent, controlled or behavioral sources";
 const CYCLOSTATIONARY_FLICKER: &str = "stationary thermal/shot noise is exact; a nonzero flicker coefficient needs cyclostationary \
      colored-noise folding rather than a DC-bias substitution";
 const RESISTOR_CYCLOSTATIONARY_FLICKER: &str = "thermal noise and AF=2 signed-current flicker modulation are exact; other AF values \
@@ -457,7 +457,9 @@ pub(crate) const fn periodic_capability_descriptor(
             pss_state: Restricted(
                 "native BJT electrical storage and VBIC thermal/excess-phase states",
             ),
-            envelope: Absent(ENVELOPE_LINEAR_SUBSET),
+            envelope: Restricted(
+                "Gummel-Poon electrical charge history without thermal/excess-phase states",
+            ),
         },
         F::Mosfet => PeriodicCapabilityDescriptor {
             residual_jacobian: Restricted(
@@ -1464,6 +1466,18 @@ pub(in crate::engine) fn envelope_gaps(circuit: &CircuitData) -> Vec<CapabilityG
                         family,
                         "non-classic JFET accepted charge state",
                     ));
+                } else if family == F::Bjt
+                    && circuit.bjts.devices.iter().any(|bjt| {
+                        !bjt.uses_legacy_gummel_poon()
+                            || bjt.node_rth != 0
+                            || bjt.td > 0.0
+                            || bjt.legacy_excess_phase_delay() != 0.0
+                    })
+                {
+                    gaps.push(CapabilityGap::new(
+                        family,
+                        "BJT thermal, excess-phase or VBIC accepted state",
+                    ));
                 }
             }
         }
@@ -1734,7 +1748,7 @@ mod tests {
             F::Diode => [R, C, C, R, C, C],
             // Authored GP PTF adds an irrational delay to the formerly
             // complete charge descriptor; VBIC's finite delay states remain.
-            F::Bjt => [R, R, C, C, R, A],
+            F::Bjt => [R, R, C, C, R, R],
             F::Mosfet => [R, C, C, R, A, A],
             F::Bsim3v3 | F::Bsim4v8 => [A, R, I, A, A, A],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],

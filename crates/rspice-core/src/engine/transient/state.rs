@@ -491,6 +491,110 @@ impl Engine {
         history
     }
 
+    /// Restore native GP storage from periodic samples. A prepared copy exposes
+    /// the same charge derivatives for collapsed and promoted device topology;
+    /// the original device keeps its checkpoint/runtime identity.
+    pub(in crate::engine) fn initialize_periodic_bjt_history(
+        circuit: &mut crate::circuit::CircuitData,
+        solutions: [&[Value]; 3],
+        node_rates: &[Value],
+        history_step: Value,
+    ) -> Result<BjtTransientHistory, String> {
+        if solutions.iter().any(|solution| {
+            solution.len() != circuit.matrix_size()
+                || solution.iter().any(|value| !value.is_finite())
+        }) || node_rates.len() != circuit.num_nodes()
+            || node_rates.iter().any(|rate| !rate.is_finite())
+            || !history_step.is_finite()
+            || history_step <= 0.0
+        {
+            return Err("periodic BJT history has invalid samples or rates".into());
+        }
+        for bjt in &mut circuit.bjts.devices {
+            if !bjt.uses_legacy_gummel_poon()
+                || bjt.node_rth != 0
+                || bjt.td > 0.0
+                || bjt.legacy_excess_phase_delay() != 0.0
+            {
+                return Err(format!(
+                    "BJT '{}' has no periodic history initializer",
+                    bjt.name
+                ));
+            }
+            bjt.seed_accepted_periodic_bias(solutions[2]);
+        }
+        let older =
+            Self::initialize_bjt_history(circuit, solutions[0], ReactiveHistorySeed::SolvedBias);
+        let previous =
+            Self::initialize_bjt_history(circuit, solutions[1], ReactiveHistorySeed::SolvedBias);
+        let mut history =
+            Self::initialize_bjt_history(circuit, solutions[2], ReactiveHistorySeed::SolvedBias);
+        history.charge_q_prev_prev = previous.charge_q_prev;
+        history.charge_q_prev_prev_prev = older.charge_q_prev;
+        history.vbe_prev_prev = previous.vbe_prev;
+        history.vbc_prev_prev = previous.vbc_prev;
+        history.vcs_prev_prev = previous.vcs_prev;
+        history.dynamic_internal_prev_prev = previous.dynamic_internal_prev;
+        history.dynamic_linear_prev_prev = previous.dynamic_linear_prev;
+        for (index, bjt) in circuit.bjts.devices.iter().enumerate() {
+            let mut model = bjt.clone();
+            model.prepare_periodic_mna(circuit.num_nodes())?;
+            let (branches, _, _) = model.mna_charge_state_at_solution(solutions[2]);
+            let internal_rates: [Value; BJT_INTERNAL_STATE_DIM] =
+                std::array::from_fn(|i| Self::node_voltage(node_rates, model.mna_internal_node(i)));
+            let external_rates = [
+                model.node_collector,
+                model.node_base,
+                model.node_emitter,
+                model.node_substrate,
+            ]
+            .map(|node| Self::node_voltage(node_rates, node));
+            let mut currents = branches.map(|branch| {
+                branch
+                    .d_internal
+                    .iter()
+                    .zip(internal_rates)
+                    .chain(branch.d_external.iter().zip(external_rates))
+                    .map(|(derivative, rate)| derivative * rate)
+                    .sum::<Value>()
+            });
+            if let Some(charge) = model.legacy_external_bc_charge(solutions[2]) {
+                currents[BJT_QBCX_BRANCH_INDEX] = charge.capacitance
+                    * Self::differential_voltage(node_rates, charge.nodes[0], charge.nodes[1]);
+            }
+            let mut terminal = model.mna_terminal_currents_at_solution(solutions[2]);
+            for (branch, current) in branches.iter().zip(currents) {
+                if let Some(i) = branch.pos_external {
+                    terminal[i] += current;
+                }
+                if let Some(i) = branch.neg_external {
+                    terminal[i] -= current;
+                }
+            }
+            if currents
+                .iter()
+                .chain(&terminal)
+                .any(|value| !value.is_finite())
+            {
+                return Err(format!(
+                    "BJT '{}' has nonfinite periodic currents",
+                    bjt.name
+                ));
+            }
+            history.charge_cq_prev[index] = currents;
+            history.accepted_external_bc_current[index] = currents[BJT_QBCX_BRANCH_INDEX];
+            history.accepted_terminal_currents[index] = Some(terminal);
+            if !bjt.mna_promoted() {
+                history.ibe_prev[index] = currents[BJT_QBE_BRANCH_INDEX];
+                history.ibc_prev[index] = currents[BJT_QBC_BRANCH_INDEX];
+                history.ics_prev[index] = currents[BJT_QBCP_BRANCH_INDEX];
+            }
+        }
+        history.accepted_dt_prev = history_step;
+        history.accepted_dt_prev_prev = history_step;
+        Ok(history)
+    }
+
     #[inline]
     pub(in crate::engine) fn initialize_jfet_history(
         circuit: &crate::circuit::CircuitData,
