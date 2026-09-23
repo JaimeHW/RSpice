@@ -2286,20 +2286,18 @@ pub struct MonteCarloPayload {
 
 impl MonteCarloPayload {
     fn validate(&self) -> Result<(), ResultDocumentError> {
-        if let Some(indices) = &self.successful_trial_indices {
-            if indices.windows(2).any(|pair| pair[0] >= pair[1])
+        if let Some(indices) = &self.successful_trial_indices
+            && (indices.windows(2).any(|pair| pair[0] >= pair[1])
                 || self
                     .statistics
                     .iter()
-                    .any(|variable| variable.samples.len() != indices.len())
-            {
-                return Err(ResultDocumentError::Malformed {
-                    location: "Monte Carlo trial indices",
-                    detail:
-                        "trial indices must be increasing and align with every variable's samples"
-                            .into(),
-                });
-            }
+                    .any(|variable| variable.samples.len() != indices.len()))
+        {
+            return Err(ResultDocumentError::Malformed {
+                location: "Monte Carlo trial indices",
+                detail: "trial indices must be increasing and align with every variable's samples"
+                    .into(),
+            });
         }
         for statistics in &self.statistics {
             super::require_name("Monte Carlo variable", &statistics.name)?;

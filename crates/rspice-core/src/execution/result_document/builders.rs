@@ -2673,18 +2673,17 @@ impl AnalysisResultDocument {
         let end_trial = first_trial.checked_add(result.num_runs).ok_or_else(|| {
             source_error(LOCATION, "trial range overflows the supported index range")
         })?;
-        if let Some(indices) = &result.successful_trial_indices {
-            if indices.len() != successful_runs
+        if let Some(indices) = &result.successful_trial_indices
+            && (indices.len() != successful_runs
                 || indices
                     .iter()
                     .any(|&index| index < first_trial || index >= end_trial)
-                || indices.windows(2).any(|pair| pair[0] >= pair[1])
-            {
-                return Err(source_error(
-                    LOCATION,
-                    "trial identities disagree with the retained population",
-                ));
-            }
+                || indices.windows(2).any(|pair| pair[0] >= pair[1]))
+        {
+            return Err(source_error(
+                LOCATION,
+                "trial identities disagree with the retained population",
+            ));
         }
         let mut names = result.variables.keys().cloned().collect::<Vec<_>>();
         names.sort();

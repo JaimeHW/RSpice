@@ -98,9 +98,9 @@ pub(crate) fn source_identity(netlist: &Netlist) -> [u8; 32] {
         let mut logical = first.to_owned();
         let mut end = offset;
         // Look ahead without consuming the next independent physical card.
-        let mut following = lines.clone();
+        let following = lines.clone();
         let mut next_offset = offset;
-        while let Some((_, line)) = following.next() {
+        for (_, line) in following {
             next_offset += line.len();
             let Some(line) = meaningful(line, xyce) else {
                 continue;
