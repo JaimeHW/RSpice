@@ -117,8 +117,8 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-// The resolved timestep ceiling now bounds the retained period map.
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 101;
+// Resolved timestep and truncation bounds qualify the retained period map.
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 102;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -2854,7 +2854,7 @@ impl Engine {
         let coarse_period = *coarse.time.last().unwrap();
         let fine_period = *fine.time.last().unwrap();
         let period_scale = coarse_period.max(fine_period);
-        let reltol = self.voltage_reltol();
+        let reltol = self.voltage_reltol().min(self.transient_lte_reltol());
         let mut error = (coarse_period / period_scale - fine_period / period_scale).abs() / reltol;
         let channels = coarse
             .voltages
@@ -2880,6 +2880,10 @@ impl Engine {
                     .map(|pair| (pair, self.current_abstol())),
             );
         for ((coarse_values, fine_values), abstol) in channels {
+            // The estimator normalizes current/charge states into voltage
+            // units. Use that same scale here, and retain the circuit's
+            // physical accuracy floor when TIMEINT asks for a looser bound.
+            let abstol = self.pss_lte_abstol(abstol);
             if coarse_values.len() != coarse.time.len() || fine_values.len() != fine.time.len() {
                 return Err(SimulationError::Circuit(
                     "PSS refinement waveform has an inconsistent sample count".to_owned(),
@@ -4575,8 +4579,13 @@ impl Engine {
                 self.config.resource_limits.max_analysis_points,
             )?;
         }
-        let mut lte_estimator =
-            LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
+        let mut lte_estimator = LteEstimator::with_tolerances_and_reference(
+            self.transient_lte_reltol(),
+            self.transient_lte_abstol(),
+            self.config
+                .transient_lte_reference
+                .unwrap_or_else(|| self.config.spice_dialect.default_transient_lte_reference()),
+        );
         // Control independent dynamic states, not algebraic reactions. An
         // ideal source's companion current can ring under trapezoidal even
         // when its prescribed voltage is exact; shrinking dt cannot damp that
@@ -4858,7 +4867,7 @@ impl Engine {
                 );
                 let (lte, _) = lte_estimator.estimate(&lte_solution, dt);
                 lte_estimator.record(&lte_solution, dt);
-                Some(lte_estimator.recommend_scale(lte))
+                Some(lte_estimator.recommend_scale(lte / self.transient_trtol()))
             };
             trapgear.update(&new_solution, dt);
 
