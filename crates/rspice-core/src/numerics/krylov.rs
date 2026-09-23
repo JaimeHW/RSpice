@@ -391,13 +391,15 @@ fn check_vector<E>(values: &[Complex64], size: usize) -> Result<(), GmresError<E
     Ok(())
 }
 
+type OperatorResult<E> = Result<Vec<Complex64>, E>;
+
 /// Restarted right-preconditioned GMRES with mutable, fallible operators and
 /// an explicit relative tolerance. Scratch-owning Fourier transforms and
 /// sparse factorizations need no interior-mutability/error side channels.
 /// Convergence is normwise; an analysis still certifies its physical equations.
 pub(crate) fn try_gmres_with_abort<E>(
-    matvec: &mut dyn FnMut(&[Complex64]) -> Result<Vec<Complex64>, E>,
-    precondition: &mut dyn FnMut(&[Complex64]) -> Result<Vec<Complex64>, E>,
+    matvec: &mut dyn FnMut(&[Complex64]) -> OperatorResult<E>,
+    precondition: &mut dyn FnMut(&[Complex64]) -> OperatorResult<E>,
     b: &[Complex64],
     restart: usize,
     max_outer: usize,
