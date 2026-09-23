@@ -19,7 +19,7 @@ pub(super) struct Bsim4TerminalCharges {
 /// coefficients for the terminal charges, the separate ones for the
 /// non-quasi-static branch, and the step size.
 #[derive(Clone, Copy)]
-pub(super) struct Bsim4CompanionStep<'a> {
+pub(in crate::engine) struct Bsim4CompanionStep<'a> {
     pub coeff: &'a CompanionCoefficients,
     pub trnqs_coeff: &'a CompanionCoefficients,
     pub dt: Value,
@@ -813,7 +813,7 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn initialize_bsim4_history(
+    pub(in crate::engine) fn initialize_bsim4_history(
         circuit: &crate::circuit::CircuitData,
         solution: &[Value],
     ) -> Bsim4TransientHistory {
@@ -1076,7 +1076,7 @@ impl Engine {
     /// mode-assembled `gc**·ag0` capacitance matrix plus the `ceqq*`
     /// equivalent charge currents (b4ld.c charge load, trnqsMod = 0).
     #[inline]
-    pub(super) fn stamp_bsim4_transient_companions(
+    pub(in crate::engine) fn stamp_bsim4_transient_companions(
         circuit: &crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
@@ -1132,6 +1132,7 @@ impl Engine {
             // The history carries per-device charges; the device stamp
             // applies the parallel multiplier itself (b4ld.c: mult_q * ceqq*).
             if dev.uses_trnqs() {
+                dev.remove_trnqs_dc_anchor(&mut stamper);
                 let qcdump = dev.trnqs_qcdump_state(voltages);
                 let (cqcheq, cqcdump) = Self::bsim4_trnqs_companion_currents(
                     coeff,
@@ -1178,7 +1179,7 @@ impl Engine {
 
     /// Commit the BSIM4 charge history after an accepted timestep.
     #[inline]
-    pub(super) fn update_bsim4_history(
+    pub(in crate::engine) fn update_bsim4_history(
         circuit: &crate::circuit::CircuitData,
         voltages: &[Value],
         step: Bsim4CompanionStep<'_>,

@@ -485,7 +485,7 @@ pub(crate) const fn periodic_capability_descriptor(
             dynamic_state: Complete,
             small_signal: Complete,
             noise: Restricted("native BSIM4 TNOIMOD=0/1 and FNOIMOD=0/1"),
-            pss_state: Absent("BSIM4 charge and NQS history"),
+            pss_state: Complete,
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
         F::B3SoiDd => PeriodicCapabilityDescriptor {
@@ -1750,7 +1750,7 @@ mod tests {
             F::Bjt => [R, R, C, C, R, R],
             F::Mosfet => [R, C, C, R, A, A],
             F::Bsim3v3 => [C, C, C, C, C, C],
-            F::Bsim4v8 => [C, C, C, R, A, A],
+            F::Bsim4v8 => [C, C, C, R, C, A],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],
             F::Ekv26 | F::Ekv3 | F::Vdmos => [I, C, A, A, A, A],
             F::Jfet => [R, C, C, R, R, R],

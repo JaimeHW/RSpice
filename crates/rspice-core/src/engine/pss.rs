@@ -114,7 +114,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 96;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 97;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -2004,7 +2004,7 @@ impl Engine {
             &circuit.jfet_history,
             &circuit.bjt_snapshot_cache,
             &circuit.bsim3_history,
-            &Default::default(),
+            &circuit.bsim4_history,
         );
         let junction_history =
             Self::normalize_accepted_junction_transient_history_checkpoint_for_order_one(
@@ -4062,6 +4062,7 @@ impl Engine {
             bjt_history,
             jfet_history,
             bsim3_history,
+            bsim4_history,
             bjt_snapshot_cache,
             ..
         } = pss;
@@ -4242,6 +4243,19 @@ impl Engine {
                     dt,
                 },
                 bsim3_history,
+                physical_probe,
+            );
+            Self::stamp_bsim4_transient_companions(
+                circuit,
+                matrix,
+                rhs,
+                linearize_at,
+                super::transient::Bsim4CompanionStep {
+                    coeff,
+                    trnqs_coeff: coeff,
+                    dt,
+                },
+                bsim4_history,
                 physical_probe,
             );
         }
@@ -4631,6 +4645,7 @@ impl Engine {
                     bjt_history,
                     jfet_history,
                     bsim3_history,
+                    bsim4_history,
                     bjt_snapshot_cache,
                     ..
                 } = circuit;
@@ -4651,6 +4666,16 @@ impl Engine {
                 )?;
                 Self::accept_jfet_history(circuit, jfet_history, &new_solution, &coeff, dt, false);
                 Self::update_bsim3_history(circuit, &new_solution, &coeff, dt, bsim3_history);
+                Self::update_bsim4_history(
+                    circuit,
+                    &new_solution,
+                    super::transient::Bsim4CompanionStep {
+                        coeff: &coeff,
+                        trnqs_coeff: &coeff,
+                        dt,
+                    },
+                    bsim4_history,
+                );
             }
 
             circuit.accept_node_solution(&new_solution);

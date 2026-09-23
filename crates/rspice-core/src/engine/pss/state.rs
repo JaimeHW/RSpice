@@ -64,7 +64,17 @@ enum ChargeBranch {
         pos: usize,
         neg: usize,
     },
+    Bsim4 {
+        device: usize,
+        port: usize,
+        pos: usize,
+        neg: usize,
+    },
     Bsim3Nqs {
+        device: usize,
+        node: usize,
+    },
+    Bsim4Nqs {
         device: usize,
         node: usize,
     },
@@ -201,7 +211,10 @@ impl PssStateBasis {
             return Ok(basis);
         }
         let node_count = circuit.num_nodes() + 1;
-        let mut voltage_constraints = if circuit.vcvs.is_empty() && circuit.bsim3v3.is_empty() {
+        let mut voltage_constraints = if circuit.vcvs.is_empty()
+            && circuit.bsim3v3.is_empty()
+            && circuit.bsim4v8.is_empty()
+        {
             None
         } else {
             let mut constraints = PssVoltageConstraintBuilder::new(node_count, limits)?;
@@ -361,6 +374,32 @@ impl PssStateBasis {
                 }
             }
         }
+        for (device, mos) in circuit.bsim4v8.devices.iter().enumerate() {
+            for (port, nodes) in mos
+                .shooting_terminal_storage_nodes()
+                .into_iter()
+                .enumerate()
+            {
+                if let Some((pos, neg)) = nodes
+                    && add(pos, neg, ForestValue::State(charge_branches.len()))?
+                {
+                    charge_branches.push(ChargeBranch::Bsim4 {
+                        device,
+                        port,
+                        pos,
+                        neg,
+                    });
+                }
+            }
+            if mos.uses_trnqs() {
+                let node = mos.node_charge_deficit;
+                // This node form represents stored charge only during the
+                // coordinate projection; set_state restores its raw deficit.
+                if add(node, 0, ForestValue::State(charge_branches.len()))? {
+                    charge_branches.push(ChargeBranch::Bsim4Nqs { device, node });
+                }
+            }
+        }
         let mut visited = vec![false; forest_node_count];
         let mut forest = Vec::new();
         let mut pending = Vec::new();
@@ -387,6 +426,11 @@ impl PssStateBasis {
         }
         let mut node_units = vec![CoordinateUnit::Voltage; node_count];
         for mos in &circuit.bsim3v3.devices {
+            if mos.uses_trnqs() {
+                node_units[mos.node_charge_deficit] = CoordinateUnit::ScaledCharge;
+            }
+        }
+        for mos in &circuit.bsim4v8.devices {
             if mos.uses_trnqs() {
                 node_units[mos.node_charge_deficit] = CoordinateUnit::ScaledCharge;
             }
@@ -450,8 +494,18 @@ impl PssStateBasis {
                         ["vgd", "vgs", "vgb", "vdb", "vsb"][port]
                     )
                 }
+                ChargeBranch::Bsim4 { device, port, .. } => {
+                    format!(
+                        "M:{}:{}",
+                        circuit.bsim4v8.devices[device].name,
+                        ["vgd", "vgs", "vgb", "vgmd", "vgms", "vgmb", "vddb", "vssb"][port]
+                    )
+                }
                 ChargeBranch::Bsim3Nqs { device, .. } => {
                     format!("M:{}:qchannel/1e-9", circuit.bsim3v3.devices[device].name)
+                }
+                ChargeBranch::Bsim4Nqs { device, .. } => {
+                    format!("M:{}:qchannel/1e-9", circuit.bsim4v8.devices[device].name)
                 }
             })
             .chain(
@@ -475,8 +529,9 @@ impl PssStateBasis {
             }
             ChargeBranch::Bjt { pos, neg, .. }
             | ChargeBranch::Jfet { pos, neg, .. }
-            | ChargeBranch::Bsim3 { pos, neg, .. } => (pos, neg),
-            ChargeBranch::Bsim3Nqs { node, .. } => (node, 0),
+            | ChargeBranch::Bsim3 { pos, neg, .. }
+            | ChargeBranch::Bsim4 { pos, neg, .. } => (pos, neg),
+            ChargeBranch::Bsim3Nqs { node, .. } | ChargeBranch::Bsim4Nqs { node, .. } => (node, 0),
         }
     }
 }
@@ -491,6 +546,7 @@ pub(in crate::engine) struct PssCircuit {
     pub(super) bjt_history: super::super::transient::BjtTransientHistory,
     pub(super) jfet_history: super::super::transient::JfetTransientHistory,
     pub(super) bsim3_history: super::super::transient::Bsim3TransientHistory,
+    pub(super) bsim4_history: super::super::transient::Bsim4TransientHistory,
     pub(super) bjt_snapshot_cache: Vec<Option<crate::device::semiconductor::BjtChargeSnapshot>>,
     /// Trial currents computed before a small Newton voltage correction is
     /// rounded into the absolute solution. Read only on accepted steps.
@@ -593,6 +649,7 @@ impl PssCircuit {
             super::super::transient::ReactiveHistorySeed::SolvedBias,
         );
         let bsim3_history = Engine::initialize_bsim3_history(&circuit, &solution_scratch[1..]);
+        let bsim4_history = Engine::initialize_bsim4_history(&circuit, &solution_scratch[1..]);
         let integral_probe_scales = vec![
             1.0;
             circuit.behavioral_sources.integral_count()
@@ -604,6 +661,7 @@ impl PssCircuit {
             bjt_history,
             jfet_history,
             bsim3_history,
+            bsim4_history,
             bjt_snapshot_cache,
             capacitor_trial_currents,
             inductor_trial_offsets,
@@ -666,7 +724,7 @@ impl PssCircuit {
     fn is_charge_coordinate(&self, index: usize) -> bool {
         matches!(
             self.basis.charge_branches.get(index),
-            Some(ChargeBranch::Bsim3Nqs { .. })
+            Some(ChargeBranch::Bsim3Nqs { .. } | ChargeBranch::Bsim4Nqs { .. })
         )
     }
 
@@ -794,11 +852,17 @@ impl PssCircuit {
                 ChargeBranch::Diode(index) => self.diode_history.vd_prev[index],
                 ChargeBranch::Bjt { pos, neg, .. }
                 | ChargeBranch::Jfet { pos, neg, .. }
-                | ChargeBranch::Bsim3 { pos, neg, .. } => {
+                | ChargeBranch::Bsim3 { pos, neg, .. }
+                | ChargeBranch::Bsim4 { pos, neg, .. } => {
                     self.solution_scratch[pos] - self.solution_scratch[neg]
                 }
                 ChargeBranch::Bsim3Nqs { device, .. } => {
                     self.circuit.bsim3v3.devices[device]
+                        .shooting_nqs_state(&self.solution_scratch[1..])
+                        .0
+                }
+                ChargeBranch::Bsim4Nqs { device, .. } => {
+                    self.circuit.bsim4v8.devices[device]
                         .shooting_nqs_state(&self.solution_scratch[1..])
                         .0
                 }
@@ -867,6 +931,10 @@ impl PssCircuit {
                 self.solution_scratch[node] = self.circuit.bsim3v3.devices[device]
                     .shooting_nqs_seed(state[index], &self.solution_scratch[1..]);
             }
+            if let ChargeBranch::Bsim4Nqs { device, node } = *branch {
+                self.solution_scratch[node] = self.circuit.bsim4v8.devices[device]
+                    .shooting_nqs_seed(state[index], &self.solution_scratch[1..]);
+            }
         }
         self.current_source_times = [0.0; 2];
         let circuit = &mut self.circuit;
@@ -927,7 +995,11 @@ impl PssCircuit {
         for device in &mut circuit.bsim3v3.devices {
             device.seed_accepted_periodic_bias(&self.solution_scratch[1..]);
         }
+        for device in &mut circuit.bsim4v8.devices {
+            device.seed_accepted_periodic_bias(&self.solution_scratch[1..]);
+        }
         self.bsim3_history = Engine::initialize_bsim3_history(circuit, &self.solution_scratch[1..]);
+        self.bsim4_history = Engine::initialize_bsim4_history(circuit, &self.solution_scratch[1..]);
         Ok(())
     }
 
@@ -950,7 +1022,11 @@ impl PssCircuit {
         for device in &mut self.circuit.bsim3v3.devices {
             device.seed_accepted_periodic_bias(solution);
         }
+        for device in &mut self.circuit.bsim4v8.devices {
+            device.seed_accepted_periodic_bias(solution);
+        }
         self.bsim3_history = Engine::initialize_bsim3_history(&self.circuit, solution);
+        self.bsim4_history = Engine::initialize_bsim4_history(&self.circuit, solution);
     }
 
     pub(in crate::engine) fn bjt_noise_snapshots(
@@ -1039,11 +1115,17 @@ impl PssCircuit {
                 ChargeBranch::Diode(index) => self.diode_history.vd_prev[index],
                 ChargeBranch::Bjt { pos, neg, .. }
                 | ChargeBranch::Jfet { pos, neg, .. }
-                | ChargeBranch::Bsim3 { pos, neg, .. } => {
+                | ChargeBranch::Bsim3 { pos, neg, .. }
+                | ChargeBranch::Bsim4 { pos, neg, .. } => {
                     self.solution_scratch[pos] - self.solution_scratch[neg]
                 }
                 ChargeBranch::Bsim3Nqs { device, .. } => {
                     self.circuit.bsim3v3.devices[device]
+                        .shooting_nqs_state(&self.solution_scratch[1..])
+                        .0
+                }
+                ChargeBranch::Bsim4Nqs { device, .. } => {
+                    self.circuit.bsim4v8.devices[device]
                         .shooting_nqs_state(&self.solution_scratch[1..])
                         .0
                 }
@@ -1057,7 +1139,9 @@ impl PssCircuit {
                 | ChargeBranch::Bjt { .. }
                 | ChargeBranch::Jfet { .. }
                 | ChargeBranch::Bsim3 { .. }
-                | ChargeBranch::Bsim3Nqs { .. } => None,
+                | ChargeBranch::Bsim3Nqs { .. }
+                | ChargeBranch::Bsim4 { .. }
+                | ChargeBranch::Bsim4Nqs { .. } => None,
             };
             let branch = existing_branch.unwrap_or_else(|| self.circuit.allocate_branch());
             self.circuit.voltage_sources.add(
@@ -1092,6 +1176,12 @@ impl PssCircuit {
                     self.basis.charge_branches[index]
                 {
                     self.circuit.bsim3v3.devices[device]
+                        .periodic_coupling_nodes()
+                        .to_vec()
+                } else if let ChargeBranch::Bsim4Nqs { device, .. } =
+                    self.basis.charge_branches[index]
+                {
+                    self.circuit.bsim4v8.devices[device]
                         .periodic_coupling_nodes()
                         .to_vec()
                 } else {
@@ -1146,6 +1236,13 @@ impl PssCircuit {
         let nodes = self.circuit.num_nodes();
         let mut stamps = Vec::new();
         for device in &self.circuit.bsim3v3.devices {
+            device.stamp_shooting_initial_relaxation(
+                solution,
+                &mut super::super::transient::StaticMatrixChargeStamper { matrix, rhs },
+                physical_probe,
+            );
+        }
+        for device in &self.circuit.bsim4v8.devices {
             device.stamp_shooting_initial_relaxation(
                 solution,
                 &mut super::super::transient::StaticMatrixChargeStamper { matrix, rhs },
@@ -1246,6 +1343,16 @@ impl PssCircuit {
                     physical_probe,
                 );
             }
+            for device in &self.circuit.bsim4v8.devices {
+                device.stamp_shooting_initial_charge(
+                    solution,
+                    &mut super::super::transient::StaticMatrixChargeStamper {
+                        matrix: charge,
+                        rhs: unused_rhs,
+                    },
+                    physical_probe,
+                );
+            }
             rates.project(charge.values_mut(), &self.circuit, rhs, &mut stamps)
         })?;
         for (row, col, value) in stamps {
@@ -1255,6 +1362,23 @@ impl PssCircuit {
             let row = nodes + branch - 1;
             if let ChargeBranch::Bsim3Nqs { device, .. } = self.basis.charge_branches[index] {
                 let device = &self.circuit.bsim3v3.devices[device];
+                let target = device.shooting_nqs_state(&self.solution_scratch[1..]).0;
+                let (current, derivatives) = device.shooting_nqs_state(solution);
+                rhs[row] = target - current;
+                for (node, derivative) in device
+                    .periodic_coupling_nodes()
+                    .into_iter()
+                    .zip(derivatives)
+                {
+                    if node != 0 {
+                        matrix.add(row, node - 1, derivative);
+                        rhs[row] += derivative * solution[node - 1];
+                    }
+                }
+                continue;
+            }
+            if let ChargeBranch::Bsim4Nqs { device, .. } = self.basis.charge_branches[index] {
+                let device = &self.circuit.bsim4v8.devices[device];
                 let target = device.shooting_nqs_state(&self.solution_scratch[1..]).0;
                 let (current, derivatives) = device.shooting_nqs_state(solution);
                 rhs[row] = target - current;
@@ -1746,6 +1870,19 @@ impl PssCircuit {
             .map(move |index| {
                 if let ChargeBranch::Bsim3Nqs { device, .. } = self.basis.charge_branches[index] {
                     let device = &self.circuit.bsim3v3.devices[device];
+                    let Some(linearize_at) = linearize_at else {
+                        return device.shooting_nqs_state(solution).0;
+                    };
+                    let (_, derivatives) = device.shooting_nqs_state(linearize_at);
+                    return device
+                        .periodic_coupling_nodes()
+                        .into_iter()
+                        .zip(derivatives)
+                        .map(|(node, derivative)| voltage(node) * derivative)
+                        .sum();
+                }
+                if let ChargeBranch::Bsim4Nqs { device, .. } = self.basis.charge_branches[index] {
+                    let device = &self.circuit.bsim4v8.devices[device];
                     let Some(linearize_at) = linearize_at else {
                         return device.shooting_nqs_state(solution).0;
                     };

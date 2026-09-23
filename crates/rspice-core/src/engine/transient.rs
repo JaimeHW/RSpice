@@ -732,7 +732,7 @@ pub(in crate::engine) use breakpoints::{BreakpointWindow, SourceBreakpointGeomet
 use breakpoints::{DynamicBreakpointSink, TlineArrivalEvent, TlineWaveChange};
 pub(in crate::engine) use checkpoint::CheckpointState;
 use checkpoint::{AcceptedTransientRuntime, CheckpointIdentity, CheckpointIntegrationState};
-use state_advanced_mos::Bsim4CompanionStep;
+pub(in crate::engine) use state_advanced_mos::Bsim4CompanionStep;
 use state_commit::{AcceptedReactiveSnapshots, AcceptedReactiveStep, ReactiveBreakpointScheduling};
 use state_recovery::{ForceAcceptLimits, SourceActivityRecovery};
 use step_control::{SourceActivityDeltas, StepBiasFloors};
@@ -810,7 +810,7 @@ pub use fft::{
 mod history;
 use history::*;
 pub(in crate::engine) use history::{
-    BjtTransientHistory, Bsim3TransientHistory, JfetTransientHistory,
+    BjtTransientHistory, Bsim3TransientHistory, Bsim4TransientHistory, JfetTransientHistory,
 };
 
 #[derive(Debug, Clone, Copy)]

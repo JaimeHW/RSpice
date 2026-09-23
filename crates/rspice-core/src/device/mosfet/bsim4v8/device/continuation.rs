@@ -3,6 +3,18 @@
 use super::*;
 
 impl Bsim4v8Device {
+    /// DC anchors the otherwise unused deficit node. A dynamic load owns its
+    /// physical relaxation/storage equation and must remove that DC anchor.
+    pub(crate) fn remove_trnqs_dc_anchor(&self, matrix: &mut impl MatrixStamper) {
+        if self.uses_trnqs() {
+            matrix.stamp(
+                self.node_charge_deficit,
+                self.node_charge_deficit,
+                -self.multiplier * self.gmin.max(1e-12),
+            );
+        }
+    }
+
     /// Stored channel charge divided by M*1n. The electrical terminals may
     /// move algebraically while this storage coordinate remains constrained.
     pub(crate) fn shooting_nqs_state(&self, solution: &[Value]) -> (Value, [Value; 12]) {
@@ -60,6 +72,7 @@ impl Bsim4v8Device {
         physical_probe: bool,
     ) {
         if self.uses_trnqs() {
+            self.remove_trnqs_dc_anchor(matrix);
             let (charge, mode) = self.charge_at_with_probe(solution, physical_probe);
             self.stamp_trnqs_charge_companion_with_probe(
                 &charge,
