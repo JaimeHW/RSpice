@@ -658,6 +658,27 @@ impl AnalysisDraft {
         }
     }
 
+    /// Solver ownership including choices stored in the numerical options.
+    #[must_use]
+    pub fn solver_ownership_with_options(
+        &self,
+        record: Option<&crate::simulation::plan::AnalysisNumericOverride>,
+    ) -> crate::simulation::plan::SolverOwnership {
+        use crate::simulation::dialog::HbTimeDomainMode;
+        use crate::simulation::plan::{NumericOverrideOption, OverrideValue};
+
+        let mut ownership = self.solver_ownership();
+        if matches!(self, Self::HarmonicBalance(_)) {
+            ownership.time_integration = Some(matches!(
+                record.and_then(|record| record.stated(NumericOverrideOption::HbInitialState)),
+                Some(OverrideValue::TimeDomainMode(
+                    HbTimeDomainMode::TransientAssisted
+                ))
+            ));
+        }
+        ownership
+    }
+
     /// Exact kind carried by this tagged draft.
     #[must_use]
     pub const fn kind(&self) -> AnalysisKind {

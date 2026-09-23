@@ -343,6 +343,9 @@ pub(super) const RELIABILITY_OWNS_REPORTING: &str = "Reliability reports the Yea
 pub(super) const RELIABILITY_CONSTANT_STRESS: &str = "this Reliability mission uses constant operating-point stress; enable Transient stress to configure time integration";
 pub(super) const STUDY_DC_BASE: &str = "this study's built-in base runs only DC operating points; select a configured time-domain base analysis to use time-integration controls";
 const STUDY_OPTION_NOT_INHERITED: &str = "the selected base and its active prerequisites do not inherit this study default; configure the option on the analysis that owns it";
+const HB_TRANSIENT_INITIALIZER: &str =
+    "select Transient-assisted under Initial state to configure the HB startup integration";
+const HB_INITIALIZER_OWNS_REPORTING: &str = "HB startup retains its complete internal trajectory; transient reporting controls do not change the harmonic-balance result";
 pub(super) const TRANSIENT_OWNS_STEP_CEILING: &str =
     "the transient's own Max step field owns this, and one bound cannot have two copies";
 /// `.OPTIONS METHOD` on a PSS analysis.
@@ -692,6 +695,16 @@ impl NumericOverrideOption {
         if let Some(options) = ownership.study_inherited_options {
             return (options & (1_u64 << self as u32) == 0).then_some(STUDY_OPTION_NOT_INHERITED);
         }
+        if kind == AnalysisKind::HarmonicBalance && self.spec().reach == OptionReach::TimeStepped {
+            return if matches!(
+                self,
+                Self::StrobeInterval | Self::OutputTimePoints | Self::RetainEverySignal
+            ) {
+                Some(HB_INITIALIZER_OWNS_REPORTING)
+            } else {
+                (ownership.time_integration != Some(true)).then_some(HB_TRANSIENT_INITIALIZER)
+            };
+        }
         self.refusal_for(kind).or_else(|| match self {
             _ if ownership.time_integration == Some(false)
                 && self.spec().reach == OptionReach::TimeStepped =>
@@ -747,7 +760,8 @@ pub struct SolverOwnership {
     /// analysis kind, while `Some(false)` excludes an unused HB startup control.
     pub hb_initializer: Option<bool>,
     /// Reliability's stress mode and studies' built-in DC base can exclude
-    /// time integration. `None` leaves the decision to the kind.
+    /// time integration; HB's transient-assisted initializer enables it.
+    /// `None` leaves the decision to the kind.
     pub time_integration: Option<bool>,
     /// Runtime-only applicability of study defaults, resolved against the
     /// selected base and its actual execution stages. Never serialized.

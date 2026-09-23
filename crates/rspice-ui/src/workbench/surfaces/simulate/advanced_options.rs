@@ -85,7 +85,13 @@ pub(super) fn sections(
     record: Option<&AnalysisNumericOverride>,
     options: &SimulationOptions,
 ) -> Vec<AdvancedOptionSection> {
-    sections_with_ownership(kind, draft, record, options, draft.solver_ownership())
+    sections_with_ownership(
+        kind,
+        draft,
+        record,
+        options,
+        draft.solver_ownership_with_options(record),
+    )
 }
 
 fn sections_with_ownership(
@@ -415,7 +421,13 @@ pub(super) fn form_rows(
     record: Option<&AnalysisNumericOverride>,
     options: &SimulationOptions,
 ) -> Vec<AdvancedOptionSection> {
-    form_rows_with_ownership(kind, draft, record, options, draft.solver_ownership())
+    form_rows_with_ownership(
+        kind,
+        draft,
+        record,
+        options,
+        draft.solver_ownership_with_options(record),
+    )
 }
 
 pub(super) fn form_rows_with_ownership(

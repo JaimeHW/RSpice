@@ -46,7 +46,7 @@ pub(in crate::workbench::surfaces::simulate) fn fields(
         .and_then(|plan| plan.instance(instance))
         .and_then(|target| target.numeric_override());
     let ownership = plan.map_or_else(
-        || draft.solver_ownership(),
+        || draft.solver_ownership_with_options(record),
         |plan| plan.solver_ownership_for_draft(draft, record),
     );
     let offered = if ownership.study_inherited_options.is_some() {
@@ -64,6 +64,12 @@ pub(in crate::workbench::surfaces::simulate) fn fields(
         super::field_note(
             ui,
             "These defaults apply to study stages that inherit them. Settings on the selected base analysis and its prerequisites take precedence.",
+        );
+    }
+    if matches!(draft, AnalysisDraft::HarmonicBalance(_)) && ownership.time_integration == Some(true) {
+        super::field_note(
+            ui,
+            "Time-integration settings control the transient used to initialize harmonic balance.",
         );
     }
     if draft.kind().inherits_periodic_solver_options() {

@@ -16,7 +16,7 @@ impl SimulationPlan {
         defaults: Option<&AnalysisNumericOverride>,
     ) -> SolverOwnership {
         self.study_solver_ownership(draft, defaults)
-            .unwrap_or_else(|| draft.solver_ownership())
+            .unwrap_or_else(|| draft.solver_ownership_with_options(defaults))
     }
 
     fn study_solver_ownership(

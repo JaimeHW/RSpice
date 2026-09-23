@@ -17,6 +17,84 @@ use crate::simulation::plan::{AnalysisKind, NumericOverrideOption as O, SolverOw
 use crate::workbench::state::SimulationPage;
 
 #[test]
+fn hb_transient_startup_controls_reach_the_solver_and_follow_mode_changes() {
+    let (mut app, id) = studio(AnalysisKind::HarmonicBalance);
+    assert!(
+        !offered(&app, id)
+            .iter()
+            .any(|(option, _)| *option == O::Itl4)
+    );
+    super::super::page_solver::write_numeric_record(&mut app, id, O::HbInitialState, "1").unwrap();
+    for (option, value) in [
+        (O::Itl4, "80"),
+        (O::MaximumTimestep, "2u"),
+        (O::LteReltol, "2e-4"),
+    ] {
+        assert!(
+            offered(&app, id)
+                .iter()
+                .any(|(offered, _)| *offered == option)
+        );
+        super::super::page_solver::write_numeric_record(&mut app, id, option, value).unwrap();
+    }
+    for option in [O::StrobeInterval, O::OutputTimePoints, O::RetainEverySignal] {
+        assert!(
+            !offered(&app, id)
+                .iter()
+                .any(|(offered, _)| *offered == option)
+        );
+    }
+    let plan = app.state.sim_setup.stable_analysis_plan().unwrap();
+    let record = plan
+        .instance(id)
+        .unwrap()
+        .numeric_override()
+        .unwrap()
+        .clone();
+    let mut restored = plan.clone();
+    restored.prepare_after_restore();
+    assert_eq!(
+        restored.instance(id).unwrap().numeric_override(),
+        Some(&record)
+    );
+    let circuit = rspice_core::Netlist::parse(&format!(
+        "HB startup controls\nV1 in 0 DC 1 AC 1\nR1 in out 1k\nR2 out 0 1k\nC1 out 0 100n\n{}\n.end\n",
+        record.to_spice_options()
+    )).unwrap();
+    let engine = rspice_core::Engine::default().resolved_for_netlist(&circuit);
+    assert_eq!(engine.config().transient_timeint_max_timestep, Some(2e-6));
+    assert_eq!(engine.config().transient_lte_reltol, Some(2e-4));
+    assert!(
+        engine
+            .run_hb(
+                &circuit,
+                rspice_core::analysis::HbConfig::new(1000.0).with_harmonics(3)
+            )
+            .unwrap()
+            .result
+            .converged
+    );
+    let before = serde_json::to_value(plan).unwrap();
+    assert!(
+        super::super::page_solver::write_numeric_record(&mut app, id, O::HbInitialState, "0")
+            .is_err()
+    );
+    assert_eq!(
+        serde_json::to_value(app.state.sim_setup.stable_analysis_plan().unwrap()).unwrap(),
+        before
+    );
+    for option in [O::Itl4, O::MaximumTimestep, O::LteReltol] {
+        commit(&mut app, id, &[OptionEdit::Clear(option)]);
+    }
+    super::super::page_solver::write_numeric_record(&mut app, id, O::HbInitialState, "0").unwrap();
+    assert!(
+        !offered(&app, id)
+            .iter()
+            .any(|(option, _)| *option == O::Itl4)
+    );
+}
+
+#[test]
 fn configured_study_form_writer_and_solver_ledger_share_base_ownership() {
     let (mut app, id) = studio(AnalysisKind::MonteCarlo);
     let plan = app.state.sim_setup.stable_analysis_plan_mut().unwrap();
