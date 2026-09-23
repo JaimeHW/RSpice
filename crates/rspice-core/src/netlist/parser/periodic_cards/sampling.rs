@@ -1,9 +1,7 @@
 //! Strict optional sampling controls for `.PNOISE`.
 
 use super::*;
-use crate::analysis::pnoise::{
-    PeriodicNoiseEdge, PeriodicNoiseEdgeDirection, PeriodicNoiseSampling,
-};
+use crate::netlist::{PeriodicNoiseEdge, PeriodicNoiseEdgeDirection, PeriodicNoiseSampling};
 
 #[derive(Default)]
 pub(super) struct SamplingFields {
