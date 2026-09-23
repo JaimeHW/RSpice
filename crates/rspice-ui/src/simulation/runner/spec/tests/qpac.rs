@@ -114,7 +114,7 @@ fn qpac_controls_survive_draft_worker_native_card_and_dependency_dispatch() {
         4e-10
     );
     for (i, &offset) in result.metadata.request.offsets_hz.iter().enumerate() {
-        let frequency = offset + 1414.2135623730951 - 1732.0508075688772;
+        let frequency = offset + 1414.213562373095 - 1732.0508075688772;
         let expected = rspice_core::Complex64::new(1.0, 0.0)
             / rspice_core::Complex64::new(1.0, std::f64::consts::TAU * frequency * 1e-4);
         assert!((result.output_transfer[i] - expected).norm() < 1e-9);

@@ -111,7 +111,7 @@ fn study_measurement_units_follow_quasi_periodic_channels() {
     let point = rspice_core::Engine::default()
         .run_qpss(
             &deck,
-            rspice_core::engine::QpssConfig::new(vec![1000.0, 1414.2135623730951], vec![1, 1]),
+            rspice_core::engine::QpssConfig::new(vec![1000.0, 1414.213562373095], vec![1, 1]),
         )
         .unwrap();
     let result = SimulationResult::from_qpss_operating_point(Arc::new(point)).unwrap();

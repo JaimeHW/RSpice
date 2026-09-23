@@ -261,17 +261,17 @@ fn qp_study_all_families_use_the_varied_circuit_and_retained_lattice() {
                     "tuple:1,0:real:V(out)" => fundamental.re,
                     "tuple:1,0:imag:V(out)" => fundamental.im,
                     "tuple:-1,0:imag:V(out)" => -fundamental.im,
-                    "tuple:0,1:magnitude:V(out)" => 0.001 * impedance(r, 1414.2135623730951).norm(),
+                    "tuple:0,1:magnitude:V(out)" => 0.001 * impedance(r, 1414.213562373095).norm(),
                     "tuple:0,0:real:V(out)" => 0.2 * impedance(r, 0.0).re / r,
                     "scalar:qpss.normalized_residual" => {
                         assert!(actual <= 1.0);
                         continue;
                     }
                     "bin:0:real:V(out,0) [k=[1, -1]]" => {
-                        (drive(0.002, 73.0) * impedance(r, 100.0 + 1000.0 - 1414.2135623730951)).re
+                        (drive(0.002, 73.0) * impedance(r, 100.0 + 1000.0 - 1414.213562373095)).re
                     }
                     "bin:0:imag:V(out,0) [k=[1, -1]]" => {
-                        (drive(0.002, 73.0) * impedance(r, 100.0 + 1000.0 - 1414.2135623730951)).im
+                        (drive(0.002, 73.0) * impedance(r, 100.0 + 1000.0 - 1414.213562373095)).im
                     }
                     "bin:0:real:H(V(out,0)/V(V1)) [in=[1, -1]; out=[1, -1]]" => {
                         impedance(r, -100.0).re / r
@@ -383,7 +383,7 @@ fn qp_study_uses_exact_dc_seed_and_preserves_zero_start_and_supply_environment()
     let circuit =
         rspice_core::Netlist::parse("Seed basis\nV1 out 0 1\nR1 out 0 1k\n.options GMIN=0\n.end\n")
             .unwrap();
-    let mut config = QpssConfig::new(vec![1000.0, 1414.2135623730951], vec![1, 1]);
+    let mut config = QpssConfig::new(vec![1000.0, 1414.213562373095], vec![1, 1]);
     config.initial_state = QpssInitialState::DcOperatingPoint;
     let exact = PeriodicDcOperatingPointSeed::try_new(
         vec!["OUT".into()],

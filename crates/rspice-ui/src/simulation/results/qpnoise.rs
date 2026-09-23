@@ -50,7 +50,7 @@ impl SimulationResult {
         let point = engine
             .run_qpss(
                 &netlist,
-                rspice_core::engine::QpssConfig::new(vec![1000.0, 1414.2135623730951], vec![1, 1]),
+                rspice_core::engine::QpssConfig::new(vec![1000.0, 1414.213562373095], vec![1, 1]),
             )
             .unwrap();
         let request = rspice_core::engine::QpnoiseRequest::from_qpnoise_card(

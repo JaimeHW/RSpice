@@ -51,7 +51,7 @@ impl SimulationResult {
         let point = engine
             .run_qpss(
                 &netlist,
-                QpssConfig::new(vec![1000.0, 1414.2135623730951], vec![1, 1]),
+                QpssConfig::new(vec![1000.0, 1414.213562373095], vec![1, 1]),
             )
             .unwrap();
         let request = QpxfRequest {
