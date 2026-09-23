@@ -268,8 +268,12 @@ impl SpDialogState {
             .map_err(|e| format!("Invalid start frequency: {}", e))?;
         let stop = parse_si_value(&self.stop_freq)
             .map_err(|e| format!("Invalid stop frequency: {}", e))?;
-        let points: u32 = self.num_points.parse().map_err(|_| "Invalid point count")?;
-        let z0: f64 = self.z0.parse().map_err(|_| "Invalid Z0")?;
+        let points: u32 = self
+            .num_points
+            .trim()
+            .parse()
+            .map_err(|_| "Invalid point count")?;
+        let z0 = parse_si_value(&self.z0).map_err(|error| format!("Invalid Z0: {error}"))?;
 
         let sweep_type = match self.sweep_type_idx {
             0 => SpSweepType::Decade,
@@ -792,7 +796,11 @@ mod tests {
     /// And with nothing placed, ad-hoc mode is exactly what it always was.
     #[test]
     fn ad_hoc_mode_without_placed_ports_is_unchanged() {
-        let state = dialog();
+        let mut state = dialog();
+        state.z0 = " 0.05k ".into();
+        state.num_points = " 10 ".into();
+        state.ports[1].z0_override = true;
+        state.ports[1].z0 = "0.075k".into();
 
         let from_design = state.to_config(Some(&[])).expect("the table resolves");
         let blind = state.to_config(None).expect("the table resolves");
@@ -801,6 +809,11 @@ mod tests {
         assert_eq!(from_design.ports[0].node_pos, "IN");
         assert_eq!(from_design.ports[1].node_pos, "OUT");
         assert_eq!(blind.ports.len(), 2);
+        assert_eq!(from_design.z0, 50.0);
+        assert_eq!(blind.z0, 50.0);
+        assert_eq!(from_design.ports[0].z0, None);
+        assert_eq!(from_design.ports[1].z0, Some(75.0));
+        assert_eq!(from_design.num_points, 10);
     }
 
     /// An impedance the port states as an expression is not a figure this
