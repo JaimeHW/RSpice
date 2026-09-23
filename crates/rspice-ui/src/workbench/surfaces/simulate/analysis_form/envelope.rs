@@ -313,6 +313,12 @@ fn multirate_fields(
         ui,
         "Blank uses Envelope step for omitted waveform timing parameters. This basis stays fixed during adaptive integration.",
     );
+    if c.dc_initialization {
+        field_note(
+            ui,
+            "Advanced conventional solver overrides configure the DC initial guess. The controls below configure the spectral solves.",
+        );
+    }
     for (label, value) in [
         ("Newton relative tolerance", &mut c.solver_relative),
         ("Newton current tolerance (A)", &mut c.solver_current),

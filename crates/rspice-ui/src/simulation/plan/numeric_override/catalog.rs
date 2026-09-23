@@ -347,6 +347,9 @@ const STUDY_OPTION_NOT_INHERITED: &str = "the selected base and its active prere
 const HB_TRANSIENT_INITIALIZER: &str =
     "select Transient-assisted under Initial state to configure the HB startup integration";
 const HB_INITIALIZER_OWNS_REPORTING: &str = "HB startup retains its complete internal trajectory; transient reporting controls do not change the harmonic-balance result";
+const MULTIRATE_OWNS_NUMERICS: &str = "configure slow-time integration, spectral Newton, linear solver and event tolerances on the multirate Envelope form";
+const MULTIRATE_OWNS_RETENTION: &str = "multirate Envelope retains its spectral state and selected output traces; use Output schedule and saved signals to configure reporting";
+const MULTIRATE_HAS_NO_DC_GUESS: &str = "these conventional solver options apply only to the optional DC initial guess; spectral solver controls are on the multirate Envelope form";
 pub(super) const TRANSIENT_OWNS_STEP_CEILING: &str =
     "the transient's own Max step field owns this, and one bound cannot have two copies";
 /// `.OPTIONS METHOD` on a PSS analysis.
@@ -696,6 +699,15 @@ impl NumericOverrideOption {
         if let Some(options) = ownership.study_inherited_options {
             return (options & (1_u64 << self as u32) == 0).then_some(STUDY_OPTION_NOT_INHERITED);
         }
+        if let Some(dc_guess) = ownership.multirate_envelope_dc {
+            return match self {
+                Self::StrobeInterval | Self::OutputTimePoints => None,
+                Self::RetainEverySignal => Some(MULTIRATE_OWNS_RETENTION),
+                _ if self.spec().reach != OptionReach::EverySolve => Some(MULTIRATE_OWNS_NUMERICS),
+                _ if !dc_guess => Some(MULTIRATE_HAS_NO_DC_GUESS),
+                _ => None,
+            };
+        }
         if kind == AnalysisKind::HarmonicBalance && self.spec().reach == OptionReach::TimeStepped {
             return if matches!(
                 self,
@@ -762,6 +774,10 @@ pub struct SolverOwnership {
     /// Envelope's selected initializer; `None` leaves applicability to the
     /// analysis kind, while `Some(false)` excludes an unused HB startup control.
     pub hb_initializer: Option<bool>,
+    /// `Some` selects multirate Envelope; the bool says whether its optional
+    /// DC guess consumes conventional solver controls. Spectral numerics have
+    /// dedicated form fields. `None` preserves full-waveform applicability.
+    pub multirate_envelope_dc: Option<bool>,
     /// Reliability's stress mode and studies' built-in DC base can exclude
     /// time integration; HB's transient-assisted initializer enables it.
     /// `None` leaves the decision to the kind.
@@ -777,6 +793,7 @@ impl SolverOwnership {
         accuracy: None,
         homotopy: None,
         hb_initializer: None,
+        multirate_envelope_dc: None,
         time_integration: None,
         study_inherited_options: None,
     };

@@ -1152,14 +1152,15 @@ impl SimulationPlan {
             // Older drafts offered time-integration controls for DC-only
             // studies and stress, plus unused Reliability reporting switches.
             // Retire only those fields; preserve effective solver departures.
-            if matches!(
+            if (matches!(
                 instance.kind,
                 AnalysisKind::Reliability
                     | AnalysisKind::MonteCarlo
                     | AnalysisKind::Optimization
                     | AnalysisKind::Temperature
                     | AnalysisKind::Corner
-            ) && let Some(record) = instance.numeric_override.as_mut()
+            ) || matches!(&instance.draft, AnalysisDraft::Envelope(state) if state.multirate_enabled))
+                && let Some(record) = instance.numeric_override.as_mut()
             {
                 let ownership = instance.draft.solver_ownership();
                 for option in NumericOverrideOption::all() {

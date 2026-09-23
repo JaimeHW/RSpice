@@ -43,6 +43,72 @@ fn set(
 }
 
 #[test]
+fn multirate_envelope_owns_numerics_and_keeps_reporting_and_dc_guess_options() {
+    let mut plan = SimulationPlan::empty();
+    let envelope = plan.insert(AnalysisKind::Envelope).unwrap().0;
+    assert!(accepts(&plan, envelope, O::Itl4));
+    plan.edit(envelope, |draft| {
+        let AnalysisDraft::Envelope(state) = draft else {
+            unreachable!()
+        };
+        state.multirate_enabled = true;
+    })
+    .unwrap();
+    for option in [
+        O::Itl4,
+        O::MaximumTimestep,
+        O::IntegrationMethod,
+        O::Chgtol,
+        O::HbInitialState,
+        O::RetainEverySignal,
+        O::Itl1,
+        O::Reltol,
+    ] {
+        assert!(!accepts(&plan, envelope, option), "{option:?}");
+    }
+    assert!(accepts(&plan, envelope, O::StrobeInterval));
+    assert!(accepts(&plan, envelope, O::OutputTimePoints));
+    assert!(set(&mut plan, envelope, O::Itl4, "99").is_err());
+    plan.edit(envelope, |draft| {
+        let AnalysisDraft::Envelope(state) = draft else {
+            unreachable!()
+        };
+        state.multirate.dc_initialization = true;
+    })
+    .unwrap();
+    assert!(accepts(&plan, envelope, O::Itl1));
+    assert!(accepts(&plan, envelope, O::Reltol));
+    assert!(!accepts(&plan, envelope, O::Itl4));
+    set(&mut plan, envelope, O::Itl1, "123").unwrap();
+    set(&mut plan, envelope, O::StrobeInterval, "1u").unwrap();
+    // A record saved before mode-aware applicability may contain controls
+    // that never governed this solve. Restore retires only those entries.
+    let index = plan.index_of(envelope).unwrap();
+    plan.instances[index]
+        .numeric_override
+        .as_mut()
+        .unwrap()
+        .set_for_instance(AnalysisKind::Envelope, SolverOwnership::NONE, O::Itl4, "99")
+        .unwrap();
+    let mut restored: SimulationPlan =
+        serde_json::from_slice(&serde_json::to_vec(&plan).unwrap()).unwrap();
+    restored.prepare_after_restore();
+    let record = restored
+        .instance(envelope)
+        .unwrap()
+        .numeric_override()
+        .unwrap();
+    assert!(record.stated(O::Itl4).is_none());
+    assert!(record.stated(O::Itl1).is_some());
+    assert!(record.stated(O::StrobeInterval).is_some());
+    assert_eq!(
+        serde_json::to_value(&restored.receipts).unwrap(),
+        serde_json::to_value(&plan.receipts).unwrap()
+    );
+    assert_eq!(restored.revision(), plan.revision());
+}
+
+#[test]
 fn configured_study_defaults_follow_base_ownership_and_restore_without_history_edits() {
     assert!(O::all().count() <= 64);
     for kind in [

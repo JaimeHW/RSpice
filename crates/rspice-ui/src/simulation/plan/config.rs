@@ -686,6 +686,9 @@ impl AnalysisDraft {
                 ..SolverOwnership::NONE
             },
             Self::Envelope(state) => SolverOwnership {
+                multirate_envelope_dc: state
+                    .multirate_enabled
+                    .then_some(state.multirate.dc_initialization),
                 hb_initializer: Some(
                     !state.multirate_enabled && state.initial_periodic_solve_idx == 0,
                 ),
