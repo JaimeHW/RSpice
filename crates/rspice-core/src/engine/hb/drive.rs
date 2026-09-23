@@ -1147,6 +1147,16 @@ impl Engine {
             })
     }
 
+    pub(in crate::engine::hb) fn hb_response_auxiliary_count(circuit: &CircuitData) -> usize {
+        circuit
+            .bsim3v3
+            .devices
+            .iter()
+            .filter(|device| device.uses_ac_nqs())
+            .count()
+            .saturating_mul(3)
+    }
+
     #[inline]
     pub(in crate::engine::hb) fn hb_node_to_solver_index(node: usize, num_nodes: usize) -> usize {
         if node == 0 { num_nodes } else { node - 1 }

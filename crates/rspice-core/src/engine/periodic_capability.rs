@@ -475,11 +475,10 @@ pub(crate) const fn periodic_capability_descriptor(
         F::Bsim3v3 => PeriodicCapabilityDescriptor {
             residual_jacobian: Complete,
             dynamic_state: Restricted(
-                "AC-NQS is a rational charge-deficit effect and needs a hidden charge-deficit \
-                 state instead of G+sC descriptor extraction, so only ACNQSMOD=0 has a finite \
-                 explicit descriptor state",
+                "AC-only NQS requires the response auxiliary states allocated by the periodic \
+                 solver; generic fixed-size G+sC extraction supports ACNQSMOD=0",
             ),
-            small_signal: Restricted("BSIM3 AC-only NQS needs a periodic response operator"),
+            small_signal: Complete,
             noise: Complete,
             pss_state: Complete,
             envelope: Complete,
@@ -1188,18 +1187,6 @@ fn periodic_descriptor_gaps_in_context(circuit: &CircuitData, carrier: bool) -> 
             Inapplicable | Complete => {}
             Absent(missing) => gaps.push(CapabilityGap::new(family, missing)),
             Restricted(_) => match family {
-                F::Bsim3v3 => {
-                    if !carrier {
-                        for device in &circuit.bsim3v3.devices {
-                            if device.uses_ac_nqs() {
-                                gaps.push(CapabilityGap::new(family, format!(
-                                    "BSIM3 '{}' with ACNQSMOD=1 needs a periodic response operator",
-                                    device.name,
-                                )));
-                            }
-                        }
-                    }
-                }
                 F::Capacitor => {
                     if !carrier
                         && circuit
@@ -1762,7 +1749,7 @@ mod tests {
             // complete charge descriptor; VBIC's finite delay states remain.
             F::Bjt => [R, R, C, C, R, R],
             F::Mosfet => [R, C, C, R, A, A],
-            F::Bsim3v3 => [C, R, R, C, C, C],
+            F::Bsim3v3 => [C, R, C, C, C, C],
             F::Bsim4v8 => [A, R, I, A, A, A],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],
             F::Ekv26 | F::Ekv3 | F::Vdmos => [I, C, A, A, A, A],

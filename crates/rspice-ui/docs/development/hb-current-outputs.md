@@ -28,9 +28,10 @@ Native BSIM3 (`LEVEL=8/9/49`, subject to the selected SPICE dialect) contributes
 its own channel, junction, substrate and displacement currents. `CAPMOD=0..3`,
 `XPART`, geometry, temperature, multiplier and series resistance retain their
 native model meanings. `NQSMOD=1` includes the channel charge-deficit state in
-HB and QPSS. AC-only `ACNQSMOD=1` does not change the carrier equations; periodic
-response analyses currently reject that option because their AC-only NQS
-operator is not implemented. Periodic noise supports `NOIMOD=1..6`, including
+HB and QPSS. AC-only `ACNQSMOD=1` does not change the carrier equations; driven
+periodic AC, transfer and noise analyses include its channel-current and
+intrinsic-charge relaxation. This also applies when reusing a retained HB,
+QPSS or shooting-PSS operating point. Periodic noise supports `NOIMOD=1..6`, including
 channel thermal noise, empirical and physical flicker laws, `KF/AF/EF`, and
 source/drain resistor noise. The native `ID` and `FN` mechanisms retain their
 identities as the bias varies; colored noise includes amplitude modulation and

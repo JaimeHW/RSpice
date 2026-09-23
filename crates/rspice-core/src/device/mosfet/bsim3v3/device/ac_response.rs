@@ -1,6 +1,11 @@
 //! Finite-state realization of the native AC-only NQS small-signal law.
 use super::*;
 
+// A constant time unit keeps the auxiliary residual in current/scaled-charge
+// units, instead of amplifying cancellation by an inverse picosecond. It is
+// independent of bias, so dQ/dt never introduces a spurious d(taunet)/dt term.
+const RESPONSE_TIME_UNIT: Value = 1e-9;
+
 /// The AC equations are a linear response at the supplied carrier bias.
 /// Equivalent Newton sources are not part of that response operator.
 struct Derivatives<'a, S>(&'a mut S);
@@ -13,6 +18,13 @@ impl<S: MatrixStamper> MatrixStamper for Derivatives<'_, S> {
 }
 
 impl Bsim3v3Device {
+    pub(crate) fn ac_nqs_response_names(&self) -> impl Iterator<Item = String> + '_ {
+        ["channel_current", "drain_charge", "source_charge"]
+            .into_iter()
+            .filter(|_| self.uses_ac_nqs())
+            .map(|name| format!("M:{}:ac_nqs:{name}", self.name))
+    }
+
     /// Stamp the complete ACNQSMOD=1 response as G+sC, using three auxiliary
     /// coordinates for filtered channel current and drain/source charge.
     /// The charge coordinates are scaled by 1e-9 C. All node IDs are one-based.
@@ -58,9 +70,9 @@ impl Bsim3v3Device {
         let rate = if charge.taunet == 0.0 {
             0.0
         } else {
-            charge.taunet.recip()
+            RESPONSE_TIME_UNIT / charge.taunet
         };
-        if !rate.is_finite() {
+        if !rate.is_finite() || (charge.taunet > 0.0 && rate == 0.0) {
             return Err(format!(
                 "BSIM3 '{}': AC NQS relaxation rate is not representable",
                 self.name
@@ -72,7 +84,11 @@ impl Bsim3v3Device {
         self.stamp_op(&op, bias, &mut Derivatives(f));
         self.stamp_charge_matrix(&Self::charge_matrix(charge, op.mode), 1.0, q);
         if self.node_charge_deficit != 0 {
-            f.stamp(self.node_charge_deficit, self.node_charge_deficit, 1.0);
+            f.stamp(
+                self.node_charge_deficit,
+                self.node_charge_deficit,
+                self.multiplier,
+            );
         }
         if rate == 0.0 {
             for node in auxiliary {
@@ -123,7 +139,7 @@ impl Bsim3v3Device {
         let scales = [1.0, TRNQS_SCALING, TRNQS_SCALING];
         for (index, node) in auxiliary.into_iter().enumerate() {
             f.stamp(node, node, rate);
-            q.stamp(node, node, 1.0);
+            q.stamp(node, node, RESPONSE_TIME_UNIT);
             for (terminal, derivative) in nodes.into_iter().zip(inputs[index]) {
                 let value = self.multiplier * derivative * rate / scales[index];
                 if !value.is_finite() {

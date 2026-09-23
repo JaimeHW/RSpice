@@ -29,6 +29,11 @@ impl HbSolver {
                     .flat_map(|cap| cap.expression.integral_names()),
             )
             .chain(self.periodic_capacitors.iter().map(|cap| cap.rate_name()))
+            .chain(
+                self.native_bsim3
+                    .iter()
+                    .flat_map(|device| device.ac_nqs_response_names()),
+            )
             .collect::<Vec<_>>();
         if physical != self.exact_mna_branches().len() {
             if self.exact_mna_branch_names()[physical..] != names
@@ -78,8 +83,11 @@ impl HbSolver {
             (physical != self.exact_mna_branches().len()).then_some(physical);
         state.capacitor_rate_branch_start =
             (!self.periodic_capacitors.is_empty()).then_some(self.capacitor_rate_start());
-        state.current_equation_branches = (0..physical)
-            .filter(|branch| self.is_capacitor_current_row(self.num_nodes + branch))
+        state.current_equation_branches = (0..self.exact_mna_branches().len())
+            .filter(|branch| {
+                self.is_capacitor_current_row(self.num_nodes + branch)
+                    || self.is_ac_response_current_row(self.num_nodes + branch)
+            })
             .collect();
     }
 }

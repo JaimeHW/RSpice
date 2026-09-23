@@ -15,7 +15,7 @@ fn bsim3_continuation_preserves_the_carrier_orbit_and_portable_checkpoint() {
         (1, "PMOS", -1.0, IntegrationMethod::Trapezoidal),
     ] {
         let deck = Netlist::parse(&format!(
-            "BSIM3 Envelope\nVDD supply 0 {}\nVIN in 0 SIN({} {} 1G)\nRD supply out 500\nRG in gate 100\nRS source 0 10\nM1 out gate source 0 mm L=.18u W=10u AD=4p AS=4p PD=20u PS=20u M=2 OFF\n.model mm {kind}(LEVEL=49 TOX=4.1n VTH0={} U0=270 K1=.59 K2=.0026 CAPMOD=2 NQSMOD={nqs} RSH=10 CGDO=7.9e-10 CGSO=6.3e-10 CJ=9.5e-4 CJSW=2.4e-10)\n.options hbint tahb=0\n.end\n",
+            "BSIM3 Envelope\nVDD supply 0 {}\nVIN in 0 SIN({} {} 1G)\nRD supply out 500\nRG in gate 100\nRS source 0 10\nM1 out gate source 0 mm L=.18u W=10u AD=4p AS=4p PD=20u PS=20u M=2 OFF\n.model mm {kind}(LEVEL=49 TOX=4.1n VTH0={} U0=270 K1=.59 K2=.0026 CAPMOD=2 NQSMOD={nqs} ACNQSMOD={nqs} RSH=10 CGDO=7.9e-10 CGSO=6.3e-10 CJ=9.5e-4 CJSW=2.4e-10)\n.options hbint tahb=0\n.end\n",
             polarity * 1.8, polarity * 0.7, polarity * 0.01, polarity * 0.37,
         )).unwrap();
         let engine = Engine::new(SimulationConfig {

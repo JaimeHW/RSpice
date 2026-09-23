@@ -97,6 +97,17 @@ fn record_native_terms(
 }
 
 impl HbSolver {
+    pub(super) fn ac_response_branch_start(&self) -> usize {
+        self.capacitor_rate_start() + self.periodic_capacitors.len()
+    }
+
+    pub(super) fn is_ac_response_current_row(&self, row: usize) -> bool {
+        let start = self.num_nodes + self.ac_response_branch_start();
+        row >= start
+            && row < self.num_nodes + self.exact_mna_branches().len()
+            && (row - start).is_multiple_of(3)
+    }
+
     pub(super) fn has_native_periodic_devices(&self) -> bool {
         !self.native_bjts.is_empty()
             || !self.native_bsim3.is_empty()
@@ -371,6 +382,13 @@ impl HbSolver {
         {
             self.non_electrical_nodes.insert(index, node - 1);
         }
+        for name in device.ac_nqs_response_names() {
+            let branch_ordinal = self.exact_mna_branches().len() + 1;
+            self.try_push_periodic_mna_branch(
+                ExactMnaBranch::AuxiliaryState { branch_ordinal },
+                &name,
+            )?;
+        }
         self.native_bsim3.push(device);
         Ok(())
     }
@@ -432,18 +450,38 @@ impl HbSolver {
                 )));
             }
         }
+        let mut response_start = self.num_nodes + self.ac_response_branch_start();
         for device in &self.native_bsim3 {
+            let auxiliary = device.uses_ac_nqs().then(|| {
+                let nodes = [response_start + 1, response_start + 2, response_start + 3];
+                response_start += 3;
+                nodes
+            });
             if selected.is_some_and(|rows| {
                 !device
                     .periodic_coupling_nodes()
                     .iter()
                     .any(|&node| node > 0 && rows[node - 1])
+                    && !auxiliary.is_some_and(|nodes| nodes.into_iter().any(|node| rows[node - 1]))
             }) {
                 continue;
             }
-            device
-                .stamp_periodic_fq(solution, f, q)
-                .map_err(HbError::InvalidCircuit)?;
+            if small_signal && let Some(auxiliary) = auxiliary {
+                device
+                    .stamp_ac_nqs_response(solution, auxiliary, f, q)
+                    .map_err(HbError::InvalidCircuit)?;
+            } else {
+                device
+                    .stamp_periodic_fq(solution, f, q)
+                    .map_err(HbError::InvalidCircuit)?;
+                if let Some(auxiliary) = auxiliary {
+                    // Response-only states remain exactly zero in the carrier.
+                    for node in auxiliary {
+                        f.stamp(node, node, 1.0);
+                        f.stamp_rhs(node, -solution[node - 1]);
+                    }
+                }
+            }
             if f.invalid || q.invalid {
                 return Err(HbError::InvalidCircuit(format!(
                     "BSIM3 '{}' produced invalid physical F/Q entries",
@@ -553,6 +591,7 @@ impl HbSolver {
         phases: &[Value],
         jacobian: bool,
         selected: Option<&[bool]>,
+        small_signal: bool,
     ) -> Result<crate::analysis::quasi_periodic::solve::Sample, HbError> {
         if !time.is_finite()
             || phases.len() != self.behavioral_phase_dimensions
@@ -568,7 +607,13 @@ impl HbSolver {
         let mut f = NativeStamp::new(solution.len());
         let mut q = NativeStamp::new(solution.len());
         self.sample_native_devices_selected(
-            solution, time, &inputs, &mut f, &mut q, false, selected,
+            solution,
+            time,
+            &inputs,
+            &mut f,
+            &mut q,
+            small_signal,
+            selected,
         )?;
         Ok(crate::analysis::quasi_periodic::solve::Sample {
             current: f.contributions,

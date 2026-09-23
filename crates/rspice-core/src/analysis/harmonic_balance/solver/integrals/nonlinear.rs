@@ -131,6 +131,7 @@ impl Circuit for Subcircuit<'_> {
                     &[],
                     jacobian,
                     Some(&self.selected),
+                    false,
                 )?
             }
         };
@@ -308,6 +309,10 @@ impl HbSolver {
                     }
                 }
             }
+        }
+        let response_start = self.num_nodes + self.ac_response_branch_start();
+        for row in response_start..self.num_nodes + self.exact_mna_branches().len() {
+            insert(row, row)?;
         }
         let mut capacitor_state = physical + self.behavioral_sources.integral_count();
         for (index, capacitor) in self.periodic_capacitors.iter().enumerate() {

@@ -73,7 +73,7 @@ pub use quasi_periodic::{
 };
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 
-const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 41;
+const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 42;
 
 fn hb_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1143,9 +1143,15 @@ impl Engine {
             .flatten()
             .map(|expression| format!("C:{}:voltage_rate", expression.name))
             .collect::<Vec<_>>();
+        let response_names = circuit
+            .bsim3v3
+            .devices
+            .iter()
+            .flat_map(|device| device.ac_nqs_response_names())
+            .collect::<Vec<_>>();
         let physical_count = branch_names
             .len()
-            .checked_sub(integral_names.len() + rate_names.len())
+            .checked_sub(integral_names.len() + rate_names.len() + response_names.len())
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "dependent periodic basis omits behavioral integral coordinates".to_owned(),
@@ -1153,9 +1159,10 @@ impl Engine {
             })?;
         let (physical_branch_names, retained_integral_names) =
             branch_names.split_at(physical_count);
-        if !retained_integral_names
+        if !retained_integral_names.iter().eq(integral_names
             .iter()
-            .eq(integral_names.iter().chain(&rate_names))
+            .chain(&rate_names)
+            .chain(&response_names))
         {
             return Err(SimulationError::Circuit(
                 "dependent periodic integral basis does not match the circuit".to_owned(),
@@ -1870,6 +1877,7 @@ impl Engine {
             .checked_add(Self::hb_periodic_extra_branch_count(&circuit)?)
             .and_then(|count| count.checked_add(circuit.behavioral_sources.integral_count()))
             .and_then(|count| count.checked_add(circuit.capacitors.periodic_auxiliary_count()))
+            .and_then(|count| count.checked_add(Self::hb_response_auxiliary_count(&circuit)))
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "HB canonical and distributed-network branch count overflows this platform"

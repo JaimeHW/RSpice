@@ -178,6 +178,15 @@ pub(crate) trait Circuit {
     ) -> Result<Sample, Error> {
         self.sample(state, jacobian)
     }
+    /// Some authored AC-only models have response dynamics distinct from
+    /// their carrier. Ordinary devices share the carrier Jacobian by default.
+    fn small_signal_sample_at_phases(
+        &mut self,
+        state: &[Value],
+        phases: &[Value],
+    ) -> Result<Sample, Error> {
+        self.sample_at_phases(state, phases, true)
+    }
 }
 
 struct Workspace<'a> {

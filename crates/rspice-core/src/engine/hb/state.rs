@@ -484,6 +484,13 @@ impl Engine {
                     .flatten()
                     .map(|expression| format!("C:{}:voltage_rate", expression.name)),
             )
+            .chain(
+                circuit
+                    .bsim3v3
+                    .devices
+                    .iter()
+                    .flat_map(|device| device.ac_nqs_response_names()),
+            )
             .collect::<Vec<_>>();
         let spectra = operating_point.integral_spectra();
         if spectra.len() != auxiliary_names.len()

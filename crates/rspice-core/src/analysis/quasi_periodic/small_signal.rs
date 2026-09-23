@@ -140,7 +140,7 @@ impl Linearization {
                 *value = waves[row][time];
             }
             let phases = grid.phases(time).expect("bounded collocation index");
-            let sample = circuit.sample_at_phases(&state, &phases, true)?;
+            let sample = circuit.small_signal_sample_at_phases(&state, &phases)?;
             base_values = base_values.saturating_add(
                 sample
                     .conductance

@@ -667,6 +667,7 @@ impl Circuit for HbSolver {
     fn voltage_equation(&self, row: usize) -> bool {
         row >= self.num_nodes
             && !self.is_capacitor_current_row(row)
+            && !self.is_ac_response_current_row(row)
             && self
                 .periodic_mna_branches
                 .get(row - self.num_nodes)
@@ -760,6 +761,18 @@ impl Circuit for HbSolver {
     ) -> Result<Sample, Error> {
         self.quasi_periodic_sample_selected(state, phases, jacobian, None)
     }
+    fn small_signal_sample_at_phases(
+        &mut self,
+        state: &[Value],
+        phases: &[Value],
+    ) -> Result<Sample, Error> {
+        let phases = if self.behavioral_phase_dimensions == 0 {
+            &[][..]
+        } else {
+            phases
+        };
+        self.periodic_sample_selected(state, 0.0, phases, true, None, true)
+    }
 }
 
 impl HbSolver {
@@ -776,7 +789,7 @@ impl HbSolver {
         } else {
             phases
         };
-        self.periodic_sample_selected(state, 0.0, phases, jacobian, selected)
+        self.periodic_sample_selected(state, 0.0, phases, jacobian, selected, false)
     }
 
     pub(in crate::analysis::harmonic_balance::solver) fn periodic_sample_selected(
@@ -786,6 +799,7 @@ impl HbSolver {
         phases: &[Value],
         jacobian: bool,
         selected: Option<&[bool]>,
+        small_signal: bool,
     ) -> Result<Sample, Error> {
         if selected.is_some_and(|rows| rows.len() != state.len()) {
             return Err(Error::InvalidCircuit(
@@ -793,7 +807,7 @@ impl HbSolver {
             ));
         }
         let mut sample = self
-            .periodic_native_sample_selected(state, time, phases, jacobian, selected)
+            .periodic_native_sample_selected(state, time, phases, jacobian, selected, small_signal)
             .map_err(device_error)?;
         // Legacy compact devices use num_nodes as the ground sentinel.
         // Including branch-current coordinates would turn ground into the
