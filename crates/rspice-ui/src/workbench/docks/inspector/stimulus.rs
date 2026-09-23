@@ -280,9 +280,16 @@ fn consumers_section(ui: &mut Ui, state: &AppState, adopters: &[StimulusAdopter]
                 ("role", consumer.role),
             ],
         );
-        opened |= property_row_wrapped(ui, reference, &text)
-            .interact(Sense::click())
-            .clicked();
+        let response = property_row_wrapped(ui, reference, &text).interact(Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                ui.is_enabled(),
+                format!("{reference}: {text}"),
+            )
+        });
+        theme::paint_focus_ring(ui, &response, response.rect);
+        opened |= response.clicked();
     }
     opened
 }

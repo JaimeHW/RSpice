@@ -842,6 +842,8 @@ fn notice_list(
         group_heading(&mut pinned, label, Some(band));
         // Swallow presses: the row scrolled under the heading is not what a
         // reader pressing the heading means.
+        // accessibility-pointer-shim: this overlay only blocks presses on a
+        // row hidden beneath the heading; it has no action of its own.
         ui.interact(band, panel_id().with("pinned-group"), Sense::click());
     }
 }
@@ -1112,14 +1114,7 @@ fn notice_row(
     {
         intents.push(Intent::Dismiss(record.id()));
     }
-    if response.has_focus() && ui.is_rect_visible(rect) {
-        ui.painter().rect_stroke(
-            rect,
-            0.0,
-            Stroke::new(1.0, t.color.accent),
-            egui::StrokeKind::Inside,
-        );
-    }
+    theme::paint_focus_ring(ui, &response, rect);
     let announced = format!(
         "{} {}{}: {}. {}",
         record.category().label(),

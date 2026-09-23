@@ -275,6 +275,19 @@ fn point_rows(
             font.clone(),
             palette.text_dim,
         );
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                ui.is_enabled(),
+                format!(
+                    "PWL breakpoint {}: time {}, level {}",
+                    index + 1,
+                    cells[index * 2],
+                    cells[index * 2 + 1]
+                ),
+            )
+        });
+        theme::paint_focus_ring(ui, &response, row);
         if (response.clicked() || focused) && !selected {
             actions.push(StageAction::SelectPoint(Some(index)));
         }

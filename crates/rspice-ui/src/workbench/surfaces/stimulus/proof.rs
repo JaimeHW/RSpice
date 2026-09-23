@@ -279,6 +279,7 @@ fn plot_body(
         Sense::click(),
     );
     ui.painter().rect_filled(rect, 0.0, colors.bg_app);
+    theme::paint_focus_ring(ui, &response, rect);
 
     let label = accessible_label(state, stage);
     response.widget_info(|| {
