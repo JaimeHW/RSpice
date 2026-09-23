@@ -122,6 +122,54 @@ impl Lower<'_> {
 }
 
 impl IntegralEquations {
+    /// Direct noise forcing of dz/dt, with all accepted integral coordinates
+    /// held fixed. Their state-to-state response belongs to the period map.
+    pub(crate) fn append_rate_directions(
+        &self,
+        solution: &[Value],
+        direction: &[Value],
+        integrals: &[Value],
+        bindings: IntegralBindings<'_>,
+        output: &mut Vec<Value>,
+    ) -> Result<(), String> {
+        if self.phase_dimensions.is_some() {
+            return Err("phase-lifted integral rates require independent-phase sampling".into());
+        }
+        if solution.len() != direction.len() || integrals.len() < self.rates.len() {
+            return Err(format!(
+                "expression '{}' has inconsistent noise coordinates",
+                bindings.name
+            ));
+        }
+        for (index, rate) in self.rates.iter().enumerate() {
+            let values = |input| {
+                let binding = match input {
+                    Input::Integral(i) => return (integrals[i], 0.0.into()),
+                    Input::Node(i) => bindings.nodes[i],
+                    Input::Branch(i) => bindings.branches[i],
+                    Input::Phase(_) => return (Value::NAN, 0.0.into()),
+                };
+                binding.map_or((0.0, 0.0.into()), |i| (solution[i], direction[i].into()))
+            };
+            let (value, derivative) =
+                rate.evaluate(values, bindings.environment).ok_or_else(|| {
+                    format!(
+                        "expression '{}' SDT {index} has no analytic input derivative",
+                        bindings.name
+                    )
+                })?;
+            let derivative = derivative.binary64();
+            if !value.is_finite() || !derivative.is_finite() {
+                return Err(format!(
+                    "expression '{}' SDT {index} has a non-finite input or noise derivative",
+                    bindings.name
+                ));
+            }
+            output.push(derivative);
+        }
+        Ok(())
+    }
+
     pub(crate) fn new(ast: &Expr, program: &CompiledExpr) -> Option<Self> {
         if program.sdt_count == 0 {
             return None;
@@ -215,34 +263,30 @@ macro_rules! integral_source {
                 time: Value,
                 output: &mut Vec<Value>,
             ) -> Result<(), String> {
-                let Some(equations) = &self.integral_equations else { return Ok(()); };
-                if equations.phase_dimensions.is_some() {
-                    return Err("phase-lifted integral rates require independent-phase sampling".into());
-                }
+                let Some(equations) = &self.integral_equations else {
+                    return Ok(());
+                };
                 let environment = BehavioralEnvironment {
-                    time, frequency: self.frequency, temperature: self.temperature,
-                    gmin: self.gmin, expression_dialect: self.expression_dialect,
+                    time,
+                    frequency: self.frequency,
+                    temperature: self.temperature,
+                    gmin: self.gmin,
+                    expression_dialect: self.expression_dialect,
                     logarithm_domain: LogarithmDomain::Ieee,
                 };
-                for (index, rate) in equations.rates.iter().enumerate() {
-                    let values = |input| {
-                        let binding = match input {
-                            Input::Integral(i) => return (integrals[i], 0.0.into()),
-                            Input::Node(i) => self.node_bindings[i],
-                            Input::Branch(i) => self.branch_bindings[i],
-                            Input::Phase(_) => return (Value::NAN, 0.0.into()),
-                        };
-                        binding.map_or((0.0, 0.0.into()), |i| (solution[i], direction[i].into()))
-                    };
-                    let (value, derivative) = rate.evaluate(values, environment).ok_or_else(|| format!(
-                        "behavioral source '{}' SDT {index} has no analytic input derivative", self.name))?;
-                    let derivative = derivative.binary64();
-                    if !value.is_finite() || !derivative.is_finite() {
-                        return Err(format!("behavioral source '{}' SDT {index} has a non-finite input or noise derivative", self.name));
-                    }
-                    output.push(derivative);
-                }
-                Ok(())
+                equations.append_rate_directions(
+                    solution,
+                    direction,
+                    integrals,
+                    IntegralBindings {
+                        name: &self.name,
+                        nodes: &self.node_bindings,
+                        branches: &self.branch_bindings,
+                        state_start: 0,
+                        environment,
+                    },
+                    output,
+                )
             }
 
             pub(super) fn integral_partial(

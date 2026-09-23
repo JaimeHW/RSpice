@@ -11,6 +11,8 @@
 
 use super::*;
 
+mod capacitor_noise;
+
 #[inline]
 fn solution_partial(partials: &[(usize, Value)], column: usize) -> Value {
     partials

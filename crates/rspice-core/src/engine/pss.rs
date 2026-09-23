@@ -3750,9 +3750,10 @@ impl Engine {
                     step,
                     &new_solution,
                     false,
+                    None,
                 )?;
             } else {
-                self.pss_stamp_system(circuit, matrix, &mut rhs, step, &new_solution, false)?;
+                self.pss_stamp_system(circuit, matrix, &mut rhs, step, &new_solution, false, None)?;
             }
 
             let solved = if correction_form {
@@ -3866,7 +3867,7 @@ impl Engine {
         let correction_form = !step.initialization
             && (!circuit.inductors.is_empty() || !circuit.capacitors.is_empty());
         if correction_form {
-            self.pss_stamp_non_norton_system(circuit, matrix, rhs, step, solution, true)?;
+            self.pss_stamp_non_norton_system(circuit, matrix, rhs, step, solution, true, None)?;
             if capture_from_solution {
                 scratch.clear();
                 scratch.resize(solution.len(), 0.0);
@@ -3877,7 +3878,7 @@ impl Engine {
                 .capacitors
                 .stamp_norton_currents(rhs, &circuit.capacitor_trial_currents);
         } else {
-            self.pss_stamp_system(circuit, matrix, rhs, step, solution, true)?;
+            self.pss_stamp_system(circuit, matrix, rhs, step, solution, true, None)?;
         }
         if !self.pss_residual_convergence_met(circuit, matrix, solution, rhs, step) {
             return Ok(false);
@@ -3990,7 +3991,9 @@ impl Engine {
     /// `linearize_at`. Shared by the Newton iteration and by the
     /// injection-sensitivity solves of the oscillator noise machinery,
     /// which ignore the RHS and solve the stamped matrix against unit
-    /// current injections.
+    /// current injections. For those solves, `frozen_capacitors` supplies the
+    /// orbit time and terminal voltage rates for the local dynamic law;
+    /// ordinary transient solves retain their accepted charge companions.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::engine) fn pss_stamp_system(
         &self,
@@ -4000,8 +4003,17 @@ impl Engine {
         step: PssCompanionStep<'_>,
         linearize_at: &[Value],
         physical_probe: bool,
+        frozen_capacitors: Option<(Value, &[Value])>,
     ) -> Result<(), SimulationError> {
-        self.pss_stamp_non_norton_system(pss, matrix, rhs, step, linearize_at, physical_probe)?;
+        self.pss_stamp_non_norton_system(
+            pss,
+            matrix,
+            rhs,
+            step,
+            linearize_at,
+            physical_probe,
+            frozen_capacitors,
+        )?;
         if !step.initialization {
             // The common capacitor loader includes its explicit branches,
             // which were already loaded above. Add only Norton companions.
@@ -4021,6 +4033,7 @@ impl Engine {
         step: PssCompanionStep<'_>,
         linearize_at: &[Value],
         physical_probe: bool,
+        frozen_capacitors: Option<(Value, &[Value])>,
     ) -> Result<(), SimulationError> {
         matrix.clear_values();
         rhs.fill(0.0);
@@ -4073,20 +4086,34 @@ impl Engine {
             circuit
                 .capacitors
                 .stamp_transient_branch_companions(matrix, rhs, dt, coeff, num_nodes);
-            circuit
-                .capacitors
-                .stamp_solution_dependent_transient_companion(
-                    matrix,
-                    rhs,
-                    linearize_at,
-                    crate::circuit::SolutionDependentCompanionStep {
-                        time: t_next,
-                        dt,
-                        coeff,
+            if let Some((time, voltage_rates)) = frozen_capacitors {
+                circuit
+                    .capacitors
+                    .stamp_frozen_noise(
+                        matrix,
+                        linearize_at,
+                        voltage_rates,
+                        time,
+                        coeff.coeff_g / dt,
                         num_nodes,
-                    },
-                )
-                .map_err(SimulationError::Circuit)?;
+                    )
+                    .map_err(SimulationError::Circuit)?;
+            } else {
+                circuit
+                    .capacitors
+                    .stamp_solution_dependent_transient_companion(
+                        matrix,
+                        rhs,
+                        linearize_at,
+                        crate::circuit::SolutionDependentCompanionStep {
+                            time: t_next,
+                            dt,
+                            coeff,
+                            num_nodes,
+                        },
+                    )
+                    .map_err(SimulationError::Circuit)?;
+            }
         } else if !initial_charge_rates {
             // Only independent voltage constraints carry reactions in this
             // initialization solve. Dependent IC-capacitor current slots are
@@ -5406,7 +5433,15 @@ mod tests {
         };
         let mut rhs = vec![0.0; solution.len()];
         engine
-            .pss_stamp_system(&mut circuit, &mut matrix, &mut rhs, step, &solution, true)
+            .pss_stamp_system(
+                &mut circuit,
+                &mut matrix,
+                &mut rhs,
+                step,
+                &solution,
+                true,
+                None,
+            )
             .unwrap();
         // The absolute matrix is backward-stable while missing almost 20 V:
         // its inductive terms are 1e18 V. Physical DAE certification must not

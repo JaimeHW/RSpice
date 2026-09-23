@@ -57,6 +57,26 @@ impl SolutionDependentCapacitor {
         (0..self.program.sdt_count).map(|index| format!("C:{}:sdt:{index}", self.name))
     }
 
+    pub(crate) fn append_integral_rate_directions(
+        &self,
+        solution: &[Value],
+        direction: &[Value],
+        integrals: &[Value],
+        time: Value,
+        output: &mut Vec<Value>,
+    ) -> Result<(), String> {
+        if let Some(equations) = &self.integral_equations {
+            equations.append_rate_directions(
+                solution,
+                direction,
+                integrals,
+                self.integral_bindings(time, 0),
+                output,
+            )?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn append_prescribed_integral_rates<'a>(
         &'a self,
         plans: &mut Vec<PrescribedIntegralRate<'a>>,
@@ -213,5 +233,30 @@ impl SolutionDependentCapacitor {
             state.time = time;
         }
         self.restore_sdt_history(&history);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capacitor_noise_integral_rates_hold_nested_states_fixed() {
+        let mut capacitor = SolutionDependentCapacitor::new(
+            "c1".into(),
+            "1+sdt(v(in)*v(in))+3*sdt(sdt(i(vsense)))+5*sdt(i(vsense))",
+        )
+        .unwrap();
+        capacitor.bind_references(|_| Some(1), |_| Some(1)).unwrap();
+        capacitor.reset_integrals(&[1e10; 4]).unwrap();
+        let mut rates = Vec::new();
+        capacitor
+            .append_integral_rate_directions(&[2.0, 3.0], &[0.5, 0.25], &[1e10; 4], 1.0, &mut rates)
+            .unwrap();
+        assert_eq!(rates, [2.0, 0.25, 0.0, 0.25]);
+        assert_eq!(
+            capacitor.accepted_integrals().collect::<Vec<_>>(),
+            [1e10; 4]
+        );
     }
 }

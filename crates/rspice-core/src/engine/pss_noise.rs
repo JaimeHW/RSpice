@@ -519,13 +519,8 @@ impl Engine {
                 self.run_pss_with_state_abort(netlist, config.clone(), abort)?;
             (pss.period, circuit, matrix, x0)
         };
-        let integral_count = circuit.behavioral_sources.integral_count();
-        if circuit.capacitors.has_solution_dependent_values() {
-            return Err(SimulationError::unsupported_capability(
-                "analysis.pnoise.capacitor_charge_linearization",
-                "Oscillator noise requires retained capacitor charge derivatives and expression-integral rate sensitivities at each orbit sample",
-            ));
-        }
+        let source_integral_count = circuit.behavioral_sources.integral_count();
+        let integral_count = source_integral_count + circuit.capacitors.integral_count();
         let f0 = 1.0 / period;
 
         // ------------------------------------------------------------------
@@ -646,7 +641,7 @@ impl Engine {
         // Orbit tangent ds/dt on the grid (periodic central differences) and
         // the adjoint unity mode v1(0) from the monodromy Phi(T, 0).
         // ------------------------------------------------------------------
-        let tangent = |k: usize| -> Vec<Value> {
+        let trajectory_rate = |k: usize, samples: &[Vec<Value>]| -> Vec<Value> {
             // s(0) == s(T) on the converged orbit, so wrap periodically.
             let k = if k + 1 == n_grid { 0 } else { k };
             let prev = if k == 0 { n_grid - 2 } else { k - 1 };
@@ -659,13 +654,14 @@ impl Engine {
             let right_dt = base.times[next] - base.times[k];
             let left_weight = right_dt / (left_dt + right_dt);
             let right_weight = left_dt / (left_dt + right_dt);
-            (0..n_state)
+            (0..samples[k].len())
                 .map(|i| {
-                    left_weight * (base.states[k][i] - base.states[prev][i]) / left_dt
-                        + right_weight * (base.states[next][i] - base.states[k][i]) / right_dt
+                    left_weight * (samples[k][i] - samples[prev][i]) / left_dt
+                        + right_weight * (samples[next][i] - samples[k][i]) / right_dt
                 })
                 .collect()
         };
+        let tangent = |k| trajectory_rate(k, &base.states);
 
         let monodromy = &phi[n_grid - 1];
         let mut v1_0 = vec![1.0; n_state];
@@ -767,7 +763,7 @@ impl Engine {
             // node solution: pss_stamp_system reads cap/inductor history.
             self.pss_set_reactive_state(&mut circuit, &base.states[k])?;
             let solution = base.solutions[k].clone();
-            if integral_count != 0 {
+            if source_integral_count != 0 {
                 // Reset installs integration constants at t=0. Move them to the
                 // traced phase before accepting its actual input at zero dt.
                 circuit
@@ -779,6 +775,22 @@ impl Engine {
                     .accept_transient_step(&solution, base.times[k])
                     .map_err(|error| SimulationError::Circuit(error.to_string()))?;
             }
+            let solution_rates = trajectory_rate(k, &base.solutions);
+            let capacitor_rates: Vec<_> = circuit
+                .capacitors
+                .stamps
+                .iter()
+                .map(|stamp| {
+                    let rate = |node: usize| {
+                        if node == 0 {
+                            0.0
+                        } else {
+                            solution_rates[node - 1]
+                        }
+                    };
+                    rate(stamp.pp.row) - rate(stamp.nn.row)
+                })
+                .collect();
             let mut rhs_scratch = vec![0.0; size];
             circuit.prepare_prescribed_forcing(base.times[k] + dt_freeze, abort)?;
             self.pss_stamp_system(
@@ -793,6 +805,7 @@ impl Engine {
                 },
                 &solution,
                 true,
+                Some((base.times[k], &capacitor_rates)),
             )?;
 
             let super::noise::CollectedNoiseSources {
@@ -827,15 +840,27 @@ impl Engine {
                         .zip(circuit.project_perturbation(&delta))
                         .map(|(adjoint, perturbation)| adjoint * perturbation * frozen_rate)
                         .sum();
-                    let integral_rates = circuit
+                    let capacitor_start = physical_count + source_integral_count;
+                    let mut integral_rates = circuit
                         .behavioral_sources
                         .integral_rate_directions(
                             &solution,
                             &delta,
-                            &base.states[k][physical_count..],
+                            &base.states[k][physical_count..capacitor_start],
                             base.times[k],
                         )
                         .map_err(SimulationError::Circuit)?;
+                    integral_rates.extend(
+                        circuit
+                            .capacitors
+                            .integral_rate_directions(
+                                &solution,
+                                &delta,
+                                &base.states[k][capacitor_start..],
+                                base.times[k],
+                            )
+                            .map_err(SimulationError::Circuit)?,
+                    );
                     let integral: Value = v1_k[physical_count..]
                         .iter()
                         .zip(integral_rates)
