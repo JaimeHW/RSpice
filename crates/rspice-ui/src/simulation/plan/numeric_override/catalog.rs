@@ -335,6 +335,7 @@ pub(super) const NOT_HARMONIC_BALANCE: &str =
     "only a harmonic-balance solve reads this package, and this analysis does not run one";
 pub(super) const CARRIER_OWNS_HB_INITIAL_STATE: &str =
     "this analysis reuses the bound HB solution; configure initial state on that HB analysis";
+pub(super) const CARRIER_OWNS_SOLVER_OPTIONS: &str = "this analysis uses the bound periodic producer's circuit and solver options; configure those options on that producer and response-specific controls on this analysis's form";
 pub(super) const ENVELOPE_HAS_NO_HB_INITIALIZER: &str =
     "select HB under Initial periodic solve to configure its initial state";
 pub(super) const PSS_RETAINS_COMPLETE_ORBIT: &str = "PSS always retains every orbit signal for dependent analyses; reporting times only change display sampling";
@@ -631,6 +632,9 @@ impl NumericOverrideOption {
             && matches!(kind, AnalysisKind::Hbsp | AnalysisKind::Hbnoise)
         {
             return Some(CARRIER_OWNS_HB_INITIAL_STATE);
+        }
+        if kind.inherits_periodic_solver_options() {
+            return Some(CARRIER_OWNS_SOLVER_OPTIONS);
         }
         if let Some(reason) = self.spec().reach.refusal_for(kind) {
             return Some(reason);

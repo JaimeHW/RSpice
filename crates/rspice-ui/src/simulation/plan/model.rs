@@ -1156,16 +1156,11 @@ impl SimulationPlan {
                     instance.numeric_override = None;
                 }
             }
-            // These consumers now reuse a bound HB state. Their old startup
-            // override was never read and must not block editing a restored
-            // plan or be silently transferred to its shared carrier producer.
-            if matches!(instance.kind, AnalysisKind::Hbsp | AnalysisKind::Hbnoise)
-                && let Some(record) = instance.numeric_override.as_mut()
-            {
-                record.clear(NumericOverrideOption::HbInitialState);
-                if record.is_empty() {
-                    instance.numeric_override = None;
-                }
+            // A dependent periodic solve must use its carrier's exact deck
+            // options. Independent overrides either failed authentication or
+            // duplicated the carrier; response controls live in the draft.
+            if instance.kind.inherits_periodic_solver_options() {
+                instance.numeric_override = None;
             }
             // PSS has always retained the full orbit for its consumers. Its
             // old retention switch changed nothing; retire only that field.

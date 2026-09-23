@@ -2510,14 +2510,8 @@ fn periodic_op_handoff_snapshot_preserves_source_basis_and_distinct_numerics() {
                 },
                 config: None,
                 spec_options: Default::default(),
-                numeric_override: make_numeric(
-                    if hb {
-                        AnalysisKind::Pac
-                    } else {
-                        AnalysisKind::Qpac
-                    },
-                    "0",
-                ),
+                // The plan builder inherits this from the exact carrier.
+                numeric_override: make_numeric(producer_kind, "0"),
                 analysis_line: ".qpac".into(),
             },
         );

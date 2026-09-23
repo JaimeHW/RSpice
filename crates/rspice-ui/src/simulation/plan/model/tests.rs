@@ -204,69 +204,67 @@ fn pss_retention_restore_preserves_reporting_and_receipts() {
 }
 
 #[test]
-fn restore_retires_only_unused_hb_consumer_startup_overrides() {
-    use crate::simulation::plan::SolverOwnership;
+fn restore_periodic_consumer_solver_ownership_preserves_carriers_and_history() {
     let mut plan = SimulationPlan::empty();
     let (hb, _) = plan.insert(AnalysisKind::HarmonicBalance).unwrap();
-    let (sp, _) = plan.insert(AnalysisKind::Hbsp).unwrap();
-    let (noise, _) = plan.insert(AnalysisKind::Hbnoise).unwrap();
-    let mut startup = AnalysisNumericOverride::default();
-    startup
-        .set_for_instance(
-            AnalysisKind::HarmonicBalance,
-            SolverOwnership::NONE,
-            NumericOverrideOption::HbInitialState,
-            "0",
-        )
-        .unwrap();
-    for id in [hb, sp, noise] {
-        let index = plan.index_of(id).unwrap();
-        plan.instances[index].numeric_override = Some(startup.clone());
+    let mut consumers = Vec::new();
+    for kind in [
+        AnalysisKind::Pac,
+        AnalysisKind::Pxf,
+        AnalysisKind::Pnoise,
+        AnalysisKind::Pstb,
+        AnalysisKind::Psp,
+        AnalysisKind::Hbsp,
+        AnalysisKind::Hbnoise,
+        AnalysisKind::Qpac,
+        AnalysisKind::Qpxf,
+        AnalysisKind::Qpnoise,
+    ] {
+        consumers.push(plan.insert(kind).unwrap().0);
     }
-    let index = plan.index_of(sp).unwrap();
-    plan.instances[index]
-        .numeric_override
-        .as_mut()
-        .unwrap()
-        .set_for_instance(
-            AnalysisKind::Hbsp,
-            SolverOwnership::NONE,
-            NumericOverrideOption::Reltol,
-            "1u",
-        )
-        .unwrap();
+    plan.prepare_after_restore();
+    let legacy: AnalysisNumericOverride = serde_json::from_str(r#"{"reltol":0.000001}"#).unwrap();
+    for id in std::iter::once(&hb).chain(&consumers) {
+        let index = plan.index_of(*id).unwrap();
+        plan.instances[index].numeric_override = Some(legacy.clone());
+    }
+    let drafts: Vec<_> = plan
+        .instances
+        .iter()
+        .map(|instance| serde_json::to_value(&instance.draft).unwrap())
+        .collect();
     let mut restored: SimulationPlan = serde_json::from_str(&snapshot(&plan)).unwrap();
     let history = serde_json::to_value(&restored.receipts).unwrap();
-    assert!(!restored.receipts.is_empty());
     restored.prepare_after_restore();
     assert_eq!(
         restored.instance(hb).unwrap().numeric_override(),
-        Some(&startup)
+        Some(&legacy)
     );
-    assert!(
-        restored
-            .instance(noise)
-            .unwrap()
-            .numeric_override()
-            .is_none()
-    );
-    let remaining = restored.instance(sp).unwrap().numeric_override().unwrap();
-    assert!(
-        remaining
-            .value(NumericOverrideOption::HbInitialState)
-            .is_none()
-    );
-    assert_eq!(
-        remaining.value(NumericOverrideOption::Reltol),
-        Some("1u".into())
-    );
+    for id in &consumers {
+        assert!(restored.instance(*id).unwrap().numeric_override().is_none());
+        assert!(
+            restored
+                .set_numeric_override(*id, Some(legacy.clone()))
+                .is_err()
+        );
+    }
     assert_eq!(serde_json::to_value(&restored.receipts).unwrap(), history);
+    assert_eq!(
+        restored
+            .instances
+            .iter()
+            .map(|instance| serde_json::to_value(&instance.draft).unwrap())
+            .collect::<Vec<_>>(),
+        drafts
+    );
     let once = snapshot(&restored);
     restored.prepare_after_restore();
     assert_eq!(snapshot(&restored), once);
-    restored
-        .edit(sp, |_| ())
-        .expect("restored consumer remains editable");
+    for id in consumers {
+        restored
+            .edit(id, |_| ())
+            .expect("restored consumer remains editable");
+    }
 }
 
 /// A plan written before participation existed states no `run_at`, and must

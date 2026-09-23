@@ -11,6 +11,40 @@ use crate::simulation::dialog::OpHomotopy;
 use crate::simulation::plan::NumericOverrideOption as O;
 
 #[test]
+fn periodic_consumer_solver_ownership_matches_form_ledger_and_authoring() {
+    for kind in [
+        AnalysisKind::Pac,
+        AnalysisKind::Pxf,
+        AnalysisKind::Pnoise,
+        AnalysisKind::Pstb,
+        AnalysisKind::Psp,
+        AnalysisKind::Hbsp,
+        AnalysisKind::Hbnoise,
+        AnalysisKind::Qpac,
+        AnalysisKind::Qpxf,
+        AnalysisKind::Qpnoise,
+    ] {
+        let draft = AnalysisDraft::for_kind(kind);
+        assert!(form_rows(kind, &draft, None, &SimulationOptions::default()).is_empty());
+        let rows = rows_for(kind, None);
+        let mut record = AnalysisNumericOverride::default();
+        for option in O::all() {
+            let reason = option
+                .refusal_for_instance(kind, draft.solver_ownership())
+                .unwrap();
+            assert!(reason.contains("bound"));
+            assert_eq!(origin_of(&rows, option), reason);
+            assert!(
+                record
+                    .set_for_instance(kind, draft.solver_ownership(), option, "1")
+                    .unwrap_err()
+                    .contains(reason)
+            );
+        }
+    }
+}
+
+#[test]
 fn reliability_output_ownership_and_stress_mode_match_form_and_ledger() {
     let kind = AnalysisKind::Reliability;
     let options = SimulationOptions::default();

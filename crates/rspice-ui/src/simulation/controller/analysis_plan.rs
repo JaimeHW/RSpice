@@ -213,7 +213,36 @@ impl SimulationController {
             // being resolved here: snapshot preparation owns the seam where a
             // task's deck is written, and it is the only place that can splice
             // them after per-point expansion has chosen that deck.
-            let numeric_override = instance.numeric_override().cloned();
+            let numeric_override = if instance.kind().inherits_periodic_solver_options() {
+                let carriers = instance
+                    .dependencies()
+                    .iter()
+                    .filter_map(|edge| {
+                        plan.instances().iter().find(|producer| {
+                            producer.id() == edge.target()
+                                && matches!(
+                                    producer.kind(),
+                                    AnalysisKind::Pss
+                                        | AnalysisKind::HarmonicBalance
+                                        | AnalysisKind::Qpss
+                                )
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let [carrier] = carriers.as_slice() else {
+                    errors.push(format!(
+                        "{} requires exactly one bound periodic producer for its solver options",
+                        instance.display_name()
+                    ));
+                    continue;
+                };
+                // Reusing an orbit requires its authenticated numerical
+                // circuit, including every producer-local .OPTIONS package.
+                // Consumer response controls travel separately in its spec.
+                carrier.numeric_override().cloned()
+            } else {
+                instance.numeric_override().cloned()
+            };
 
             let task = if Self::executes_via_spec(&spec) {
                 QueuedAnalysis {
@@ -949,6 +978,17 @@ mod tests {
                 }))
             })
             .unwrap();
+            let mut producer_numerics = crate::simulation::plan::AnalysisNumericOverride::default();
+            producer_numerics
+                .set_for_instance(
+                    AnalysisKind::Qpss,
+                    Default::default(),
+                    crate::simulation::plan::NumericOverrideOption::Gmin,
+                    "1e-9",
+                )
+                .unwrap();
+            plan.set_numeric_override(producer, Some(producer_numerics))
+                .unwrap();
             let frozen = plan.freeze().unwrap();
             plan.edit(producer, |draft| {
                 let AnalysisDraft::Qpss(d) = draft else {
@@ -964,6 +1004,23 @@ mod tests {
             let queue = SimulationController::new()
                 .build_queue_from_plan(&state, &frozen, &sealed)
                 .unwrap();
+            let inherited = &queue
+                .iter()
+                .find(|task| task.instance_id() == consumer)
+                .unwrap()
+                .queued_analysis()
+                .numeric_override;
+            let carrier = &queue
+                .iter()
+                .find(|task| task.instance_id() == producer)
+                .unwrap()
+                .queued_analysis()
+                .numeric_override;
+            assert!(carrier.is_some());
+            assert_eq!(
+                inherited, carrier,
+                "consumer must authenticate the carrier's numerical circuit"
+            );
             let task = queue.iter().find(|task| task.instance_id() == mc).unwrap();
             let base = task
                 .queued_analysis()
@@ -1123,6 +1180,17 @@ mod tests {
                 }))
             })
             .unwrap();
+            let mut producer_numerics = crate::simulation::plan::AnalysisNumericOverride::default();
+            producer_numerics
+                .set_for_instance(
+                    AnalysisKind::Pss,
+                    Default::default(),
+                    crate::simulation::plan::NumericOverrideOption::Gmin,
+                    "1e-9",
+                )
+                .unwrap();
+            plan.set_numeric_override(pss, Some(producer_numerics))
+                .unwrap();
             let frozen = plan.freeze().unwrap();
             plan.edit(consumer, |draft| *draft = AnalysisDraft::for_kind(kind))
                 .unwrap();
@@ -1133,6 +1201,23 @@ mod tests {
             let queue = SimulationController::new()
                 .build_queue_from_plan(&state, &frozen, &sealed)
                 .unwrap();
+            let inherited = &queue
+                .iter()
+                .find(|task| task.instance_id() == consumer)
+                .unwrap()
+                .queued_analysis()
+                .numeric_override;
+            let carrier = &queue
+                .iter()
+                .find(|task| task.instance_id() == pss)
+                .unwrap()
+                .queued_analysis()
+                .numeric_override;
+            assert!(carrier.is_some());
+            assert_eq!(
+                inherited, carrier,
+                "consumer must authenticate the carrier's numerical circuit"
+            );
             let task = queue.iter().find(|task| task.instance_id() == mc).unwrap();
             let consumer_task = queue
                 .iter()
@@ -1510,6 +1595,23 @@ mod tests {
             let queue = SimulationController::new()
                 .build_queue_from_plan(&state, &frozen, &sealed)
                 .unwrap();
+            let inherited = &queue
+                .iter()
+                .find(|task| task.instance_id() == consumer)
+                .unwrap()
+                .queued_analysis()
+                .numeric_override;
+            let carrier = &queue
+                .iter()
+                .find(|task| task.instance_id() == first)
+                .unwrap()
+                .queued_analysis()
+                .numeric_override;
+            assert!(carrier.is_some());
+            assert_eq!(
+                inherited, carrier,
+                "consumer must authenticate the carrier's numerical circuit"
+            );
             let task = queue.iter().find(|task| task.instance_id() == mc).unwrap();
             let base = task
                 .queued_analysis()

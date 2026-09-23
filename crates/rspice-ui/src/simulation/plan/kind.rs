@@ -635,6 +635,25 @@ impl AnalysisKind {
         )
     }
 
+    /// These analyses linearize the exact retained periodic circuit. Its deck
+    /// options belong to the carrier; response tolerances remain in each
+    /// consumer's own analysis configuration.
+    pub const fn inherits_periodic_solver_options(self) -> bool {
+        matches!(
+            self,
+            Self::Pac
+                | Self::Pxf
+                | Self::Pnoise
+                | Self::Pstb
+                | Self::Psp
+                | Self::Hbsp
+                | Self::Hbnoise
+                | Self::Qpac
+                | Self::Qpxf
+                | Self::Qpnoise
+        )
+    }
+
     /// Current engine limitation. The identity and configuration remain
     /// persistent, but execution must reject these kinds until a real solver
     /// is integrated.

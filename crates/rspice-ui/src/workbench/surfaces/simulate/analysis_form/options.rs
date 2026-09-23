@@ -50,6 +50,12 @@ pub(in crate::workbench::surfaces::simulate) fn fields(
         .and_then(|target| target.numeric_override());
     let offered =
         advanced_options::form_rows(draft.kind(), draft, record, &app.state.sim_setup.options);
+    if draft.kind().inherits_periodic_solver_options() {
+        super::field_note(
+            ui,
+            "Shared solver options come from the bound periodic analysis. Configure its solver options there; response-specific settings remain on this form.",
+        );
+    }
     let mut edits = Vec::new();
     for (heading, rows) in grouped(&offered) {
         super::sub_header(ui, heading);
