@@ -206,7 +206,7 @@ fn qpnoise_engine_windows_filters_nulls_and_cancellation_are_explicit() {
         ),
         Err(SimulationError::Aborted)
     ));
-    let mut limits = engine.config.resource_limits.clone();
+    let mut limits = engine.config.resource_limits;
     limits.max_result_values = 100;
     assert!(matches!(
         one.validate_retained_payload_with_abort(&limits, &NoAbort),
@@ -386,7 +386,7 @@ fn qpnoise_packed_transport_preserves_colored_lattices_and_rejects_corruption() 
         )
         .is_err()
     );
-    let mut bounded = limits.clone();
+    let mut bounded = *limits;
     bounded.max_result_values = values.len();
     assert!(matches!(
         metadata.validate_transfer_layout_with_abort(values.len(), &bounded, &NoAbort),

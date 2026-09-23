@@ -262,7 +262,7 @@ pub(super) fn resolve_noise_figure_resistor(
         .resistors
         .names
         .iter()
-        .position(|name| name.eq_ignore_ascii_case(&source_name))
+        .position(|name| name.eq_ignore_ascii_case(source_name))
     {
         if circuit.resistors.thermal[index].is_some() {
             return Err(invalid(
@@ -279,7 +279,7 @@ pub(super) fn resolve_noise_figure_resistor(
         .resistor_branches
         .names
         .iter()
-        .position(|name| name.eq_ignore_ascii_case(&source_name))
+        .position(|name| name.eq_ignore_ascii_case(source_name))
     {
         (
             circuit.resistor_branches.small_signal_resistances[index],

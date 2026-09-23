@@ -100,7 +100,7 @@ fn qpac_engine_binds_three_tone_sources_differential_outputs_and_retained_identi
                 .validate_retained_payload_with_abort(&limits, &NoAbort)
                 .is_err()
         );
-        let mut limited = limits.clone();
+        let mut limited = limits;
         limited.max_result_values = 1;
         assert!(
             metadata

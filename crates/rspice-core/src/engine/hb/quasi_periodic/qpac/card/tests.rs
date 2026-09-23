@@ -140,7 +140,7 @@ fn qpac_card_executes_against_the_decks_retained_qpss_state() {
     ] {
         let limits = ResourceLimits::default();
         assert_eq!(QpacRequest::validate_qpac_card(&sweep, &limits).unwrap(), expected_offsets.len());
-        let mut limited = limits.clone();
+        let mut limited = limits;
         limited.max_analysis_points = expected_offsets.len() - 1;
         assert!(matches!(QpacRequest::validate_qpac_card(&sweep, &limited), Err(SimulationError::ResourceLimit(_))));
         let result = engine.run_qpac_card_from_qpss_with_abort(&deck, &sweep, &point, &NoAbort).unwrap();

@@ -124,7 +124,7 @@ impl Engine {
                 point.node_names().len(),
             )?);
         }
-        let mut limits = engine.config.resource_limits.clone();
+        let mut limits = engine.config.resource_limits;
         limits.max_result_values = limits.max_result_values.saturating_sub(metadata_values);
         let mut solutions = solver
             .solve_quasi_periodic_adjoint_at_frequency_with_abort(

@@ -132,16 +132,15 @@ impl QpacResultMetadata {
             .iter()
             .zip([&self.request.output_node, &self.request.output_ref])
         {
-            if let Some(row) = row {
-                if !self
+            if let Some(row) = row
+                && !self
                     .node_names
                     .get(*row)
                     .is_some_and(|node| node.eq_ignore_ascii_case(name.trim()))
-                {
-                    return Err(qpac_error(
-                        "retained output coordinate differs from its request",
-                    ));
-                }
+            {
+                return Err(qpac_error(
+                    "retained output coordinate differs from its request",
+                ));
             }
         }
         for (tuple, frequencies) in [

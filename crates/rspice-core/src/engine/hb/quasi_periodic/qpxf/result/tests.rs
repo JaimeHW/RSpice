@@ -88,7 +88,7 @@ fn qpxf_retained_result_round_trip_and_corruption_boundaries() {
         )
         .is_err()
     );
-    let mut limited = limits.clone();
+    let mut limited = limits;
     limited.max_result_values = 1;
     assert!(matches!(
         metadata.validate_transfer_layout_with_abort(&lengths, &limited, &NoAbort),

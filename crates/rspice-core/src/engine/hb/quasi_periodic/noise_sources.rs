@@ -62,7 +62,7 @@ impl Catalog {
         engine.ensure_result_values(self.values.saturating_add(extra))
     }
     fn remaining(&self, engine: &Engine) -> ResourceLimits {
-        let mut limits = engine.config.resource_limits.clone();
+        let mut limits = engine.config.resource_limits;
         limits.max_result_values = limits
             .max_result_values
             .min(32_000_000)

@@ -136,7 +136,7 @@ impl Engine {
             .saturating_add(grid.len().saturating_mul(grid.dimensions().len()))
             .saturating_add(grid.dimensions().len());
         engine.ensure_result_values(metadata_values)?;
-        let mut limits = engine.config.resource_limits.clone();
+        let mut limits = engine.config.resource_limits;
         limits.max_result_values = limits.max_result_values.saturating_sub(metadata_values);
         let mut solutions = solver
             .solve_quasi_periodic_ac_with_abort(

@@ -180,54 +180,10 @@ impl Projector<'_> {
         tuple
             .iter()
             .zip(&self.grid.config().harmonics)
-            .filter_map(|(k, h)| (*k != 0).then(|| h / k.unsigned_abs() as usize))
+            .filter(|&(k, _h)| *k != 0)
+            .map(|(k, h)| h / k.unsigned_abs() as usize)
             .min()
             .unwrap_or(0)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn qpss_source_projection_preserves_representable_subnormal_coefficients() {
-        let grid = Arc::new(
-            QuasiPeriodicGrid::new_with_abort(
-                QuasiPeriodicGridConfig::new(vec![1.0, std::f64::consts::SQRT_2], vec![1, 1]),
-                &crate::ResourceLimits::default(),
-                &NoAbort,
-            )
-            .unwrap(),
-        );
-        let mut projector = Projector {
-            transform: QuasiPeriodicTransform::new_with_abort(grid.clone(), &NoAbort).unwrap(),
-            grid: grid.clone(),
-            dialect: SpiceDialect::BestAvailable,
-            abort: &NoAbort,
-        };
-        let spectrum = projector
-            .project(
-                &SourceSpec::Ac {
-                    magnitude: Value::from_bits(2),
-                    phase: 0.0,
-                },
-                &[0],
-            )
-            .unwrap();
-        assert_eq!(spectrum[grid.index_of(&[1, 0]).unwrap()].re.to_bits(), 1);
-        assert_eq!(spectrum[grid.index_of(&[-1, 0]).unwrap()].re.to_bits(), 1);
-        assert!(
-            projector
-                .project(
-                    &SourceSpec::Ac {
-                        magnitude: Value::from_bits(1),
-                        phase: 0.0
-                    },
-                    &[0]
-                )
-                .is_err()
-        );
     }
 }
 
@@ -332,7 +288,8 @@ pub(super) fn build(
             } else {
                 [(pos[index], -1.0), (neg[index], 1.0)]
                     .into_iter()
-                    .filter_map(|(node, sign)| (node > 0).then(|| (node - 1, sign)))
+                    .filter(|&(node, _sign)| node > 0)
+                    .map(|(node, sign)| (node - 1, sign))
                     .collect()
             };
             for (row, sign) in rows {
@@ -346,4 +303,49 @@ pub(super) fn build(
         }
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn qpss_source_projection_preserves_representable_subnormal_coefficients() {
+        let grid = Arc::new(
+            QuasiPeriodicGrid::new_with_abort(
+                QuasiPeriodicGridConfig::new(vec![1.0, std::f64::consts::SQRT_2], vec![1, 1]),
+                &crate::ResourceLimits::default(),
+                &NoAbort,
+            )
+            .unwrap(),
+        );
+        let mut projector = Projector {
+            transform: QuasiPeriodicTransform::new_with_abort(grid.clone(), &NoAbort).unwrap(),
+            grid: grid.clone(),
+            dialect: SpiceDialect::BestAvailable,
+            abort: &NoAbort,
+        };
+        let spectrum = projector
+            .project(
+                &SourceSpec::Ac {
+                    magnitude: Value::from_bits(2),
+                    phase: 0.0,
+                },
+                &[0],
+            )
+            .unwrap();
+        assert_eq!(spectrum[grid.index_of(&[1, 0]).unwrap()].re.to_bits(), 1);
+        assert_eq!(spectrum[grid.index_of(&[-1, 0]).unwrap()].re.to_bits(), 1);
+        assert!(
+            projector
+                .project(
+                    &SourceSpec::Ac {
+                        magnitude: Value::from_bits(1),
+                        phase: 0.0
+                    },
+                    &[0]
+                )
+                .is_err()
+        );
+    }
 }

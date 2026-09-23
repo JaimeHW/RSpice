@@ -225,7 +225,7 @@ mod tests {
         let defaults = parse(".QPSS 1k 1.4142135623730951k").unwrap();
         assert_eq!(
             defaults,
-            QpssConfig::new(vec![1e3, 1.4142135623730951e3], vec![7, 7])
+            QpssConfig::new(vec![1e3, 1.414_213_562_373_095e3], vec![7, 7])
         );
         let broadcast = parse(".QPSS 1k 1.4142135623730951k HARMS=2 OVERSAMPLE=3").unwrap();
         assert_eq!(broadcast.grid.harmonics, [2, 2]);
@@ -264,7 +264,7 @@ mod tests {
         }
         assert!(parse(".QPSS 1k").is_err());
         assert!(parse(".QPSS 1k 1k").is_err());
-        let mut config = QpssConfig::new(vec![1e3, 1.4142135623730951e3], vec![1, 1]);
+        let mut config = QpssConfig::new(vec![1e3, 1.414_213_562_373_095e3], vec![1, 1]);
         config.source_tones.push(QpssSourceTone {
             source: "V1\n.end".into(),
             tone: 0,

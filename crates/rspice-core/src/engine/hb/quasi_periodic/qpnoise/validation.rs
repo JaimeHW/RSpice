@@ -201,7 +201,7 @@ impl QpnoiseAnalysisResult {
             }
         }
         let mut names = BTreeSet::new();
-        let mut workspace = limits.clone();
+        let mut workspace = *limits;
         workspace.max_result_values = workspace
             .max_result_values
             .min(32_000_000)
