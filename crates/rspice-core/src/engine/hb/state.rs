@@ -21,10 +21,14 @@ pub enum HbEnvelopeStateGuarantee {
     /// Exact phase projection for ordinary linear resistors/capacitors,
     /// independent current sources, and ideal voltage-source MNA branches.
     ExactLinearRcMnaV1,
+    /// Exact phase projection for linear R/L/C networks, fixed mutual
+    /// inductance, independent and controlled sources, and physical MNA
+    /// branches (including capacitor IC and resistor-current branches).
+    ExactLinearRlcMnaV1,
 }
 
 /// Authenticated HB carrier state that can restart transient integration at
-/// slow-time origin zero for the deliberately narrow complete circuit subset.
+/// slow-time origin zero with complete state for the declared circuit subset.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HbEnvelopeContinuationState {
     guarantee: HbEnvelopeStateGuarantee,
@@ -244,7 +248,7 @@ impl Engine {
             Some(blockers) => Err(SimulationError::unsupported_capability(
                 "analysis.hb.envelope.continuation",
                 format!(
-                    "HB Envelope continuation is unavailable because the circuit contains {blockers}; the exact initializer currently supports only ordinary R/C elements and independent voltage/current sources"
+                    "HB Envelope continuation is unavailable because the circuit contains {blockers}; the exact initializer supports linear R/L/C networks, fixed mutual inductance, and independent or controlled sources"
                 ),
             )),
         }
@@ -315,11 +319,11 @@ impl Engine {
             *slot = *current;
             seen_branches.insert(branch);
         }
-        if seen_branches.len() != circuit.voltage_sources.len() {
+        if seen_branches.len() != circuit.num_branches() {
             return Err(SimulationError::Circuit(format!(
-                "HB Envelope phase projection retained {} of {} ideal voltage-source branches",
+                "HB Envelope phase projection retained {} of {} MNA branches",
                 seen_branches.len(),
-                circuit.voltage_sources.len()
+                circuit.num_branches()
             )));
         }
         if solution.iter().any(|value| !value.is_finite()) {
@@ -410,6 +414,35 @@ impl Engine {
             );
         }
 
+        for index in 0..circuit.inductors.len() {
+            let name = &circuit.inductors.names[index];
+            let reactive_at = |state: &crate::analysis::HbPhaseState| {
+                state
+                    .reactive_states
+                    .iter()
+                    .find(|reactive| {
+                        reactive.kind == HbReactiveKind::Inductor
+                            && reactive.device_name.eq_ignore_ascii_case(name)
+                            && reactive.current_is_exact
+                    })
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "HB Envelope phase projection omitted exact inductor state '{name}'"
+                        ))
+                    })
+                    .map(|reactive| (reactive.voltage, reactive.current))
+            };
+            let (voltage, current) = reactive_at(latest)?;
+            circuit.inductors.i_prev[index] = current;
+            circuit.inductors.i_prev_prev[index] = reactive_at(previous)?.1;
+            circuit.inductors.i_prev_prev_prev[index] = reactive_at(older)?.1;
+            let _ = reactive_at(oldest)?;
+            // Full winding voltage includes mutual flux; transient coupling
+            // stamps reconstruct the remaining terms from winding currents.
+            circuit.inductors.v_prev[index] = voltage;
+        }
+        circuit.restore_coupled_inductor_pair_state(solutions.last().unwrap());
+
         let lte_reference = self
             .config
             .transient_lte_reference
@@ -440,7 +473,7 @@ impl Engine {
 
     /// Solve an authenticated carrier-periodic HB state with selected slow
     /// source waveforms frozen at their exact time-zero values, then create an
-    /// exact transient continuation state for the supported linear R/C subset.
+    /// exact transient continuation state for supported linear R/L/C networks.
     pub fn run_hb_envelope_continuation_state(
         &self,
         netlist: &Netlist,
@@ -482,6 +515,25 @@ impl Engine {
             ));
         }
         Self::ensure_hb_envelope_linear_subset(&original_circuit)?;
+        Self::transient_checkpoint_capability_for_circuit(&original_circuit, abort)?
+            .require_resumable()
+            .map_err(SimulationError::Circuit)?;
+        let guarantee = if original_circuit.inductors.is_empty()
+            && original_circuit.resistor_branches.is_empty()
+            && original_circuit.vcvs.is_empty()
+            && original_circuit.vccs.is_empty()
+            && original_circuit.ccvs.is_empty()
+            && original_circuit.cccs.is_empty()
+            && original_circuit
+                .capacitors
+                .ic_branch_indices
+                .iter()
+                .all(Option::is_none)
+        {
+            HbEnvelopeStateGuarantee::ExactLinearRcMnaV1
+        } else {
+            HbEnvelopeStateGuarantee::ExactLinearRlcMnaV1
+        };
         let mut frozen_circuit = original_circuit.clone();
         let canonical_frozen_sources =
             Self::hb_envelope_freeze_selected_sources(&mut frozen_circuit, &requested_sources)?;
@@ -512,7 +564,7 @@ impl Engine {
         Ok((
             analysis,
             HbEnvelopeContinuationState {
-                guarantee: HbEnvelopeStateGuarantee::ExactLinearRcMnaV1,
+                guarantee,
                 fundamental_freq: config.fundamental_freq,
                 num_harmonics: config.num_harmonics,
                 hb_config_identity: Self::hb_envelope_config_identity(&config),
@@ -607,12 +659,6 @@ impl Engine {
         let engine = self.resolved_for_netlist(netlist);
         let expected_hb_config =
             engine.hb_config_for_netlist(netlist, expected_hb_config.clone())?;
-        if state.guarantee != HbEnvelopeStateGuarantee::ExactLinearRcMnaV1 {
-            return Err(SimulationError::Circuit(
-                "HB Envelope continuation artifact has an unsupported completeness guarantee"
-                    .to_string(),
-            ));
-        }
         if Self::hb_envelope_config_identity(&expected_hb_config) != state.hb_config_identity {
             return Err(SimulationError::Circuit(
                 "HB Envelope continuation artifact belongs to a different HB configuration"

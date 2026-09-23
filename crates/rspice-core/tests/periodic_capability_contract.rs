@@ -253,7 +253,7 @@ c1 out 0 100p
 #[test]
 fn hb_envelope_continuation_names_every_family_outside_the_linear_subset() {
     let supported = "\
-* R/C and independent sources are the declared envelope subset
+* Linear R/L/C and independent or controlled sources support exact projection
 Vcarrier carrier 0 SIN(0 1 1meg)
 Vmod mod 0 PULSE(0 1 250n 20n 20n 2u 10u)
 Rcarrier carrier out 1k
@@ -271,20 +271,32 @@ Cout out 0 160p
     );
 
     let with_inductor = supported.replace("Cout out 0 160p", "Cout out 0 160p\nLout out 0 1u");
-    let message = engine()
-        .run_hb_envelope_continuation_state(
+    assert_admitted(
+        engine().run_hb_envelope_continuation_state(
             &parse(&with_inductor),
             HbConfig::new(F0).with_harmonics(2),
             &["Vmod".to_string()],
+        ),
+        "a linear R/L/C envelope deck",
+    );
+    let with_diode = supported.replace(
+        "Cout out 0 160p",
+        "Cout out 0 160p\nDout out 0 DM\n.model DM D",
+    );
+    let message = engine()
+        .run_hb_envelope_continuation_state(
+            &parse(&with_diode),
+            HbConfig::new(F0).with_harmonics(2),
+            &["Vmod".to_string()],
         )
-        .expect_err("an inductor is outside the exact envelope initializer's subset")
+        .unwrap_err()
         .to_string();
     assert!(
         message.contains("HB Envelope continuation is unavailable"),
         "the envelope preflight must own this rejection: {message}"
     );
     assert!(
-        message.contains("inductors"),
+        message.contains("diodes"),
         "the rejection must name the family outside the subset: {message}"
     );
 }

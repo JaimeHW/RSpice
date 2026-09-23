@@ -348,8 +348,8 @@ use CapabilitySupport::{Absent, Complete, Inapplicable, Restricted};
 
 /// Shared phrase for the envelope initializer's linear subset. The gap query
 /// reports the offending family by name; this states why it is a gap.
-const ENVELOPE_LINEAR_SUBSET: &str = "the exact envelope initializer supports only ordinary R/C elements and independent \
-     voltage/current sources";
+const ENVELOPE_LINEAR_SUBSET: &str = "the exact envelope initializer supports linear R/L/C networks, fixed mutual \
+     inductance, and independent or controlled sources";
 const CYCLOSTATIONARY_FLICKER: &str = "stationary thermal/shot noise is exact; a nonzero flicker coefficient needs cyclostationary \
      colored-noise folding rather than a DC-bias substitution";
 const RESISTOR_CYCLOSTATIONARY_FLICKER: &str = "thermal noise and AF=2 signed-current flicker modulation are exact; other AF values \
@@ -388,7 +388,7 @@ pub(crate) const fn periodic_capability_descriptor(
                 "a resistor without an accepted thermal-state temperature; the Xyce LEVEL=2 \
                  thermal resistor state is not advanced by the shooting period map",
             ),
-            envelope: Complete,
+            envelope: Restricted("a resistor without an accepted thermal-state temperature"),
         },
         F::ResistorBranch => PeriodicCapabilityDescriptor {
             residual_jacobian: Inapplicable,
@@ -396,7 +396,7 @@ pub(crate) const fn periodic_capability_descriptor(
             small_signal: Complete,
             noise: Restricted(RESISTOR_CYCLOSTATIONARY_FLICKER),
             pss_state: Complete,
-            envelope: Absent(ENVELOPE_LINEAR_SUBSET),
+            envelope: Complete,
         },
         F::Capacitor => PeriodicCapabilityDescriptor {
             residual_jacobian: Inapplicable,
@@ -408,8 +408,7 @@ pub(crate) const fn periodic_capability_descriptor(
             noise: Inapplicable,
             pss_state: Complete,
             envelope: Restricted(
-                "an ordinary two-terminal capacitor with a constant value and no internal or \
-                 IC-constrained branch",
+                "a constant capacitance with exact retained terminal voltage and lead current",
             ),
         },
         F::Inductor => PeriodicCapabilityDescriptor {
@@ -418,7 +417,7 @@ pub(crate) const fn periodic_capability_descriptor(
             small_signal: Complete,
             noise: Inapplicable,
             pss_state: Complete,
-            envelope: Absent(ENVELOPE_LINEAR_SUBSET),
+            envelope: Complete,
         },
         F::VoltageSource | F::CurrentSource => PeriodicCapabilityDescriptor {
             residual_jacobian: Inapplicable,
@@ -434,7 +433,7 @@ pub(crate) const fn periodic_capability_descriptor(
             small_signal: Complete,
             noise: Inapplicable,
             pss_state: Complete,
-            envelope: Absent(ENVELOPE_LINEAR_SUBSET),
+            envelope: Complete,
         },
         F::Diode => PeriodicCapabilityDescriptor {
             residual_jacobian: Restricted(
@@ -637,7 +636,7 @@ pub(crate) const fn periodic_capability_descriptor(
                 "positive-definite mutual inductance; singular flux constraints do not yet \
                  have independent shooting coordinates",
             ),
-            envelope: Absent(ENVELOPE_LINEAR_SUBSET),
+            envelope: Complete,
         },
         F::MultiWindingTransformer => PeriodicCapabilityDescriptor {
             residual_jacobian: Inapplicable,
@@ -1460,26 +1459,21 @@ pub(in crate::engine) fn envelope_gaps(circuit: &CircuitData) -> Vec<CapabilityG
                             "solution-dependent capacitor values",
                         ));
                     }
-                    if circuit.capacitors.internal.iter().any(|internal| *internal)
-                        || circuit
-                            .capacitors
-                            .ic_branch_indices
-                            .iter()
-                            .any(Option::is_some)
-                    {
-                        gaps.push(CapabilityGap::new(
-                            family,
-                            "internal or IC-constrained capacitor branches",
-                        ));
-                    }
+                } else if family == F::Resistor
+                    && circuit.resistors.thermal.iter().any(Option::is_some)
+                {
+                    gaps.push(CapabilityGap::new(
+                        family,
+                        "thermal resistor accepted temperature state",
+                    ));
                 }
             }
         }
     }
 
-    // Structural backstop: the exact initializer owns only voltage-source
-    // branches, so any other branch means a family it cannot initialize.
-    if circuit.num_branches() != circuit.voltage_sources.len() {
+    // Every admitted branch must have a physical periodic owner whose exact
+    // current can be projected into the continuation's full MNA solution.
+    if !every_branch_has_a_periodic_owner(circuit) {
         gaps.push(CapabilityGap::new(
             F::ResistorBranch,
             "unrecognized MNA branch families",
@@ -1733,12 +1727,12 @@ mod tests {
         use Declared::{Absent as A, Complete as C, Inapplicable as I, Restricted as R};
         use PeriodicDeviceFamily as F;
         match family {
-            F::Resistor => [I, I, C, R, R, C],
-            F::ResistorBranch => [I, I, C, R, C, A],
+            F::Resistor => [I, I, C, R, R, R],
+            F::ResistorBranch => [I, I, C, R, C, C],
             F::Capacitor => [I, C, R, I, R, R],
-            F::Inductor => [I, C, C, I, C, A],
+            F::Inductor => [I, C, C, I, C, C],
             F::VoltageSource | F::CurrentSource => [I, I, C, I, C, C],
-            F::Vcvs | F::Vccs | F::Cccs | F::Ccvs => [I, I, C, I, C, A],
+            F::Vcvs | F::Vccs | F::Cccs | F::Ccvs => [I, I, C, I, C, C],
             F::Diode => [R, C, C, R, C, A],
             // Authored GP PTF adds an irrational delay to the formerly
             // complete charge descriptor; VBIC's finite delay states remain.
@@ -1759,7 +1753,7 @@ mod tests {
             F::CoupledTransmissionLine => [I, C, R, I, A, A],
             // Mutual history now advances and restarts with its physical
             // winding currents. Singular flux still needs a reduced basis.
-            F::InductorCoupling | F::CoupledInductorPair => [I, C, C, I, R, A],
+            F::InductorCoupling | F::CoupledInductorPair => [I, C, C, I, R, C],
             F::MultiWindingTransformer => [I, C, C, I, A, A],
             F::JilesAthertonInductor | F::XyceCoreGroup => [I, C, A, I, A, A],
             F::BehavioralSource => [R, C, R, I, R, A],

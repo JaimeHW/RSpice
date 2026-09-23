@@ -3228,12 +3228,15 @@ pub enum EnvelopeGuaranteeTag {
     /// Exact phase projection for ordinary linear R/C elements, independent
     /// current sources, and ideal voltage-source MNA branches.
     ExactLinearRcMnaV1,
+    /// Exact projection including winding histories and physical branch currents.
+    ExactLinearRlcMnaV1,
 }
 
 impl From<HbEnvelopeStateGuarantee> for EnvelopeGuaranteeTag {
     fn from(guarantee: HbEnvelopeStateGuarantee) -> Self {
         match guarantee {
             HbEnvelopeStateGuarantee::ExactLinearRcMnaV1 => Self::ExactLinearRcMnaV1,
+            HbEnvelopeStateGuarantee::ExactLinearRlcMnaV1 => Self::ExactLinearRlcMnaV1,
         }
     }
 }
@@ -3242,6 +3245,7 @@ impl From<EnvelopeGuaranteeTag> for HbEnvelopeStateGuarantee {
     fn from(guarantee: EnvelopeGuaranteeTag) -> Self {
         match guarantee {
             EnvelopeGuaranteeTag::ExactLinearRcMnaV1 => Self::ExactLinearRcMnaV1,
+            EnvelopeGuaranteeTag::ExactLinearRlcMnaV1 => Self::ExactLinearRlcMnaV1,
         }
     }
 }

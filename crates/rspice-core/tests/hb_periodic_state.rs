@@ -520,8 +520,8 @@ fn hb_envelope_source_selection_and_circuit_subset_fail_closed() {
 
     for (label, deck) in [
         (
-            "inductor",
-            "unsupported inductor\nV1 in 0 SIN(0 1 1meg)\nR1 in out 1k\nL1 out 0 1m\n.end\n",
+            "behavioral memory",
+            "unsupported behavioral memory\nV1 in 0 SIN(0 1 1meg)\nB1 out 0 V={sdt(V(in))}\nR1 out 0 1k\n.end\n",
         ),
         (
             "nonlinear",
@@ -535,7 +535,7 @@ fn hb_envelope_source_selection_and_circuit_subset_fail_closed() {
         assert!(
             error
                 .to_string()
-                .contains("exact initializer currently supports only"),
+                .contains("the exact initializer supports linear R/L/C networks"),
             "{label} rejection was not the strict subset gate: {error}"
         );
     }

@@ -48,6 +48,9 @@ fn guarantee_label(guarantee: rspice_core::engine::HbEnvelopeStateGuarantee) -> 
         rspice_core::engine::HbEnvelopeStateGuarantee::ExactLinearRcMnaV1 => {
             "exact-linear-rc-mna-v1"
         }
+        rspice_core::engine::HbEnvelopeStateGuarantee::ExactLinearRlcMnaV1 => {
+            "exact-linear-rlc-mna-v1"
+        }
     }
 }
 
