@@ -66,17 +66,16 @@ impl SoaDurationEvidence {
 
     pub fn validate(self) -> Result<(), String> {
         self.mode().validate(Some(self.minimum_duration_s))?;
-        if let Some(cumulative) = self.cumulative {
-            if !cumulative.peak_exposure_s.is_finite()
+        if let Some(cumulative) = self.cumulative
+            && (!cumulative.peak_exposure_s.is_finite()
                 || cumulative.peak_exposure_s < 0.0
                 || cumulative.peak_exposure_s > self.total_exceedance_s
                 || !cumulative.final_exposure_s.is_finite()
                 || cumulative.final_exposure_s < 0.0
-                || cumulative.final_exposure_s > cumulative.peak_exposure_s
+                || cumulative.final_exposure_s > cumulative.peak_exposure_s)
             {
                 return Err("SOA cumulative duration evidence is invalid".into());
             }
-        }
         if !self.minimum_duration_s.is_finite()
             || self.minimum_duration_s <= 0.0
             || !self.total_exceedance_s.is_finite()
@@ -296,11 +295,10 @@ pub fn qualify_soa_duration_with_mode(
             }
         }
     }
-    if let Some(cumulative) = &mut evidence.cumulative {
-        if let Some(tau) = cumulative.recovery_time_s {
+    if let Some(cumulative) = &mut evidence.cumulative
+        && let Some(tau) = cumulative.recovery_time_s {
             cumulative.final_exposure_s *= (-(time[time.len() - 1] - previous_end) / tau).exp();
         }
-    }
     evidence.validate().map_err(SimulationError::Circuit)?;
     Ok(SoaDurationScan {
         evidence,

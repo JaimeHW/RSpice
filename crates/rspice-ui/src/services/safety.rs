@@ -19,7 +19,9 @@ pub use power_derating::{
 };
 
 mod duration;
+#[cfg(test)]
+pub use duration::SoaCumulativeDurationEvidence;
 pub use duration::{
-    SoaCumulativeDurationEvidence, SoaDurationEvidence, SoaDurationMode, SoaLimitTrace,
+    SoaDurationEvidence, SoaDurationMode, SoaLimitTrace,
     qualify_soa_duration_with_mode, soa_duration_verdict,
 };
