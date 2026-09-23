@@ -87,6 +87,8 @@ pub(super) fn fft_window_label(window: rspice_core::netlist::FftWindow) -> &'sta
         FftWindow::HalfCycleSine6 => "half_cycle_sine_6",
         FftWindow::Cosine2 => "cosine_2",
         FftWindow::Cosine4 => "cosine_4",
+        FftWindow::Gaussian => "gaussian",
+        FftWindow::Kaiser => "kaiser",
     }
 }
 
@@ -107,6 +109,8 @@ pub(super) fn fft_window_from_label(label: &str) -> PyResult<rspice_core::netlis
         "half_cycle_sine_6" => Ok(FftWindow::HalfCycleSine6),
         "cosine_2" => Ok(FftWindow::Cosine2),
         "cosine_4" => Ok(FftWindow::Cosine4),
+        "gaussian" => Ok(FftWindow::Gaussian),
+        "kaiser" => Ok(FftWindow::Kaiser),
         other => Err(crate::errors::value_error(format!(
             "unknown transient FFT window '{other}' in pickled state"
         ))),

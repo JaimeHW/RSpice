@@ -536,6 +536,8 @@ impl PyTransientFftResult {
             FftWindow::HalfCycleSine6 => "half_cycle_sine_6",
             FftWindow::Cosine2 => "cosine_2",
             FftWindow::Cosine4 => "cosine_4",
+            FftWindow::Gaussian => "gaussian",
+            FftWindow::Kaiser => "kaiser",
         }
     }
 
