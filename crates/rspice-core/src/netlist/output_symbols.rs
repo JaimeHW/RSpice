@@ -280,6 +280,20 @@ impl OutputRequest {
         })
     }
 
+    /// Whether a transient output needs this retained device parameter.
+    /// Includes terminal-current operands inside expressions, whose typed
+    /// dependencies are not represented by a direct `SaveSignal` probe.
+    pub fn selects_transient_device_parameter(&self, device: &str, parameter: &str) -> bool {
+        let device = canonical_symbol(device);
+        self.analysis
+            .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
+            && self.dependencies.iter().any(|dependency| {
+                dependency.kind == OutputSymbolKind::Device
+                    && dependency.operator.eq_ignore_ascii_case(parameter)
+                    && hierarchy_pattern_matches(&canonical_symbol(&dependency.symbol), &device)
+            })
+    }
+
     /// Whether this request retains a transient node-voltage operand for the
     /// named node.  Node dependencies are recorded for direct voltage probes
     /// and for voltage operands nested inside expressions; device-current

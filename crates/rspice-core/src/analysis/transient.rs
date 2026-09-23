@@ -842,6 +842,20 @@ pub struct TransientDeviceOpTrace {
     pub values: Vec<Value>,
 }
 
+impl TransientDeviceOpTrace {
+    /// Physical current owner for a retained current parameter. Non-current
+    /// operating-point parameters have no singular-current interpretation.
+    pub fn current_owner(&self) -> Option<crate::CurrentImpulseOwner> {
+        let parameter = self.parameter.to_ascii_uppercase();
+        (parameter == "I" || crate::netlist::is_device_lead_current_accessor(&parameter)).then(
+            || crate::CurrentImpulseOwner::DeviceLead {
+                device_name: self.device_name.clone(),
+                parameter: self.parameter.clone(),
+            },
+        )
+    }
+}
+
 /// One typed non-solution device store waveform, such as a compact-model
 /// internal resistance. Store traces are deliberately separate from voltage
 /// nodes so units, matrix topology, compression, and UI labeling remain sound.
