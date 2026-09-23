@@ -2121,12 +2121,21 @@ impl Engine {
         op_voltages: &[Value],
         omega: Value,
     ) {
-        if omega == 0.0 || circuit.bsim3v3.is_empty() {
+        if circuit.bsim3v3.is_empty() {
             return;
         }
         for dev in &circuit.bsim3v3.devices {
             if !dev.uses_ac_nqs() {
                 continue;
+            }
+            // b3acld.c anchors the transient deficit coordinate when the
+            // AC-only model overrides NQSMOD. Leaving it empty is singular.
+            if dev.node_charge_deficit != 0 {
+                matrix.add_real(
+                    dev.node_charge_deficit - 1,
+                    dev.node_charge_deficit - 1,
+                    dev.multiplier,
+                );
             }
             let (charge, mode) = dev.charge_at(op_voltages);
             dev.stamp_ac_nqs_correction(&charge, mode, omega, |row, col, value| {
