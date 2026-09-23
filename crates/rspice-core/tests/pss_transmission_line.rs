@@ -6,6 +6,69 @@ use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect, TransientCheck
 use std::f64::consts::TAU;
 
 #[test]
+fn shooting_delay_preserves_ideal_repeating_pwl_steps() {
+    for (dialect, delay, source) in [
+        (
+            SpiceDialect::Ngspice,
+            0.1875,
+            "VIN in 0 PWL(0 0 .375 0 .375 1 .625 1 .625 0 1 0) R=0",
+        ),
+        (
+            SpiceDialect::Xyce,
+            1.1875,
+            "VIN in 0 PWL(0 0 .375 0 .375 1 .625 1 .625 0 1 0) R=0",
+        ),
+        (
+            SpiceDialect::Ngspice,
+            1.1875,
+            "IIN 0 in PWL(0 0 .375 0 .375 .01 .625 .01 .625 0 1 0) R=0",
+        ),
+    ] {
+        let deck = Netlist::parse(&format!("Ideal PWL delay\n{source}\nRS in near 50\nT1 near 0 far 0 Z0=50 TD={delay}\nRL far 0 50\n.save all\n.end\n")).unwrap();
+        let mut simulation = SimulationConfig::default();
+        simulation.spice_dialect = dialect;
+        simulation.resource_limits.max_result_values = 2_000_000;
+        let engine = Engine::new(simulation);
+        let (pss, state) = engine
+            .run_pss_with_continuation_state(
+                &deck,
+                PssConfig::new(1.0)
+                    .with_harmonics(1)
+                    .with_points_per_period(16)
+                    .with_tstab_periods(0),
+            )
+            .unwrap();
+        assert_eq!(state.time_origin(), 0.0);
+        assert!(pss.is_stable);
+        let far = pss
+            .result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("far"))
+            .unwrap();
+        let expected = |time: f64| {
+            if (0.375..0.625).contains(&(time - delay).rem_euclid(1.0)) {
+                0.5
+            } else {
+                0.0
+            }
+        };
+        for (&time, &actual) in pss
+            .result
+            .time
+            .iter()
+            .zip(&pss.result.waveforms[far].values)
+        {
+            assert!(
+                (actual - expected(time)).abs() < 1e-6,
+                "TD={delay} t={time:.17e}: {actual} vs {}",
+                expected(time)
+            );
+        }
+    }
+}
+
+#[test]
 fn shooting_resolves_reflected_pulses_through_cascaded_delay_lines() {
     for cascade in [false, true] {
         let period = 1e-6;

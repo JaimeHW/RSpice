@@ -145,13 +145,17 @@ impl PssDelayBasis {
                         return Err(SimulationError::Aborted);
                     }
                     let previous_cycles = (cycle - 1) as Value * period;
-                    for (index, &phase) in mesh.times()[..mesh.steps()].iter().enumerate() {
+                    for index in 0..mesh.steps() {
                         if index & 0xff == 0 && abort.is_aborted() {
                             return Err(SimulationError::Aborted);
                         }
                         // A full cycle*period can overflow even though this
                         // partial last cycle still intersects the delay window.
-                        let time = (phase - period) - previous_cycles;
+                        let time = PssIntegrationMesh::shifted_clock(
+                            mesh.times(),
+                            index,
+                            &[-period, -previous_cycles],
+                        );
                         if time > -line.delay() && time < 0.0 {
                             knots.push(time);
                         }
@@ -260,11 +264,15 @@ impl PssDelayBasis {
             })?;
             knots.extend((0..=coordinates.intervals).map(|knot| coordinates.offset(knot)));
             for cycle in 1..=cycles {
-                for (index, &event) in events.iter().enumerate() {
+                for index in 0..events.len() {
                     if index & 0xff == 0 && abort.is_aborted() {
                         return Err(SimulationError::Aborted);
                     }
-                    let time = (event - period) - (cycle - 1) as Value * period;
+                    let time = PssIntegrationMesh::shifted_clock(
+                        events,
+                        index,
+                        &[-period, -((cycle - 1) as Value * period)],
+                    );
                     if time > -coordinates.delay && time < 0.0 {
                         knots.push(time);
                     }
@@ -398,7 +406,15 @@ impl PssDelayBasis {
             .flat_map(|coordinates| {
                 let line = &circuit.tlines[coordinates.index];
                 (0..=coordinates.intervals).flat_map(move |knot| {
-                    let time = line.accepted_history_time() + coordinates.offset(knot);
+                    let time = if let Some(knots) = &coordinates.knots {
+                        PssIntegrationMesh::shifted_clock(
+                            knots,
+                            knot,
+                            &[line.accepted_history_time()],
+                        )
+                    } else {
+                        line.accepted_history_time() + coordinates.offset(knot)
+                    };
                     [
                         line.lossless_wave_at(time, true),
                         line.lossless_wave_at(time, false),

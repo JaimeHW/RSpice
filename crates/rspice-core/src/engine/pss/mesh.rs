@@ -56,6 +56,33 @@ impl PssIntegrationMesh {
         &self.times
     }
 
+    /// Preserve the two sides of a represented edge when shifting it onto a
+    /// coarser floating-point clock. Ordinary corners keep nearest rounding;
+    /// adjacent lower/upper samples use outward rounding of the exact sum.
+    pub(super) fn shifted_clock(times: &[Value], index: usize, offsets: &[Value]) -> Value {
+        let original = times[index];
+        let lower = times
+            .get(index + 1)
+            .is_some_and(|next| original.next_up() == *next);
+        let upper = index
+            .checked_sub(1)
+            .is_some_and(|previous| times[previous].next_up() == original);
+        let mut time = original;
+        for &offset in offsets {
+            let sum = time + offset;
+            let recovered = sum - time;
+            let error = (time - (sum - recovered)) + (offset - recovered);
+            time = if lower && error < 0.0 {
+                sum.next_down()
+            } else if upper && error > 0.0 {
+                sum.next_up()
+            } else {
+                sum
+            };
+        }
+        time
+    }
+
     pub(super) fn refinement_midpoint(left: Value, right: Value) -> Option<Value> {
         let midpoint = left + 0.5 * (right - left);
         (midpoint > left && midpoint < right).then_some(midpoint)
@@ -125,6 +152,28 @@ impl PssIntegrationMesh {
     }
 }
 
+// PWL permits multiple values at one authored clock. Other native waveform
+// corners retain their established schedule; rounded ramp endpoints must not
+// be reclassified as ideal jumps by comparing independently evaluated limits.
+fn is_pwl_source(spec: &crate::netlist::SourceSpec) -> bool {
+    use crate::netlist::SourceSpec;
+    match spec {
+        SourceSpec::Pwl { .. } | SourceSpec::PwlFile { .. } => true,
+        SourceSpec::Distortion { inner, .. }
+        | SourceSpec::RfPort { inner, .. }
+        | SourceSpec::DcTransient {
+            transient: inner, ..
+        }
+        | SourceSpec::AcTransient {
+            transient: inner, ..
+        }
+        | SourceSpec::DcAcTransient {
+            transient: inner, ..
+        } => is_pwl_source(inner),
+        _ => false,
+    }
+}
+
 impl Engine {
     /// Resolve another generation of line arrivals only between solved meshes.
     /// All shooting/Jacobian workers then replay the same immutable clocks.
@@ -166,9 +215,13 @@ impl Engine {
                     return Err(SimulationError::Aborted);
                 }
                 let arrival = if corner >= period - phase_delay {
-                    corner - (period - phase_delay)
+                    PssIntegrationMesh::shifted_clock(
+                        &mesh.delay_corners,
+                        index,
+                        &[-(period - phase_delay)],
+                    )
                 } else {
-                    corner + phase_delay
+                    PssIntegrationMesh::shifted_clock(&mesh.delay_corners, index, &[phase_delay])
                 };
                 let position = corners.partition_point(|time| *time < arrival);
                 if corners
@@ -234,6 +287,8 @@ impl Engine {
             .collect();
         refined = PssIntegrationMesh::from_times(period, times)?;
         refined.delay_corners = corners.into();
+        added.sort_by(Value::total_cmp);
+        added.dedup();
         Ok((refined, retained, added))
     }
 
@@ -363,6 +418,75 @@ impl Engine {
             self.config.resource_limits.max_analysis_points,
             true,
         )?;
+        // A PWL jump has two values at one authored time. Keep the published
+        // sample and the incoming/outgoing values at neighboring clocks, as
+        // behavioral source event schedules already do for ideal steps.
+        self.ensure_result_values(breakpoints.times().len().saturating_mul(4))?;
+        let authored = breakpoints.times().to_vec();
+        for (event, &time) in authored.iter().enumerate() {
+            if event & 0xff == 0 && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            use crate::circuit::SourceTimeSide::{LeftLimit, Published, RightLimit};
+            let mut before = false;
+            let mut after = false;
+            for index in 0..circuit.voltage_sources.names.len() {
+                if index & 0xff == 0 && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                if !circuit.voltage_sources.source_specs[index]
+                    .as_ref()
+                    .is_some_and(is_pwl_source)
+                {
+                    continue;
+                }
+                let incoming = circuit
+                    .voltage_sources
+                    .transient_value_at_on_side(index, time, LeftLimit);
+                let outgoing = circuit
+                    .voltage_sources
+                    .transient_value_at_on_side(index, time, RightLimit);
+                if incoming != outgoing {
+                    let published = circuit
+                        .voltage_sources
+                        .transient_value_at_on_side(index, time, Published);
+                    before |= incoming != published;
+                    after |= outgoing != published;
+                }
+            }
+            for index in 0..circuit.current_sources.names.len() {
+                if index & 0xff == 0 && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                if !circuit.current_sources.source_specs[index]
+                    .as_ref()
+                    .is_some_and(is_pwl_source)
+                {
+                    continue;
+                }
+                let incoming = circuit
+                    .current_sources
+                    .value_at_time_on_side(index, time, LeftLimit);
+                let outgoing = circuit
+                    .current_sources
+                    .value_at_time_on_side(index, time, RightLimit);
+                if incoming != outgoing {
+                    let published = circuit
+                        .current_sources
+                        .value_at_time_on_side(index, time, Published);
+                    before |= incoming != published;
+                    after |= outgoing != published;
+                }
+            }
+            if before && time > 0.0 {
+                breakpoints.add(time.next_down());
+            }
+            if after && time < period {
+                breakpoints.add(time.next_up());
+            }
+            self.ensure_analysis_points(breakpoints.times().len())?;
+        }
+        drop(authored);
         // Seed the first periodic arrival of each prescribed corner. A delay
         // may span several carrier cycles; only its phase affects this clock,
         // whereas the shooting history still covers the entire physical TD.
@@ -381,9 +505,13 @@ impl Engine {
                 }
                 // Subtract first to avoid overflow near the largest period.
                 let arrival = if event >= period - phase_delay {
-                    event - (period - phase_delay)
+                    PssIntegrationMesh::shifted_clock(
+                        &source_events,
+                        index,
+                        &[-(period - phase_delay)],
+                    )
                 } else {
-                    event + phase_delay
+                    PssIntegrationMesh::shifted_clock(&source_events, index, &[phase_delay])
                 };
                 breakpoints.add(arrival);
                 self.ensure_analysis_points(breakpoints.times().len())?;
@@ -528,6 +656,40 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shifted_delay_clocks_preserve_both_sides_of_ideal_edges() {
+        for (clocks, offsets, expected) in [
+            (
+                [0.375_f64.next_down(), 0.375],
+                vec![-1.0],
+                [(-0.625_f64).next_down(), -0.625],
+            ),
+            (
+                [-0.375, (-0.375_f64).next_up()],
+                vec![1.0],
+                [0.625, 0.625_f64.next_up()],
+            ),
+            (
+                [0.375_f64.next_down(), 0.375],
+                vec![-1.0, -1.0],
+                [(-1.625_f64).next_down(), -1.625],
+            ),
+        ] {
+            for index in 0..2 {
+                assert_eq!(
+                    PssIntegrationMesh::shifted_clock(&clocks, index, &offsets),
+                    expected[index]
+                );
+            }
+        }
+        // Wrapped arrivals subtract the period first, avoiding overflow.
+        let period = 1e308;
+        assert_eq!(
+            PssIntegrationMesh::shifted_clock(&[0.9 * period], 0, &[-period, 0.9 * period]),
+            (0.9 * period - period) + 0.9 * period,
+        );
+    }
 
     #[test]
     fn delayed_mesh_enrichment_preserves_clocks_and_detects_between_sample_echoes() {
