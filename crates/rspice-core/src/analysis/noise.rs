@@ -20,8 +20,10 @@
 //! This computes noise at output node referenced to input source Vin.
 
 pub use crate::constants::NoisePhysicalConstants;
+pub(crate) mod correlated;
 use crate::constants::{K_BOLTZMANN, Q_ELECTRON};
 use crate::{Complex64, Value};
+pub use correlated::{Bsim4CorrelatedNoiseSample, Bsim4CorrelatedNoiseWaveform};
 
 //=============================================================================
 // Constants
@@ -320,6 +322,19 @@ pub struct CorrelatedNoisePair {
 }
 
 impl CorrelatedNoisePair {
+    /// Native factorization parameters, retained until a signed translated
+    /// frequency is known. Consumers validate them before sampling an orbit.
+    pub(crate) fn bsim4_factor_parameters(&self) -> [Value; 4] {
+        match self.model {
+            CorrelatedNoisePairModel::Bsim4Tnoi2 {
+                gamma_gd0,
+                ctnoi,
+                sigrat,
+                multiplier,
+            } => [gamma_gd0, ctnoi, sigrat, multiplier],
+        }
+    }
+
     /// Create a BSIM4 `tnoiMod=2` correlated channel/gate thermal source.
     pub fn bsim4_tnoi2(
         identity: NoiseSourceIdentity,
@@ -377,13 +392,7 @@ impl CorrelatedNoisePair {
                 }
 
                 let ctnoi_sq = (ctnoi.clamp(0.0, 1.0)).powi(2);
-                let omega_sigrat = 2.0 * std::f64::consts::PI * frequency * sigrat;
-                let gate_fraction = if omega_sigrat.is_finite() {
-                    let shaped = omega_sigrat * omega_sigrat;
-                    shaped / (1.0 + shaped)
-                } else {
-                    1.0
-                };
+                let gate_fraction = correlated::induced_gate_factor(frequency, sigrat).powi(2);
                 let first_g = gamma_gd0 * ctnoi_sq * multiplier;
                 let second_g = gamma_gd0 * gate_fraction * multiplier;
                 let scale = 4.0
