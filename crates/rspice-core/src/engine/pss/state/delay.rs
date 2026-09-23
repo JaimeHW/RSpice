@@ -222,6 +222,68 @@ impl PssDelayBasis {
         Ok(basis)
     }
 
+    /// Keep independently resolved history while adding newly discovered
+    /// periodic event clocks throughout every physical delay window.
+    pub(in crate::engine::pss) fn with_events(
+        &self,
+        period: Value,
+        events: &[Value],
+        limits: crate::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, SimulationError> {
+        if events.is_empty() {
+            return Ok(self.clone());
+        }
+        let mut basis = Self::default();
+        for coordinates in &self.lines {
+            let cycles = (coordinates.delay / period).ceil() as usize;
+            let capacity = coordinates
+                .intervals
+                .saturating_add(1)
+                .saturating_add(cycles.saturating_mul(events.len()));
+            let dimension = basis
+                .dimension
+                .saturating_add(2usize.saturating_mul(capacity));
+            crate::ResourceLimitError::ensure(
+                crate::ResourceKind::AnalysisPoints,
+                dimension,
+                limits.max_analysis_points,
+            )?;
+            crate::ResourceLimitError::ensure(
+                crate::ResourceKind::ResultValues,
+                dimension.saturating_mul(dimension).saturating_mul(4),
+                limits.max_result_values,
+            )?;
+            let mut knots = Vec::new();
+            knots.try_reserve_exact(capacity).map_err(|_| {
+                SimulationError::Circuit("PSS delay event allocation failed".into())
+            })?;
+            knots.extend((0..=coordinates.intervals).map(|knot| coordinates.offset(knot)));
+            for cycle in 1..=cycles {
+                for (index, &event) in events.iter().enumerate() {
+                    if index & 0xff == 0 && abort.is_aborted() {
+                        return Err(SimulationError::Aborted);
+                    }
+                    let time = (event - period) - (cycle - 1) as Value * period;
+                    if time > -coordinates.delay && time < 0.0 {
+                        knots.push(time);
+                    }
+                }
+            }
+            knots.sort_by(Value::total_cmp);
+            knots.dedup();
+            basis.push(
+                LineCoordinates {
+                    intervals: knots.len() - 1,
+                    knots: Some(knots.into()),
+                    ..coordinates.clone()
+                },
+                limits,
+            )?;
+        }
+        Ok(basis)
+    }
+
     /// The authenticated retained basis names carry the selected history grid.
     /// It can be finer than the initial time mesh, so reconstruct its actual
     /// knot count rather than guessing it from the configured carrier period.

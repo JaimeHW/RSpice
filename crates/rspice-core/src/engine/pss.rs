@@ -60,6 +60,7 @@ struct PssGridSolution {
 enum PssSampleMap<'a> {
     Doubled,
     Retained(&'a [usize]),
+    Enriched(&'a [usize]),
     Identical,
 }
 
@@ -67,7 +68,7 @@ impl PssSampleMap<'_> {
     fn index(self, coarse_index: usize) -> usize {
         match self {
             Self::Doubled => 2 * coarse_index,
-            Self::Retained(indices) => indices[coarse_index],
+            Self::Retained(indices) | Self::Enriched(indices) => indices[coarse_index],
             Self::Identical => coarse_index,
         }
     }
@@ -2375,6 +2376,14 @@ impl Engine {
         )?;
         let mut iteration = coarse.iterations;
         loop {
+            coarse = self.pss_resolve_delay_corners(
+                &mut circuit,
+                &mut matrix,
+                &config,
+                coarse,
+                &mut iteration,
+                abort,
+            )?;
             let steps = circuit.grid_steps(&config);
             let coarse_mesh = circuit.integration_mesh.clone();
             let coarse_delay_basis = circuit.delay_basis.clone();
@@ -2803,7 +2812,9 @@ impl Engine {
         let fine = &fine.waveform;
         let sample_count_matches = match samples {
             PssSampleMap::Doubled => fine.time.len() == 2 * coarse.time.len().saturating_sub(1) + 1,
-            PssSampleMap::Retained(indices) => indices.len() == coarse.time.len(),
+            PssSampleMap::Retained(indices) | PssSampleMap::Enriched(indices) => {
+                indices.len() == coarse.time.len()
+            }
             PssSampleMap::Identical => fine.time.len() == coarse.time.len(),
         };
         if coarse.time.len() < 2
@@ -2884,6 +2895,25 @@ impl Engine {
                 }
                 let b = fine_values[samples.index(index)];
                 error = error.max((a / scale - b / scale).abs() / tolerance);
+            }
+            if let PssSampleMap::Enriched(indices) = samples {
+                // Newly propagated echoes can be narrower than the old grid.
+                // Compare them against its interpolated waveform too; checking
+                // only old clocks can otherwise certify an entirely missed pulse.
+                for (interval, pair) in indices.windows(2).enumerate() {
+                    let left = fine.time[pair[0]];
+                    let width = fine.time[pair[1]] - left;
+                    for point in pair[0] + 1..pair[1] {
+                        if point & 0x3ff == 0 && abort.is_aborted() {
+                            return Err(SimulationError::Aborted);
+                        }
+                        let weight = (fine.time[point] - left) / width;
+                        let interpolated = (1.0 - weight) * (coarse_values[interval] / scale)
+                            + weight * (coarse_values[interval + 1] / scale);
+                        error = error
+                            .max((interpolated - fine_values[point] / scale).abs() / tolerance);
+                    }
+                }
             }
         }
         // A first-order method's coarse error is twice the difference to

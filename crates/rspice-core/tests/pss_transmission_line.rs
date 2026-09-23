@@ -6,6 +6,92 @@ use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect, TransientCheck
 use std::f64::consts::TAU;
 
 #[test]
+fn shooting_resolves_reflected_pulses_through_cascaded_delay_lines() {
+    for cascade in [false, true] {
+        let period = 1e-6;
+        let delay = if cascade { 220e-9 } else { 137e-9 };
+        let pulse = |time: f64| {
+            let phase = time.rem_euclid(period);
+            if phase < 710e-9 {
+                0.0
+            } else if phase < 715e-9 {
+                (phase - 710e-9) / 5e-9
+            } else if phase < 735e-9 {
+                1.0
+            } else if phase < 740e-9 {
+                (740e-9 - phase) / 5e-9
+            } else {
+                0.0
+            }
+        };
+        let lines = if cascade {
+            "T1 near 0 middle 0 Z0=50 TD=137n\nT2 middle 0 far 0 Z0=50 TD=83n"
+        } else {
+            "T1 near 0 far 0 Z0=50 TD=137n"
+        };
+        let deck = Netlist::parse(&format!("Reflected pulse\nVIN in 0 PULSE(0 1 710n 5n 5n 20n 1u)\nRS in near 75\n{lines}\nRL far 0 100\n.save all\n.end\n")).unwrap();
+        let mut simulation = SimulationConfig::default();
+        simulation.resource_limits.max_result_values = 8_000_000;
+        let engine = Engine::new(simulation);
+        let pss = engine
+            .run_pss(
+                &deck,
+                PssConfig::new(1e6)
+                    .with_harmonics(1)
+                    .with_points_per_period(16)
+                    .with_tstab_periods(0)
+                    .with_tolerance(1e-8),
+            )
+            .unwrap();
+        assert!(pss.is_stable);
+        for (name, distance) in [("near", 0.0), ("middle", 137e-9), ("far", delay)] {
+            if name == "middle" && !cascade {
+                continue;
+            }
+            let index = pss
+                .result
+                .node_names
+                .iter()
+                .position(|entry| entry.eq_ignore_ascii_case(name))
+                .unwrap();
+            for (&time, &actual) in pss
+                .result
+                .time
+                .iter()
+                .zip(&pss.result.waveforms[index].values)
+            {
+                let expected: f64 = (0..12)
+                    .map(|echo| {
+                        let round_trip = 2.0 * echo as f64 * delay;
+                        0.4 * (1.0_f64 / 15.0).powi(echo)
+                            * (pulse(time - distance - round_trip)
+                                + pulse(time - (2.0 * delay - distance) - round_trip) / 3.0)
+                    })
+                    .sum();
+                assert!(
+                    (actual - expected).abs() < 3e-4,
+                    "cascade={cascade} {name} t={time}: {actual} vs {expected}"
+                );
+            }
+        }
+        // Even a narrow echo must have its edges represented, rather than
+        // disappearing between the points used by coarse/fine qualification.
+        for echo in 0..=2 {
+            for corner in [710e-9, 715e-9, 735e-9, 740e-9] {
+                let arrival = (corner + (2 * echo + 1) as f64 * delay).rem_euclid(period);
+                assert!(
+                    pss.result
+                        .time
+                        .iter()
+                        .any(|time| (*time - arrival).abs() < 32.0 * f64::EPSILON * period),
+                    "cascade={cascade}: missing echo {echo} edge {arrival}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn shooting_delay_preserves_pulse_edges_across_the_period_boundary() {
     let period = 1e-6;
     for (delay, dialect) in [
