@@ -348,8 +348,8 @@ use CapabilitySupport::{Absent, Complete, Inapplicable, Restricted};
 
 /// Shared phrase for the envelope initializer's supported subset. The gap query
 /// reports the offending family by name; this states why it is a gap.
-const ENVELOPE_LINEAR_SUBSET: &str = "the exact envelope initializer supports linear R/L/C networks, fixed mutual \
-     inductance, diodes, and independent, controlled or behavioral sources";
+const ENVELOPE_LINEAR_SUBSET: &str = "the envelope initializer supports R/L/C networks with expression \
+     capacitance, fixed mutual inductance, diodes, and independent, controlled or behavioral sources";
 const CYCLOSTATIONARY_FLICKER: &str = "stationary thermal/shot noise is exact; a nonzero flicker coefficient needs cyclostationary \
      colored-noise folding rather than a DC-bias substitution";
 const RESISTOR_CYCLOSTATIONARY_FLICKER: &str = "thermal noise and AF=2 signed-current flicker modulation are exact; other AF values \
@@ -407,9 +407,7 @@ pub(crate) const fn periodic_capability_descriptor(
             ),
             noise: Inapplicable,
             pss_state: Complete,
-            envelope: Restricted(
-                "a constant capacitance with exact retained terminal voltage and lead current",
-            ),
+            envelope: Complete,
         },
         F::Inductor => PeriodicCapabilityDescriptor {
             residual_jacobian: Inapplicable,
@@ -1452,16 +1450,7 @@ pub(in crate::engine) fn envelope_gaps(circuit: &CircuitData) -> Vec<CapabilityG
             Inapplicable | Complete => {}
             Absent(_) => gaps.push(CapabilityGap::new(family, family.label())),
             Restricted(_) => {
-                if family == F::Capacitor {
-                    if circuit.capacitors.has_solution_dependent_values() {
-                        gaps.push(CapabilityGap::new(
-                            family,
-                            "solution-dependent capacitor values",
-                        ));
-                    }
-                } else if family == F::Resistor
-                    && circuit.resistors.thermal.iter().any(Option::is_some)
-                {
+                if family == F::Resistor && circuit.resistors.thermal.iter().any(Option::is_some) {
                     gaps.push(CapabilityGap::new(
                         family,
                         "thermal resistor accepted temperature state",
@@ -1729,7 +1718,7 @@ mod tests {
         match family {
             F::Resistor => [I, I, C, R, R, R],
             F::ResistorBranch => [I, I, C, R, C, C],
-            F::Capacitor => [I, C, R, I, R, R],
+            F::Capacitor => [I, C, R, I, C, C],
             F::Inductor => [I, C, C, I, C, C],
             F::VoltageSource | F::CurrentSource => [I, I, C, I, C, C],
             F::Vcvs | F::Vccs | F::Cccs | F::Ccvs => [I, I, C, I, C, C],

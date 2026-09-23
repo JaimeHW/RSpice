@@ -520,8 +520,8 @@ fn hb_envelope_source_selection_and_circuit_subset_fail_closed() {
 
     for (label, deck) in [
         (
-            "capacitor charge history",
-            "unsupported capacitor history\nV1 in 0 SIN(0 1 1meg)\nR1 in out 1k\nC1 out 0 C={1p*(1+V(out)^2)}\n.end\n",
+            "BJT history",
+            "unsupported BJT history\nV1 in 0 SIN(.7 .01 1meg)\nR1 in out 1k\nQ1 out in 0 QM\n.model QM NPN\n.end\n",
         ),
         (
             "MOS charge history",
@@ -535,7 +535,7 @@ fn hb_envelope_source_selection_and_circuit_subset_fail_closed() {
         assert!(
             error
                 .to_string()
-                .contains("the exact initializer supports linear R/L/C networks"),
+                .contains("the initializer supports R/L/C networks"),
             "{label} rejection was not the strict subset gate: {error}"
         );
     }

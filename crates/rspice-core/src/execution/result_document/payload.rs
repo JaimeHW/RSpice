@@ -3234,6 +3234,8 @@ pub enum EnvelopeGuaranteeTag {
     ExactBehavioralRlcMnaV1,
     /// Complete supported junction, behavioral-source and physical R/L/C state.
     ExactJunctionRlcMnaV1,
+    /// Physical and SDT state with a first-order expression-charge restart.
+    ExpressionChargeRestartV1,
 }
 
 impl From<HbEnvelopeStateGuarantee> for EnvelopeGuaranteeTag {
@@ -3243,6 +3245,7 @@ impl From<HbEnvelopeStateGuarantee> for EnvelopeGuaranteeTag {
             HbEnvelopeStateGuarantee::ExactLinearRlcMnaV1 => Self::ExactLinearRlcMnaV1,
             HbEnvelopeStateGuarantee::ExactBehavioralRlcMnaV1 => Self::ExactBehavioralRlcMnaV1,
             HbEnvelopeStateGuarantee::ExactJunctionRlcMnaV1 => Self::ExactJunctionRlcMnaV1,
+            HbEnvelopeStateGuarantee::ExpressionChargeRestartV1 => Self::ExpressionChargeRestartV1,
         }
     }
 }
@@ -3254,6 +3257,7 @@ impl From<EnvelopeGuaranteeTag> for HbEnvelopeStateGuarantee {
             EnvelopeGuaranteeTag::ExactLinearRlcMnaV1 => Self::ExactLinearRlcMnaV1,
             EnvelopeGuaranteeTag::ExactBehavioralRlcMnaV1 => Self::ExactBehavioralRlcMnaV1,
             EnvelopeGuaranteeTag::ExactJunctionRlcMnaV1 => Self::ExactJunctionRlcMnaV1,
+            EnvelopeGuaranteeTag::ExpressionChargeRestartV1 => Self::ExpressionChargeRestartV1,
         }
     }
 }

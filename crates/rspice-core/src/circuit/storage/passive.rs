@@ -1270,6 +1270,65 @@ impl Capacitors {
         }
     }
 
+    /// Start a new integration epoch from an authenticated periodic solution.
+    /// Call after restoring SDT constants and the physical terminal currents.
+    /// For i=C(x,z,t)*v', only charge increments are observable: set Q(0)=0
+    /// and start its accumulated external derivatives from that same origin.
+    /// The first resumed interval must be order one, so no fictitious earlier
+    /// charge samples enter Gear2/Trap. Subsequent accepts build real history.
+    pub(crate) fn initialize_solution_dependent_periodic_origin(
+        &mut self,
+        solution: &[Value],
+        history_step: Value,
+        coeff: &CompanionCoefficients,
+    ) -> Result<(), String> {
+        for index in 0..self.len() {
+            let Some(linearization) = self.linearize_effective_capacitance(index, solution, 0.0)
+            else {
+                continue;
+            };
+            let capacitance = linearization.value;
+            if !capacitance.is_finite()
+                || capacitance < 0.0
+                || linearization
+                    .partials
+                    .iter()
+                    .any(|(_, value)| !value.is_finite())
+                || !self.i_prev[index].is_finite()
+            {
+                return Err(format!(
+                    "capacitor '{}' has invalid periodic origin state",
+                    self.names[index]
+                ));
+            }
+            let stamp = self.stamps[index];
+            let voltage = |node: usize| node.checked_sub(1).map_or(0.0, |column| solution[column]);
+            let voltage = voltage(stamp.pp.row) - voltage(stamp.nn.row);
+            self.value_expression_states[index] = Some(SolutionDependentCapacitorState {
+                c_prev: capacitance,
+                q_prev: 0.0,
+                q_prev_prev: 0.0,
+                dcdx_prev: linearization.partials,
+                dqdx_prev: Vec::new(),
+            });
+            self.effective_capacitances[index] = capacitance;
+            self.v_prev[index] = voltage;
+            self.v_prev_prev[index] = voltage;
+            self.v_prev_prev_prev[index] = voltage;
+            self.i_eq[index] = coeff.capacitor_ieq(
+                capacitance,
+                history_step,
+                voltage,
+                voltage,
+                self.i_prev[index],
+            );
+            self.value_expression_mut(index)
+                .expect("linearized expression")
+                .accept_transient_step(solution, 0.0);
+        }
+        Ok(())
+    }
+
     /// Stamp the DAE companion for every solution-dependent capacitor.
     ///
     /// The accepted state stores charge and the integrated external

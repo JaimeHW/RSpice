@@ -31,6 +31,9 @@ pub enum HbEnvelopeStateGuarantee {
     /// Complete state for supported native junctions, R/L/C networks and
     /// behavioral sources, including physical junction charge and current.
     ExactJunctionRlcMnaV1,
+    /// Complete physical/SDT state for expression capacitances and the other
+    /// supported devices, with a new charge origin and first-order restart.
+    ExpressionChargeRestartV1,
 }
 
 /// Authenticated HB carrier state that can restart transient integration at
@@ -254,7 +257,7 @@ impl Engine {
             Some(blockers) => Err(SimulationError::unsupported_capability(
                 "analysis.hb.envelope.continuation",
                 format!(
-                    "HB Envelope continuation is unavailable because the circuit contains {blockers}; the exact initializer supports linear R/L/C networks, fixed mutual inductance, diodes, and independent, controlled or behavioral sources"
+                    "HB Envelope continuation is unavailable because the circuit contains {blockers}; the initializer supports R/L/C networks with expression capacitance, fixed mutual inductance, diodes, and independent, controlled or behavioral sources"
                 ),
             )),
         }
@@ -349,7 +352,14 @@ impl Engine {
         result: &HbResult,
         operating_point: &HbOperatingPoint,
     ) -> Result<(TransientCheckpoint, Value), SimulationError> {
-        if !result.is_valid() || !result.continuation_limitations.is_empty() {
+        if !result.is_valid()
+            || result.continuation_limitations.iter().any(|limitation| {
+                // Generic phase projections still cannot resume an expression
+                // capacitor. This initializer explicitly reconstructs its SDT
+                // state and starts a new first-order charge-integration epoch.
+                *limitation != HbContinuationLimitation::CapacitorChargeHistoryNotRetained
+            })
+        {
             return Err(SimulationError::Circuit(
                 "HB Envelope continuation requires a converged, complete periodic state"
                     .to_string(),
@@ -453,23 +463,38 @@ impl Engine {
         // Unlike the public display spectra, retained descriptor coordinates
         // use two-sided Fourier coefficients. Preserve their solved constants
         // as well as the AC terms; a fresh VM would silently reset every SDT.
+        let source_integrals = circuit.behavioral_sources.integral_count();
         let integral_names = circuit
             .behavioral_sources
             .integral_names()
+            .chain(circuit.capacitors.integral_names())
+            .collect::<Vec<_>>();
+        let auxiliary_names = integral_names
+            .iter()
+            .cloned()
+            .chain(
+                circuit
+                    .capacitors
+                    .value_expressions
+                    .iter()
+                    .flatten()
+                    .map(|expression| format!("C:{}:voltage_rate", expression.name)),
+            )
             .collect::<Vec<_>>();
         let spectra = operating_point.integral_spectra();
-        if spectra.len() != integral_names.len()
+        if spectra.len() != auxiliary_names.len()
             || spectra
                 .iter()
-                .zip(&integral_names)
+                .zip(&auxiliary_names)
                 .any(|(row, name)| row.name != *name)
         {
             return Err(SimulationError::Circuit(
-                "HB Envelope behavioral integral basis does not match the circuit".into(),
+                "HB Envelope expression-state basis does not match the circuit".into(),
             ));
         }
         let integrals = spectra
             .iter()
+            .take(integral_names.len())
             .map(|row| {
                 row.coefficients
                     .iter()
@@ -482,7 +507,7 @@ impl Engine {
             .collect::<Vec<Value>>();
         circuit
             .behavioral_sources
-            .reset_integrals(&integrals)
+            .reset_integrals(&integrals[..source_integrals])
             .map_err(SimulationError::Circuit)?;
         // Evaluate the original expressions at time zero, with the restored
         // nested integrals held fixed. This installs their actual accepted
@@ -491,6 +516,20 @@ impl Engine {
             .behavioral_sources
             .accept_transient_step(solutions.last().unwrap(), 0.0)
             .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+        circuit
+            .capacitors
+            .reset_integrals(&integrals[source_integrals..])
+            .map_err(SimulationError::Circuit)?;
+        circuit
+            .capacitors
+            .initialize_solution_dependent_periodic_origin(
+                solutions.last().unwrap(),
+                history_step,
+                &crate::numerics::integration::CompanionCoefficients::for_method(
+                    self.config.integration_method,
+                ),
+            )
+            .map_err(SimulationError::Circuit)?;
 
         let junction_history = if circuit.diodes.is_empty() {
             None
@@ -621,7 +660,9 @@ impl Engine {
         Self::transient_checkpoint_capability_for_circuit(&original_circuit, abort)?
             .require_resumable()
             .map_err(SimulationError::Circuit)?;
-        let guarantee = if !original_circuit.diodes.is_empty() {
+        let guarantee = if original_circuit.capacitors.has_solution_dependent_values() {
+            HbEnvelopeStateGuarantee::ExpressionChargeRestartV1
+        } else if !original_circuit.diodes.is_empty() {
             HbEnvelopeStateGuarantee::ExactJunctionRlcMnaV1
         } else if !original_circuit.behavioral_sources.is_empty() {
             HbEnvelopeStateGuarantee::ExactBehavioralRlcMnaV1
