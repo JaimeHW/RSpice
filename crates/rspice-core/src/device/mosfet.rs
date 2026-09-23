@@ -15,6 +15,7 @@ pub struct MosTerminals {
     pub bulk: crate::NodeId,
 }
 
+mod ac_nqs;
 pub mod b3soi;
 pub mod bsim3v3;
 pub mod bsim4v8;

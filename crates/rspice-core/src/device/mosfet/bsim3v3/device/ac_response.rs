@@ -1,11 +1,6 @@
 //! Finite-state realization of the native AC-only NQS small-signal law.
 use super::*;
 
-// A constant time unit keeps the auxiliary residual in current/scaled-charge
-// units, instead of amplifying cancellation by an inverse picosecond. It is
-// independent of bias, so dQ/dt never introduces a spurious d(taunet)/dt term.
-const RESPONSE_TIME_UNIT: Value = 1e-9;
-
 /// The AC equations are a linear response at the supplied carrier bias.
 /// Equivalent Newton sources are not part of that response operator.
 struct Derivatives<'a, S>(&'a mut S);
@@ -61,24 +56,6 @@ impl Bsim3v3Device {
         let bias = self.raw_branch_voltages(solution);
         let op = self.core.eval(bias, self.gmin, true)?;
         let charge = op.charge.as_ref().expect("charge-enabled evaluation");
-        if !charge.taunet.is_finite() || charge.taunet < 0.0 {
-            return Err(format!(
-                "BSIM3 '{}': invalid AC NQS relaxation time",
-                self.name
-            ));
-        }
-        let rate = if charge.taunet == 0.0 {
-            0.0
-        } else {
-            RESPONSE_TIME_UNIT / charge.taunet
-        };
-        if !rate.is_finite() || (charge.taunet > 0.0 && rate == 0.0) {
-            return Err(format!(
-                "BSIM3 '{}': AC NQS relaxation rate is not representable",
-                self.name
-            ));
-        }
-
         // ACNQSMOD overrides transient NQS in b3acld.c. Start from the full
         // quasi-static charge Jacobian even when the carrier uses NQSMOD=1.
         self.stamp_op(&op, bias, &mut Derivatives(f));
@@ -90,85 +67,26 @@ impl Bsim3v3Device {
                 self.multiplier,
             );
         }
-        if rate == 0.0 {
-            for node in auxiliary {
-                f.stamp(node, node, 1.0);
-            }
-            return Ok(());
+        crate::device::mosfet::ac_nqs::AcNqsResponse {
+            model: "BSIM3",
+            name: &self.name,
+            terminals: [
+                self.node_drain,
+                self.node_gate,
+                self.node_source,
+                self.node_bulk,
+            ],
+            multiplier: self.multiplier,
+            mode: op.mode,
+            current: [op.gm, op.gmbs, op.gds],
+            charge: [
+                [charge.cggb, charge.cgdb, charge.cgsb],
+                [charge.cbgb, charge.cbdb, charge.cbsb],
+                [charge.cdgb, charge.cddb, charge.cdsb],
+            ],
+            relaxation_time: charge.taunet,
         }
-
-        let (gm, gmb, forward, reverse) = if op.mode >= 0 {
-            (op.gm, op.gmbs, op.gm + op.gmbs, 0.0)
-        } else {
-            (-op.gm, -op.gmbs, 0.0, op.gm + op.gmbs)
-        };
-        let channel = [op.gds + reverse, gm, -(op.gds + forward), gmb];
-        let drain = [
-            charge.cddb,
-            charge.cdgb,
-            charge.cdsb,
-            -(charge.cddb + charge.cdgb + charge.cdsb),
-        ];
-        let source = [
-            -(charge.cddb + charge.cgdb + charge.cbdb),
-            -(charge.cdgb + charge.cggb + charge.cbgb),
-            -(charge.cdsb + charge.cgsb + charge.cbsb),
-            charge.cddb
-                + charge.cgdb
-                + charge.cbdb
-                + charge.cdgb
-                + charge.cggb
-                + charge.cbgb
-                + charge.cdsb
-                + charge.cgsb
-                + charge.cbsb,
-        ];
-        let (drain, source) = if op.mode >= 0 {
-            (drain, source)
-        } else {
-            let swap = |row: [Value; 4]| [row[2], row[1], row[0], row[3]];
-            (swap(source), swap(drain))
-        };
-        let nodes = [
-            self.node_drain,
-            self.node_gate,
-            self.node_source,
-            self.node_bulk,
-        ];
-        let inputs = [channel, drain, source];
-        let scales = [1.0, TRNQS_SCALING, TRNQS_SCALING];
-        for (index, node) in auxiliary.into_iter().enumerate() {
-            f.stamp(node, node, rate);
-            q.stamp(node, node, RESPONSE_TIME_UNIT);
-            for (terminal, derivative) in nodes.into_iter().zip(inputs[index]) {
-                let value = self.multiplier * derivative * rate / scales[index];
-                if !value.is_finite() {
-                    return Err(format!(
-                        "BSIM3 '{}': AC NQS input derivative is not representable",
-                        self.name
-                    ));
-                }
-                f.stamp(node, terminal, -value);
-            }
-        }
-        // Replace only channel current and intrinsic drain/source charge.
-        // Bulk charge, junctions, overlaps and substrate currents stay native.
-        for (node, sign) in [(self.node_drain, 1.0), (self.node_source, -1.0)] {
-            f.stamp(node, auxiliary[0], sign);
-            for (terminal, derivative) in nodes.into_iter().zip(channel) {
-                f.stamp(node, terminal, -sign * self.multiplier * derivative);
-            }
-        }
-        for (index, terminal, input) in [(1, self.node_drain, drain), (2, self.node_source, source)]
-        {
-            for (node, sign) in [(terminal, 1.0), (self.node_gate, -1.0)] {
-                q.stamp(node, auxiliary[index], sign * TRNQS_SCALING);
-                for (column, derivative) in nodes.into_iter().zip(input) {
-                    q.stamp(node, column, -sign * self.multiplier * derivative);
-                }
-            }
-        }
-        Ok(())
+        .stamp(auxiliary, f, q)
     }
 }
 
