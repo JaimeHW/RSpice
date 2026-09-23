@@ -80,7 +80,6 @@ impl Engine {
     ) -> Result<QpacAnalysisResult, SimulationError> {
         check_abort(abort)?;
         request.validate()?;
-        point.require_driven_response("QPAC")?;
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_analysis_points(request.offsets_hz.len())?;
         let producer = state::Producer::capture(netlist, &engine.config, point.config())?;
@@ -139,17 +138,21 @@ impl Engine {
         engine.ensure_result_values(metadata_values)?;
         let mut limits = engine.config.resource_limits;
         limits.max_result_values = limits.max_result_values.saturating_sub(metadata_values);
-        let mut solutions = solver
-            .solve_quasi_periodic_ac_with_abort(
-                grid.clone(),
-                &request.solver,
-                point.complete_spectra(),
-                &request.offsets_hz,
-                &sources,
-                &limits,
-                abort,
-            )
-            .map_err(numerical_error)?;
+        let mut solutions =
+            solver
+                .solve_quasi_periodic_ac_from_orbit_with_abort(
+                    grid.clone(),
+                    &request.solver,
+                    point.complete_spectra(),
+                    point.config().oscillator.as_ref().map(|oscillator| {
+                        (oscillator.tone, point.config().solver.relative_tolerance)
+                    }),
+                    &request.offsets_hz,
+                    &sources,
+                    &limits,
+                    abort,
+                )
+                .map_err(numerical_error)?;
         let drive = Complex64::from_polar(
             request.magnitude,
             (request.phase_degrees % 360.0).to_radians(),

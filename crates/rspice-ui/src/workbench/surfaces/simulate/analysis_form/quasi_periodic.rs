@@ -126,7 +126,7 @@ pub(super) fn shooting_fields(ui: &mut Ui, setup: &mut QpssDraft) {
         );
         input_row(ui, "Additional startup seeds", &mut setup.oscillator_seeds);
         ui.small("Seeds use node,amplitude,phase-degrees separated by semicolons, such as quadrature,0.1,-90. They initialize the selected tuple; they do not drive the circuit.");
-        ui.small("Autonomous QPAC, QPXF and QPNOISE responses are not yet available.");
+        ui.small("Autonomous QPAC and QPXF require nonzero probe offsets. Absolute oscillator phase has no finite DC response. Autonomous QPNOISE is not yet available.");
     }
 }
 

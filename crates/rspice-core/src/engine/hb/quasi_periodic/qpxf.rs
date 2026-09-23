@@ -42,7 +42,6 @@ impl Engine {
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_analysis_points(request.frequencies_hz.len())?;
         let producer = state::Producer::capture(netlist, &engine.config, point.config())?;
-        point.require_driven_response("QPXF")?;
         let grid = engine.validate_qpss_operating_point_with_abort(netlist, point, abort)?;
         let output_index = grid
             .index_of(&request.output_lattice)
@@ -127,18 +126,22 @@ impl Engine {
         }
         let mut limits = engine.config.resource_limits;
         limits.max_result_values = limits.max_result_values.saturating_sub(metadata_values);
-        let mut solutions = solver
-            .solve_quasi_periodic_adjoint_at_frequency_with_abort(
-                grid.clone(),
-                &request.linear,
-                point.complete_spectra(),
-                &request.frequencies_hz,
-                &anchor,
-                &observation,
-                &limits,
-                abort,
-            )
-            .map_err(numerical_error)?;
+        let mut solutions =
+            solver
+                .solve_quasi_periodic_adjoint_from_orbit_with_abort(
+                    grid.clone(),
+                    &request.linear,
+                    point.complete_spectra(),
+                    point.config().oscillator.as_ref().map(|oscillator| {
+                        (oscillator.tone, point.config().solver.relative_tolerance)
+                    }),
+                    &request.frequencies_hz,
+                    &anchor,
+                    &observation,
+                    &limits,
+                    abort,
+                )
+                .map_err(numerical_error)?;
         let mut transfers = Vec::with_capacity(paths);
         for (source_index, source) in inputs.iter().enumerate() {
             for tuple in &input_lattices {

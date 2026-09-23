@@ -27,6 +27,197 @@ fn authored() -> QpssDraft {
 }
 
 #[test]
+fn autonomous_qpac_qpxf_studio_dependency_worker_and_save_preserve_phase_response() {
+    use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+    use crate::simulation::execution::{ExecutionArtifactEnvelope, PreparedDependencyBinding};
+    use crate::simulation::plan::{QuasiPeriodicAcDraft, QuasiPeriodicTransferDraft};
+    use crate::simulation::runner::worker_contract::round_trip_response_for_test;
+    use rspice_core::engine::QpxfFrequencyAxis;
+    use std::f64::consts::{SQRT_2, TAU};
+    let producer = QpssDraft {
+        tones: format!("{},{}", 1.2 / TAU, SQRT_2 / TAU),
+        harmonics: "3,1".into(),
+        collocation_points: "17,9".into(),
+        relative_tolerance: "1e-9".into(),
+        autonomous: true,
+        oscillator_node: "x".into(),
+        oscillator_amplitude: ".8".into(),
+        oscillator_seeds: "y,.8,-90".into(),
+        ..Default::default()
+    }
+    .to_spec()
+    .unwrap();
+    let deck = "QP phase response\nCx x 0 1\nCy y 0 1\nIprobe 0 x DC 0\nBx 0 x I={(1+.1*cos(sqrt(2)*time))*(1-v(x)^2-v(y)^2)*v(x)-v(y)}\nBy 0 y I={(1+.1*cos(sqrt(2)*time))*(1-v(x)^2-v(y)^2)*v(y)+v(x)}\n.end\n";
+    let point = svc_runner::run_qpss_analysis_with_source_path_and_abort(
+        deck,
+        producer.qpss_config().unwrap(),
+        None,
+        &rspice_core::NoAbort,
+    )
+    .unwrap()
+    .operating_point;
+    let snapshot = ContentDigest::from_bytes([81; 32]);
+    let binding = PreparedDependencyBinding::qpss_state(
+        AnalysisInstanceId::new(),
+        ObjectRevision::INITIAL,
+        ContentDigest::from_bytes([82; 32]),
+    );
+    let artifact = ExecutionArtifactEnvelope::from_qpss_result(
+        snapshot,
+        binding.producer_instance_id(),
+        binding.producer_source_revision(),
+        binding.producer_config_digest(),
+        &producer,
+        &SimulationResult::from_qpss_operating_point(point.clone()).unwrap(),
+    )
+    .unwrap()
+    .unwrap();
+    let deps = ResolvedExecutionDependencies::resolve(
+        snapshot,
+        vec![binding.clone()],
+        &HashMap::from([(binding.producer_instance_id(), artifact)]),
+    )
+    .unwrap();
+    let (metadata, buffers) = deps.encode_transfer().unwrap();
+    let deps = ResolvedExecutionDependencies::decode_transfer(&metadata, buffers).unwrap();
+    let ac = QuasiPeriodicAcDraft {
+        explicit_offsets: "-.03,1e-20,.04".into(),
+        input_source: "Iprobe".into(),
+        input_lattice: "1,0".into(),
+        output_lattice: "1,0".into(),
+        output_node: "x".into(),
+        magnitude: ".2".into(),
+        phase_degrees: "37".into(),
+        ..Default::default()
+    }
+    .to_spec()
+    .unwrap();
+    let xf = QuasiPeriodicTransferDraft {
+        explicit_frequencies: "-.03,1e-20,.04".into(),
+        frequency_axis: QpxfFrequencyAxis::Offset,
+        input_source: "Iprobe".into(),
+        input_lattice: "1,0".into(),
+        output_lattice: "1,0".into(),
+        output_node: "x".into(),
+        group_delay: true,
+        ..Default::default()
+    }
+    .to_spec()
+    .unwrap();
+    let mut results = vec![];
+    for spec in [ac, xf] {
+        let worker = WorkerAnalysisSpec::try_from(&spec).unwrap();
+        let restored: AnalysisSpec =
+            serde_json::from_str::<WorkerAnalysisSpec>(&serde_json::to_string(&worker).unwrap())
+                .unwrap()
+                .into();
+        assert_eq!(spec, restored);
+        deps.validate_for_spec(&restored, &Default::default())
+            .unwrap();
+        let result = run_spec_request(
+            &EngineBridge::new(),
+            restored,
+            Default::default(),
+            deck,
+            None,
+            &deps,
+            &rspice_core::NoAbort,
+        )
+        .unwrap();
+        results.push(round_trip_response_for_test(result));
+    }
+    let SimulationResult::Qpac { response: ac, .. } = &results[0] else {
+        panic!("QPAC expected")
+    };
+    let SimulationResult::Qpxf { response: xf, .. } = &results[1] else {
+        panic!("QPXF expected")
+    };
+    assert_eq!(
+        ac.metadata.operating_point_identity,
+        point.retained_identity()
+    );
+    assert_eq!(
+        xf.metadata.operating_point_identity,
+        point.retained_identity()
+    );
+    for (forward, adjoint) in ac.output_transfer.iter().zip(&xf.transfers[0].values) {
+        assert!((*forward - *adjoint).norm() / forward.norm().max(1.0) < 1e-7);
+    }
+    assert!(
+        ac.output_transfer[1].norm() > 1e18,
+        "phase response must retain the near-carrier pole"
+    );
+    assert!(xf.transfers[0].group_delay.is_some());
+    for (result, kind) in results.into_iter().zip([
+        crate::state::AnalysisType::Qpac,
+        crate::state::AnalysisType::Qpxf,
+    ]) {
+        let retained = crate::simulation::controller::SimulationController::new()
+            .convert_to_analysis_result_with_metadata_owned(result, kind, "QP response");
+        retained.validate_retained_evidence().unwrap();
+        let saved = crate::io::project_io::ProjectAnalysisResult::from(&retained);
+        let decoded: crate::io::project_io::ProjectAnalysisResult =
+            serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+        assert_eq!(decoded, saved);
+    }
+    let zero = QuasiPeriodicAcDraft {
+        explicit_offsets: "0".into(),
+        input_source: "Iprobe".into(),
+        output_node: "x".into(),
+        input_lattice: "1,0".into(),
+        output_lattice: "1,0".into(),
+        ..Default::default()
+    };
+    let error = run_spec_request(
+        &EngineBridge::new(),
+        zero.to_spec().unwrap(),
+        Default::default(),
+        deck,
+        None,
+        &deps,
+        &rspice_core::NoAbort,
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("nonzero"));
+    let mut xf = QuasiPeriodicTransferDraft {
+        explicit_frequencies: format!("{}", point.oscillator_frequency_hz().unwrap() + 0.04),
+        input_source: "Iprobe".into(),
+        output_node: "x".into(),
+        input_lattice: "1,0".into(),
+        output_lattice: "1,0".into(),
+        ..Default::default()
+    };
+    let output_axis = run_spec_request(
+        &EngineBridge::new(),
+        xf.to_spec().unwrap(),
+        Default::default(),
+        deck,
+        None,
+        &deps,
+        &rspice_core::NoAbort,
+    )
+    .unwrap();
+    xf.frequency_axis = QpxfFrequencyAxis::Offset;
+    xf.explicit_frequencies = "0.04".into();
+    let offset_axis = run_spec_request(
+        &EngineBridge::new(),
+        xf.to_spec().unwrap(),
+        Default::default(),
+        deck,
+        None,
+        &deps,
+        &rspice_core::NoAbort,
+    )
+    .unwrap();
+    let (SimulationResult::Qpxf { response: a, .. }, SimulationResult::Qpxf { response: b, .. }) =
+        (output_axis, offset_axis)
+    else {
+        panic!("QPXF expected")
+    };
+    assert!((a.transfers[0].values[0] - b.transfers[0].values[0]).norm() < 1e-9);
+}
+
+#[test]
 fn autonomous_qpss_studio_controls_reach_worker_engine_and_saved_results() {
     use crate::simulation::runner::worker_contract::round_trip_response_for_test;
     use std::f64::consts::{SQRT_2, TAU};
