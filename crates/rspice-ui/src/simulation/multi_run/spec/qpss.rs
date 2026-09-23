@@ -162,6 +162,7 @@ impl AnalysisSpec {
         controls.to_core_config(tones, *max_iterations, *relative_tolerance)
     }
 
+    #[cfg(test)]
     pub fn driven_qpss_config(&self) -> Result<QpssConfig, String> {
         let config = self.qpss_config()?;
         if config.oscillator.is_some() {
