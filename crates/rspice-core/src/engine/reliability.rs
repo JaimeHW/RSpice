@@ -232,6 +232,14 @@ impl Engine {
         };
         if let Some(window) = &study.transient_stress {
             let mut observed = netlist.clone();
+            // Reporting schedules belong to independently requested transient
+            // outputs. This internal solve integrates every accepted stress
+            // sample; its result is reported at the mission's lifetime ages.
+            // In particular, shared OUTPUTTIMEPOINTS must neither insert stress
+            // stops nor require an unrelated authored .TRAN card here.
+            observed.options.output_interval_schedule = None;
+            observed.options.output_time_points.clear();
+            observed.options.output_snapshots = None;
             // Retain the actual accepted states, independently of visible .SAVE selection.
             for target in &targets {
                 for node in &target.nodes {
