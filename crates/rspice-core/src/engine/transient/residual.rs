@@ -1714,6 +1714,7 @@ impl Engine {
                 dt,
             },
             ctx.bsim4_history,
+            evaluation_mode == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
         );
         Self::stamp_ekv26_transient_companions(
             circuit,

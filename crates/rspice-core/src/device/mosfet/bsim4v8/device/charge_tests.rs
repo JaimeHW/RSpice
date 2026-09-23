@@ -202,29 +202,13 @@ fn bsim4_periodic_physical_fq_matches_native_companion_and_derivatives() {
                         "zero charges retain their contributor slots"
                     );
                     let (charge, mode) = device.charge_at_with_probe(&state, true);
-                    let bias = device.raw_branch_voltages(&state);
-                    let junction = device.raw_junction_bias(&state);
-                    let op = device
-                        .core
-                        .eval_with_junction_and_gate_mid_bias(
-                            bias,
-                            junction,
-                            (rgate == 3).then(|| {
-                                device.core.mtype
-                                    * (state[device.node_gate_mid - 1]
-                                        - state[device.node_source - 1])
-                            }),
-                            device.gmin,
-                            true,
-                        )
-                        .unwrap();
                     let gain = 1e10;
                     let mut native = if nqs {
                         companion(device, &state, gain)
                     } else {
                         Sample::new(state.len())
                     };
-                    device.stamp_op(&op, bias, junction, &state, &mut native);
+                    device.stamp_static_probe(&state, &mut native);
                     if nqs {
                         native.stamp(
                             device.node_charge_deficit,
@@ -281,6 +265,49 @@ fn bsim4_periodic_physical_fq_matches_native_companion_and_derivatives() {
                                 );
                             }
                         }
+                    }
+                    // Differentiate the actual stored charges, including split
+                    // body and middle-gate routing, along a physical trajectory.
+                    let mut rates: Vec<Value> = (0..state.len())
+                        .map(|i| ((i * 7 % 13) as Value - 6.0) * 0.13)
+                        .collect();
+                    if nqs {
+                        rates[device.node_charge_deficit - 1] = 2e-7;
+                    }
+                    let (_, history_rates) =
+                        device.periodic_history_sample(&state, &rates).unwrap();
+                    let h = 1e-6;
+                    let plus: Vec<_> = state.iter().zip(&rates).map(|(x, dx)| x + h * dx).collect();
+                    let minus: Vec<_> =
+                        state.iter().zip(&rates).map(|(x, dx)| x - h * dx).collect();
+                    let (qp, _) = device.periodic_history_sample(&plus, &rates).unwrap();
+                    let (qm, _) = device.periodic_history_sample(&minus, &rates).unwrap();
+                    for row in 0..8 {
+                        let fd = (qp[row] - qm[row]) / (2.0 * h);
+                        let actual = history_rates[row];
+                        assert!(
+                            (actual - fd).abs() < 2e-22 + 5e-4 * actual.abs().max(fd.abs()),
+                            "history rgate={rgate} rbody={rbody} nqs={nqs} pmos={pmos} reverse={reverse} row={row}: {actual} vs {fd}"
+                        );
+                    }
+                    if nqs {
+                        let (storage, derivative) = device.shooting_nqs_state(&state);
+                        let analytic: Value = device
+                            .periodic_coupling_nodes()
+                            .into_iter()
+                            .zip(derivative)
+                            .filter(|(node, _)| *node > 0)
+                            .map(|(node, c)| c * rates[node - 1])
+                            .sum();
+                        let fd = (device.shooting_nqs_state(&plus).0
+                            - device.shooting_nqs_state(&minus).0)
+                            / (2.0 * h);
+                        assert!((analytic - fd).abs() < 1e-13 + 5e-4 * fd.abs());
+                        let mut moved = state.clone();
+                        moved[device.node_gate - 1] += 0.1;
+                        moved[device.node_charge_deficit - 1] =
+                            device.shooting_nqs_seed(storage, &moved);
+                        assert!((device.shooting_nqs_state(&moved).0 - storage).abs() < 1e-18);
                     }
                     let (currents, charges) = device.periodic_lead_fq(&state).unwrap();
                     assert!(currents.iter().sum::<Value>().abs() < 1e-14);

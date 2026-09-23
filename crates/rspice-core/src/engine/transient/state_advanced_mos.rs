@@ -1083,6 +1083,7 @@ impl Engine {
         voltages: &[Value],
         step: Bsim4CompanionStep<'_>,
         history: &Bsim4TransientHistory,
+        physical_probe: bool,
     ) {
         let Bsim4CompanionStep {
             coeff,
@@ -1100,10 +1101,10 @@ impl Engine {
             if ag0 <= 0.0 {
                 continue;
             }
-            let (charge, mode) = dev.charge_at(voltages);
+            let (charge, mode) = dev.charge_at_with_probe(voltages, physical_probe);
             let rbody = dev.rbody_enabled();
             let (qg, qgmid, qb, qd, qbs, qbd) = if dev.uses_trnqs() {
-                dev.trnqs_state_charges(&charge, voltages)
+                dev.trnqs_state_charges_with_probe(&charge, voltages, physical_probe)
             } else {
                 (
                     charge.qg_state(),
@@ -1154,10 +1155,10 @@ impl Engine {
                     cqcdump,
                     voltages,
                     &mut stamper,
-                    false,
+                    physical_probe,
                 );
             } else {
-                dev.stamp_charge_companion(
+                dev.stamp_charge_companion_with_probe(
                     &charge,
                     mode,
                     ag0,
@@ -1169,6 +1170,7 @@ impl Engine {
                     cqbd,
                     voltages,
                     &mut stamper,
+                    physical_probe,
                 );
             }
         }

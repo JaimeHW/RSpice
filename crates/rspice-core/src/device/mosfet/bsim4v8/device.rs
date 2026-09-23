@@ -37,6 +37,7 @@ use crate::{Complex64, NodeId, Value};
 const TRNQS_SCALING: Value = 1.0e-9;
 
 mod ac_response;
+mod continuation;
 mod periodic;
 #[cfg(test)]
 mod charge_tests;
@@ -411,6 +412,13 @@ impl Bsim4v8Device {
         self.core
             .eval_with_junction_bias(bias, junction_bias, self.gmin, false)
             .expect("BSIM4 DC eval: no charge model requested")
+    }
+
+    pub(crate) fn stamp_static_probe(&self, voltages: &[Value], matrix: &mut impl MatrixStamper) {
+        let bias = self.raw_branch_voltages(voltages);
+        let junction = self.raw_junction_bias(voltages);
+        let op = self.eval_dc(bias, junction);
+        self.stamp_op(&op, bias, junction, voltages, matrix);
     }
 
     /// Charge state at the limited bias (the same bias the conductance

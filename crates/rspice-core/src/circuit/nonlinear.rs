@@ -1501,7 +1501,13 @@ impl CircuitData {
         }
         // BSIM4 rides the identical path (b4ld.c ceqdrn/ceqbd/ceqbs/ceqj*
         // rows through the stamper's RHS hook).
-        self.bsim4v8.stamp_all(&mut stamper, &mut [], voltages);
+        if stamp_mode == NonlinearStampMode::LimitedNewton {
+            self.bsim4v8.stamp_all(&mut stamper, &mut [], voltages);
+        } else {
+            for device in &self.bsim4v8.devices {
+                device.stamp_static_probe(voltages, &mut stamper);
+            }
+        }
         self.ekv26s.stamp_all(&mut stamper, &mut [], voltages);
         self.ekv3s.stamp_all(&mut stamper, &mut [], voltages);
         self.vdmoses.stamp_all(&mut stamper, &mut [], voltages);
