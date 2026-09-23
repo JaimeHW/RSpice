@@ -2093,7 +2093,7 @@ impl ResolvedExecutionDependencies {
                             })
                             .collect();
                         ExecutionArtifactPayloadTransferMetadata::HbState(
-                            HbStateTransferMetadata {
+                            Box::new(HbStateTransferMetadata {
                                 environment: state.environment.clone(),
                                 config: state.operating_point.config().clone(),
                                 producer_identity: state
@@ -2105,7 +2105,7 @@ impl ResolvedExecutionDependencies {
                                 integral_spectra,
                                 iterations: state.operating_point.iterations(),
                                 residual_norm: state.operating_point.residual_norm(),
-                            },
+                            }),
                         )
                     }
                 };
@@ -2700,7 +2700,7 @@ struct DcOperatingPointSeedTransferMetadata {
 enum ExecutionArtifactPayloadTransferMetadata {
     TransientTrajectory(Box<TransientTrajectoryTransferMetadata>),
     PeriodicState(Box<PeriodicStateTransferMetadata>),
-    HbState(HbStateTransferMetadata),
+    HbState(Box<HbStateTransferMetadata>),
     QpssState(Box<qpss::QpssStateTransferMetadata>),
     DcOperatingPointSeed(DcOperatingPointSeedTransferMetadata),
 }
