@@ -1391,6 +1391,9 @@ impl Capacitors {
                 "solution-dependent capacitor companion requires a finite positive dt, got {dt}"
             ));
         }
+        if !self.has_solution_dependent_values() {
+            return Ok(());
+        }
         let charge_factor = coeff.coeff_g / dt;
         if !charge_factor.is_finite() {
             return Err(format!(
@@ -2459,6 +2462,64 @@ mod capacitor_state_tests {
             .evaluate_effective_capacitance(0, &[4.0, 0.5], 1.0)
             .unwrap();
         assert_close(value, 4.0);
+    }
+
+    #[test]
+    fn absent_capacitor_expressions_do_not_require_a_representable_charge_rate() {
+        let mut caps = Capacitors::new();
+        let mut matrix = StaticMatrix::from_triplets(1, 1, &[(0, 0, 7.0)]).unwrap();
+        let mut rhs = [3.0];
+        let coeff = CompanionCoefficients::backward_euler();
+        let step = || SolutionDependentCompanionStep {
+            time: Value::from_bits(1),
+            dt: Value::from_bits(1),
+            coeff: &coeff,
+            num_nodes: 1,
+        };
+        for with_static_capacitor in [false, true] {
+            if with_static_capacitor {
+                caps.add("Cstatic".into(), 1, 0, 1e-12);
+            }
+            caps.stamp_solution_dependent_transient_companion(
+                &mut matrix,
+                &mut rhs,
+                &[1.0],
+                step(),
+            )
+            .unwrap();
+            caps.stamp_solution_dependent_shooting_companion(
+                &mut matrix,
+                &mut rhs,
+                &[1.0],
+                step(),
+                &mut [0.0],
+                false,
+            )
+            .unwrap();
+            assert_eq!(rhs, [3.0]);
+            assert_eq!(matrix.values_mut(), &[7.0]);
+        }
+        caps.add_with_value_expression(
+            "Cdynamic".into(),
+            1,
+            0,
+            1e-12,
+            SolutionDependentCapacitor::new("Cdynamic".into(), "1e-12").unwrap(),
+        );
+        assert!(
+            caps.stamp_solution_dependent_shooting_companion(
+                &mut matrix,
+                &mut rhs,
+                &[1.0],
+                step(),
+                &mut [0.0; 2],
+                false,
+            )
+            .unwrap_err()
+            .contains("invalid charge coefficient")
+        );
+        assert_eq!(rhs, [3.0]);
+        assert_eq!(matrix.values_mut(), &[7.0]);
     }
 
     #[test]
