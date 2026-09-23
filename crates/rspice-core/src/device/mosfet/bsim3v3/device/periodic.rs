@@ -151,7 +151,7 @@ impl Bsim3v3Device {
         }
         // ag0=0 extracts only the native NQS static Jacobian. Its companion
         // sources are discarded; physical terms above never use J*x-RHS.
-        self.stamp_trnqs_charge_companion(
+        self.stamp_trnqs_charge_companion_with_probe(
             charge,
             op.mode,
             0.0,
@@ -162,6 +162,7 @@ impl Bsim3v3Device {
             0.0,
             solution,
             &mut JacobianOnly(f),
+            true,
         );
         let scale = self.core.mtype * self.multiplier;
         let qdef = self.trnqs_qdef(solution);
@@ -274,6 +275,79 @@ mod tests {
         let (mut f, mut q) = (Sample::default(), Sample::default());
         device.stamp_periodic_fq(state, &mut f, &mut q).unwrap();
         (f, q)
+    }
+
+    #[test]
+    fn bsim3_physical_companion_matches_fq_without_mutating_limiter() {
+        for pmos in [false, true] {
+            for nqs in [false, true] {
+                for drain in [0.8, -0.3] {
+                    let mut device = device(pmos, 2, nqs, 0.4);
+                    let state =
+                        [drain, 1.1, 0.1, -0.5, 2e-6].map(|value| value * device.core.mtype);
+                    for startup in [true, false] {
+                        if !startup {
+                            device.seed_accepted_periodic_bias(&[0.0; 5]);
+                        }
+                        let before = device.accepted_nonlinear_checkpoint();
+                        let (f, q) = sample(&device, &state);
+                        let mut companion = Sample::default();
+                        device.stamp_static_probe(&state, &mut companion);
+                        let (charge, mode) = device.charge_at_with_probe(&state, true);
+                        let ag0 = 1e10;
+                        let (qg, qb, qd) = device.trnqs_state_charges(&charge);
+                        if nqs {
+                            device.stamp_trnqs_charge_companion_with_probe(
+                                &charge,
+                                mode,
+                                ag0,
+                                ag0 * qg,
+                                ag0 * qb,
+                                ag0 * qd,
+                                ag0 * charge.qcheq,
+                                ag0 * device.trnqs_qcdump_state(&state),
+                                &state,
+                                &mut companion,
+                                true,
+                            );
+                        } else {
+                            device.stamp_charge_companion_with_probe(
+                                &charge,
+                                mode,
+                                ag0,
+                                ag0 * qg,
+                                ag0 * qb,
+                                ag0 * qd,
+                                &state,
+                                &mut companion,
+                                true,
+                            );
+                        }
+                        for row in 0..5 {
+                            let residual = companion.jac[row]
+                                .iter()
+                                .zip(&state)
+                                .map(|(&jac, &value)| jac * value)
+                                .sum::<Value>()
+                                - companion.rhs[row];
+                            let expected = -f.rhs[row] - ag0 * q.rhs[row];
+                            assert!(
+                                (residual - expected).abs() < 1e-14 + 1e-10 * expected.abs(),
+                                "pmos={pmos} nqs={nqs} startup={startup} drain={drain} row={row}: {residual} vs {expected}"
+                            );
+                            for col in 0..5 {
+                                let expected = f.jac[row][col] + ag0 * q.jac[row][col];
+                                assert!(
+                                    (companion.jac[row][col] - expected).abs()
+                                        < 1e-14 + 1e-10 * expected.abs()
+                                );
+                            }
+                        }
+                        assert_eq!(device.accepted_nonlinear_checkpoint(), before);
+                    }
+                }
+            }
+        }
     }
 
     #[test]

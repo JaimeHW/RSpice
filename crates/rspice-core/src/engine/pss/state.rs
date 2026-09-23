@@ -1149,6 +1149,7 @@ impl PssCircuit {
             device.stamp_shooting_initial_relaxation(
                 solution,
                 &mut super::super::transient::StaticMatrixChargeStamper { matrix, rhs },
+                physical_probe,
             );
         }
         for index in 0..self.circuit.capacitors.len() {
@@ -1242,6 +1243,7 @@ impl PssCircuit {
                         matrix: charge,
                         rhs: unused_rhs,
                     },
+                    physical_probe,
                 );
             }
             rates.project(charge.values_mut(), &self.circuit, rhs, &mut stamps)

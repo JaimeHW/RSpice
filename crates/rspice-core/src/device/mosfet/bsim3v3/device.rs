@@ -213,7 +213,24 @@ impl Bsim3v3Device {
     /// charge together with the channel mode of that evaluation, which
     /// selects the companion-matrix assembly.
     pub fn charge_at(&self, v: &[Value]) -> (Bsim3v3Charge, i32) {
-        let (bias, _) = self.limited_branch_voltages(v);
+        self.charge_at_with_probe(v, false)
+    }
+
+    fn evaluation_bias(&self, v: &[Value], physical_probe: bool) -> Bsim3v3Bias {
+        if physical_probe {
+            self.raw_branch_voltages(v)
+        } else {
+            self.limited_branch_voltages(v).0
+        }
+    }
+
+    /// Physical residual checks must not inherit OFF startup or Newton limiting.
+    pub(crate) fn charge_at_with_probe(
+        &self,
+        v: &[Value],
+        physical_probe: bool,
+    ) -> (Bsim3v3Charge, i32) {
+        let bias = self.evaluation_bias(v, physical_probe);
         let op = self
             .core
             .eval(bias, self.gmin, true)
@@ -622,7 +639,25 @@ impl Bsim3v3Device {
         voltages: &[Value],
         matrix: &mut impl MatrixStamper,
     ) {
-        let (bias, _) = self.limited_branch_voltages(voltages);
+        self.stamp_charge_companion_with_probe(
+            charge, mode, ag0, cqg, cqb, cqd, voltages, matrix, false,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn stamp_charge_companion_with_probe(
+        &self,
+        charge: &Bsim3v3Charge,
+        mode: i32,
+        ag0: Value,
+        cqg: Value,
+        cqb: Value,
+        cqd: Value,
+        voltages: &[Value],
+        matrix: &mut impl MatrixStamper,
+        physical_probe: bool,
+    ) {
+        let bias = self.evaluation_bias(voltages, physical_probe);
         let vgb = bias.vgs - bias.vbs;
         let vbd = bias.vbs - bias.vds;
         let vbs = bias.vbs;
@@ -665,6 +700,26 @@ impl Bsim3v3Device {
         voltages: &[Value],
         matrix: &mut impl MatrixStamper,
     ) {
+        self.stamp_trnqs_charge_companion_with_probe(
+            charge, mode, ag0, cqg, cqb, cqd, cqcheq, cqcdump, voltages, matrix, false,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn stamp_trnqs_charge_companion_with_probe(
+        &self,
+        charge: &Bsim3v3Charge,
+        mode: i32,
+        ag0: Value,
+        cqg: Value,
+        cqb: Value,
+        cqd: Value,
+        cqcheq: Value,
+        cqcdump: Value,
+        voltages: &[Value],
+        matrix: &mut impl MatrixStamper,
+        physical_probe: bool,
+    ) {
         let cox_wl = charge.cox_wl;
         if !(cox_wl > 0.0 && cox_wl.is_finite()) {
             return;
@@ -674,7 +729,7 @@ impl Bsim3v3Device {
             return;
         }
 
-        let (bias, _) = self.limited_branch_voltages(voltages);
+        let bias = self.evaluation_bias(voltages, physical_probe);
         let vgb = bias.vgs - bias.vbs;
         let vbd = bias.vbs - bias.vds;
         let vbs = bias.vbs;
@@ -942,6 +997,20 @@ impl Bsim3v3Device {
     }
 
     /// Stamp the linearized DC operating point: matrix/RHS load of
+    /// Unlimited static candidate equations; no accepted or trial state changes.
+    pub(crate) fn stamp_static_probe(&self, voltages: &[Value], matrix: &mut impl MatrixStamper) {
+        let bias = self.raw_branch_voltages(voltages);
+        let op = eval::eval_dc(
+            &self.core.model,
+            &self.core.model_temp,
+            &self.core.size,
+            &self.core.inst,
+            bias,
+            self.gmin,
+        );
+        self.stamp_op(&op, bias, matrix);
+    }
+
     /// b3ld.c:2920-3120 with all charge (`gc**`/`ceqq*`) and NQS (`ggt*`,
     /// `T1`) terms zero and the series conductances lowered to external
     /// resistors (so the `Dd`/`DPd`/`Ss`/`SPs` rows vanish here).

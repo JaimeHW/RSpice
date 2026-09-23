@@ -1492,7 +1492,13 @@ impl CircuitData {
         // BSIM3 stamps its equivalent currents through the stamper's RHS
         // hook (the b3ld.c cdreq/ceqbd/ceqbs rows), not the legacy `rhs`
         // slice, so the same path serves DC and transient assembly.
-        self.bsim3v3.stamp_all(&mut stamper, &mut [], voltages);
+        if stamp_mode == NonlinearStampMode::LimitedNewton {
+            self.bsim3v3.stamp_all(&mut stamper, &mut [], voltages);
+        } else {
+            for device in &self.bsim3v3.devices {
+                device.stamp_static_probe(voltages, &mut stamper);
+            }
+        }
         // BSIM4 rides the identical path (b4ld.c ceqdrn/ceqbd/ceqbs/ceqj*
         // rows through the stamper's RHS hook).
         self.bsim4v8.stamp_all(&mut stamper, &mut [], voltages);

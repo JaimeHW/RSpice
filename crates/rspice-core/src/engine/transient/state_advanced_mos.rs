@@ -694,6 +694,7 @@ impl Engine {
         coeff: &CompanionCoefficients,
         dt: Value,
         history: &Bsim3TransientHistory,
+        physical_probe: bool,
     ) {
         if !circuit.has_bsim3v3_devices() {
             return;
@@ -705,7 +706,7 @@ impl Engine {
         }
         let mut stamper = StaticMatrixChargeStamper { matrix, rhs };
         for (idx, dev) in circuit.bsim3v3.devices.iter().enumerate() {
-            let (charge, mode) = dev.charge_at(voltages);
+            let (charge, mode) = dev.charge_at_with_probe(voltages, physical_probe);
             let (qg, qb, qd) = if dev.uses_trnqs() {
                 dev.trnqs_state_charges(&charge)
             } else {
@@ -725,7 +726,7 @@ impl Engine {
                     charge.qcheq,
                     qcdump,
                 );
-                dev.stamp_trnqs_charge_companion(
+                dev.stamp_trnqs_charge_companion_with_probe(
                     &charge,
                     mode,
                     ag0,
@@ -736,9 +737,10 @@ impl Engine {
                     cqcdump,
                     voltages,
                     &mut stamper,
+                    physical_probe,
                 );
             } else {
-                dev.stamp_charge_companion(
+                dev.stamp_charge_companion_with_probe(
                     &charge,
                     mode,
                     ag0,
@@ -747,6 +749,7 @@ impl Engine {
                     cqd,
                     voltages,
                     &mut stamper,
+                    physical_probe,
                 );
             }
         }

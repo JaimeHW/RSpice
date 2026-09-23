@@ -42,8 +42,9 @@ impl Bsim3v3Device {
         &self,
         solution: &[Value],
         matrix: &mut impl MatrixStamper,
+        physical_probe: bool,
     ) {
-        let (charge, mode) = self.charge_at(solution);
+        let (charge, mode) = self.charge_at_with_probe(solution, physical_probe);
         if !self.uses_trnqs() {
             self.stamp_charge_matrix(&Self::charge_matrix(&charge, mode), 1.0, matrix);
             return;
@@ -73,11 +74,22 @@ impl Bsim3v3Device {
         &self,
         solution: &[Value],
         matrix: &mut impl MatrixStamper,
+        physical_probe: bool,
     ) {
         if self.uses_trnqs() {
-            let (charge, mode) = self.charge_at(solution);
-            self.stamp_trnqs_charge_companion(
-                &charge, mode, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, solution, matrix,
+            let (charge, mode) = self.charge_at_with_probe(solution, physical_probe);
+            self.stamp_trnqs_charge_companion_with_probe(
+                &charge,
+                mode,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                solution,
+                matrix,
+                physical_probe,
             );
         }
     }
