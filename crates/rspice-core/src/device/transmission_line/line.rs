@@ -577,6 +577,12 @@ impl TransmissionLine {
         F: Fn(&TlineStateSample) -> Value + Copy,
     {
         let linear = || Self::linear_interpolate(prev, next, target, selector);
+        // Adjacent represented clocks carry opposite sides of an ideal edge.
+        // A quadratic stencil spanning that unresolved interval amplifies the
+        // jump into a spurious overshoot on the outgoing smooth interval.
+        if prev2.is_some_and(|previous| previous.time.next_up() == prev.time) {
+            return linear();
+        }
         match mode {
             DelayedInterpolationMode::Linear => linear(),
             DelayedInterpolationMode::Quadratic => {
@@ -1583,18 +1589,34 @@ impl TransmissionLine {
             }
         };
         checkpoint.current_time = time;
+        let mut next_clock: Option<Value> = None;
+        for (index, sample) in checkpoint.state_history.iter_mut().enumerate().rev() {
+            let nearest = translate(sample[0]);
+            let shifted = next_clock.map_or(nearest, |next| nearest.min(next.next_down()));
+            // Coarsening the clock must not merge the incoming sample into
+            // its outgoing neighbor. Retain both within one rounding cell;
+            // a denser, unrepresentable cluster must fail without mutation.
+            if shifted < nearest.next_down() {
+                return Err(format!(
+                    "transmission line '{}': rebased history clocks are too dense to retain",
+                    self.name
+                ));
+            }
+            sample[0] = shifted;
+            checkpoint.forward_history[index][0] = shifted;
+            checkpoint.backward_history[index][0] = shifted;
+            next_clock = Some(shifted);
+        }
         if let Some(initial) = &mut checkpoint.initial_state {
-            initial[0] = translate(initial[0]);
-        }
-        for sample in &mut checkpoint.state_history {
-            sample[0] = translate(sample[0]);
-        }
-        for sample in checkpoint
-            .forward_history
-            .iter_mut()
-            .chain(&mut checkpoint.backward_history)
-        {
-            sample[0] = translate(sample[0]);
+            initial[0] = if self
+                .state_history
+                .front()
+                .is_some_and(|first| first.time == initial[0])
+            {
+                checkpoint.state_history[0][0]
+            } else {
+                translate(initial[0]).min(checkpoint.state_history[0][0])
+            };
         }
         self.restore_checkpoint_state(&checkpoint)
     }
@@ -1936,6 +1958,89 @@ impl TransmissionLine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ideal_edge_interpolation_restarts_on_the_outgoing_side() {
+        for mode in [
+            DelayedInterpolationMode::Linear,
+            DelayedInterpolationMode::Quadratic,
+            DelayedInterpolationMode::Mixed,
+            DelayedInterpolationMode::XyceTra,
+        ] {
+            let sample = |time, value| TlineStateSample {
+                time,
+                v1: value,
+                i1: 0.0,
+                v2: 0.0,
+                i2: 0.0,
+            };
+            let incoming = sample(0.375_f64.next_down(), 0.0);
+            let outgoing = sample(0.375, 1.0);
+            let next = sample(0.5, 2.0);
+            assert_eq!(
+                TransmissionLine::delayed_interpolate(
+                    mode,
+                    Some(&incoming),
+                    &outgoing,
+                    &next,
+                    0.4375,
+                    |value| value.v1,
+                ),
+                1.5
+            );
+        }
+    }
+
+    #[test]
+    fn ideal_edge_rebase_preserves_samples_and_fails_atomically_for_dense_clocks() {
+        let mut line = lossless_line(&[
+            (-0.4375000000000001, 0.0),
+            (-0.4375, 1.0),
+            (0.375_f64.next_down(), 1.0),
+            (0.375, 0.0),
+            (1.0, 0.0),
+        ]);
+        let before = line.checkpoint_state().unwrap();
+        assert_eq!(
+            before.state_history[0][0] - 1.0,
+            before.state_history[1][0] - 1.0
+        );
+        line.rebase_lossless_history(0.0).unwrap();
+        let after = line.checkpoint_state().unwrap();
+        assert_eq!(after.current_time, 0.0);
+        assert_eq!(after.state_history[0][0], (-1.4375_f64).next_down());
+        assert_eq!(after.state_history[1][0], -1.4375);
+        assert_eq!(after.initial_state.unwrap(), after.state_history[0]);
+        for (old, shifted) in before.state_history.iter().zip(&after.state_history) {
+            assert_eq!(old[1..], shifted[1..]);
+        }
+        for (old, shifted) in before
+            .forward_history
+            .iter()
+            .zip(&after.forward_history)
+            .chain(before.backward_history.iter().zip(&after.backward_history))
+        {
+            assert_eq!(old[1..], shifted[1..]);
+        }
+        let mut restored = lossless_line(&[]);
+        restored.restore_checkpoint_state(&after).unwrap();
+        assert_eq!(restored.checkpoint_state().unwrap(), after);
+        let mut dense = lossless_line(&[
+            (0.0, 0.0),
+            (1e-10, 1.0),
+            (2e-10, 0.0),
+            (3e-10, 1.0),
+            (1.0, 0.0),
+        ]);
+        let before = dense.checkpoint_state().unwrap();
+        assert!(
+            dense
+                .rebase_lossless_history(1e16)
+                .unwrap_err()
+                .contains("too dense")
+        );
+        assert_eq!(dense.checkpoint_state().unwrap(), before);
+    }
 
     #[test]
     fn quadratic_interpolation_preserves_restart_polynomials_at_extreme_time_scales() {
