@@ -448,7 +448,10 @@ fn two_dozen_names() -> String {
 /// The two tallest drafts: a valid batch, whose derived line wraps, and a
 /// refused one, whose message runs the full two lines the slot reserves.
 #[cfg(not(target_arch = "wasm32"))]
-fn worst_cases() -> [(&'static str, fn(&mut AppState)); 2] {
+type PinPortCase = (&'static str, fn(&mut AppState));
+
+#[cfg(not(target_arch = "wasm32"))]
+fn worst_cases() -> [PinPortCase; 2] {
     [
         ("valid", |state: &mut AppState| {
             open_create_pins(state);
