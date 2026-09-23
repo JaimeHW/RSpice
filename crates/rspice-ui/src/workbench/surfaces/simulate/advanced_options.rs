@@ -45,6 +45,7 @@ use crate::workbench::state::WorkbenchState;
 
 pub(super) const PLAN_ORIGIN: &str = "plan policy";
 pub(super) const OVERRIDE_ORIGIN: &str = "analysis override";
+pub(super) const STUDY_DEFAULT_ORIGIN: &str = "study default · inherited stages";
 pub(crate) const ENGINE_ORIGIN: &str = "engine default";
 
 /// One option, as this analysis resolves it.
@@ -84,13 +85,23 @@ pub(super) fn sections(
     record: Option<&AnalysisNumericOverride>,
     options: &SimulationOptions,
 ) -> Vec<AdvancedOptionSection> {
+    sections_with_ownership(kind, draft, record, options, draft.solver_ownership())
+}
+
+fn sections_with_ownership(
+    kind: AnalysisKind,
+    draft: &AnalysisDraft,
+    record: Option<&AnalysisNumericOverride>,
+    options: &SimulationOptions,
+    ownership: SolverOwnership,
+) -> Vec<AdvancedOptionSection> {
     OverrideSection::ALL
         .into_iter()
         .map(|section| AdvancedOptionSection {
             section,
             rows: NumericOverrideOption::all()
                 .filter(|option| option.section() == section)
-                .map(|option| row(option, kind, draft, record, options))
+                .map(|option| row(option, kind, draft, record, options, ownership))
                 .collect(),
         })
         .filter(|section| !section.rows.is_empty())
@@ -179,10 +190,10 @@ fn row(
     draft: &AnalysisDraft,
     record: Option<&AnalysisNumericOverride>,
     options: &SimulationOptions,
+    ownership: SolverOwnership,
 ) -> AdvancedOptionRow {
     // The instance's own tier and homotopy decide five of these options, and
     // they decide them after the deck is read. The draft is what carries them.
-    let ownership = draft.solver_ownership();
     let preset = super::page_solver::plan_preset_value(option, options);
     // A refusal outranks an authored value on purpose. A record restored from
     // an older project can hold an option this instance stopped accepting, and
@@ -213,7 +224,9 @@ fn row(
         Some(authored) => {
             // A step ceiling composes with the plan's rather than replacing it,
             // so the authored number is not always what the run steps at.
-            let (effective, origin) = if option == NumericOverrideOption::MaximumTimestep {
+            let (effective, origin) = if ownership.study_inherited_options.is_some() {
+                (authored.clone(), STUDY_DEFAULT_ORIGIN)
+            } else if option == NumericOverrideOption::MaximumTimestep {
                 super::page_solver::resolved_step_ceiling(&authored, options.max_timestep)
             } else {
                 (authored.clone(), OVERRIDE_ORIGIN)
@@ -402,11 +415,21 @@ pub(super) fn form_rows(
     record: Option<&AnalysisNumericOverride>,
     options: &SimulationOptions,
 ) -> Vec<AdvancedOptionSection> {
+    form_rows_with_ownership(kind, draft, record, options, draft.solver_ownership())
+}
+
+pub(super) fn form_rows_with_ownership(
+    kind: AnalysisKind,
+    draft: &AnalysisDraft,
+    record: Option<&AnalysisNumericOverride>,
+    options: &SimulationOptions,
+    ownership: SolverOwnership,
+) -> Vec<AdvancedOptionSection> {
     // The catalogue's own answer to what this instance may carry, rather than a
     // second reading of the refusals behind it: the gate that decides whether a
     // value survives to the solve is the gate that decides whether it earns a
     // control.
-    let authorable = NumericOverrideOption::applicable_to_instance(kind, draft.solver_ownership());
+    let authorable = NumericOverrideOption::applicable_to_instance(kind, ownership);
     // Whether this analysis has already chosen the shape of its output
     // schedule. Read once, because the two keys that answer it are the two
     // rows that depend on the answer.
@@ -418,7 +441,12 @@ pub(super) fn form_rows(
                 .value(NumericOverrideOption::OutputTimePoints)
                 .is_some()
     });
-    sections(kind, draft, record, options)
+    let resolved = if ownership.study_inherited_options.is_some() {
+        sections_with_ownership(kind, draft, record, options, ownership)
+    } else {
+        sections(kind, draft, record, options)
+    };
+    resolved
         .into_iter()
         .map(|mut section| {
             section.rows.retain(|row| {
@@ -513,6 +541,9 @@ const fn form_owns_the_homotopy(kind: AnalysisKind) -> bool {
 /// refused rows are gone: the plan's own block, this analysis's record, or the
 /// engine's dialect default where the plan states nothing at all.
 pub(super) fn origin_hint(row: &AdvancedOptionRow) -> &'static str {
+    if row.origin == STUDY_DEFAULT_ORIGIN {
+        return "study default";
+    }
     if row.authored.is_some() {
         return "override";
     }

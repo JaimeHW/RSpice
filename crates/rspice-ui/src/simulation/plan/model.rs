@@ -9,6 +9,7 @@ mod diagnostics;
 mod digest;
 mod naming;
 mod participation;
+mod solver_ownership;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -957,6 +958,7 @@ impl SimulationPlan {
         };
         candidate.configuration_receipts.push(receipt.clone());
         candidate.ensure_structurally_valid()?;
+        candidate.validate_study_solver_options()?;
         *self = candidate;
         Ok(receipt)
     }
@@ -1192,6 +1194,7 @@ impl SimulationPlan {
                 };
             }
         }
+        self.restore_study_solver_options();
     }
 
     /// Fold every restored Corner draft's pre-unification run space into the
@@ -1711,6 +1714,7 @@ impl SimulationPlan {
         candidate.next_receipt_sequence = next_sequence;
         candidate.receipts.push(receipt.clone());
         candidate.ensure_structurally_valid()?;
+        candidate.validate_study_solver_options()?;
         *self = candidate;
         Ok((result, receipt))
     }
@@ -1827,7 +1831,7 @@ impl SimulationPlan {
                 // deck instead. Refusing the edit is the honest outcome: the
                 // alternative is a stored departure the solve discards, which
                 // is the exact failure the record's gate exists to prevent.
-                let ownership = candidate.instances[index].draft.solver_ownership();
+                let ownership = candidate.solver_ownership(id);
                 if let Some(record) = candidate.instances[index].numeric_override.as_ref()
                     && let Some((option, reason)) =
                         record.first_refusal_for_instance(actual, ownership)
@@ -1880,7 +1884,8 @@ impl SimulationPlan {
         // The instance's own tier and homotopy decide five of these options,
         // and they decide them after the deck is read. A gate that asked only
         // the kind would accept a value the solve overwrites.
-        let ownership = instance.draft().solver_ownership();
+        let ownership =
+            self.solver_ownership_for_draft(instance.draft(), numeric_override.as_ref());
         let name = instance.display_name().to_owned();
         let outcome = if instance.enabled() {
             AnalysisLifecycleState::Draft
@@ -2164,6 +2169,7 @@ impl SimulationPlan {
     /// Freeze a dispatchable deterministic projection. Any unresolved or
     /// structural diagnostic blocks the projection.
     pub fn freeze(&self) -> Result<FrozenSimulationPlan, AnalysisPlanError> {
+        self.validate_study_solver_options()?;
         let issues = self.validation_issues();
         if !issues.is_empty() {
             return Err(AnalysisPlanError::InvalidPlan(issues));

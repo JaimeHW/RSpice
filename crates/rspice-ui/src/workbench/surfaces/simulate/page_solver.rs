@@ -1291,9 +1291,12 @@ pub(super) fn plan_policy_rows(app: &RSpiceApp) -> Vec<PolicyRow> {
         .sim_setup
         .stable_analysis_plan()
         .is_ok_and(|plan| {
-            plan.instances()
-                .iter()
-                .any(|instance| instance.enabled() && instance.kind().advances_time())
+            plan.instances().iter().any(|instance| {
+                instance.enabled()
+                    && NumericOverrideOption::Itl4
+                        .refusal_for_instance(instance.kind(), plan.solver_ownership(instance.id()))
+                        .is_none()
+            })
         });
 
     let plan_row = |analysis: &str, option: NumericOverrideOption| PolicyRow {
@@ -1504,11 +1507,17 @@ pub(super) fn analysis_overrides(app: &RSpiceApp) -> Vec<PolicyRow> {
             continue;
         };
         for (option, effective) in record.entries() {
-            let (effective, origin) = if option == NumericOverrideOption::MaximumTimestep {
-                resolved_step_ceiling(&effective, options.max_timestep)
-            } else {
-                (effective, OVERRIDE_ORIGIN)
-            };
+            let ownership = plan.solver_ownership(instance.id());
+            let (effective, origin) =
+                if let Some(reason) = option.refusal_for_instance(instance.kind(), ownership) {
+                    ("—".into(), reason)
+                } else if ownership.study_inherited_options.is_some() {
+                    (effective, super::advanced_options::STUDY_DEFAULT_ORIGIN)
+                } else if option == NumericOverrideOption::MaximumTimestep {
+                    resolved_step_ceiling(&effective, options.max_timestep)
+                } else {
+                    (effective, OVERRIDE_ORIGIN)
+                };
             rows.push(PolicyRow {
                 analysis: analysis.clone(),
                 option: option.label().to_owned(),
@@ -1617,7 +1626,7 @@ fn prepared_numeric_record(
         .instance(instance)
         .ok_or_else(|| "The selected analysis is no longer in the plan.".to_owned())?;
     let kind = target.kind();
-    let ownership = target.draft().solver_ownership();
+    let ownership = plan.solver_ownership(instance);
     let mut record = target.numeric_override().cloned().unwrap_or_default();
     record.set_for_instance(kind, ownership, option, authored)?;
     Ok(record)

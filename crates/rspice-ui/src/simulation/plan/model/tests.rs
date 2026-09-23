@@ -43,16 +43,27 @@ fn dc_study_restore_keeps_effective_controls_and_base_changes_are_atomic() {
         ] {
             assert!(dc_options.value(option).is_none());
         }
-        for id in [configured, transient] {
-            assert_eq!(
-                restored.instance(id).unwrap().numeric_override(),
-                Some(&legacy)
-            );
-        }
+        assert_eq!(
+            restored.instance(transient).unwrap().numeric_override(),
+            Some(&legacy)
+        );
+        assert!(
+            restored
+                .instance(configured)
+                .unwrap()
+                .numeric_override()
+                .is_none(),
+            "all study defaults were superseded by the base's own settings"
+        );
         assert_eq!(serde_json::to_value(&restored.receipts).unwrap(), history);
         let once = snapshot(&restored);
         restored.prepare_after_restore();
         assert_eq!(snapshot(&restored), once);
+        restored.set_numeric_override(transient, None).unwrap();
+        restored
+            .set_numeric_override(configured, Some(legacy))
+            .unwrap();
+        let once = snapshot(&restored);
         let error = restored
             .edit(configured, |draft| select(draft, None))
             .unwrap_err();

@@ -17,6 +17,55 @@ use crate::simulation::plan::{AnalysisKind, NumericOverrideOption as O, SolverOw
 use crate::workbench::state::SimulationPage;
 
 #[test]
+fn configured_study_form_writer_and_solver_ledger_share_base_ownership() {
+    let (mut app, id) = studio(AnalysisKind::MonteCarlo);
+    let plan = app.state.sim_setup.stable_analysis_plan_mut().unwrap();
+    let ac = plan.insert(AnalysisKind::Ac).unwrap().0;
+    let tran = plan.insert(AnalysisKind::Transient).unwrap().0;
+    plan.edit(id, |draft| {
+        let AnalysisDraft::MonteCarlo(state) = draft else {
+            unreachable!()
+        };
+        state.base_analysis = Some(ac);
+    })
+    .unwrap();
+    assert!(
+        !offered(&app, id)
+            .iter()
+            .any(|(option, _)| *option == O::Itl4)
+    );
+    assert!(super::super::page_solver::write_numeric_record(&mut app, id, O::Itl4, "91").is_err());
+    super::super::page_solver::write_numeric_record(&mut app, id, O::Reltol, "1e-5").unwrap();
+    assert_eq!(row_of(&app, id, O::Reltol).origin, STUDY_DEFAULT_ORIGIN);
+    assert!(offered(&app, id).contains(&(O::Reltol, "study default")));
+    let rows = super::super::page_solver::analysis_overrides(&app);
+    let row = rows
+        .iter()
+        .find(|row| row.option == O::Reltol.label())
+        .unwrap();
+    assert_eq!(row.origin, STUDY_DEFAULT_ORIGIN);
+    assert_eq!(row.effective, "10u");
+    app.state
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .unwrap()
+        .edit(id, |draft| {
+            let AnalysisDraft::MonteCarlo(state) = draft else {
+                unreachable!()
+            };
+            state.base_analysis = Some(tran);
+        })
+        .unwrap();
+    assert!(
+        offered(&app, id)
+            .iter()
+            .any(|(option, _)| *option == O::Itl4)
+    );
+    super::super::page_solver::write_numeric_record(&mut app, id, O::Itl4, "91").unwrap();
+    assert_eq!(authored(&app, id, O::Itl4).as_deref(), Some("91"));
+}
+
+#[test]
 fn time_stepped_forms_can_author_and_clear_their_step_ceiling() {
     for kind in [
         AnalysisKind::Pss,
@@ -25,6 +74,29 @@ fn time_stepped_forms_can_author_and_clear_their_step_ceiling() {
         AnalysisKind::Optimization,
     ] {
         let (mut app, instance) = studio(kind);
+        let plan = app.state.sim_setup.stable_analysis_plan_mut().unwrap();
+        if kind == AnalysisKind::Reliability {
+            plan.edit(instance, |draft| {
+                let AnalysisDraft::Reliability(state) = draft else {
+                    unreachable!()
+                };
+                state.study.transient_stress = true;
+            })
+            .unwrap();
+        }
+        if kind == AnalysisKind::Optimization {
+            let op = plan.insert(AnalysisKind::OperatingPoint).unwrap().0;
+            let pss = plan.insert(AnalysisKind::Pss).unwrap().0;
+            plan.bind_dependency(pss, AnalysisKind::OperatingPoint, op)
+                .unwrap();
+            plan.edit(instance, |draft| {
+                let AnalysisDraft::Optimization(state) = draft else {
+                    unreachable!()
+                };
+                state.base_analysis = Some(pss);
+            })
+            .unwrap();
+        }
         assert!(
             offered(&app, instance)
                 .iter()
@@ -131,11 +203,12 @@ fn offered(app: &RSpiceApp, instance: AnalysisInstanceId) -> Vec<(O, &'static st
     let target = plan
         .instance(instance)
         .expect("the instance is in the plan");
-    form_rows(
+    form_rows_with_ownership(
         target.kind(),
         target.draft(),
         target.numeric_override(),
         &app.state.sim_setup.options,
+        plan.solver_ownership(instance),
     )
     .into_iter()
     .flat_map(|section| section.rows)
@@ -153,11 +226,12 @@ fn row_of(app: &RSpiceApp, instance: AnalysisInstanceId, option: O) -> AdvancedO
     let target = plan
         .instance(instance)
         .expect("the instance is in the plan");
-    sections(
+    sections_with_ownership(
         target.kind(),
         target.draft(),
         target.numeric_override(),
         &app.state.sim_setup.options,
+        plan.solver_ownership(instance),
     )
     .into_iter()
     .flat_map(|section| section.rows)

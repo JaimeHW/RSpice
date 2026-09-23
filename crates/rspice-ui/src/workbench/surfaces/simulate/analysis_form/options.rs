@@ -41,15 +41,31 @@ pub(in crate::workbench::surfaces::simulate) fn fields(
     draft: &AnalysisDraft,
     instance: AnalysisInstanceId,
 ) -> Vec<OptionEdit> {
-    let record = app
-        .state
-        .sim_setup
-        .stable_analysis_plan()
-        .ok()
+    let plan = app.state.sim_setup.stable_analysis_plan().ok();
+    let record = plan
         .and_then(|plan| plan.instance(instance))
         .and_then(|target| target.numeric_override());
-    let offered =
-        advanced_options::form_rows(draft.kind(), draft, record, &app.state.sim_setup.options);
+    let ownership = plan.map_or_else(
+        || draft.solver_ownership(),
+        |plan| plan.solver_ownership_for_draft(draft, record),
+    );
+    let offered = if ownership.study_inherited_options.is_some() {
+        advanced_options::form_rows_with_ownership(
+            draft.kind(),
+            draft,
+            record,
+            &app.state.sim_setup.options,
+            ownership,
+        )
+    } else {
+        advanced_options::form_rows(draft.kind(), draft, record, &app.state.sim_setup.options)
+    };
+    if ownership.study_inherited_options.is_some() {
+        super::field_note(
+            ui,
+            "These defaults apply to study stages that inherit them. Settings on the selected base analysis and its prerequisites take precedence.",
+        );
+    }
     if draft.kind().inherits_periodic_solver_options() {
         super::field_note(
             ui,
