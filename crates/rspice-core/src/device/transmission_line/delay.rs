@@ -80,12 +80,9 @@ impl DelayBuffer {
     ) -> Result<(), String> {
         if samples
             .iter()
-            .any(|sample| !sample.iter().all(|value| value.is_finite()) || sample[0] < 0.0)
+            .any(|sample| !sample.iter().all(|value| value.is_finite()))
         {
-            return Err(
-                "transmission-line delay checkpoint samples must be finite with non-negative times"
-                    .to_string(),
-            );
+            return Err("transmission-line delay checkpoint samples must be finite".to_string());
         }
         if samples
             .windows(2)

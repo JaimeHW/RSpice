@@ -314,8 +314,10 @@ impl TransmissionLine {
                 checkpoint.name
             ));
         }
-        let validate_sample =
-            |sample: &[Value; 5]| sample.iter().all(|value| value.is_finite()) && sample[0] >= 0.0;
+        // A periodic warm start has accepted history before its time-zero
+        // origin. Only the continuation endpoint must be non-negative;
+        // retained samples still obey the ordering and extent checks below.
+        let validate_sample = |sample: &[Value; 5]| sample.iter().all(|value| value.is_finite());
         if checkpoint
             .initial_state
             .as_ref()
@@ -326,14 +328,14 @@ impl TransmissionLine {
                 .any(|sample| !validate_sample(sample))
         {
             return Err(format!(
-                "transmission line '{}': checkpoint history must be finite with non-negative times",
+                "transmission line '{}': checkpoint history must be finite",
                 checkpoint.name
             ));
         }
         let validate_delay_history = |history: &[[Value; 3]]| {
             history
                 .iter()
-                .all(|sample| sample.iter().all(|value| value.is_finite()) && sample[0] >= 0.0)
+                .all(|sample| sample.iter().all(|value| value.is_finite()))
                 && !history
                     .windows(2)
                     .any(|window| window[1][0] <= window[0][0])
@@ -342,7 +344,7 @@ impl TransmissionLine {
             || !validate_delay_history(&checkpoint.backward_history)
         {
             return Err(format!(
-                "transmission line '{}': checkpoint delay windows must be finite with strictly increasing non-negative times",
+                "transmission line '{}': checkpoint delay windows must be finite with strictly increasing times",
                 checkpoint.name
             ));
         }
@@ -1964,6 +1966,44 @@ mod tests {
             expected_buffer_response.to_bits(),
             "the oldest retained Hermite slope must survive the round trip"
         );
+    }
+
+    #[test]
+    fn lossless_checkpoint_preserves_history_before_periodic_origin() {
+        let mut original = lossless_line(&[(-3.0, 1.0), (-2.0, 4.0), (-1.0, 2.0), (0.0, 3.0)]);
+        let checkpoint = original.checkpoint_state().unwrap();
+        let mut restored = lossless_line(&[]);
+        restored.restore_checkpoint_state(&checkpoint).unwrap();
+        assert_eq!(restored.checkpoint_state().unwrap(), checkpoint);
+        for time in [0.0, 0.25, 0.75, 1.5, 2.0] {
+            assert_eq!(
+                original
+                    .transient_port_response(time)
+                    .i_eq_port2()
+                    .to_bits(),
+                restored
+                    .transient_port_response(time)
+                    .i_eq_port2()
+                    .to_bits()
+            );
+            assert_eq!(
+                original.delayed_forward_at(time).to_bits(),
+                restored.delayed_forward_at(time).to_bits()
+            );
+        }
+        original.update_history(0.25, 5.0, 0.0, 0.0, 0.0);
+        restored.update_history(0.25, 5.0, 0.0, 0.0, 0.0);
+        assert_eq!(
+            restored.checkpoint_state().unwrap(),
+            original.checkpoint_state().unwrap()
+        );
+
+        let mut invalid = checkpoint.clone();
+        invalid.current_time = -0.25;
+        assert!(restored.restore_checkpoint_state(&invalid).is_err());
+        invalid = checkpoint;
+        invalid.initial_state.as_mut().unwrap()[0] = 0.5;
+        assert!(restored.restore_checkpoint_state(&invalid).is_err());
     }
 
     #[test]
