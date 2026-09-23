@@ -66,6 +66,9 @@ fn guarantee_label(guarantee: rspice_core::engine::HbEnvelopeStateGuarantee) -> 
         rspice_core::engine::HbEnvelopeStateGuarantee::ExactBsim4RlcMnaV1 => {
             "exact-bsim4-rlc-mna-v1"
         }
+        rspice_core::engine::HbEnvelopeStateGuarantee::SampledDelayHistoryV1 => {
+            "sampled-delay-history-v1"
+        }
         rspice_core::engine::HbEnvelopeStateGuarantee::ExpressionChargeRestartV1 => {
             "expression-charge-restart-v1"
         }

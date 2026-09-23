@@ -349,7 +349,7 @@ use CapabilitySupport::{Absent, Complete, Inapplicable, Restricted};
 /// Shared phrase for the envelope initializer's supported subset. The gap query
 /// reports the offending family by name; this states why it is a gap.
 const ENVELOPE_LINEAR_SUBSET: &str = "the envelope initializer supports R/L/C networks with expression \
-     capacitance, fixed mutual inductance, diodes, classic JFETs, native GP/VBIC BJTs, and independent, controlled or behavioral sources";
+     capacitance, fixed mutual inductance, diodes, classic JFETs, native GP/VBIC BJTs, classic MOS/BSIM3/BSIM4, lossless delay lines, and independent, controlled or behavioral sources";
 const CYCLOSTATIONARY_FLICKER: &str = "stationary thermal/shot noise is exact; a nonzero flicker coefficient needs cyclostationary \
      colored-noise folding rather than a DC-bias substitution";
 const RESISTOR_CYCLOSTATIONARY_FLICKER: &str = "thermal noise and AF=2 signed-current flicker modulation are exact; other AF values \
@@ -608,7 +608,9 @@ pub(crate) const fn periodic_capability_descriptor(
                  no propagation history to carry; every other line's delay history is not \
                  captured",
             ),
-            envelope: Absent(ENVELOPE_LINEAR_SUBSET),
+            envelope: Restricted(
+                "memoryless RG/LEN=0 lines and exact lossless delay lines with retained pre-origin wave history",
+            ),
         },
         F::CoupledTransmissionLine => PeriodicCapabilityDescriptor {
             residual_jacobian: Inapplicable,
@@ -1518,7 +1520,13 @@ pub(in crate::engine) fn dynamic_state_descriptor_gaps(
                 }
                 F::TransmissionLine => {
                     for line in &circuit.tlines {
-                        if !line.is_memoryless_two_port() {
+                        if !line.is_memoryless_two_port()
+                            && (!tline_has_exact_periodic_descriptor(line)
+                                || line.has_distributed_rlgc()
+                                || line.impedance() < 1e-12
+                                || !line.delay().is_finite()
+                                || line.delay() <= 0.0)
+                        {
                             gaps.push(CapabilityGap::new(
                                 family,
                                 format!("transmission line '{}': {condition}", line.name),
@@ -1744,7 +1752,7 @@ mod tests {
             // when the memoryless RG line gained native execution stamps: an
             // RG line carries neither an irrational descriptor nor delay
             // history, so it is admitted where a linear resistor is.
-            F::TransmissionLine => [I, R, R, I, R, A],
+            F::TransmissionLine => [I, R, R, I, R, R],
             F::CoupledTransmissionLine => [I, C, R, I, A, A],
             // Mutual history now advances and restarts with its physical
             // winding currents. Singular flux still needs a reduced basis.

@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 use std::f64::consts::TAU;
 
 mod mosfet;
+mod transmission_line;
 
 /// Explicit state-completeness contract for an HB-derived Envelope warm start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +46,10 @@ pub enum HbEnvelopeStateGuarantee {
     /// Complete physical/SDT state for expression capacitances and the other
     /// supported devices, with a new charge origin and first-order restart.
     ExpressionChargeRestartV1,
+    /// Complete supported device state plus a full lossless delay window,
+    /// sampled with a bound on native interpolation error from the configured
+    /// voltage/current tolerances. Expression charge uses a first-order restart.
+    SampledDelayHistoryV1,
 }
 
 /// Authenticated HB carrier state that can restart transient integration at
@@ -268,7 +273,7 @@ impl Engine {
             Some(blockers) => Err(SimulationError::unsupported_capability(
                 "analysis.hb.envelope.continuation",
                 format!(
-                    "HB Envelope continuation is unavailable because the circuit contains {blockers}; the initializer supports R/L/C networks with expression capacitance, fixed mutual inductance, supported diodes/BJTs/JFETs, native classic MOS/BSIM3/BSIM4, and independent, controlled or behavioral sources"
+                    "HB Envelope continuation is unavailable because the circuit contains {blockers}; the initializer supports R/L/C networks with expression capacitance, fixed mutual inductance, supported diodes/BJTs/JFETs, native classic MOS/BSIM3/BSIM4, lossless delay lines, and independent, controlled or behavioral sources"
                 ),
             )),
         }
@@ -325,11 +330,27 @@ impl Engine {
 
         let mut seen_branches = BTreeSet::new();
         for (name, current) in &phase.mna_branch_currents {
-            let branch = circuit.get_branch_by_name(name).ok_or_else(|| {
-                SimulationError::Circuit(format!(
+            let Some(branch) = circuit.get_branch_by_name(name) else {
+                // HB adds exact port-current coordinates for branchless lines.
+                // Their values initialize delay history rather than transient MNA.
+                if current.is_finite()
+                    && circuit.tlines.iter().any(|line| {
+                        line.ltra_branch_ordinals().is_none()
+                            && !line.is_memoryless_two_port()
+                            && [
+                                format!("{}#port1", line.name),
+                                format!("{}#port2", line.name),
+                            ]
+                            .iter()
+                            .any(|port| port.eq_ignore_ascii_case(name))
+                    })
+                {
+                    continue;
+                }
+                return Err(SimulationError::Circuit(format!(
                     "HB Envelope phase projection references unknown MNA branch '{name}'"
-                ))
-            })?;
+                )));
+            };
             let index = circuit.num_nodes() + branch - 1;
             let slot = solution.get_mut(index).ok_or_else(|| {
                 SimulationError::Circuit(format!(
@@ -368,12 +389,13 @@ impl Engine {
         if !result.is_valid()
             || result.continuation_limitations.iter().any(|limitation| {
                 // Generic phase projections omit expression-capacitor SDT
-                // and native MOS integration history. This initializer reconstructs
+                // and native MOS/line integration history. This initializer reconstructs
                 // those states before creating the authenticated checkpoint.
                 *limitation != HbContinuationLimitation::CapacitorChargeHistoryNotRetained
                     && *limitation != HbContinuationLimitation::Bsim3ChargeHistoryNotRetained
                     && *limitation != HbContinuationLimitation::Bsim4ChargeHistoryNotRetained
                     && *limitation != HbContinuationLimitation::ClassicMosChargeHistoryNotRetained
+                    && *limitation != HbContinuationLimitation::TransmissionLineHistoryNotRetained
             })
         {
             return Err(SimulationError::Circuit(
@@ -686,6 +708,8 @@ impl Engine {
             )
         };
 
+        self.hb_initialize_transmission_line_history(&mut circuit, result, history_step, abort)?;
+
         let lte_reference = self
             .config
             .transient_lte_reference
@@ -763,7 +787,13 @@ impl Engine {
         Self::transient_checkpoint_capability_for_circuit(&original_circuit, abort)?
             .require_resumable()
             .map_err(SimulationError::Circuit)?;
-        let guarantee = if original_circuit.capacitors.has_solution_dependent_values() {
+        let guarantee = if original_circuit
+            .tlines
+            .iter()
+            .any(|line| !line.is_memoryless_two_port())
+        {
+            HbEnvelopeStateGuarantee::SampledDelayHistoryV1
+        } else if original_circuit.capacitors.has_solution_dependent_values() {
             HbEnvelopeStateGuarantee::ExpressionChargeRestartV1
         } else if !original_circuit.mosfets.is_empty() {
             HbEnvelopeStateGuarantee::ExactClassicMosRlcMnaV1
@@ -778,7 +808,8 @@ impl Engine {
             HbEnvelopeStateGuarantee::ExactJunctionRlcMnaV1
         } else if !original_circuit.behavioral_sources.is_empty() {
             HbEnvelopeStateGuarantee::ExactBehavioralRlcMnaV1
-        } else if original_circuit.inductors.is_empty()
+        } else if original_circuit.tlines.is_empty()
+            && original_circuit.inductors.is_empty()
             && original_circuit.resistor_branches.is_empty()
             && original_circuit.vcvs.is_empty()
             && original_circuit.vccs.is_empty()
@@ -1019,6 +1050,16 @@ impl Engine {
             });
         }
 
+        if circuit
+            .tlines
+            .iter()
+            .any(|line| !line.is_memoryless_two_port())
+            || !circuit.coupled_tlines.is_empty()
+        {
+            result
+                .continuation_limitations
+                .push(HbContinuationLimitation::TransmissionLineHistoryNotRetained);
+        }
         if circuit.capacitors.has_solution_dependent_values() {
             result
                 .continuation_limitations

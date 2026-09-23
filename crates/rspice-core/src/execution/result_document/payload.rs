@@ -3110,6 +3110,7 @@ pub enum HbContinuationLimitationTag {
     Bsim3ChargeHistoryNotRetained,
     Bsim4ChargeHistoryNotRetained,
     ClassicMosChargeHistoryNotRetained,
+    TransmissionLineHistoryNotRetained,
 }
 
 impl From<&HbContinuationLimitation> for HbContinuationLimitationTag {
@@ -3120,6 +3121,9 @@ impl From<&HbContinuationLimitation> for HbContinuationLimitationTag {
             }
             HbContinuationLimitation::Bsim4ChargeHistoryNotRetained => {
                 Self::Bsim4ChargeHistoryNotRetained
+            }
+            HbContinuationLimitation::TransmissionLineHistoryNotRetained => {
+                Self::TransmissionLineHistoryNotRetained
             }
             HbContinuationLimitation::ClassicMosChargeHistoryNotRetained => {
                 Self::ClassicMosChargeHistoryNotRetained
@@ -3148,6 +3152,9 @@ impl From<HbContinuationLimitationTag> for HbContinuationLimitation {
             }
             HbContinuationLimitationTag::Bsim4ChargeHistoryNotRetained => {
                 Self::Bsim4ChargeHistoryNotRetained
+            }
+            HbContinuationLimitationTag::TransmissionLineHistoryNotRetained => {
+                Self::TransmissionLineHistoryNotRetained
             }
             HbContinuationLimitationTag::ClassicMosChargeHistoryNotRetained => {
                 Self::ClassicMosChargeHistoryNotRetained
@@ -3263,6 +3270,8 @@ pub enum EnvelopeGuaranteeTag {
     ExactClassicMosRlcMnaV1,
     /// Physical and SDT state with a first-order expression-charge restart.
     ExpressionChargeRestartV1,
+    /// Full lossless delay history with bounded interpolation error.
+    SampledDelayHistoryV1,
 }
 
 impl From<HbEnvelopeStateGuarantee> for EnvelopeGuaranteeTag {
@@ -3276,6 +3285,7 @@ impl From<HbEnvelopeStateGuarantee> for EnvelopeGuaranteeTag {
             HbEnvelopeStateGuarantee::ExactBsim4RlcMnaV1 => Self::ExactBsim4RlcMnaV1,
             HbEnvelopeStateGuarantee::ExactClassicMosRlcMnaV1 => Self::ExactClassicMosRlcMnaV1,
             HbEnvelopeStateGuarantee::ExpressionChargeRestartV1 => Self::ExpressionChargeRestartV1,
+            HbEnvelopeStateGuarantee::SampledDelayHistoryV1 => Self::SampledDelayHistoryV1,
         }
     }
 }
@@ -3291,6 +3301,7 @@ impl From<EnvelopeGuaranteeTag> for HbEnvelopeStateGuarantee {
             EnvelopeGuaranteeTag::ExactBsim4RlcMnaV1 => Self::ExactBsim4RlcMnaV1,
             EnvelopeGuaranteeTag::ExactClassicMosRlcMnaV1 => Self::ExactClassicMosRlcMnaV1,
             EnvelopeGuaranteeTag::ExpressionChargeRestartV1 => Self::ExpressionChargeRestartV1,
+            EnvelopeGuaranteeTag::SampledDelayHistoryV1 => Self::SampledDelayHistoryV1,
         }
     }
 }

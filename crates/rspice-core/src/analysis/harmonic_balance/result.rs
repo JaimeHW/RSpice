@@ -71,6 +71,8 @@ pub enum HbContinuationLimitation {
     /// Native Meyer capacitance and legacy BSIM charge histories require an
     /// explicit accepted-state initializer for transient continuation.
     ClassicMosChargeHistoryNotRetained,
+    /// A phase projection omits the pre-origin travelling-wave delay window.
+    TransmissionLineHistoryNotRetained,
 }
 
 /// One reactive element evaluated at a carrier phase.
