@@ -164,7 +164,7 @@ class TestSavedSignals:
         signals = report.tran.saved_signals(netlist)
 
         assert signal_names(signals) == ["V(MID)", "@D1[ID]"]
-        assert [signal.kind for signal in signals] == ["voltage", "parameter"]
+        assert [signal.kind for signal in signals] == ["voltage", "current"]
         for signal in signals:
             assert len(signal.values) == len(report.tran.time)
             assert all(signal.validity)
