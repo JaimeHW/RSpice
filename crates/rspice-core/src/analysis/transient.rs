@@ -244,6 +244,209 @@ pub struct TransientOutputProjection {
 }
 
 impl TransientOutputProjection {
+    /// Build an output view from an accepted time grid without copying the
+    /// waveform history. Explicit transient stops must be present exactly;
+    /// interval schedules may interpolate between accepted samples.
+    pub fn from_accepted_times(
+        source_times: &[Value],
+        output_time_points: &[Value],
+        output_interval_schedule: Option<&XyceOutputIntervalSchedule>,
+        start_time: Value,
+        stop_time: Value,
+        max_points: usize,
+    ) -> Result<Self, String> {
+        if !start_time.is_finite()
+            || !stop_time.is_finite()
+            || start_time < 0.0
+            || stop_time < start_time
+        {
+            return Err(format!(
+                "invalid transient output window [{start_time}, {stop_time}]"
+            ));
+        }
+        if source_times.is_empty() {
+            return Err("transient result has no accepted samples".to_string());
+        }
+        if !output_time_points.is_empty() && output_interval_schedule.is_some() {
+            return Err(
+                "transient output cannot combine OUTPUTTIMEPOINTS and INITIAL_INTERVAL".to_string(),
+            );
+        }
+        if let Some(invalid) = output_time_points
+            .iter()
+            .find(|time| !time.is_finite() || **time < 0.0)
+        {
+            return Err(format!(
+                "transient output schedule contains invalid time {invalid}"
+            ));
+        }
+        for (index, &time) in source_times.iter().enumerate() {
+            if !time.is_finite() {
+                return Err(format!("transient result time[{index}] is not finite"));
+            }
+            if index > 0 && time <= source_times[index - 1] {
+                return Err(format!(
+                    "transient result time grid is not strictly increasing at index {index}"
+                ));
+            }
+        }
+
+        let (times, coordinates) = if let Some(schedule) = output_interval_schedule {
+            let first = source_times.partition_point(|time| *time < start_time);
+            let output_start_time = source_times.get(first).copied().ok_or_else(|| {
+                format!("transient result has no accepted sample at or after TSTART={start_time}")
+            })?;
+            if output_start_time > stop_time {
+                return Err("transient output projection selected no samples".to_string());
+            }
+            let events = schedule.output_events(source_times, start_time, stop_time, max_points)?;
+            let mut times = Vec::with_capacity(events.len());
+            let mut coordinates = Vec::with_capacity(events.len());
+            for event in events {
+                times.push(event.output_time);
+                let Some(target) = event.interpolation_time else {
+                    coordinates.push(TransientOutputCoordinate::Accepted(event.accepted_index));
+                    continue;
+                };
+                let current = event.accepted_index;
+                if current == 0 || current >= source_times.len() {
+                    return Err(format!(
+                        "transient output time {target} has no accepted interpolation bracket"
+                    ));
+                }
+                let previous = current - 1;
+                let width = source_times[current] - source_times[previous];
+                let from_current = (target - source_times[current]) / width;
+                if !from_current.is_finite() || !(-1.0..=0.0).contains(&from_current) {
+                    return Err(format!(
+                        "transient output time {target} has an invalid interpolation bracket"
+                    ));
+                }
+                coordinates.push(TransientOutputCoordinate::Linear {
+                    previous,
+                    current,
+                    from_current,
+                });
+            }
+            (times, coordinates)
+        } else if output_time_points.is_empty() {
+            let first = source_times.partition_point(|time| *time < start_time);
+            let last = source_times.partition_point(|time| *time <= stop_time);
+            let indices = (first..last).collect::<Vec<_>>();
+            crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::AnalysisPoints,
+                indices.len(),
+                max_points,
+            )
+            .map_err(|error| error.to_string())?;
+            (
+                indices.iter().map(|index| source_times[*index]).collect(),
+                indices
+                    .into_iter()
+                    .map(TransientOutputCoordinate::Accepted)
+                    .collect(),
+            )
+        } else {
+            let mut requested = output_time_points
+                .iter()
+                .copied()
+                .filter(|time| *time >= start_time && *time <= stop_time)
+                .collect::<Vec<_>>();
+            requested.push(stop_time);
+            requested.sort_by(Value::total_cmp);
+            requested.dedup_by(|left, right| left.to_bits() == right.to_bits());
+            crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::AnalysisPoints,
+                requested.len(),
+                max_points,
+            )
+            .map_err(|error| error.to_string())?;
+
+            let mut coordinates = Vec::with_capacity(requested.len());
+            for &requested_time in &requested {
+                let index = source_times
+                    .binary_search_by(|time| time.total_cmp(&requested_time))
+                    .map_err(|_| {
+                        format!(
+                            "transient result did not land on requested output time {requested_time}"
+                        )
+                    })?;
+                coordinates.push(TransientOutputCoordinate::Accepted(index));
+            }
+            (requested, coordinates)
+        };
+
+        if coordinates.is_empty() {
+            return Err("transient output projection selected no samples".to_string());
+        }
+        Ok(TransientOutputProjection {
+            source_len: source_times.len(),
+            times,
+            coordinates,
+        })
+    }
+
+    /// Sample a solved waveform at arbitrary requested times without changing
+    /// its integration mesh. Unlike transient solver stops, reporting times
+    /// inside an accepted interval are linearly interpolated.
+    pub fn interpolate_times(
+        source_times: &[Value],
+        requested: &[Value],
+        max_points: usize,
+    ) -> Result<Self, String> {
+        if source_times.is_empty()
+            || source_times.iter().any(|time| !time.is_finite())
+            || source_times.windows(2).any(|pair| pair[1] <= pair[0])
+        {
+            return Err("sampled output requires a finite, increasing source time grid".into());
+        }
+        if requested.is_empty()
+            || requested.iter().any(|time| !time.is_finite())
+            || requested.windows(2).any(|pair| pair[1] <= pair[0])
+        {
+            return Err("sampled output requires finite, increasing reporting times".into());
+        }
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::AnalysisPoints,
+            requested.len(),
+            max_points,
+        )
+        .map_err(|error| error.to_string())?;
+        let mut coordinates = Vec::with_capacity(requested.len());
+        for &time in requested {
+            let coordinate = match source_times.binary_search_by(|sample| sample.total_cmp(&time)) {
+                Ok(index) => TransientOutputCoordinate::Accepted(index),
+                Err(current) if current > 0 && current < source_times.len() => {
+                    let previous = current - 1;
+                    let width = source_times[current] - source_times[previous];
+                    let from_current = (time - source_times[current]) / width;
+                    if !width.is_finite()
+                        || !from_current.is_finite()
+                        || !(-1.0..=0.0).contains(&from_current)
+                    {
+                        return Err("sampled output has an invalid interpolation bracket".into());
+                    }
+                    TransientOutputCoordinate::Linear {
+                        previous,
+                        current,
+                        from_current,
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "reporting time {time} lies outside the solved waveform"
+                    ));
+                }
+            };
+            coordinates.push(coordinate);
+        }
+        Ok(Self {
+            source_len: source_times.len(),
+            times: requested.to_vec(),
+            coordinates,
+        })
+    }
+
     /// Exact output times represented by this projection.
     pub fn times(&self) -> &[Value] {
         &self.times
@@ -1005,136 +1208,14 @@ impl TransientResult {
         stop_time: Value,
         max_points: usize,
     ) -> Result<TransientOutputProjection, String> {
-        if !start_time.is_finite()
-            || !stop_time.is_finite()
-            || start_time < 0.0
-            || stop_time < start_time
-        {
-            return Err(format!(
-                "invalid transient output window [{start_time}, {stop_time}]"
-            ));
-        }
-        if self.time.is_empty() {
-            return Err("transient result has no accepted samples".to_string());
-        }
-        if !output_time_points.is_empty() && output_interval_schedule.is_some() {
-            return Err(
-                "transient output cannot combine OUTPUTTIMEPOINTS and INITIAL_INTERVAL".to_string(),
-            );
-        }
-        if let Some(invalid) = output_time_points
-            .iter()
-            .find(|time| !time.is_finite() || **time < 0.0)
-        {
-            return Err(format!(
-                "transient output schedule contains invalid time {invalid}"
-            ));
-        }
-        for (index, &time) in self.time.iter().enumerate() {
-            if !time.is_finite() {
-                return Err(format!("transient result time[{index}] is not finite"));
-            }
-            if index > 0 && time <= self.time[index - 1] {
-                return Err(format!(
-                    "transient result time grid is not strictly increasing at index {index}"
-                ));
-            }
-        }
-
-        let (times, coordinates) = if let Some(schedule) = output_interval_schedule {
-            let first = self.time.partition_point(|time| *time < start_time);
-            let output_start_time = self.time.get(first).copied().ok_or_else(|| {
-                format!("transient result has no accepted sample at or after TSTART={start_time}")
-            })?;
-            if output_start_time > stop_time {
-                return Err("transient output projection selected no samples".to_string());
-            }
-            let events = schedule.output_events(&self.time, start_time, stop_time, max_points)?;
-            let mut times = Vec::with_capacity(events.len());
-            let mut coordinates = Vec::with_capacity(events.len());
-            for event in events {
-                times.push(event.output_time);
-                let Some(target) = event.interpolation_time else {
-                    coordinates.push(TransientOutputCoordinate::Accepted(event.accepted_index));
-                    continue;
-                };
-                let current = event.accepted_index;
-                if current == 0 || current >= self.time.len() {
-                    return Err(format!(
-                        "transient output time {target} has no accepted interpolation bracket"
-                    ));
-                }
-                let previous = current - 1;
-                let width = self.time[current] - self.time[previous];
-                let from_current = (target - self.time[current]) / width;
-                if !from_current.is_finite() || !(-1.0..=0.0).contains(&from_current) {
-                    return Err(format!(
-                        "transient output time {target} has an invalid interpolation bracket"
-                    ));
-                }
-                coordinates.push(TransientOutputCoordinate::Linear {
-                    previous,
-                    current,
-                    from_current,
-                });
-            }
-            (times, coordinates)
-        } else if output_time_points.is_empty() {
-            let first = self.time.partition_point(|time| *time < start_time);
-            let last = self.time.partition_point(|time| *time <= stop_time);
-            let indices = (first..last).collect::<Vec<_>>();
-            crate::resource::ResourceLimitError::ensure(
-                crate::resource::ResourceKind::AnalysisPoints,
-                indices.len(),
-                max_points,
-            )
-            .map_err(|error| error.to_string())?;
-            (
-                indices.iter().map(|index| self.time[*index]).collect(),
-                indices
-                    .into_iter()
-                    .map(TransientOutputCoordinate::Accepted)
-                    .collect(),
-            )
-        } else {
-            let mut requested = output_time_points
-                .iter()
-                .copied()
-                .filter(|time| *time >= start_time && *time <= stop_time)
-                .collect::<Vec<_>>();
-            requested.push(stop_time);
-            requested.sort_by(Value::total_cmp);
-            requested.dedup_by(|left, right| left.to_bits() == right.to_bits());
-            crate::resource::ResourceLimitError::ensure(
-                crate::resource::ResourceKind::AnalysisPoints,
-                requested.len(),
-                max_points,
-            )
-            .map_err(|error| error.to_string())?;
-
-            let mut coordinates = Vec::with_capacity(requested.len());
-            for &requested_time in &requested {
-                let index = self
-                    .time
-                    .binary_search_by(|time| time.total_cmp(&requested_time))
-                    .map_err(|_| {
-                        format!(
-                            "transient result did not land on requested output time {requested_time}"
-                        )
-                    })?;
-                coordinates.push(TransientOutputCoordinate::Accepted(index));
-            }
-            (requested, coordinates)
-        };
-
-        if coordinates.is_empty() {
-            return Err("transient output projection selected no samples".to_string());
-        }
-        Ok(TransientOutputProjection {
-            source_len: self.time.len(),
-            times,
-            coordinates,
-        })
+        TransientOutputProjection::from_accepted_times(
+            &self.time,
+            output_time_points,
+            output_interval_schedule,
+            start_time,
+            stop_time,
+            max_points,
+        )
     }
 
     /// Append one accepted device operating-point snapshot. Missing parameters
@@ -1692,6 +1773,25 @@ mod tests {
         assert_eq!(result.try_voltage_at(1, 1), Some(2.0));
         assert_eq!(result.try_voltage_at(1, 2), None);
         assert_eq!(result.try_voltage_at(2, 0), None);
+    }
+
+    #[test]
+    fn sampled_output_interpolates_without_relaxing_transient_solver_stops() {
+        let times = [0.0, 0.5, 1.0];
+        let projection =
+            TransientOutputProjection::interpolate_times(&times, &[0.0, 0.3, 1.0], 3).unwrap();
+        let values = projection.project(&[-0.0, 2.0, 4.0]).unwrap();
+        assert_eq!(values[0].to_bits(), (-0.0_f64).to_bits());
+        assert!((values[1] - 1.2).abs() < 1e-15);
+        assert_eq!(values[2], 4.0);
+        assert!(
+            TransientOutputProjection::from_accepted_times(&times, &[0.3], None, 0.0, 1.0, 3)
+                .is_err()
+        );
+        assert!(TransientOutputProjection::interpolate_times(&times, &[0.0, 0.3, 1.0], 2).is_err());
+        for invalid in [&[-0.1][..], &[1.1], &[0.5, 0.5], &[Value::NAN]] {
+            assert!(TransientOutputProjection::interpolate_times(&times, invalid, 3).is_err());
+        }
     }
 
     #[test]
