@@ -26,7 +26,10 @@ impl HbSolver {
     /// Solve one free-running tone together with the complete MNA waveforms.
     /// Other tone frequencies and source phases remain fixed. The caller
     /// supplies a nonzero oscillator seed and a node-voltage phase reference.
-    #[expect(clippy::too_many_arguments, reason = "the solver boundary keeps the physical inputs explicit")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the solver boundary keeps the physical inputs explicit"
+    )]
     pub fn solve_autonomous_quasi_periodic_with_abort(
         &mut self,
         grid: Arc<QuasiPeriodicGrid>,
