@@ -28,6 +28,24 @@ pub(crate) use conversions::*;
 pub(crate) use recorded_fft::WorkerRecordedFftSpectrum;
 pub(crate) use transport::*;
 
+#[cfg(test)]
+pub(crate) fn round_trip_response_for_test(result: SimulationResult) -> SimulationResult {
+    let packet = WorkerResponseTransport::from_response(WorkerResponse::from_result_for_transfer(
+        71,
+        Ok(result),
+    ))
+    .unwrap();
+    let serialized = serde_json::to_string(&packet.response).unwrap();
+    WorkerResponseTransport {
+        response: serde_json::from_str(&serialized).unwrap(),
+        ..packet
+    }
+    .into_response()
+    .unwrap()
+    .into_result()
+    .unwrap()
+}
+
 pub(crate) use analysis::*;
 pub(crate) use analysis_spec::*;
 

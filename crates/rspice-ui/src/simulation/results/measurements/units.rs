@@ -118,9 +118,16 @@ impl SimulationResult {
                 "pss.iterations" => unit("count"),
                 _ => MeasurementUnit::Unknown,
             },
-            Self::Qpss { .. } => match folded.as_str() {
+            Self::Qpss {
+                operating_point, ..
+            } => match folded.as_str() {
                 "qpss.iterations" => unit("count"),
                 "qpss.normalized_residual" => unit("1"),
+                "qpss.oscillator_frequency_hz"
+                    if operating_point.oscillator_frequency_hz().is_some() =>
+                {
+                    unit("Hz")
+                }
                 _ => MeasurementUnit::Unknown,
             },
             Self::Pstb { waveforms, .. } => match folded.as_str() {

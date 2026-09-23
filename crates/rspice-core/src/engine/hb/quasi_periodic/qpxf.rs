@@ -42,6 +42,7 @@ impl Engine {
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_analysis_points(request.frequencies_hz.len())?;
         let producer = state::Producer::capture(netlist, &engine.config, point.config())?;
+        point.require_driven_response("QPXF")?;
         let grid = engine.validate_qpss_operating_point_with_abort(netlist, point, abort)?;
         let output_index = grid
             .index_of(&request.output_lattice)

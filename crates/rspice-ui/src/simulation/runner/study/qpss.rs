@@ -14,7 +14,7 @@ pub struct StudyQpssConfig {
 
 impl StudyQpssConfig {
     pub(super) fn validate(&self) -> Result<(), String> {
-        self.request.driven_qpss_config()?;
+        self.request.qpss_config()?;
         self.operating_point.config.validate()
     }
 
@@ -28,7 +28,7 @@ impl StudyQpssConfig {
         self.validate().map_err(SimulationError::InvalidConfig)?;
         let config = self
             .request
-            .driven_qpss_config()
+            .qpss_config()
             .map_err(SimulationError::InvalidConfig)?;
         let (physical, seed) = match config.initial_state {
             QpssInitialState::DcOperatingPoint => {

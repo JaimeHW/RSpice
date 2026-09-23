@@ -294,6 +294,7 @@ impl SimulationResult {
             } => match key.to_ascii_lowercase().as_str() {
                 "qpss.iterations" => Some(operating_point.iterations() as f64),
                 "qpss.normalized_residual" => Some(operating_point.normalized_residual()),
+                "qpss.oscillator_frequency_hz" => operating_point.oscillator_frequency_hz(),
                 _ => None,
             },
             SimulationResult::Pstb {
@@ -507,16 +508,22 @@ impl SimulationResult {
                 .collect(),
             SimulationResult::Qpss {
                 operating_point, ..
-            } => HashMap::from([
-                (
-                    "qpss.iterations".into(),
-                    operating_point.iterations() as f64,
-                ),
-                (
-                    "qpss.normalized_residual".into(),
-                    operating_point.normalized_residual(),
-                ),
-            ]),
+            } => {
+                let mut values = HashMap::from([
+                    (
+                        "qpss.iterations".into(),
+                        operating_point.iterations() as f64,
+                    ),
+                    (
+                        "qpss.normalized_residual".into(),
+                        operating_point.normalized_residual(),
+                    ),
+                ]);
+                if let Some(frequency) = operating_point.oscillator_frequency_hz() {
+                    values.insert("qpss.oscillator_frequency_hz".into(), frequency);
+                }
+                values
+            }
             SimulationResult::Pstb {
                 period,
                 fundamental_frequency,

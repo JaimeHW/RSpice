@@ -1,10 +1,10 @@
-//! QPSS authoring without dropping any driven-engine configuration field.
+//! QPSS authoring with independent clocks and optional oscillator startup.
 use super::*;
 use crate::simulation::multi_run::{AnalysisSpec, HbToneSpec, QpssControls};
 use rspice_core::analysis::quasi_periodic::{
     QuasiPeriodicLinearConfig, QuasiPeriodicLinearMethod, QuasiPeriodicSampling,
 };
-use rspice_core::engine::{QpssInitialState, QpssSourceTone};
+use rspice_core::engine::{QpssInitialState, QpssOscillator, QpssOscillatorSeed, QpssSourceTone};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -27,6 +27,12 @@ pub struct QpssDraft {
     pub dc_initialization: bool,
     pub autonomous: bool,
     pub oscillator_node: String,
+    pub oscillator_tone: String,
+    pub oscillator_phase_tuple: String,
+    pub oscillator_amplitude: String,
+    pub oscillator_minimum_amplitude: String,
+    pub oscillator_frequency_step: String,
+    pub oscillator_seeds: String,
 }
 
 impl Default for QpssDraft {
@@ -50,6 +56,12 @@ impl Default for QpssDraft {
             dc_initialization: false,
             autonomous: false,
             oscillator_node: String::new(),
+            oscillator_tone: "1".into(),
+            oscillator_phase_tuple: String::new(),
+            oscillator_amplitude: "0.1".into(),
+            oscillator_minimum_amplitude: "1e-6".into(),
+            oscillator_frequency_step: "0.2".into(),
+            oscillator_seeds: String::new(),
         }
     }
 }
@@ -154,6 +166,11 @@ impl QpssDraft {
                 QpssInitialState::Zero
             },
             source_tones,
+            oscillator: if self.autonomous {
+                Some(self.oscillator_config()?)
+            } else {
+                None
+            },
         };
         let spec = AnalysisSpec::Qpss {
             tones,
@@ -169,6 +186,53 @@ impl QpssDraft {
         };
         spec.validate()?;
         Ok(spec)
+    }
+
+    fn oscillator_config(&self) -> Result<QpssOscillator, String> {
+        let mut oscillator = QpssOscillator::new(
+            parse_positive_usize(&self.oscillator_tone, "QPSS oscillator tone")? - 1,
+            self.oscillator_node.trim().to_owned(),
+        );
+        if !self.oscillator_phase_tuple.trim().is_empty() {
+            oscillator.phase_tuple = self
+                .oscillator_phase_tuple
+                .split(',')
+                .map(|v| {
+                    v.trim().parse::<i32>().map_err(|_| {
+                        "QPSS oscillator phase tuple needs comma-separated signed integers"
+                            .to_owned()
+                    })
+                })
+                .collect::<Result<_, _>>()?;
+        }
+        oscillator.initial_amplitude =
+            parse_positive(&self.oscillator_amplitude, "QPSS oscillator amplitude")?;
+        oscillator.minimum_amplitude = parse_positive(
+            &self.oscillator_minimum_amplitude,
+            "QPSS oscillator minimum amplitude",
+        )?;
+        oscillator.max_relative_frequency_step = parse_positive(
+            &self.oscillator_frequency_step,
+            "QPSS oscillator frequency step",
+        )?;
+        for entry in self
+            .oscillator_seeds
+            .split([';', '\n'])
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let parts = entry.split(',').map(str::trim).collect::<Vec<_>>();
+            if parts.len() != 3 {
+                return Err("QPSS additional seeds use node,amplitude,phase-degrees; one entry per line or separated by semicolons".into());
+            }
+            oscillator.additional_seeds.push(QpssOscillatorSeed {
+                node: parts[0].to_owned(),
+                amplitude: parse_positive(parts[1], "QPSS seed amplitude")?,
+                phase_degrees: parse_spice_value_checked(parts[2])
+                    .map_err(|error| format!("invalid QPSS seed phase: {error}"))?,
+            });
+        }
+        Ok(oscillator)
     }
 }
 

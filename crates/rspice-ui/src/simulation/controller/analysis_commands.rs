@@ -90,7 +90,7 @@ impl SimulationController {
             // writer of a `.fft` line is the request itself.
             AnalysisSpec::Fft { request } => Ok(request.to_card()),
             AnalysisSpec::Qpss { .. } => spec
-                .driven_qpss_config()?
+                .qpss_config()?
                 .to_spice()
                 .map_err(|error| error.to_string()),
             AnalysisSpec::Qpac { .. } => Ok(spec.qpac_card()?.to_spice()),

@@ -1,5 +1,8 @@
-//! One authored-card/configuration boundary for driven QPSS.
-use super::{QpssConfig, QpssInitialState, QpssSourceTone, invalid, numerical_error};
+//! Authored-card/configuration boundary for driven and autonomous QPSS.
+use super::{
+    QpssConfig, QpssInitialState, QpssOscillator, QpssOscillatorSeed, QpssSourceTone, invalid,
+    numerical_error,
+};
 use crate::analysis::quasi_periodic::{QuasiPeriodicLinearMethod, QuasiPeriodicSampling};
 use crate::engine::SimulationError;
 use crate::netlist::QpssCard;
@@ -10,6 +13,9 @@ impl QpssConfig {
     pub fn validate_configuration(&self) -> Result<(), SimulationError> {
         self.grid.validate().map_err(numerical_error)?;
         self.solver.validate().map_err(numerical_error)?;
+        if let Some(oscillator) = &self.oscillator {
+            oscillator.validate(&self.grid)?;
+        }
         if self
             .grid
             .frequencies_hz
@@ -30,6 +36,10 @@ impl QpssConfig {
                     c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '#' | ':' | '%' | '!')
                 })
                 || source.tone >= self.grid.frequencies_hz.len()
+                || self
+                    .oscillator
+                    .as_ref()
+                    .is_some_and(|oscillator| oscillator.tone == source.tone)
                 || !seen.insert((source.source.to_ascii_lowercase(), source.tone))
             {
                 return Err(invalid(
@@ -53,6 +63,45 @@ impl QpssConfig {
         }
         let harmonics = counts(&card.harmonics, tones, 7, "HARMS")?;
         let mut config = Self::new(card.frequencies.clone(), harmonics);
+        let oscillator_fields = card.oscillator_tone.is_some()
+            || card.oscillator_node.is_some()
+            || card.oscillator_tuple.is_some()
+            || card.oscillator_amplitude.is_some()
+            || card.oscillator_minimum_amplitude.is_some()
+            || card.oscillator_frequency_step.is_some()
+            || !card.oscillator_seeds.is_empty();
+        if oscillator_fields {
+            let tone = card
+                .oscillator_tone
+                .ok_or_else(|| invalid("oscillator settings require OSCTONE"))?;
+            let node = card
+                .oscillator_node
+                .clone()
+                .ok_or_else(|| invalid("oscillator settings require OSCNODE"))?;
+            let mut oscillator = QpssOscillator::new(tone, node);
+            if let Some(tuple) = &card.oscillator_tuple {
+                oscillator.phase_tuple = tuple.clone();
+            }
+            if let Some(v) = card.oscillator_amplitude {
+                oscillator.initial_amplitude = v;
+            }
+            if let Some(v) = card.oscillator_minimum_amplitude {
+                oscillator.minimum_amplitude = v;
+            }
+            if let Some(v) = card.oscillator_frequency_step {
+                oscillator.max_relative_frequency_step = v;
+            }
+            oscillator.additional_seeds = card
+                .oscillator_seeds
+                .iter()
+                .map(|(node, amplitude, phase_degrees)| QpssOscillatorSeed {
+                    node: node.clone(),
+                    amplitude: *amplitude,
+                    phase_degrees: *phase_degrees,
+                })
+                .collect();
+            config.oscillator = Some(oscillator);
+        }
         match (&card.oversample, &card.points) {
             (Some(_), Some(_)) => {
                 return Err(invalid("POINTS and OVERSAMPLE are mutually exclusive"));
@@ -160,6 +209,32 @@ impl QpssConfig {
                 .iter()
                 .map(|s| format!("SOURCE{}={}", s.tone + 1, s.source)),
         );
+        if let Some(oscillator) = &self.oscillator {
+            fields.extend([
+                format!("OSCTONE={}", oscillator.tone + 1),
+                format!("OSCNODE={}", oscillator.node),
+                format!("OSCAMPLITUDE={}", oscillator.initial_amplitude),
+                format!("OSCMINAMPLITUDE={}", oscillator.minimum_amplitude),
+                format!("OSCFREQSTEP={}", oscillator.max_relative_frequency_step),
+            ]);
+            if !oscillator.phase_tuple.is_empty() {
+                fields.push(format!(
+                    "OSCTUPLE=({})",
+                    oscillator
+                        .phase_tuple
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ));
+            }
+            fields.extend(oscillator.additional_seeds.iter().map(|seed| {
+                format!(
+                    "OSCSEED=({},{},{})",
+                    seed.node, seed.amplitude, seed.phase_degrees
+                )
+            }));
+        }
         Ok(fields.join(" "))
     }
 }

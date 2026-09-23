@@ -21,6 +21,13 @@ pub struct QpssCard {
     pub krylov_cycles: Option<usize>,
     pub linear_tolerance: Option<Value>,
     pub dc_initial_state: Option<bool>,
+    pub oscillator_tone: Option<usize>,
+    pub oscillator_node: Option<String>,
+    pub oscillator_tuple: Option<Vec<i32>>,
+    pub oscillator_amplitude: Option<Value>,
+    pub oscillator_minimum_amplitude: Option<Value>,
+    pub oscillator_frequency_step: Option<Value>,
+    pub oscillator_seeds: Vec<(String, Value, Value)>,
     /// Authored order of (source name, zero-based tone index) assignments.
     /// Several sources may drive one tone, or one source several tones.
     pub sources: Vec<(String, usize)>,

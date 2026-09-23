@@ -51,6 +51,80 @@ pub(super) fn parse(
             )
         })?;
         match keyword.as_str() {
+            "OSCTONE" => bind_once(
+                &mut card.oscillator_tone,
+                card_count(stream, line, params, CARD, "OSCTONE", 1)? - 1,
+                CARD,
+                line,
+                "OSCTONE",
+            )?,
+            "OSCNODE" => bind_once(
+                &mut card.oscillator_node,
+                expect_node_with_authored_spelling(stream, line)?.1,
+                CARD,
+                line,
+                "OSCNODE",
+            )?,
+            "OSCAMPLITUDE" => bind_once(
+                &mut card.oscillator_amplitude,
+                positive(stream, line, params, "OSCAMPLITUDE")?,
+                CARD,
+                line,
+                "OSCAMPLITUDE",
+            )?,
+            "OSCMINAMPLITUDE" => bind_once(
+                &mut card.oscillator_minimum_amplitude,
+                positive(stream, line, params, "OSCMINAMPLITUDE")?,
+                CARD,
+                line,
+                "OSCMINAMPLITUDE",
+            )?,
+            "OSCFREQSTEP" => bind_once(
+                &mut card.oscillator_frequency_step,
+                positive(stream, line, params, "OSCFREQSTEP")?,
+                CARD,
+                line,
+                "OSCFREQSTEP",
+            )?,
+            "OSCTUPLE" => {
+                punctuation(stream, line, TokenKind::LParen)?;
+                let mut tuple = Vec::new();
+                loop {
+                    let value = card_number(
+                        stream,
+                        line,
+                        params,
+                        CARD,
+                        "OSCTUPLE",
+                        "a signed integer",
+                        |v| v.fract() == 0.0 && v >= i32::MIN as Value && v <= i32::MAX as Value,
+                    )?;
+                    tuple.push(value as i32);
+                    if stream.consume(&TokenKind::RParen) {
+                        break;
+                    }
+                    punctuation(stream, line, TokenKind::Comma)?;
+                }
+                bind_once(&mut card.oscillator_tuple, tuple, CARD, line, "OSCTUPLE")?;
+            }
+            "OSCSEED" => {
+                punctuation(stream, line, TokenKind::LParen)?;
+                let name = expect_node_with_authored_spelling(stream, line)?.1;
+                punctuation(stream, line, TokenKind::Comma)?;
+                let amplitude = positive(stream, line, params, "OSCSEED amplitude")?;
+                punctuation(stream, line, TokenKind::Comma)?;
+                let phase = card_number(
+                    stream,
+                    line,
+                    params,
+                    CARD,
+                    "OSCSEED phase",
+                    "a finite angle",
+                    |_| true,
+                )?;
+                punctuation(stream, line, TokenKind::RParen)?;
+                card.oscillator_seeds.push((name, amplitude, phase));
+            }
             "SOLVER" => bind_once(
                 &mut card.linear_solver,
                 card_name(stream, line, CARD, "SOLVER")?,
@@ -239,4 +313,15 @@ fn positive(
         "a positive tolerance",
         |v| v > 0.0,
     )
+}
+
+fn punctuation(stream: &mut TokenStream, line: usize, token: TokenKind) -> Result<(), ParseError> {
+    if stream.consume(&token) {
+        Ok(())
+    } else {
+        Err(ParseError::Syntax {
+            line,
+            message: format!(".QPSS: expected {token:?} in oscillator settings"),
+        })
+    }
 }

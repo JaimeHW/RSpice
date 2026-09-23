@@ -1,8 +1,34 @@
 //! Versioned producer and complete numerical-payload identity for QPSS.
 use super::*;
 
-fn payload_version(integral_names: &[String]) -> u32 {
-    if integral_names.is_empty() { 1 } else { 2 }
+fn payload_version(integral_names: &[String], oscillator: bool) -> u32 {
+    if oscillator {
+        3
+    } else if integral_names.is_empty() {
+        1
+    } else {
+        2
+    }
+}
+
+fn resolved_grid(
+    config: &QpssConfig,
+    frequency: Option<Value>,
+) -> Result<QuasiPeriodicGridConfig, SimulationError> {
+    config.validate_configuration()?;
+    let mut grid = config.grid.clone();
+    match (&config.oscillator, frequency) {
+        (None, None) => {}
+        (Some(oscillator), Some(value)) if value.is_finite() && value > 0.0 => {
+            grid.frequencies_hz[oscillator.tone] = value;
+        }
+        _ => {
+            return Err(invalid(
+                "retained oscillator frequency does not match its configuration",
+            ));
+        }
+    }
+    Ok(grid)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -43,6 +69,8 @@ pub struct QpssOperatingPoint {
     version: u32,
     producer: Producer,
     config: QpssConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    oscillator_frequency_hz: Option<Value>,
     node_names: Vec<String>,
     branch_names: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -61,6 +89,8 @@ pub struct QpssOperatingPointMetadata {
     version: u32,
     producer: Producer,
     config: QpssConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    oscillator_frequency_hz: Option<Value>,
     node_names: Vec<String>,
     branch_names: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -81,8 +111,12 @@ impl QpssOperatingPointMetadata {
     ) -> Result<(), SimulationError> {
         check_abort(abort)?;
         self.config.solver.validate().map_err(numerical_error)?;
-        let grid = QuasiPeriodicGrid::new_with_abort(self.config.grid.clone(), limits, abort)
-            .map_err(numerical_error)?;
+        let grid = QuasiPeriodicGrid::new_with_abort(
+            resolved_grid(&self.config, self.oscillator_frequency_hz)?,
+            limits,
+            abort,
+        )
+        .map_err(numerical_error)?;
         crate::analysis::quasi_periodic::solve::check_workload(
             row_lengths.len(),
             &grid,
@@ -91,7 +125,8 @@ impl QpssOperatingPointMetadata {
         )
         .map_err(numerical_error)?;
         if self.node_names.is_empty()
-            || self.version != payload_version(&self.integral_names)
+            || self.version
+                != payload_version(&self.integral_names, self.config.oscillator.is_some())
             || self
                 .node_names
                 .len()
@@ -111,6 +146,22 @@ impl QpssOperatingPointMetadata {
 impl QpssOperatingPoint {
     pub fn config(&self) -> &QpssConfig {
         &self.config
+    }
+    /// The solved free frequency. The authored configuration retains its
+    /// original starting guess for producer identity and reproducibility.
+    pub fn oscillator_frequency_hz(&self) -> Option<Value> {
+        self.oscillator_frequency_hz
+    }
+    pub fn resolved_grid_config(&self) -> Result<QuasiPeriodicGridConfig, SimulationError> {
+        resolved_grid(&self.config, self.oscillator_frequency_hz)
+    }
+    pub(super) fn require_driven_response(&self, analysis: &str) -> Result<(), SimulationError> {
+        if self.config.oscillator.is_some() {
+            return Err(invalid(format!(
+                "{analysis} on an autonomous QPSS orbit requires oscillator phase-response equations, which are not connected"
+            )));
+        }
+        Ok(())
     }
     pub fn node_names(&self) -> &[String] {
         &self.node_names
@@ -165,7 +216,7 @@ impl QpssOperatingPoint {
         check_abort(abort)?;
         self.config.solver.validate().map_err(numerical_error)?;
         let grid = Arc::new(
-            QuasiPeriodicGrid::new_with_abort(self.config.grid.clone(), limits, abort)
+            QuasiPeriodicGrid::new_with_abort(self.resolved_grid_config()?, limits, abort)
                 .map_err(numerical_error)?,
         );
         crate::analysis::quasi_periodic::solve::check_workload(
@@ -190,6 +241,7 @@ impl QpssOperatingPoint {
             version: self.version,
             producer: self.producer,
             config: self.config,
+            oscillator_frequency_hz: self.oscillator_frequency_hz,
             node_names: self.node_names,
             branch_names: self.branch_names,
             integral_names: self.integral_names,
@@ -210,6 +262,7 @@ impl QpssOperatingPoint {
             version: metadata.version,
             producer: metadata.producer,
             config: metadata.config,
+            oscillator_frequency_hz: metadata.oscillator_frequency_hz,
             node_names: metadata.node_names,
             branch_names: metadata.branch_names,
             integral_names: metadata.integral_names,
@@ -230,10 +283,20 @@ impl QpssOperatingPoint {
         integral_names: Vec<String>,
         solution: QuasiPeriodicSolution,
     ) -> Result<Self, SimulationError> {
+        let oscillator_frequency_hz = config
+            .oscillator
+            .as_ref()
+            .map(|oscillator| solution.grid().config().frequencies_hz[oscillator.tone]);
+        if resolved_grid(&config, oscillator_frequency_hz)? != *solution.grid().config() {
+            return Err(invalid(
+                "solved tone lattice differs from the authored QPSS configuration",
+            ));
+        }
         let mut point = Self {
-            version: payload_version(&integral_names),
+            version: payload_version(&integral_names, config.oscillator.is_some()),
             producer,
             config,
+            oscillator_frequency_hz,
             node_names,
             branch_names,
             integral_names,
@@ -259,6 +322,13 @@ impl QpssOperatingPoint {
         ))
         .map_err(|error| invalid(format!("retained state identity failed: {error}")))?;
         hb_identity_field(&mut hasher, "metadata", &metadata);
+        if let Some(frequency) = self.oscillator_frequency_hz {
+            hb_identity_field(
+                &mut hasher,
+                "oscillator-frequency/v1",
+                &frequency.to_bits().to_le_bytes(),
+            );
+        }
         // Preserve the v1 identity byte-for-byte for existing memoryless points.
         if !self.integral_names.is_empty() {
             let names = serde_json::to_vec(&self.integral_names)
@@ -307,7 +377,7 @@ impl QpssOperatingPoint {
                 "retained state has incomplete shape or convergence evidence",
             ));
         }
-        if self.version != payload_version(&self.integral_names)
+        if self.version != payload_version(&self.integral_names, self.config.oscillator.is_some())
             || !is_canonical_blake3_identity(&self.retained_identity)
             || self.retained_identity != self.payload_identity()?
         {
@@ -323,6 +393,27 @@ impl QpssOperatingPoint {
                         "retained MNA coordinate names are empty or duplicated",
                     ));
                 }
+            }
+        }
+        if let Some(oscillator) = &self.config.oscillator {
+            let row = self
+                .node_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case(&oscillator.node))
+                .ok_or_else(|| invalid("retained oscillator reference node is absent"))?;
+            let tuple = oscillator.resolved_phase_tuple(grid.config().frequencies_hz.len())?;
+            let index = grid
+                .index_of(&tuple)
+                .ok_or_else(|| invalid("retained oscillator tuple is absent"))?;
+            let coefficient = self.spectra[row][index];
+            let scale = self.config.solver.voltage_absolute_tolerance
+                + self.config.solver.relative_tolerance * coefficient.norm();
+            if coefficient.norm() * 2.0 < oscillator.minimum_amplitude
+                || coefficient.im.abs() > scale
+            {
+                return Err(invalid(
+                    "retained oscillator lacks nonzero amplitude or the configured phase condition",
+                ));
             }
         }
         for spectrum in &self.spectra {

@@ -50,6 +50,7 @@ impl Engine {
                 .saturating_mul(request.outputs.len()),
         )?;
         let producer = state::Producer::capture(netlist, &engine.config, point.config())?;
+        point.require_driven_response("QPNOISE")?;
         let grid = engine.validate_qpss_operating_point_with_abort(netlist, point, abort)?;
         let input_lattices = request.input_lattices.resolve(&grid)?;
         for output in &request.outputs {

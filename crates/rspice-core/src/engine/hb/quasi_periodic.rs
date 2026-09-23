@@ -1,5 +1,7 @@
 //! Netlist execution and retained independent-phase operating points.
+mod autonomous;
 mod bindings;
+pub use autonomous::{QpssOscillator, QpssOscillatorSeed};
 mod card;
 mod frequency_sweep;
 #[cfg(test)]
@@ -59,6 +61,8 @@ pub struct QpssConfig {
     pub solver: QuasiPeriodicSolveConfig,
     pub source_tones: Vec<QpssSourceTone>,
     pub initial_state: QpssInitialState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oscillator: Option<QpssOscillator>,
 }
 
 impl QpssConfig {
@@ -68,6 +72,7 @@ impl QpssConfig {
             solver: QuasiPeriodicSolveConfig::default(),
             source_tones: Vec::new(),
             initial_state: QpssInitialState::Zero,
+            oscillator: None,
         }
     }
 }
@@ -96,7 +101,8 @@ fn check_abort(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
 }
 
 impl Engine {
-    /// Solve a driven quasiperiodic circuit with independent source phases.
+    /// Solve a quasiperiodic circuit with independent source phases and an
+    /// optional free-running oscillator frequency and voltage phase condition.
     /// The returned state retains signed tone tuples, never a fabricated
     /// common fundamental. Authored transient clocks take precedence over AC
     /// annotations. An AC-only large-signal drive requires an explicit tone
@@ -201,8 +207,21 @@ impl Engine {
             // guess for these coordinates; the full torus equations decide it.
             seed.resize(unknowns, vec![Complex64::ZERO; grid.len()]);
         }
-        let solution = solver
-            .solve_quasi_periodic_with_abort(
+        let solution = if let Some(oscillator) = &config.oscillator {
+            let seed =
+                seed.get_or_insert_with(|| vec![vec![Complex64::ZERO; grid.len()]; unknowns]);
+            let oscillator = oscillator.prepare_seed(&grid, &node_names, seed)?;
+            solver.solve_autonomous_quasi_periodic_with_abort(
+                grid,
+                &config.solver,
+                &oscillator,
+                &sources,
+                seed,
+                &engine.config.resource_limits,
+                abort,
+            )
+        } else {
+            solver.solve_quasi_periodic_with_abort(
                 grid,
                 &config.solver,
                 &sources,
@@ -210,7 +229,8 @@ impl Engine {
                 &engine.config.resource_limits,
                 abort,
             )
-            .map_err(numerical_error)?;
+        }
+        .map_err(numerical_error)?;
         check_abort(abort)?;
         if producer != state::Producer::capture(netlist, &engine.config, &config)? {
             return Err(invalid("semantic producer inputs changed during the solve"));

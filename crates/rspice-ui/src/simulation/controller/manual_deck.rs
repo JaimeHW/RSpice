@@ -944,7 +944,7 @@ fn command_to_queue_item(
             let analysis_line = config.to_spice().map_err(|error| error.to_string())?;
             Ok(QueuedAnalysis {
                 numeric_override: None,
-                spec: AnalysisSpec::from_driven_qpss_config(config),
+                spec: AnalysisSpec::from_qpss_config(config),
                 config: None,
                 spec_options,
                 analysis_line,

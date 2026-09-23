@@ -859,7 +859,7 @@ fn validate_qpss_measurements(
     spec: &crate::simulation::multi_run::AnalysisSpec,
     measurements: &[String],
 ) -> Result<(), String> {
-    let config = spec.driven_qpss_config()?;
+    let config = spec.qpss_config()?;
     let grid = rspice_core::analysis::quasi_periodic::QuasiPeriodicGrid::new_with_abort(
         config.grid,
         &rspice_core::ResourceLimits::default(),
@@ -874,6 +874,11 @@ fn validate_qpss_measurements(
                 return Err(format!("QPSS does not retain lattice tuple {tuple:?}"));
             }
         } else if mode.eq_ignore_ascii_case("scalar") {
+            if key.eq_ignore_ascii_case("qpss.oscillator_frequency_hz")
+                && config.oscillator.is_some()
+            {
+                continue;
+            }
             if !["qpss.iterations", "qpss.normalized_residual"]
                 .iter()
                 .any(|name| key.eq_ignore_ascii_case(name))

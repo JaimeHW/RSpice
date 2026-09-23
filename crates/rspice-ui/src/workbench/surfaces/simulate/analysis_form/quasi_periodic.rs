@@ -17,7 +17,7 @@ use super::{
 
 /// Render the QPSS fields.
 pub(super) fn shooting_fields(ui: &mut Ui, setup: &mut QpssDraft) {
-    ui.small("Driven QPSS preview. Automatic mode uses the iterative solver above 512 coupled coordinates; the direct solver is limited to 512. Both enforce the configured memory limits.");
+    ui.small("QPSS resolves independent tones and their mixing products. Autonomous mode solves one free-running frequency while keeping the other tones fixed.");
     input_row(ui, "Tone frequencies", &mut setup.tones);
     input_row(ui, "Harmonic orders", &mut setup.harmonics);
     input_row(
@@ -94,17 +94,40 @@ pub(super) fn shooting_fields(ui: &mut Ui, setup: &mut QpssDraft) {
         &mut setup.voltage_absolute_tolerance,
     );
     input_row(ui, "Maximum backtracks", &mut setup.max_backtracks);
-    switch_row(
-        ui,
-        "Autonomous oscillator (unavailable)",
-        &mut setup.autonomous,
-    );
+    switch_row(ui, "Autonomous oscillator", &mut setup.autonomous);
     input_row_enabled(
         ui,
         "Oscillator node",
         &mut setup.oscillator_node,
         setup.autonomous,
     );
+    if setup.autonomous {
+        input_row(ui, "Free tone number", &mut setup.oscillator_tone);
+        ui.small("Tone numbers start at 1. Its frequency above is the starting guess. Sources must drive only the other tones.");
+        input_row(
+            ui,
+            "Phase tuple (blank: fundamental)",
+            &mut setup.oscillator_phase_tuple,
+        );
+        input_row(
+            ui,
+            "Startup amplitude (V peak)",
+            &mut setup.oscillator_amplitude,
+        );
+        input_row(
+            ui,
+            "Minimum oscillation (V peak)",
+            &mut setup.oscillator_minimum_amplitude,
+        );
+        input_row(
+            ui,
+            "Maximum relative frequency step",
+            &mut setup.oscillator_frequency_step,
+        );
+        input_row(ui, "Additional startup seeds", &mut setup.oscillator_seeds);
+        ui.small("Seeds use node,amplitude,phase-degrees separated by semicolons, such as quadrature,0.1,-90. They initialize the selected tuple; they do not drive the circuit.");
+        ui.small("Autonomous QPAC, QPXF and QPNOISE responses are not yet available.");
+    }
 }
 
 /// Render the QPAC fields.

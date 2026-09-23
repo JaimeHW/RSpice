@@ -27,6 +27,104 @@ fn authored() -> QpssDraft {
 }
 
 #[test]
+fn autonomous_qpss_studio_controls_reach_worker_engine_and_saved_results() {
+    use crate::simulation::runner::worker_contract::round_trip_response_for_test;
+    use std::f64::consts::{SQRT_2, TAU};
+    let mut draft = QpssDraft {
+        tones: format!("{},{}", 1.2 / TAU, SQRT_2 / TAU),
+        harmonics: "2,3".into(),
+        collocation_points: "13,25".into(),
+        relative_tolerance: "1e-8".into(),
+        autonomous: true,
+        oscillator_node: "x".into(),
+        oscillator_tone: "1".into(),
+        oscillator_phase_tuple: "1,0".into(),
+        oscillator_amplitude: ".8".into(),
+        oscillator_minimum_amplitude: ".01".into(),
+        oscillator_frequency_step: ".15".into(),
+        oscillator_seeds: "y,.8,-90".into(),
+        ..Default::default()
+    };
+    let persisted: QpssDraft = ron::from_str(&ron::to_string(&draft).unwrap()).unwrap();
+    let spec = persisted.to_spec().unwrap();
+    let worker = WorkerAnalysisSpec::try_from(&spec).unwrap();
+    let restored: AnalysisSpec =
+        serde_json::from_str::<WorkerAnalysisSpec>(&serde_json::to_string(&worker).unwrap())
+            .unwrap()
+            .into();
+    assert_eq!(restored, spec);
+    let config = restored.qpss_config().unwrap();
+    assert_eq!(
+        config.oscillator.as_ref().unwrap().additional_seeds[0].phase_degrees,
+        -90.0
+    );
+    assert_eq!(
+        AnalysisSpec::from_qpss_config(config.clone())
+            .qpss_config()
+            .unwrap(),
+        config
+    );
+    let deck = format!(
+        "QPSS oscillator\nCx x 0 1\nCy y 0 1\nBx 0 x I={{(1-v(x)^2-v(y)^2)*v(x)-(1+.1*sqrt(2)*cos(sqrt(2)*time))*v(y)}}\nBy 0 y I={{(1-v(x)^2-v(y)^2)*v(y)+(1+.1*sqrt(2)*cos(sqrt(2)*time))*v(x)}}\n{}\n.end\n",
+        config.to_spice().unwrap()
+    );
+    let dependencies = op_dependencies(&deck, &deck, &deck, Default::default());
+    let result = run_spec_request(
+        &EngineBridge::new(),
+        restored,
+        SpecExecutionOptions::default(),
+        &deck,
+        None,
+        &dependencies,
+        &rspice_core::NoAbort,
+    )
+    .unwrap();
+    let measurement = result
+        .study_measurement("scalar:qpss.oscillator_frequency_hz")
+        .unwrap();
+    assert!((measurement.value.unwrap() - 1.0 / TAU).abs() < 1e-8);
+    let restored = round_trip_response_for_test(result);
+    let SimulationResult::Qpss {
+        operating_point,
+        frequencies,
+        tuples,
+        ..
+    } = &restored
+    else {
+        panic!("QPSS result expected")
+    };
+    assert_eq!(operating_point.config(), &config);
+    let solved = operating_point.oscillator_frequency_hz().unwrap();
+    let index = tuples.iter().position(|tuple| tuple == &[1, 0]).unwrap();
+    assert_eq!(frequencies[index], solved);
+    let retained = crate::simulation::controller::SimulationController::new()
+        .convert_to_analysis_result_with_metadata_owned(
+            restored,
+            crate::state::AnalysisType::Qpss,
+            "QPSS",
+        );
+    retained.validate_retained_evidence().unwrap();
+    let saved = crate::io::project_io::ProjectAnalysisResult::from(&retained);
+    let decoded: crate::io::project_io::ProjectAnalysisResult =
+        serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+    assert_eq!(decoded, saved);
+    // Inactive raw buffers can be unfinished; activating them must validate.
+    draft.autonomous = false;
+    draft.oscillator_tone = "unfinished".into();
+    assert!(
+        draft
+            .to_spec()
+            .unwrap()
+            .qpss_config()
+            .unwrap()
+            .oscillator
+            .is_none()
+    );
+    draft.autonomous = true;
+    assert!(draft.to_spec().is_err());
+}
+
+#[test]
 fn qpss_controls_survive_draft_worker_and_real_engine_execution() {
     let draft = authored();
     let draft: QpssDraft = ron::from_str(&ron::to_string(&draft).unwrap()).unwrap();
@@ -144,6 +242,7 @@ fn qpss_controls_validate_inactive_and_legacy_fields() {
     default.source_tones = "V1=1,V1=1".into();
     assert!(default.to_spec().is_err());
     let mut autonomous = authored();
+    autonomous.source_tones.clear();
     autonomous.autonomous = true;
     autonomous.oscillator_node = "out".into();
     assert!(

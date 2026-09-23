@@ -1,10 +1,10 @@
-//! Field-complete driven QPSS settings shared by authoring and execution.
+//! QPSS settings shared by authoring and execution.
 use super::types::{AnalysisSpec, HbToneSpec};
 use rspice_core::analysis::quasi_periodic::{
     QuasiPeriodicGridConfig, QuasiPeriodicLinearConfig, QuasiPeriodicSampling,
     QuasiPeriodicSolveConfig,
 };
-use rspice_core::engine::{QpssConfig, QpssInitialState, QpssSourceTone};
+use rspice_core::engine::{QpssConfig, QpssInitialState, QpssOscillator, QpssSourceTone};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -20,6 +20,8 @@ pub struct QpssControls {
     pub sampling: QuasiPeriodicSampling,
     pub initial_state: QpssInitialState,
     pub source_tones: Vec<QpssSourceTone>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oscillator: Option<QpssOscillator>,
 }
 
 impl Default for QpssControls {
@@ -33,6 +35,7 @@ impl Default for QpssControls {
             sampling: QuasiPeriodicSampling::Oversample(vec![2]),
             initial_state: QpssInitialState::Zero,
             source_tones: Vec::new(),
+            oscillator: None,
         }
     }
 }
@@ -83,6 +86,7 @@ impl QpssControls {
             },
             source_tones,
             initial_state: self.initial_state,
+            oscillator: self.oscillator.clone(),
         };
         config
             .validate_configuration()
@@ -92,7 +96,7 @@ impl QpssControls {
 }
 
 impl AnalysisSpec {
-    pub(crate) fn from_driven_qpss_config(config: QpssConfig) -> Self {
+    pub(crate) fn from_qpss_config(config: QpssConfig) -> Self {
         let tones = config
             .grid
             .frequencies_hz
@@ -104,8 +108,11 @@ impl AnalysisSpec {
             tones,
             max_iterations: config.solver.max_iterations,
             relative_tolerance: config.solver.relative_tolerance,
-            autonomous: false,
-            oscillator_node: None,
+            autonomous: config.oscillator.is_some(),
+            oscillator_node: config
+                .oscillator
+                .as_ref()
+                .map(|oscillator| oscillator.node.clone()),
             controls: QpssControls {
                 current_absolute_tolerance: config.solver.current_absolute_tolerance,
                 voltage_absolute_tolerance: config.solver.voltage_absolute_tolerance,
@@ -115,25 +122,51 @@ impl AnalysisSpec {
                 sampling: config.grid.sampling,
                 initial_state: config.initial_state,
                 source_tones: config.source_tones,
+                oscillator: config.oscillator,
             },
         }
     }
 
-    pub fn driven_qpss_config(&self) -> Result<QpssConfig, String> {
+    pub fn qpss_config(&self) -> Result<QpssConfig, String> {
         let Self::Qpss {
             tones,
             max_iterations,
             relative_tolerance,
             autonomous,
+            oscillator_node,
             controls,
             ..
         } = self
         else {
             return Err("expected a QPSS specification".into());
         };
+        let mut controls = controls.clone();
         if *autonomous {
-            return Err("autonomous QPSS requires an unknown-frequency and phase-condition solve, which is not connected yet".into());
+            let node = oscillator_node
+                .as_ref()
+                .filter(|node| !node.trim().is_empty())
+                .ok_or("autonomous QPSS requires an oscillator node")?;
+            if controls.oscillator.is_none() {
+                controls.oscillator = Some(QpssOscillator::new(0, node.clone()));
+            }
+            if controls
+                .oscillator
+                .as_ref()
+                .is_some_and(|oscillator| !oscillator.node.eq_ignore_ascii_case(node))
+            {
+                return Err("QPSS oscillator node differs from its controls".into());
+            }
+        } else if controls.oscillator.is_some() {
+            return Err("QPSS oscillator controls require autonomous mode".into());
         }
         controls.to_core_config(tones, *max_iterations, *relative_tolerance)
+    }
+
+    pub fn driven_qpss_config(&self) -> Result<QpssConfig, String> {
+        let config = self.qpss_config()?;
+        if config.oscillator.is_some() {
+            return Err("autonomous QPSS response requires oscillator phase-response equations, which are not connected".into());
+        }
+        Ok(config)
     }
 }

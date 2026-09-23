@@ -32,10 +32,9 @@ impl StudyAnalysis {
             Self::Native(spec @ AnalysisSpec::HarmonicBalance { .. }) => {
                 spec.validate().map_err(|error| vec![error])
             }
-            Self::Native(spec @ AnalysisSpec::Qpss { .. }) => spec
-                .driven_qpss_config()
-                .map(|_| ())
-                .map_err(|error| vec![error]),
+            Self::Native(spec @ AnalysisSpec::Qpss { .. }) => {
+                spec.qpss_config().map(|_| ()).map_err(|error| vec![error])
+            }
             Self::Pss(config) => config.validate().map_err(|error| vec![error]),
             Self::Qpss(config) => config.validate().map_err(|error| vec![error]),
             Self::Hb(config) => config.validate().map_err(|error| vec![error]),

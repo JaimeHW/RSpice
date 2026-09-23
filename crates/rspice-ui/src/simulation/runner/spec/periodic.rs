@@ -83,9 +83,7 @@ pub(super) fn run_periodic_spec(
                 .map_err(SimulationError::InvalidConfig)
         }
         spec @ AnalysisSpec::Qpss { .. } => {
-            let config = spec
-                .driven_qpss_config()
-                .map_err(SimulationError::InvalidConfig)?;
+            let config = spec.qpss_config().map_err(SimulationError::InvalidConfig)?;
             let artifact = dependencies.dc_operating_point_seed().map_err(|error| {
                 SimulationError::InvalidConfig(format!(
                     "QPSS operating-point dependency is unavailable: {error}"
@@ -1815,9 +1813,7 @@ pub(in crate::simulation::runner) fn run_native_study_on_materialized(
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     if matches!(spec, AnalysisSpec::Qpss { .. }) {
-        let config = spec
-            .driven_qpss_config()
-            .map_err(SimulationError::InvalidConfig)?;
+        let config = spec.qpss_config().map_err(SimulationError::InvalidConfig)?;
         let data = super::run_abort_aware_service(abort, || {
             svc_runner::run_qpss_analysis_on_materialized_with_abort(circuit, config, abort)
         })?;

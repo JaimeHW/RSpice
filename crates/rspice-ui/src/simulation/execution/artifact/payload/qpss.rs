@@ -143,7 +143,7 @@ impl ExecutionArtifactEnvelope {
             ));
         };
         let expected = producer_spec
-            .driven_qpss_config()
+            .qpss_config()
             .map_err(ExecutionArtifactError::ContractMismatch)?;
         if &expected != operating_point.config() {
             return Err(ExecutionArtifactError::ContractMismatch(
@@ -302,7 +302,7 @@ mod tests {
         let spec = draft.to_spec().unwrap();
         let data = crate::services::simulation_runner::run_qpss_analysis_with_source_path_and_abort(
             "QPSS artifact\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\nI1 0 out SIN(0 .001 1414.213562373095)\nBmemory memory 0 V=1k*sdt(v(out)-v(memory))\nRmemory memory 0 1k\n.end\n",
-            spec.driven_qpss_config().unwrap(), None, &rspice_core::NoAbort,
+            spec.qpss_config().unwrap(), None, &rspice_core::NoAbort,
         ).unwrap();
         let result = SimulationResult::from_qpss_operating_point(data.operating_point).unwrap();
         let snapshot = ContentDigest::from_bytes([19; 32]);

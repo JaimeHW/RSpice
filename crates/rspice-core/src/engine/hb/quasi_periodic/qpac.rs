@@ -80,6 +80,7 @@ impl Engine {
     ) -> Result<QpacAnalysisResult, SimulationError> {
         check_abort(abort)?;
         request.validate()?;
+        point.require_driven_response("QPAC")?;
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_analysis_points(request.offsets_hz.len())?;
         let producer = state::Producer::capture(netlist, &engine.config, point.config())?;

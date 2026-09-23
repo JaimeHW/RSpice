@@ -600,8 +600,8 @@ pub enum AnalysisSpec {
         #[serde(default)]
         normalize: bool,
     },
-    /// Driven quasi-periodic steady state on independent phase axes.
-    /// Autonomous frequency/phase-condition solving is not yet supported.
+    /// Quasi-periodic steady state with independent driven clocks and an
+    /// optional free-running tone solved with a node-voltage phase condition.
     Qpss {
         tones: Vec<HbToneSpec>,
         max_iterations: usize,

@@ -66,9 +66,10 @@ pub use quasi_periodic::{
     QpnoiseObservation, QpnoiseOutput, QpnoiseOutputSpectrum, QpnoiseQuantity, QpnoiseReference,
     QpnoiseRequest, QpnoiseResultMetadata, QpnoiseSourceLayout, QpnoiseSources,
     QpnoiseSpectrumLayout, QpnoiseTransferMetadata, QpnoiseUnavailable, QpnoiseValue, QpssConfig,
-    QpssInitialState, QpssOperatingPoint, QpssOperatingPointMetadata, QpssSourceTone,
-    QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay, QpxfInputLattices, QpxfInputSource,
-    QpxfOutput, QpxfQuantity, QpxfRequest, QpxfResultMetadata, QpxfSources, QpxfTransfer,
+    QpssInitialState, QpssOperatingPoint, QpssOperatingPointMetadata, QpssOscillator,
+    QpssOscillatorSeed, QpssSourceTone, QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay,
+    QpxfInputLattices, QpxfInputSource, QpxfOutput, QpxfQuantity, QpxfRequest, QpxfResultMetadata,
+    QpxfSources, QpxfTransfer,
 };
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 
