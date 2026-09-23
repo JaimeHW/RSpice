@@ -28,7 +28,7 @@ impl Mosfet {
     /// Currents entering individual D/G/S/B pins. Body charge currents use
     /// diode orientation; Meyer currents enter the gate. Only matrix stamping
     /// combines the individual currents when authored pins share a node.
-    fn report_branch_currents(
+    pub(in crate::device::mosfet::classic) fn report_branch_currents(
         &self,
         channel: Value,
         body_source: Value,

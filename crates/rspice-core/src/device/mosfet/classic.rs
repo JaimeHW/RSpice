@@ -26,6 +26,7 @@ mod mos2;
 mod mos3;
 mod nonlinear;
 mod operating_point;
+mod periodic;
 mod stamping;
 
 const VDS_SMOOTHING: Value = SMOOTH_VOLTAGE * 1e-1;
