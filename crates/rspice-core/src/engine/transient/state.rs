@@ -491,7 +491,7 @@ impl Engine {
         history
     }
 
-    /// Restore native GP storage from periodic samples. A prepared copy exposes
+    /// Restore native BJT storage from periodic samples. A prepared copy exposes
     /// the same charge derivatives for collapsed and promoted device topology;
     /// the original device keeps its checkpoint/runtime identity.
     pub(in crate::engine) fn initialize_periodic_bjt_history(
@@ -511,10 +511,8 @@ impl Engine {
             return Err("periodic BJT history has invalid samples or rates".into());
         }
         for bjt in &mut circuit.bjts.devices {
-            if !bjt.uses_legacy_gummel_poon()
-                || bjt.node_rth != 0
-                || bjt.td > 0.0
-                || bjt.legacy_excess_phase_delay() != 0.0
+            if bjt.uses_legacy_gummel_poon()
+                && (bjt.node_rth != 0 || bjt.td > 0.0 || bjt.legacy_excess_phase_delay() != 0.0)
             {
                 return Err(format!(
                     "BJT '{}' has no periodic history initializer",
@@ -563,11 +561,12 @@ impl Engine {
                     * Self::differential_voltage(node_rates, charge.nodes[0], charge.nodes[1]);
             }
             let mut terminal = model.mna_terminal_currents_at_solution(solutions[2]);
-            for (branch, current) in branches.iter().zip(currents) {
-                if let Some(i) = branch.pos_external {
+            for (index, (branch, current)) in branches.iter().zip(currents).enumerate() {
+                let current = model.charge_branch_polarity(index) * current;
+                if let Some(i) = model.mna_external_lead(branch.pos_internal, branch.pos_external) {
                     terminal[i] += current;
                 }
-                if let Some(i) = branch.neg_external {
+                if let Some(i) = model.mna_external_lead(branch.neg_internal, branch.neg_external) {
                     terminal[i] -= current;
                 }
             }

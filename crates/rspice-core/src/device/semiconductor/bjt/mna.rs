@@ -811,6 +811,29 @@ impl Bjt {
         }
     }
 
+    /// Attribute an aliased internal endpoint to its physical lead by device
+    /// topology. Comparing global node numbers would merge tied C/B/E/S leads.
+    pub(crate) fn mna_external_lead(
+        &self,
+        internal: Option<usize>,
+        external: Option<usize>,
+    ) -> Option<usize> {
+        external.or_else(|| match internal? {
+            IDX_VCX if !Self::series_active(self.rcx) => Some(EXT_C),
+            IDX_VCI if !Self::series_active(self.rcx) && !Self::series_active(self.rci) => {
+                Some(EXT_C)
+            }
+            IDX_VBX if !Self::series_active(self.rbx) => Some(EXT_B),
+            IDX_VBI if !Self::series_active(self.rbx) && !Self::series_active(self.rbi) => {
+                Some(EXT_B)
+            }
+            IDX_VEI if !Self::series_active(self.re) => Some(EXT_E),
+            IDX_VBP if !self.vbic_solves_vbp() && !Self::series_active(self.rcx) => Some(EXT_C),
+            IDX_VSI if !self.vbic_three_terminal && !self.has_substrate_resistance() => Some(EXT_S),
+            _ => None,
+        })
+    }
+
     /// Whether internal state `idx` owns its own KCL row. Collapsed states are
     /// aliased onto a parent node whose row already carries their branch
     /// currents (via `external_terminal_branches` and the active rows), so
@@ -1260,8 +1283,43 @@ impl Bjt {
             self.mna_rbi_branch
                 .map(|_| Self::node_voltage(solution, self.mna_rbi_matrix_node)),
         );
-        self.external_terminal_branches(eval)
-            .map(|branch| branch.current)
+        let mut terminal = self
+            .external_terminal_branches(eval)
+            .map(|branch| branch.current);
+        if self.uses_vbic_dynamic_charges() && self.td > 0.0 {
+            // The accepted solution owns the delay coordinates. Cached Newton
+            // branches may still refer to a limited iterate.
+            let external = self.external_terminal_voltages(solution);
+            let internal = self.mna_internal_state_at_solution(solution);
+            let (_, inputs, d_itzf_d_vrth) =
+                self.vbic_dynamic_charge_state_at_bias(external, internal, None);
+            let reduction = BjtDynamicReduction {
+                internal_voltages: internal,
+                external_voltages: external,
+                vbic_transport: inputs.transport,
+                vbic_d_itzf_d_vrth: d_itzf_d_vrth,
+                ..Default::default()
+            };
+            for branch in self.vbic_delay_static_branches(&reduction) {
+                if let Some(index) =
+                    self.mna_external_lead(branch.pos_internal, branch.pos_external)
+                {
+                    terminal[index] += branch
+                        .pos_internal
+                        .map_or(1.0, Self::vbic_residual_row_sign)
+                        * branch.current;
+                }
+                if let Some(index) =
+                    self.mna_external_lead(branch.neg_internal, branch.neg_external)
+                {
+                    terminal[index] -= branch
+                        .neg_internal
+                        .map_or(1.0, Self::vbic_residual_row_sign)
+                        * branch.current;
+                }
+            }
+        }
+        terminal
     }
 
     /// Authored lead F/Q at the unlimited periodic bias most recently sampled.
@@ -1270,31 +1328,18 @@ impl Bjt {
         &self,
         solution: &[Value],
     ) -> Result<([Value; EXTERNAL_DIM], [Value; EXTERNAL_DIM]), String> {
-        let eval = self
-            .mna_eval
+        self.mna_eval
             .ok_or_else(|| format!("BJT '{}' has no periodic bias", self.name))?;
-        let mut current = self
-            .external_terminal_branches(eval)
-            .map(|branch| branch.current);
-        for branch in self
-            .mna_delay_branches
-            .iter()
-            .chain([&self.mna_delay_thermal])
-        {
-            if let Some(terminal) = branch.pos_external {
-                current[terminal] += branch.current;
-            }
-            if let Some(terminal) = branch.neg_external {
-                current[terminal] -= branch.current;
-            }
-        }
+        let current = self.mna_terminal_currents_at_solution(solution);
         let mut charge = [0.0; EXTERNAL_DIM];
         for (index, branch) in self.mna_charge_state().0.iter().enumerate() {
             let value = self.charge_branch_polarity(index) * branch.charge;
-            if let Some(terminal) = branch.pos_external {
+            if let Some(terminal) = self.mna_external_lead(branch.pos_internal, branch.pos_external)
+            {
                 charge[terminal] += value;
             }
-            if let Some(terminal) = branch.neg_external {
+            if let Some(terminal) = self.mna_external_lead(branch.neg_internal, branch.neg_external)
+            {
                 charge[terminal] -= value;
             }
         }

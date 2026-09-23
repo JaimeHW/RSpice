@@ -242,10 +242,9 @@ pub(in crate::engine) struct BjtTransientHistory {
     pub(super) charge_cq_prev: Vec<[Value; BJT_DYNAMIC_CHARGE_COUNT]>,
     /// Accepted external BC displacement current survives integration resets.
     pub(super) accepted_external_bc_current: Vec<Value>,
-    /// Accepted total terminal currents for legacy native BJTs, in C/B/E/S
-    /// order. `None` preserves the ordinary static operating-point report for
-    /// device families whose transient lead-current projection is not owned
-    /// by the reduced legacy companion.
+    /// Accepted total terminal currents for native GP and VBIC, in C/B/E/S
+    /// order. `None` preserves the static operating-point report before a
+    /// transient or periodic initializer has supplied physical lead currents.
     pub(super) accepted_terminal_currents: Vec<Option<[Value; BJT_EXTERNAL_STATE_DIM]>>,
     pub(super) dynamic_internal_prev: Vec<[Value; BJT_INTERNAL_STATE_DIM]>,
     pub(super) dynamic_internal_prev_prev: Vec<[Value; BJT_INTERNAL_STATE_DIM]>,

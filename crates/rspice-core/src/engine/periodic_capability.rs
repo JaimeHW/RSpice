@@ -349,7 +349,7 @@ use CapabilitySupport::{Absent, Complete, Inapplicable, Restricted};
 /// Shared phrase for the envelope initializer's supported subset. The gap query
 /// reports the offending family by name; this states why it is a gap.
 const ENVELOPE_LINEAR_SUBSET: &str = "the envelope initializer supports R/L/C networks with expression \
-     capacitance, fixed mutual inductance, diodes, classic JFETs, Gummel-Poon BJTs, and independent, controlled or behavioral sources";
+     capacitance, fixed mutual inductance, diodes, classic JFETs, native GP/VBIC BJTs, and independent, controlled or behavioral sources";
 const CYCLOSTATIONARY_FLICKER: &str = "stationary thermal/shot noise is exact; a nonzero flicker coefficient needs cyclostationary \
      colored-noise folding rather than a DC-bias substitution";
 const RESISTOR_CYCLOSTATIONARY_FLICKER: &str = "thermal noise and AF=2 signed-current flicker modulation are exact; other AF values \
@@ -458,7 +458,7 @@ pub(crate) const fn periodic_capability_descriptor(
                 "native BJT electrical storage and VBIC thermal/excess-phase states",
             ),
             envelope: Restricted(
-                "Gummel-Poon electrical charge history without thermal/excess-phase states",
+                "native GP electrical and VBIC physical charge history; legacy GP thermal/excess-phase states are not represented",
             ),
         },
         F::Mosfet => PeriodicCapabilityDescriptor {
@@ -1468,15 +1468,15 @@ pub(in crate::engine) fn envelope_gaps(circuit: &CircuitData) -> Vec<CapabilityG
                     ));
                 } else if family == F::Bjt
                     && circuit.bjts.devices.iter().any(|bjt| {
-                        !bjt.uses_legacy_gummel_poon()
-                            || bjt.node_rth != 0
-                            || bjt.td > 0.0
-                            || bjt.legacy_excess_phase_delay() != 0.0
+                        bjt.uses_legacy_gummel_poon()
+                            && (bjt.node_rth != 0
+                                || bjt.td > 0.0
+                                || bjt.legacy_excess_phase_delay() != 0.0)
                     })
                 {
                     gaps.push(CapabilityGap::new(
                         family,
-                        "BJT thermal, excess-phase or VBIC accepted state",
+                        "legacy GP thermal or excess-phase accepted state",
                     ));
                 }
             }

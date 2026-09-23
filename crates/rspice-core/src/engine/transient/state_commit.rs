@@ -484,7 +484,7 @@ impl Engine {
                     },
                 )
             });
-            if bjt.uses_legacy_gummel_poon() && bjt.mna_promoted() {
+            if bjt.mna_promoted() {
                 let mut terminal = bjt.mna_terminal_currents_at_solution(solution);
                 if let Some(phase) = phase_view.trial(idx, accepted_time) {
                     let correction = phase.correction(bjt, &internal).map_err(|error| {
@@ -501,11 +501,16 @@ impl Engine {
                     }
                 }
                 let (branches, _, _) = bjt.mna_charge_state_at_solution(solution);
-                for (branch, current) in branches.iter().zip(currents) {
-                    if let Some(index) = branch.pos_external {
+                for (index, (branch, current)) in branches.iter().zip(currents).enumerate() {
+                    let current = bjt.charge_branch_polarity(index) * current;
+                    if let Some(index) =
+                        bjt.mna_external_lead(branch.pos_internal, branch.pos_external)
+                    {
                         terminal[index] += current;
                     }
-                    if let Some(index) = branch.neg_external {
+                    if let Some(index) =
+                        bjt.mna_external_lead(branch.neg_internal, branch.neg_external)
+                    {
                         terminal[index] -= current;
                     }
                 }
