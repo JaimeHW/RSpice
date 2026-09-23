@@ -28,6 +28,7 @@ use super::{Bsim3v3, eval};
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::{Complex64, NodeId, Value};
 
+mod ac_response;
 pub(crate) mod checkpoint;
 mod continuation;
 mod periodic;
