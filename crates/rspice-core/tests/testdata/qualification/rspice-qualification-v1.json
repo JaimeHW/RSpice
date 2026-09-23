@@ -1080,6 +1080,55 @@
               }
             }
           }
+        },
+        {
+          "result": "dcmatch",
+          "surfaces": {
+            "CLI": {
+              "scalar": {
+                "status": "mapped"
+              },
+              "stepped": {
+                "status": "mapped"
+              },
+              "temperature": {
+                "status": "mapped"
+              }
+            },
+            "Engine adapter": {
+              "scalar": {
+                "status": "mapped"
+              },
+              "stepped": {
+                "status": "mapped"
+              },
+              "temperature": {
+                "status": "mapped"
+              }
+            },
+            "Python": {
+              "scalar": {
+                "status": "mapped"
+              },
+              "stepped": {
+                "status": "mapped"
+              },
+              "temperature": {
+                "status": "mapped"
+              }
+            },
+            "WASM": {
+              "scalar": {
+                "status": "mapped"
+              },
+              "stepped": {
+                "status": "mapped"
+              },
+              "temperature": {
+                "status": "mapped"
+              }
+            }
+          }
         }
       ],
       "signals": [
@@ -1336,7 +1385,7 @@
       "note": "abort polls a completed harmonic balance performs",
       "tolerance": 0.15,
       "unit": "polls",
-      "value": 24.0
+      "value": 28.0
     },
     {
       "metric": "hb.newton_iterations",
