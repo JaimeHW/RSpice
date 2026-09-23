@@ -22,6 +22,6 @@ mod duration;
 #[cfg(test)]
 pub use duration::SoaCumulativeDurationEvidence;
 pub use duration::{
-    SoaDurationEvidence, SoaDurationMode, SoaLimitTrace,
-    qualify_soa_duration_with_mode, soa_duration_verdict,
+    SoaDurationEvidence, SoaDurationMode, SoaLimitTrace, qualify_soa_duration_with_mode,
+    soa_duration_verdict,
 };

@@ -13,13 +13,13 @@ use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::HbOperatingPoint;
 
 use super::error::{ensure_not_aborted, poll_periodically};
+#[cfg(test)]
+use super::parse_runner_netlist_with_abort;
 use super::{
     ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
     generate_freq_points_with_abort, is_ground_like,
     netlist_has_independent_source_named_with_abort,
 };
-#[cfg(test)]
-use super::parse_runner_netlist_with_abort;
 
 /// Frequency sweep type for HBNOISE.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
