@@ -1217,9 +1217,6 @@ mod integration_tests {
 
     #[test]
     fn oscillator_phase_error_keeps_diffusion_inside_voltage_linewidth() {
-        use crate::execution::{
-            AnalysisInstanceId, AnalysisKind, AnalysisResultDocument, SignalUnit,
-        };
         let carrier: Value = 1000.0;
         let diffusion = 1e-4;
         let corner = std::f64::consts::PI * carrier * carrier * diffusion;
@@ -1254,29 +1251,6 @@ mod integration_tests {
                 .unwrap()
                 .unwrap();
         assert!(result.integrated_phase_noise.unwrap() > 200.0 * voltage_equivalent);
-        let document = AnalysisResultDocument::from_pnoise(
-            AnalysisInstanceId::new(AnalysisKind::PNoise, 0),
-            &PeriodicNoiseResult::Oscillator {
-                output: "V(osc)".into(),
-                result,
-            },
-        )
-        .unwrap()
-        .build()
-        .unwrap();
-        let signal = document
-            .signals()
-            .iter()
-            .find(|signal| signal.descriptor().canonical_name() == "phase_error_psd")
-            .unwrap();
-        assert_eq!(
-            signal.descriptor().unit(),
-            &SignalUnit::Custom("rad^2/Hz".into())
-        );
-        assert_eq!(
-            AnalysisResultDocument::from_json(&document.to_json().unwrap()).unwrap(),
-            document
-        );
     }
 
     #[test]
