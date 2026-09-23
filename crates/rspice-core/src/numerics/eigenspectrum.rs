@@ -176,12 +176,14 @@ pub(crate) fn qualified_real_eigenspectrum(
 ) -> Result<QualifiedOrdinarySpectrum, OrdinarySpectrumError> {
     match qualified_eigenspectrum_impl(matrix, abort, false) {
         // Nearly defective real Schur blocks can lose accuracy during the
-        // real-to-complex eigenvector back substitution. Retry a
+        // real-to-complex eigenvector back substitution, including zero or
+        // nonfinite vectors for a defective block. Retry a
         // complex Schur solve, then apply the identical residual certificate
         // in the original coordinates. Never relax the qualification bound.
-        Err(OrdinarySpectrumError::NumericalQualification { .. }) => {
-            qualified_eigenspectrum_impl(matrix, abort, true)
-        }
+        Err(
+            OrdinarySpectrumError::NumericalQualification { .. }
+            | OrdinarySpectrumError::InvalidEigenvector { .. },
+        ) => qualified_eigenspectrum_impl(matrix, abort, true),
         result => result,
     }
 }
