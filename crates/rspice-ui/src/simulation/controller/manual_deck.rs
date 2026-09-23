@@ -900,6 +900,7 @@ fn command_to_queue_item(
             spec: AnalysisSpec::AcData {
                 table_name: table_name.clone(),
                 frequencies: ac_data_table_frequencies(netlist, table_name)?,
+                table_options: Default::default(),
             },
             config: None,
             spec_options,

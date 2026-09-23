@@ -536,9 +536,19 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
         AnalysisSpec::AcData {
             table_name,
             frequencies,
+            table_options,
         } => {
             writer.string(table_name);
             encode_f64_slice(writer, frequencies);
+            if *table_options != crate::simulation::config::AcDataTableOptions::default() {
+                writer.domain("ac-data-table-options");
+                writer.bool(table_options.from_netlist);
+                writer.usize(table_options.parameter_columns.len());
+                for column in &table_options.parameter_columns {
+                    writer.string(&column.name);
+                    encode_f64_slice(writer, &column.values);
+                }
+            }
         }
         AnalysisSpec::Disto {
             start_freq,

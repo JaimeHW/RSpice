@@ -13,6 +13,165 @@ use std::cell::RefCell;
 use std::path::Path;
 
 #[test]
+fn studio_ac_data_authored_columns_and_netlist_tables_reach_results() {
+    use crate::simulation::plan::{AcDataDraft, AnalysisDraft};
+    use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
+    use crate::simulation::config::AcDataTableOptions;
+    use crate::simulation::results::SimulationResult;
+
+    let controller = SimulationController::new();
+    let state = AppState::default();
+    let mut draft = AcDataDraft {
+        table_name: "points:1".into(),
+        frequencies: "1k, 0, 1k".into(),
+        ..Default::default()
+    };
+    for (name, values) in [("load", "1k, 2k, 500"), ("R1:R", "1k, 1k, 2k")] {
+        draft.parameter_columns.push(Default::default());
+        let column = draft.parameter_columns.last_mut().unwrap();
+        column.name = name.into();
+        column.values = values.into();
+    }
+    let spec_for = |draft: &AcDataDraft| {
+        let json = serde_json::to_value(draft).unwrap();
+        let restored: AcDataDraft = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&restored).unwrap(), json);
+        let spec = controller
+            .build_manifest_preview_spec(&state, &AnalysisDraft::AcData(restored))
+            .unwrap()
+            .unwrap();
+        spec.validate().unwrap();
+        let worker = WorkerAnalysisSpec::try_from(&spec).unwrap();
+        let worker: WorkerAnalysisSpec =
+            serde_json::from_value(serde_json::to_value(worker).unwrap()).unwrap();
+        assert_eq!(AnalysisSpec::from(worker), spec);
+        spec
+    };
+    for name in ["2026-study", "bad name", "500", "pts+tail", "$pts"] {
+        let mut invalid = draft.clone();
+        invalid.table_name = name.into();
+        assert!(invalid.to_config().is_err(), "accepted table name {name}");
+    }
+    let authored = spec_for(&draft);
+    let cards = SimulationController::build_ac_data_command(&authored).unwrap();
+    let source = format!(
+        "AC row controls\n.param load=900\nV1 in 0 AC 1\nR1 in out 900\nR2 out 0 {{load}}\n{cards}\n.end\n"
+    );
+    for from_netlist in [false, true] {
+        let mut selected = draft.clone();
+        selected.from_netlist = from_netlist;
+        if from_netlist {
+            selected.frequencies = "unfinished frequency".into();
+            selected.parameter_columns[0].values = "unfinished value".into();
+        }
+        let spec = spec_for(&selected);
+        let command = SimulationController::build_ac_data_command(&spec).unwrap();
+        if from_netlist {
+            assert_eq!(command, ".ac DATA=points:1");
+        }
+        let run = crate::simulation::runner::pvt_point_evidence::run_declaration(
+            &source,
+            "AC table",
+            QueuedAnalysis {
+                spec,
+                config: None,
+                spec_options: Default::default(),
+                analysis_line: command,
+                numeric_override: None,
+            },
+            27.0,
+            crate::simulation::execution::SavePolicy::RetainEngineProducedResults,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(run.analyses.len(), 1);
+        let analysis = &run.analyses[0];
+        assert!(analysis.success, "{:?}", analysis.error_message);
+        let output = analysis
+            .waveforms
+            .iter()
+            .find(|waveform| waveform.name.eq_ignore_ascii_case("|V(out)|"))
+            .unwrap();
+        assert_eq!(
+            output.x.iter().copied().collect::<Vec<_>>(),
+            [1000.0, 0.0, 1000.0]
+        );
+        for (actual, expected) in output.y.iter().zip([0.5, 2.0 / 3.0, 0.2]) {
+            assert!((actual - expected).abs() < 1e-10, "{actual} != {expected}");
+        }
+    }
+
+    // Direct worker requests carry complete columns even without generated cards.
+    let AnalysisSpec::AcData {
+        table_name,
+        frequencies,
+        table_options,
+    } = authored
+    else {
+        unreachable!()
+    };
+    let bare = "AC direct\n.param load=900\nV1 in 0 AC 1\nR1 in out 900\nR2 out 0 {load}\n.end\n";
+    let bridge = crate::simulation::EngineBridge::new();
+    let run = |source: &str, frequencies: Vec<f64>, options: &AcDataTableOptions| {
+        bridge.run_ac_data_with_source_path(
+            source,
+            None,
+            &table_name,
+            frequencies,
+            options,
+            &rspice_core::NoAbort,
+        )
+    };
+    let SimulationResult::Ac {
+        waveforms,
+        frequencies: actual_axis,
+        ..
+    } = run(bare, frequencies.clone(), &table_options).unwrap()
+    else {
+        panic!("AC result")
+    };
+    assert_eq!(actual_axis, frequencies);
+    for (actual, expected) in waveforms["V(OUT)"]
+        .y_values
+        .iter()
+        .zip([0.5, 2.0 / 3.0, 0.2])
+    {
+        assert!((actual - expected).abs() < 1e-10);
+    }
+    let mut mismatch = table_options.clone();
+    mismatch.parameter_columns[0].values[0] = 2000.0;
+    assert!(
+        run(&source, frequencies.clone(), &mismatch)
+            .unwrap_err()
+            .to_string()
+            .contains("configured parameter values")
+    );
+    let reference = AcDataTableOptions {
+        from_netlist: true,
+        ..Default::default()
+    };
+    assert!(
+        run(bare, Vec::new(), &reference)
+            .unwrap_err()
+            .to_string()
+            .contains("unknown .DATA table")
+    );
+    for (name, values) in [
+        ("HERTZ", "1 2 3"),
+        ("LOAD", "1 2 3"),
+        ("bad name", "1 2 3"),
+        ("extra", "1 2"),
+    ] {
+        let mut invalid = draft.clone();
+        invalid.parameter_columns.push(Default::default());
+        let column = invalid.parameter_columns.last_mut().unwrap();
+        column.name = name.into();
+        column.values = values.into();
+        assert!(invalid.to_config().is_err(), "{name}: {values}");
+    }
+}
+
+#[test]
 fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
     use crate::simulation::plan::{AnalysisDraft, TransientNoiseDraft};
     use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;

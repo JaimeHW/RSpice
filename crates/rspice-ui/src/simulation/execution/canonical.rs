@@ -1341,6 +1341,61 @@ mod tests {
         assert_eq!(analysis_kind_tag(&exact_pss_spec()), 7);
     }
 
+    #[test]
+    fn ac_data_table_options_preserve_old_requests_and_separate_new_identities() {
+        use crate::simulation::config::AcDataParameterColumn;
+        use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
+        let json = serde_json::json!({"AcData": {"table_name": "pts", "frequencies": [1.0, 0.0]}});
+        let old: AnalysisSpec = serde_json::from_value(json.clone()).unwrap();
+        let worker: WorkerAnalysisSpec = serde_json::from_value(json).unwrap();
+        assert_eq!(AnalysisSpec::from(worker), old);
+        let digest = |spec: &AnalysisSpec| {
+            let mut writer = CanonicalWriter::new("test");
+            encode_analysis_spec(&mut writer, spec);
+            writer.finish()
+        };
+        let mut previous = CanonicalWriter::new("test");
+        previous.domain("analysis-spec");
+        previous.u8(analysis_kind_tag(&old));
+        previous.string("pts");
+        encode_f64_slice(&mut previous, &[1.0, 0.0]);
+        assert_eq!(digest(&old), previous.finish());
+        let mut columns = old.clone();
+        let AnalysisSpec::AcData { table_options, .. } = &mut columns else {
+            unreachable!()
+        };
+        table_options.parameter_columns.push(AcDataParameterColumn {
+            name: "load".into(),
+            values: vec![1000.0, 2000.0],
+        });
+        assert_ne!(digest(&columns), digest(&old));
+        let mut changed = columns.clone();
+        let AnalysisSpec::AcData { table_options, .. } = &mut changed else {
+            unreachable!()
+        };
+        table_options.parameter_columns[0].values[1] = 3000.0;
+        assert_ne!(digest(&changed), digest(&columns));
+        let mut reference = old.clone();
+        let AnalysisSpec::AcData {
+            frequencies,
+            table_options,
+            ..
+        } = &mut reference
+        else {
+            unreachable!()
+        };
+        frequencies.clear();
+        table_options.from_netlist = true;
+        reference.validate().unwrap();
+        assert_ne!(digest(&reference), digest(&old));
+        for spec in [columns, reference] {
+            let worker = WorkerAnalysisSpec::try_from(&spec).unwrap();
+            let restored: WorkerAnalysisSpec =
+                serde_json::from_value(serde_json::to_value(worker).unwrap()).unwrap();
+            assert_eq!(AnalysisSpec::from(restored), spec);
+        }
+    }
+
     /// A transient-noise plan with no authored floor digests to exactly the
     /// bytes it digested to before the field existed.
     ///

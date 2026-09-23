@@ -103,8 +103,9 @@ pub(crate) struct WorkerRequest {
 /// 37: retained HB dependencies carry separate behavioral integral spectra.
 /// 38: QPSS dependencies retain typed behavioral integral coordinates.
 /// 39: transient-noise seeds distinguish inherited settings from explicit zero.
+/// 40: AC DATA carries authored parameter columns or netlist table ownership.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 39;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 40;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty

@@ -742,7 +742,11 @@ fn deterministic_sample_count(
         AnalysisSpec::Qpac { .. } | AnalysisSpec::Qpxf { .. } | AnalysisSpec::Qpnoise { .. } => {
             quasi_periodic_sample_count(spec)
         }
-        AnalysisSpec::AcData { frequencies, .. } => Some(frequencies.len()),
+        AnalysisSpec::AcData {
+            frequencies,
+            table_options,
+            ..
+        } => (!table_options.from_netlist || !frequencies.is_empty()).then_some(frequencies.len()),
         AnalysisSpec::Noise {
             start_freq,
             stop_freq,

@@ -130,6 +130,10 @@ impl SimulationController {
             AnalysisDraft::AcData(draft) => {
                 let config = draft.to_config()?;
                 AnalysisSpec::AcData {
+                    table_options: crate::simulation::config::AcDataTableOptions {
+                        from_netlist: !config.authored,
+                        parameter_columns: config.parameter_columns,
+                    },
                     table_name: config.table_name,
                     frequencies: config.frequencies,
                 }

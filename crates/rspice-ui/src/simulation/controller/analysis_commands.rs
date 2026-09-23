@@ -551,15 +551,12 @@ impl SimulationController {
         let AnalysisSpec::AcData {
             table_name,
             frequencies,
+            table_options,
         } = spec
         else {
             return Err("failed to build AC frequency-table command".to_string());
         };
-        let config = crate::simulation::config::AcDataAnalysisConfig {
-            table_name: table_name.clone(),
-            frequencies: frequencies.clone(),
-            authored: true,
-        };
+        let config = table_options.config(table_name, frequencies.clone());
         config.validate().map_err(|errors| errors.join("; "))?;
         Ok(config.to_spice())
     }
@@ -1199,6 +1196,7 @@ mod tests {
         let spec = AnalysisSpec::AcData {
             table_name: crate::simulation::config::AC_FREQUENCY_TABLE.to_owned(),
             frequencies: frequencies.clone(),
+            table_options: Default::default(),
         };
         let cards = SimulationController::build_ac_data_command(&spec)
             .expect("an AC frequency-table specification writes its own cards");
@@ -1253,6 +1251,7 @@ mod tests {
             let spec = AnalysisSpec::AcData {
                 table_name: crate::simulation::config::AC_FREQUENCY_TABLE.to_owned(),
                 frequencies: frequencies.clone(),
+                table_options: Default::default(),
             };
             assert!(
                 SimulationController::build_ac_data_command(&spec).is_err(),

@@ -126,6 +126,34 @@ pub struct AcDataAnalysisConfig {
     /// Whether the axis was authored here, or imported with a deck's own table
     /// whose row order and row-local overrides belong to its author.
     pub authored: bool,
+    pub parameter_columns: Vec<AcDataParameterColumn>,
+}
+
+/// Values applied with each frequency, in the same row order.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcDataParameterColumn {
+    pub name: String,
+    pub values: Vec<f64>,
+}
+
+/// Ownership of a table-driven AC request. Defaults preserve frequency-only plans.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AcDataTableOptions {
+    pub from_netlist: bool,
+    pub parameter_columns: Vec<AcDataParameterColumn>,
+}
+
+impl AcDataTableOptions {
+    pub fn config(&self, table_name: &str, frequencies: Vec<f64>) -> AcDataAnalysisConfig {
+        AcDataAnalysisConfig {
+            table_name: table_name.to_owned(),
+            frequencies,
+            authored: !self.from_netlist,
+            parameter_columns: self.parameter_columns.clone(),
+        }
+    }
 }
 
 impl Default for AcDataAnalysisConfig {
@@ -134,6 +162,7 @@ impl Default for AcDataAnalysisConfig {
             table_name: super::frequency_table::AC_FREQUENCY_TABLE.to_owned(),
             frequencies: Vec::new(),
             authored: true,
+            parameter_columns: Vec::new(),
         }
     }
 }
@@ -149,21 +178,92 @@ impl AcDataAnalysisConfig {
         if !self.authored {
             return format!(".ac DATA={table}");
         }
-        format!(
-            ".ac DATA={table}\n{}",
-            super::frequency_table::explicit_frequency_table(table, &self.frequencies)
-        )
+        if self.parameter_columns.is_empty() {
+            return format!(
+                ".ac DATA={table}\n{}",
+                super::frequency_table::explicit_frequency_table(table, &self.frequencies)
+            );
+        }
+        let mut text = format!(".ac DATA={table}\n.DATA {table}\n+ HERTZ");
+        for column in &self.parameter_columns {
+            text.push_str(&format!(" {}", column.name));
+        }
+        for row in 0..self.frequencies.len() {
+            text.push_str(&format!("\n+ {:.17e}", self.frequencies[row]));
+            for column in &self.parameter_columns {
+                text.push_str(&format!(" {:.17e}", column.values[row]));
+            }
+        }
+        text.push_str("\n.ENDDATA");
+        text
+    }
+
+    pub(crate) fn authored_table(&self) -> rspice_core::netlist::DataTable {
+        rspice_core::netlist::DataTable {
+            name: self.table_name.clone(),
+            params: std::iter::once("HERTZ".to_owned())
+                .chain(
+                    self.parameter_columns
+                        .iter()
+                        .map(|column| column.name.clone()),
+                )
+                .collect(),
+            rows: self
+                .frequencies
+                .iter()
+                .enumerate()
+                .map(|(row, frequency)| {
+                    std::iter::once(*frequency)
+                        .chain(
+                            self.parameter_columns
+                                .iter()
+                                .map(|column| column.values[row]),
+                        )
+                        .collect()
+                })
+                .collect(),
+        }
     }
 
     /// Validate the complete, executable table-driven configuration.
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
-        if self.table_name.trim().is_empty() {
-            errors.push("AC DATA table name must not be empty".to_owned());
+        if !super::noise::is_single_spice_identifier_token(&self.table_name) {
+            errors.push("AC DATA table name must be a single SPICE identifier".to_owned());
         }
-        errors.extend(super::frequency_table::validate_ac_frequencies(
-            &self.frequencies,
-        ));
+        if self.authored || !self.frequencies.is_empty() {
+            errors.extend(super::frequency_table::validate_ac_frequencies(
+                &self.frequencies,
+            ));
+        }
+        if !self.authored && !self.parameter_columns.is_empty() {
+            errors.push("A netlist-owned table cannot also have authored parameter columns".into());
+        }
+        let mut names = std::collections::BTreeSet::from(["FREQ".to_owned(), "HERTZ".to_owned()]);
+        for column in &self.parameter_columns {
+            if !rspice_core::netlist::data_table_parameter_name_is_valid(&column.name) {
+                errors.push(format!("Invalid AC DATA parameter name '{}'", column.name));
+            }
+            if !names.insert(column.name.to_ascii_uppercase()) {
+                errors.push(format!(
+                    "Duplicate or reserved AC DATA column '{}'",
+                    column.name
+                ));
+            }
+            if column.values.len() != self.frequencies.len() {
+                errors.push(format!(
+                    "AC DATA column '{}' needs one value per frequency ({} values)",
+                    column.name,
+                    self.frequencies.len()
+                ));
+            }
+            if column.values.iter().any(|value| !value.is_finite()) {
+                errors.push(format!(
+                    "AC DATA column '{}' must contain finite values",
+                    column.name
+                ));
+            }
+        }
         if errors.is_empty() {
             Ok(())
         } else {
@@ -249,6 +349,7 @@ mod tests {
             table_name: "pts".to_owned(),
             frequencies: vec![10.0, 1.0],
             authored: false,
+            parameter_columns: Vec::new(),
         };
         assert_eq!(imported.to_spice(), ".ac DATA=pts");
         assert!(

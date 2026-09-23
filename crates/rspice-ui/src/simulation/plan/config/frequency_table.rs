@@ -11,13 +11,17 @@
 use serde::{Deserialize, Serialize};
 
 use crate::simulation::config::{
-    AC_FREQUENCY_TABLE, AcDataAnalysisConfig, parse_ac_frequency_list,
+    AC_FREQUENCY_TABLE, AcDataAnalysisConfig, AcDataParameterColumn, parse_ac_frequency_list,
 };
 
 /// Raw form state for `.AC DATA=<table>`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AcDataDraft {
+    #[serde(default)]
+    pub from_netlist: bool,
+    #[serde(default)]
+    pub parameter_columns: Vec<AcDataParameterDraft>,
     /// Comma-, semicolon- or space-separated frequencies in hertz, exactly as
     /// typed. SI suffixes are accepted, so `1k` is a frequency here.
     pub frequencies: String,
@@ -30,6 +34,13 @@ pub struct AcDataDraft {
     pub table_name: String,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcDataParameterDraft {
+    pub name: String,
+    pub values: String,
+}
+
 fn default_ac_frequency_table() -> String {
     AC_FREQUENCY_TABLE.to_owned()
 }
@@ -37,6 +48,8 @@ fn default_ac_frequency_table() -> String {
 impl Default for AcDataDraft {
     fn default() -> Self {
         Self {
+            from_netlist: false,
+            parameter_columns: Vec::new(),
             // A decade per entry across the audio band: a list that runs as
             // typed, and short enough that the author reads it as an example
             // of the form rather than as a band they have to edit down.
@@ -55,8 +68,34 @@ impl AcDataDraft {
         }
         let config = AcDataAnalysisConfig {
             table_name: table_name.to_owned(),
-            frequencies: parse_ac_frequency_list(&self.frequencies)?,
-            authored: true,
+            frequencies: if self.from_netlist {
+                Vec::new()
+            } else {
+                parse_ac_frequency_list(&self.frequencies)?
+            },
+            authored: !self.from_netlist,
+            parameter_columns: if self.from_netlist {
+                Vec::new()
+            } else {
+                self.parameter_columns
+                    .iter()
+                    .map(|column| {
+                        let values = column
+                            .values
+                            .split(|ch: char| ch == ',' || ch == ';' || ch.is_whitespace())
+                            .filter(|value| !value.is_empty())
+                            .map(|value| {
+                                crate::simulation::spice_value::parse_spice_value_checked(value)
+                                    .map_err(|error| format!("AC DATA {}: {error}", column.name))
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        Ok(AcDataParameterColumn {
+                            name: column.name.trim().to_owned(),
+                            values,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, String>>()?
+            },
         };
         config.validate().map_err(|errors| errors.join("; "))?;
         Ok(config)
@@ -66,6 +105,7 @@ impl AcDataDraft {
     #[must_use]
     pub fn summary(&self) -> String {
         match self.to_config() {
+            Ok(config) if !config.authored => format!("netlist table {}", config.table_name),
             Ok(config) => {
                 let first = config.frequencies.first().copied().unwrap_or_default();
                 let last = config.frequencies.last().copied().unwrap_or_default();

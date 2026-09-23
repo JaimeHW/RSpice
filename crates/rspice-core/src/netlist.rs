@@ -54,7 +54,7 @@ mod xspice_parser;
 
 pub use add_resistors::*;
 pub use ast::*;
-pub use data_table::{FrequencyDataPoint, FrequencyDataTableError};
+pub use data_table::{FrequencyDataPoint, FrequencyDataTableError, data_table_parameter_name_is_valid};
 pub use expr::{
     ParamContext, ParameterRedefinitionDiagnosticPolicy, ParameterRedefinitionPolicy, RandomState,
     StatisticalParamMode,

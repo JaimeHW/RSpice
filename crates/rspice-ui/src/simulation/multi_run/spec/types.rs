@@ -272,6 +272,8 @@ pub enum AnalysisSpec {
     AcData {
         table_name: String,
         frequencies: Vec<f64>,
+        #[serde(default)]
+        table_options: crate::simulation::config::AcDataTableOptions,
     },
     /// Distortion analysis
     Disto {

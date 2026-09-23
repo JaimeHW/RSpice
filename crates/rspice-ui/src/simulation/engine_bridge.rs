@@ -218,11 +218,12 @@ impl EngineBridge {
         source_path: Option<&Path>,
         table_name: &str,
         frequencies: Vec<f64>,
+        table_options: &crate::simulation::config::AcDataTableOptions,
         abort_flag: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
         let netlist =
             self.parse_netlist_with_abort_and_source_path(netlist_str, source_path, abort_flag)?;
-        self.run_ac_data(&netlist, table_name, frequencies, abort_flag)
+        self.run_ac_data(&netlist, table_name, frequencies, table_options, abort_flag)
     }
 
     fn run_request(

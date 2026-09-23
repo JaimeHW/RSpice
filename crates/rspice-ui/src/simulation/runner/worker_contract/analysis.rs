@@ -1208,9 +1208,11 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
             AnalysisSpec::AcData {
                 table_name,
                 frequencies,
+                table_options,
             } => Ok(Self::AcData {
                 table_name: table_name.clone(),
                 frequencies: frequencies.clone(),
+                table_options: table_options.clone(),
             }),
             AnalysisSpec::Noise {
                 output_node,
@@ -1619,9 +1621,11 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
             WorkerAnalysisSpec::AcData {
                 table_name,
                 frequencies,
+                table_options,
             } => Self::AcData {
                 table_name,
                 frequencies,
+                table_options,
             },
             WorkerAnalysisSpec::Noise {
                 output_node,

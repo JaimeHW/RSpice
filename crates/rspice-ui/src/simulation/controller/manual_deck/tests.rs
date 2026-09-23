@@ -287,6 +287,7 @@ fn a_hand_written_ac_data_deck_is_read_as_the_frequency_table_analysis() {
         AnalysisSpec::AcData {
             table_name,
             frequencies,
+            ..
         },
     ] = specs.as_slice()
     else {
@@ -305,6 +306,7 @@ fn the_studio_ac_frequency_table_cards_round_trip_through_the_manual_deck_reader
     let authored = AnalysisSpec::AcData {
         table_name: crate::simulation::config::AC_FREQUENCY_TABLE.to_owned(),
         frequencies: vec![37.0, 74.0, 148.5],
+        table_options: Default::default(),
     };
     let cards = SimulationController::build_ac_data_command(&authored)
         .expect("the plan writes its card and its table");
@@ -319,6 +321,7 @@ fn the_studio_ac_frequency_table_cards_round_trip_through_the_manual_deck_reader
         AnalysisSpec::AcData {
             table_name,
             frequencies,
+            ..
         },
     ] = specs.as_slice()
     else {
@@ -327,6 +330,7 @@ fn the_studio_ac_frequency_table_cards_round_trip_through_the_manual_deck_reader
     let AnalysisSpec::AcData {
         table_name: authored_table,
         frequencies: authored_frequencies,
+        ..
     } = &authored
     else {
         unreachable!("the fixture is a frequency-table specification");
@@ -604,6 +608,7 @@ fn manual_deck_ac_data_uses_table_frequencies() {
     let AnalysisSpec::AcData {
         table_name,
         frequencies,
+        ..
     } = &queue[0].spec
     else {
         panic!("expected AC DATA analysis");

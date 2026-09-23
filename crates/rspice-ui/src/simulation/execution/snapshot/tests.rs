@@ -574,6 +574,7 @@ R1 out 0 1k\n\
             spec: AnalysisSpec::AcData {
                 table_name: "FREQS".to_owned(),
                 frequencies: vec![1.0e3],
+                table_options: Default::default(),
             },
             config: None,
             spec_options: SpecExecutionOptions::default(),
@@ -691,6 +692,7 @@ fn reference_only_run_set_accepts_a_spec_driven_analysis_without_an_environment(
             spec: AnalysisSpec::AcData {
                 table_name: "FREQS".to_owned(),
                 frequencies: vec![1.0e3, 1.0e6],
+                table_options: Default::default(),
             },
             config: None,
             spec_options: SpecExecutionOptions::default(),

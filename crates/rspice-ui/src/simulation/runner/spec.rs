@@ -185,11 +185,13 @@ pub(super) fn run_spec_request_with_environment_and_checkpoint_observer(
         AnalysisSpec::AcData {
             table_name,
             frequencies,
+            table_options,
         } => bridge.run_ac_data_with_source_path(
             netlist,
             source_path,
             &table_name,
             frequencies,
+            &table_options,
             abort_flag,
         ),
         AnalysisSpec::Reliability { .. }
@@ -2009,6 +2011,7 @@ R2 out 0 1k\n\
         let spec = AnalysisSpec::AcData {
             table_name: crate::simulation::config::AC_FREQUENCY_TABLE.to_owned(),
             frequencies: authored.clone(),
+            table_options: Default::default(),
         };
         let cards =
             crate::simulation::controller::SimulationController::build_ac_data_command(&spec)
@@ -2075,6 +2078,7 @@ R2 out 0 1k\n\
                 AnalysisSpec::AcData {
                     table_name: "pts".into(),
                     frequencies,
+                    table_options: Default::default(),
                 },
                 SpecExecutionOptions::default(),
                 deck,
@@ -2112,6 +2116,7 @@ R2 out 0 1k\n\
             AnalysisSpec::AcData {
                 table_name: "measured".to_string(),
                 frequencies: vec![1.0, 10.0, 100.0],
+                table_options: Default::default(),
             },
             SpecExecutionOptions::default(),
             "AC DATA cancellation\n\

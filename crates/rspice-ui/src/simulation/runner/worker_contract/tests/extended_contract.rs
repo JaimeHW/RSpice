@@ -279,6 +279,7 @@ fn analysis_spec_round_trips_supported_variants() {
         AnalysisSpec::AcData {
             table_name: "pts".to_string(),
             frequencies: vec![1.0, 2.5, 10.0],
+            table_options: Default::default(),
         },
         AnalysisSpec::Noise {
             output_node: "out".to_string(),

@@ -106,6 +106,8 @@ pub(crate) enum WorkerAnalysisSpec {
     AcData {
         table_name: String,
         frequencies: Vec<f64>,
+        #[serde(default)]
+        table_options: crate::simulation::config::AcDataTableOptions,
     },
     Noise {
         output_node: String,

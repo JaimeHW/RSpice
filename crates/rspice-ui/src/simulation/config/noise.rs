@@ -385,7 +385,7 @@ impl NoiseAnalysisConfig {
     }
 }
 
-fn is_single_spice_identifier_token(value: &str) -> bool {
+pub(super) fn is_single_spice_identifier_token(value: &str) -> bool {
     use rspice_core::netlist::lexer::TokenKind;
 
     let value = value.trim();

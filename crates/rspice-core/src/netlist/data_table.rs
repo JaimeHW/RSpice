@@ -16,7 +16,7 @@ use std::fmt;
 /// Both the ordinary parser and the textual multi-run expander consume
 /// `.DATA` blocks. Keeping the lexical contract here prevents a deck from
 /// being accepted by one path and interpreted differently by the other.
-pub(crate) fn data_table_parameter_name_is_valid(name: &str) -> bool {
+pub fn data_table_parameter_name_is_valid(name: &str) -> bool {
     let mut chars = name.chars();
     chars
         .next()

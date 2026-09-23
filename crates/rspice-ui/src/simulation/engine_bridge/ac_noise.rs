@@ -70,9 +70,14 @@ impl EngineBridge {
         netlist: &rspice_core::Netlist,
         table_name: &str,
         frequencies: Vec<f64>,
+        table_options: &crate::simulation::config::AcDataTableOptions,
         abort: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
         ensure_not_aborted(abort)?;
+        let config = table_options.config(table_name, frequencies.clone());
+        config
+            .validate()
+            .map_err(|errors| SimulationError::InvalidConfig(errors.join("; ")))?;
         // Older direct worker requests carry only an axis, without a table in
         // their source. A present table is authoritative and must match it.
         if !netlist
@@ -80,27 +85,56 @@ impl EngineBridge {
             .iter()
             .any(|table| table.name.eq_ignore_ascii_case(table_name))
         {
+            if table_options.from_netlist {
+                return Err(SimulationError::InvalidConfig(format!(
+                    "AC DATA references unknown .DATA table '{table_name}'"
+                )));
+            }
+            if !table_options.parameter_columns.is_empty() {
+                let mut netlist = netlist.clone();
+                netlist.data_tables.push(config.authored_table());
+                return self.run_ac_data(&netlist, table_name, frequencies, table_options, abort);
+            }
             return self.run_ac_frequencies(netlist, frequencies, abort);
         }
         let rows = netlist
             .frequency_data_table_points(table_name)
             .map_err(|error| SimulationError::InvalidConfig(format!("AC DATA {error}")))?;
-        if rows.len() != frequencies.len()
-            || rows
-                .iter()
-                .zip(&frequencies)
-                .any(|(row, frequency)| row.frequency.to_bits() != frequency.to_bits())
+        if (!table_options.from_netlist || !frequencies.is_empty())
+            && (rows.len() != frequencies.len()
+                || rows
+                    .iter()
+                    .zip(&frequencies)
+                    .any(|(row, frequency)| row.frequency.to_bits() != frequency.to_bits()))
         {
             return Err(SimulationError::InvalidConfig(
                 "AC DATA table does not match the configured frequency axis".into(),
             ));
+        }
+        if !table_options.parameter_columns.is_empty() {
+            for (index, row) in rows.iter().enumerate() {
+                // Core overrides include the frequency column checked above.
+                if row.overrides.len() != table_options.parameter_columns.len() + 1
+                    || table_options.parameter_columns.iter().any(|column| {
+                        !row.overrides.iter().any(|(name, value)| {
+                            name.eq_ignore_ascii_case(&column.name)
+                                && value.to_bits() == column.values[index].to_bits()
+                        })
+                    })
+                {
+                    return Err(SimulationError::InvalidConfig(format!(
+                        "AC DATA table row {} does not match the configured parameter values",
+                        index + 1
+                    )));
+                }
+            }
         }
         let (_, ac_results) = self
             .engine_for_netlist(netlist)
             .run_ac_data_with_abort(netlist, table_name, abort)
             .map_err(|error| self.translate_error(error))?;
         // An accepted model $finish can terminate the authored row sequence.
-        let mut frequencies = frequencies;
+        let mut frequencies = rows.iter().map(|row| row.frequency).collect::<Vec<_>>();
         frequencies.truncate(ac_results.len());
         Self::finish_ac_run(netlist, frequencies, ac_results, abort)
     }
