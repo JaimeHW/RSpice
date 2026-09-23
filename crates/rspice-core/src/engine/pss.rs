@@ -2400,7 +2400,9 @@ impl Engine {
                 .any(|line| !line.is_memoryless_two_port())
             {
                 self.pss_set_reactive_state(&mut circuit, &coarse.state.x0)?;
-                circuit.delay_basis = circuit.delay_basis.refined(self.config.resource_limits)?;
+                circuit.delay_basis = circuit
+                    .delay_basis
+                    .refined(self.config.resource_limits, abort)?;
                 circuit.extract_state()
             } else {
                 coarse.state.x0.clone()

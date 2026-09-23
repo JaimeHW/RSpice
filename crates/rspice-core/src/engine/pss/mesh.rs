@@ -50,6 +50,10 @@ impl PssIntegrationMesh {
         }
     }
 
+    pub(super) fn times(&self) -> &[Value] {
+        &self.times
+    }
+
     pub(super) fn refinement_midpoint(left: Value, right: Value) -> Option<Value> {
         let midpoint = left + 0.5 * (right - left);
         (midpoint > left && midpoint < right).then_some(midpoint)

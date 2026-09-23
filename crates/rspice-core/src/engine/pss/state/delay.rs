@@ -12,14 +12,30 @@ struct LineCoordinates {
     index: usize,
     intervals: usize,
     delay: Value,
+    /// Explicit physical clocks retain corners that a uniform projection loses.
+    /// None preserves the compact legacy uniform-grid identity.
+    knots: Option<std::sync::Arc<[Value]>>,
 }
 
 impl LineCoordinates {
     fn offset(&self, knot: usize) -> Value {
-        if knot == self.intervals {
+        if let Some(knots) = &self.knots {
+            knots[knot]
+        } else if knot == self.intervals {
             0.0
         } else {
             -self.delay * ((self.intervals - knot) as Value / self.intervals as Value)
+        }
+    }
+
+    fn name(&self, line: &str, knot: usize, port: usize) -> String {
+        match &self.knots {
+            Some(knots) => format!(
+                "W{port}:{line}[{knot}/{}@{:016x}]",
+                self.intervals,
+                knots[knot].to_bits()
+            ),
+            None => format!("W{port}:{line}[{knot}/{}]", self.intervals),
         }
     }
 }
@@ -45,6 +61,11 @@ impl PssDelayBasis {
                 .saturating_mul(4),
             limits.max_result_values,
         )?;
+        if line.offset(0) != -line.delay || line.offset(line.intervals).to_bits() != 0 {
+            return Err(SimulationError::Circuit(
+                "PSS delay-state knots must span exactly [-TD, 0]".into(),
+            ));
+        }
         let mut previous = line.offset(0);
         for knot in 1..=line.intervals {
             let time = line.offset(knot);
@@ -63,6 +84,7 @@ impl PssDelayBasis {
         circuit: &CircuitData,
         period: Value,
         steps: usize,
+        mesh: Option<&PssIntegrationMesh>,
         limits: crate::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<Self, SimulationError> {
@@ -88,14 +110,59 @@ impl PssDelayBasis {
                 )));
             }
             let intervals = count as usize;
-            basis.push(
-                LineCoordinates {
-                    index,
-                    intervals,
-                    delay: line.delay(),
-                },
-                limits,
-            )?;
+            let mut coordinates = LineCoordinates {
+                index,
+                intervals,
+                delay: line.delay(),
+                knots: None,
+            };
+            if let Some(mesh) = mesh {
+                let cycles = (line.delay() / period).ceil() as usize;
+                let capacity = cycles
+                    .saturating_mul(mesh.steps())
+                    .saturating_add(intervals)
+                    .saturating_add(2);
+                let dimension = basis
+                    .dimension
+                    .saturating_add(2usize.saturating_mul(capacity));
+                crate::ResourceLimitError::ensure(
+                    crate::ResourceKind::AnalysisPoints,
+                    dimension,
+                    limits.max_analysis_points,
+                )?;
+                crate::ResourceLimitError::ensure(
+                    crate::ResourceKind::ResultValues,
+                    dimension.saturating_mul(dimension).saturating_mul(4),
+                    limits.max_result_values,
+                )?;
+                let mut knots = Vec::new();
+                knots.try_reserve_exact(capacity).map_err(|_| {
+                    SimulationError::Circuit("PSS delay-state allocation failed".into())
+                })?;
+                knots.extend((0..=intervals).map(|knot| coordinates.offset(knot)));
+                for cycle in 1..=cycles {
+                    if abort.is_aborted() {
+                        return Err(SimulationError::Aborted);
+                    }
+                    let previous_cycles = (cycle - 1) as Value * period;
+                    for (index, &phase) in mesh.times()[..mesh.steps()].iter().enumerate() {
+                        if index & 0xff == 0 && abort.is_aborted() {
+                            return Err(SimulationError::Aborted);
+                        }
+                        // A full cycle*period can overflow even though this
+                        // partial last cycle still intersects the delay window.
+                        let time = (phase - period) - previous_cycles;
+                        if time > -line.delay() && time < 0.0 {
+                            knots.push(time);
+                        }
+                    }
+                }
+                knots.sort_by(Value::total_cmp);
+                knots.dedup();
+                coordinates.intervals = knots.len() - 1;
+                coordinates.knots = Some(knots.into());
+            }
+            basis.push(coordinates, limits)?;
         }
         Ok(basis)
     }
@@ -103,19 +170,54 @@ impl PssDelayBasis {
     pub(in crate::engine::pss) fn refined(
         &self,
         limits: crate::ResourceLimits,
+        abort: &dyn AbortSignal,
     ) -> Result<Self, SimulationError> {
         let mut basis = Self::default();
         for coordinates in &self.lines {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let intervals = coordinates.intervals.checked_mul(2).ok_or_else(|| {
                 SimulationError::Circuit("PSS delay-state refinement overflowed".into())
             })?;
-            basis.push(
-                LineCoordinates {
-                    intervals,
-                    ..coordinates.clone()
-                },
-                limits,
-            )?;
+            let mut refined = LineCoordinates {
+                intervals,
+                ..coordinates.clone()
+            };
+            if let Some(knots) = &coordinates.knots {
+                let dimension = basis
+                    .dimension
+                    .saturating_add(2usize.saturating_mul(intervals.saturating_add(1)));
+                crate::ResourceLimitError::ensure(
+                    crate::ResourceKind::AnalysisPoints,
+                    dimension,
+                    limits.max_analysis_points,
+                )?;
+                crate::ResourceLimitError::ensure(
+                    crate::ResourceKind::ResultValues,
+                    dimension.saturating_mul(dimension).saturating_mul(4),
+                    limits.max_result_values,
+                )?;
+                let mut times = Vec::new();
+                times.try_reserve_exact(intervals + 1).map_err(|_| {
+                    SimulationError::Circuit("PSS delay-state refinement allocation failed".into())
+                })?;
+                for (index, pair) in knots.windows(2).enumerate() {
+                    if index & 0xff == 0 && abort.is_aborted() {
+                        return Err(SimulationError::Aborted);
+                    }
+                    times.push(pair[0]);
+                    if let Some(midpoint) =
+                        PssIntegrationMesh::refinement_midpoint(pair[0], pair[1])
+                    {
+                        times.push(midpoint);
+                    }
+                }
+                times.push(0.0);
+                refined.intervals = times.len() - 1;
+                refined.knots = Some(times.into());
+            }
+            basis.push(refined, limits)?;
         }
         Ok(basis)
     }
@@ -138,7 +240,7 @@ impl PssDelayBasis {
                 .get(basis.dimension)
                 .and_then(|name| name.strip_prefix(&prefix))
                 .and_then(|name| name.strip_suffix(']'))
-                .and_then(|count| count.parse::<usize>().ok())
+                .and_then(|count| count.split('@').next()?.parse::<usize>().ok())
                 .filter(|count| *count >= 8)
                 .ok_or_else(|| {
                     SimulationError::Circuit(format!(
@@ -146,14 +248,62 @@ impl PssDelayBasis {
                         line.name
                     ))
                 })?;
-            basis.push(
-                LineCoordinates {
-                    index,
-                    intervals,
-                    delay: line.delay(),
-                },
-                limits,
+            let mut coordinates = LineCoordinates {
+                index,
+                intervals,
+                delay: line.delay(),
+                knots: None,
+            };
+            let dimension = basis
+                .dimension
+                .saturating_add(2usize.saturating_mul(intervals.saturating_add(1)));
+            crate::ResourceLimitError::ensure(
+                crate::ResourceKind::AnalysisPoints,
+                dimension,
+                limits.max_analysis_points,
             )?;
+            crate::ResourceLimitError::ensure(
+                crate::ResourceKind::ResultValues,
+                dimension.saturating_mul(dimension).saturating_mul(4),
+                limits.max_result_values,
+            )?;
+            if names[basis.dimension]
+                .strip_prefix(&prefix)
+                .is_some_and(|field| field.contains('@'))
+            {
+                let count = intervals
+                    .checked_add(1)
+                    .and_then(|n| n.checked_mul(2))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit("retained PSS delay-state size overflowed".into())
+                    })?;
+                let entries = names
+                    .get(basis.dimension..)
+                    .and_then(|tail| tail.get(..count))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(
+                            "retained PSS delay-state grid is truncated".into(),
+                        )
+                    })?;
+                let mut knots = Vec::new();
+                knots.try_reserve_exact(intervals + 1).map_err(|_| {
+                    SimulationError::Circuit("retained PSS delay-state allocation failed".into())
+                })?;
+                for pair in entries.chunks_exact(2) {
+                    let bits = pair[0]
+                        .rsplit_once('@')
+                        .and_then(|(_, bits)| bits.strip_suffix(']'))
+                        .and_then(|bits| u64::from_str_radix(bits, 16).ok())
+                        .ok_or_else(|| {
+                            SimulationError::Circuit(
+                                "retained PSS delay-state clock is invalid".into(),
+                            )
+                        })?;
+                    knots.push(Value::from_bits(bits));
+                }
+                coordinates.knots = Some(knots.into());
+            }
+            basis.push(coordinates, limits)?;
         }
         if basis.names(circuit) != names {
             return Err(SimulationError::Circuit(
@@ -173,10 +323,7 @@ impl PssDelayBasis {
             .flat_map(|coordinates| {
                 (0..=coordinates.intervals).flat_map(move |knot| {
                     [1, 2].map(|port| {
-                        format!(
-                            "W{port}:{}[{knot}/{}]",
-                            circuit.tlines[coordinates.index].name, coordinates.intervals
-                        )
+                        coordinates.name(&circuit.tlines[coordinates.index].name, knot, port)
                     })
                 })
             })
@@ -256,7 +403,14 @@ impl PssCircuit {
         limits: crate::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
-        self.delay_basis = PssDelayBasis::new(&self.circuit, period, steps, limits, abort)?;
+        self.delay_basis = PssDelayBasis::new(
+            &self.circuit,
+            period,
+            steps,
+            self.integration_mesh.as_ref(),
+            limits,
+            abort,
+        )?;
         Ok(())
     }
 
@@ -283,6 +437,71 @@ impl PssCircuit {
 mod tests {
     use super::*;
     use crate::NoAbort;
+
+    #[test]
+    fn pss_delay_state_retains_corner_clocks_and_portable_basis() {
+        let engine = Engine::new(Default::default());
+        let deck = Netlist::parse("Corner state\nVIN in 0 SIN(0 1 1)\nRS in near 50\nT1 near 0 far 0 Z0=50 TD=1.137\nRL far 0 50\n.end\n").unwrap();
+        let mut circuit = PssCircuit::new(engine.build_circuit(&deck).unwrap()).unwrap();
+        let times = vec![0.0, 0.017, 0.71, 0.76, 0.83, 0.88, 1.0];
+        circuit.integration_mesh =
+            Some(PssIntegrationMesh::from_times(1.0, times.clone()).unwrap());
+        circuit
+            .configure_delay_basis(1.0, 6, Default::default(), &NoAbort)
+            .unwrap();
+        let original = circuit.delay_basis.clone();
+        let knots = original.lines[0].knots.as_ref().unwrap();
+        for &time in &times[..times.len() - 1] {
+            assert!(knots.contains(&(time - 1.0)));
+        }
+        assert!(knots.contains(&((0.88 - 1.0) - 1.0)));
+        let values: Vec<_> = (0..circuit.state_dimension())
+            .map(|k| (k as Value * 0.21).sin())
+            .collect();
+        circuit.set_state(&values).unwrap();
+        let names = circuit.state_basis_names();
+        let mut worker = circuit.clone();
+        worker
+            .restore_delay_basis(&names, Default::default())
+            .unwrap();
+        assert_eq!(worker.state_basis_names(), names);
+        assert_eq!(worker.extract_state(), values);
+        worker.delay_basis = worker
+            .delay_basis
+            .refined(Default::default(), &NoAbort)
+            .unwrap();
+        let fine_knots = worker.delay_basis.lines[0].knots.as_ref().unwrap();
+        for &knot in knots.iter() {
+            assert!(
+                fine_knots
+                    .iter()
+                    .any(|value| value.to_bits() == knot.to_bits())
+            );
+        }
+        let refined = worker.extract_state();
+        worker.set_state(&refined).unwrap();
+        assert_eq!(worker.extract_state(), refined);
+        let mut malformed = names.clone();
+        malformed[0] = malformed[0].replace(
+            &format!("{:016x}", (-1.137_f64).to_bits()),
+            &format!("{:016x}", (-1.138_f64).to_bits()),
+        );
+        assert!(
+            worker
+                .restore_delay_basis(&malformed, Default::default())
+                .is_err()
+        );
+        let mut limits = crate::ResourceLimits::default();
+        limits.max_result_values = 100;
+        assert!(worker.restore_delay_basis(&names, limits).is_err());
+        assert!(matches!(
+            original.refined(
+                Default::default(),
+                &crate::abort_signal::CountingAbort::new(0)
+            ),
+            Err(SimulationError::Aborted)
+        ));
+    }
 
     #[test]
     fn pss_delay_state_preserves_nonperiodic_memory_and_worker_isolation() {
@@ -350,7 +569,10 @@ mod tests {
             assert_eq!(original.i_eq_port2(), rebased.i_eq_port2());
         }
         circuit.set_state(&values).unwrap();
-        circuit.delay_basis = circuit.delay_basis.refined(Default::default()).unwrap();
+        circuit.delay_basis = circuit
+            .delay_basis
+            .refined(Default::default(), &NoAbort)
+            .unwrap();
         let refined = circuit.extract_state();
         for knot in 0..17 {
             assert_eq!(
@@ -374,7 +596,7 @@ mod tests {
         );
         let mut limits = crate::ResourceLimits::default();
         limits.max_result_values = 100;
-        assert!(circuit.delay_basis.refined(limits).is_err());
+        assert!(circuit.delay_basis.refined(limits, &NoAbort).is_err());
         assert!(
             circuit
                 .configure_delay_basis(0.0, 8, Default::default(), &NoAbort)
