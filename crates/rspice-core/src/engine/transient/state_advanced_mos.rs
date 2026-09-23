@@ -1140,11 +1140,12 @@ impl Engine {
                     charge.qchqs,
                     qcdump,
                 );
-                dev.stamp_trnqs_charge_companion(
+                dev.stamp_trnqs_charge_companion_with_probe(
                     &charge,
                     mode,
                     ag0,
                     cqg,
+                    cqgmid,
                     cqb,
                     cqd,
                     cqbs,
@@ -1153,6 +1154,7 @@ impl Engine {
                     cqcdump,
                     voltages,
                     &mut stamper,
+                    false,
                 );
             } else {
                 dev.stamp_charge_companion(

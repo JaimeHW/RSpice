@@ -37,6 +37,8 @@ use crate::{Complex64, NodeId, Value};
 const TRNQS_SCALING: Value = 1.0e-9;
 
 mod ac_response;
+#[cfg(test)]
+mod charge_tests;
 
 /// Mode-assembled charge-companion conductance matrix: the `gc**` of
 /// b4ld.c:4216-4260 (mode > 0) / 4408-4456 (mode < 0) *before* the `ag0`
@@ -416,7 +418,28 @@ impl Bsim4v8Device {
     /// Returns the charge together with the channel mode of that
     /// evaluation, which selects the companion-matrix assembly.
     pub fn charge_at(&self, v: &[Value]) -> (Bsim4v8Charge, i32) {
-        let (bias, junction_bias, _) = self.limited_branch_voltages(v);
+        self.charge_at_with_probe(v, false)
+    }
+
+    fn evaluation_bias(
+        &self,
+        v: &[Value],
+        physical_probe: bool,
+    ) -> (Bsim4v8Bias, Option<Bsim4v8JunctionBias>) {
+        if physical_probe {
+            (self.raw_branch_voltages(v), self.raw_junction_bias(v))
+        } else {
+            let (bias, junction, _) = self.limited_branch_voltages(v);
+            (bias, junction)
+        }
+    }
+
+    pub(crate) fn charge_at_with_probe(
+        &self,
+        v: &[Value],
+        physical_probe: bool,
+    ) -> (Bsim4v8Charge, i32) {
+        let (bias, junction_bias) = self.evaluation_bias(v, physical_probe);
         let gate_mid_vgs = (self.core.model.rgate_mod == 3).then(|| {
             self.core.mtype
                 * (Self::node_voltage(v, self.node_gate_mid)
@@ -451,13 +474,33 @@ impl Bsim4v8Device {
         charge: &Bsim4v8Charge,
         voltages: &[Value],
     ) -> (Value, Value, Value, Value, Value, Value) {
-        let (bias, _, _) = self.limited_branch_voltages(voltages);
-        let vgb = bias.vgs - bias.vbs;
+        self.trnqs_state_charges_with_probe(charge, voltages, false)
+    }
+
+    pub(crate) fn trnqs_state_charges_with_probe(
+        &self,
+        charge: &Bsim4v8Charge,
+        voltages: &[Value],
+        physical_probe: bool,
+    ) -> (Value, Value, Value, Value, Value, Value) {
+        let (bias, _) = self.evaluation_bias(voltages, physical_probe);
+        let middle_gate = self.core.model.rgate_mod == 3;
+        let vgb = if middle_gate {
+            self.core.mtype
+                * (Self::node_voltage(voltages, self.node_gate_mid)
+                    - Self::node_voltage(voltages, self.node_bulk))
+        } else {
+            bias.vgs - bias.vbs
+        };
         let qgb = charge.cgbo * vgb;
-        let qgate = charge.qgdo + charge.qgso + qgb;
+        let overlap = charge.qgdo + charge.qgso + qgb;
+        let (qgate, qgmid) = if middle_gate {
+            (0.0, overlap)
+        } else {
+            (overlap, 0.0)
+        };
         let qbulk = -qgb;
         let qdrn = -charge.qgdo;
-        let qgmid = 0.0;
         let qd = qdrn - charge.qbd;
         let qb = if self.rbody_enabled() {
             qbulk
@@ -1046,7 +1089,28 @@ impl Bsim4v8Device {
         voltages: &[Value],
         matrix: &mut impl MatrixStamper,
     ) {
-        let (bias, junction_bias, _) = self.limited_branch_voltages(voltages);
+        self.stamp_charge_companion_with_probe(
+            charge, mode, ag0, cqg, cqgmid, cqb, cqd, cqbs, cqbd, voltages, matrix, false,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn stamp_charge_companion_with_probe(
+        &self,
+        charge: &Bsim4v8Charge,
+        mode: i32,
+        ag0: Value,
+        cqg: Value,
+        cqgmid: Value,
+        cqb: Value,
+        cqd: Value,
+        cqbs: Value,
+        cqbd: Value,
+        voltages: &[Value],
+        matrix: &mut impl MatrixStamper,
+        physical_probe: bool,
+    ) {
+        let (bias, junction_bias) = self.evaluation_bias(voltages, physical_probe);
         let vgb = bias.vgs - bias.vbs;
         let vbd = bias.vbs - bias.vds;
         let vbs = bias.vbs;
@@ -1136,6 +1200,30 @@ impl Bsim4v8Device {
         voltages: &[Value],
         matrix: &mut impl MatrixStamper,
     ) {
+        self.stamp_trnqs_charge_companion_with_probe(
+            charge, mode, ag0, cqg, 0.0, cqb, cqd, cqbs, cqbd, cqcheq, cqcdump, voltages, matrix,
+            false,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn stamp_trnqs_charge_companion_with_probe(
+        &self,
+        charge: &Bsim4v8Charge,
+        mode: i32,
+        ag0: Value,
+        cqg: Value,
+        cqgmid: Value,
+        cqb: Value,
+        cqd: Value,
+        cqbs: Value,
+        cqbd: Value,
+        cqcheq: Value,
+        cqcdump: Value,
+        voltages: &[Value],
+        matrix: &mut impl MatrixStamper,
+        physical_probe: bool,
+    ) {
         let cox_wl = charge.cox_wl;
         if !(cox_wl > 0.0 && cox_wl.is_finite()) {
             return;
@@ -1151,11 +1239,10 @@ impl Bsim4v8Device {
             return;
         }
 
-        let (bias, junction_bias, _) = self.limited_branch_voltages(voltages);
+        let (bias, _) = self.evaluation_bias(voltages, physical_probe);
         let vgb = bias.vgs - bias.vbs;
         let vbd = bias.vbs - bias.vds;
         let vbs = bias.vbs;
-        let (vbs_jct, vbd_jct) = junction_bias.map(|j| (j.vbs, j.vbd)).unwrap_or((vbs, vbd));
         let qdef = self.trnqs_qdef(voltages);
         let t0 = qdef * TRNQS_SCALING / cox_wl;
 
@@ -1301,46 +1388,33 @@ impl Bsim4v8Device {
             )
         };
 
-        let gcggb = (charge.cgdo + charge.cgso + charge.cgbo) * ag0;
-        let gcgdb = -charge.cgdo * ag0;
-        let gcgsb = -charge.cgso * ag0;
-        let gcgbb = -charge.cgbo * ag0;
-        let gcdgb = gcgdb;
-        let gcsgb = gcgsb;
-        let gcbgb = gcgbb;
-        let gcddb = (charge.capbd + charge.cgdo) * ag0;
-        let gcdsb = 0.0;
-        let gcsdb = 0.0;
-        let gcssb = (charge.capbs + charge.cgso) * ag0;
-        let gcdbb = -(gcdgb + gcddb);
-        let gcsbb = -(gcsgb + gcssb);
-        let gcbdb = -charge.capbd * ag0;
-        let gcbsb = -charge.capbs * ag0;
-        let gcbbb = -(gcbdb + gcbgb + gcbsb);
-
+        // Terminal storage is overlap/junction charge only. Reuse the full
+        // topology-aware companion, including RGATEMOD=3 middle-gate charge.
+        self.stamp_charge_companion_with_probe(
+            &Self::trnqs_overlap_charge(charge),
+            mode,
+            ag0,
+            cqg,
+            cqgmid,
+            cqb,
+            cqd,
+            cqbs,
+            cqbd,
+            voltages,
+            matrix,
+            physical_probe,
+        );
         let nqs_terminal = ggtg * vgb - ggtd * vbd - ggts * vbs;
         let t1 = qdef * gtau;
-        let mut ceqqg = cqg - gcggb * vgb + gcgdb * vbd + gcgsb * vbs + nqs_terminal;
-        let mut ceqqd = cqd - gcdgb * vgb + gcddb * vbd + gcdsb * vbs
-            - dxpart * nqs_terminal
+        let mut ceqqg = nqs_terminal;
+        let mut ceqqd = -dxpart * nqs_terminal
             - t1 * (ddxpart_dvg * vgb - ddxpart_dvd * vbd - ddxpart_dvs * vbs);
-        let mut ceqqb = cqb - gcbgb * vgb + gcbdb * vbd + gcbsb * vbs;
-        let (mut ceqqjs, mut ceqqjd) = (0.0, 0.0);
-        if self.rbody_enabled() {
-            ceqqd += charge.capbd * ag0 * (vbd_jct - vbd);
-            ceqqb += charge.capbd * ag0 * vbd + charge.capbs * ag0 * vbs;
-            ceqqjs = cqbs - charge.capbs * ag0 * vbs_jct;
-            ceqqjd = cqbd - charge.capbd * ag0 * vbd_jct;
-        }
         let gqdef = TRNQS_SCALING * ag0;
         let mut cqdef = cqcdump - gqdef * qdef;
         let mut cqcheq_eq = cqcheq - (gcqgb * vgb - gcqdb * vbd - gcqsb * vbs) + nqs_terminal;
         if self.core.mtype < 0.0 {
             ceqqg = -ceqqg;
             ceqqd = -ceqqd;
-            ceqqb = -ceqqb;
-            ceqqjs = -ceqqjs;
-            ceqqjd = -ceqqjd;
             cqdef = -cqdef;
             cqcheq_eq = -cqcheq_eq;
         }
@@ -1355,77 +1429,29 @@ impl Bsim4v8Device {
         );
         stamp_rhs(matrix, g, -m * ceqqg);
         stamp_rhs(matrix, dp, -m * ceqqd);
-        if self.rbody_enabled() {
-            stamp_rhs(matrix, self.node_drain_body, -m * ceqqjd);
-            stamp_rhs(matrix, b, -m * ceqqb);
-            stamp_rhs(matrix, self.node_source_body, -m * ceqqjs);
-            stamp_rhs(matrix, sp, m * (ceqqg + ceqqb + ceqqd + ceqqjd + ceqqjs));
-        } else {
-            stamp_rhs(matrix, b, -m * ceqqb);
-            stamp_rhs(matrix, sp, m * (ceqqg + ceqqb + ceqqd));
-        }
+        stamp_rhs(matrix, sp, m * (ceqqg + ceqqd));
         stamp_rhs(matrix, q, m * (cqcheq_eq - cqdef));
 
-        stamp(matrix, g, g, m * (gcggb - ggtg));
-        stamp(matrix, g, dp, m * (gcgdb - ggtd));
-        stamp(matrix, g, sp, m * (gcgsb - ggts));
-        stamp(matrix, g, b, m * (gcgbb - ggtb));
-
-        stamp(
-            matrix,
-            dp,
-            dp,
-            m * (t1 * ddxpart_dvd + gcddb + dxpart * ggtd),
-        );
-        stamp(
-            matrix,
-            dp,
-            g,
-            m * (dxpart * ggtg + t1 * ddxpart_dvg + gcdgb),
-        );
-        stamp(
-            matrix,
-            dp,
-            sp,
-            m * (dxpart * ggts + t1 * ddxpart_dvs + gcdsb),
-        );
-        stamp(
-            matrix,
-            dp,
-            b,
-            m * (dxpart * ggtb + gcdbb + t1 * ddxpart_dvb),
-        );
-
-        stamp(
-            matrix,
-            sp,
-            dp,
-            m * (t1 * dsxpart_dvd + sxpart * ggtd + gcsdb),
-        );
-        stamp(
-            matrix,
-            sp,
-            g,
-            m * (gcsgb + sxpart * ggtg + t1 * dsxpart_dvg),
-        );
-        stamp(
-            matrix,
-            sp,
-            sp,
-            m * (sxpart * ggts + t1 * dsxpart_dvs + gcssb),
-        );
-        stamp(
-            matrix,
-            sp,
-            b,
-            m * (gcsbb + sxpart * ggtb + t1 * dsxpart_dvb),
-        );
-
-        stamp(matrix, b, dp, m * gcbdb);
-        stamp(matrix, b, g, m * gcbgb);
-        stamp(matrix, b, sp, m * gcbsb);
-        stamp(matrix, b, b, m * gcbbb);
-
+        for (column, conductance, drain_partition, source_partition) in [
+            (g, ggtg, ddxpart_dvg, dsxpart_dvg),
+            (dp, ggtd, ddxpart_dvd, dsxpart_dvd),
+            (sp, ggts, ddxpart_dvs, dsxpart_dvs),
+            (b, ggtb, ddxpart_dvb, dsxpart_dvb),
+        ] {
+            stamp(matrix, g, column, -m * conductance);
+            stamp(
+                matrix,
+                dp,
+                column,
+                m * (dxpart * conductance + t1 * drain_partition),
+            );
+            stamp(
+                matrix,
+                sp,
+                column,
+                m * (sxpart * conductance + t1 * source_partition),
+            );
+        }
         stamp(matrix, q, q, m * (gqdef + gtau));
         stamp(matrix, q, g, m * (ggtg - gcqgb));
         stamp(matrix, q, dp, m * (ggtd - gcqdb));
@@ -1434,8 +1460,16 @@ impl Bsim4v8Device {
         stamp(matrix, dp, q, m * (dxpart * gtau));
         stamp(matrix, sp, q, m * (sxpart * gtau));
         stamp(matrix, g, q, -m * gtau);
-        if self.rbody_enabled() {
-            self.stamp_rbody_junction_charge_adjustments(charge, ag0, matrix);
+    }
+
+    fn trnqs_overlap_charge(charge: &Bsim4v8Charge) -> Bsim4v8Charge {
+        Bsim4v8Charge {
+            cgdo: charge.cgdo,
+            cgso: charge.cgso,
+            cgbo: charge.cgbo,
+            capbd: charge.capbd,
+            capbs: charge.capbs,
+            ..Bsim4v8Charge::default()
         }
     }
 
