@@ -11,6 +11,7 @@ pub(in crate::engine) struct PssIntegrationMesh {
     /// Provenance of paired samples at a declared ideal source/arrival edge.
     /// Nearby ordinary samples alone never create this ownership.
     sampled_edges: Arc<[SampledEdge]>,
+    boundary_event: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -21,6 +22,20 @@ pub(super) struct SampledEdge {
 }
 
 impl SampledEdge {
+    fn periodic_boundary(self, enabled: bool) -> Self {
+        if enabled && self.time == 0.0 {
+            // One physical phase-zero event owns both limits. Positive-time
+            // traversal resolves it exactly; negative history keeps two
+            // independent coordinates for its incoming/outgoing waves.
+            Self {
+                time: 0.0,
+                incoming: 0.0_f64.next_down(),
+                outgoing: 0.0,
+            }
+        } else {
+            self
+        }
+    }
     fn key(self) -> [u64; 3] {
         [self.time, self.incoming, self.outgoing]
             .map(|time| if time == 0.0 { 0 } else { time.to_bits() })
@@ -36,6 +51,32 @@ impl SampledEdge {
 }
 
 impl PssIntegrationMesh {
+    pub(super) fn has_boundary_event(&self) -> bool {
+        self.boundary_event
+    }
+
+    pub(super) fn is_period_end(&self, time: Value) -> bool {
+        time == self.period
+    }
+
+    pub(super) fn source_side(&self, time: Value) -> crate::circuit::SourceTimeSide {
+        use crate::circuit::SourceTimeSide;
+        if !self.boundary_event {
+            return SourceTimeSide::Published;
+        }
+        if time == 0.0 {
+            SourceTimeSide::RightLimit
+        } else if time == self.period
+            || self
+                .sampled_edges
+                .iter()
+                .any(|edge| edge.time == time && edge.incoming == time && edge.outgoing > time)
+        {
+            SourceTimeSide::LeftLimit
+        } else {
+            SourceTimeSide::Published
+        }
+    }
     pub(super) fn pending_sampled_edges(
         &self,
         delay: Value,
@@ -46,7 +87,12 @@ impl PssIntegrationMesh {
         if self.sampled_edges.is_empty() {
             return Ok(Vec::new());
         }
-        if (endpoint != self.period && endpoint != 0.0) || !delay.is_finite() || delay <= 0.0 {
+        if !endpoint.is_finite()
+            || endpoint < 0.0
+            || endpoint > self.period
+            || !delay.is_finite()
+            || delay <= 0.0
+        {
             return Err(SimulationError::Circuit(
                 "invalid periodic delay event window".into(),
             ));
@@ -122,6 +168,7 @@ impl PssIntegrationMesh {
             times: times.into(),
             delay_corners: Arc::from([]),
             sampled_edges: Arc::from([]),
+            boundary_event: false,
         })
     }
 
@@ -255,6 +302,7 @@ impl PssIntegrationMesh {
         let mut refined = Self::from_times(self.period, times)?;
         refined.delay_corners = self.delay_corners.clone();
         refined.sampled_edges = self.sampled_edges.clone();
+        refined.boundary_event = self.boundary_event;
         Ok((refined, retained))
     }
 }
@@ -338,7 +386,9 @@ impl Engine {
                 } else {
                     phase_delay
                 };
-                let edge = edge.shifted(&[offset]);
+                let edge = edge
+                    .shifted(&[offset])
+                    .periodic_boundary(mesh.boundary_event);
                 if !seen_edges.contains(&edge.key()) {
                     self.ensure_analysis_points(edges.len().saturating_add(1))?;
                     self.ensure_result_values(
@@ -430,6 +480,7 @@ impl Engine {
             })
             .collect();
         refined = PssIntegrationMesh::from_times(period, times)?;
+        refined.boundary_event = mesh.boundary_event;
         refined.delay_corners = corners.into();
         refined.sampled_edges = edges.into();
         added.sort_by(Value::total_cmp);
@@ -625,10 +676,10 @@ impl Engine {
                     after |= outgoing != published;
                 }
             }
-            if before && time > 0.0 {
+            if before && time > 0.0 && time < period {
                 breakpoints.add(time.next_down());
             }
-            if after && time < period {
+            if after && time > 0.0 && time < period {
                 breakpoints.add(time.next_up());
             }
             if before || after {
@@ -641,6 +692,18 @@ impl Engine {
             self.ensure_analysis_points(breakpoints.times().len())?;
         }
         drop(authored);
+        // The source's pre-startup limit need not equal its periodic incoming
+        // limit. Certify the repeated boundary at T, not its first DC-to-time
+        // transition (a constant PWL must not create an orbit event).
+        let boundary_event = source_edges.iter().any(|edge| edge.time == period);
+        source_edges.retain(|edge| edge.time > 0.0 && edge.time < period);
+        if boundary_event {
+            source_edges.push(SampledEdge {
+                time: 0.0,
+                incoming: 0.0_f64.next_down(),
+                outgoing: 0.0,
+            });
+        }
         // Seed the first periodic arrival of each prescribed corner. A delay
         // may span several carrier cycles; only its phase affects this clock,
         // whereas the shooting history still covers the entire physical TD.
@@ -673,7 +736,12 @@ impl Engine {
                 } else {
                     phase_delay
                 };
-                let edge = edge.shifted(&[offset]);
+                let edge = edge.shifted(&[offset]).periodic_boundary(boundary_event);
+                for clock in [edge.incoming, edge.outgoing] {
+                    if clock > 0.0 && clock < period {
+                        breakpoints.add(clock);
+                    }
+                }
                 if !seen_edges.contains(&edge.key()) {
                     self.ensure_analysis_points(sampled_edges.len().saturating_add(1))?;
                     self.ensure_result_values(
@@ -774,7 +842,7 @@ impl Engine {
         let dt = period / steps as Value;
         let mut grid = 0;
         let mut event = 0;
-        let mut changed = false;
+        let mut changed = boundary_event;
         while grid <= steps || event < events.len() {
             if (grid + event) & 0xff == 0 && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
@@ -840,6 +908,7 @@ impl Engine {
         }
         if changed {
             let mut mesh = PssIntegrationMesh::from_times(period, times)?;
+            mesh.boundary_event = boundary_event;
             if circuit
                 .tlines
                 .iter()
@@ -858,6 +927,34 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pss_boundary_provenance_distinguishes_periodic_jumps_from_startup() {
+        let engine = Engine::default();
+        for (points, boundary) in [
+            ("0 1 1 1", false),
+            ("0 0 0 1 1 1", false),
+            ("0 0 0 1 .5 1 .5 0 1 0", true),
+        ] {
+            let deck = Netlist::parse(&format!("boundary ownership\nV1 a 0 PWL({points}) R=0\nT1 a 0 b 0 Z0=50 TD=.1875\nR1 b 0 50\n.end\n")).unwrap();
+            let circuit = engine.build_circuit(&deck).unwrap();
+            let mesh = engine
+                .pss_source_mesh(&circuit, &PssConfig::new(1.0), 16, &NoAbort)
+                .unwrap();
+            assert_eq!(
+                mesh.as_ref()
+                    .is_some_and(PssIntegrationMesh::has_boundary_event),
+                boundary
+            );
+            if !boundary && let Some(mesh) = mesh {
+                assert!(
+                    mesh.pending_sampled_edges(0.1875, 0.0, Default::default(), &NoAbort)
+                        .unwrap()
+                        .is_empty()
+                );
+            }
+        }
+    }
 
     #[test]
     fn sampled_delay_incoming_coordinates_survive_projection_refinement_and_restore() {

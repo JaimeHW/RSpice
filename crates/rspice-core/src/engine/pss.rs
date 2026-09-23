@@ -117,7 +117,7 @@ const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
 // Owned delay events and incoming-coordinate provenance change the period map.
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 99;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 100;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -4158,6 +4158,15 @@ impl Engine {
         }
         let initial_flux_rates = pss.has_initial_flux_rates();
         let initial_charge_rates = pss.has_initial_charge_rates();
+        let source_side = if step.t_next == 0.0 {
+            crate::circuit::SourceTimeSide::RightLimit
+        } else {
+            pss.integration_mesh
+                .as_ref()
+                .map_or(crate::circuit::SourceTimeSide::Published, |mesh| {
+                    mesh.source_side(step.t_next)
+                })
+        };
         let PssCircuit {
             circuit,
             capacitor_trial_currents,
@@ -4183,14 +4192,28 @@ impl Engine {
         // sources overwrite their branch rows; current sources add their
         // complete waveform value to the source-free nodal RHS.
         let num_nodes = circuit.num_nodes();
+        circuit.voltage_sources.update_transient_rhs_on_side(
+            rhs,
+            t_next,
+            |br_ordinal| num_nodes + br_ordinal,
+            source_side,
+        );
         circuit
-            .voltage_sources
-            .update_transient_rhs(rhs, t_next, |br_ordinal| num_nodes + br_ordinal);
-        circuit.current_sources.stamp_transient_rhs(rhs, t_next);
+            .current_sources
+            .stamp_transient_rhs_on_side(rhs, t_next, source_side);
 
         // Every shooting trial reads immutable accepted delay history. Only a
         // converged step appends new outgoing waves to that worker's circuit.
-        Self::stamp_tline_companions(circuit, matrix, rhs, t_next, &[]);
+        let line_side = if source_side == crate::circuit::SourceTimeSide::LeftLimit {
+            crate::device::TransmissionLineTimeSide::Incoming
+        } else {
+            crate::device::TransmissionLineTimeSide::Outgoing
+        };
+        if line_side == crate::device::TransmissionLineTimeSide::Outgoing {
+            Self::stamp_tline_companions(circuit, matrix, rhs, t_next, &[]);
+        } else {
+            Self::stamp_tline_companions_on_side(circuit, matrix, rhs, t_next, &[], line_side);
+        }
 
         // Retain the transient charge law and physical branch-current
         // convention, using the fixed-history step Jacobian for shooting.
@@ -4444,6 +4467,18 @@ impl Engine {
                 matrix.solver_options(),
                 abort,
             )?;
+            if circuit
+                .integration_mesh
+                .as_ref()
+                .is_some_and(PssIntegrationMesh::has_boundary_event)
+            {
+                self.pss_start_boundary_history(
+                    circuit,
+                    &solution,
+                    matrix.solver_options(),
+                    abort,
+                )?;
+            }
         }
         let num_nodes = circuit.num_nodes();
         circuit
@@ -4702,6 +4737,13 @@ impl Engine {
 
             t = t_next;
             first_step = false;
+            let boundary_history = (fixed_grid
+                && t == tstop
+                && circuit
+                    .integration_mesh
+                    .as_ref()
+                    .is_some_and(PssIntegrationMesh::has_boundary_event))
+            .then(|| circuit.bjt_history.clone());
 
             if !fixed_grid {
                 let delay_values = circuit
@@ -4883,7 +4925,7 @@ impl Engine {
             accepted_step_history.accept(dt);
             circuit.accept_source_time(t);
 
-            if fixed_grid && t == tstop {
+            if fixed_grid {
                 self.pss_promote_line_history_events(
                     circuit,
                     &solution,
@@ -4891,6 +4933,20 @@ impl Engine {
                     matrix.solver_options(),
                     abort,
                 )?;
+                if let Some(incoming_history) = boundary_history {
+                    solution = self.transition_pss_boundary(
+                        &mut circuit.circuit,
+                        &mut circuit.bjt_history,
+                        &incoming_history,
+                        &solution,
+                        t,
+                        dt,
+                        matrix.solver_options(),
+                        abort,
+                    )?;
+                    circuit.bjt_snapshot_cache.fill(None);
+                    circuit.accept_node_solution(&solution);
+                }
             }
 
             if let Some(tr) = trace.as_deref_mut() {

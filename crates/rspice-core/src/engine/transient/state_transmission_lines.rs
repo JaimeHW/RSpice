@@ -21,7 +21,7 @@ impl Engine {
         );
     }
 
-    pub(super) fn stamp_tline_companions_on_side(
+    pub(in crate::engine) fn stamp_tline_companions_on_side(
         circuit: &crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],

@@ -315,7 +315,11 @@ impl PssCurrentBasis {
                 if derivative {
                     sources.right_derivative_at_time(index, 0.0)
                 } else {
-                    sources.value_at_time(index, 0.0)
+                    sources.value_at_time_on_side(
+                        index,
+                        0.0,
+                        crate::circuit::SourceTimeSide::RightLimit,
+                    )
                 }
             },
         )

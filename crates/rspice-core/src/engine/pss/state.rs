@@ -143,19 +143,36 @@ impl ForestValue {
         let order = order.checked_add(extra_order).ok_or_else(|| {
             SimulationError::Circuit("PSS source derivative order overflow".to_owned())
         })?;
+        let side = if time == 0.0 {
+            crate::circuit::SourceTimeSide::RightLimit
+        } else {
+            crate::circuit::SourceTimeSide::Published
+        };
         let (name, value) = if kind == ConstraintSource::Current {
             (
                 &circuit.current_sources.names[index],
-                circuit
-                    .current_sources
-                    .time_derivative_at(index, time, order),
+                if time == 0.0 {
+                    circuit
+                        .current_sources
+                        .time_derivative_at_on_side(index, time, order, side)
+                } else {
+                    circuit
+                        .current_sources
+                        .time_derivative_at(index, time, order)
+                },
             )
         } else {
             (
                 &circuit.voltage_sources.names[index],
-                circuit
-                    .voltage_sources
-                    .time_derivative_at(index, time, order),
+                if time == 0.0 {
+                    circuit
+                        .voltage_sources
+                        .time_derivative_at_on_side(index, time, order, side)
+                } else {
+                    circuit
+                        .voltage_sources
+                        .time_derivative_at(index, time, order)
+                },
             )
         };
         value.filter(|value| value.is_finite()).ok_or_else(|| SimulationError::Circuit(format!(

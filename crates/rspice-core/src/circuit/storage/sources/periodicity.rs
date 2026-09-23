@@ -30,14 +30,15 @@ fn periodic_linear_points(
         && delay + start <= 0.0
         && last > start
         && integral_cycles(period / (last - start))
-        && VoltageSources::pwl_time_component::<false>(points, start, 0.0, None) == last_value
         && (!require_continuity
-            || points.windows(2).all(|pair| {
-                let dt = pair[1].0 - pair[0].0;
-                dt >= 0.0
-                    && (pair[0].1 == pair[1].1
-                        || (dt > 0.0 && ((pair[1].1 - pair[0].1) / dt).is_finite()))
-            }))
+            || (VoltageSources::pwl_time_component::<false>(points, start, 0.0, None)
+                == last_value
+                && points.windows(2).all(|pair| {
+                    let dt = pair[1].0 - pair[0].0;
+                    dt >= 0.0
+                        && (pair[0].1 == pair[1].1
+                            || (dt > 0.0 && ((pair[1].1 - pair[0].1) / dt).is_finite()))
+                })))
 }
 
 impl VoltageSources {
@@ -583,6 +584,20 @@ mod tests {
     fn inline_pwl_repeat_boundary_has_no_artificial_endpoint_hold() {
         for scale in [1e-30, 1e-18, 1e-12, 1.0, 1e12, 1e30] {
             let points = [(0.0, 1.0), (scale, 2.0)];
+            assert!(periodic_linear_points(
+                &points,
+                scale,
+                0.0,
+                Some(0.0),
+                false
+            ));
+            assert!(!periodic_linear_points(
+                &points,
+                scale,
+                0.0,
+                Some(0.0),
+                true
+            ));
             let seam = 2.0 * scale;
             assert_eq!(
                 VoltageSources::pwl_time_component::<false>(&points, seam, 0.0, Some(0.0)),

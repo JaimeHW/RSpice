@@ -53,12 +53,17 @@ impl LineCoordinates {
             .is_ok()
     }
 
-    fn with_incoming_edges(&mut self, edges: &[[Value; 3]]) {
+    fn with_incoming_edges(&mut self, edges: &[[Value; 3]], boundary_event: bool) {
         let mut incoming = self.incoming_knots.to_vec();
         incoming.extend(edges.iter().filter_map(|edge| {
             (edge[0] == edge[1] && edge[0] >= -self.delay && edge[0] <= 0.0)
                 .then_some(if edge[0] == 0.0 { 0.0 } else { edge[0] })
         }));
+        if boundary_event {
+            // The physical boundary solver supplies the outgoing endpoint.
+            // Keep its incoming wave as the independent history coordinate.
+            incoming.push(0.0);
+        }
         incoming.sort_by(Value::total_cmp);
         incoming.dedup();
         self.incoming_knots = incoming.into();
@@ -174,6 +179,7 @@ impl PssDelayBasis {
                 knots.extend(
                     edges
                         .iter()
+                        .filter(|edge| !(mesh.has_boundary_event() && edge[0] == 0.0))
                         .flatten()
                         .copied()
                         .filter(|time| *time > -line.delay() && *time < 0.0),
@@ -203,7 +209,7 @@ impl PssDelayBasis {
                 knots.dedup();
                 coordinates.intervals = knots.len() - 1;
                 coordinates.knots = Some(knots.into());
-                coordinates.with_incoming_edges(&edges);
+                coordinates.with_incoming_edges(&edges, mesh.has_boundary_event());
             }
             basis.push(coordinates, limits)?;
         }
@@ -305,6 +311,7 @@ impl PssDelayBasis {
             knots.extend(
                 edges
                     .iter()
+                    .filter(|edge| !(mesh.has_boundary_event() && edge[0] == 0.0))
                     .flatten()
                     .copied()
                     .filter(|time| *time > -coordinates.delay && *time < 0.0),
@@ -331,7 +338,7 @@ impl PssDelayBasis {
                 knots: Some(knots.into()),
                 ..coordinates.clone()
             };
-            enriched.with_incoming_edges(&edges);
+            enriched.with_incoming_edges(&edges, mesh.has_boundary_event());
             basis.push(enriched, limits)?;
         }
         Ok(basis)
@@ -477,7 +484,15 @@ impl PssDelayBasis {
                     } else {
                         crate::device::TransmissionLineTimeSide::Outgoing
                     };
-                    [true, false].map(|forward| line.lossless_wave_at_on_side(time, forward, side))
+                    [true, false].map(|forward| {
+                        line.lossless_shifted_wave_at(
+                            time,
+                            line.accepted_history_time(),
+                            coordinates.offset(knot),
+                            forward,
+                            side,
+                        )
+                    })
                 })
             })
             .collect()
@@ -552,6 +567,14 @@ impl PssCircuit {
     }
 
     pub(in crate::engine::pss) fn accept_delay_history(&mut self, solution: &[Value], time: Value) {
+        let side =
+            if self.integration_mesh.as_ref().is_some_and(|mesh| {
+                mesh.source_side(time) == crate::circuit::SourceTimeSide::LeftLimit
+            }) {
+                crate::device::TransmissionLineTimeSide::Incoming
+            } else {
+                crate::device::TransmissionLineTimeSide::Outgoing
+            };
         for line in &mut self.circuit.tlines {
             if line.is_memoryless_two_port() {
                 continue;
@@ -563,7 +586,8 @@ impl PssCircuit {
             let (i1, i2) = if let Some((one, two)) = line.ltra_branch_matrix_indices() {
                 (solution[one - 1], solution[two - 1])
             } else {
-                line.transient_port_response(time).port_currents(v1, v2)
+                line.transient_port_response_on_side(time, side)
+                    .port_currents(v1, v2)
             };
             line.update_history(time, v1, i1, v2, i2);
         }

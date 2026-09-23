@@ -8,6 +8,7 @@ use charge_event::circuit::{EventPhase, PreparedEventCircuit};
 mod impulses;
 mod lines;
 mod orders;
+mod periodic;
 mod startup;
 pub(in crate::engine::transient) use impulses::PhysicalDeviceImpulses;
 pub(in crate::engine::transient) use orders::PhysicalEventOrders;

@@ -6,6 +6,25 @@ use crate::device::TransmissionLineTimeSide;
 use charge_event::circuit::{EventPhase, PreparedEventCircuit};
 
 impl Engine {
+    pub(in crate::engine::transient) fn pss_physical_event_options(
+        &self,
+        solver: crate::solver::SolverOptions,
+    ) -> charge_event::EventOptions {
+        charge_event::EventOptions {
+            limits: self.config.resource_limits,
+            solver,
+            // Authored RSHUNT is in the physical circuit; shooting adds no
+            // adaptive-transient conditioning conductance.
+            nodal_gmin: 0.0,
+            iterations: self.config.max_iterations,
+            backtracks: 32,
+            voltage_tolerance: self.voltage_abstol(),
+            current_tolerance: self.current_abstol(),
+            charge_tolerance: self.charge_abstol(),
+            relative_tolerance: self.voltage_reltol(),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(in crate::engine) fn pss_endpoint_line_rates(
         &self,
@@ -47,19 +66,7 @@ impl Engine {
             line.promote_sampled_history_events(&edges[..end])
                 .map_err(SimulationError::Circuit)?;
         }
-        let options = charge_event::EventOptions {
-            limits: self.config.resource_limits,
-            solver,
-            // Shooting's physical stamp includes authored RSHUNT itself and
-            // does not add the adaptive transient conditioning conductance.
-            nodal_gmin: 0.0,
-            iterations: self.config.max_iterations,
-            backtracks: 32,
-            voltage_tolerance: self.voltage_abstol(),
-            current_tolerance: self.current_abstol(),
-            charge_tolerance: self.charge_abstol(),
-            relative_tolerance: self.voltage_reltol(),
-        };
+        let options = self.pss_physical_event_options(solver);
         let mut sampler = PreparedEventCircuit::new(
             &resolved,
             self.config.transient_event_flux_abstol,

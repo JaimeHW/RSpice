@@ -25,7 +25,7 @@ fn shooting_delay_keeps_a_period_endpoint_jump_and_its_outgoing_ramp() {
                     .with_points_per_period(16)
                     .with_tstab_periods(0),
             )
-            .unwrap();
+            .unwrap_or_else(|error| panic!("{dialect:?}, TD={delay}: {error}"));
         assert!(pss.is_stable);
         let expected = |time: f64| {
             // Reduce the exact whole-period delay first. Subtracting a long
