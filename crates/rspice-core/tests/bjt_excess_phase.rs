@@ -370,7 +370,7 @@ fn gp_authored_phase_is_preserved_by_each_evaluator_preference() {
 fn gp_pole_zero_requires_a_qualified_delay_descriptor() {
     for (tf, phase) in [(1e-9, 21.0), (1e-9, -21.0), (1e-9, 0.0), (0.0, 21.0)] {
         let source = Netlist::parse(&format!(
-            "GP PZ descriptor\nVCC supply 0 3\nRL supply c 1k\nVB b 0 .6\nQ1 c b 0 mm\n.model mm NPN(LEVEL=1 IS=1e-16 BF=100 RB=100 RBM=20 TF={tf} PTF={phase} CJC=2p)\n.end"
+            "GP PZ descriptor\nVCC supply 0 3\nRL supply c 1k\nVB b 0 .6\nQ1 c b 0 mm\n.model mm NPN(LEVEL=1 IS=1e-16 BF=100 RB=100 RBM=20 TF={tf} PTF={phase} CJE=2p CJC=2p)\n.end"
         )).unwrap();
         let engine = engine(300.15);
         let collector = engine
