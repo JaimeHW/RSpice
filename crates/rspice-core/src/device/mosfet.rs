@@ -35,7 +35,7 @@ pub use bsim3v3::{Bsim3v3, Bsim3v3Device, Bsim3v3EquationSet, Bsim3v3Model};
 pub use bsim4v8::{Bsim4v8, Bsim4v8Device, Bsim4v8Model};
 #[cfg(feature = "parallel")]
 pub(crate) use classic::ClassicMosResidualRowPlan;
-pub(crate) use classic::MosBodyJunctionModel;
+pub(crate) use classic::{AcceptedMosfetNonlinearCheckpoint, MosBodyJunctionModel};
 pub(crate) use classic::{
     ClassicMosCachedStaticTerms, ClassicMosStaticStampPlan, ClassicMosTransientConstants,
     MosfetNonlinearState,

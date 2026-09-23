@@ -15,6 +15,8 @@ use crate::{NodeId, Value};
 /// Keep this much smaller than threshold smoothing to avoid artificial channel
 /// current at Vds≈0 while retaining C1 continuity for Newton.
 mod capacitance;
+mod checkpoint;
+pub(crate) use checkpoint::AcceptedMosfetNonlinearCheckpoint;
 mod construction;
 mod current;
 mod junctions;
