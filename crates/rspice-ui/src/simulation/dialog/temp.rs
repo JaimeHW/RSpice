@@ -162,6 +162,9 @@ pub struct TempDialogState {
     pub temp_stop: String,
     pub temp_step: String,
     pub base_idx: usize,
+    /// Exact saved analysis used at every temperature. None retains legacy shared settings.
+    #[serde(default)]
+    pub base_analysis: Option<crate::product::AnalysisInstanceId>,
     /// Explicit temperatures, comma or space separated. Empty means the range
     /// above is the dimension.
     pub specific_temps: String,
@@ -184,6 +187,8 @@ struct PersistedTempDialogState {
     temp_step: String,
     #[serde(default)]
     base_idx: usize,
+    #[serde(default)]
+    base_analysis: Option<crate::product::AnalysisInstanceId>,
     #[serde(default)]
     specific_temps: Option<String>,
     /// Absent in every project saved before the switch existed, and absent
@@ -216,6 +221,7 @@ impl<'de> Deserialize<'de> for TempDialogState {
             temp_stop: persisted.temp_stop,
             temp_step: persisted.temp_step,
             base_idx: persisted.base_idx,
+            base_analysis: persisted.base_analysis,
             specific_temps,
             axis_mode_idx: persisted.axis_mode_idx.min(TempAxisMode::ALL.len() - 1),
             initialized: false,
@@ -241,6 +247,7 @@ impl TempDialogState {
                 .map(|temperature| format!("{temperature}"))
                 .collect::<Vec<_>>()
                 .join(", "),
+            base_analysis: None,
             axis_mode_idx: 0,
             initialized: true,
         }

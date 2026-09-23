@@ -761,12 +761,28 @@ impl SimulationPlan {
                         Ok(AnalysisDependency::new(dependency.prerequisite, target))
                     })
                     .collect::<Result<Vec<_>, AnalysisPlanError>>()?;
+                let mut draft = source.draft.clone();
+                let base = match &mut draft {
+                    AnalysisDraft::MonteCarlo(state) => Some(&mut state.base_analysis),
+                    AnalysisDraft::Optimization(state) => Some(&mut state.base_analysis),
+                    AnalysisDraft::Temperature(state) => Some(&mut state.base_analysis),
+                    AnalysisDraft::Corner(state) => Some(&mut state.base_analysis),
+                    _ => None,
+                };
+                if let Some(Some(target)) = base {
+                    *target = identity_map.get(target).copied().ok_or(
+                        AnalysisPlanError::DependencyTargetMissing {
+                            dependent: id,
+                            target: *target,
+                        },
+                    )?;
+                }
                 Ok(AnalysisInstance::fresh(
                     id,
                     // Every instance is copied, so the names stay exactly as
                     // unique as they already were in the source plan.
                     source.name.clone(),
-                    source.draft.clone(),
+                    draft,
                     source.enabled,
                     dependencies,
                     source.numeric_override.clone(),

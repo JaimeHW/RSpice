@@ -101,6 +101,13 @@ pub struct AnalysisCategory {
 }
 
 impl AnalysisKind {
+    pub fn supports_pvt_base(self) -> bool {
+        matches!(
+            self,
+            Self::OperatingPoint | Self::Transient | Self::Ac | Self::DcSweep
+        )
+    }
+
     /// All plan-recognized kinds in the stable historical-index order.
     pub const ALL: [Self; 36] = [
         Self::OperatingPoint,

@@ -376,7 +376,18 @@ impl SimSetupState {
             Ok(())
         }
 
-        let mut projection = self.clone();
+        let base = instance.draft().pvt_base_analysis().map(|id| {
+            let base = frozen.instances().iter().find(|candidate| candidate.id() == id)
+                .ok_or_else(|| format!("Study base analysis {id} is missing or disabled"))?;
+            if !base.kind().supports_pvt_base() {
+                return Err(format!("{} cannot be used as a Temperature/Corner base; select operating point, transient, AC or DC sweep", base.display_name()));
+            }
+            Ok(base)
+        }).transpose()?;
+        let mut projection = match base {
+            Some(base) => self.frozen_instance_projection(frozen, base)?,
+            None => self.clone(),
+        };
         let mut applied = HashSet::new();
         let mut visiting = vec![instance.id()];
         for dependency in instance.dependencies() {
@@ -391,6 +402,29 @@ impl SimSetupState {
             )?;
         }
         projection.apply_analysis_draft_projection(instance.draft());
+        if let Some(base) = base {
+            // The legacy builders still read a type index. Derive it from the
+            // bound card; the hidden legacy choice cannot change the request.
+            match instance.draft() {
+                AnalysisDraft::Temperature(_) => {
+                    projection.temp.base_idx = match base.kind() {
+                        AnalysisKind::OperatingPoint => 0,
+                        AnalysisKind::Transient => 1,
+                        AnalysisKind::Ac => 2,
+                        _ => 3,
+                    }
+                }
+                AnalysisDraft::Corner(_) => {
+                    projection.corner.base_analysis_idx = match base.kind() {
+                        AnalysisKind::Transient => 0,
+                        AnalysisKind::Ac => 1,
+                        AnalysisKind::DcSweep => 2,
+                        _ => 3,
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
         if matches!(instance.draft(), AnalysisDraft::OperatingPoint(state) if matches!(state.temperature_mode_idx, 0 | 3))
         {
             projection.op.temperature = self.reference_pvt.temperature_celsius.to_string();

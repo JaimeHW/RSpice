@@ -27,9 +27,14 @@ impl SimulationPlan {
         let base_id = match draft {
             AnalysisDraft::MonteCarlo(state) => state.base_analysis?,
             AnalysisDraft::Optimization(state) => state.base_analysis?,
+            AnalysisDraft::Temperature(state) => state.base_analysis?,
+            AnalysisDraft::Corner(state) => state.base_analysis?,
             _ => return None,
         };
         let base = self.instance(base_id)?;
+        if draft.pvt_base_analysis().is_some() && !base.kind().supports_pvt_base() {
+            return None;
+        }
         if !crate::simulation::runner::study::supports_kind(base.kind()) {
             return None;
         }

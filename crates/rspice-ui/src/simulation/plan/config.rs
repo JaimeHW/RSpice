@@ -553,6 +553,15 @@ macro_rules! initialized_default {
 }
 
 impl AnalysisDraft {
+    /// Saved base used by a Temperature or Corner point expansion.
+    pub fn pvt_base_analysis(&self) -> Option<crate::product::AnalysisInstanceId> {
+        match self {
+            Self::Temperature(state) => state.base_analysis,
+            Self::Corner(state) => state.base_analysis,
+            _ => None,
+        }
+    }
+
     /// Construct the semantic fresh-dialog default for a kind.
     #[must_use]
     pub fn for_kind(kind: AnalysisKind) -> Self {
@@ -642,11 +651,11 @@ impl AnalysisDraft {
                 time_integration: Some(state.study.transient_stress),
                 ..SolverOwnership::NONE
             },
-            Self::Temperature(state) => SolverOwnership {
+            Self::Temperature(state) if state.base_analysis.is_none() => SolverOwnership {
                 time_integration: Some(state.base_idx == 1),
                 ..SolverOwnership::NONE
             },
-            Self::Corner(state) => SolverOwnership {
+            Self::Corner(state) if state.base_analysis.is_none() => SolverOwnership {
                 time_integration: Some(matches!(
                     state.base_analysis(),
                     crate::simulation::dialog::corner::CornerBaseAnalysis::Transient

@@ -83,6 +83,24 @@ pub struct AnalysisNumericOverride {
 }
 
 impl AnalysisNumericOverride {
+    /// Apply a base analysis's options after the enclosing study's defaults.
+    pub(crate) fn with_base_options(mut self, base: &Self) -> Self {
+        for option in NumericOverrideOption::all() {
+            if let Some(value) = base.stated(option) {
+                if option == NumericOverrideOption::OutputTimePoints {
+                    // The parser accumulates exact output times across cards.
+                    if let OverrideValue::TimeList(ref points) = value {
+                        let times = self.output_time_points.get_or_insert_with(Vec::new);
+                        times.extend(points.iter().copied());
+                        continue;
+                    }
+                }
+                self.store(option, Some(value));
+            }
+        }
+        self
+    }
+
     #[must_use]
     pub fn is_empty(&self) -> bool {
         *self == Self::default()

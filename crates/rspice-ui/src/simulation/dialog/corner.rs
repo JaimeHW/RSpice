@@ -276,6 +276,9 @@ impl CornerConfig {
 pub struct CornerDialogState {
     /// Base analysis type index.
     pub base_analysis_idx: usize,
+    /// Exact saved analysis used at every PVT point.
+    #[serde(default)]
+    pub base_analysis: Option<crate::product::AnalysisInstanceId>,
     /// The space a project authored back when this draft owned one.
     ///
     /// A migration alias, never an owner: it is only ever read out of a
@@ -302,6 +305,8 @@ struct CornerDialogStateRepr {
     run_set: Option<RunSetState>,
     #[serde(default)]
     base_analysis_idx: usize,
+    #[serde(default)]
+    base_analysis: Option<crate::product::AnalysisInstanceId>,
     #[serde(default)]
     process_tt: bool,
     #[serde(default)]
@@ -337,6 +342,7 @@ impl From<CornerDialogStateRepr> for CornerDialogState {
         let legacy_run_set = repr.run_set.take().or_else(|| migrate_legacy_space(&repr));
         Self {
             base_analysis_idx: repr.base_analysis_idx,
+            base_analysis: repr.base_analysis,
             legacy_run_set,
             initialized: true,
         }
@@ -437,6 +443,7 @@ impl CornerDialogState {
                 CornerBaseAnalysis::Op => 3,
             },
             legacy_run_set: None,
+            base_analysis: None,
             initialized: true,
         }
     }

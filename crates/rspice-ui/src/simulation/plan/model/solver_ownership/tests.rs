@@ -15,6 +15,8 @@ fn select(plan: &mut SimulationPlan, id: AnalysisInstanceId, base: AnalysisInsta
     plan.edit(id, |draft| match draft {
         AnalysisDraft::MonteCarlo(state) => state.base_analysis = Some(base),
         AnalysisDraft::Optimization(state) => state.base_analysis = Some(base),
+        AnalysisDraft::Temperature(state) => state.base_analysis = Some(base),
+        AnalysisDraft::Corner(state) => state.base_analysis = Some(base),
         _ => unreachable!(),
     })
     .unwrap();
@@ -43,7 +45,12 @@ fn set(
 #[test]
 fn configured_study_defaults_follow_base_ownership_and_restore_without_history_edits() {
     assert!(O::all().count() <= 64);
-    for kind in [AnalysisKind::MonteCarlo, AnalysisKind::Optimization] {
+    for kind in [
+        AnalysisKind::MonteCarlo,
+        AnalysisKind::Optimization,
+        AnalysisKind::Temperature,
+        AnalysisKind::Corner,
+    ] {
         let mut plan = SimulationPlan::empty();
         let ac = plan.insert(AnalysisKind::Ac).unwrap().0;
         let tran = plan.insert(AnalysisKind::Transient).unwrap().0;
@@ -73,6 +80,22 @@ fn configured_study_defaults_follow_base_ownership_and_restore_without_history_e
         ))
         .unwrap();
         assert_eq!(circuit.options.output_time_points, [0.0, 1e-9, 2e-9]);
+        let merged = plan
+            .instance(id)
+            .unwrap()
+            .numeric_override()
+            .unwrap()
+            .clone()
+            .with_base_options(plan.instance(tran).unwrap().numeric_override().unwrap());
+        let merged_circuit = rspice_core::Netlist::parse(&format!(
+            "study timing\nV1 n 0 1\nR1 n 0 1k\n.tran 1n 3n\n{}\n.end\n",
+            merged.to_spice_options(),
+        ))
+        .unwrap();
+        assert_eq!(
+            merged_circuit.options.output_time_points,
+            circuit.options.output_time_points
+        );
         assert_eq!(
             rspice_core::Engine::default()
                 .resolved_for_netlist(&circuit)

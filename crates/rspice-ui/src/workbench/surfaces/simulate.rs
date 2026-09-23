@@ -2313,7 +2313,10 @@ fn analysis_form_body(
         matches!(draft, AnalysisDraft::TransferFunction(_)).then(|| tf_inference_catalog(ui, app));
     let study_bases = if matches!(
         draft,
-        AnalysisDraft::MonteCarlo(_) | AnalysisDraft::Optimization(_)
+        AnalysisDraft::MonteCarlo(_)
+            | AnalysisDraft::Optimization(_)
+            | AnalysisDraft::Temperature(_)
+            | AnalysisDraft::Corner(_)
     ) {
         app.state
             .sim_setup
@@ -2324,7 +2327,14 @@ fn analysis_form_body(
                     .iter()
                     .filter(|instance| {
                         instance.enabled()
-                            && crate::simulation::runner::study::supports_kind(instance.kind())
+                            && if matches!(
+                                draft,
+                                AnalysisDraft::Temperature(_) | AnalysisDraft::Corner(_)
+                            ) {
+                                instance.kind().supports_pvt_base()
+                            } else {
+                                crate::simulation::runner::study::supports_kind(instance.kind())
+                            }
                     })
                     .map(|instance| (instance.id(), instance.display_name().to_owned()))
                     .collect::<Vec<_>>()

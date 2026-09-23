@@ -143,8 +143,10 @@ pub(super) fn temperature_form(
             if action_line(ui, "Edit in PVT, sweeps & variation") {
                 *route = Some(SimulationPage::RunSet);
             }
-            super::choice_row(ui, "Base", &["op", "tran", "ac", "dc"], &mut setup.base_idx);
-            if setup.base_idx == 3 {
+            if setup.base_analysis.is_none() {
+                super::choice_row(ui, "Base", &["op", "tran", "ac", "dc"], &mut setup.base_idx);
+            }
+            if setup.base_analysis.is_none() && setup.base_idx == 3 {
                 field_note(ui, DC_BASE_TRAVELS_ONCE_NOTE);
             }
         }
@@ -173,10 +175,12 @@ pub(super) fn temperature_form(
                 policy,
                 locale,
             );
-            super::choice_row(ui, "Base", &["op", "tran", "ac", "dc"], &mut setup.base_idx);
+            if setup.base_analysis.is_none() {
+                super::choice_row(ui, "Base", &["op", "tran", "ac", "dc"], &mut setup.base_idx);
+            }
             super::input_row(ui, "Explicit list", &mut setup.specific_temps)
                 .on_hover_text("Replaces the range above; leave it empty to sweep the range.");
-            if setup.base_idx == 3 {
+            if setup.base_analysis.is_none() && setup.base_idx == 3 {
                 field_note(ui, DC_BASE_TRAVELS_ONCE_NOTE);
             }
         }
@@ -245,7 +249,7 @@ fn axis_state(
 /// editor.
 pub(super) fn corner_form(
     ui: &mut Ui,
-    base_analysis_idx: &mut usize,
+    setup: &mut crate::simulation::dialog::corner::CornerDialogState,
     context: &RunSpaceContext<'_>,
     route: &mut Option<SimulationPage>,
 ) {
@@ -297,9 +301,16 @@ pub(super) fn corner_form(
     property_row(ui, "Parallelism", &context.parallelism_label());
     property_row(ui, "Failure policy", context.nominal_failure_label());
 
-    sub_header(ui, "At every point");
-    choice_row(ui, "Base", &["tran", "ac", "dc", "op"], base_analysis_idx);
-    if *base_analysis_idx == 2 {
-        field_note(ui, DC_BASE_TRAVELS_ONCE_NOTE);
+    if setup.base_analysis.is_none() {
+        sub_header(ui, "At every point");
+        choice_row(
+            ui,
+            "Base",
+            &["tran", "ac", "dc", "op"],
+            &mut setup.base_analysis_idx,
+        );
+        if setup.base_analysis_idx == 2 {
+            field_note(ui, DC_BASE_TRAVELS_ONCE_NOTE);
+        }
     }
 }

@@ -157,6 +157,39 @@ impl SimulationController {
                 }
             };
 
+            if instance.draft().pvt_base_analysis().is_some() {
+                let mode = spec_options
+                    .temp
+                    .as_mut()
+                    .map(|config| &mut config.base_mode)
+                    .or_else(|| {
+                        spec_options
+                            .corner
+                            .as_mut()
+                            .map(|config| &mut config.base_mode)
+                    });
+                if let Some(mode @ crate::services::simulation_runner::CornerBaseMode::Op) = mode {
+                    let config = self
+                        .build_analysis_spec_for_index(&projected_state, 0)
+                        .and_then(|spec| self.analysis_spec_to_config(&projected_state, &spec));
+                    match config {
+                        Ok(AnalysisConfig::DcOp(config)) => {
+                            *mode =
+                                crate::services::simulation_runner::CornerBaseMode::ConfiguredOp(
+                                    Box::new(config),
+                                );
+                        }
+                        Ok(_) => {
+                            unreachable!("the operating-point builder returns an OP configuration")
+                        }
+                        Err(error) => {
+                            errors.push(format!("{}: {error}", instance.display_name()));
+                            continue;
+                        }
+                    }
+                }
+            }
+
             if matches!(
                 instance.draft(),
                 crate::simulation::plan::AnalysisDraft::MonteCarlo(_)
@@ -240,6 +273,17 @@ impl SimulationController {
                 // circuit, including every producer-local .OPTIONS package.
                 // Consumer response controls travel separately in its spec.
                 carrier.numeric_override().cloned()
+            } else if let Some(base_id) = instance.draft().pvt_base_analysis() {
+                let base = plan
+                    .instances()
+                    .iter()
+                    .find(|base| base.id() == base_id)
+                    .expect("PVT base was resolved by frozen_instance_projection");
+                let mut options = instance.numeric_override().cloned().unwrap_or_default();
+                if let Some(base_options) = base.numeric_override() {
+                    options = options.with_base_options(base_options);
+                }
+                (!options.is_empty()).then_some(options)
             } else {
                 instance.numeric_override().cloned()
             };
@@ -896,6 +940,219 @@ fn invalid_saved_output_reports(
 mod tests {
     use super::*;
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+
+    #[test]
+    fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
+        use crate::services::simulation_runner::CornerBaseMode;
+        use crate::simulation::plan::{
+            AnalysisNumericOverride, NumericOverrideOption as O, SimulationPlan,
+        };
+        use crate::simulation::runner::worker_contract::WorkerCornerBaseMode;
+        for wrapper in [AnalysisKind::Temperature, AnalysisKind::Corner] {
+            for kind in [
+                AnalysisKind::OperatingPoint,
+                AnalysisKind::Transient,
+                AnalysisKind::Ac,
+                AnalysisKind::DcSweep,
+            ] {
+                let mut state = AppState::default();
+                state.sim_setup.analysis_plan = Some(SimulationPlan::empty());
+                let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+                let op = plan.insert(AnalysisKind::OperatingPoint).unwrap().0;
+                let base = plan.insert(kind).unwrap().0;
+                let other = plan.insert(kind).unwrap().0;
+                for id in [base, other] {
+                    for prerequisite in kind.prerequisites() {
+                        plan.bind_dependency(id, *prerequisite, op).unwrap();
+                    }
+                }
+                plan.edit(base, |draft| match draft {
+                    AnalysisDraft::OperatingPoint(draft) => {
+                        draft.node_initialization_idx = 2;
+                        draft.initial_guess_idx = 2;
+                        draft.accuracy_idx = 2;
+                        draft.homotopy_idx = 4;
+                    }
+                    AnalysisDraft::Transient(draft) => {
+                        draft.stop = "0.003".into();
+                        draft.step = "0.00001".into();
+                        draft.start = "0.001".into();
+                        draft.max_step = "0.000002".into();
+                        draft.uic = true;
+                    }
+                    AnalysisDraft::Ac(draft) => {
+                        draft.fstart = "100".into();
+                        draft.fstop = "1000".into();
+                        draft.points = "7".into();
+                        draft.sweep = 1;
+                    }
+                    AnalysisDraft::DcSweep(draft) => {
+                        draft.source = "Vselected".into();
+                        draft.mode = 1;
+                        draft.values = "0 0.5 1 0.5".into();
+                        draft.nested = true;
+                        draft.source2 = "Vouter".into();
+                        draft.mode2 = 1;
+                        draft.values2 = "1 2".into();
+                    }
+                    _ => unreachable!(),
+                })
+                .unwrap();
+                let mut numeric = AnalysisNumericOverride::default();
+                numeric
+                    .set_for_instance(kind, plan.solver_ownership(base), O::Gmin, "1e-9")
+                    .unwrap();
+                plan.set_numeric_override(base, Some(numeric)).unwrap();
+                let study = plan.insert(wrapper).unwrap().0;
+                plan.edit(study, |draft| match draft {
+                    AnalysisDraft::Temperature(draft) => {
+                        draft.base_analysis = Some(base);
+                        draft.base_idx = 3;
+                    }
+                    AnalysisDraft::Corner(draft) => {
+                        draft.base_analysis = Some(base);
+                        draft.base_analysis_idx = 2;
+                    }
+                    _ => unreachable!(),
+                })
+                .unwrap();
+                let mut numeric = AnalysisNumericOverride::default();
+                numeric
+                    .set_for_instance(wrapper, plan.solver_ownership(study), O::Pivrel, "1e-4")
+                    .unwrap();
+                plan.set_numeric_override(study, Some(numeric)).unwrap();
+                let mut restored: SimulationPlan =
+                    serde_json::from_value(serde_json::to_value(&*plan).unwrap()).unwrap();
+                restored.prepare_after_restore();
+                assert_eq!(
+                    restored
+                        .instance(study)
+                        .unwrap()
+                        .draft()
+                        .pvt_base_analysis(),
+                    Some(base)
+                );
+                let cloned = restored.clone_as_new().unwrap();
+                assert_eq!(
+                    cloned.instances()[3].draft().pvt_base_analysis(),
+                    Some(cloned.instances()[1].id())
+                );
+                let frozen = restored.freeze().unwrap();
+                // Shared setup and later live base edits must not replace frozen values.
+                state.sim_setup.tran.stop = "invalid".into();
+                state.sim_setup.ac.fstop = "invalid".into();
+                state.sim_setup.dc.source = "Vwrong".into();
+                state
+                    .sim_setup
+                    .analysis_plan
+                    .as_mut()
+                    .unwrap()
+                    .edit(base, |draft| {
+                        *draft = AnalysisDraft::for_kind(kind);
+                    })
+                    .unwrap();
+                let sealed = state
+                    .model_library_manager
+                    .seal_execution_sources()
+                    .unwrap();
+                let controller = SimulationController::new();
+                let tasks = controller
+                    .build_queue_from_plan(&state, &frozen, &sealed)
+                    .unwrap();
+                let task = tasks
+                    .iter()
+                    .find(|task| task.instance_id() == study)
+                    .unwrap();
+                let queued = task.queued_analysis();
+                let mode = queued
+                    .spec_options
+                    .temp
+                    .as_ref()
+                    .map(|config| &config.base_mode)
+                    .or_else(|| {
+                        queued
+                            .spec_options
+                            .corner
+                            .as_ref()
+                            .map(|config| &config.base_mode)
+                    })
+                    .unwrap();
+                let wire = WorkerCornerBaseMode::from(mode);
+                let restored_wire: WorkerCornerBaseMode =
+                    serde_json::from_value(serde_json::to_value(&wire).unwrap()).unwrap();
+                assert_eq!(wire, restored_wire);
+                match mode {
+                    CornerBaseMode::ConfiguredOp(config) => {
+                        assert_eq!(
+                            config.node_initialization,
+                            crate::simulation::dialog::OpNodeInitialization::ForceIcValues
+                        );
+                        assert_eq!(
+                            config.initial_guess,
+                            crate::simulation::dialog::OpInitialGuess::UserNodeVoltages
+                        );
+                        assert_eq!(config.homotopy, crate::simulation::dialog::OpHomotopy::None);
+                    }
+                    CornerBaseMode::TransientWindow {
+                        stop_time,
+                        step_time,
+                        start_time,
+                        max_timestep,
+                        uic,
+                    } => {
+                        assert_eq!(
+                            (*stop_time, *step_time, *start_time, *max_timestep, *uic),
+                            (0.003, 0.00001, 0.001, Some(0.000002), true)
+                        );
+                    }
+                    CornerBaseMode::Ac {
+                        start_freq,
+                        stop_freq,
+                        points_per_unit,
+                        sweep,
+                    } => {
+                        assert_eq!(
+                            (*start_freq, *stop_freq, *points_per_unit),
+                            (100.0, 1000.0, 7)
+                        );
+                        assert_eq!(
+                            *sweep,
+                            crate::services::simulation_runner::CornerFrequencySweep::Octave
+                        );
+                    }
+                    CornerBaseMode::DcSweepNested {
+                        source_name,
+                        source2,
+                        modes,
+                        ..
+                    } => {
+                        assert_eq!(
+                            (source_name.as_str(), source2.as_str()),
+                            ("Vselected", "Vouter")
+                        );
+                        assert_eq!(
+                            modes.primary.spec(0.0, 0.0, 1.0).mode,
+                            rspice_core::netlist::DcSweepMode::List(vec![0.0, 0.5, 1.0, 0.5])
+                        );
+                    }
+                    other => panic!("wrong bound base: {other:?}"),
+                }
+                let numeric = queued.numeric_override.as_ref().unwrap();
+                assert!(numeric.stated(O::Gmin).is_some());
+                assert!(numeric.stated(O::Pivrel).is_some());
+                restored.set_enabled(base, false).unwrap();
+                let errors = controller
+                    .build_queue_from_plan(&state, &restored.freeze().unwrap(), &sealed)
+                    .unwrap_err();
+                assert!(
+                    errors
+                        .iter()
+                        .any(|error| error.contains("missing or disabled")),
+                    "{errors:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn qp_study_freezes_the_exact_producer_and_complete_consumer_controls() {

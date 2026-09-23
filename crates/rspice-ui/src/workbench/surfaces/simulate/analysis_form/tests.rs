@@ -212,7 +212,7 @@ fn corner_form_height(run_set: &crate::simulation::run_set::RunSetState) -> f32 
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut height = 0.0;
-    let mut base_analysis_idx = 0;
+    let mut corner = crate::simulation::dialog::corner::CornerDialogState::default();
     let _ = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -226,7 +226,7 @@ fn corner_form_height(run_set: &crate::simulation::run_set::RunSetState) -> f32 
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
                     let top = ui.cursor().top();
-                    run_space::corner_form(ui, &mut base_analysis_idx, &context, &mut None);
+                    run_space::corner_form(ui, &mut corner, &context, &mut None);
                     height = ui.cursor().top() - top;
                 });
         },

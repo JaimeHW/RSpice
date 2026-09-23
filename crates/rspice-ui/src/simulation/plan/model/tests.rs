@@ -11,6 +11,40 @@ fn snapshot(plan: &SimulationPlan) -> String {
 }
 
 #[test]
+fn pvt_selected_and_other_study_clones_rebind_their_bases() {
+    for kind in [
+        AnalysisKind::Temperature,
+        AnalysisKind::Corner,
+        AnalysisKind::MonteCarlo,
+        AnalysisKind::Optimization,
+    ] {
+        let mut plan = SimulationPlan::empty();
+        let base = plan.insert(AnalysisKind::OperatingPoint).unwrap().0;
+        let study = plan.insert(kind).unwrap().0;
+        plan.edit(study, |draft| match draft {
+            AnalysisDraft::Temperature(state) => state.base_analysis = Some(base),
+            AnalysisDraft::Corner(state) => state.base_analysis = Some(base),
+            AnalysisDraft::MonteCarlo(state) => state.base_analysis = Some(base),
+            AnalysisDraft::Optimization(state) => state.base_analysis = Some(base),
+            _ => unreachable!(),
+        })
+        .unwrap();
+        let original = snapshot(&plan);
+        let clone = plan.clone_as_new().unwrap();
+        let selected = match clone.instances()[1].draft() {
+            AnalysisDraft::Temperature(state) => state.base_analysis,
+            AnalysisDraft::Corner(state) => state.base_analysis,
+            AnalysisDraft::MonteCarlo(state) => state.base_analysis,
+            AnalysisDraft::Optimization(state) => state.base_analysis,
+            _ => unreachable!(),
+        };
+        assert_eq!(selected, Some(clone.instances()[0].id()));
+        assert_ne!(selected, Some(base));
+        assert_eq!(snapshot(&plan), original);
+    }
+}
+
+#[test]
 fn pvt_base_controls_restore_and_mode_changes_preserve_effective_settings() {
     for kind in [AnalysisKind::Temperature, AnalysisKind::Corner] {
         let mut plan = SimulationPlan::empty();

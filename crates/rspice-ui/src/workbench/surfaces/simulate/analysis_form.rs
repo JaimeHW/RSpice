@@ -1116,6 +1116,18 @@ pub(super) fn form(
         // because two temperature declarations that silently disagree is
         // the same defect the corner form above was built to stop.
         AnalysisDraft::Temperature(setup) => {
+            study_base_row(
+                ui,
+                &mut setup.base_analysis,
+                study_bases,
+                "Shared base settings (legacy)",
+            );
+            if setup.base_analysis.is_some() {
+                field_note(
+                    ui,
+                    "Uses the selected analysis's settings at every temperature. Edit that analysis to change its configuration.",
+                );
+            }
             run_space::temperature_form(ui, setup, run_space, route, policy, locale)
         }
         AnalysisDraft::HarmonicBalance(setup) => {
@@ -1137,7 +1149,19 @@ pub(super) fn form(
         // behind them, would be a second owner of the same fact, and the
         // two would eventually disagree about how many points run.
         AnalysisDraft::Corner(setup) => {
-            run_space::corner_form(ui, &mut setup.base_analysis_idx, run_space, route)
+            study_base_row(
+                ui,
+                &mut setup.base_analysis,
+                study_bases,
+                "Shared base settings (legacy)",
+            );
+            if setup.base_analysis.is_some() {
+                field_note(
+                    ui,
+                    "Uses the selected analysis's settings at every PVT point. Edit that analysis to change its configuration.",
+                );
+            }
+            run_space::corner_form(ui, setup, run_space, route)
         }
         AnalysisDraft::Envelope(setup) => {
             envelope::fields(ui, setup, envelope_modulation_sources, policy, locale)
