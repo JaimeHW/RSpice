@@ -1,6 +1,11 @@
 //! Netlist execution and retained independent-phase operating points.
 mod autonomous;
 mod bindings;
+mod envelope;
+pub use envelope::{
+    EnvelopeCarrierBasis, EnvelopeSourceSide, NetlistEnvelopeAdvance, NetlistEnvelopeState,
+    PreparedSpectralEnvelope, SpectralEnvelopeConfig,
+};
 pub use autonomous::{QpssOscillator, QpssOscillatorSeed};
 mod card;
 mod frequency_sweep;

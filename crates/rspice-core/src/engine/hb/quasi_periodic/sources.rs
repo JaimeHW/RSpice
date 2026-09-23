@@ -194,8 +194,28 @@ pub(super) fn build(
     grid: Arc<QuasiPeriodicGrid>,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<Vec<Complex64>>, SimulationError> {
+    build_with_excluded_sources(
+        engine,
+        circuit,
+        &config.source_tones,
+        grid,
+        &BTreeSet::new(),
+        abort,
+    )
+}
+
+/// Excluded independent sources are supplied separately in slow time. Never
+/// project their transient clocks or retain a separate AC carrier annotation.
+pub(super) fn build_with_excluded_sources(
+    engine: &Engine,
+    circuit: &CircuitData,
+    source_tones: &[QpssSourceTone],
+    grid: Arc<QuasiPeriodicGrid>,
+    excluded: &BTreeSet<String>,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<Vec<Complex64>>, SimulationError> {
     let mut bindings: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-    for binding in &config.source_tones {
+    for binding in source_tones {
         check_abort(abort)?;
         if binding.source.trim() != binding.source
             || binding.source.is_empty()
@@ -203,6 +223,11 @@ pub(super) fn build(
         {
             return Err(invalid(
                 "source tone binding needs an exact source name and a valid zero-based tone index",
+            ));
+        }
+        if excluded.contains(&binding.source.to_ascii_lowercase()) {
+            return Err(invalid(
+                "a slow-time source cannot also have a carrier tone binding",
             ));
         }
         if !circuit
@@ -265,6 +290,9 @@ pub(super) fn build(
     ] {
         for (index, name) in names.iter().enumerate() {
             check_abort(abort)?;
+            if excluded.contains(&name.to_ascii_lowercase()) {
+                continue;
+            }
             let tones = bindings
                 .get(&name.to_ascii_lowercase())
                 .map(Vec::as_slice)

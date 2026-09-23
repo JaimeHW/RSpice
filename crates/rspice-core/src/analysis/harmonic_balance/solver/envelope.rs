@@ -8,6 +8,10 @@ use crate::analysis::quasi_periodic::{
 };
 
 impl HbSolver {
+    pub(crate) fn validate_spectral_envelope_circuit(&self) -> Result<(), Error> {
+        self.envelope_storage().map(|_| ())
+    }
+
     fn envelope_storage(&self) -> Result<Vec<JacobianEntry>, Error> {
         self.validate_quasi_periodic_circuit()?;
         // A distributed Y(jw) needs slow-time convolution/state equations.
