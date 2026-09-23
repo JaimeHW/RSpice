@@ -186,7 +186,8 @@ impl AnalysisResultPayload {
 
 fn parameter_unit(parameter: &str) -> &'static str {
     match parameter.to_ascii_uppercase().as_str() {
-        "VTO" | "PHI" => "V",
+        "VTO" | "VTH0" | "PHI" => "V",
+        "VSAT" => "m/s",
         "KP" => "A/V²",
         "GAMMA" => "√V",
         _ => "model units",

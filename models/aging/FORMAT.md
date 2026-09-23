@@ -91,9 +91,8 @@ it is not process calibration**:
   Contributions to the same parameter sum; their update modes must agree.
 - Additive updates use `aged = fresh + shift`; relative updates use
   `aged = fresh * (1 + shift)`. A relative shift at or below `-1` is rejected.
-  Circuit re-simulation currently maps explicit `VTO`, `KP`, `GAMMA`, and `PHI`
-  parameters on native classic MOS levels 1–3. Other parameter/model adapters
-  require separate implementation; an unknown name is never silently ignored.
+  Circuit re-simulation uses the model-family mappings below. An unknown or
+  inactive parameter is never silently ignored.
 - **Min stress V** suppresses capture below the gate magnitude threshold.
   Emission/recovery continues at the actual bias and temperature. Choose zero
   to use both table rates at every bias.
@@ -114,6 +113,44 @@ it is not process calibration**:
 Limits: 4 MiB per imported pack, 1,024 models, 1,024 populations per table,
 131,072 total rate values per table (capture and emission combined), and
 128 parameter couplings per population. No extrapolation is performed.
+
+## Circuit parameter mappings
+
+These mappings apply to both power-law and trapping fits. A parameter must have
+an explicit numeric fresh value on the selected model card, including a resolved
+expression. The instance keeps its geometry, geometry-bin selection, temperature
+coefficients and instance modifiers. Other instances sharing that card stay fresh.
+
+| Native family | Aging parameters |
+| --- | --- |
+| Classic MOS levels 1–3 | `VTO`, `KP`, `GAMMA`, `PHI` |
+| BSIM3 (levels 8/49, or Xyce-selected level 9) | `VTH0`, `U0`, `VSAT`, `RDSW` |
+| BSIM4 (levels 14/54), `RDSMOD=0` | `VTH0`, `U0`, `VSAT`, `RDSW`, `RDSWMIN` |
+| BSIM4, `RDSMOD=1` | `VTH0`, `U0`, `VSAT`, `RDW`, `RSW`, `RDWMIN`, `RSWMIN` |
+
+The simulator dialect still controls model availability and equations. Ngspice
+level 9 is MOS9, so it does not use the BSIM3 adapter. A canonical `VTH0` aging
+coordinate can read a fresh `VTHO` alias; explicit `VTH0` takes precedence.
+
+Shifts apply to the nominal card coefficient before the native L/W/cross-term
+binning, temperature dependence, and instance modifiers. A negative nominal
+coefficient is not automatically invalid if its binned physical value is valid.
+Threshold voltage is in volts and saturation velocity is in metres per second.
+Resistance coordinates retain the selected model's width normalization.
+
+BSIM mobility shifts retain the fresh instance's input-unit convention: the
+native model interprets binned `U0 > 1` as cm²/(V·s), otherwise m²/(V·s).
+That fresh convention also applies to additive shifts and their reported aged
+values. The adapter re-encodes all mobility coefficients on the private aged
+card when necessary, so an aging shift across 1 cannot accidentally change
+mobility by a factor of 10,000. L/W/cross-term coefficients are converted
+together, preserving their physical bin contributions. The fitted shift changes
+the nominal coefficient. `MULU0` remains an instance modifier.
+
+The native BSIM3/BSIM4 ports use circuit temperature, so their reliability stress
+uses the mission phase temperature, including when the instance contains a
+`DTEMP` value that the native equations do not use. Classic MOS retains its native
+instance `TEMP`/`DTEMP` behavior. Stress remains based on the fresh circuit.
 
 The kinetics and periodic-history equations are described in
 [Gerhard Rzepa's thesis, section 4.5](https://www.iue.tuwien.ac.at/phd/rzepa/).
