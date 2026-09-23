@@ -294,8 +294,10 @@ fn bounded_moments_handle_tails_limits_and_cancellation() {
         ),
         Err(SpectreStatisticsError::Aborted)
     ));
-    let mut limits = ResourceLimits::default();
-    limits.max_analysis_points = 512;
+    let limits = ResourceLimits {
+        max_analysis_points: 512,
+        ..Default::default()
+    };
     assert!(
         plan.scope_moments_with_abort(
             SpectreVariationScope::Process,
