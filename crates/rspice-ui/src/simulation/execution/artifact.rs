@@ -247,12 +247,7 @@ pub(in crate::simulation) fn validate_prepared_dependency_contract_with_options(
         consumer,
         AnalysisSpec::Qpac { .. } | AnalysisSpec::Qpnoise { .. } | AnalysisSpec::Qpxf { .. }
     ) {
-        let config = if matches!(consumer, AnalysisSpec::Qpnoise { .. }) {
-            producer.driven_qpss_config()
-        } else {
-            producer.qpss_config()
-        };
-        return config.map(|_| ()).map_err(|error| {
+        return producer.qpss_config().map(|_| ()).map_err(|error| {
             ExecutionArtifactError::ContractMismatch(format!(
                 "{} requires a compatible QPSS producer: {error}",
                 consumer.run_type().display_name()

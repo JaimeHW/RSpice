@@ -163,6 +163,9 @@ pub(super) fn fields(
         ui.small("Leave both limits empty for the full sweep. The sweep must cover the requested band. Undefined input samples are never bridged; log-log interpolation uses linear segments at zero frequency or density.");
     }
     switch_row(ui, "Rank noise contributors", &mut s.contributor_ranking);
+    if s.integrated_noise || s.contributor_ranking {
+        ui.small("For an autonomous oscillator, keep integration samples on one side of each oscillator spectral line. Integration across a free-phase pole is undefined.");
+    }
     switch_row(ui, "Noise figure", &mut s.noise_figure);
     if s.noise_figure {
         input_row(ui, "Series source resistor", &mut s.source_resistor);

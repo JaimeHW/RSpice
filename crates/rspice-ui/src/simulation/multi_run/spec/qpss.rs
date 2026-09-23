@@ -165,7 +165,7 @@ impl AnalysisSpec {
     pub fn driven_qpss_config(&self) -> Result<QpssConfig, String> {
         let config = self.qpss_config()?;
         if config.oscillator.is_some() {
-            return Err("autonomous QPSS response requires oscillator phase-response equations, which are not connected".into());
+            return Err("a driven QPSS configuration cannot use an autonomous oscillator".into());
         }
         Ok(config)
     }
