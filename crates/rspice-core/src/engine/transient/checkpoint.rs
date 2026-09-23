@@ -10645,7 +10645,13 @@ mod tests {
             restored.accepted_junction_history,
             original.accepted_junction_history
         );
-        assert_eq!(restored.to_text(), original.to_text());
+        assert!(restored.behavioral_states.is_none());
+        assert!(restored.capacitor_sdt_states.is_none());
+        let upgraded = restored.to_text();
+        assert_eq!(
+            TransientCheckpoint::from_text(&upgraded).unwrap().to_text(),
+            upgraded
+        );
     }
 
     #[test]
@@ -13844,6 +13850,8 @@ mod tests {
         (47, 13),
         (48, 13),
         (49, 13),
+        (50, 13),
+        (51, 13),
     ];
 
     #[cfg(feature = "veriloga")]
