@@ -5577,7 +5577,17 @@ impl Engine {
         // complete accepted delay history; unsupported distributed/coupled
         // line state fails closed during injection instead of starting a new
         // wave trajectory at the seam.
-        let tline_dc_refs = Self::initialize_tline_history(&mut circuit, &solution, resume_time);
+        let line_seed = if resume.is_none() && uic_requested {
+            ReactiveHistorySeed::UicStartup
+        } else {
+            ReactiveHistorySeed::SolvedBias
+        };
+        let tline_dc_refs = Self::initialize_tline_history_for_startup(
+            &mut circuit,
+            &solution,
+            resume_time,
+            line_seed,
+        );
         let coupled_tline_refs =
             Self::initialize_coupled_tline_history(&mut circuit, &solution, resume_time);
 

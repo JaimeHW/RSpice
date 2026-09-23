@@ -205,15 +205,6 @@ impl Engine {
         }
     }
     #[inline]
-    pub(super) fn tline_transient_port_impedance(tl: &crate::device::TransmissionLine) -> Value {
-        // Keep the local port relation anchored to the characteristic
-        // impedance; lossy model-card behavior is captured through delayed-wave
-        // attenuation and history smoothing rather than by distorting the
-        // immediate Z0 boundary condition.
-        tl.impedance().max(1e-12)
-    }
-
-    #[inline]
     pub(super) fn stamp_tline_port(
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],

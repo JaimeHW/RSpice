@@ -198,12 +198,7 @@ impl CircuitData {
                 self.stamp_ltra_branch_dc_direct(matrix, tl);
                 continue;
             }
-            let g_series = tl.dc_series_conductance();
-            // DC fallback: couple near/far conductors through equivalent series path.
-            // This preserves operating-point continuity across the line and avoids
-            // nonphysical port-to-ground shunts.
-            Self::stamp_tline_port_direct(matrix, tl.node1_pos, tl.node2_pos, g_series);
-            Self::stamp_tline_port_direct(matrix, tl.node1_neg, tl.node2_neg, g_series);
+            Self::stamp_tline_dc_fallback(tl, |row, col, value| matrix.add(row, col, value));
         }
     }
 
@@ -284,9 +279,40 @@ impl CircuitData {
                 self.stamp_ltra_branch_dc(matrix, tl);
                 continue;
             }
-            let g_series = tl.dc_series_conductance();
-            Self::stamp_tline_port_triplet(matrix, tl.node1_pos, tl.node2_pos, g_series);
-            Self::stamp_tline_port_triplet(matrix, tl.node1_neg, tl.node2_neg, g_series);
+            Self::stamp_tline_dc_fallback(tl, |row, col, value| matrix.push(row, col, value));
+        }
+    }
+
+    /// The DC series path carries I1 = G * (V1 - V2), I2 = -I1,
+    /// where V1/V2 are differential port voltages. Separate conductor shorts
+    /// would incorrectly couple the two ports' common-mode voltages.
+    fn stamp_tline_dc_fallback(
+        tl: &crate::device::TransmissionLine,
+        mut add: impl FnMut(usize, usize, Value),
+    ) {
+        let mut terminals = [
+            (tl.node1_pos, 1.0),
+            (tl.node1_neg, -1.0),
+            (tl.node2_pos, -1.0),
+            (tl.node2_neg, 1.0),
+        ];
+        // Combine tied terminals before stamping, so cancellation is exact
+        // even in a matrix already containing much smaller conductances.
+        for index in 0..terminals.len() {
+            for other in index + 1..terminals.len() {
+                if terminals[index].0 == terminals[other].0 {
+                    terminals[index].1 += terminals[other].1;
+                    terminals[other].1 = 0.0;
+                }
+            }
+        }
+        let g = tl.dc_series_conductance();
+        for &(row, row_sign) in &terminals {
+            for &(col, col_sign) in &terminals {
+                if row != 0 && col != 0 && row_sign != 0.0 && col_sign != 0.0 {
+                    add(row - 1, col - 1, g * row_sign * col_sign);
+                }
+            }
         }
     }
 

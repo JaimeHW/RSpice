@@ -209,11 +209,23 @@ impl Engine {
         initial_solution: &[Value],
         initial_time: Value,
     ) -> Vec<(Value, Value)> {
+        Self::initialize_tline_history_for_startup(
+            circuit,
+            initial_solution,
+            initial_time,
+            ReactiveHistorySeed::SolvedBias,
+        )
+    }
+
+    pub(super) fn initialize_tline_history_for_startup(
+        circuit: &mut crate::circuit::CircuitData,
+        initial_solution: &[Value],
+        initial_time: Value,
+        seed: ReactiveHistorySeed,
+    ) -> Vec<(Value, Value)> {
         let mut refs = Vec::with_capacity(circuit.tlines.len());
         for tl in &mut circuit.tlines {
             tl.reset();
-            let z_port = Self::tline_transient_port_impedance(tl);
-            let g = 1.0 / z_port;
             let v1 = Self::differential_voltage(initial_solution, tl.node1_pos, tl.node1_neg);
             let v2 = Self::differential_voltage(initial_solution, tl.node2_pos, tl.node2_neg);
             refs.push((v1, v2));
@@ -233,20 +245,19 @@ impl Engine {
                 continue;
             }
 
-            // Seed delayed-wave state from the initial OP so pre-edge steady states
-            // are preserved (avoids artificial startup droop/ringing).
-            // Port equations: i1 = g*(v1 - incoming1), i2 = g*(v2 - incoming2),
-            // with incoming1 <- v2 and incoming2 <- v1 at t=0.
-            let i1_actual = g * (v1 - v2);
-            let i2_actual = g * (v2 - v1);
-            let wave_scale = z_port / tl.impedance();
-            tl.update_history(
-                initial_time,
-                v1,
-                i1_actual * wave_scale,
-                v2,
-                i2_actual * wave_scale,
-            );
+            // Use the same differential series current as the OP stamp.
+            // Z0 converts that physical current into a traveling wave; it is
+            // not the line's DC resistance.
+            let i1 = match seed {
+                ReactiveHistorySeed::SolvedBias => tl.dc_series_conductance() * (v1 - v2),
+                // UIC has no OP current to recover. Preserve its existing
+                // initial-wave construction from the selected nodal values.
+                ReactiveHistorySeed::UicStartup => {
+                    let z_port = tl.impedance().max(1e-12);
+                    (1.0 / z_port) * (v1 - v2) * (z_port / tl.impedance())
+                }
+            };
+            tl.update_history(initial_time, v1, i1, v2, -i1);
         }
         refs
     }
