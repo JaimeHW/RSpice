@@ -18,109 +18,6 @@ pub(in crate::analysis::harmonic_balance::solver) enum PrescribedIntegral {
     Retained,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::device::behavioral::{BehavioralSources, BehavioralVoltageSource};
-
-    #[test]
-    fn hb_prescribed_integral_residual_preserves_tight_tolerance_at_high_frequency() {
-        let rate = 1e9;
-        let mut config = HbConfig::new(rate)
-            .with_harmonics(3)
-            .with_collocation_points(17);
-        config.tolerance = 1e-10;
-        config.abstol = 1e-14;
-        let mut solver = HbSolver::new(config, 1);
-        solver
-            .try_add_periodic_constitutive_port_branch(1, 0, 1, "BP")
-            .unwrap();
-        solver
-            .try_add_exact_mna_static_entry(1, 0, 1.0, "BP")
-            .unwrap();
-        solver.add_resistor(1, 0, 1e3);
-        let sources = BehavioralSources {
-            voltage_sources: vec![
-                BehavioralVoltageSource::new(
-                    "BP".into(),
-                    1,
-                    0,
-                    1,
-                    &format!("sdt(2*pi*{rate}*sin(2*pi*{rate}*time))"),
-                )
-                .unwrap(),
-            ],
-            current_sources: vec![],
-        };
-        solver
-            .set_periodic_behavioral_sources(&sources, false, 1_000_000, false, &NoAbort)
-            .unwrap();
-        let mut state = HbSolverState::new(1, 3);
-        solver
-            .solve_newton_with_abort(&mut state, &NoAbort)
-            .unwrap();
-        assert!((state.x[0][0].re - 1.0).abs() < 1e-10);
-        assert!((state.x[0][1] + 0.5).norm() < 1e-10);
-        assert!(state.x[0][2..].iter().all(|value| value.norm() < 1e-10));
-        // The row retains rate units and both contribution magnitudes. A
-        // perturbation at an otherwise absent harmonic must remain visible.
-        state.mna_branch_currents[1][2] += 1e-6;
-        state.mna_branch_residual[1].fill(Complex64::ZERO);
-        state.mna_branch_residual_scale[1].fill(0.0);
-        solver.add_prescribed_integral_residual(&mut state).unwrap();
-        assert!((state.mna_branch_residual[1][2].re + 1e3).abs() < 1e-7);
-        assert!((state.mna_branch_residual_scale[1][2] - 1e3).abs() < 1e-7);
-        assert!(!state.rows_converged(1e-10, 1e-14));
-    }
-
-    #[test]
-    fn prescribed_integral_preparation_cancels_during_collocation() {
-        let sources = BehavioralSources {
-            voltage_sources: vec![
-                BehavioralVoltageSource::new("B1".into(), 1, 0, 1, "sdt(cos(2*pi*1k*time))")
-                    .unwrap(),
-            ],
-            current_sources: vec![],
-        };
-        let mut solver = HbSolver::try_new(
-            HbConfig::new(1e3)
-                .with_harmonics(3)
-                .with_collocation_points(129),
-            1,
-        )
-        .unwrap();
-        assert!(matches!(
-            solver.prepare_prescribed_integrals(
-                &sources,
-                4096,
-                false,
-                &crate::abort_signal::CountingAbort::new(16)
-            ),
-            Err(HbError::Aborted)
-        ));
-        assert!(
-            solver.prescribed_integrals.is_empty(),
-            "cancelled preparation cannot publish a partial basis"
-        );
-    }
-}
-
-impl PrescribedIntegral {
-    pub(in crate::analysis::harmonic_balance::solver) fn is_circuit_driven(&self) -> bool {
-        matches!(self, Self::Driven(_))
-    }
-    pub(in crate::analysis::harmonic_balance::solver) fn value(
-        &self,
-        cycles: Value,
-        retained: Value,
-    ) -> Value {
-        match self {
-            Self::Primitive(spectrum) | Self::Driven(spectrum) => primitive_value(spectrum, cycles),
-            Self::Retained => retained,
-        }
-    }
-}
-
 pub(in crate::analysis::harmonic_balance::solver) fn primitive_value(
     coefficients: &[Complex64],
     cycles: Value,
@@ -611,5 +508,108 @@ impl HbSolver {
             }));
         }
         Ok((spectra, needed))
+    }
+}
+
+impl PrescribedIntegral {
+    pub(in crate::analysis::harmonic_balance::solver) fn is_circuit_driven(&self) -> bool {
+        matches!(self, Self::Driven(_))
+    }
+    pub(in crate::analysis::harmonic_balance::solver) fn value(
+        &self,
+        cycles: Value,
+        retained: Value,
+    ) -> Value {
+        match self {
+            Self::Primitive(spectrum) | Self::Driven(spectrum) => primitive_value(spectrum, cycles),
+            Self::Retained => retained,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::device::behavioral::{BehavioralSources, BehavioralVoltageSource};
+
+    #[test]
+    fn hb_prescribed_integral_residual_preserves_tight_tolerance_at_high_frequency() {
+        let rate = 1e9;
+        let mut config = HbConfig::new(rate)
+            .with_harmonics(3)
+            .with_collocation_points(17);
+        config.tolerance = 1e-10;
+        config.abstol = 1e-14;
+        let mut solver = HbSolver::new(config, 1);
+        solver
+            .try_add_periodic_constitutive_port_branch(1, 0, 1, "BP")
+            .unwrap();
+        solver
+            .try_add_exact_mna_static_entry(1, 0, 1.0, "BP")
+            .unwrap();
+        solver.add_resistor(1, 0, 1e3);
+        let sources = BehavioralSources {
+            voltage_sources: vec![
+                BehavioralVoltageSource::new(
+                    "BP".into(),
+                    1,
+                    0,
+                    1,
+                    &format!("sdt(2*pi*{rate}*sin(2*pi*{rate}*time))"),
+                )
+                .unwrap(),
+            ],
+            current_sources: vec![],
+        };
+        solver
+            .set_periodic_behavioral_sources(&sources, false, 1_000_000, false, &NoAbort)
+            .unwrap();
+        let mut state = HbSolverState::new(1, 3);
+        solver
+            .solve_newton_with_abort(&mut state, &NoAbort)
+            .unwrap();
+        assert!((state.x[0][0].re - 1.0).abs() < 1e-10);
+        assert!((state.x[0][1] + 0.5).norm() < 1e-10);
+        assert!(state.x[0][2..].iter().all(|value| value.norm() < 1e-10));
+        // The row retains rate units and both contribution magnitudes. A
+        // perturbation at an otherwise absent harmonic must remain visible.
+        state.mna_branch_currents[1][2] += 1e-6;
+        state.mna_branch_residual[1].fill(Complex64::ZERO);
+        state.mna_branch_residual_scale[1].fill(0.0);
+        solver.add_prescribed_integral_residual(&mut state).unwrap();
+        assert!((state.mna_branch_residual[1][2].re + 1e3).abs() < 1e-7);
+        assert!((state.mna_branch_residual_scale[1][2] - 1e3).abs() < 1e-7);
+        assert!(!state.rows_converged(1e-10, 1e-14));
+    }
+
+    #[test]
+    fn prescribed_integral_preparation_cancels_during_collocation() {
+        let sources = BehavioralSources {
+            voltage_sources: vec![
+                BehavioralVoltageSource::new("B1".into(), 1, 0, 1, "sdt(cos(2*pi*1k*time))")
+                    .unwrap(),
+            ],
+            current_sources: vec![],
+        };
+        let mut solver = HbSolver::try_new(
+            HbConfig::new(1e3)
+                .with_harmonics(3)
+                .with_collocation_points(129),
+            1,
+        )
+        .unwrap();
+        assert!(matches!(
+            solver.prepare_prescribed_integrals(
+                &sources,
+                4096,
+                false,
+                &crate::abort_signal::CountingAbort::new(16)
+            ),
+            Err(HbError::Aborted)
+        ));
+        assert!(
+            solver.prescribed_integrals.is_empty(),
+            "cancelled preparation cannot publish a partial basis"
+        );
     }
 }

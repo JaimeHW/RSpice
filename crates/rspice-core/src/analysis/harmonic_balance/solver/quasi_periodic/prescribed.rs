@@ -122,6 +122,9 @@ impl QuasiPrescribedIntegrals {
     }
 }
 
+type CarrierSpectrum = Vec<Vec<Complex64>>;
+type PreparedCarrier = (Option<CarrierSpectrum>, ResourceLimits, usize);
+
 impl HbSolver {
     pub(super) fn prepare_quasi_periodic_carrier(
         &mut self,
@@ -131,7 +134,7 @@ impl HbSolver {
         seed: Option<&[Vec<Complex64>]>,
         limits: &ResourceLimits,
         abort: &dyn AbortSignal,
-    ) -> Result<(Option<Vec<Vec<Complex64>>>, ResourceLimits, usize), Error> {
+    ) -> Result<PreparedCarrier, Error> {
         let (mut remaining, mut needed) = self.prepare_quasi_periodic_integrals_with_inputs(
             grid.clone(),
             limits,
