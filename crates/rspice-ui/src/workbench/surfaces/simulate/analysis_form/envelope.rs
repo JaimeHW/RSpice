@@ -109,10 +109,14 @@ pub(super) fn envelope_choice_row(
             .get(*value)
             .map_or("Schema unavailable", String::as_str);
         let salt = format!("analysis-envelope-field-{}-{label}", ui.id().value());
-        if let Some(index) =
-            select_mono_with_response(ui, &salt, label, current, &options, ui.available_width())
-                .picked
-        {
+        let selection =
+            select_mono_with_response(ui, &salt, label, current, &options, ui.available_width());
+        if label == ENVELOPE_FIELD_LABELS[6] {
+            selection.response.on_hover_text(
+                "Output controls can override this schedule with a strobe interval or explicit reporting times. Each reported envelope needs a complete carrier window centered on its time.",
+            );
+        }
+        if let Some(index) = selection.picked {
             *value = index;
             true
         } else {

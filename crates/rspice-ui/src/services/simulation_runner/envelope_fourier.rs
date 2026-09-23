@@ -19,6 +19,7 @@ use rspice_core::abort_signal::AbortSignal;
 use rspice_core::abort_signal::NoAbort;
 mod current;
 mod initialization;
+mod reporting;
 mod trajectory;
 pub use initialization::{EnvelopeInitializationConfig, EnvelopeShootingIntegration};
 use rspice_core::engine::Engine;
@@ -168,14 +169,23 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
     ensure_not_aborted(abort)?;
     let carrier_tones = config.carrier_tones().collect::<Vec<_>>();
     let estimated_transient_points = estimated_schedule_points(config.stop_time, step_time)?;
-    let estimated_output_points = match config.adaptive_mode {
-        EnvelopeAdaptiveMode::Enabled => estimated_transient_points,
-        EnvelopeAdaptiveMode::FixedEnvelopeStep => {
-            estimated_schedule_points(config.stop_time, config.envelope_step.unwrap_or(step_time))?
+    let estimated_output_points = if parsed.options.output_interval_schedule.is_some()
+        || !parsed.options.output_time_points.is_empty()
+    {
+        // The reporting schedule is bounded against the actual accepted grid
+        // below, including any source-authored cadence transitions.
+        1
+    } else {
+        match config.adaptive_mode {
+            EnvelopeAdaptiveMode::Enabled => estimated_transient_points,
+            EnvelopeAdaptiveMode::FixedEnvelopeStep => estimated_schedule_points(
+                config.stop_time,
+                config.envelope_step.unwrap_or(step_time),
+            )?,
+            // Exact event enumeration is resource-bounded separately. A single
+            // point still exercises the dense matrix/cubic tone-count guard here.
+            EnvelopeAdaptiveMode::EventAlignedOnly => 1,
         }
-        // Exact event enumeration is resource-bounded separately. A single
-        // point still exercises the dense matrix/cubic tone-count guard here.
-        EnvelopeAdaptiveMode::EventAlignedOnly => 1,
     };
     validate_projection_workload(
         estimated_transient_points,
@@ -189,15 +199,29 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
             ServiceRunError::from_core("Envelope modulation-source validation error", error)
         })?;
 
+    let integration_netlist = if parsed.options.output_interval_schedule.is_some()
+        || !parsed.options.output_time_points.is_empty()
+    {
+        // These controls report the extracted envelope. The internal carrier
+        // trajectory must retain every accepted point; explicit output stops
+        // otherwise require a source .TRAN card and incorrectly reject an
+        // Envelope-only deck. Keep signal retention and all solver options.
+        let mut integration = parsed.clone();
+        integration.options.output_interval_schedule = None;
+        integration.options.output_time_points.clear();
+        std::borrow::Cow::Owned(integration)
+    } else {
+        std::borrow::Cow::Borrowed(&parsed)
+    };
     let transient = match config.initial_periodic_solve {
         EnvelopeInitialPeriodicSolve::TransientSpectralEstimate => {
-            trajectory::run_transient(&parsed, config, step_time, abort)?
+            trajectory::run_transient(&integration_netlist, config, step_time, abort)?
         }
         EnvelopeInitialPeriodicSolve::PeriodicSteadyState => {
-            run_pss_initialized_envelope_transient(&parsed, config, step_time, abort)?
+            run_pss_initialized_envelope_transient(&integration_netlist, config, step_time, abort)?
         }
         EnvelopeInitialPeriodicSolve::HarmonicBalance => {
-            run_hb_initialized_envelope_transient(&parsed, config, step_time, abort)?
+            run_hb_initialized_envelope_transient(&integration_netlist, config, step_time, abort)?
         }
     };
     if transient.time.is_empty() {
@@ -211,8 +235,16 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
         ));
     }
 
-    let requested_output_time =
-        envelope_output_times(&parsed, &transient.time, config, step_time, abort)?;
+    let requested_output_time = match reporting::configured_times(
+        &parsed.options,
+        &transient.time,
+        &carrier_tones,
+        rspice_core::ResourceLimits::default().max_analysis_points,
+        abort,
+    )? {
+        Some(times) => times,
+        None => envelope_output_times(&parsed, &transient.time, config, step_time, abort)?,
+    };
     validate_projection_workload(
         transient.time.len(),
         requested_output_time.len(),
