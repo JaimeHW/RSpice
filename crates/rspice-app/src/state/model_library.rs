@@ -12,7 +12,6 @@
 mod compatibility;
 pub(crate) mod compilation;
 mod corner_expansion;
-mod correlation;
 mod device_class;
 mod facts;
 mod library;
@@ -20,18 +19,14 @@ mod manager;
 mod project_revision;
 mod qualification;
 
-pub use rspice_model_library::ProjectModelDefinition;
 pub(crate) use compatibility::{
     models_have_compatible_device_family, placement_component_for_model,
     validate_component_model_compatibility,
 };
-pub use rspice_model_library::{
-    CornerSectionBinding, CornerSectionDomain, ProcessCorner, stated_temperatures,
-};
 pub use corner_expansion::RetainedClosure;
-// Test-only aliases: the submodule is private, so this path is the only
-// way the tests can name these.
-pub use correlation::{
+pub(crate) use device_class::{SUBCIRCUIT_CLASS, card_device};
+pub use rspice_model_library::ProjectModelDefinition;
+pub use rspice_model_library::correlation::{
     CorrelationAggregation, CorrelationAlignmentEvidence, CorrelationAlignmentPolicy,
     CorrelationCalculation, CorrelationDatasetClass, CorrelationDatasetRevision,
     CorrelationEvaluation, CorrelationEvidence, CorrelationExtrapolationPolicy,
@@ -41,19 +36,20 @@ pub use correlation::{
     CorrelationSuite, MAX_CORRELATION_ROWS, MAX_CORRELATION_TEXT_BYTES, ModelCorrelationState,
 };
 pub use rspice_model_library::{
+    CornerSectionBinding, CornerSectionDomain, ProcessCorner, stated_temperatures,
+};
+pub use rspice_model_library::{
     CorrelationMatrix, DefinitionMetadataError, FiniteBounds, FiniteF64, LookupInterpolation,
     ModelDefinitionMetadata, ModelFileIdentity, ModelSectionDefinition, ModelSectionQualification,
     ParameterDataType, ParameterDefinition, ParameterSource, ParameterValue,
     StatisticalDistribution, StatisticalHierarchyScope, TemperatureExtrapolationPolicy,
     TemperatureLawDefinition, TemperatureLawRepresentation,
 };
-// Test-only aliases: `definition_metadata` is private, so this path is the
-// only way the tests can name these.
+// Metadata fixtures used by application integration tests.
 #[cfg(test)]
 pub use rspice_model_library::{
     MODEL_DEFINITION_METADATA_SCHEMA_VERSION, StatisticalDefinition, StatisticalVariableDefinition,
 };
-pub(crate) use device_class::{SUBCIRCUIT_CLASS, card_device};
 // Test-only alias: the class table itself is read only by the test that holds
 // the workspace's class chips to it, which cannot live down here because
 // `state` may not reference `workbench`.
@@ -78,7 +74,6 @@ pub use manager::{
     ProjectModelCommit, SealedModelExecutionSources, SimulationPlanModelBinding,
 };
 pub(crate) use manager::{SealedModelLibraryVerilogAAuthority, model_library_source_digest};
-pub use rspice_model_library::DeviceModel;
 pub use project_revision::ProjectModelRevisionDefinition;
 pub use qualification::{
     ApprovalDecision, CompatibilityAssessment, CompatibilityDisposition, ConsumerChange,
@@ -98,4 +93,5 @@ pub use qualification::{
     MODEL_QUALIFICATION_SCHEMA_VERSION, PlatformQualificationOutcome,
     QualificationPlatformVectorOutcome,
 };
+pub use rspice_model_library::DeviceModel;
 pub use rspice_model_library::{ModelLevel, ModelType};

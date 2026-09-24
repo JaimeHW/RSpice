@@ -12,9 +12,10 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+csv.workspace = true
+rspice-app-types.workspace = true
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false }
 serde.workspace = true
-thiserror.workspace = true
-
-[dev-dependencies]
 serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true

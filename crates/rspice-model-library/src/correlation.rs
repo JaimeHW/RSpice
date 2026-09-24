@@ -18,7 +18,7 @@ use csv::{ReaderBuilder, StringRecord, Trim};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use crate::product::{ContentDigest, ObjectRevision};
+use rspice_app_types::product::{ContentDigest, ObjectRevision};
 
 use super::qualification::{FiniteValue, ModelSourceEvidenceBinding, NonNegativeFinite};
 
@@ -260,6 +260,10 @@ pub struct CorrelationDatasetRevision {
 }
 
 impl CorrelationDatasetRevision {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Preserve the existing validated record constructor during ownership migration"
+    )]
     pub fn try_from_csv(
         id: impl Into<String>,
         revision: ObjectRevision,
@@ -289,6 +293,10 @@ impl CorrelationDatasetRevision {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Preserve the existing validated record constructor during ownership migration"
+    )]
     pub fn try_from_csv_with_provenance(
         id: impl Into<String>,
         revision: ObjectRevision,
@@ -568,6 +576,10 @@ pub struct CorrelationMetricDefinition {
 }
 
 impl CorrelationMetricDefinition {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Preserve the existing validated record constructor during ownership migration"
+    )]
     pub fn try_new(
         id: impl Into<String>,
         name: impl Into<String>,
@@ -757,6 +769,10 @@ pub struct CorrelationSuite {
 }
 
 impl CorrelationSuite {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Preserve the existing validated record constructor during ownership migration"
+    )]
     pub fn try_new(
         id: impl Into<String>,
         revision: ObjectRevision,

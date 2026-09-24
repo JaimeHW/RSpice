@@ -9,67 +9,6 @@
 
 use super::*;
 
-/// Exact model source identity against which results were produced.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ModelSourceEvidenceBinding {
-    pub model_id: String,
-    /// Legacy records did not retain the manager-owned source UUID. They may
-    /// still be inspected, but cannot produce new evidence or be promoted.
-    #[serde(default)]
-    pub source_id: Option<ModelSourceId>,
-    pub source_digest: ContentDigest,
-    pub source_revision: ObjectRevision,
-}
-
-impl ModelSourceEvidenceBinding {
-    pub fn try_new(
-        model_id: impl Into<String>,
-        source_digest: ContentDigest,
-        source_revision: ObjectRevision,
-    ) -> QualificationResult<Self> {
-        let value = Self {
-            model_id: model_id.into(),
-            source_id: None,
-            source_digest,
-            source_revision,
-        };
-        value.validate("source_binding")?;
-        Ok(value)
-    }
-
-    pub fn try_new_project_bound(
-        model_id: impl Into<String>,
-        source_id: ModelSourceId,
-        source_digest: ContentDigest,
-        source_revision: ObjectRevision,
-    ) -> QualificationResult<Self> {
-        let value = Self {
-            model_id: model_id.into(),
-            source_id: Some(source_id),
-            source_digest,
-            source_revision,
-        };
-        value.validate("source_binding")?;
-        value.require_project_bound("source_binding")?;
-        Ok(value)
-    }
-
-    pub(super) fn validate(&self, path: &str) -> QualificationResult<()> {
-        require_text(&format!("{path}.model_id"), &self.model_id)
-    }
-
-    pub(super) fn require_project_bound(&self, path: &str) -> QualificationResult<ModelSourceId> {
-        self.source_id.ok_or_else(|| {
-            QualificationValidationError::new(
-                QualificationErrorCode::SourceBindingMismatch,
-                format!("{path}.source_id"),
-                "new qualification evidence requires an exact project-owned source identity",
-            )
-        })
-    }
-}
-
 /// Observed error and the exact tolerance used to make its disposition.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

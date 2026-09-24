@@ -1,12 +1,14 @@
-//! Portable model definitions, typed metadata, and process corners.
+//! Portable model definitions, typed metadata, process corners, and correlation evidence.
 //!
-//! Catalog authority, source import, and qualification will join this owner
+//! Catalog authority, source import, and further qualification contracts will join this owner
 //! as their app-facing dependencies are separated.
 
 mod authoring;
 mod corner;
+pub mod correlation;
 mod definition_metadata;
 mod model;
+pub mod qualification;
 mod types;
 
 pub use authoring::*;
