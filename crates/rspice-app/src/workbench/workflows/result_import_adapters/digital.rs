@@ -305,37 +305,13 @@ fn vcd_bits_to_f64(bits: &[rspice_core::io::VcdBit]) -> Option<f64> {
     Some(value as f64)
 }
 
-fn logic_bits_to_f64(bits: &[u8], format: ResultImportFormat) -> Result<f64, String> {
-    if bits.is_empty() || bits.len() > 53 {
-        return Err(adapter_error(
-            format,
-            "digital vector is empty or wider than 53 exact bits",
-        ));
-    }
-    let mut value = 0_u64;
-    for bit in bits {
-        value = value
-            .checked_mul(2)
-            .ok_or_else(|| adapter_error(format, "digital vector overflow"))?;
-        match bit {
-            b'0' => {}
-            b'1' => value += 1,
-            _ => {
-                return Err(adapter_error(
-                    format,
-                    "digital vector contains X/Z/U/W/- state that cannot be losslessly mapped to an analog trace",
-                ));
-            }
-        }
-    }
-    Ok(value as f64)
-}
-
 fn fst_limits() -> rspice_formats::fst::FstLimits {
     rspice_formats::fst::FstLimits {
         max_bytes: MAX_RESULT_DATASET_BYTES,
         max_columns: MAX_RESULT_COLUMNS,
         max_rows: MAX_RESULT_ROWS,
+        max_values: MAX_RESULT_VALUES,
+        max_signal_name_bytes: MAX_SIGNAL_NAME_BYTES,
     }
 }
 
@@ -351,234 +327,43 @@ pub(in crate::workbench::workflows) fn parse_fst(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
-    let geometry = rspice_formats::fst::preflight_fst(bytes, fst_limits(), format.canonical_id())?;
-    let cursor = Cursor::new(bytes);
-    let mut reader = fst_reader::FstReader::open(BufReader::new(cursor))
-        .map_err(|error| adapter_error(format, format_args!("invalid FST container: {error}")))?;
-    let header = reader.get_header();
-    if header.var_count as usize > MAX_RESULT_COLUMNS - 1 {
-        return Err(adapter_error(format, "FST signal-count limit exceeded"));
-    }
-    if !(-30..=30).contains(&header.timescale_exponent) {
-        return Err(adapter_error(
-            format,
-            "FST timescale exponent is outside the supported finite range",
-        ));
-    }
-    let mut scopes = Vec::new();
-    let mut scope_identity_bytes = 0_usize;
-    let mut by_handle: BTreeMap<usize, Vec<DigitalSignal>> = BTreeMap::new();
-    let mut hierarchy_entries = 0_usize;
-    let mut hierarchy_signals = 0_usize;
-    let mut hierarchy_error = None;
-    let maximum_handle = usize::try_from(header.max_handle)
-        .map_err(|_| adapter_error(format, "FST header signal count does not fit this target"))?;
-    reader
-        .read_hierarchy(|entry| {
-            if hierarchy_error.is_some() {
-                return;
-            }
-            hierarchy_entries += 1;
-            if hierarchy_entries > MAX_RESULT_VALUES {
-                hierarchy_error = Some("FST hierarchy-entry limit exceeded".to_owned());
-                return;
-            }
-            match entry {
-                fst_reader::FstHierarchyEntry::Scope { name, .. } => {
-                    let separator = usize::from(!scopes.is_empty());
-                    let Some(next_identity_bytes) = scope_identity_bytes
-                        .checked_add(separator)
-                        .and_then(|length| length.checked_add(name.len()))
-                    else {
-                        hierarchy_error = Some("FST hierarchy identity length overflow".to_owned());
-                        return;
-                    };
-                    if name.is_empty() || name.len() > MAX_SIGNAL_NAME_BYTES {
-                        hierarchy_error = Some(format!(
-                            "FST scope identity exceeds {MAX_SIGNAL_NAME_BYTES} bytes or is empty"
-                        ));
-                    } else if next_identity_bytes > MAX_SIGNAL_NAME_BYTES {
-                        hierarchy_error = Some(format!(
-                            "FST scope path exceeds {MAX_SIGNAL_NAME_BYTES} bytes"
-                        ));
-                    } else if scopes.len() >= MAX_RESULT_COLUMNS {
-                        hierarchy_error = Some("FST hierarchy-depth limit exceeded".to_owned());
-                    } else {
-                        scope_identity_bytes = next_identity_bytes;
-                        scopes.push(name);
-                    }
-                }
-                fst_reader::FstHierarchyEntry::UpScope => {
-                    if let Some(name) = scopes.pop() {
-                        scope_identity_bytes = if scopes.is_empty() {
-                            0
-                        } else {
-                            scope_identity_bytes.saturating_sub(name.len() + 1)
-                        };
-                    } else {
-                        hierarchy_error =
-                            Some("FST hierarchy closes a scope that was not open".to_owned());
-                    }
-                }
-                fst_reader::FstHierarchyEntry::Var {
-                    name,
-                    length,
-                    handle,
-                    ..
-                } => {
-                    hierarchy_signals += 1;
-                    if hierarchy_signals > MAX_RESULT_COLUMNS - 1 {
-                        hierarchy_error =
-                            Some("FST hierarchy signal/alias limit exceeded".to_owned());
-                        return;
-                    }
-                    let handle = handle.get_index();
-                    if handle >= maximum_handle {
-                        hierarchy_error = Some(
-                            "FST hierarchy references an out-of-range signal handle".to_owned(),
-                        );
-                        return;
-                    }
-                    if geometry.widths[handle] != length as usize {
-                        hierarchy_error = Some(format!(
-                            "FST hierarchy width {length} for '{name}' disagrees with geometry width {}",
-                            geometry.widths[handle]
-                        ));
-                        return;
-                    }
-                    if length == 0 || length > 53 {
-                        hierarchy_error = Some(format!(
-                            "FST hierarchy signal '{name}' has unsupported width {length}"
-                        ));
-                        return;
-                    }
-                    if name.is_empty() || name.len() > MAX_SIGNAL_NAME_BYTES {
-                        hierarchy_error = Some(format!(
-                            "FST signal identity exceeds {MAX_SIGNAL_NAME_BYTES} bytes or is empty"
-                        ));
-                        return;
-                    }
-                    let mut full_name = scopes.join(".");
-                    if !full_name.is_empty() {
-                        full_name.push('.');
-                    }
-                    full_name.push_str(&name);
-                    if full_name.len() > MAX_SIGNAL_NAME_BYTES {
-                        hierarchy_error = Some(format!(
-                            "FST hierarchy signal identity exceeds {MAX_SIGNAL_NAME_BYTES} bytes"
-                        ));
-                        return;
-                    }
-                    by_handle.entry(handle).or_default().push(DigitalSignal {
-                        name: full_name,
-                        width: Some(length as usize),
-                    });
-                }
-                _ => {}
-            }
-        })
-        .map_err(|error| {
-            adapter_error(
-                format,
-                format_args!("could not read FST hierarchy: {error}"),
-            )
-        })?;
-    if let Some(error) = hierarchy_error {
-        return Err(adapter_error(format, error));
-    }
-    if !scopes.is_empty() {
-        return Err(adapter_error(format, "FST hierarchy has unclosed scopes"));
-    }
-    if by_handle.len() != maximum_handle {
-        return Err(adapter_error(
-            format,
-            "FST hierarchy unique-signal count disagrees with geometry",
-        ));
-    }
-    let total_signals = by_handle.values().map(Vec::len).sum::<usize>();
-    if total_signals == 0 || total_signals > MAX_RESULT_COLUMNS - 1 {
-        return Err(adapter_error(
-            format,
-            "FST contains no signals or too many aliases",
-        ));
-    }
-    let handles = by_handle
-        .keys()
-        .map(|index| fst_reader::FstSignalHandle::from_index(*index))
-        .collect::<Vec<_>>();
-    let handle_order = by_handle.keys().copied().collect::<Vec<_>>();
-    let handle_to_signal = handle_order
-        .iter()
-        .enumerate()
-        .map(|(signal, handle)| (*handle, signal))
-        .collect::<HashMap<_, _>>();
-    let canonical_signals = handle_order
-        .iter()
-        .map(|handle| DigitalSignal {
-            name: by_handle[handle][0].name.clone(),
-            width: by_handle[handle][0].width,
-        })
-        .collect::<Vec<_>>();
     let mut events = Vec::new();
-    // The same changes, kept as the four-state values the file recorded, so
-    // the exact evidence can be built by the one codec that builds it for a
-    // dump. This adapter maps FST's alphabet onto VCD's four states and then
-    // stops: what a vector *means* — which conductors it names, in which
-    // order, over what declared range — is decided in exactly one place for
-    // both importers.
-    let mut recorded: Vec<Vec<rspice_core::io::VcdChange>> = vec![Vec::new(); handle_order.len()];
-    let callback_result = reader.read_signals(
-        &fst_reader::FstFilter::filter_signals(handles),
-        |tick, handle, value| {
-            if events.len() >= MAX_RESULT_VALUES {
-                return Err("FST event-count limit exceeded".to_owned());
+    let mut recorded: Vec<Vec<rspice_core::io::VcdChange>> = Vec::new();
+    let decoded =
+        rspice_formats::fst::decode_fst(bytes, fst_limits(), format.canonical_id(), |event| {
+            if recorded.len() <= event.signal {
+                recorded.resize_with(event.signal + 1, Vec::new);
             }
-            let signal = *handle_to_signal
-                .get(&handle.get_index())
-                .ok_or_else(|| "FST returned an undeclared signal handle".to_owned())?;
-            let (value, recorded_value) = match value {
-                fst_reader::FstSignalValue::String(bits) => (
-                    logic_bits_to_f64(bits, format)?,
-                    rspice_core::io::VcdValue::Logic(
-                        bits.iter().copied().map(fst_bit).collect::<Vec<_>>(),
-                    ),
+            let value = match event.raw {
+                rspice_formats::fst::FstRawValue::Logic(bits) => rspice_core::io::VcdValue::Logic(
+                    bits.iter().copied().map(fst_bit).collect::<Vec<_>>(),
                 ),
-                fst_reader::FstSignalValue::Real(value) if value.is_finite() => {
-                    (value, rspice_core::io::VcdValue::Real(value))
-                }
-                fst_reader::FstSignalValue::Real(_) => {
-                    return Err("FST contains a non-finite real value".to_owned());
+                rspice_formats::fst::FstRawValue::Real(value) => {
+                    rspice_core::io::VcdValue::Real(value)
                 }
             };
-            recorded[signal].push(rspice_core::io::VcdChange {
-                tick,
-                value: recorded_value,
-            });
-            events.push(DigitalEvent {
-                tick,
-                signal,
+            recorded[event.signal].push(rspice_core::io::VcdChange {
+                tick: event.tick,
                 value,
             });
-            Ok(())
-        },
-    );
-    callback_result.map_err(|error| {
-        adapter_error(format, format_args!("could not read FST events: {error:?}"))
-    })?;
-    let timescale = 10_f64.powi(header.timescale_exponent as i32);
-    let event_payload = fst_event_payload(&canonical_signals, recorded, timescale, format)?;
-    let parsed = digital_events_to_dataset(format, timescale, canonical_signals, events)?;
-
-    // Materialize aliases after canonical decoding. They retain independent
-    // identities while sharing exact samples and axes.
-    let mut aliases = Vec::new();
-    for (canonical_index, handle) in handle_order.iter().enumerate() {
-        for alias in by_handle[handle].iter().skip(1) {
-            aliases.push((canonical_index, alias.name.clone()));
-        }
-    }
-    let mut parsed = parsed;
-    append_digital_aliases(format, &mut parsed, aliases)?;
+            events.push(DigitalEvent {
+                tick: event.tick,
+                signal: event.signal,
+                value: event.sample,
+            });
+        })?;
+    recorded.resize_with(decoded.signals.len(), Vec::new);
+    let signals = decoded
+        .signals
+        .into_iter()
+        .map(|signal| DigitalSignal {
+            name: signal.name,
+            width: signal.width,
+        })
+        .collect::<Vec<_>>();
+    let event_payload = fst_event_payload(&signals, recorded, decoded.timescale_seconds, format)?;
+    let mut parsed = digital_events_to_dataset(format, decoded.timescale_seconds, signals, events)?;
+    append_digital_aliases(format, &mut parsed, decoded.aliases)?;
     if let Some(payload) = event_payload {
         if let AnalysisResultPayload::TransientEvents { digital_buses, .. } = &payload
             && !digital_buses.is_empty()
@@ -593,7 +378,6 @@ pub(in crate::workbench::workflows) fn parse_fst(
     }
     Ok(parsed)
 }
-
 /// One FST four-state character as the VCD bit it means.
 ///
 /// FST's alphabet is wider than VCD's: `h`/`l` are weak drives and `u`/`w`/`-`
@@ -658,10 +442,8 @@ fn fst_event_payload(
 }
 
 pub(in crate::workbench::workflows) fn looks_like_fst(bytes: &[u8]) -> bool {
-    let mut cursor = Cursor::new(bytes);
-    fst_reader::is_fst_file(&mut cursor)
+    rspice_formats::fst::looks_like_fst(bytes)
 }
-
 fn digital_events_to_dataset(
     format: ResultImportFormat,
     timescale_seconds: f64,

@@ -7,8 +7,8 @@
 use super::*;
 use rspice_formats::numeric::MAX_EXACT_F64_INTEGER;
 use serde::Deserialize;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::io::{BufReader, Cursor, Read};
+use std::collections::{BTreeMap, BTreeSet};
+use std::io::{Cursor, Read};
 
 const MAX_ARCHIVE_MEMBERS: usize = 1_024;
 const MAX_ARCHIVE_EXPANDED_BYTES: u64 = MAX_RESULT_DATASET_BYTES;

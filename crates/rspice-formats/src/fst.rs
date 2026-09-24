@@ -1,4 +1,9 @@
-//! Bounded FST framing and allocation preflight.
+//! Bounded FST framing, allocation preflight, and event decoding.
+
+#[cfg(feature = "fst")]
+mod reader;
+#[cfg(feature = "fst")]
+pub use reader::{decode_fst, looks_like_fst};
 
 const MAX_FST_TOP_LEVEL_BLOCKS: usize = 1_024;
 pub const FST_HEADER_SECTION_BYTES: u64 = 329;
@@ -8,6 +13,8 @@ pub struct FstLimits {
     pub max_bytes: u64,
     pub max_columns: usize,
     pub max_rows: usize,
+    pub max_values: usize,
+    pub max_signal_name_bytes: usize,
 }
 
 fn adapter_error(format: &str, detail: impl std::fmt::Display) -> String {
@@ -24,6 +31,37 @@ struct FstHeaderPreflight {
 #[derive(Debug)]
 pub struct FstGeometryPreflight {
     pub widths: Vec<usize>,
+}
+
+#[cfg(feature = "fst")]
+#[derive(Debug)]
+pub struct FstSignal {
+    pub name: String,
+    pub width: Option<usize>,
+}
+
+#[cfg(feature = "fst")]
+#[derive(Debug)]
+pub struct DecodedFst {
+    pub timescale_seconds: f64,
+    pub signals: Vec<FstSignal>,
+    pub aliases: Vec<(usize, String)>,
+}
+
+#[cfg(feature = "fst")]
+#[derive(Debug, Clone, Copy)]
+pub enum FstRawValue<'a> {
+    Logic(&'a [u8]),
+    Real(f64),
+}
+
+#[cfg(feature = "fst")]
+#[derive(Debug, Clone, Copy)]
+pub struct FstEvent<'a> {
+    pub tick: u64,
+    pub signal: usize,
+    pub sample: f64,
+    pub raw: FstRawValue<'a>,
 }
 
 #[derive(Debug, Clone, Copy)]

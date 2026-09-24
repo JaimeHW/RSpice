@@ -3,6 +3,7 @@
 use super::*;
 use arrow_array::{ArrayRef, Float64Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
+use std::collections::HashMap;
 use std::io::Write as _;
 use std::sync::Arc;
 
