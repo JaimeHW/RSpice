@@ -489,6 +489,7 @@ impl MirEquationLowerer<'_, '_> {
             "ddt" => self.lower_ddt_derivative(expression, name, args, axes),
             "idt" | "idtmod" => self.lower_idt_derivative(expression, name, args, axes),
             "transition" => self.lower_transition_operator(expression, args, Some(axes)),
+            "absdelay" => self.lower_absdelay_call_derivative(expression, name, args, axes),
             "slew" => {
                 self.require_intrinsic_arity_range(name, args, 1, 3)?;
                 self.lower_slew_derivative_operator(

@@ -1429,6 +1429,15 @@ impl<'a> ScalarDdxBuilder<'a> {
                 max_delay,
                 order,
             } => {
+                let order = if *order == 1
+                    && matches!(self.values[usize::from(*delay_derivative)].kind,
+                        CfgValueKind::RealConstant(v) if v == 0.0)
+                    && self.derivative(*delay, lane).is_none()
+                {
+                    1
+                } else {
+                    order.saturating_add(1)
+                };
                 let (input_derivative, delay_derivative) =
                     self.delayed_derivatives(*input_derivative, *delay_derivative, lane)?;
                 Some(self.push(
@@ -1440,7 +1449,7 @@ impl<'a> ScalarDdxBuilder<'a> {
                         delay: *delay,
                         delay_derivative,
                         max_delay: *max_delay,
-                        order: order.saturating_add(1),
+                        order,
                     },
                 ))
             }
@@ -2708,6 +2717,15 @@ impl<'a> AdBuilder<'a> {
                 max_delay,
                 order,
             } => {
+                let order = if *order == 1
+                    && matches!(self.values[usize::from(*delay_derivative)].kind,
+                        CfgValueKind::RealConstant(v) | CfgValueKind::LaneSplat(v) if v == 0.0)
+                    && self.derivatives[usize::from(*delay)].is_none()
+                {
+                    1
+                } else {
+                    order.saturating_add(1)
+                };
                 let (input_derivative, delay_derivative) =
                     self.delayed_lane_derivatives(*input_derivative, *delay_derivative, target)?;
                 Some(self.push(
@@ -2719,7 +2737,7 @@ impl<'a> AdBuilder<'a> {
                         delay: *delay,
                         delay_derivative,
                         max_delay: *max_delay,
-                        order: order.saturating_add(1),
+                        order,
                     },
                 ))
             }

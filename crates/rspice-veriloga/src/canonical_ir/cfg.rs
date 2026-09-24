@@ -468,10 +468,10 @@ pub enum CfgValueKind {
     /// through it: this is the one dynamic operator whose *timing* operand is
     /// not primal-only.
     ///
-    /// `order` is carried rather than inferred, mirroring the flat node's
-    /// `derivative_order`. The runtime implements order one; a second
-    /// differentiation produces order two here so that a consumer refuses it
-    /// explicitly instead of emitting a Hessian that is silently zero.
+    /// `order` mirrors the flat node's action order. Repeated differentiation
+    /// with zero timing partials still uses the first-order action on higher
+    /// input derivatives. Moving delays retain higher orders so consumers
+    /// refuse the missing mixed timing terms instead of silently omitting them.
     ///
     /// Shares [`Self::AbsDelay`]'s buffer — it reads the same history and
     /// allocates none of its own.

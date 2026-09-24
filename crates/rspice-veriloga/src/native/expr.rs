@@ -4605,19 +4605,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_slew_derivative_operator(expr_id, expr, max_rise, max_fall, &[wrt])
             }
             "transition" => self.lower_transition_operator(expr_id, args, Some(&[wrt])),
-            "absdelay" => {
-                let (expr, delay, max_delay) = match args {
-                    [expr, delay] => (*expr, *delay, None),
-                    [expr, delay, max_delay] => (*expr, *delay, Some(*max_delay)),
-                    _ => {
-                        return Err(self.unsupported(format!(
-                            "analog operator absdelay expects two or three operands, found {}",
-                            args.len()
-                        )));
-                    }
-                };
-                self.lower_absdelay_derivative_operator(expr_id, expr, delay, max_delay, wrt)
-            }
+            "absdelay" => self.lower_absdelay_call_derivative(expr_id, name, args, &[wrt]),
             "laplace_zp" | "laplace_zd" | "laplace_np" | "laplace_nd" => {
                 self.lower_laplace_call_derivative(expr_id, name, args, wrt)
             }
@@ -4827,9 +4815,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 )
             }
             "transition" => self.lower_transition_operator(expr_id, args, Some(&[first, second])),
-            "absdelay" => Err(self.unsupported(format!(
-                "second derivative of absdelay at expression {expr_id}"
-            ))),
+            "absdelay" => {
+                self.lower_absdelay_call_derivative(expr_id, name, args, &[first, second])
+            }
             "laplace_zp" | "laplace_zd" | "laplace_np" | "laplace_nd" => {
                 self.lower_laplace_call_second_derivative(expr_id, name, args, first, second)
             }
@@ -6378,23 +6366,39 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(())
     }
 
-    fn lower_absdelay_derivative_operator(
+    fn lower_absdelay_call_derivative(
         &mut self,
         expr_id: ExprId,
-        expr: ExprId,
-        delay: ExprId,
-        max_delay: Option<ExprId>,
-        wrt: CanonicalDerivativeAxis,
+        name: &str,
+        args: &[ExprId],
+        axes: &[CanonicalDerivativeAxis],
     ) -> JitResult<()> {
+        self.require_intrinsic_arity_range(name, args, 2, 3)?;
+        let (expr, delay, max_delay) = (args[0], args[1], args.get(2).copied());
+        if axes.len() > 1 {
+            for &axis in axes {
+                if !self.expr_derivative_is_zero(delay, axis)? {
+                    return Err(self.unsupported(format!(
+                        "absdelay higher-order derivatives with a signal-dependent delay at expression {expr_id}"
+                    )));
+                }
+            }
+        }
         let Some(slot) = self.limits.canonical_absdelay_slot(expr_id) else {
             return Err(self.unsupported(format!(
                 "analog operator absdelay derivative expression {expr_id} buffer slot"
             )));
         };
         self.lower(expr)?;
-        self.lower_derivative(expr, wrt)?;
+        self.lower_mixed_derivative(expr, axes)?;
         self.lower(delay)?;
-        self.lower_derivative(delay, wrt)?;
+        // All timing partials were proved zero above for higher orders. The
+        // history and interpolation coefficient belong to the primal site.
+        if axes.len() > 1 {
+            self.push(NativeOp::Const(0.0))?;
+        } else {
+            self.lower_mixed_derivative(delay, axes)?;
+        }
         if let Some(max_delay) = max_delay {
             self.lower(max_delay)?;
             require_stack(

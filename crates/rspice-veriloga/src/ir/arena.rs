@@ -406,7 +406,8 @@ pub enum Heavy {
         delay_derivative: NodeId,
         /// Optional maximum delay.
         max_delay: Option<NodeId>,
-        /// Derivative order, retained so lowering can refuse orders above one.
+        /// Action order. Repeated input derivatives with zero timing partials
+        /// still use order one; higher orders require mixed timing terms.
         derivative_order: u8,
     },
     /// `transition` — piecewise-linear smoothing.

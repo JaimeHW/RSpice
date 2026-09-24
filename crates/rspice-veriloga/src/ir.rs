@@ -4935,6 +4935,22 @@ pub mod autodiff {
                     } => {
                         let second_input = differentiate!(input_derivative);
                         let second_delay = differentiate!(delay_derivative);
+                        let next_delay = differentiate!(delay_time);
+                        let next_delay = simplify(arena, next_delay);
+                        let prior_delay = simplify(arena, delay_derivative);
+                        // For a delay independent of every differentiation
+                        // axis, the interpolation coefficient is constant.
+                        // Reuse its first-order action on the higher input
+                        // derivative. A moving delay needs mixed terms and
+                        // must retain the unsupported-order marker.
+                        let derivative_order = if derivative_order == 1
+                            && matches!(arena.node(prior_delay), Node::Const(v) if *v == 0.0)
+                            && matches!(arena.node(next_delay), Node::Const(v) if *v == 0.0)
+                        {
+                            1
+                        } else {
+                            derivative_order.saturating_add(1)
+                        };
                         arena.push_heavy(Heavy::AbsDelayDerivative {
                             site,
                             input,
@@ -4942,7 +4958,7 @@ pub mod autodiff {
                             delay_time,
                             delay_derivative: second_delay,
                             max_delay,
-                            derivative_order: derivative_order.saturating_add(1),
+                            derivative_order,
                         })
                     }
                     Heavy::Transition {

@@ -1,0 +1,12 @@
+module higher_delay(p,n);
+    inout p,n;
+    electrical p,n;
+    parameter real td = 0.25;
+    real x;
+    integer k;
+    analog begin
+        x = absdelay(exp(2*V(p,n)), td);
+        for (k=0; k<3; k=k+1) x = ddx(x,V(p,n));
+        I(p,n) <+ x;
+    end
+endmodule

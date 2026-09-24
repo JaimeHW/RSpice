@@ -64,12 +64,12 @@ mod absdelay_derivative_tests {
     }
 
     #[test]
-    fn absdelay_second_derivative_fails_closed() {
+    fn absdelay_moving_delay_mixed_derivative_fails_closed() {
         let site = AbsDelaySiteId::from_span(crate::source::Span::dummy());
         let arena = &mut ExprArena::new();
         let primal = primal(arena, site, false);
         let first = autodiff::differentiate(arena, primal, &DerivativeWrt::Voltage(0));
-        let second = autodiff::differentiate(arena, first, &DerivativeWrt::Voltage(0));
+        let second = autodiff::differentiate(arena, first, &DerivativeWrt::Voltage(1));
         let error = CodeGenerator::new()
             .compile_expr(arena, second, &empty_emit_context())
             .expect_err("unsupported absdelay Hessian must fail compilation");

@@ -1104,6 +1104,8 @@ endmodule
 fn nested_ddx_preserves_the_readback_and_its_jacobian() {
     for body in [
         "analog I(p,n)<+ddx(ddx(V(p,n)*V(p,n)*V(p,n),V(p,n)),V(p,n));",
+        "analog I(p,n)<+ddx(ddx(absdelay(V(p,n)*V(p,n)*V(p,n),1e-9),V(p,n)),V(p,n));",
+        "parameter real td=1e-9; analog I(p,n)<+ddx(ddx(absdelay(V(p,n)*V(p,n)*V(p,n),td,2e-9),V(p,n)),V(p,n));",
         "real x,y; analog begin x=V(p,n)*V(p,n)*V(p,n); y=ddx(x,V(p,n)); I(p,n)<+ddx(y,V(p,n)); end",
         "parameter integer count=3; real x; integer k; analog begin x=0; for(k=0;k<count;k=k+1) x=x+V(p,n)*V(p,n)*V(p,n); I(p,n)<+ddx(ddx(x,V(p,n)),V(p,n))/3; end",
     ] {
@@ -1116,6 +1118,15 @@ fn nested_ddx_preserves_the_readback_and_its_jacobian() {
             .collect();
         let mut ad =
             differentiate(&cfg.function, &lanes).expect("finite nesting must differentiate");
+        for value in &ad.function.values {
+            if let rspice_veriloga::canonical_ir::cfg::CfgValueKind::AbsDelayDerivative {
+                order,
+                ..
+            } = value.kind
+            {
+                assert_eq!(order, 1, "fixed timing must reuse the local input action");
+            }
+        }
         let row = ad.derivative_row(cfg.residuals[0]);
         let mut bias = bias_point(&artifact);
         for voltage in [-0.8, 0.0, 1.3] {
