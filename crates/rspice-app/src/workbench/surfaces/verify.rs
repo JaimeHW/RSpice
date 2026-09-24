@@ -1844,11 +1844,6 @@ fn verification_margin(spec: &SpecEntry, value: f64) -> f64 {
     }
 }
 
-#[allow(dead_code, reason = "verification helper exercised by focused tests")]
-fn measurement_in_run(run: &crate::state::SimulationRun, name: &str) -> Option<f64> {
-    measurement_in_run_with_unit(run, name, "")
-}
-
 fn measurement_in_run_with_unit(
     run: &crate::state::SimulationRun,
     name: &str,
@@ -2155,7 +2150,7 @@ fn active_dataset_measurement(
 ) -> Option<f64> {
     simulation
         .active_run()
-        .and_then(|run| measurement_in_run(run, name))
+        .and_then(|run| measurement_in_run_with_unit(run, name, ""))
 }
 
 #[cfg(test)]

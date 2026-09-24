@@ -933,10 +933,13 @@ fn measurement_evidence_requires_success_finite_value_and_provenance() {
             .with_measurements(vec![rspice_core::MeasureResult::success("valid", 4.0)]),
     ));
 
-    assert_eq!(measurement_in_run(&run, "legacy"), None);
-    assert_eq!(measurement_in_run(&run, "failed"), None);
-    assert_eq!(measurement_in_run(&run, "measure_failed"), None);
-    assert_eq!(measurement_in_run(&run, "valid"), Some(4.0));
+    assert_eq!(measurement_in_run_with_unit(&run, "legacy", ""), None);
+    assert_eq!(measurement_in_run_with_unit(&run, "failed", ""), None);
+    assert_eq!(
+        measurement_in_run_with_unit(&run, "measure_failed", ""),
+        None
+    );
+    assert_eq!(measurement_in_run_with_unit(&run, "valid", ""), Some(4.0));
 }
 
 #[test]

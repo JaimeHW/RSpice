@@ -1582,7 +1582,7 @@ fn dependency_repair_replaces_self_dangling_wrong_kind_and_duplicate_bindings() 
         let instance = plan.instance(dependent).expect("dependent remains present");
         assert_eq!(
             instance.dependencies().len(),
-            instance.prerequisite_roles().len()
+            instance.draft().prerequisite_roles().len()
         );
         assert!(plan.validation_issues().is_empty());
         assert!(plan.freeze().is_ok());

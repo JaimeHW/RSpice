@@ -486,19 +486,6 @@ impl AnalysisInstance {
         &self.dependencies
     }
 
-    /// Exact dependency roles declared by this instance's current draft.
-    ///
-    /// The *declaration*, which for a periodic small-signal request whose
-    /// carrier is the preceding periodic solve is only one of the two families
-    /// that may fill it. Ask [`SimulationPlan::required_prerequisite_roles`]
-    /// for the role as the plan's own order resolves it; everything that binds
-    /// or validates an edge uses that one.
-    #[must_use]
-    #[allow(dead_code, reason = "retained plan inspection method used by tests")]
-    pub fn prerequisite_roles(&self) -> &'static [AnalysisKind] {
-        self.draft.prerequisite_roles()
-    }
-
     #[must_use]
     pub const fn lifecycle(&self) -> AnalysisLifecycleState {
         self.lifecycle
