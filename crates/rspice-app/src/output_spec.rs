@@ -1,11 +1,7 @@
-//! Shared output specification parsing/evaluation helpers.
+//! Shared output specification parsing helpers.
 //!
 //! The engine bridge resolves voltage and branch-current probes here.
 //! Parameter replay and sensitivity arithmetic belong to rspice-core.
-
-use num_complex::Complex64;
-use rspice_core::Value;
-use rspice_core::analysis::ac::AcResult;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OutputVoltageSpec {
@@ -45,40 +41,6 @@ fn parse_ascii_function_call<'a>(input: &'a str, prefix: &str) -> Option<&'a str
 #[inline]
 pub(crate) fn is_branch_current_output(output_var: &str) -> bool {
     parse_branch_current_name(output_var).is_some()
-}
-
-#[allow(dead_code, reason = "retained sensitivity output selector")]
-pub(crate) fn collect_sensitivity_parameters(
-    netlist: &rspice_core::Netlist,
-) -> Vec<(String, Value)> {
-    let mut params: Vec<(String, Value)> = netlist
-        .params
-        .all_params()
-        .into_iter()
-        .filter(|(name, value)| {
-            value.is_finite() && !name.starts_with("IC_") && !name.starts_with("NODESET_")
-        })
-        .collect();
-    params.sort_by(|a, b| a.0.cmp(&b.0));
-    params
-}
-
-#[allow(dead_code, reason = "retained sensitivity frequency selector")]
-pub(crate) fn resolve_sensitivity_ac_frequency(
-    ac_mode: bool,
-    frequency: Option<Value>,
-) -> Result<Option<Value>, String> {
-    if ac_mode {
-        let freq = frequency.unwrap_or(1.0);
-        if !freq.is_finite() || freq <= 0.0 {
-            return Err("Sensitivity AC frequency must be finite and > 0".to_string());
-        }
-        Ok(Some(freq))
-    } else if frequency.is_some() {
-        Err("Sensitivity frequency is only valid when AC mode is enabled".to_string())
-    } else {
-        Ok(None)
-    }
 }
 
 pub(crate) fn validate_sensitivity_output_spec(output_spec: &OutputSpec) -> Result<(), String> {
@@ -194,140 +156,9 @@ pub(crate) fn parse_output_voltage_spec(
     })
 }
 
-/// One node's DC voltage, or the reason the solve published none for it.
-///
-/// Ground is the constant zero. A net only the event domain resolves has no
-/// voltage at all — its MNA row is the placeholder the assembly closed with
-/// `v = 0` — so the spec is refused with the engine's own sentence instead of
-/// being answered with that zero. `role` names which half of a differential
-/// spec failed, since both halves come through here.
-#[allow(dead_code, reason = "retained DC output evaluator")]
-fn dc_node_voltage(
-    dc_result: &rspice_core::SimulationResult,
-    node: usize,
-    role: &str,
-) -> Result<Value, String> {
-    if node == 0 {
-        return Ok(0.0);
-    }
-    if let Some(kind) = dc_result.event_only_node_kind(node) {
-        let name = dc_result
-            .node_names
-            .get(node)
-            .cloned()
-            .unwrap_or_else(|| node.to_string());
-        return Err(
-            rspice_core::analysis::transient::event_only_voltage_refusal(
-                &name,
-                kind,
-                rspice_core::analysis::transient::EventTraceSurface::SolvedPoint,
-            ),
-        );
-    }
-    dc_result.node_voltages.get(node).copied().ok_or_else(|| {
-        format!(
-            "Voltage {role} node index {node} is out of range ({} available)",
-            dc_result.node_voltages.len()
-        )
-    })
-}
-
-#[allow(dead_code, reason = "retained DC output evaluator")]
-pub(crate) fn dc_output_value(
-    dc_result: &rspice_core::SimulationResult,
-    output_spec: &OutputSpec,
-) -> Result<Value, String> {
-    match output_spec {
-        OutputSpec::Voltage(vspec) => {
-            let v_pos = dc_node_voltage(dc_result, vspec.pos, "output")?;
-            let v_neg = match vspec.neg {
-                Some(idx) => dc_node_voltage(dc_result, idx, "reference")?,
-                None => 0.0,
-            };
-            Ok(v_pos - v_neg)
-        }
-        OutputSpec::BranchCurrent {
-            branch_ordinal,
-            branch_name,
-        } => {
-            let idx = branch_ordinal.saturating_sub(1);
-            dc_result.branch_currents.get(idx).copied().ok_or_else(|| {
-                format!(
-                    "Branch current for '{}' is unavailable (index {})",
-                    branch_name, idx
-                )
-            })
-        }
-    }
-}
-
-#[allow(dead_code, reason = "retained AC output evaluator")]
-pub(crate) fn ac_output_value(
-    ac_result: &AcResult,
-    output_spec: &OutputSpec,
-) -> Result<Complex64, String> {
-    match output_spec {
-        OutputSpec::Voltage(vspec) => {
-            let v_pos = if vspec.pos == 0 {
-                Complex64::new(0.0, 0.0)
-            } else {
-                ac_result
-                    .voltages
-                    .get(vspec.pos.saturating_sub(1))
-                    .copied()
-                    .ok_or_else(|| {
-                        format!(
-                            "AC voltage output node index {} is out of range ({} available)",
-                            vspec.pos,
-                            ac_result.voltages.len()
-                        )
-                    })?
-            };
-            let v_neg = match vspec.neg {
-                Some(0) => Complex64::new(0.0, 0.0),
-                Some(idx) => ac_result
-                    .voltages
-                    .get(idx.saturating_sub(1))
-                    .copied()
-                    .ok_or_else(|| {
-                        format!(
-                            "AC voltage reference node index {} is out of range ({} available)",
-                            idx,
-                            ac_result.voltages.len()
-                        )
-                    })?,
-                None => Complex64::new(0.0, 0.0),
-            };
-            Ok(v_pos - v_neg)
-        }
-        OutputSpec::BranchCurrent {
-            branch_ordinal,
-            branch_name,
-        } => {
-            let idx = branch_ordinal.saturating_sub(1);
-            ac_result.currents.get(idx).copied().ok_or_else(|| {
-                format!(
-                    "AC branch current for '{}' is unavailable (index {})",
-                    branch_name, idx
-                )
-            })
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        OutputVoltageSpec, is_branch_current_output, parse_output_voltage_spec,
-        resolve_sensitivity_ac_frequency,
-    };
-
-    #[test]
-    fn resolve_sensitivity_ac_frequency_rejects_non_finite_values() {
-        let err = resolve_sensitivity_ac_frequency(true, Some(f64::INFINITY))
-            .expect_err("infinite AC sensitivity frequency must be rejected");
-        assert!(err.contains("finite"));
-    }
+    use super::{OutputVoltageSpec, is_branch_current_output, parse_output_voltage_spec};
 
     #[test]
     fn output_parsing_accepts_arbitrary_unicode_without_byte_boundary_panics() {
