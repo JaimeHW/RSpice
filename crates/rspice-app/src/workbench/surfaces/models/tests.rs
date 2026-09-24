@@ -5,6 +5,7 @@
 //! correlation requires current approved evidence before it counts.
 
 use egui::Rect;
+use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSuiteInput};
 
 use super::*;
 use crate::workbench::state::{ModelsCatalogScope, ModelsPage};
@@ -595,30 +596,31 @@ fn configured_correlation_requires_current_approved_evidence_for_qualification()
         resolved.model_revision,
     )
     .unwrap();
-    let dataset = CorrelationDatasetRevision::try_from_csv(
-        "bench",
-        crate::product::ObjectRevision::INITIAL,
-        "Bench",
-        CorrelationDatasetClass::BenchMeasurement,
-        "lab",
-        "lot-1",
-        "fixture-1",
-        "calibration-1",
-        "bench.csv",
-        b"id,quantity,value,unit\np1,V(out),1,V\n".to_vec(),
-        None,
-    )
+    let dataset = CorrelationDatasetRevision::try_from_csv(CorrelationDatasetImport {
+        id: "bench".to_owned(),
+        revision: crate::product::ObjectRevision::INITIAL,
+        name: "Bench".to_owned(),
+        class: CorrelationDatasetClass::BenchMeasurement,
+        authority: "lab".to_owned(),
+        device_or_lot: "lot-1".to_owned(),
+        fixture: "fixture-1".to_owned(),
+        calibration: "calibration-1".to_owned(),
+        source_name: "bench.csv".to_owned(),
+        raw_source: b"id,quantity,value,unit\np1,V(out),1,V\n".to_vec(),
+        model_source: None,
+        simulation_provenance: None,
+    })
     .unwrap();
-    let suite = CorrelationSuite::try_new(
-        "bench-correlation",
-        crate::product::ObjectRevision::INITIAL,
-        "Bench correlation",
-        "model-owner",
-        source.clone(),
-        vec![dataset],
-        Vec::new(),
-        Vec::new(),
-    )
+    let suite = CorrelationSuite::try_new(CorrelationSuiteInput {
+        id: "bench-correlation".to_owned(),
+        revision: crate::product::ObjectRevision::INITIAL,
+        name: "Bench correlation".to_owned(),
+        owner_id: "model-owner".to_owned(),
+        source: source.clone(),
+        datasets: vec![dataset],
+        metrics: Vec::new(),
+        dispositions: Vec::new(),
+    })
     .unwrap();
     let correlation = ModelCorrelationState::try_new(vec![suite], Vec::new()).unwrap();
     let library = app

@@ -735,6 +735,9 @@ pub(super) fn tone_color(t: &Tokens, tone: Tone) -> Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rspice_model_library::correlation::{
+        CorrelationDatasetImport, CorrelationMetricInput, CorrelationSuiteInput,
+    };
 
     #[test]
     fn section_copy_is_complete_for_the_mockup_contract() {
@@ -949,50 +952,52 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
         )
         .expect("source binding");
 
-        let reference = CorrelationDatasetRevision::try_from_csv(
-            "reference",
-            ObjectRevision::INITIAL,
-            "Bench sweep",
-            CorrelationDatasetClass::BenchMeasurement,
-            "qualified test authority",
-            "lot-1",
-            "fixture-1",
-            "calibration-1",
-            "bench.csv",
-            REFERENCE.to_vec(),
-            None,
-        )
+        let reference = CorrelationDatasetRevision::try_from_csv(CorrelationDatasetImport {
+            id: "reference".to_owned(),
+            revision: ObjectRevision::INITIAL,
+            name: "Bench sweep".to_owned(),
+            class: CorrelationDatasetClass::BenchMeasurement,
+            authority: "qualified test authority".to_owned(),
+            device_or_lot: "lot-1".to_owned(),
+            fixture: "fixture-1".to_owned(),
+            calibration: "calibration-1".to_owned(),
+            source_name: "bench.csv".to_owned(),
+            raw_source: REFERENCE.to_vec(),
+            model_source: None,
+            simulation_provenance: None,
+        })
         .expect("reference dataset");
         // The retained export digest is the digest of the exported bytes, and
         // the constructor is the only thing that computes it.
-        let export_digest = CorrelationDatasetRevision::try_from_csv(
-            "simulation",
-            ObjectRevision::INITIAL,
-            "Model simulation",
-            CorrelationDatasetClass::BenchMeasurement,
-            "qualified test authority",
-            "lot-1",
-            "fixture-1",
-            "calibration-1",
-            "simulation.csv",
-            SIMULATED.to_vec(),
-            None,
-        )
+        let export_digest = CorrelationDatasetRevision::try_from_csv(CorrelationDatasetImport {
+            id: "simulation".to_owned(),
+            revision: ObjectRevision::INITIAL,
+            name: "Model simulation".to_owned(),
+            class: CorrelationDatasetClass::BenchMeasurement,
+            authority: "qualified test authority".to_owned(),
+            device_or_lot: "lot-1".to_owned(),
+            fixture: "fixture-1".to_owned(),
+            calibration: "calibration-1".to_owned(),
+            source_name: "simulation.csv".to_owned(),
+            raw_source: SIMULATED.to_vec(),
+            model_source: None,
+            simulation_provenance: None,
+        })
         .expect("simulation digest probe")
         .raw_digest;
-        let simulation = CorrelationDatasetRevision::try_from_csv_with_provenance(
-            "simulation",
-            ObjectRevision::INITIAL,
-            "Model simulation",
-            CorrelationDatasetClass::ModelSimulation,
-            "qualified test authority",
-            "lot-1",
-            "fixture-1",
-            "calibration-1",
-            "simulation.csv",
-            SIMULATED.to_vec(),
-            Some(source.clone()),
-            Some(CorrelationSimulationProvenance {
+        let simulation = CorrelationDatasetRevision::try_from_csv(CorrelationDatasetImport {
+            id: "simulation".to_owned(),
+            revision: ObjectRevision::INITIAL,
+            name: "Model simulation".to_owned(),
+            class: CorrelationDatasetClass::ModelSimulation,
+            authority: "qualified test authority".to_owned(),
+            device_or_lot: "lot-1".to_owned(),
+            fixture: "fixture-1".to_owned(),
+            calibration: "calibration-1".to_owned(),
+            source_name: "simulation.csv".to_owned(),
+            raw_source: SIMULATED.to_vec(),
+            model_source: Some(source.clone()),
+            simulation_provenance: Some(CorrelationSimulationProvenance {
                 run_id: "correlation-run".to_owned(),
                 run_dataset_id: "correlation-run-dataset".to_owned(),
                 analysis_id: 1,
@@ -1007,34 +1012,34 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
                 model_source: source.clone(),
                 executed_at_unix_ms: 1,
             }),
-        )
+        })
         .expect("simulation dataset");
-        let metric = CorrelationMetricDefinition::try_new(
-            "gain-error",
-            "Gain error",
-            "reference",
-            "simulation",
-            "gain",
-            CorrelationCalculation::AbsoluteDecibels,
-            None,
-            0.25,
-            1.0,
-            0.5,
-            CorrelationAggregation::WorstCondition,
-            CorrelationAlignmentPolicy::ExactOnly,
-            CorrelationReleaseRole::Review,
-        )
+        let metric = CorrelationMetricDefinition::try_new(CorrelationMetricInput {
+            id: "gain-error".to_owned(),
+            name: "Gain error".to_owned(),
+            reference_dataset_id: "reference".to_owned(),
+            simulation_dataset_id: "simulation".to_owned(),
+            quantity: "gain".to_owned(),
+            calculation: CorrelationCalculation::AbsoluteDecibels,
+            domain: None,
+            limit: 0.25,
+            uncertainty_multiplier: 1.0,
+            minimum_coverage: 0.5,
+            aggregation: CorrelationAggregation::WorstCondition,
+            alignment: CorrelationAlignmentPolicy::ExactOnly,
+            release_role: CorrelationReleaseRole::Review,
+        })
         .expect("metric definition");
-        let suite = CorrelationSuite::try_new(
-            "gain-correlation",
-            ObjectRevision::INITIAL,
-            "Gain correlation",
-            "model-owner",
+        let suite = CorrelationSuite::try_new(CorrelationSuiteInput {
+            id: "gain-correlation".to_owned(),
+            revision: ObjectRevision::INITIAL,
+            name: "Gain correlation".to_owned(),
+            owner_id: "model-owner".to_owned(),
             source,
-            vec![reference, simulation],
-            vec![metric],
-            Vec::new(),
-        )
+            datasets: vec![reference, simulation],
+            metrics: vec![metric],
+            dispositions: Vec::new(),
+        })
         .expect("correlation suite");
         let correlation =
             ModelCorrelationState::try_new(vec![suite], Vec::new()).expect("correlation state");

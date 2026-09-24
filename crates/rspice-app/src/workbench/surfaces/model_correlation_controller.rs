@@ -6,6 +6,9 @@
 //! drafts are never authoritative project state.
 
 use csv::{Terminator, WriterBuilder};
+use rspice_model_library::correlation::{
+    CorrelationDatasetImport, CorrelationMetricInput, CorrelationSuiteInput,
+};
 use sha2::{Digest as _, Sha256};
 
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision, RunId};
@@ -102,30 +105,30 @@ pub(super) fn append_dataset(
         let revision = next_suite_revision(&base)?;
         let mut datasets = base.datasets.clone();
         datasets.push(dataset);
-        CorrelationSuite::try_new(
-            base.id.clone(),
+        CorrelationSuite::try_new(CorrelationSuiteInput {
+            id: base.id.clone(),
             revision,
-            base.name.clone(),
-            base.owner_id.clone(),
-            context.source.clone(),
+            name: base.name.clone(),
+            owner_id: base.owner_id.clone(),
+            source: context.source.clone(),
             datasets,
-            base.metrics.clone(),
-            base.dispositions.clone(),
-        )
+            metrics: base.metrics.clone(),
+            dispositions: base.dispositions.clone(),
+        })
         .map_err(|error| format!("Dataset cannot be appended: {error}"))?
     } else {
         let suite_id = default_suite_id(&context)?;
         let owner_id = required_text("Suite owner identity", &draft.suite_owner_id)?;
-        CorrelationSuite::try_new(
-            suite_id,
-            ObjectRevision::INITIAL,
-            format!("{} correlation suite", context.model_name),
+        CorrelationSuite::try_new(CorrelationSuiteInput {
+            id: suite_id,
+            revision: ObjectRevision::INITIAL,
+            name: format!("{} correlation suite", context.model_name),
             owner_id,
-            context.source.clone(),
-            vec![dataset],
-            Vec::new(),
-            Vec::new(),
-        )
+            source: context.source.clone(),
+            datasets: vec![dataset],
+            metrics: Vec::new(),
+            dispositions: Vec::new(),
+        })
         .map_err(|error| format!("Correlation suite cannot be created: {error}"))?
     };
     let suite_id = suite.id.clone();
@@ -189,16 +192,16 @@ pub(super) fn append_metric(
     } else {
         metrics.push(metric);
     }
-    let suite = CorrelationSuite::try_new(
-        base.id.clone(),
+    let suite = CorrelationSuite::try_new(CorrelationSuiteInput {
+        id: base.id.clone(),
         revision,
-        base.name.clone(),
-        base.owner_id.clone(),
-        context.source.clone(),
-        base.datasets.clone(),
+        name: base.name.clone(),
+        owner_id: base.owner_id.clone(),
+        source: context.source.clone(),
+        datasets: base.datasets.clone(),
         metrics,
-        base.dispositions.clone(),
-    )
+        dispositions: base.dispositions.clone(),
+    })
     .map_err(|error| format!("Metric cannot be appended: {error}"))?;
     let suite_id = suite.id.clone();
 
@@ -286,16 +289,16 @@ pub(super) fn append_disposition(
     };
     let mut dispositions = base.dispositions.clone();
     dispositions.push(disposition);
-    let suite = CorrelationSuite::try_new(
-        base.id.clone(),
+    let suite = CorrelationSuite::try_new(CorrelationSuiteInput {
+        id: base.id.clone(),
         revision,
-        base.name.clone(),
-        base.owner_id.clone(),
-        context.source.clone(),
-        base.datasets.clone(),
-        base.metrics.clone(),
+        name: base.name.clone(),
+        owner_id: base.owner_id.clone(),
+        source: context.source.clone(),
+        datasets: base.datasets.clone(),
+        metrics: base.metrics.clone(),
         dispositions,
-    )
+    })
     .map_err(|error| format!("Outlier disposition cannot be appended: {error}"))?;
     let suite_id = suite.id.clone();
 
@@ -582,10 +585,10 @@ fn dataset_from_draft(
         )
     };
 
-    CorrelationDatasetRevision::try_from_csv_with_provenance(
+    CorrelationDatasetRevision::try_from_csv(CorrelationDatasetImport {
         id,
         revision,
-        required_text("Dataset name", &draft.name)?,
+        name: required_text("Dataset name", &draft.name)?,
         class,
         authority,
         device_or_lot,
@@ -594,8 +597,8 @@ fn dataset_from_draft(
         source_name,
         raw_source,
         model_source,
-        provenance,
-    )
+        simulation_provenance: provenance,
+    })
     .map_err(|error| format!("Dataset is invalid: {error}"))
 }
 
@@ -901,24 +904,27 @@ fn metric_from_draft(
         }
     };
 
-    CorrelationMetricDefinition::try_new(
-        required_text("Metric ID", &draft.id)?,
-        required_text("Metric name", &draft.name)?,
-        required_text("Reference dataset ID", &draft.reference_dataset_id)?,
-        required_text("Simulation dataset ID", &draft.simulation_dataset_id)?,
-        required_text("Metric quantity", &draft.quantity)?,
-        map_calculation(draft.calculation),
+    CorrelationMetricDefinition::try_new(CorrelationMetricInput {
+        id: required_text("Metric ID", &draft.id)?,
+        name: required_text("Metric name", &draft.name)?,
+        reference_dataset_id: required_text("Reference dataset ID", &draft.reference_dataset_id)?,
+        simulation_dataset_id: required_text(
+            "Simulation dataset ID",
+            &draft.simulation_dataset_id,
+        )?,
+        quantity: required_text("Metric quantity", &draft.quantity)?,
+        calculation: map_calculation(draft.calculation),
         domain,
-        parse_number("Metric limit", &draft.limit)?,
-        parse_number(
+        limit: parse_number("Metric limit", &draft.limit)?,
+        uncertainty_multiplier: parse_number(
             "Metric uncertainty multiplier",
             &draft.uncertainty_multiplier,
         )?,
-        parse_number("Metric minimum coverage", &draft.minimum_coverage)?,
-        map_aggregation(draft.aggregation),
+        minimum_coverage: parse_number("Metric minimum coverage", &draft.minimum_coverage)?,
+        aggregation: map_aggregation(draft.aggregation),
         alignment,
-        map_release_role(draft.release_role),
-    )
+        release_role: map_release_role(draft.release_role),
+    })
     .map_err(|error| format!("Metric is invalid: {error}"))
 }
 
@@ -1217,19 +1223,20 @@ mod tests {
             String::from_utf8_lossy(&source)
                 .starts_with("id,quantity,value,unit,uncertainty,weight,condition:frequency[Hz]\n")
         );
-        let dataset = CorrelationDatasetRevision::try_from_csv(
-            "simulation-export",
-            ObjectRevision::INITIAL,
-            "Simulation export",
-            CorrelationDatasetClass::BenchMeasurement,
-            "test",
-            "device",
-            "fixture",
-            "calibration",
-            "generated.csv",
-            source,
-            None,
-        )
+        let dataset = CorrelationDatasetRevision::try_from_csv(CorrelationDatasetImport {
+            id: "simulation-export".to_owned(),
+            revision: ObjectRevision::INITIAL,
+            name: "Simulation export".to_owned(),
+            class: CorrelationDatasetClass::BenchMeasurement,
+            authority: "test".to_owned(),
+            device_or_lot: "device".to_owned(),
+            fixture: "fixture".to_owned(),
+            calibration: "calibration".to_owned(),
+            source_name: "generated.csv".to_owned(),
+            raw_source: source,
+            model_source: None,
+            simulation_provenance: None,
+        })
         .unwrap();
         assert_eq!(dataset.observations.len(), 2);
         assert_eq!(dataset.observations[0].quantity, "phase(V(out))");

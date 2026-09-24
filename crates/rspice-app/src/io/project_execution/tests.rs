@@ -11,6 +11,7 @@ use crate::state::model_library::{
     CornerSectionBinding, CornerSectionDomain, CorrelationDatasetClass, CorrelationDatasetRevision,
     CorrelationSuite,
 };
+use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSuiteInput};
 
 fn project_id() -> ProjectId {
     ProjectId::from_namespace(
@@ -712,30 +713,31 @@ fn project_owned_model_round_trip_preserves_authority_bytes_and_revision() {
         model_revision,
     )
     .unwrap();
-    let reference = CorrelationDatasetRevision::try_from_csv(
-        "bench-reference",
-        crate::product::ObjectRevision::INITIAL,
-        "Bench reference",
-        CorrelationDatasetClass::BenchMeasurement,
-        "test lab",
-        "lot-1",
-        "fixture-1",
-        "calibration-1",
-        "bench.csv",
-        b"id,quantity,value,unit\nr1,gain,1,V\n".to_vec(),
-        None,
-    )
+    let reference = CorrelationDatasetRevision::try_from_csv(CorrelationDatasetImport {
+        id: "bench-reference".to_owned(),
+        revision: crate::product::ObjectRevision::INITIAL,
+        name: "Bench reference".to_owned(),
+        class: CorrelationDatasetClass::BenchMeasurement,
+        authority: "test lab".to_owned(),
+        device_or_lot: "lot-1".to_owned(),
+        fixture: "fixture-1".to_owned(),
+        calibration: "calibration-1".to_owned(),
+        source_name: "bench.csv".to_owned(),
+        raw_source: b"id,quantity,value,unit\nr1,gain,1,V\n".to_vec(),
+        model_source: None,
+        simulation_provenance: None,
+    })
     .unwrap();
-    let suite = CorrelationSuite::try_new(
-        "owned-nch-correlation",
-        crate::product::ObjectRevision::INITIAL,
-        "Owned NCH correlation",
-        "model-owner",
+    let suite = CorrelationSuite::try_new(CorrelationSuiteInput {
+        id: "owned-nch-correlation".to_owned(),
+        revision: crate::product::ObjectRevision::INITIAL,
+        name: "Owned NCH correlation".to_owned(),
+        owner_id: "model-owner".to_owned(),
         source,
-        vec![reference],
-        Vec::new(),
-        Vec::new(),
-    )
+        datasets: vec![reference],
+        metrics: Vec::new(),
+        dispositions: Vec::new(),
+    })
     .unwrap();
     let expected_correlation = ModelCorrelationState::try_new(vec![suite], Vec::new()).unwrap();
     manager

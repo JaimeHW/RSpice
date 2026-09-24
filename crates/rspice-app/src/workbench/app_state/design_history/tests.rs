@@ -9,6 +9,7 @@
 use super::*;
 use crate::state::{Cell, ComponentType, LibraryCellInstance, Point, View, ViewType};
 use crate::workbench::state::LocalSafeModeOptions;
+use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSuiteInput};
 
 #[test]
 fn library_transaction_cannot_smuggle_a_provider_ledger_change() {
@@ -917,30 +918,31 @@ fn project_model_correlation_publication_is_history_guarded() {
         model_identity.revision,
     )
     .expect("valid correlation source binding");
-    let dataset = CorrelationDatasetRevision::try_from_csv(
-        "bench-reference",
-        ObjectRevision::INITIAL,
-        "Bench reference",
-        CorrelationDatasetClass::BenchMeasurement,
-        "test authority",
-        "lot-1",
-        "fixture-1",
-        "calibration-1",
-        "reference.csv",
-        b"id,quantity,value,unit\nr1,gain,1,V\n".to_vec(),
-        None,
-    )
+    let dataset = CorrelationDatasetRevision::try_from_csv(CorrelationDatasetImport {
+        id: "bench-reference".to_owned(),
+        revision: ObjectRevision::INITIAL,
+        name: "Bench reference".to_owned(),
+        class: CorrelationDatasetClass::BenchMeasurement,
+        authority: "test authority".to_owned(),
+        device_or_lot: "lot-1".to_owned(),
+        fixture: "fixture-1".to_owned(),
+        calibration: "calibration-1".to_owned(),
+        source_name: "reference.csv".to_owned(),
+        raw_source: b"id,quantity,value,unit\nr1,gain,1,V\n".to_vec(),
+        model_source: None,
+        simulation_provenance: None,
+    })
     .expect("valid retained correlation dataset");
-    let suite = CorrelationSuite::try_new(
-        "history-correlation",
-        ObjectRevision::INITIAL,
-        "History correlation",
-        "model-owner",
-        source_binding,
-        vec![dataset],
-        Vec::new(),
-        Vec::new(),
-    )
+    let suite = CorrelationSuite::try_new(CorrelationSuiteInput {
+        id: "history-correlation".to_owned(),
+        revision: ObjectRevision::INITIAL,
+        name: "History correlation".to_owned(),
+        owner_id: "model-owner".to_owned(),
+        source: source_binding,
+        datasets: vec![dataset],
+        metrics: Vec::new(),
+        dispositions: Vec::new(),
+    })
     .expect("valid correlation suite");
     let correlation =
         ModelCorrelationState::try_new(vec![suite], Vec::new()).expect("valid correlation");

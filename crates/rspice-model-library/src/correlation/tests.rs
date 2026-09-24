@@ -60,20 +60,20 @@ fn dataset(
             model_source: source.clone().expect("simulation source fixture"),
             executed_at_unix_ms: 1,
         });
-    CorrelationDatasetRevision::try_from_csv_with_provenance(
-        id,
-        ObjectRevision::INITIAL,
-        id,
+    CorrelationDatasetRevision::try_from_csv(CorrelationDatasetImport {
+        id: id.to_owned(),
+        revision: ObjectRevision::INITIAL,
+        name: id.to_owned(),
         class,
-        "qualified test authority",
-        "lot-1",
-        "fixture-1",
-        "calibration-1",
-        format!("{id}.csv"),
-        bytes,
-        source,
-        provenance,
-    )
+        authority: "qualified test authority".to_owned(),
+        device_or_lot: "lot-1".to_owned(),
+        fixture: "fixture-1".to_owned(),
+        calibration: "calibration-1".to_owned(),
+        source_name: format!("{id}.csv"),
+        raw_source: bytes,
+        model_source: source,
+        simulation_provenance: provenance,
+    })
     .expect("dataset fixture")
 }
 
@@ -81,21 +81,21 @@ fn metric(
     aggregation: CorrelationAggregation,
     alignment: CorrelationAlignmentPolicy,
 ) -> CorrelationMetricDefinition {
-    CorrelationMetricDefinition::try_new(
-        "gain-error",
-        "Gain error",
-        "reference",
-        "simulation",
-        "gain",
-        CorrelationCalculation::AbsoluteDecibels,
-        None,
-        0.25,
-        1.0,
-        0.5,
+    CorrelationMetricDefinition::try_new(CorrelationMetricInput {
+        id: "gain-error".to_owned(),
+        name: "Gain error".to_owned(),
+        reference_dataset_id: "reference".to_owned(),
+        simulation_dataset_id: "simulation".to_owned(),
+        quantity: "gain".to_owned(),
+        calculation: CorrelationCalculation::AbsoluteDecibels,
+        domain: None,
+        limit: 0.25,
+        uncertainty_multiplier: 1.0,
+        minimum_coverage: 0.5,
         aggregation,
         alignment,
-        CorrelationReleaseRole::Review,
-    )
+        release_role: CorrelationReleaseRole::Review,
+    })
     .expect("metric fixture")
 }
 
@@ -105,13 +105,13 @@ fn suite_with(
     metric: CorrelationMetricDefinition,
     dispositions: Vec<CorrelationOutlierDisposition>,
 ) -> CorrelationSuite {
-    CorrelationSuite::try_new(
-        "correlation",
-        ObjectRevision::INITIAL,
-        "DUT correlation",
-        "model-owner",
-        source.clone(),
-        vec![
+    CorrelationSuite::try_new(CorrelationSuiteInput {
+        id: "correlation".to_owned(),
+        revision: ObjectRevision::INITIAL,
+        name: "DUT correlation".to_owned(),
+        owner_id: "model-owner".to_owned(),
+        source: source.clone(),
+        datasets: vec![
             dataset(
                 "reference",
                 CorrelationDatasetClass::BenchMeasurement,
@@ -125,9 +125,9 @@ fn suite_with(
                 Some(source),
             ),
         ],
-        vec![metric],
+        metrics: vec![metric],
         dispositions,
-    )
+    })
     .expect("suite fixture")
 }
 
@@ -157,19 +157,20 @@ fn csv_import_is_bounded_utf8_bom_aware_and_content_addressed() {
         300.15
     );
 
-    let invalid = CorrelationDatasetRevision::try_from_csv(
-        "bad",
-        ObjectRevision::INITIAL,
-        "bad",
-        CorrelationDatasetClass::BenchMeasurement,
-        "authority",
-        "lot",
-        "fixture",
-        "calibration",
-        "bad.csv",
-        b"id,quantity,value,unit\nx,q,NaN,V\n".to_vec(),
-        None,
-    )
+    let invalid = CorrelationDatasetRevision::try_from_csv(CorrelationDatasetImport {
+        id: "bad".to_owned(),
+        revision: ObjectRevision::INITIAL,
+        name: "bad".to_owned(),
+        class: CorrelationDatasetClass::BenchMeasurement,
+        authority: "authority".to_owned(),
+        device_or_lot: "lot".to_owned(),
+        fixture: "fixture".to_owned(),
+        calibration: "calibration".to_owned(),
+        source_name: "bad.csv".to_owned(),
+        raw_source: b"id,quantity,value,unit\nx,q,NaN,V\n".to_vec(),
+        model_source: None,
+        simulation_provenance: None,
+    })
     .unwrap_err();
     assert_eq!(invalid.code, CorrelationErrorCode::InvalidNumber);
 }
@@ -259,32 +260,32 @@ s1,noise_density,0.0051,uV/√Hz,0.00005,1\n"
             .to_vec(),
         Some(source.clone()),
     );
-    let metric = CorrelationMetricDefinition::try_new(
-        "noise-density-error",
-        "Noise density error",
-        "reference",
-        "simulation",
-        "noise_density",
-        CorrelationCalculation::AbsoluteLinear,
-        None,
-        0.5,
-        1.0,
-        1.0,
-        CorrelationAggregation::EveryPoint,
-        CorrelationAlignmentPolicy::ExactOnly,
-        CorrelationReleaseRole::Review,
-    )
+    let metric = CorrelationMetricDefinition::try_new(CorrelationMetricInput {
+        id: "noise-density-error".to_owned(),
+        name: "Noise density error".to_owned(),
+        reference_dataset_id: "reference".to_owned(),
+        simulation_dataset_id: "simulation".to_owned(),
+        quantity: "noise_density".to_owned(),
+        calculation: CorrelationCalculation::AbsoluteLinear,
+        domain: None,
+        limit: 0.5,
+        uncertainty_multiplier: 1.0,
+        minimum_coverage: 1.0,
+        aggregation: CorrelationAggregation::EveryPoint,
+        alignment: CorrelationAlignmentPolicy::ExactOnly,
+        release_role: CorrelationReleaseRole::Review,
+    })
     .unwrap();
-    let suite = CorrelationSuite::try_new(
-        "noise-correlation",
-        ObjectRevision::INITIAL,
-        "Noise density correlation",
-        "model-owner",
+    let suite = CorrelationSuite::try_new(CorrelationSuiteInput {
+        id: "noise-correlation".to_owned(),
+        revision: ObjectRevision::INITIAL,
+        name: "Noise density correlation".to_owned(),
+        owner_id: "model-owner".to_owned(),
         source,
-        vec![reference, simulation],
-        vec![metric],
-        Vec::new(),
-    )
+        datasets: vec![reference, simulation],
+        metrics: vec![metric],
+        dispositions: Vec::new(),
+    })
     .unwrap();
     let evaluation = CorrelationEvaluation::evaluate(&suite).unwrap();
     let outcome = &evaluation.metric_outcomes[0];
@@ -811,21 +812,21 @@ fn advisory_failures_remain_visible_without_failing_the_review_gate() {
 #[test]
 fn a_dataset_only_suite_is_a_valid_draft_but_cannot_produce_evidence() {
     let source = source(32);
-    let suite = CorrelationSuite::try_new(
-        "draft",
-        ObjectRevision::INITIAL,
-        "Dataset import draft",
-        "model-owner",
+    let suite = CorrelationSuite::try_new(CorrelationSuiteInput {
+        id: "draft".to_owned(),
+        revision: ObjectRevision::INITIAL,
+        name: "Dataset import draft".to_owned(),
+        owner_id: "model-owner".to_owned(),
         source,
-        vec![dataset(
+        datasets: vec![dataset(
             "reference",
             CorrelationDatasetClass::BenchMeasurement,
             reference_csv(),
             None,
         )],
-        Vec::new(),
-        Vec::new(),
-    )
+        metrics: Vec::new(),
+        dispositions: Vec::new(),
+    })
     .unwrap();
     assert_eq!(
         CorrelationEvaluation::evaluate(&suite).unwrap_err().code,

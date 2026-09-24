@@ -259,75 +259,44 @@ pub struct CorrelationDatasetRevision {
     pub observations: Vec<CorrelationObservation>,
 }
 
-impl CorrelationDatasetRevision {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "Preserve the existing validated record constructor during ownership migration"
-    )]
-    pub fn try_from_csv(
-        id: impl Into<String>,
-        revision: ObjectRevision,
-        name: impl Into<String>,
-        class: CorrelationDatasetClass,
-        authority: impl Into<String>,
-        device_or_lot: impl Into<String>,
-        fixture: impl Into<String>,
-        calibration: impl Into<String>,
-        source_name: impl Into<String>,
-        raw_source: Vec<u8>,
-        model_source: Option<ModelSourceEvidenceBinding>,
-    ) -> CorrelationResult<Self> {
-        Self::try_from_csv_with_provenance(
-            id,
-            revision,
-            name,
-            class,
-            authority,
-            device_or_lot,
-            fixture,
-            calibration,
-            source_name,
-            raw_source,
-            model_source,
-            None,
-        )
-    }
+/// Source bytes and declared provenance awaiting dataset validation.
+///
+/// The importer derives the observations and digest from these exact bytes.
+#[derive(Debug)]
+pub struct CorrelationDatasetImport {
+    pub id: String,
+    pub revision: ObjectRevision,
+    pub name: String,
+    pub class: CorrelationDatasetClass,
+    pub authority: String,
+    pub device_or_lot: String,
+    pub fixture: String,
+    pub calibration: String,
+    pub source_name: String,
+    pub raw_source: Vec<u8>,
+    pub model_source: Option<ModelSourceEvidenceBinding>,
+    pub simulation_provenance: Option<CorrelationSimulationProvenance>,
+}
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "Preserve the existing validated record constructor during ownership migration"
-    )]
-    pub fn try_from_csv_with_provenance(
-        id: impl Into<String>,
-        revision: ObjectRevision,
-        name: impl Into<String>,
-        class: CorrelationDatasetClass,
-        authority: impl Into<String>,
-        device_or_lot: impl Into<String>,
-        fixture: impl Into<String>,
-        calibration: impl Into<String>,
-        source_name: impl Into<String>,
-        raw_source: Vec<u8>,
-        model_source: Option<ModelSourceEvidenceBinding>,
-        simulation_provenance: Option<CorrelationSimulationProvenance>,
-    ) -> CorrelationResult<Self> {
-        let observations = parse_correlation_csv(&raw_source)?;
-        let raw_digest = digest(&raw_source);
+impl CorrelationDatasetRevision {
+    pub fn try_from_csv(input: CorrelationDatasetImport) -> CorrelationResult<Self> {
+        let observations = parse_correlation_csv(&input.raw_source)?;
+        let raw_digest = digest(&input.raw_source);
         let value = Self {
             schema_version: MODEL_CORRELATION_SCHEMA_VERSION,
-            id: id.into(),
-            revision,
-            name: name.into(),
-            class,
-            authority: authority.into(),
-            device_or_lot: device_or_lot.into(),
-            fixture: fixture.into(),
-            calibration: calibration.into(),
-            source_name: source_name.into(),
-            raw_source,
+            id: input.id,
+            revision: input.revision,
+            name: input.name,
+            class: input.class,
+            authority: input.authority,
+            device_or_lot: input.device_or_lot,
+            fixture: input.fixture,
+            calibration: input.calibration,
+            source_name: input.source_name,
+            raw_source: input.raw_source,
             raw_digest,
-            model_source,
-            simulation_provenance,
+            model_source: input.model_source,
+            simulation_provenance: input.simulation_provenance,
             observations,
         };
         value.validate("dataset")?;
@@ -575,43 +544,43 @@ pub struct CorrelationMetricDefinition {
     pub release_role: CorrelationReleaseRole,
 }
 
+/// Authored metric inputs before numeric and cross-field validation.
+#[derive(Debug)]
+pub struct CorrelationMetricInput {
+    pub id: String,
+    pub name: String,
+    pub reference_dataset_id: String,
+    pub simulation_dataset_id: String,
+    pub quantity: String,
+    pub calculation: CorrelationCalculation,
+    pub domain: Option<CorrelationMetricDomain>,
+    pub limit: f64,
+    pub uncertainty_multiplier: f64,
+    pub minimum_coverage: f64,
+    pub aggregation: CorrelationAggregation,
+    pub alignment: CorrelationAlignmentPolicy,
+    pub release_role: CorrelationReleaseRole,
+}
+
 impl CorrelationMetricDefinition {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "Preserve the existing validated record constructor during ownership migration"
-    )]
-    pub fn try_new(
-        id: impl Into<String>,
-        name: impl Into<String>,
-        reference_dataset_id: impl Into<String>,
-        simulation_dataset_id: impl Into<String>,
-        quantity: impl Into<String>,
-        calculation: CorrelationCalculation,
-        domain: Option<CorrelationMetricDomain>,
-        limit: f64,
-        uncertainty_multiplier: f64,
-        minimum_coverage: f64,
-        aggregation: CorrelationAggregation,
-        alignment: CorrelationAlignmentPolicy,
-        release_role: CorrelationReleaseRole,
-    ) -> CorrelationResult<Self> {
+    pub fn try_new(input: CorrelationMetricInput) -> CorrelationResult<Self> {
         let metric = Self {
-            id: id.into(),
-            name: name.into(),
-            reference_dataset_id: reference_dataset_id.into(),
-            simulation_dataset_id: simulation_dataset_id.into(),
-            quantity: quantity.into(),
-            calculation,
-            domain,
-            limit: non_negative("metric.limit", limit)?,
+            id: input.id,
+            name: input.name,
+            reference_dataset_id: input.reference_dataset_id,
+            simulation_dataset_id: input.simulation_dataset_id,
+            quantity: input.quantity,
+            calculation: input.calculation,
+            domain: input.domain,
+            limit: non_negative("metric.limit", input.limit)?,
             uncertainty_multiplier: non_negative(
                 "metric.uncertainty_multiplier",
-                uncertainty_multiplier,
+                input.uncertainty_multiplier,
             )?,
-            minimum_coverage: non_negative("metric.minimum_coverage", minimum_coverage)?,
-            aggregation,
-            alignment,
-            release_role,
+            minimum_coverage: non_negative("metric.minimum_coverage", input.minimum_coverage)?,
+            aggregation: input.aggregation,
+            alignment: input.alignment,
+            release_role: input.release_role,
         };
         metric.validate("metric")?;
         Ok(metric)
@@ -768,36 +737,38 @@ pub struct CorrelationSuite {
     pub dispositions: Vec<CorrelationOutlierDisposition>,
 }
 
+/// Candidate suite contents, canonically ordered and validated at construction.
+#[derive(Debug)]
+pub struct CorrelationSuiteInput {
+    pub id: String,
+    pub revision: ObjectRevision,
+    pub name: String,
+    pub owner_id: String,
+    pub source: ModelSourceEvidenceBinding,
+    pub datasets: Vec<CorrelationDatasetRevision>,
+    pub metrics: Vec<CorrelationMetricDefinition>,
+    pub dispositions: Vec<CorrelationOutlierDisposition>,
+}
+
 impl CorrelationSuite {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "Preserve the existing validated record constructor during ownership migration"
-    )]
-    pub fn try_new(
-        id: impl Into<String>,
-        revision: ObjectRevision,
-        name: impl Into<String>,
-        owner_id: impl Into<String>,
-        source: ModelSourceEvidenceBinding,
-        mut datasets: Vec<CorrelationDatasetRevision>,
-        mut metrics: Vec<CorrelationMetricDefinition>,
-        mut dispositions: Vec<CorrelationOutlierDisposition>,
-    ) -> CorrelationResult<Self> {
-        datasets.sort_by_key(|dataset| (normalized(&dataset.id), dataset.revision));
-        metrics.sort_by_key(|metric| normalized(&metric.id));
-        dispositions.sort_by_key(|disposition| {
+    pub fn try_new(mut input: CorrelationSuiteInput) -> CorrelationResult<Self> {
+        input
+            .datasets
+            .sort_by_key(|dataset| (normalized(&dataset.id), dataset.revision));
+        input.metrics.sort_by_key(|metric| normalized(&metric.id));
+        input.dispositions.sort_by_key(|disposition| {
             (disposition.decided_at_unix_ms, normalized(&disposition.id))
         });
         let value = Self {
             schema_version: MODEL_CORRELATION_SCHEMA_VERSION,
-            id: id.into(),
-            revision,
-            name: name.into(),
-            owner_id: owner_id.into(),
-            source,
-            datasets,
-            metrics,
-            dispositions,
+            id: input.id,
+            revision: input.revision,
+            name: input.name,
+            owner_id: input.owner_id,
+            source: input.source,
+            datasets: input.datasets,
+            metrics: input.metrics,
+            dispositions: input.dispositions,
         };
         value.validate()?;
         Ok(value)

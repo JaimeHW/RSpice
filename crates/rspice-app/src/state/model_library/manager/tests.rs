@@ -9,6 +9,7 @@ use crate::state::model_library::{
     CorrelationDatasetClass, CorrelationDatasetRevision, CorrelationSimulationProvenance,
     CorrelationSuite,
 };
+use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSuiteInput};
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1581,34 +1582,35 @@ fn correlation_suite(
 ) -> CorrelationSuite {
     let reference_bytes = b"id,quantity,value,unit\nr1,gain,1,V\n".to_vec();
     let simulation_bytes = b"id,quantity,value,unit\ns1,gain,1,V\n".to_vec();
-    let reference = CorrelationDatasetRevision::try_from_csv(
-        "reference",
-        ObjectRevision::INITIAL,
-        "Reference",
-        CorrelationDatasetClass::BenchMeasurement,
-        "test authority",
-        "lot-1",
-        "fixture-1",
-        "calibration-1",
-        "reference.csv",
-        reference_bytes,
-        None,
-    )
+    let reference = CorrelationDatasetRevision::try_from_csv(CorrelationDatasetImport {
+        id: "reference".to_owned(),
+        revision: ObjectRevision::INITIAL,
+        name: "Reference".to_owned(),
+        class: CorrelationDatasetClass::BenchMeasurement,
+        authority: "test authority".to_owned(),
+        device_or_lot: "lot-1".to_owned(),
+        fixture: "fixture-1".to_owned(),
+        calibration: "calibration-1".to_owned(),
+        source_name: "reference.csv".to_owned(),
+        raw_source: reference_bytes,
+        model_source: None,
+        simulation_provenance: None,
+    })
     .unwrap();
     let simulation_digest = ContentDigest::from_bytes(Sha256::digest(&simulation_bytes).into());
-    let simulation = CorrelationDatasetRevision::try_from_csv_with_provenance(
-        "simulation",
-        ObjectRevision::INITIAL,
-        "Simulation",
-        CorrelationDatasetClass::ModelSimulation,
-        "RSpice",
-        "owned_nch",
-        "retained-plan",
-        "numeric-contract",
-        "simulation.csv",
-        simulation_bytes,
-        Some(source.clone()),
-        Some(CorrelationSimulationProvenance {
+    let simulation = CorrelationDatasetRevision::try_from_csv(CorrelationDatasetImport {
+        id: "simulation".to_owned(),
+        revision: ObjectRevision::INITIAL,
+        name: "Simulation".to_owned(),
+        class: CorrelationDatasetClass::ModelSimulation,
+        authority: "RSpice".to_owned(),
+        device_or_lot: "owned_nch".to_owned(),
+        fixture: "retained-plan".to_owned(),
+        calibration: "numeric-contract".to_owned(),
+        source_name: "simulation.csv".to_owned(),
+        raw_source: simulation_bytes,
+        model_source: Some(source.clone()),
+        simulation_provenance: Some(CorrelationSimulationProvenance {
             run_id: "run-1".to_owned(),
             run_dataset_id: "dataset-1".to_owned(),
             analysis_id: 1,
@@ -1623,18 +1625,18 @@ fn correlation_suite(
             model_source: source.clone(),
             executed_at_unix_ms: 1,
         }),
-    )
+    })
     .unwrap();
-    CorrelationSuite::try_new(
-        "owned-nch-correlation",
+    CorrelationSuite::try_new(CorrelationSuiteInput {
+        id: "owned-nch-correlation".to_owned(),
         revision,
-        "Owned NCH correlation",
-        "model-owner",
+        name: "Owned NCH correlation".to_owned(),
+        owner_id: "model-owner".to_owned(),
         source,
-        vec![reference, simulation],
-        Vec::new(),
-        Vec::new(),
-    )
+        datasets: vec![reference, simulation],
+        metrics: Vec::new(),
+        dispositions: Vec::new(),
+    })
     .unwrap()
 }
 
