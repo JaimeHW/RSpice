@@ -171,15 +171,12 @@ struct PersistedPstbDialogState {
     /// Retired. Floquet extraction always yields both margins and there is no
     /// schematic annotation channel for PSTB, so none of these three selected
     /// anything. Accepted so earlier projects still open; never written back.
-    #[serde(default)]
-    #[allow(dead_code)]
-    annotate: serde::de::IgnoredAny,
-    #[serde(default)]
-    #[allow(dead_code)]
-    phase_margin: serde::de::IgnoredAny,
-    #[serde(default)]
-    #[allow(dead_code)]
-    gain_margin: serde::de::IgnoredAny,
+    #[serde(default, rename = "annotate")]
+    _annotate: serde::de::IgnoredAny,
+    #[serde(default, rename = "phase_margin")]
+    _phase_margin: serde::de::IgnoredAny,
+    #[serde(default, rename = "gain_margin")]
+    _gain_margin: serde::de::IgnoredAny,
 }
 
 impl<'de> Deserialize<'de> for PstbDialogState {

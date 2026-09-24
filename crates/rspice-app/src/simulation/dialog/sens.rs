@@ -131,12 +131,10 @@ struct PersistedSensDialogState {
     /// way to narrow. The `filter` above is the engine's own selection and
     /// takes their place; these are accepted so earlier projects still open,
     /// and never written back.
-    #[serde(default)]
-    #[allow(dead_code)]
-    include_params: serde::de::IgnoredAny,
-    #[serde(default)]
-    #[allow(dead_code)]
-    include_devices: serde::de::IgnoredAny,
+    #[serde(default, rename = "include_params")]
+    _include_params: serde::de::IgnoredAny,
+    #[serde(default, rename = "include_devices")]
+    _include_devices: serde::de::IgnoredAny,
 }
 
 impl<'de> serde::Deserialize<'de> for SensDialogState {

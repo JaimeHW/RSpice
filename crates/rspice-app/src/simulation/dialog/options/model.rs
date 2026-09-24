@@ -87,18 +87,14 @@ pub struct SimulationOptions {
 struct PersistedSimulationOptions {
     #[serde(default)]
     compatibility: SimulationCompatibility,
-    #[serde(default)]
-    #[allow(dead_code)]
-    itl2: serde::de::IgnoredAny,
-    #[serde(default)]
-    #[allow(dead_code)]
-    timestep_factor: serde::de::IgnoredAny,
-    #[serde(default)]
-    #[allow(dead_code)]
-    verbose: serde::de::IgnoredAny,
-    #[serde(default)]
-    #[allow(dead_code)]
-    save_internals: serde::de::IgnoredAny,
+    #[serde(default, rename = "itl2")]
+    _itl2: serde::de::IgnoredAny,
+    #[serde(default, rename = "timestep_factor")]
+    _timestep_factor: serde::de::IgnoredAny,
+    #[serde(default, rename = "verbose")]
+    _verbose: serde::de::IgnoredAny,
+    #[serde(default, rename = "save_internals")]
+    _save_internals: serde::de::IgnoredAny,
     reltol: f64,
     residual_reltol: f64,
     vntol: f64,

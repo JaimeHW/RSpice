@@ -98,9 +98,8 @@ struct PersistedPzDialogState {
     analysis_idx: usize,
     /// Retired. The eigenvalue extraction has no tolerance to accept, so this
     /// never reached it. Accepted so earlier projects still open.
-    #[serde(default)]
-    #[allow(dead_code)]
-    tolerance: serde::de::IgnoredAny,
+    #[serde(default, rename = "tolerance")]
+    _tolerance: serde::de::IgnoredAny,
 }
 
 impl<'de> Deserialize<'de> for PzDialogState {

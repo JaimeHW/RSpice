@@ -286,22 +286,18 @@ struct PersistedMcDialogState {
     #[serde(default = "default_histogram_bins")]
     histogram_bins: String,
     /// Retired ordinal selector; it never identified a configured analysis.
-    #[serde(default)]
-    #[allow(dead_code)]
-    base_idx: serde::de::IgnoredAny,
+    #[serde(default, rename = "base_idx")]
+    _base_idx: serde::de::IgnoredAny,
     /// Retired. Variation is applied as one spread over the eligible
     /// parameters; there is no process/mismatch split to enable.
-    #[serde(default)]
-    #[allow(dead_code)]
-    process_variations: serde::de::IgnoredAny,
-    #[serde(default)]
-    #[allow(dead_code)]
-    mismatch_variations: serde::de::IgnoredAny,
+    #[serde(default, rename = "process_variations")]
+    _process_variations: serde::de::IgnoredAny,
+    #[serde(default, rename = "mismatch_variations")]
+    _mismatch_variations: serde::de::IgnoredAny,
     /// Retired. A trial contributes a sample, not a retained dataset, so
     /// there was nothing for this to save.
-    #[serde(default)]
-    #[allow(dead_code)]
-    save_all_runs: serde::de::IgnoredAny,
+    #[serde(default, rename = "save_all_runs")]
+    _save_all_runs: serde::de::IgnoredAny,
 }
 
 fn default_first_trial() -> String {

@@ -342,9 +342,8 @@ struct PersistedPnoiseDialogState {
     carrier_idx: usize,
     /// Retired. The sweep always produces the per-frequency spectrum, so this
     /// selected nothing. Accepted so earlier projects still open.
-    #[serde(default)]
-    #[allow(dead_code)]
-    spot_noise: serde::de::IgnoredAny,
+    #[serde(default, rename = "spot_noise")]
+    _spot_noise: serde::de::IgnoredAny,
 }
 
 fn default_sideband() -> String {

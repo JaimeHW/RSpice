@@ -231,15 +231,12 @@ struct PersistedStbDialogState {
     /// Retired. The analysis always extracts every margin, so these three
     /// never selected anything; they are accepted so projects written by an
     /// earlier build still open, and are never written back.
-    #[serde(default)]
-    #[allow(dead_code)]
-    gain_margin: serde::de::IgnoredAny,
-    #[serde(default)]
-    #[allow(dead_code)]
-    phase_margin: serde::de::IgnoredAny,
-    #[serde(default)]
-    #[allow(dead_code)]
-    crossover_freq: serde::de::IgnoredAny,
+    #[serde(default, rename = "gain_margin")]
+    _gain_margin: serde::de::IgnoredAny,
+    #[serde(default, rename = "phase_margin")]
+    _phase_margin: serde::de::IgnoredAny,
+    #[serde(default, rename = "crossover_freq")]
+    _crossover_freq: serde::de::IgnoredAny,
 }
 
 fn default_true() -> bool {

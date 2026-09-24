@@ -109,13 +109,11 @@ impl<'de> Deserialize<'de> for ProjectExecutionContext {
             /// accepted, and discarded, so a project written by a build that
             /// carried the ledger still loads under `deny_unknown_fields`.
             /// Nothing writes it back.
-            #[serde(default)]
-            #[allow(dead_code)]
-            model_bin_audit_receipts: serde::de::IgnoredAny,
+            #[serde(default, rename = "model_bin_audit_receipts")]
+            _model_bin_audit_receipts: serde::de::IgnoredAny,
             /// Retired alongside `model_bin_audit_receipts`.
-            #[serde(default)]
-            #[allow(dead_code)]
-            model_definition_resolutions: serde::de::IgnoredAny,
+            #[serde(default, rename = "model_definition_resolutions")]
+            _model_definition_resolutions: serde::de::IgnoredAny,
         }
 
         let persisted = PersistedExecutionContext::deserialize(deserializer)?;
@@ -161,12 +159,10 @@ struct LegacyRonExecutionContext {
     model_resolution_records: Vec<ModelResolutionRecord>,
     #[serde(default)]
     model_validation_receipt: Option<ModelValidationReceipt>,
-    #[serde(default)]
-    #[allow(dead_code)]
-    model_bin_audit_receipts: serde::de::IgnoredAny,
-    #[serde(default)]
-    #[allow(dead_code)]
-    model_definition_resolutions: serde::de::IgnoredAny,
+    #[serde(default, rename = "model_bin_audit_receipts")]
+    _model_bin_audit_receipts: serde::de::IgnoredAny,
+    #[serde(default, rename = "model_definition_resolutions")]
+    _model_definition_resolutions: serde::de::IgnoredAny,
 }
 
 #[derive(Default)]

@@ -26,6 +26,36 @@ fn context_from_state(
     ProjectExecutionContext::from_state(project_id(), plan, manager)
 }
 
+#[test]
+fn retired_model_ledgers_decode_from_json_and_legacy_ron_without_being_rewritten() {
+    let context = context_from_state(&SimSetupState::new(), &ModelLibraryManager::new())
+        .expect("valid execution context");
+
+    let mut json = serde_json::to_value(&context).expect("serialize current context");
+    let object = json.as_object_mut().expect("context is a JSON object");
+    object.insert("model_bin_audit_receipts".to_owned(), serde_json::json!(42));
+    object.insert(
+        "model_definition_resolutions".to_owned(),
+        serde_json::json!(true),
+    );
+    let restored: ProjectExecutionContext =
+        serde_json::from_value(json).expect("retired JSON fields remain readable");
+    let rewritten = serde_json::to_value(restored).expect("rewrite current context");
+    assert!(rewritten.get("model_bin_audit_receipts").is_none());
+    assert!(rewritten.get("model_definition_resolutions").is_none());
+
+    let ron = ron::to_string(&context).expect("serialize legacy RON shape");
+    let prefix = ron
+        .strip_suffix(')')
+        .expect("RON struct closes with a paren");
+    let legacy = format!("{prefix},model_bin_audit_receipts:42,model_definition_resolutions:true)");
+    let restored = ProjectExecutionContext::from_legacy_session_ron(&legacy)
+        .expect("retired RON fields remain readable");
+    let rewritten = serde_json::to_value(restored).expect("rewrite migrated context");
+    assert!(rewritten.get("model_bin_audit_receipts").is_none());
+    assert!(rewritten.get("model_definition_resolutions").is_none());
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn model_fixture() -> (std::path::PathBuf, std::path::PathBuf) {
     let unique = std::time::SystemTime::now()
