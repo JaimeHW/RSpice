@@ -180,13 +180,13 @@ pub use simulation::{
     SavedOutputMaterializationStatus, SavedOutputReceipt, SensitivityResultMode,
     SensitivityResultRow, SharedWaveformValues, SignOffStanding, SimulationCampaignMembership,
     SimulationRun, SimulationRunIntent, SimulationRunLifecycle, SimulationRunProvenance,
-    SimulationState, SoaSourceHistory, SoaSourceWaveform, SoaEvaluationEvidence,
-    SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
-    SoaViolationSeverityEvidence, SpecificationVerdict, SpecificationVerdictStatus,
-    TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
-    TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence, WaveformData,
-    absent_deck_reason, ac_bode_shape_for_analysis, ac_bode_shape_for_selection,
-    ac_bode_summary_for_analysis, ac_bode_summary_for_selection, sealed_model_sources,
+    SimulationState, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
+    SoaSourceHistory, SoaSourceWaveform, SoaViolationEvidence, SoaViolationSeverityEvidence,
+    SpecificationVerdict, SpecificationVerdictStatus, TransferFunctionAccuracyEvidence,
+    TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
+    TransferFunctionScalarEvidence, WaveformData, absent_deck_reason, ac_bode_shape_for_analysis,
+    ac_bode_shape_for_selection, ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
+    sealed_model_sources,
 };
 pub use simulation::{
     ConvergenceReport, PeriodicConvergenceEvidence, PeriodicInitializationMethod,
@@ -244,8 +244,10 @@ pub use workspace::{
     SpecificationRole, UNGROUPED_NAME, group_namer, validate_owned_netlist_artifact_path,
 };
 
+pub use simulation::{MonteCarloCheckpointEvidence, MonteCarloCheckpointLibrary};
+pub use simulation::{MonteCarloMeanConfidence, MonteCarloMeanInterval, MonteCarloMeanMethod};
+
 #[cfg(test)]
-#[allow(clippy::items_after_test_module)]
 mod symbol_document_tests {
     use super::{
         PinFindingKind, PinSummary, Point, PortDirection, PortSpec, SymbolDocument, View, ViewType,
@@ -355,6 +357,3 @@ mod symbol_document_tests {
         assert_eq!(doc.pin_summary(&[]), PinSummary::NoSchematic);
     }
 }
-
-pub use simulation::{MonteCarloCheckpointEvidence, MonteCarloCheckpointLibrary};
-pub use simulation::{MonteCarloMeanConfidence, MonteCarloMeanInterval, MonteCarloMeanMethod};
