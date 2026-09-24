@@ -21,7 +21,7 @@
 use crate::services::simulation_runner::PeriodicCarrier;
 
 use super::options::parse_si_value;
-pub mod sampling;
+pub(crate) mod sampling;
 use rspice_core::analysis::pnoise::PeriodicNoiseSampling;
 use sampling::SamplingDraft;
 

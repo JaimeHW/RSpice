@@ -6,8 +6,8 @@
 //! point population or an exact configured analysis selected from the plan.
 
 use serde::{Deserialize, Deserializer};
-pub mod checkpoint;
-pub mod statistics;
+pub(crate) mod checkpoint;
+pub(crate) mod statistics;
 use statistics::{McCorrelationDraft, McStatisticsConfig, McVariationDraft};
 
 /// Random distribution type
