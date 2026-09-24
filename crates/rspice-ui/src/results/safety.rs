@@ -1,6 +1,7 @@
-//! Safety Services Module
+//! Safe operating area evidence and deterministic limit evaluation.
 //!
-//! Provides Safe Operating Area (SOA) and design rule checking.
+//! Owns Safe Operating Area (SOA) records used by saved results, workers, and
+//! viewers. Evaluation has no application-state or host-storage dependency.
 
 pub(crate) mod soa_manager;
 

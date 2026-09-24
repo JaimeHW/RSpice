@@ -1155,11 +1155,11 @@ fn encode_result_payload(
                         });
                         writer.bool(
                             curve.voltage_interpolation
-                                == crate::services::safety::SoaVoltageInterpolation::Logarithmic,
+                                == crate::results::safety::SoaVoltageInterpolation::Logarithmic,
                         );
                         writer.bool(
                             curve.pulse_interpolation
-                                == crate::services::safety::SoaPulseInterpolation::Logarithmic,
+                                == crate::results::safety::SoaPulseInterpolation::Logarithmic,
                         );
                         writer.sequence(curve.pulses.len());
                         for pulse in &curve.pulses {

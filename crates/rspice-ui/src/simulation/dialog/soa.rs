@@ -149,7 +149,7 @@ impl SoaConfig {
                 " rule=({} {}{} devices=({}) models=({}))",
                 rule.parameter.stress_code(),
                 rule.max_value,
-                if rule.voltage_basis == crate::services::safety::SoaVoltageBasis::IntrinsicNodes {
+                if rule.voltage_basis == crate::results::safety::SoaVoltageBasis::IntrinsicNodes {
                     " basis=intrinsic"
                 } else {
                     ""
@@ -170,7 +170,7 @@ impl SoaConfig {
                     duration
                 ));
             }
-            if let crate::services::safety::SoaDurationMode::Cumulative { recovery_time_s } =
+            if let crate::results::safety::SoaDurationMode::Cumulative { recovery_time_s } =
                 rule.duration_mode
             {
                 card.push_str(&format!(
@@ -316,7 +316,7 @@ impl SoaDialogState {
                 .map(SoaRuleDraft::to_config)
                 .collect::<Result<_, _>>()?,
             observation: SoaObservationConfig {
-                thresholds: crate::services::safety::SoaThresholds {
+                thresholds: crate::results::safety::SoaThresholds {
                     warning_fraction: threshold_fraction(&self.warning_percent, "warning")?,
                     critical_fraction: threshold_fraction(&self.critical_percent, "critical")?,
                 },
@@ -445,7 +445,7 @@ mod tests {
                 current_envelope: None,
                 power_derating: None,
                 voltage_basis: Default::default(),
-                parameter: crate::services::safety::SoAParameter::Id,
+                parameter: crate::results::safety::SoAParameter::Id,
                 max_value: 0.0123456789012345,
                 devices: vec!["X1:M1".into()],
                 models: vec!["NM".into()],

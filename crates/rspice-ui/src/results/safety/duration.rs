@@ -432,7 +432,7 @@ fn soa_duration_cumulative_exposure_recovers_only_between_excursions() {
 #[cfg(test)]
 #[test]
 fn soa_duration_qualifies_interpolated_excursions_and_reclassifies_worst_point() {
-    use super::{SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter};
+    use super::{SoADefinition, SoALimit, SoAManager, SoAParameter};
     use rspice_core::abort_signal::NoAbort;
     let time = [0., 1., 2., 3., 4., 5., 6.];
     let stress = [0., 4., 0., 2., 2., 2., 0.];
@@ -501,12 +501,6 @@ fn soa_duration_qualifies_interpolated_excursions_and_reclassifies_worst_point()
             manager.violations().len(),
             if warning.is_some() { 4 } else { 3 }
         );
-        let wire = crate::simulation::runner::worker_contract::WorkerSoAEvaluation::from(
-            evaluation.clone(),
-        );
-        let wire: crate::simulation::runner::worker_contract::WorkerSoAEvaluation =
-            serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
-        assert_eq!(SoAEvaluation::from(wire), *evaluation);
     }
     let varying = qualify_soa_duration(
         &[0., 1., 2., 3.],

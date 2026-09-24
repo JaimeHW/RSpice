@@ -534,20 +534,20 @@ pub(super) fn validate_transfer_function_output(
 pub(super) fn soa_rule_verdict(
     actual: f64,
     limit: f64,
-    thresholds: crate::services::safety::SoaThresholds,
+    thresholds: crate::results::safety::SoaThresholds,
 ) -> SoaRuleVerdictEvidence {
     match thresholds.verdict(actual, limit) {
-        crate::services::safety::SoARuleVerdict::Pass => SoaRuleVerdictEvidence::Pass,
-        crate::services::safety::SoARuleVerdict::Warning => SoaRuleVerdictEvidence::Warning,
-        crate::services::safety::SoARuleVerdict::Violation => SoaRuleVerdictEvidence::Violation,
-        crate::services::safety::SoARuleVerdict::Critical => SoaRuleVerdictEvidence::Critical,
+        crate::results::safety::SoARuleVerdict::Pass => SoaRuleVerdictEvidence::Pass,
+        crate::results::safety::SoARuleVerdict::Warning => SoaRuleVerdictEvidence::Warning,
+        crate::results::safety::SoARuleVerdict::Violation => SoaRuleVerdictEvidence::Violation,
+        crate::results::safety::SoARuleVerdict::Critical => SoaRuleVerdictEvidence::Critical,
     }
 }
 
 pub(super) fn soa_violation_severity(
     actual: f64,
     limit: f64,
-    thresholds: crate::services::safety::SoaThresholds,
+    thresholds: crate::results::safety::SoaThresholds,
 ) -> Option<SoaViolationSeverityEvidence> {
     match soa_rule_verdict(actual, limit, thresholds) {
         SoaRuleVerdictEvidence::Pass => None,
@@ -1346,7 +1346,7 @@ impl AnalysisResult {
                         }
                         Some(soa_derating::trace(
                             self,
-                            &crate::services::safety::soa_envelope_limit_waveform_name(
+                            &crate::results::safety::soa_envelope_limit_waveform_name(
                                 &evaluation.device_id,
                                 evaluation.parameter.runtime_parameter(),
                             ),
@@ -1360,7 +1360,7 @@ impl AnalysisResult {
                         }
                         Some(soa_derating::trace(
                             self,
-                            &crate::services::safety::soa_power_limit_waveform_name(
+                            &crate::results::safety::soa_power_limit_waveform_name(
                                 &evaluation.device_id,
                             ),
                             time,
@@ -1371,7 +1371,7 @@ impl AnalysisResult {
                     };
                     let stress = soa_derating::trace(
                         self,
-                        &crate::services::safety::soa_stress_waveform_name(
+                        &crate::results::safety::soa_stress_waveform_name(
                             &evaluation.device_id,
                             evaluation.parameter.runtime_parameter(),
                         ),
@@ -1423,7 +1423,7 @@ impl AnalysisResult {
                         ));
                     }
                     if evaluation.duration.is_none()
-                        && crate::services::safety::compare_soa_stress(
+                        && crate::results::safety::compare_soa_stress(
                             violation.actual_value,
                             violation.limit_value,
                             evaluation.worst_actual_value,

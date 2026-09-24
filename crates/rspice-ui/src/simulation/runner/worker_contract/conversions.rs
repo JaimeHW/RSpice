@@ -231,16 +231,16 @@ impl From<WorkerMonteCarloVariable> for MonteCarloVariableResult {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerSoAEvaluation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub envelope: Option<crate::services::safety::SoaCurrentEnvelopeEvidence>,
+    pub envelope: Option<crate::results::safety::SoaCurrentEnvelopeEvidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duration: Option<crate::services::safety::SoaDurationEvidence>,
+    pub duration: Option<crate::results::safety::SoaDurationEvidence>,
     #[serde(
         default,
-        skip_serializing_if = "crate::services::safety::SoaThresholds::is_default"
+        skip_serializing_if = "crate::results::safety::SoaThresholds::is_default"
     )]
-    pub thresholds: crate::services::safety::SoaThresholds,
+    pub thresholds: crate::results::safety::SoaThresholds,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub derating: Option<crate::services::safety::SoaPowerDeratingEvidence>,
+    pub derating: Option<crate::results::safety::SoaPowerDeratingEvidence>,
     pub device_id: String,
     pub parameter: WorkerSoAParameter,
     pub limit_value: f64,

@@ -1805,9 +1805,9 @@ mod tests {
                     "#ffbd2e",
                 ),
                 WaveformData::new(
-                    crate::services::safety::soa_stress_waveform_name(
+                    crate::results::safety::soa_stress_waveform_name(
                         "M1",
-                        crate::services::safety::SoAParameter::Vds,
+                        crate::results::safety::SoAParameter::Vds,
                     ),
                     soa_time,
                     vec![2.0, 3.0],

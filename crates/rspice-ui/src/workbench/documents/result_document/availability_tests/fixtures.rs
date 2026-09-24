@@ -28,9 +28,9 @@ pub(super) fn soa_analysis() -> AnalysisResult {
             // The stress history the producer now retains, named exactly as
             // the sheet addresses it.
             WaveformData::new(
-                crate::services::safety::soa_stress_waveform_name(
+                crate::results::safety::soa_stress_waveform_name(
                     "M1",
-                    crate::services::safety::SoAParameter::Vds,
+                    crate::results::safety::SoAParameter::Vds,
                 ),
                 time,
                 vec![2.0, 3.0],

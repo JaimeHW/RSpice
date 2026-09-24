@@ -370,7 +370,7 @@ fn run_soa(
         if let Some(envelope) = &trace.envelope {
             insert_scalar_waveform(
                 &mut waveforms,
-                crate::services::safety::soa_envelope_limit_waveform_name(
+                crate::results::safety::soa_envelope_limit_waveform_name(
                     &trace.device_id,
                     trace.parameter,
                 ),
@@ -381,7 +381,7 @@ fn run_soa(
             );
             insert_scalar_waveform(
                 &mut waveforms,
-                crate::services::safety::soa_envelope_voltage_waveform_name(
+                crate::results::safety::soa_envelope_voltage_waveform_name(
                     &trace.device_id,
                     trace.parameter,
                 ),
@@ -394,7 +394,7 @@ fn run_soa(
         if let Some(derating) = &trace.derating {
             insert_scalar_waveform(
                 &mut waveforms,
-                crate::services::safety::soa_power_limit_waveform_name(&trace.device_id),
+                crate::results::safety::soa_power_limit_waveform_name(&trace.device_id),
                 data.time.clone(),
                 derating.limits_w.clone(),
                 "W",
@@ -402,7 +402,7 @@ fn run_soa(
             );
             insert_scalar_waveform(
                 &mut waveforms,
-                crate::services::safety::soa_derating_temperature_waveform_name(&trace.device_id),
+                crate::results::safety::soa_derating_temperature_waveform_name(&trace.device_id),
                 data.time.clone(),
                 derating.temperatures_kelvin.clone(),
                 "K",
@@ -411,7 +411,7 @@ fn run_soa(
         }
         insert_scalar_waveform(
             &mut waveforms,
-            crate::services::safety::soa_stress_waveform_name(&trace.device_id, trace.parameter),
+            crate::results::safety::soa_stress_waveform_name(&trace.device_id, trace.parameter),
             data.time.clone(),
             trace.values.clone(),
             &trace.unit,

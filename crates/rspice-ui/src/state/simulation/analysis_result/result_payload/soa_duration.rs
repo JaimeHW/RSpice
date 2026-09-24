@@ -1,6 +1,6 @@
 //! Recompute excursion qualifications from the complete retained samples.
 use super::*;
-use crate::services::safety::{
+use crate::results::safety::{
     SoARuleVerdict, SoaLimitTrace, compare_soa_stress, qualify_soa_duration_with_mode,
     soa_duration_verdict, soa_power_limit_waveform_name, soa_stress_waveform_name,
 };
@@ -27,8 +27,8 @@ pub(super) fn validate(
     let duration = evaluation.duration.ok_or("Missing SOA duration policy")?;
     let parameter = evaluation.parameter.runtime_parameter();
     let unit = match parameter {
-        crate::services::safety::SoAParameter::Temp => "K",
-        crate::services::safety::SoAParameter::Pdiss => "W",
+        crate::results::safety::SoAParameter::Temp => "K",
+        crate::results::safety::SoAParameter::Pdiss => "W",
         parameter if parameter.is_current() => "A",
         _ => "V",
     };
@@ -44,7 +44,7 @@ pub(super) fn validate(
     let limits = if evaluation.envelope.is_some() {
         SoaLimitTrace::Samples(super::soa_derating::trace(
             analysis,
-            &crate::services::safety::soa_envelope_limit_waveform_name(
+            &crate::results::safety::soa_envelope_limit_waveform_name(
                 &evaluation.device_id,
                 parameter,
             ),

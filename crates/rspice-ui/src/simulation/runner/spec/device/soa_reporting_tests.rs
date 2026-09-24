@@ -1,7 +1,7 @@
 //! Device-reporting tests retain between-sample SOA violations across worker transport.
 
 use super::*;
-use crate::services::safety::SoAParameter;
+use crate::results::safety::SoAParameter;
 use crate::state::{AnalysisResultPayload, AnalysisType};
 use rspice_core::abort_signal::NoAbort;
 

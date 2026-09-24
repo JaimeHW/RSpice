@@ -69,7 +69,7 @@ fn soa_reporting_worker_detaches_source_and_rejects_changed_reports() {
 
 #[test]
 fn soa_current_envelope_worker_buffers_preserve_curve_metadata() {
-    use crate::services::safety::*;
+    use crate::results::safety::*;
     let curve = SoaCurrentEnvelope::test_fixture();
     let result = SimulationResult::Soa {
         source_history: None,
@@ -388,28 +388,28 @@ fn worker_result_round_trip() {
             "SOA_VIOLATION_COUNT".to_string(),
             WaveformData::new_time_domain("SOA_VIOLATION_COUNT", vec![0.0, 1e-6], vec![0.0, 1.0]),
         )]),
-        violations: vec![crate::services::safety::SoAViolation {
+        violations: vec![crate::results::safety::SoAViolation {
             device_id: "M1".to_string(),
-            parameter: crate::services::safety::SoAParameter::Vgs,
+            parameter: crate::results::safety::SoAParameter::Vgs,
             limit_value: 1.2,
             actual_value: 1.35,
             time: 1e-6,
-            severity: crate::services::safety::ViolationSeverity::Critical,
+            severity: crate::results::safety::ViolationSeverity::Critical,
         }],
-        evaluations: vec![crate::services::safety::SoAEvaluation {
+        evaluations: vec![crate::results::safety::SoAEvaluation {
             duration: None,
             thresholds: Default::default(),
             envelope: None,
             derating: None,
             device_id: "M1".to_string(),
-            parameter: crate::services::safety::SoAParameter::Vgs,
+            parameter: crate::results::safety::SoAParameter::Vgs,
             limit_value: 1.2,
             worst_actual_value: 1.35,
             worst_time: 1e-6,
             sample_count: 2,
             unit: "V".to_string(),
             description: "Maximum gate-source voltage".to_string(),
-            verdict: crate::services::safety::SoARuleVerdict::Violation,
+            verdict: crate::results::safety::SoARuleVerdict::Violation,
         }],
     };
     let soa = round_trip_result(soa);
@@ -428,12 +428,12 @@ fn worker_result_round_trip() {
             assert_eq!(violations[0].device_id, "M1");
             assert_eq!(
                 violations[0].severity,
-                crate::services::safety::ViolationSeverity::Critical
+                crate::results::safety::ViolationSeverity::Critical
             );
             assert_eq!(evaluations[0].sample_count, 2);
             assert_eq!(
                 evaluations[0].verdict,
-                crate::services::safety::SoARuleVerdict::Violation
+                crate::results::safety::SoARuleVerdict::Violation
             );
         }
         other => panic!("expected SOA result, got {other:?}"),

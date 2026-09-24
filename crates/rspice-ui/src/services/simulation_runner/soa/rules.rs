@@ -8,16 +8,16 @@ use super::*;
 #[serde(deny_unknown_fields)]
 pub struct SoaRuleConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_envelope: Option<crate::services::safety::SoaCurrentEnvelope>,
+    pub current_envelope: Option<crate::results::safety::SoaCurrentEnvelope>,
     #[serde(
         default,
-        skip_serializing_if = "crate::services::safety::SoaDurationMode::is_default"
+        skip_serializing_if = "crate::results::safety::SoaDurationMode::is_default"
     )]
-    pub duration_mode: crate::services::safety::SoaDurationMode,
+    pub duration_mode: crate::results::safety::SoaDurationMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minimum_duration_s: Option<f64>,
     #[serde(default)]
-    pub power_derating: Option<crate::services::safety::SoaPowerDerating>,
+    pub power_derating: Option<crate::results::safety::SoaPowerDerating>,
     pub parameter: SoAParameter,
     #[serde(default)]
     pub voltage_basis: SoaVoltageBasis,
@@ -38,7 +38,7 @@ impl SoaRuleConfig {
                     "SOA current/voltage curves require a positive maximum-current cap".into(),
                 );
             }
-            if crate::services::safety::SoaCurrentEnvelope::voltage_parameter(self.parameter)
+            if crate::results::safety::SoaCurrentEnvelope::voltage_parameter(self.parameter)
                 .is_none()
             {
                 return Err("SOA current/voltage curves apply to Id, Ic or Ia (including directional rules)".into());

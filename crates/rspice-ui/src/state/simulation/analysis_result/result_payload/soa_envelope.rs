@@ -1,6 +1,6 @@
 //! Recompute current limits from the authored curve and retained terminal voltage.
 use super::*;
-use crate::services::safety::{
+use crate::results::safety::{
     SoARuleVerdict, compare_soa_stress, soa_envelope_limit_waveform_name,
     soa_envelope_voltage_waveform_name, soa_stress_waveform_name,
 };

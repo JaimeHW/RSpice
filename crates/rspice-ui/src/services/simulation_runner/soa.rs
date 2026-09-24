@@ -5,7 +5,7 @@
 
 use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use super::{is_ground_like, normalize_voltage_signal_name, parse_runner_netlist_with_abort};
-use crate::services::safety::{
+use crate::results::safety::{
     SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter, SoAViolation, SoaVoltageBasis,
 };
 use rspice_core::Value;
@@ -122,8 +122,8 @@ impl SoaRunConfig {
 /// The complete sampled stress magnitude behind one evaluated rule.
 #[derive(Debug, Clone)]
 pub struct SoaStressTrace {
-    pub envelope: Option<crate::services::safety::SoaEnvelopeSamples>,
-    pub derating: Option<crate::services::safety::SoaDeratingSamples>,
+    pub envelope: Option<crate::results::safety::SoaEnvelopeSamples>,
+    pub derating: Option<crate::results::safety::SoaDeratingSamples>,
     /// Device the rule constrains.
     pub device_id: String,
     /// Stressed parameter.
@@ -446,7 +446,7 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
             }
             for limit in &definition.limits {
                 if limit.current_envelope.is_some() {
-                    let parameter = crate::services::safety::SoaCurrentEnvelope::voltage_parameter(
+                    let parameter = crate::results::safety::SoaCurrentEnvelope::voltage_parameter(
                         limit.parameter,
                     )
                     .ok_or_else(|| ServiceRunError::Failure("Invalid SOA curve current".into()))?;
@@ -741,11 +741,11 @@ mod tests {
         assert!((gates[1].worst_actual_value - 2.5).abs() < 1e-10);
         assert_eq!(
             gates[0].verdict,
-            crate::services::safety::SoARuleVerdict::Pass
+            crate::results::safety::SoARuleVerdict::Pass
         );
         assert_eq!(
             gates[1].verdict,
-            crate::services::safety::SoARuleVerdict::Critical
+            crate::results::safety::SoARuleVerdict::Critical
         );
         assert!(
             result

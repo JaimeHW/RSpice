@@ -495,7 +495,8 @@ fn an_hb_rooted_plan_prepares_a_whole_receipt() {
 
 #[test]
 fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_results() {
-    use crate::services::{safety::SoAParameter, simulation_runner::SoaRuleConfig};
+    use crate::results::safety::SoAParameter;
+    use crate::services::simulation_runner::SoaRuleConfig;
     use crate::simulation::dialog::soa::{SoaConfig, SoaDialogState};
     use crate::simulation::plan::AnalysisDraft;
     use crate::simulation::runner::worker_contract::{WorkerAnalysisSpec, WorkerSoAParameter};
@@ -707,7 +708,8 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
 
 #[test]
 fn soa_temperature_limits_survive_studio_worker_execution_and_saved_results() {
-    use crate::services::{safety::SoAParameter, simulation_runner::SoaRuleConfig};
+    use crate::results::safety::SoAParameter;
+    use crate::services::simulation_runner::SoaRuleConfig;
     use crate::simulation::dialog::soa::{SoaConfig, SoaDialogState};
     use crate::simulation::plan::AnalysisDraft;
     use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
@@ -801,7 +803,8 @@ fn soa_temperature_limits_survive_studio_worker_execution_and_saved_results() {
 
 #[test]
 fn soa_body_and_backgate_limits_follow_model_pins_through_studio_and_saved_results() {
-    use crate::services::{safety::SoAParameter, simulation_runner::SoaRuleConfig};
+    use crate::results::safety::SoAParameter;
+    use crate::services::simulation_runner::SoaRuleConfig;
     use crate::simulation::dialog::soa::{SoaConfig, SoaDialogState};
     use crate::simulation::plan::AnalysisDraft;
     use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
@@ -962,7 +965,8 @@ fn soa_body_and_backgate_limits_follow_model_pins_through_studio_and_saved_resul
 
 #[test]
 fn soa_diode_and_bjt_substrate_limits_survive_studio_worker_and_saved_results() {
-    use crate::services::{safety::SoAParameter, simulation_runner::SoaRuleConfig};
+    use crate::results::safety::SoAParameter;
+    use crate::services::simulation_runner::SoaRuleConfig;
     use crate::simulation::dialog::soa::{SoaConfig, SoaDialogState};
     use crate::simulation::plan::AnalysisDraft;
     use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
@@ -1136,10 +1140,8 @@ fn soa_diode_and_bjt_substrate_limits_survive_studio_worker_and_saved_results() 
 
 #[test]
 fn soa_intrinsic_voltage_rules_survive_studio_worker_and_saved_results() {
-    use crate::services::{
-        safety::{SoAParameter, SoaVoltageBasis},
-        simulation_runner::SoaRuleConfig,
-    };
+    use crate::results::safety::{SoAParameter, SoaVoltageBasis};
+    use crate::services::simulation_runner::SoaRuleConfig;
     use crate::simulation::dialog::soa::{SoaConfig, SoaDialogState};
     use crate::simulation::plan::AnalysisDraft;
     use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
@@ -1293,7 +1295,8 @@ fn soa_intrinsic_voltage_rules_survive_studio_worker_and_saved_results() {
 
 #[test]
 fn soa_model_voltage_ratings_survive_studio_worker_and_saved_results() {
-    use crate::services::{safety::SoAParameter, simulation_runner::SoaRuleConfig};
+    use crate::results::safety::SoAParameter;
+    use crate::services::simulation_runner::SoaRuleConfig;
     use crate::simulation::dialog::soa::{SoaConfig, SoaDialogState};
     use crate::simulation::plan::AnalysisDraft;
     use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
@@ -1461,10 +1464,8 @@ fn soa_model_voltage_ratings_survive_studio_worker_and_saved_results() {
 
 #[test]
 fn soa_derating_survives_studio_worker_thermal_transient_and_saved_results() {
-    use crate::services::{
-        safety::{SoAParameter, SoaPowerDerating},
-        simulation_runner::SoaRuleConfig,
-    };
+    use crate::results::safety::{SoAParameter, SoaPowerDerating};
+    use crate::services::simulation_runner::SoaRuleConfig;
     use crate::simulation::dialog::soa::{SoaConfig, SoaDialogState};
     use crate::simulation::plan::AnalysisDraft;
     use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
@@ -1474,7 +1475,7 @@ fn soa_derating_survives_studio_worker_thermal_transient_and_saved_results() {
     };
     let config = SoaConfig {
         observation: crate::services::simulation_runner::SoaObservationConfig {
-            thresholds: crate::services::safety::SoaThresholds {
+            thresholds: crate::results::safety::SoaThresholds {
                 warning_fraction: None,
                 critical_fraction: None,
             },
@@ -1717,7 +1718,7 @@ fn soa_vbic_model_ratings_survive_studio_worker_and_saved_results() {
 
 #[test]
 fn soa_thresholds_survive_studio_worker_execution_and_saved_results() {
-    use crate::services::safety::SoaThresholds;
+    use crate::results::safety::SoaThresholds;
     use crate::simulation::dialog::soa::{SoaConfig, SoaDialogState};
     use crate::simulation::plan::AnalysisDraft;
     use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
@@ -1847,7 +1848,7 @@ fn soa_duration_survives_studio_worker_execution_and_saved_results() {
 
 #[test]
 fn soa_duration_cumulative_survives_studio_worker_execution_and_saved_results() {
-    use crate::services::safety::SoaDurationMode;
+    use crate::results::safety::SoaDurationMode;
     check_soa_duration_round_trip(
         SoaDurationMode::Cumulative {
             recovery_time_s: None,
@@ -1865,11 +1866,12 @@ fn soa_duration_cumulative_survives_studio_worker_execution_and_saved_results() 
 }
 
 fn check_soa_duration_round_trip(
-    mode: crate::services::safety::SoaDurationMode,
+    mode: crate::results::safety::SoaDurationMode,
     minimum: f64,
     second_qualified: bool,
 ) {
-    use crate::services::{safety::SoAParameter, simulation_runner::SoaRuleConfig};
+    use crate::results::safety::SoAParameter;
+    use crate::services::simulation_runner::SoaRuleConfig;
     use crate::simulation::dialog::soa::{SoaConfig, SoaDialogState};
     use crate::simulation::plan::AnalysisDraft;
     use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;

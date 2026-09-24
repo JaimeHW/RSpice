@@ -3,7 +3,7 @@
 //! Containers for simulation results that bridge rspice-core outputs
 //! to the waveform viewer and other UI components.
 
-use crate::services::safety::{SoAEvaluation, SoAViolation};
+use crate::results::safety::{SoAEvaluation, SoAViolation};
 use std::collections::HashMap;
 
 mod accessors;

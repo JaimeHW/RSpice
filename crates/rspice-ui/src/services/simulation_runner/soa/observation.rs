@@ -7,9 +7,9 @@ use rspice_core::netlist::{Element, ElementKind};
 pub struct SoaObservationConfig {
     #[serde(
         default,
-        skip_serializing_if = "crate::services::safety::SoaThresholds::is_default"
+        skip_serializing_if = "crate::results::safety::SoaThresholds::is_default"
     )]
-    pub thresholds: crate::services::safety::SoaThresholds,
+    pub thresholds: crate::results::safety::SoaThresholds,
     /// Only samples at or after this time contribute to the checker.
     #[serde(default)]
     pub start_time: f64,

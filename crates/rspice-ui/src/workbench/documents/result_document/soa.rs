@@ -805,16 +805,16 @@ fn derating_waveform<'a>(
     temperature: bool,
 ) -> Option<SoaTrace<'a>> {
     let name = if evaluation.envelope.is_some() && !temperature {
-        crate::services::safety::soa_envelope_limit_waveform_name(
+        crate::results::safety::soa_envelope_limit_waveform_name(
             &evaluation.device_id,
             evaluation.parameter.runtime_parameter(),
         )
     } else if temperature {
         evaluation.derating?;
-        crate::services::safety::soa_derating_temperature_waveform_name(&evaluation.device_id)
+        crate::results::safety::soa_derating_temperature_waveform_name(&evaluation.device_id)
     } else {
         evaluation.derating?;
-        crate::services::safety::soa_power_limit_waveform_name(&evaluation.device_id)
+        crate::results::safety::soa_power_limit_waveform_name(&evaluation.device_id)
     };
     let AnalysisResultFamilyMetadata::Soa { time } = analysis.family_metadata.as_ref()? else {
         return None;
@@ -836,7 +836,7 @@ fn stress_waveform<'a>(
     let AnalysisResultFamilyMetadata::Soa { time } = analysis.family_metadata.as_ref()? else {
         return None;
     };
-    let name = crate::services::safety::soa_stress_waveform_name(
+    let name = crate::results::safety::soa_stress_waveform_name(
         &evaluation.device_id,
         evaluation.parameter.runtime_parameter(),
     );
@@ -862,7 +862,7 @@ fn stress_waveform<'a>(
         waveform.y[worst_index].to_bits() == evaluation.worst_actual_value.to_bits()
             && (evaluation.duration.is_some()
                 || waveform.y.iter().enumerate().all(|(index, value)| {
-                    crate::services::safety::compare_soa_stress(
+                    crate::results::safety::compare_soa_stress(
                         *value,
                         limits.map_or(evaluation.limit_value, |wave| wave.y[index]),
                         evaluation.worst_actual_value,
@@ -895,7 +895,7 @@ fn worst_interval_text(
     };
     let worst_index = nearest_sample_index(waveform.x.as_slice(), evaluation.worst_time_s);
     if let Some(duration) = evaluation.duration {
-        use crate::services::safety::{SoaLimitTrace, qualify_soa_duration_with_mode};
+        use crate::results::safety::{SoaLimitTrace, qualify_soa_duration_with_mode};
         let limit_trace = limits.map_or(
             SoaLimitTrace::Constant(evaluation.limit_value),
             SoaLimitTrace::Samples,
@@ -1398,7 +1398,7 @@ mod tests {
         ];
         for (parameter, expected) in cases {
             assert_eq!(
-                crate::services::safety::soa_stress_waveform_name(
+                crate::results::safety::soa_stress_waveform_name(
                     "M1",
                     parameter.runtime_parameter()
                 ),
@@ -1474,9 +1474,9 @@ mod tests {
             let worst_actual_value = y[samples - 1];
             let worst_time_s = time[samples - 1];
             waveforms.push(WaveformData::new(
-                crate::services::safety::soa_stress_waveform_name(
+                crate::results::safety::soa_stress_waveform_name(
                     &device_id,
-                    crate::services::safety::SoAParameter::Vds,
+                    crate::results::safety::SoAParameter::Vds,
                 ),
                 time.clone(),
                 y,

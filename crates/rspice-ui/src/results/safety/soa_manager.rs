@@ -504,7 +504,7 @@ pub struct SoAEvaluation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub envelope: Option<super::SoaCurrentEnvelopeEvidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duration: Option<crate::services::safety::SoaDurationEvidence>,
+    pub duration: Option<crate::results::safety::SoaDurationEvidence>,
     #[serde(default, skip_serializing_if = "super::SoaThresholds::is_default")]
     pub thresholds: super::SoaThresholds,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1069,13 +1069,6 @@ fn soa_derating_selects_highest_utilization_and_retains_zero_limit_events() {
     assert!(compare_soa_stress(f64::MAX, 1e-308, 1.0, 0.0).is_lt());
     assert!(compare_soa_stress(f64::MAX, 1e-308, f64::MAX / 2.0, 1e-310).is_lt());
     assert!(compare_soa_stress(1e-200, 1e308, 1e-300, 1e100).is_lt());
-    let wire =
-        crate::simulation::runner::worker_contract::WorkerSoAEvaluation::from(result.clone());
-    let wire = serde_json::from_str::<
-        crate::simulation::runner::worker_contract::WorkerSoAEvaluation,
-    >(&serde_json::to_string(&wire).unwrap())
-    .unwrap();
-    assert_eq!(SoAEvaluation::from(wire), *result);
     assert_eq!(
         manager
             .derating_history("Q1", SoAParameter::Pdiss)

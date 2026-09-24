@@ -1,7 +1,8 @@
 //! SOA current-envelope dispatch must preserve limits and saved Studio configuration.
 
 use super::*;
-use crate::services::{safety::*, simulation_runner::SoaRuleConfig};
+use crate::results::safety::*;
+use crate::services::simulation_runner::SoaRuleConfig;
 use crate::simulation::{
     dialog::soa::{SoaConfig, SoaDialogState},
     plan::AnalysisDraft,

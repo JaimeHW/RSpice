@@ -894,7 +894,7 @@ fn soa_evidence_are_field_sensitive_v4_content_identity() {
         else {
             unreachable!()
         };
-        evaluations[0].thresholds = crate::services::safety::SoaThresholds {
+        evaluations[0].thresholds = crate::results::safety::SoaThresholds {
             warning_fraction,
             critical_fraction,
         };
@@ -904,7 +904,7 @@ fn soa_evidence_are_field_sensitive_v4_content_identity() {
     let Some(AnalysisResultPayload::Soa { evaluations, .. }) = &mut timed.result_payload else {
         unreachable!()
     };
-    evaluations[0].duration = Some(crate::services::safety::SoaDurationEvidence {
+    evaluations[0].duration = Some(crate::results::safety::SoaDurationEvidence {
         cumulative: None,
         minimum_duration_s: 1e-9,
         total_exceedance_s: 3e-9,
@@ -946,9 +946,9 @@ fn soa_evidence_are_field_sensitive_v4_content_identity() {
     };
     evaluations[0].parameter = SoaParameterEvidence::PowerDissipation;
     evaluations[0].unit = "W".into();
-    evaluations[0].derating = Some(crate::services::safety::SoaPowerDeratingEvidence {
+    evaluations[0].derating = Some(crate::results::safety::SoaPowerDeratingEvidence {
         rated_power_w: 1.0,
-        curve: crate::services::safety::SoaPowerDerating {
+        curve: crate::results::safety::SoaPowerDerating {
             reference_temperature_kelvin: 300.0,
             watts_per_kelvin: 0.01,
         },
@@ -972,9 +972,9 @@ fn soa_evidence_are_field_sensitive_v4_content_identity() {
     else {
         unreachable!()
     };
-    evaluations[0].envelope = Some(crate::services::safety::SoaCurrentEnvelopeEvidence {
+    evaluations[0].envelope = Some(crate::results::safety::SoaCurrentEnvelopeEvidence {
         maximum_current_a: 1.0,
-        curve: crate::services::safety::SoaCurrentEnvelope::test_fixture(),
+        curve: crate::results::safety::SoaCurrentEnvelope::test_fixture(),
     });
     assert_ne!(soa.result_data_digest(), curved.result_data_digest());
     for field in 0..10 {
@@ -993,11 +993,11 @@ fn soa_evidence_are_field_sensitive_v4_content_identity() {
             5 => e.curve.pulse_width_s = None,
             6 => {
                 e.curve.voltage_interpolation =
-                    crate::services::safety::SoaVoltageInterpolation::Linear
+                    crate::results::safety::SoaVoltageInterpolation::Linear
             }
             7 => {
                 e.curve.pulse_interpolation =
-                    crate::services::safety::SoaPulseInterpolation::LongerPulse
+                    crate::results::safety::SoaPulseInterpolation::LongerPulse
             }
             8 => e.curve.pulses[0].duration_s *= 0.9,
             _ => e.curve.pulses[0].currents_a[1] *= 1.1,

@@ -859,13 +859,13 @@ impl SimulationController {
                         actual_value: violation.actual_value,
                         time_s: violation.time,
                         severity: match violation.severity {
-                            crate::services::safety::ViolationSeverity::Warning => {
+                            crate::results::safety::ViolationSeverity::Warning => {
                                 SoaViolationSeverityEvidence::Warning
                             }
-                            crate::services::safety::ViolationSeverity::Violation => {
+                            crate::results::safety::ViolationSeverity::Violation => {
                                 SoaViolationSeverityEvidence::Violation
                             }
-                            crate::services::safety::ViolationSeverity::Critical => {
+                            crate::results::safety::ViolationSeverity::Critical => {
                                 SoaViolationSeverityEvidence::Critical
                             }
                         },
@@ -896,16 +896,16 @@ impl SimulationController {
                         unit: evaluation.unit,
                         description: evaluation.description,
                         verdict: match evaluation.verdict {
-                            crate::services::safety::SoARuleVerdict::Pass => {
+                            crate::results::safety::SoARuleVerdict::Pass => {
                                 SoaRuleVerdictEvidence::Pass
                             }
-                            crate::services::safety::SoARuleVerdict::Warning => {
+                            crate::results::safety::SoARuleVerdict::Warning => {
                                 SoaRuleVerdictEvidence::Warning
                             }
-                            crate::services::safety::SoARuleVerdict::Violation => {
+                            crate::results::safety::SoARuleVerdict::Violation => {
                                 SoaRuleVerdictEvidence::Violation
                             }
-                            crate::services::safety::SoARuleVerdict::Critical => {
+                            crate::results::safety::SoARuleVerdict::Critical => {
                                 SoaRuleVerdictEvidence::Critical
                             }
                         },
@@ -1499,206 +1499,206 @@ fn operating_point_payload(
     }
 }
 
-fn retain_soa_parameter(parameter: crate::services::safety::SoAParameter) -> SoaParameterEvidence {
+fn retain_soa_parameter(parameter: crate::results::safety::SoAParameter) -> SoaParameterEvidence {
     match parameter {
-        crate::services::safety::SoAParameter::Vgs => SoaParameterEvidence::GateSourceVoltage,
-        crate::services::safety::SoAParameter::Vds => SoaParameterEvidence::DrainSourceVoltage,
-        crate::services::safety::SoAParameter::Vgd => SoaParameterEvidence::GateDrainVoltage,
-        crate::services::safety::SoAParameter::Vbe => SoaParameterEvidence::BaseEmitterVoltage,
-        crate::services::safety::SoAParameter::Vce => SoaParameterEvidence::CollectorEmitterVoltage,
-        crate::services::safety::SoAParameter::Vbc => SoaParameterEvidence::BaseCollectorVoltage,
-        crate::services::safety::SoAParameter::Id => SoaParameterEvidence::DrainCurrent,
-        crate::services::safety::SoAParameter::Ic => SoaParameterEvidence::CollectorCurrent,
-        crate::services::safety::SoAParameter::Vcsub => {
+        crate::results::safety::SoAParameter::Vgs => SoaParameterEvidence::GateSourceVoltage,
+        crate::results::safety::SoAParameter::Vds => SoaParameterEvidence::DrainSourceVoltage,
+        crate::results::safety::SoAParameter::Vgd => SoaParameterEvidence::GateDrainVoltage,
+        crate::results::safety::SoAParameter::Vbe => SoaParameterEvidence::BaseEmitterVoltage,
+        crate::results::safety::SoAParameter::Vce => SoaParameterEvidence::CollectorEmitterVoltage,
+        crate::results::safety::SoAParameter::Vbc => SoaParameterEvidence::BaseCollectorVoltage,
+        crate::results::safety::SoAParameter::Id => SoaParameterEvidence::DrainCurrent,
+        crate::results::safety::SoAParameter::Ic => SoaParameterEvidence::CollectorCurrent,
+        crate::results::safety::SoAParameter::Vcsub => {
             SoaParameterEvidence::CollectorSubstrateVoltage
         }
-        crate::services::safety::SoAParameter::VcsubPositive => {
+        crate::results::safety::SoAParameter::VcsubPositive => {
             SoaParameterEvidence::CollectorSubstrateVoltagePositive
         }
-        crate::services::safety::SoAParameter::VcsubNegative => {
+        crate::results::safety::SoAParameter::VcsubNegative => {
             SoaParameterEvidence::CollectorSubstrateVoltageNegative
         }
-        crate::services::safety::SoAParameter::Vbsub => SoaParameterEvidence::BaseSubstrateVoltage,
-        crate::services::safety::SoAParameter::VbsubPositive => {
+        crate::results::safety::SoAParameter::Vbsub => SoaParameterEvidence::BaseSubstrateVoltage,
+        crate::results::safety::SoAParameter::VbsubPositive => {
             SoaParameterEvidence::BaseSubstrateVoltagePositive
         }
-        crate::services::safety::SoAParameter::VbsubNegative => {
+        crate::results::safety::SoAParameter::VbsubNegative => {
             SoaParameterEvidence::BaseSubstrateVoltageNegative
         }
-        crate::services::safety::SoAParameter::Vesub => {
+        crate::results::safety::SoAParameter::Vesub => {
             SoaParameterEvidence::EmitterSubstrateVoltage
         }
-        crate::services::safety::SoAParameter::VesubPositive => {
+        crate::results::safety::SoAParameter::VesubPositive => {
             SoaParameterEvidence::EmitterSubstrateVoltagePositive
         }
-        crate::services::safety::SoAParameter::VesubNegative => {
+        crate::results::safety::SoAParameter::VesubNegative => {
             SoaParameterEvidence::EmitterSubstrateVoltageNegative
         }
-        crate::services::safety::SoAParameter::Isub => SoaParameterEvidence::SubstrateCurrent,
-        crate::services::safety::SoAParameter::IsubPositive => {
+        crate::results::safety::SoAParameter::Isub => SoaParameterEvidence::SubstrateCurrent,
+        crate::results::safety::SoAParameter::IsubPositive => {
             SoaParameterEvidence::SubstrateCurrentPositive
         }
-        crate::services::safety::SoAParameter::IsubNegative => {
+        crate::results::safety::SoAParameter::IsubNegative => {
             SoaParameterEvidence::SubstrateCurrentNegative
         }
-        crate::services::safety::SoAParameter::Vak => SoaParameterEvidence::AnodeCathodeVoltage,
-        crate::services::safety::SoAParameter::VakPositive => {
+        crate::results::safety::SoAParameter::Vak => SoaParameterEvidence::AnodeCathodeVoltage,
+        crate::results::safety::SoAParameter::VakPositive => {
             SoaParameterEvidence::AnodeCathodeVoltagePositive
         }
-        crate::services::safety::SoAParameter::VakNegative => {
+        crate::results::safety::SoAParameter::VakNegative => {
             SoaParameterEvidence::AnodeCathodeVoltageNegative
         }
-        crate::services::safety::SoAParameter::Ia => SoaParameterEvidence::AnodeCurrent,
-        crate::services::safety::SoAParameter::IaPositive => {
+        crate::results::safety::SoAParameter::Ia => SoaParameterEvidence::AnodeCurrent,
+        crate::results::safety::SoAParameter::IaPositive => {
             SoaParameterEvidence::AnodeCurrentPositive
         }
-        crate::services::safety::SoAParameter::IaNegative => {
+        crate::results::safety::SoAParameter::IaNegative => {
             SoaParameterEvidence::AnodeCurrentNegative
         }
 
-        crate::services::safety::SoAParameter::Vbs => SoaParameterEvidence::BodySourceVoltage,
-        crate::services::safety::SoAParameter::VbsPositive => {
+        crate::results::safety::SoAParameter::Vbs => SoaParameterEvidence::BodySourceVoltage,
+        crate::results::safety::SoAParameter::VbsPositive => {
             SoaParameterEvidence::BodySourceVoltagePositive
         }
-        crate::services::safety::SoAParameter::VbsNegative => {
+        crate::results::safety::SoAParameter::VbsNegative => {
             SoaParameterEvidence::BodySourceVoltageNegative
         }
-        crate::services::safety::SoAParameter::Vbd => SoaParameterEvidence::BodyDrainVoltage,
-        crate::services::safety::SoAParameter::VbdPositive => {
+        crate::results::safety::SoAParameter::Vbd => SoaParameterEvidence::BodyDrainVoltage,
+        crate::results::safety::SoAParameter::VbdPositive => {
             SoaParameterEvidence::BodyDrainVoltagePositive
         }
-        crate::services::safety::SoAParameter::VbdNegative => {
+        crate::results::safety::SoAParameter::VbdNegative => {
             SoaParameterEvidence::BodyDrainVoltageNegative
         }
-        crate::services::safety::SoAParameter::Vgb => SoaParameterEvidence::GateBodyVoltage,
-        crate::services::safety::SoAParameter::VgbPositive => {
+        crate::results::safety::SoAParameter::Vgb => SoaParameterEvidence::GateBodyVoltage,
+        crate::results::safety::SoAParameter::VgbPositive => {
             SoaParameterEvidence::GateBodyVoltagePositive
         }
-        crate::services::safety::SoAParameter::VgbNegative => {
+        crate::results::safety::SoAParameter::VgbNegative => {
             SoaParameterEvidence::GateBodyVoltageNegative
         }
-        crate::services::safety::SoAParameter::Ibulk => SoaParameterEvidence::BulkCurrent,
-        crate::services::safety::SoAParameter::IbulkPositive => {
+        crate::results::safety::SoAParameter::Ibulk => SoaParameterEvidence::BulkCurrent,
+        crate::results::safety::SoAParameter::IbulkPositive => {
             SoaParameterEvidence::BulkCurrentPositive
         }
-        crate::services::safety::SoAParameter::IbulkNegative => {
+        crate::results::safety::SoAParameter::IbulkNegative => {
             SoaParameterEvidence::BulkCurrentNegative
         }
-        crate::services::safety::SoAParameter::Ves => SoaParameterEvidence::BackgateSourceVoltage,
-        crate::services::safety::SoAParameter::VesPositive => {
+        crate::results::safety::SoAParameter::Ves => SoaParameterEvidence::BackgateSourceVoltage,
+        crate::results::safety::SoAParameter::VesPositive => {
             SoaParameterEvidence::BackgateSourceVoltagePositive
         }
-        crate::services::safety::SoAParameter::VesNegative => {
+        crate::results::safety::SoAParameter::VesNegative => {
             SoaParameterEvidence::BackgateSourceVoltageNegative
         }
-        crate::services::safety::SoAParameter::Ved => SoaParameterEvidence::BackgateDrainVoltage,
-        crate::services::safety::SoAParameter::VedPositive => {
+        crate::results::safety::SoAParameter::Ved => SoaParameterEvidence::BackgateDrainVoltage,
+        crate::results::safety::SoAParameter::VedPositive => {
             SoaParameterEvidence::BackgateDrainVoltagePositive
         }
-        crate::services::safety::SoAParameter::VedNegative => {
+        crate::results::safety::SoAParameter::VedNegative => {
             SoaParameterEvidence::BackgateDrainVoltageNegative
         }
-        crate::services::safety::SoAParameter::Vge => SoaParameterEvidence::GateBackgateVoltage,
-        crate::services::safety::SoAParameter::VgePositive => {
+        crate::results::safety::SoAParameter::Vge => SoaParameterEvidence::GateBackgateVoltage,
+        crate::results::safety::SoAParameter::VgePositive => {
             SoaParameterEvidence::GateBackgateVoltagePositive
         }
-        crate::services::safety::SoAParameter::VgeNegative => {
+        crate::results::safety::SoAParameter::VgeNegative => {
             SoaParameterEvidence::GateBackgateVoltageNegative
         }
-        crate::services::safety::SoAParameter::Ibackgate => SoaParameterEvidence::BackgateCurrent,
-        crate::services::safety::SoAParameter::IbackgatePositive => {
+        crate::results::safety::SoAParameter::Ibackgate => SoaParameterEvidence::BackgateCurrent,
+        crate::results::safety::SoAParameter::IbackgatePositive => {
             SoaParameterEvidence::BackgateCurrentPositive
         }
-        crate::services::safety::SoAParameter::IbackgateNegative => {
+        crate::results::safety::SoAParameter::IbackgateNegative => {
             SoaParameterEvidence::BackgateCurrentNegative
         }
-        crate::services::safety::SoAParameter::VbodyBackgate => {
+        crate::results::safety::SoAParameter::VbodyBackgate => {
             SoaParameterEvidence::BodyBackgateVoltage
         }
-        crate::services::safety::SoAParameter::VbodyBackgatePositive => {
+        crate::results::safety::SoAParameter::VbodyBackgatePositive => {
             SoaParameterEvidence::BodyBackgateVoltagePositive
         }
-        crate::services::safety::SoAParameter::VbodyBackgateNegative => {
+        crate::results::safety::SoAParameter::VbodyBackgateNegative => {
             SoaParameterEvidence::BodyBackgateVoltageNegative
         }
 
-        crate::services::safety::SoAParameter::Ig => SoaParameterEvidence::GateCurrent,
-        crate::services::safety::SoAParameter::IgPositive => {
+        crate::results::safety::SoAParameter::Ig => SoaParameterEvidence::GateCurrent,
+        crate::results::safety::SoAParameter::IgPositive => {
             SoaParameterEvidence::GateCurrentPositive
         }
-        crate::services::safety::SoAParameter::IgNegative => {
+        crate::results::safety::SoAParameter::IgNegative => {
             SoaParameterEvidence::GateCurrentNegative
         }
-        crate::services::safety::SoAParameter::Is => SoaParameterEvidence::SourceCurrent,
-        crate::services::safety::SoAParameter::IsPositive => {
+        crate::results::safety::SoAParameter::Is => SoaParameterEvidence::SourceCurrent,
+        crate::results::safety::SoAParameter::IsPositive => {
             SoaParameterEvidence::SourceCurrentPositive
         }
-        crate::services::safety::SoAParameter::IsNegative => {
+        crate::results::safety::SoAParameter::IsNegative => {
             SoaParameterEvidence::SourceCurrentNegative
         }
-        crate::services::safety::SoAParameter::Ib => SoaParameterEvidence::BaseCurrent,
-        crate::services::safety::SoAParameter::IbPositive => {
+        crate::results::safety::SoAParameter::Ib => SoaParameterEvidence::BaseCurrent,
+        crate::results::safety::SoAParameter::IbPositive => {
             SoaParameterEvidence::BaseCurrentPositive
         }
-        crate::services::safety::SoAParameter::IbNegative => {
+        crate::results::safety::SoAParameter::IbNegative => {
             SoaParameterEvidence::BaseCurrentNegative
         }
-        crate::services::safety::SoAParameter::Ie => SoaParameterEvidence::EmitterCurrent,
-        crate::services::safety::SoAParameter::IePositive => {
+        crate::results::safety::SoAParameter::Ie => SoaParameterEvidence::EmitterCurrent,
+        crate::results::safety::SoAParameter::IePositive => {
             SoaParameterEvidence::EmitterCurrentPositive
         }
-        crate::services::safety::SoAParameter::IeNegative => {
+        crate::results::safety::SoAParameter::IeNegative => {
             SoaParameterEvidence::EmitterCurrentNegative
         }
 
-        crate::services::safety::SoAParameter::Pdiss => SoaParameterEvidence::PowerDissipation,
-        crate::services::safety::SoAParameter::Temp => SoaParameterEvidence::Temperature,
-        crate::services::safety::SoAParameter::VgsPositive => {
+        crate::results::safety::SoAParameter::Pdiss => SoaParameterEvidence::PowerDissipation,
+        crate::results::safety::SoAParameter::Temp => SoaParameterEvidence::Temperature,
+        crate::results::safety::SoAParameter::VgsPositive => {
             SoaParameterEvidence::GateSourceVoltagePositive
         }
-        crate::services::safety::SoAParameter::VgsNegative => {
+        crate::results::safety::SoAParameter::VgsNegative => {
             SoaParameterEvidence::GateSourceVoltageNegative
         }
-        crate::services::safety::SoAParameter::VdsPositive => {
+        crate::results::safety::SoAParameter::VdsPositive => {
             SoaParameterEvidence::DrainSourceVoltagePositive
         }
-        crate::services::safety::SoAParameter::VdsNegative => {
+        crate::results::safety::SoAParameter::VdsNegative => {
             SoaParameterEvidence::DrainSourceVoltageNegative
         }
-        crate::services::safety::SoAParameter::VgdPositive => {
+        crate::results::safety::SoAParameter::VgdPositive => {
             SoaParameterEvidence::GateDrainVoltagePositive
         }
-        crate::services::safety::SoAParameter::VgdNegative => {
+        crate::results::safety::SoAParameter::VgdNegative => {
             SoaParameterEvidence::GateDrainVoltageNegative
         }
-        crate::services::safety::SoAParameter::VbePositive => {
+        crate::results::safety::SoAParameter::VbePositive => {
             SoaParameterEvidence::BaseEmitterVoltagePositive
         }
-        crate::services::safety::SoAParameter::VbeNegative => {
+        crate::results::safety::SoAParameter::VbeNegative => {
             SoaParameterEvidence::BaseEmitterVoltageNegative
         }
-        crate::services::safety::SoAParameter::VcePositive => {
+        crate::results::safety::SoAParameter::VcePositive => {
             SoaParameterEvidence::CollectorEmitterVoltagePositive
         }
-        crate::services::safety::SoAParameter::VceNegative => {
+        crate::results::safety::SoAParameter::VceNegative => {
             SoaParameterEvidence::CollectorEmitterVoltageNegative
         }
-        crate::services::safety::SoAParameter::VbcPositive => {
+        crate::results::safety::SoAParameter::VbcPositive => {
             SoaParameterEvidence::BaseCollectorVoltagePositive
         }
-        crate::services::safety::SoAParameter::VbcNegative => {
+        crate::results::safety::SoAParameter::VbcNegative => {
             SoaParameterEvidence::BaseCollectorVoltageNegative
         }
-        crate::services::safety::SoAParameter::IdPositive => {
+        crate::results::safety::SoAParameter::IdPositive => {
             SoaParameterEvidence::DrainCurrentPositive
         }
-        crate::services::safety::SoAParameter::IdNegative => {
+        crate::results::safety::SoAParameter::IdNegative => {
             SoaParameterEvidence::DrainCurrentNegative
         }
-        crate::services::safety::SoAParameter::IcPositive => {
+        crate::results::safety::SoAParameter::IcPositive => {
             SoaParameterEvidence::CollectorCurrentPositive
         }
-        crate::services::safety::SoAParameter::IcNegative => {
+        crate::results::safety::SoAParameter::IcNegative => {
             SoaParameterEvidence::CollectorCurrentNegative
         }
     }

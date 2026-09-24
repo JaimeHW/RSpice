@@ -340,9 +340,9 @@ fn soa_analysis() -> AnalysisResult {
         let worst_actual_value = y[SOA_SAMPLES - 1];
         let worst_time_s = time[SOA_SAMPLES - 1];
         waveforms.push(WaveformData::new(
-            crate::services::safety::soa_stress_waveform_name(
+            crate::results::safety::soa_stress_waveform_name(
                 &device_id,
-                crate::services::safety::SoAParameter::Vds,
+                crate::results::safety::SoAParameter::Vds,
             ),
             time.clone(),
             y,

@@ -237,7 +237,8 @@ fn optimization_units_and_expression_are_authenticated_without_changing_legacy_i
 #[cfg(test)]
 #[test]
 fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated() {
-    use crate::services::{safety::SoAParameter, simulation_runner::SoaRuleConfig};
+    use crate::results::safety::SoAParameter;
+    use crate::services::simulation_runner::SoaRuleConfig;
     let spec = AnalysisSpec::Soa {
         import_model_voltage_ratings: false,
         observation: Default::default(),
@@ -278,7 +279,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
         let AnalysisSpec::Soa { observation, .. } = &mut changed else {
             unreachable!()
         };
-        observation.thresholds = crate::services::safety::SoaThresholds {
+        observation.thresholds = crate::results::safety::SoaThresholds {
             warning_fraction,
             critical_fraction,
         };
@@ -320,7 +321,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
             1 => rules[0].max_value = 2e-3,
             2 => rules[0].devices = vec!["M2".into()],
             3 => rules[0].models = vec!["PM".into()],
-            _ => rules[0].voltage_basis = crate::services::safety::SoaVoltageBasis::IntrinsicNodes,
+            _ => rules[0].voltage_basis = crate::results::safety::SoaVoltageBasis::IntrinsicNodes,
         }
         assert_ne!(digest(&changed), digest(&configured), "rule field {field}");
     }
@@ -341,7 +342,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
     let AnalysisSpec::Soa { rules, .. } = &mut cumulative else {
         unreachable!()
     };
-    rules[0].duration_mode = crate::services::safety::SoaDurationMode::Cumulative {
+    rules[0].duration_mode = crate::results::safety::SoaDurationMode::Cumulative {
         recovery_time_s: None,
     };
     assert_ne!(digest(&timed), digest(&cumulative));
@@ -349,7 +350,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
     let AnalysisSpec::Soa { rules, .. } = &mut recovering else {
         unreachable!()
     };
-    rules[0].duration_mode = crate::services::safety::SoaDurationMode::Cumulative {
+    rules[0].duration_mode = crate::results::safety::SoaDurationMode::Cumulative {
         recovery_time_s: Some(1e-9),
     };
     assert_ne!(digest(&cumulative), digest(&recovering));
@@ -357,7 +358,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
     let AnalysisSpec::Soa { rules, .. } = &mut faster else {
         unreachable!()
     };
-    rules[0].duration_mode = crate::services::safety::SoaDurationMode::Cumulative {
+    rules[0].duration_mode = crate::results::safety::SoaDurationMode::Cumulative {
         recovery_time_s: Some(0.5e-9),
     };
     assert_ne!(digest(&recovering), digest(&faster));
@@ -366,7 +367,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
         unreachable!()
     };
     rules[0].parameter = SoAParameter::Pdiss;
-    rules[0].power_derating = Some(crate::services::safety::SoaPowerDerating {
+    rules[0].power_derating = Some(crate::results::safety::SoaPowerDerating {
         reference_temperature_kelvin: 300.0,
         watts_per_kelvin: 0.001,
     });
@@ -388,7 +389,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
         unreachable!()
     };
     rules[0].parameter = SoAParameter::Id;
-    rules[0].current_envelope = Some(crate::services::safety::SoaCurrentEnvelope::test_fixture());
+    rules[0].current_envelope = Some(crate::results::safety::SoaCurrentEnvelope::test_fixture());
     assert_ne!(digest(&curves), digest(&configured));
     for field in 0..10 {
         let mut changed = curves.clone();
@@ -402,10 +403,8 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
             2 => c.voltages_v[1] *= 1.1,
             3 => c.dc_currents_a.as_mut().unwrap()[1] *= 0.9,
             4 => c.pulse_width_s = None,
-            5 => c.voltage_interpolation = crate::services::safety::SoaVoltageInterpolation::Linear,
-            6 => {
-                c.pulse_interpolation = crate::services::safety::SoaPulseInterpolation::LongerPulse
-            }
+            5 => c.voltage_interpolation = crate::results::safety::SoaVoltageInterpolation::Linear,
+            6 => c.pulse_interpolation = crate::results::safety::SoaPulseInterpolation::LongerPulse,
             7 => c.pulses[0].duration_s *= 0.9,
             8 => c.pulses[0].currents_a[1] *= 1.1,
             _ => c.pulses.pop().map(|_| ()).unwrap(),
@@ -906,7 +905,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                 for rule in rules {
                     writer.bool(
                         rule.voltage_basis
-                            == crate::services::safety::SoaVoltageBasis::IntrinsicNodes,
+                            == crate::results::safety::SoaVoltageBasis::IntrinsicNodes,
                     );
                 }
             }
@@ -935,12 +934,8 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                 writer.sequence(rules.len());
                 for rule in rules {
                     match rule.duration_mode {
-                        crate::services::safety::SoaDurationMode::PerExcursion => {
-                            writer.bool(false)
-                        }
-                        crate::services::safety::SoaDurationMode::Cumulative {
-                            recovery_time_s,
-                        } => {
+                        crate::results::safety::SoaDurationMode::PerExcursion => writer.bool(false),
+                        crate::results::safety::SoaDurationMode::Cumulative { recovery_time_s } => {
                             writer.bool(true);
                             writer.option(recovery_time_s.as_ref(), |writer, value| {
                                 writer.f64(*value)
@@ -975,11 +970,11 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                         });
                         writer.bool(
                             curve.voltage_interpolation
-                                == crate::services::safety::SoaVoltageInterpolation::Logarithmic,
+                                == crate::results::safety::SoaVoltageInterpolation::Logarithmic,
                         );
                         writer.bool(
                             curve.pulse_interpolation
-                                == crate::services::safety::SoaPulseInterpolation::Logarithmic,
+                                == crate::results::safety::SoaPulseInterpolation::Logarithmic,
                         );
                         writer.sequence(curve.pulses.len());
                         for pulse in &curve.pulses {

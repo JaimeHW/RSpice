@@ -56,7 +56,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     NetlistInput, ResultSchemaMismatch, SimulationError, SimulationRequest, SpecExecutionOptions,
 };
-use crate::services::safety::{
+use crate::results::safety::{
     SoAEvaluation, SoAParameter, SoARuleVerdict, SoAViolation, ViolationSeverity,
 };
 #[cfg(test)]

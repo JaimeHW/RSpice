@@ -2,8 +2,8 @@
 use super::SoaParameterEvidence;
 
 impl SoaParameterEvidence {
-    pub(crate) const fn runtime_parameter(self) -> crate::services::safety::SoAParameter {
-        use crate::services::safety::SoAParameter;
+    pub(crate) const fn runtime_parameter(self) -> crate::results::safety::SoAParameter {
+        use crate::results::safety::SoAParameter;
         match self {
             SoaParameterEvidence::GateSourceVoltage => SoAParameter::Vgs,
             SoaParameterEvidence::DrainSourceVoltage => SoAParameter::Vds,

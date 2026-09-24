@@ -461,7 +461,7 @@ fn analysis_spec_round_trips_supported_variants() {
                 current_envelope: None,
                 power_derating: None,
                 voltage_basis: Default::default(),
-                parameter: crate::services::safety::SoAParameter::Id,
+                parameter: crate::results::safety::SoAParameter::Id,
                 max_value: 0.0123456789012345,
                 devices: vec!["X1:M1".into()],
                 models: vec![],

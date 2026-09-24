@@ -2438,7 +2438,7 @@ fn a_dc_mismatch_result_exports_one_exact_row_per_contributor() {
 
 #[test]
 fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
-    use crate::services::safety::{SoaPowerDerating, SoaPowerDeratingEvidence};
+    use crate::results::safety::{SoaPowerDerating, SoaPowerDeratingEvidence};
     let mut traces = Vec::new();
     for (name, unit, values) in [
         ("SOA_PDISS(Q1)", "W", vec![0.8, 0.5, 0.2]),
@@ -2506,7 +2506,7 @@ fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
     else {
         unreachable!()
     };
-    evaluations[0].thresholds = crate::services::safety::SoaThresholds {
+    evaluations[0].thresholds = crate::results::safety::SoaThresholds {
         warning_fraction: None,
         critical_fraction: None,
     };
@@ -2602,7 +2602,7 @@ fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
 
 #[test]
 fn soa_current_envelope_csv_retains_voltage_limits_and_authored_curves() {
-    use crate::services::safety::{SoaCurrentEnvelope, SoaCurrentEnvelopeEvidence};
+    use crate::results::safety::{SoaCurrentEnvelope, SoaCurrentEnvelopeEvidence};
     let curve = SoaCurrentEnvelope::test_fixture();
     let mut traces = Vec::new();
     for (name, unit, values) in [
@@ -2680,7 +2680,7 @@ fn soa_duration_csv_preserves_short_spikes_and_qualified_excursions() {
 
 #[test]
 fn soa_duration_cumulative_csv_preserves_policy_and_exposure() {
-    use crate::services::safety::SoaCumulativeDurationEvidence;
+    use crate::results::safety::SoaCumulativeDurationEvidence;
     check_soa_duration_csv(Some(SoaCumulativeDurationEvidence {
         recovery_time_s: None,
         peak_exposure_s: 4.5,
@@ -2695,7 +2695,7 @@ fn soa_duration_cumulative_csv_preserves_policy_and_exposure() {
 }
 
 fn check_soa_duration_csv(
-    cumulative: Option<crate::services::safety::SoaCumulativeDurationEvidence>,
+    cumulative: Option<crate::results::safety::SoaCumulativeDurationEvidence>,
 ) {
     let mut stress = waveform(
         "SOA_VDS(M1)",
@@ -2703,7 +2703,7 @@ fn check_soa_duration_csv(
         vec![0., 4., 0., 2., 2., 2., 0.],
     );
     stress.unit = Some("V".into());
-    let duration = crate::services::safety::SoaDurationEvidence {
+    let duration = crate::results::safety::SoaDurationEvidence {
         cumulative,
         minimum_duration_s: if cumulative.is_some() { 4. } else { 2. },
         total_exceedance_s: 4.5,

@@ -1,6 +1,6 @@
 //! Editable numeric rows for datasheet SOA boundaries.
 use super::parse_si_value;
-use crate::services::safety::{
+use crate::results::safety::{
     SoaCurrentEnvelope, SoaPulseCurve, SoaPulseInterpolation, SoaVoltageInterpolation,
 };
 

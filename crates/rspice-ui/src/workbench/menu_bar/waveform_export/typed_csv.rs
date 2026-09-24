@@ -749,7 +749,7 @@ pub(super) fn prepare_typed_result_csv(
                 })
                 .collect::<std::collections::BTreeMap<_, _>>();
             let append_thresholds =
-                |contents: &mut String, thresholds: crate::services::safety::SoaThresholds| {
+                |contents: &mut String, thresholds: crate::results::safety::SoaThresholds| {
                     if custom_thresholds {
                         for fraction in [thresholds.warning_fraction, thresholds.critical_fraction]
                         {
@@ -764,7 +764,7 @@ pub(super) fn prepare_typed_result_csv(
                 };
             let append_duration = |contents: &mut String,
                                    duration: Option<
-                crate::services::safety::SoaDurationEvidence,
+                crate::results::safety::SoaDurationEvidence,
             >| {
                 if has_duration {
                     if let Some(duration) = duration {
@@ -880,34 +880,34 @@ pub(super) fn prepare_typed_result_csv(
                             })
                         }
                     };
-                    let stress = find(crate::services::safety::soa_stress_waveform_name(
+                    let stress = find(crate::results::safety::soa_stress_waveform_name(
                         &evaluation.device_id,
                         evaluation.parameter.runtime_parameter(),
                     ))?;
                     let limits = evaluation
                         .derating
                         .and_then(|_| {
-                            find(crate::services::safety::soa_power_limit_waveform_name(
+                            find(crate::results::safety::soa_power_limit_waveform_name(
                                 &evaluation.device_id,
                             ))
                         })
                         .or_else(|| {
                             evaluation.envelope.as_ref().and_then(|_| {
-                                find(crate::services::safety::soa_envelope_limit_waveform_name(
+                                find(crate::results::safety::soa_envelope_limit_waveform_name(
                                     &evaluation.device_id,
                                     evaluation.parameter.runtime_parameter(),
                                 ))
                             })
                         });
                     let curve_voltages = evaluation.envelope.as_ref().and_then(|_| {
-                        find(crate::services::safety::soa_envelope_voltage_waveform_name(
+                        find(crate::results::safety::soa_envelope_voltage_waveform_name(
                             &evaluation.device_id,
                             evaluation.parameter.runtime_parameter(),
                         ))
                     });
                     let temperatures = evaluation.derating.and_then(|_| {
                         find(
-                            crate::services::safety::soa_derating_temperature_waveform_name(
+                            crate::results::safety::soa_derating_temperature_waveform_name(
                                 &evaluation.device_id,
                             ),
                         )

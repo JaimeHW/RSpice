@@ -1,6 +1,6 @@
 //! Cross-check derating metadata against the complete retained waveforms.
 use super::*;
-use crate::services::safety::{
+use crate::results::safety::{
     SoAParameter, compare_soa_stress, soa_derating_temperature_waveform_name,
     soa_power_limit_waveform_name, soa_stress_waveform_name,
 };
@@ -100,7 +100,7 @@ pub(super) fn validate(
             worst = i;
         }
         if evaluation.thresholds.verdict(stress[i], limits[i])
-            != crate::services::safety::SoARuleVerdict::Pass
+            != crate::results::safety::SoARuleVerdict::Pass
         {
             events += 1;
         }
