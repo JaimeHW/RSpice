@@ -39,12 +39,11 @@ pub(crate) mod veriloga;
 // types here duplicated the path without shortening any call site.
 pub use config::AnalysisConfig;
 pub use controller::SimulationController;
+pub use results::{SimulationResult, WaveformData};
 // Test-only aliases for private modules: execution reaches the bridge and
 // these helpers through their module paths.
 #[cfg(test)]
 pub use engine_bridge::EngineBridge;
-#[cfg(test)]
-pub use results::{SimulationResult, WaveformData};
 pub use runner::SimulationRunner;
 pub use status::SimulationStatus;
 
