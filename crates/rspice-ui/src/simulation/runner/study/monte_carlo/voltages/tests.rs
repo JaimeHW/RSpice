@@ -1,3 +1,5 @@
+//! Voltage-roster tests compare checkpointed populations and resumed histograms.
+
 use super::*;
 use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::results::SimulationResult;

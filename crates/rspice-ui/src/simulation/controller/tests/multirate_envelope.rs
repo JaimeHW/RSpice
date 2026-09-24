@@ -1,3 +1,5 @@
+//! Controller tests preserve envelope controls, exact events, and source limits.
+
 use super::*;
 use crate::simulation::dialog::EnvelopeDialogState;
 use crate::simulation::plan::AnalysisDraft;

@@ -1,3 +1,5 @@
+//! Engine-bridge study tests verify per-trial analyses and worker resource limits.
+
 use super::*;
 use crate::simulation::config::{AcAnalysisConfig, AcSweepType, TransientAnalysisConfig};
 use rspice_core::analysis::monte_carlo::Distribution;

@@ -1,3 +1,5 @@
+//! Saved multirate-envelope plans must keep their solver selection through authorized dispatch.
+
 use super::*;
 use crate::simulation::plan::AnalysisDraft;
 

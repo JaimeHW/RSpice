@@ -1,3 +1,5 @@
+//! HB/RF study tests cover varied-circuit Monte Carlo and scattering objectives.
+
 use super::*;
 use crate::simulation::multi_run::{
     FrequencySweep, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,

@@ -1,3 +1,5 @@
+//! Controller checkpoint tests cover retained trials, budgets, and preflight evidence.
+
 use super::*;
 use crate::product::{ContentDigest, ObjectRevision, SimulationPlanId};
 use crate::simulation::runner::{

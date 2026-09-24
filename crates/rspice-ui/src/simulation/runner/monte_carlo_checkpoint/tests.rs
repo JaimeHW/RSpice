@@ -1,3 +1,5 @@
+//! Runner checkpoint tests exercise cancellation, resume, and capture identity.
+
 use super::*;
 use crate::product::{AnalysisInstanceId, ObjectRevision};
 use crate::simulation::dialog::McVariationSource;

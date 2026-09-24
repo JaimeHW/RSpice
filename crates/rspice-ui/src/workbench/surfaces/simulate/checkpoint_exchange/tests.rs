@@ -1,3 +1,5 @@
+//! Checkpoint exchange tests preserve project ownership and stored file identity.
+
 use super::*;
 
 #[test]

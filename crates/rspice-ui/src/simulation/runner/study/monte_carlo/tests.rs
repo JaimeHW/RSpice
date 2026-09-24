@@ -1,3 +1,5 @@
+//! Studio Monte Carlo tests cover resume, cancellation, publication, and legacy input.
+
 use super::*;
 use crate::simulation::config::{AcAnalysisConfig, AcSweepType};
 use rspice_core::ResourceLimits;

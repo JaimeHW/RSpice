@@ -1,3 +1,5 @@
+//! Periodic RF study tests vary circuits and optimize configured transfer targets.
+
 use super::*;
 use crate::simulation::dialog::{OpConfig, OpTemperatureMode};
 use crate::simulation::multi_run::{

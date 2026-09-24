@@ -1,3 +1,5 @@
+//! Checkpoint-library tests reject corrupt and oversized serialized trial files.
+
 use super::*;
 
 #[test]

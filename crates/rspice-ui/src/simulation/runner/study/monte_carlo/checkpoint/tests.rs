@@ -1,3 +1,5 @@
+//! Checkpoint-envelope tests reject invalid evidence and preserve measurement units.
+
 use super::*;
 use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
 use rspice_core::engine::MonteCarloStudyConfig;

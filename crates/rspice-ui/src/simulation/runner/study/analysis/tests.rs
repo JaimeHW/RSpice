@@ -1,3 +1,5 @@
+//! Study dispatch tests execute HB current analyses in Monte Carlo and optimization.
+
 use super::*;
 use crate::simulation::multi_run::{
     HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,

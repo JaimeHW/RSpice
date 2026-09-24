@@ -1,3 +1,5 @@
+//! Editable multirate-envelope controls and their validated solver conversion.
+
 use super::*;
 use crate::services::simulation_runner::EnvelopeMultirateConfig;
 use rspice_core::analysis::quasi_periodic::{QuasiPeriodicLinearMethod, SpectralEnvelopeMethod};

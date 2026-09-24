@@ -1,3 +1,5 @@
+//! Plan tests enforce which analysis owns numerical defaults and seeded options.
+
 use super::*;
 use NumericOverrideOption as O;
 

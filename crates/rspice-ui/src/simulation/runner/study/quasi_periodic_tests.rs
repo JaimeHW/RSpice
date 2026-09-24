@@ -1,3 +1,5 @@
+//! Quasi-periodic study tests evaluate varied circuits and physical output targets.
+
 use super::*;
 use crate::simulation::multi_run::{
     AnalysisSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,

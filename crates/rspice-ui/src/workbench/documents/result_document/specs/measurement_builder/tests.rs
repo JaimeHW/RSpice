@@ -1,3 +1,5 @@
+//! Result-document tests execute measurement reductions, crossings, and delays.
+
 use super::*;
 
 #[test]

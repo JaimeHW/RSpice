@@ -1,3 +1,5 @@
+//! Snapshot tests bind multipoint checkpoint resumes to selected trial populations.
+
 use super::*;
 use crate::simulation::dialog::McVariationSource;
 use crate::simulation::runner::monte_carlo_checkpoint::{

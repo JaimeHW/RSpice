@@ -1,3 +1,5 @@
+//! PSS study tests keep operating-point and shooting controls independent.
+
 use super::*;
 use crate::simulation::multi_run::{OptimizationAlgorithm, OptimizationGoal, OptimizationVariable};
 use crate::simulation::runner::{

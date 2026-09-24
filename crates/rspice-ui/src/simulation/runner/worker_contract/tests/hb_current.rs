@@ -1,3 +1,5 @@
+//! Worker-contract test preserves HB current phasors, units, and direction.
+
 use super::*;
 use num_complex::Complex64;
 

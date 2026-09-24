@@ -1,3 +1,5 @@
+//! Spot-frequency tests publish one-point noise, stability, and distortion results.
+
 use super::*;
 use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
 use crate::simulation::multi_run::FrequencySweep;

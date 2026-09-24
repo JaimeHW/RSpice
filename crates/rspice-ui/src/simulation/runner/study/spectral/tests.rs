@@ -1,3 +1,5 @@
+//! Spectral study tests retain frozen transient input through trials and optimization.
+
 use super::*;
 use crate::simulation::config::{FftFormatChoice, FftRequest, TransientAnalysisConfig};
 use crate::simulation::multi_run::{OptimizationAlgorithm, OptimizationGoal, OptimizationVariable};

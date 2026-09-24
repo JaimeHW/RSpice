@@ -1,3 +1,5 @@
+//! Canonical Monte Carlo tests preserve saved base-analysis and postprocessor identity.
+
 use super::*;
 use crate::product::ObjectRevision;
 use crate::simulation::runner::study::{

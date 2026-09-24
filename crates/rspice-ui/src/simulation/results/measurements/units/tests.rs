@@ -1,3 +1,5 @@
+//! Study measurement tests check waveform and transfer-unit normalization.
+
 use super::*;
 
 fn converted(result: &SimulationResult, selector: &str, target: &str) -> f64 {

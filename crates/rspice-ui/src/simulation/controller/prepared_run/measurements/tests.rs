@@ -1,3 +1,5 @@
+//! Measurement references must survive preparation, dispatch, retention, and project saves.
+
 use super::*;
 use crate::simulation::config::{AnalysisConfig, TransientAnalysisConfig};
 use crate::simulation::controller::SimulationController;
