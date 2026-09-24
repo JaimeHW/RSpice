@@ -46,7 +46,7 @@ crates/rspice-publish/src/assets/** text eol=lf
 # rspice_browser_bootstrap.py by its 1018 CRs and pyodide.mjs by 4, so the
 # worker rejected its own runtime — invisibly, because Linux CI checks out LF.
 # Verbatim rather than eol=lf: the tree holds .wasm and .zip payloads too.
-crates/rspice-ui/web/python/** -text
+crates/rspice-app/web/python/** -text
 
 # Regenerated built-in Rust must stay clean after generator rewrites. The
 # manifest records a blake3 over each generated file's exact bytes and
@@ -84,7 +84,7 @@ tools/rspice-bench/external/**/*.sh text eol=lf
 
 # The Results catalog is generated from this contract by build.rs. Pin it to LF
 # so every platform's checkout feeds the generator identical bytes.
-crates/rspice-ui/contracts/** text eol=lf
+crates/rspice-app/contracts/** text eol=lf
 
 # The loader digests a project file's exact bytes, and a frozen migration
 # fixture is include_str!'d into a test binary. CRLF materialization would

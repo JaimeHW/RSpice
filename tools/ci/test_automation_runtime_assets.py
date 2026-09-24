@@ -15,14 +15,14 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-WEB = ROOT / "crates" / "rspice-ui" / "web"
+WEB = ROOT / "crates" / "rspice-app" / "web"
 RUNTIME = WEB / "python" / "pyodide-314.0.2"
 MANIFEST = RUNTIME / "rspice-runtime-manifest.json"
 WORKER = WEB / "automation-worker.js"
 BOOTSTRAP = WEB / "python" / "rspice_browser_bootstrap.py"
 NATIVE_WORKER = ROOT / "crates" / "rspice-automation-runtime" / "worker" / "rspice_worker.py"
-RUST_BROWSER_RUNTIME = ROOT / "crates" / "rspice-ui" / "src" / "automation_runtime_browser.rs"
-RUST_NATIVE_RUNTIME = ROOT / "crates" / "rspice-ui" / "src" / "automation_runtime.rs"
+RUST_BROWSER_RUNTIME = ROOT / "crates" / "rspice-app" / "src" / "automation_runtime_browser.rs"
+RUST_NATIVE_RUNTIME = ROOT / "crates" / "rspice-app" / "src" / "automation_runtime.rs"
 NATIVE_RUNTIME_LIBRARY = ROOT / "crates" / "rspice-automation-runtime" / "src" / "lib.rs"
 NATIVE_RUNTIME_QUALIFIER = (
     ROOT
@@ -37,7 +37,7 @@ DEBUGGER_HARNESS = ROOT / "tools" / "ci" / "automation_browser_debugger_harness.
 PROJECT_CHECKPOINT = (
     ROOT
     / "crates"
-    / "rspice-ui"
+    / "rspice-app"
     / "src"
     / "workbench"
     / "lifecycle"
@@ -46,7 +46,7 @@ PROJECT_CHECKPOINT = (
 BROWSER_PERSISTENCE = (
     ROOT
     / "crates"
-    / "rspice-ui"
+    / "rspice-app"
     / "src"
     / "workbench"
     / "lifecycle"

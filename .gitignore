@@ -66,7 +66,7 @@ __pycache__/
 # The browser Python runtime ships its standard library as a zip. It is an
 # execution asset that the runtime manifest digests and CI verifies, not a
 # build output, and the browser cannot start Python without it.
-!crates/rspice-ui/web/python/pyodide-*/python_stdlib.zip
+!crates/rspice-app/web/python/pyodide-*/python_stdlib.zip
 /rtlinv_*.csv
 /rtlinv_*.json
 /rtlinv_*.cir
@@ -74,7 +74,7 @@ __pycache__/
 /design/
 /docs/
 # Application design notes are kept outside the public repository.
-/crates/rspice-ui/docs/
+/crates/rspice-app/docs/
 /crates/rspice-app/docs/
 /.codex-tools/
 /tmp/

@@ -9,7 +9,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-HELPER = ROOT / "crates/rspice-ui/build_identity.rs"
+HELPER = ROOT / "crates/rspice-app/build_identity.rs"
 
 
 class BuildIdentityTests(unittest.TestCase):

@@ -24,7 +24,7 @@ from check_wasm_jit_browser import find_chromium, qualification_assets, qualific
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--web-root", type=Path, default=Path("crates/rspice-ui/web"))
+    parser.add_argument("--web-root", type=Path, default=Path("crates/rspice-app/web"))
     parser.add_argument("--worker-path", default="simulation-worker.js")
     parser.add_argument("--output", type=Path, help="Retain the verdict and tested asset hashes")
     args = parser.parse_args()

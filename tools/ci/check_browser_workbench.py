@@ -668,7 +668,7 @@ def run(browser):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--web-root", type=Path, default=Path("crates/rspice-ui/web"))
+    parser.add_argument("--web-root", type=Path, default=Path("crates/rspice-app/web"))
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--driver")
     parser.add_argument("--browser")

@@ -42,17 +42,17 @@ SUPPORTED_TARGETS = frozenset(
 )
 
 SHEET_SOURCE_SCOPES = (
-    "crates/rspice-ui/src/hardcopy",
+    "crates/rspice-app/src/hardcopy",
     "crates/rspice-design-model/src/design_management/drawing_sheet.rs",
     "crates/rspice-design-model/src/design_management/drawing_sheet",
     "crates/rspice-design-model/src/sheet_authoring.rs",
     "crates/rspice-design-model/src/sheet_package.rs",
-    "crates/rspice-ui/src/schematic/view/drawing_sheet.rs",
-    "crates/rspice-ui/src/workbench/app/dialogs/drawing_sheet_setup.rs",
-    "crates/rspice-ui/src/workbench/app/dialogs/drawing_sheet_setup",
-    "crates/rspice-ui/src/workbench/app/dialogs/hardcopy.rs",
-    "crates/rspice-ui/src/workbench/app/dialogs/hardcopy",
-    "crates/rspice-ui/src/workbench/hardcopy_adapters",
+    "crates/rspice-app/src/schematic/view/drawing_sheet.rs",
+    "crates/rspice-app/src/workbench/app/dialogs/drawing_sheet_setup.rs",
+    "crates/rspice-app/src/workbench/app/dialogs/drawing_sheet_setup",
+    "crates/rspice-app/src/workbench/app/dialogs/hardcopy.rs",
+    "crates/rspice-app/src/workbench/app/dialogs/hardcopy",
+    "crates/rspice-app/src/workbench/hardcopy_adapters",
 )
 
 QUALIFICATION_INPUTS = (
@@ -61,7 +61,7 @@ QUALIFICATION_INPUTS = (
     "rust-toolchain.toml",
     "crates/rspice-core/Cargo.toml",
     "crates/rspice-core/tests/save_directives.rs",
-    "crates/rspice-ui/Cargo.toml",
+    "crates/rspice-app/Cargo.toml",
     "crates/rspice-design-model/Cargo.toml",
     "tools/rspice-sheet-publisher/Cargo.toml",
     "tools/rspice-sheet-publisher/src",

@@ -186,13 +186,13 @@ adapter.
 -------------------------------------------------------------------------------
 
 RSpice embeds the IBM Plex Sans and IBM Plex Mono typefaces
-(crates/rspice-ui/assets/fonts/).
+(crates/rspice-app/assets/fonts/).
 
   Copyright (c) 2017 IBM Corp. with Reserved Font Name "Plex"
 
   This Font Software is licensed under the SIL Open Font License,
   Version 1.1. The complete license text is included alongside the fonts at
-  crates/rspice-ui/assets/fonts/OFL-IBMPlex.txt and is also available at
+  crates/rspice-app/assets/fonts/OFL-IBMPlex.txt and is also available at
   https://scripts.sil.org/OFL
 
 -------------------------------------------------------------------------------

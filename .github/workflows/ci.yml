@@ -456,7 +456,7 @@ jobs:
           signed_binary="$RUNNER_TEMP/rspice-veriloga-x64-hardened-jit"
           cp "$source_binary" "$signed_binary"
           codesign --force --sign - --options runtime \
-            --entitlements crates/rspice-ui/macos/RSpice.entitlements \
+            --entitlements crates/rspice-app/macos/RSpice.entitlements \
             "$signed_binary"
           codesign --verify --strict --verbose=2 "$signed_binary"
           codesign --display --entitlements - "$signed_binary" > "$RUNNER_TEMP/x64-jit-entitlements.txt"
@@ -525,7 +525,7 @@ jobs:
           signed_binary="$RUNNER_TEMP/rspice-veriloga-hardened-jit"
           cp "$source_binary" "$signed_binary"
           codesign --force --sign - --options runtime \
-            --entitlements crates/rspice-ui/macos/RSpice.entitlements \
+            --entitlements crates/rspice-app/macos/RSpice.entitlements \
             "$signed_binary"
           codesign --verify --strict --verbose=2 "$signed_binary"
           codesign --display --entitlements - "$signed_binary" > "$RUNNER_TEMP/jit-entitlements.txt"
@@ -671,12 +671,12 @@ jobs:
       - name: Generate production browser UI bindings
         run: >-
           wasm-bindgen --target web --out-name rspice-ui
-          --out-dir crates/rspice-ui/web/pkg
+          --out-dir crates/rspice-app/web/pkg
           target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
       - name: Report browser UI image size
         run: >-
           python3 tools/ci/check_wasm_artifact_size.py
-          crates/rspice-ui/web/pkg/rspice-ui_bg.wasm
+          crates/rspice-app/web/pkg/rspice-ui_bg.wasm
           --label rspice-ui
       - name: Build production browser worker image
         run: >-
@@ -687,12 +687,12 @@ jobs:
         run: >-
           wasm-bindgen --target web
           --out-name rspice-ui-worker
-          --out-dir crates/rspice-ui/web/pkg
+          --out-dir crates/rspice-app/web/pkg
           target/wasm32-unknown-unknown/web-release/rspice-ui-worker.wasm
       - name: Report browser worker image size
         run: >-
           python3 tools/ci/check_wasm_artifact_size.py
-          crates/rspice-ui/web/pkg/rspice-ui-worker_bg.wasm
+          crates/rspice-app/web/pkg/rspice-ui-worker_bg.wasm
           --label rspice-ui-worker
       - name: Qualify browser WASM JIT solver bridge in Chromium
         run: python3 tools/ci/check_wasm_jit_browser.py
@@ -706,7 +706,7 @@ jobs:
       - name: Generate browser workbench bindings
         run: >-
           wasm-bindgen --target web --out-name rspice-ui
-          --out-dir crates/rspice-ui/web/pkg
+          --out-dir crates/rspice-app/web/pkg
           target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
       - name: Qualify browser review and recovery workflow
         run: >-
@@ -715,12 +715,12 @@ jobs:
       - name: Qualify browser engine failure and retry
         run: >-
           python3 tools/ci/check_browser_engine_recovery.py --software-webgpu
-          --web-root crates/rspice-ui/web
+          --web-root crates/rspice-app/web
           --output "${{ runner.temp }}/rspice-engine-recovery-${{ github.run_id }}-${{ github.run_attempt }}"
       - name: Qualify browser cancellation during engine startup
         run: >-
           python3 tools/ci/check_browser_engine_recovery.py --software-webgpu --cancel-startup
-          --web-root crates/rspice-ui/web
+          --web-root crates/rspice-app/web
           --output "${{ runner.temp }}/rspice-engine-cancel-${{ github.run_id }}-${{ github.run_attempt }}"
       - name: Retain browser workbench evidence
         if: always()

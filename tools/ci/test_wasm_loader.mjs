@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { gzipSync } from "node:zlib";
 import test from "node:test";
 
-const source = await readFile(new URL("../../crates/rspice-ui/web/wasm-loader.js", import.meta.url));
+const source = await readFile(new URL("../../crates/rspice-app/web/wasm-loader.js", import.meta.url));
 const { loadWasm } = await import(`data:text/javascript;base64,${source.toString("base64")}`);
 const wasm = Uint8Array.from([0, 97, 115, 109, 1, 0, 0, 0]);
 

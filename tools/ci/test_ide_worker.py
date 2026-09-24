@@ -5,9 +5,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 IDE_DIRS = [
-    ROOT / "crates" / "rspice-ui" / "web",
+    ROOT / "crates" / "rspice-app" / "web",
 ]
-UI_SRC = ROOT / "crates" / "rspice-ui" / "src"
+UI_SRC = ROOT / "crates" / "rspice-app" / "src"
 RUNNER = UI_SRC / "simulation" / "runner.rs"
 WASM_WORKER = UI_SRC / "simulation" / "runner" / "wasm_worker.rs"
 WORKER_CONTRACT = UI_SRC / "simulation" / "runner" / "worker_contract.rs"

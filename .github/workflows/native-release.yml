@@ -360,14 +360,14 @@ jobs:
             --manifest-path crates/rspice-cli/Cargo.toml \
             --override-filename rspice-cli.cdx
           cargo cyclonedx --format json --spec-version 1.5 --target all \
-            --manifest-path crates/rspice-ui/Cargo.toml \
+            --manifest-path crates/rspice-app/Cargo.toml \
             --override-filename rspice-ui.cdx
           cargo cyclonedx --format json --spec-version 1.5 --target all \
             --manifest-path crates/rspice-automation-runtime/Cargo.toml \
             --override-filename rspice-automation-runtime.cdx
           mkdir -p dist
           mv crates/rspice-cli/rspice-cli.cdx.json "dist/rspice-${RELEASE_VERSION}-cli.cdx.json"
-          mv crates/rspice-ui/rspice-ui.cdx.json "dist/rspice-${RELEASE_VERSION}-ui.cdx.json"
+          mv crates/rspice-app/rspice-ui.cdx.json "dist/rspice-${RELEASE_VERSION}-ui.cdx.json"
           mv crates/rspice-automation-runtime/rspice-automation-runtime.cdx.json \
             "dist/rspice-${RELEASE_VERSION}-automation-runtime.cdx.json"
           cd dist

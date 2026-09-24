@@ -663,7 +663,7 @@ class CiConfigurationTests(unittest.TestCase):
         job = workflow.split("  wasm-ui-size:", 1)[1].split("  veriloga-mobile:", 1)[0]
         for stem, step in (("rspice-ui", "UI"), ("rspice-ui-worker", "worker")):
             report = job.split(f"- name: Report browser {step} image size", 1)[1].split("- name:", 1)[0]
-            self.assertIn(f"crates/rspice-ui/web/pkg/{stem}_bg.wasm", report)
+            self.assertIn(f"crates/rspice-app/web/pkg/{stem}_bg.wasm", report)
             self.assertNotIn("--max-raw", report)
             self.assertNotIn("--max-gzip", report)
         self.assertLess(job.index("Generate production browser UI bindings"), job.index("Report browser UI image size"))
@@ -1311,7 +1311,7 @@ class CiConfigurationTests(unittest.TestCase):
         import plistlib
 
         workflow = read_text(".github/workflows/ci.yml")
-        entitlement_path = ROOT / "crates/rspice-ui/macos/RSpice.entitlements"
+        entitlement_path = ROOT / "crates/rspice-app/macos/RSpice.entitlements"
         with entitlement_path.open("rb") as source:
             entitlements = plistlib.load(source)
 
@@ -1337,7 +1337,7 @@ class CiConfigurationTests(unittest.TestCase):
 
     def test_shipping_frontends_enable_jit_on_qualified_desktop_architectures(self) -> None:
         cli_manifest = read_text("crates/rspice-cli/Cargo.toml")
-        ui_manifest = read_text("crates/rspice-ui/Cargo.toml")
+        ui_manifest = read_text("crates/rspice-app/Cargo.toml")
         architecture = 'any(target_arch = "x86_64", target_arch = "aarch64")'
         desktop_os = 'any(target_os = "macos", target_os = "linux", windows)'
         qualified = f"all({architecture}, {desktop_os})"
@@ -1663,8 +1663,8 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("cargo test --locked -p rspice-output", workflow)
 
     def test_ui_readme_matches_current_feature_flags_and_modules(self) -> None:
-        readme = read_text("crates/rspice-ui/README.md")
-        manifest = read_text("crates/rspice-ui/Cargo.toml")
+        readme = read_text("crates/rspice-app/README.md")
+        manifest = read_text("crates/rspice-app/Cargo.toml")
 
         # The flags the crate declares, and the flags the README documents,
         # have to be the same set. A flag no `cfg` reads is not a compatibility
@@ -1689,7 +1689,7 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertNotIn("FileError::NotSupported", readme)
 
     def test_ui_enables_accessibility_backend_for_each_runtime(self) -> None:
-        manifest = read_text("crates/rspice-ui/Cargo.toml")
+        manifest = read_text("crates/rspice-app/Cargo.toml")
 
         native_dependencies = re.search(
             r'^\[target\.\'cfg\(not\(target_arch = "wasm32"\)\)\'\.dependencies\]'
@@ -1719,16 +1719,16 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("web_screen_reader", wasm_features)
         self.assertNotIn("accesskit", wasm_features)
 
-        app = read_text("crates/rspice-ui/src/workbench/app.rs")
+        app = read_text("crates/rspice-app/src/workbench/app.rs")
         preferences = read_text(
-            "crates/rspice-ui/src/workbench/app/dialogs/preferences/preference_pages.rs"
+            "crates/rspice-app/src/workbench/app/dialogs/preferences/preference_pages.rs"
         )
         self.assertIn(
             "options.screen_reader = self.state.ui.browser_spoken_feedback",
             app,
         )
         self.assertIn("Speak control changes (browser)", preferences)
-        readme = read_text("crates/rspice-ui/README.md")
+        readme = read_text("crates/rspice-app/README.md")
         self.assertIn(
             "browser backend does not expose that AccessKit tree through",
             readme,
@@ -1736,7 +1736,7 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("remains a release gate", readme)
 
     def test_browser_surface_docs_distinguish_ide_and_playground(self) -> None:
-        ui_readme = read_text("crates/rspice-ui/README.md")
+        ui_readme = read_text("crates/rspice-app/README.md")
         playground_readme = read_text("crates/rspice-wasm/web/README.md")
 
         self.assertNotIn("later milestone", playground_readme)
@@ -1771,16 +1771,16 @@ class CiConfigurationTests(unittest.TestCase):
             # dropped: each one was added here because it was once written but
             # never committed, and that is still worth guarding. `summary.rs`
             # left the list when the module was deleted as test-only.
-            "crates/rspice-ui/src/workbench/browser/download.rs",
-            "crates/rspice-ui/src/workbench/browser/file_import.rs",
-            "crates/rspice-ui/src/workbench/logging.rs",
-            "crates/rspice-ui/src/workbench/workflows/netlist_workflow.rs",
-            "crates/rspice-ui/src/workbench/documents/netlist_document/baseline.rs",
-            "crates/rspice-ui/src/workbench/documents/netlist_document/diagnostics.rs",
-            "crates/rspice-ui/src/simulation/controller/manual_deck.rs",
-            "crates/rspice-ui/src/simulation/runner/wasm_worker.rs",
-            "crates/rspice-ui/src/simulation/runner/worker_contract.rs",
-            "crates/rspice-ui/src/state/simulation/ac_bode.rs",
+            "crates/rspice-app/src/workbench/browser/download.rs",
+            "crates/rspice-app/src/workbench/browser/file_import.rs",
+            "crates/rspice-app/src/workbench/logging.rs",
+            "crates/rspice-app/src/workbench/workflows/netlist_workflow.rs",
+            "crates/rspice-app/src/workbench/documents/netlist_document/baseline.rs",
+            "crates/rspice-app/src/workbench/documents/netlist_document/diagnostics.rs",
+            "crates/rspice-app/src/simulation/controller/manual_deck.rs",
+            "crates/rspice-app/src/simulation/runner/wasm_worker.rs",
+            "crates/rspice-app/src/simulation/runner/worker_contract.rs",
+            "crates/rspice-app/src/state/simulation/ac_bode.rs",
             "crates/rspice-veriloga/tests/support/mod.rs",
         ]
 
@@ -1811,7 +1811,7 @@ class CiConfigurationTests(unittest.TestCase):
         )
         offenders = []
 
-        for path in sorted((ROOT / "crates" / "rspice-ui" / "src").rglob("*.rs")):
+        for path in sorted((ROOT / "crates" / "rspice-app" / "src").rglob("*.rs")):
             source = path.read_text(encoding="utf-8")
             custom_clicks = len(click_pattern.findall(source))
             if custom_clicks == 0:

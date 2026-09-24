@@ -473,8 +473,8 @@ cargo test -p rspice-ui
 # unification cannot pull worker execution paths back into the UI image.
 cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --features generated-veriloga-catalog --target wasm32-unknown-unknown
 cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui-worker --features browser-worker,generated-veriloga-catalog --target wasm32-unknown-unknown
-wasm-bindgen --target web --out-name rspice-ui --out-dir crates/rspice-ui/web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
-wasm-bindgen --target web --out-name rspice-ui-worker --out-dir crates/rspice-ui/web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui-worker.wasm
+wasm-bindgen --target web --out-name rspice-ui --out-dir crates/rspice-app/web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
+wasm-bindgen --target web --out-name rspice-ui-worker --out-dir crates/rspice-app/web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui-worker.wasm
 python3 tools/ci/check_wasm_jit_browser.py
 ```
 
@@ -491,9 +491,9 @@ when automatic discovery is unsuitable.
 
 ```bash
 cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --features browser-qualification,generated-veriloga-catalog --target wasm32-unknown-unknown
-wasm-bindgen --target web --out-name rspice-ui --out-dir crates/rspice-ui/web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
+wasm-bindgen --target web --out-name rspice-ui --out-dir crates/rspice-app/web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
 python3 tools/ci/check_browser_workbench.py --output target/workbench-qualification
-python3 tools/ci/check_browser_engine_recovery.py --web-root crates/rspice-ui/web --output target/engine-recovery-qualification
+python3 tools/ci/check_browser_engine_recovery.py --web-root crates/rspice-app/web --output target/engine-recovery-qualification
 ```
 
 Append `--software-webgpu` to use Chrome's SwiftShader WebGPU adapter for

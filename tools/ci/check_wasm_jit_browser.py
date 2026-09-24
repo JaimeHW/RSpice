@@ -148,7 +148,7 @@ def main() -> None:
     parser.add_argument(
         "--web-root",
         type=pathlib.Path,
-        default=pathlib.Path("crates/rspice-ui/web"),
+        default=pathlib.Path("crates/rspice-app/web"),
     )
     parser.add_argument("--worker-path", default="simulation-worker.js",
                         help="worker relative to the served tree, including an immutable release directory")

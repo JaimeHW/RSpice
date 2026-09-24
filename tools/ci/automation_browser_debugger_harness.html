@@ -78,7 +78,7 @@ const breakpoint = {
   kind: { kind: "stop" },
 };
 const workerUrl = new URL(
-  new URL(location.href).searchParams.get("worker") || "/crates/rspice-ui/web/automation-worker.js",
+  new URL(location.href).searchParams.get("worker") || "/crates/rspice-app/web/automation-worker.js",
   location.href,
 );
 if (workerUrl.origin !== location.origin) throw new Error("Qualification worker must use this origin.");
