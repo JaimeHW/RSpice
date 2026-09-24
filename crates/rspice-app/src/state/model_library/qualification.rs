@@ -23,7 +23,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 
-use super::definition_metadata::ModelDefinitionMetadata;
+use super::ModelDefinitionMetadata;
 
 /// Current persisted schema for model qualification and release records.
 pub const MODEL_QUALIFICATION_SCHEMA_VERSION: u32 = 4;

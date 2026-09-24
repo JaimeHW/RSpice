@@ -5255,6 +5255,7 @@ dependencies = [
  "rspice-core",
  "rspice-design-model",
  "rspice-hardcopy-contract",
+ "rspice-model-library",
  "rspice-pack",
  "rspice-publication-contract",
  "rspice-results",
@@ -5528,6 +5529,16 @@ dependencies = [
  "log",
  "num-complex",
  "qd",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "rspice-model-library"
+version = "0.1.0"
+dependencies = [
+ "rspice-core",
+ "serde",
+ "serde_json",
  "thiserror 2.0.20",
 ]
 

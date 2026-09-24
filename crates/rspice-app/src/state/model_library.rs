@@ -9,28 +9,25 @@
 //! - **Section/Corner**: Process corner within library (tt, ff, ss, etc.)
 //! - **Model**: Individual device model (nmos, pmos, npn, etc.)
 
-mod authoring;
 mod compatibility;
 pub(crate) mod compilation;
-mod corner;
 mod corner_expansion;
 mod correlation;
-mod definition_metadata;
 mod device_class;
 mod facts;
 mod library;
 mod manager;
-mod model;
 mod project_revision;
 mod qualification;
-mod types;
 
-pub use authoring::ProjectModelDefinition;
+pub use rspice_model_library::ProjectModelDefinition;
 pub(crate) use compatibility::{
     models_have_compatible_device_family, placement_component_for_model,
     validate_component_model_compatibility,
 };
-pub use corner::{CornerSectionBinding, CornerSectionDomain, ProcessCorner, stated_temperatures};
+pub use rspice_model_library::{
+    CornerSectionBinding, CornerSectionDomain, ProcessCorner, stated_temperatures,
+};
 pub use corner_expansion::RetainedClosure;
 // Test-only aliases: the submodule is private, so this path is the only
 // way the tests can name these.
@@ -43,7 +40,7 @@ pub use correlation::{
     CorrelationReleaseRole, CorrelationReviewDecision, CorrelationSimulationProvenance,
     CorrelationSuite, MAX_CORRELATION_ROWS, MAX_CORRELATION_TEXT_BYTES, ModelCorrelationState,
 };
-pub use definition_metadata::{
+pub use rspice_model_library::{
     CorrelationMatrix, DefinitionMetadataError, FiniteBounds, FiniteF64, LookupInterpolation,
     ModelDefinitionMetadata, ModelFileIdentity, ModelSectionDefinition, ModelSectionQualification,
     ParameterDataType, ParameterDefinition, ParameterSource, ParameterValue,
@@ -53,7 +50,7 @@ pub use definition_metadata::{
 // Test-only aliases: `definition_metadata` is private, so this path is the
 // only way the tests can name these.
 #[cfg(test)]
-pub use definition_metadata::{
+pub use rspice_model_library::{
     MODEL_DEFINITION_METADATA_SCHEMA_VERSION, StatisticalDefinition, StatisticalVariableDefinition,
 };
 pub(crate) use device_class::{SUBCIRCUIT_CLASS, card_device};
@@ -81,7 +78,7 @@ pub use manager::{
     ProjectModelCommit, SealedModelExecutionSources, SimulationPlanModelBinding,
 };
 pub(crate) use manager::{SealedModelLibraryVerilogAAuthority, model_library_source_digest};
-pub use model::DeviceModel;
+pub use rspice_model_library::DeviceModel;
 pub use project_revision::ProjectModelRevisionDefinition;
 pub use qualification::{
     ApprovalDecision, CompatibilityAssessment, CompatibilityDisposition, ConsumerChange,
@@ -101,4 +98,4 @@ pub use qualification::{
     MODEL_QUALIFICATION_SCHEMA_VERSION, PlatformQualificationOutcome,
     QualificationPlatformVectorOutcome,
 };
-pub use types::{ModelLevel, ModelType};
+pub use rspice_model_library::{ModelLevel, ModelType};
