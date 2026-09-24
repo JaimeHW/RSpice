@@ -110,17 +110,17 @@ pub fn decode_arrow_ipc(
     format: &str,
 ) -> Result<DecodedColumnarTable, String> {
     use arrow_ipc::reader::{FileReader, StreamReader};
-    let mut batches = Vec::new();
     let file_attempt = FileReader::try_new(Cursor::new(bytes), None);
-    let metadata = match file_attempt {
+    match file_attempt {
         Ok(reader) => {
             let metadata = reader.schema().metadata().clone();
-            for batch in reader {
-                batches.push(batch.map_err(|error| {
-                    adapter_error(format, format_args!("invalid Arrow record batch: {error}"))
-                })?);
-            }
-            metadata
+            decode_arrow_batches(
+                format,
+                reader,
+                metadata,
+                limits,
+                "invalid Arrow record batch",
+            )
         }
         Err(file_error) => {
             let reader = StreamReader::try_new(Cursor::new(bytes), None).map_err(|stream_error| {
@@ -132,15 +132,15 @@ pub fn decode_arrow_ipc(
                 )
             })?;
             let metadata = reader.schema().metadata().clone();
-            for batch in reader {
-                batches.push(batch.map_err(|error| {
-                    adapter_error(format, format_args!("invalid Arrow stream batch: {error}"))
-                })?);
-            }
-            metadata
+            decode_arrow_batches(
+                format,
+                reader,
+                metadata,
+                limits,
+                "invalid Arrow stream batch",
+            )
         }
-    };
-    decode_arrow_batches(format, batches, metadata, limits)
+    }
 }
 
 pub fn decode_parquet(
@@ -154,82 +154,131 @@ pub fn decode_parquet(
             adapter_error(format, format_args!("invalid Parquet metadata: {error}"))
         })?;
     let metadata = builder.schema().metadata().clone();
-    let reader = builder.with_batch_size(16_384).build().map_err(|error| {
-        adapter_error(
-            format,
-            format_args!("could not create Parquet reader: {error}"),
-        )
-    })?;
-    let mut batches = Vec::new();
-    for batch in reader {
-        batches.push(batch.map_err(|error| {
-            adapter_error(format, format_args!("invalid Parquet row group: {error}"))
-        })?);
-    }
-    decode_arrow_batches(format, batches, metadata, limits)
+    let batch_size = 16_384.min(limits.max_rows.saturating_add(1).max(1));
+    let reader = builder
+        .with_batch_size(batch_size)
+        .build()
+        .map_err(|error| {
+            adapter_error(
+                format,
+                format_args!("could not create Parquet reader: {error}"),
+            )
+        })?;
+    decode_arrow_batches(
+        format,
+        reader,
+        metadata,
+        limits,
+        "invalid Parquet row group",
+    )
 }
 
-fn decode_arrow_batches(
+fn decode_arrow_batches<E: std::fmt::Display>(
     format: &str,
-    batches: Vec<arrow_array::RecordBatch>,
+    batches: impl IntoIterator<Item = Result<arrow_array::RecordBatch, E>>,
     metadata: HashMap<String, String>,
     limits: ColumnarLimits,
+    batch_error: &str,
 ) -> Result<DecodedColumnarTable, String> {
-    let max_columns = limits.max_columns;
-    let max_rows = limits.max_rows;
-    let max_values = limits.max_values;
-    let first = batches
-        .first()
-        .ok_or_else(|| adapter_error(format, "the table contains no record batches"))?;
-    let schema = first.schema();
-    if schema.fields().len() < 2 || schema.fields().len() > max_columns.saturating_mul(2) {
-        return Err(adapter_error(
-            format,
-            format_args!(
-                "the table has {} fields; expected 2..={}",
-                schema.fields().len(),
-                max_columns
-            ),
-        ));
-    }
-    let row_count = batches
-        .iter()
-        .try_fold(0_usize, |count, batch| count.checked_add(batch.num_rows()))
-        .ok_or_else(|| adapter_error(format, "row count overflow"))?;
-    if row_count > max_rows {
-        return Err(adapter_error(
-            format,
-            format_args!("the table has {row_count} rows; the limit is {max_rows}"),
-        ));
-    }
-    let table_values = row_count
-        .checked_mul(schema.fields().len())
-        .ok_or_else(|| adapter_error(format, "table value count overflow"))?;
-    if table_values > max_values {
-        return Err(adapter_error(
-            format,
-            format_args!("the table contains {table_values} values; the limit is {max_values}"),
-        ));
-    }
-    let mut columns = schema
-        .fields()
-        .iter()
-        .map(|field| (field.name().clone(), Vec::with_capacity(row_count)))
-        .collect::<Vec<_>>();
+    let mut decoded = ColumnarAccumulator::new(format, limits);
     for batch in batches {
-        if batch.schema().as_ref() != schema.as_ref() {
+        let batch =
+            batch.map_err(|error| adapter_error(format, format_args!("{batch_error}: {error}")))?;
+        decoded.push(batch)?;
+    }
+    decoded.finish(metadata)
+}
+
+struct ColumnarAccumulator<'a> {
+    format: &'a str,
+    limits: ColumnarLimits,
+    schema: Option<arrow_schema::SchemaRef>,
+    rows: usize,
+    columns: Vec<(String, Vec<f64>)>,
+}
+
+impl<'a> ColumnarAccumulator<'a> {
+    fn new(format: &'a str, limits: ColumnarLimits) -> Self {
+        Self {
+            format,
+            limits,
+            schema: None,
+            rows: 0,
+            columns: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, batch: arrow_array::RecordBatch) -> Result<(), String> {
+        let schema = batch.schema();
+        if self.schema.is_none() {
+            let fields = schema.fields().len();
+            if fields < 2 || fields > self.limits.max_columns.saturating_mul(2) {
+                return Err(adapter_error(
+                    self.format,
+                    format_args!(
+                        "the table has {fields} fields; expected 2..={}",
+                        self.limits.max_columns
+                    ),
+                ));
+            }
+            self.columns = schema
+                .fields()
+                .iter()
+                .map(|field| (field.name().clone(), Vec::new()))
+                .collect();
+            self.schema = Some(schema.clone());
+        }
+        if self.schema.as_ref() != Some(&schema) {
             return Err(adapter_error(
-                format,
+                self.format,
                 "record-batch schema changed within the source",
             ));
         }
-        for (index, array) in batch.columns().iter().enumerate() {
-            let name = columns[index].0.clone();
-            let values = numeric_values(format, &name, array.as_ref())?;
-            columns[index].1.extend(values);
+        let rows = self
+            .rows
+            .checked_add(batch.num_rows())
+            .ok_or_else(|| adapter_error(self.format, "row count overflow"))?;
+        if rows > self.limits.max_rows {
+            return Err(adapter_error(
+                self.format,
+                format_args!(
+                    "the table has {rows} rows; the limit is {}",
+                    self.limits.max_rows
+                ),
+            ));
         }
+        let values = rows
+            .checked_mul(schema.fields().len())
+            .ok_or_else(|| adapter_error(self.format, "table value count overflow"))?;
+        if values > self.limits.max_values {
+            return Err(adapter_error(
+                self.format,
+                format_args!(
+                    "the table contains {values} values; the limit is {}",
+                    self.limits.max_values
+                ),
+            ));
+        }
+        for (index, array) in batch.columns().iter().enumerate() {
+            let (name, column) = &mut self.columns[index];
+            column.extend(numeric_values(self.format, name, array.as_ref())?);
+        }
+        self.rows = rows;
+        Ok(())
     }
-    Ok(DecodedColumnarTable { metadata, columns })
+
+    fn finish(self, metadata: HashMap<String, String>) -> Result<DecodedColumnarTable, String> {
+        if self.schema.is_none() {
+            return Err(adapter_error(
+                self.format,
+                "the table contains no record batches",
+            ));
+        }
+        Ok(DecodedColumnarTable {
+            metadata,
+            columns: self.columns,
+        })
+    }
 }
 
 fn numeric_values(
@@ -238,8 +287,8 @@ fn numeric_values(
     array: &dyn arrow_array::Array,
 ) -> Result<Vec<f64>, String> {
     use arrow_array::{
-        BooleanArray, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
-        UInt8Array, UInt16Array, UInt32Array, UInt64Array,
+        BooleanArray, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array, Int8Array,
+        UInt16Array, UInt32Array, UInt64Array, UInt8Array,
     };
     if array.null_count() != 0 {
         return Err(adapter_error(
@@ -317,7 +366,7 @@ fn numeric_values(
 
 #[cfg(test)]
 mod tests {
-    use super::{ColumnarLimits, ParquetTableSource, decode_arrow_batches, encode_parquet_table};
+    use super::{decode_arrow_batches, encode_parquet_table, ColumnarLimits, ParquetTableSource};
     use arrow_array::{Array, ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray};
     use arrow_schema::{DataType, Field, Schema};
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -343,19 +392,66 @@ mod tests {
             max_rows: 1,
             max_values: 4,
         };
-        let error = decode_arrow_batches("arrow_ipc", vec![batch.clone()], HashMap::new(), limits)
-            .err()
-            .expect("row limit");
+        let error = decode_arrow_batches(
+            "arrow_ipc",
+            [Ok::<_, String>(batch.clone())],
+            HashMap::new(),
+            limits,
+            "invalid Arrow record batch",
+        )
+        .err()
+        .expect("row limit");
         assert!(error.contains("the table has 2 rows; the limit is 1"));
 
         let limits = ColumnarLimits {
             max_rows: 2,
             ..limits
         };
-        let error = decode_arrow_batches("arrow_ipc", vec![batch], HashMap::new(), limits)
-            .err()
-            .expect("precision loss");
+        let error = decode_arrow_batches(
+            "arrow_ipc",
+            [Ok::<_, String>(batch)],
+            HashMap::new(),
+            limits,
+            "invalid Arrow record batch",
+        )
+        .err()
+        .expect("precision loss");
         assert!(error.contains("cannot be represented exactly as f64"));
+    }
+
+    #[test]
+    fn cumulative_row_limit_stops_before_reading_another_batch() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("time", DataType::Float64, false),
+            Field::new("voltage", DataType::Float64, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Float64Array::from(vec![0.0, 1.0])) as ArrayRef,
+                Arc::new(Float64Array::from(vec![2.0, 3.0])) as ArrayRef,
+            ],
+        )
+        .expect("record batch");
+        let batches = [Ok::<_, String>(batch.clone()), Ok(batch)]
+            .into_iter()
+            .chain(std::iter::once_with(|| {
+                panic!("must not read a third batch")
+            }));
+        let error = decode_arrow_batches(
+            "arrow_ipc",
+            batches,
+            HashMap::new(),
+            ColumnarLimits {
+                max_columns: 2,
+                max_rows: 3,
+                max_values: 8,
+            },
+            "invalid Arrow record batch",
+        )
+        .err()
+        .expect("cumulative row limit");
+        assert!(error.contains("the table has 4 rows; the limit is 3"));
     }
 
     struct SelectedTable;
