@@ -814,9 +814,6 @@ pub(crate) struct NetlistAstOverlay {
     /// Options evaluated at the most recent control command, retained across
     /// later parameter/source replay just like resolved device alterations.
     pub(crate) control_options: Option<SimulationOptions>,
-    /// Absolute compact-model values for specific flattened instances. Applied
-    /// after hierarchy expansion so shared model cards remain unchanged.
-    pub(crate) instance_models: BTreeMap<String, InstanceModelOverlay>,
     /// Ideal current meters inserted at flattened authored device terminals.
     pub(crate) terminal_current_probes: Vec<TerminalCurrentProbe>,
 }
@@ -838,13 +835,6 @@ pub struct TerminalCurrentProbe {
     pub source_name: String,
     /// Private electrical node between the meter and the device terminal.
     pub node_name: String,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct InstanceModelOverlay {
-    pub requested_model: String,
-    pub selected_model: String,
-    pub parameters: BTreeMap<String, Value>,
 }
 
 /// Effective dialect-specific node-zero alias policy after parsing.

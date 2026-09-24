@@ -940,50 +940,6 @@ are in `tests/testdata/gp_weil_*`. This establishes those legacy cases, not
 general nonlinear/topology or public transient phase admission.
 
 
-## Characterized aging-model API
-
-`analysis::reliability` loads version-1 `AgingModelPack` JSON snapshots (up to
-4 MiB). The Rust types in `src/analysis/reliability.rs` define the schema. Every
-pack must supply process identity, source, license, characterization method,
-qualification claim, and explicit validity ranges. No process coefficients
-are supplied by default; the test fixtures are synthetic and are not usable
-as device calibration. A qualification label records the pack author's claim,
-not an independent certification by RSpice.
-
-The `equivalent_time_power` law accumulates equivalent reference seconds:
-
-```text
-AF = (abs(Vgs)/Vg0)^g * (abs(Vds)/Vd0)^d
-     * exp(Ea/kB * (1/T0 - 1/T))
-equivalent_seconds += duration_seconds * AF
-parameter_shift = scale_at_reference_time * (equivalent_seconds/t0)^n
-```
-
-The voltage exponents and activation energy apply to the **aging clock**.
-If a published fit instead applies them to the shift coefficient, conversion
-is necessary: its voltage exponents and activation energy must be divided by
-its time exponent to describe this clock. Every quantity uses the units named
-in its JSON field: signed terminal voltages, Kelvin, seconds, and eV. NBTI
-requires negative gate polarity. Zero or reversed gate bias suspends the
-power-law clock; it does not model recovery. Parameters explicitly select an
-additive shift or a relative shift from the fresh value. No automatic mapping
-to a compact-model threshold or mobility parameter is made.
-
-`black_electromigration` uses current-density and Arrhenius acceleration of a
-reference lifetime. Its output is accumulated consumed lifetime, which can
-exceed one; this is neither a failure probability nor a resistance change.
-Current density is in A/m² and requires a physical conductor cross section.
-All stress states and cumulative equivalent exposure must stay inside the
-pack's declared calibration. Overflow, underflow to zero, invalid updates,
-and cancellation return errors without committing an interval.
-
-`AgingClock` evaluates piecewise constant stress intervals. The Studio request
-contract stores model packs, device assignments, and ordered mission profiles,
-but circuit stress extraction, aged circuit re-simulation, and retained result
-integration are still under implementation. No Comphy, HiSIM, or other public
-parameter set has yet been adopted as a qualified default.
-
-
 ## Monte Carlo checkpoints and pooling
 
 `Engine::new_monte_carlo_checkpoint` binds an empty journal to a frozen netlist,
