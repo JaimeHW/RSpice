@@ -27,19 +27,16 @@
 //! complex dtype, since one array has one dtype; in an `.npz` only the complex
 //! signals do, so a mixed result costs nothing in the members that are real.
 
-use std::collections::BTreeSet;
-
 use super::{
     ALL_TRACES_HIDDEN_MESSAGE, NO_ACTIVE_ANALYSIS_MESSAGE, NO_SAMPLES_MESSAGE, exported_waveforms,
     note_result_export_failure, note_result_export_success,
 };
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
-use crate::workbench::workflows::export_workflow::{
-    ExportWorkflowIo, SaveDialogConfig, deterministic_stored_zip,
-};
+use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
 use num_complex::Complex64;
+use rspice_formats::numpy::archive::NamedArray;
 use rspice_formats::numpy::{encode_complex_array, encode_real_array};
 
 /// `result_import_workflow::MAX_RESULT_COLUMNS`, and
@@ -47,7 +44,7 @@ use rspice_formats::numpy::{encode_complex_array, encode_real_array};
 /// Both are private to their modules; an export above either is a file this
 /// product refuses to read, so the ceiling is enforced here rather than
 /// discovered on re-import.
-const MAX_COLUMNS: usize = 1_024;
+const MAX_COLUMNS: usize = rspice_formats::numpy::MAX_COLUMNS;
 
 /// NumPy has no registered media type. `application/octet-stream` is what the
 /// bytes are; `.npz` is genuinely a ZIP and says so.
@@ -260,77 +257,17 @@ pub(super) fn encode_npy(export: &NumpyExport) -> Result<Vec<u8>, String> {
     }
 }
 
-/// A member name RSpice's own archive reader will accept.
-///
-/// The reader refuses a member whose name is absolute, contains `..`, or
-/// contains a backslash, and it identifies an array by the file stem, so two
-/// signals whose names differ only in case collide. Every one of those is
-/// refused here, by name, rather than published as an archive this product
-/// would not reopen.
-fn archive_member_name(name: &str) -> Result<String, String> {
-    if name.trim().is_empty() {
-        return Err(
-            "A signal with no name cannot become an archive member; export CSV instead.".to_owned(),
-        );
-    }
-    if name.starts_with('/') || name.contains("..") || name.contains('\\') {
-        return Err(format!(
-            "'{name}' cannot be an archive member name: RSpice refuses an archive member that is \
-             absolute, contains '..', or contains a backslash. Export CSV or an RSpice bundle."
-        ));
-    }
-    Ok(format!("{name}.npy"))
-}
-
-/// One `.npy` member per signal, plus the coordinate, in a stored ZIP.
 pub(super) fn encode_npz(export: &NumpyExport) -> Result<Vec<u8>, String> {
-    let members = export.columns();
-    if members > MAX_COLUMNS {
-        return Err(format!(
-            "This result needs {members} archive members; RSpice reads at most {MAX_COLUMNS}."
-        ));
-    }
-    let rows = [export.coordinate.len() as u64];
-    let mut names = Vec::with_capacity(members);
-    let mut seen = BTreeSet::new();
-    names.push(archive_member_name(export.coordinate_name)?);
-    seen.insert(export.coordinate_name.to_ascii_lowercase());
-    for signal in &export.signals {
-        let member = archive_member_name(&signal.name)?;
-        if !seen.insert(signal.name.to_ascii_lowercase()) {
-            return Err(format!(
-                "Two signals both claim the archive member '{}'. An archive names its arrays, so \
-                 the names have to differ; RSpice compares them without regard to case.",
-                signal.name
-            ));
-        }
-        names.push(member);
-    }
-
-    let mut payloads = Vec::with_capacity(members);
-    payloads.push(encode_real_array(&rows, &export.coordinate)?);
-    for signal in &export.signals {
-        let bytes = match &signal.imag {
-            Some(imag) => {
-                let values = signal
-                    .real
-                    .iter()
-                    .zip(imag)
-                    .map(|(re, im)| Complex64::new(*re, *im))
-                    .collect::<Vec<_>>();
-                encode_complex_array(&rows, &values)?
-            }
-            None => encode_real_array(&rows, &signal.real)?,
-        };
-        payloads.push(bytes);
-    }
-
-    let entries = names
+    let signals = export
+        .signals
         .iter()
-        .map(String::as_str)
-        .zip(payloads.iter().map(Vec::as_slice))
+        .map(|signal| NamedArray {
+            name: &signal.name,
+            real: &signal.real,
+            imag: signal.imag.as_deref(),
+        })
         .collect::<Vec<_>>();
-    deterministic_stored_zip(&entries)
+    rspice_formats::numpy::archive::encode_npz(export.coordinate_name, &export.coordinate, &signals)
 }
 
 pub(super) fn export_numpy(

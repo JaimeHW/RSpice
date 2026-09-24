@@ -1,7 +1,12 @@
 //! NumPy NPY byte encoding for real and complex arrays.
 
+pub mod archive;
+
 use npyz::WriterBuilder as _;
 use num_complex::Complex64;
+
+/// Maximum number of coordinate and signal arrays accepted by RSpice's NPZ reader.
+pub const MAX_COLUMNS: usize = 1_024;
 
 fn npy_error(error: std::io::Error) -> String {
     format!("The NumPy array could not be written: {error}")
