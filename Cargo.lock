@@ -5516,6 +5516,7 @@ dependencies = [
  "npyz",
  "num-complex",
  "serde",
+ "time",
 ]
 
 [[package]]

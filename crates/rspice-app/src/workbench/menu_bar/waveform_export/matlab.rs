@@ -36,8 +36,6 @@
 
 use rspice_formats::matlab as writer;
 
-use std::collections::HashSet;
-
 use super::{
     ALL_TRACES_HIDDEN_MESSAGE, NO_ACTIVE_ANALYSIS_MESSAGE, NO_SAMPLES_MESSAGE, exported_waveforms,
     note_result_export_failure, note_result_export_success,
@@ -45,7 +43,8 @@ use super::{
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
-use writer::{HEADER_SIGNATURE, HEADER_TEXT_BYTES, MAX_NAME_CHARS, MatVariable, write_mat_v5};
+use writer::publication::{MatNameAllocator, created_on, header_text, note_entry};
+use writer::{MatVariable, write_mat_v5};
 
 /// `result_import_workflow::MAX_RESULT_COLUMNS`. An export above it is a file
 /// this product refuses to read, so the ceiling is enforced here rather than
@@ -60,9 +59,6 @@ const MATLAB_MIME_TYPE: &str = "application/x-matlab-data";
 
 const LABEL: &str = "MATLAB v5";
 const EXTENSION: &str = "mat";
-
-/// What a header text says when it is cut to fit its field.
-const ELLIPSIS: &str = "...";
 
 /// One prepared file, and what the reader is owed about it.
 #[derive(Debug)]
@@ -94,111 +90,6 @@ const fn coordinate_variable(analysis: crate::state::AnalysisType) -> Option<(&'
         crate::state::AnalysisType::Ac => Some(("frequency", true)),
         _ => None,
     }
-}
-
-/// A MATLAB identifier built from a name an engineer typed.
-///
-/// A letter first, then letters, digits and underscores, at most
-/// `namelengthmax` characters. Everything else becomes an underscore, so
-/// `V(out)` is `V_out_` and the shape of the original is still readable —
-/// which matters, because the reader will see this name and not the other.
-fn matlab_identifier(source: &str) -> String {
-    let mut name = String::with_capacity(source.len());
-    for character in source.chars() {
-        if character.is_ascii_alphanumeric() || character == '_' {
-            name.push(character);
-        } else {
-            name.push('_');
-        }
-    }
-    if !name.starts_with(|character: char| character.is_ascii_alphabetic()) {
-        name.insert(0, 'x');
-    }
-    // Every character is ASCII by now, so this is a character count.
-    name.truncate(MAX_NAME_CHARS);
-    name
-}
-
-/// `candidate`, or the first `candidate_N` no other variable has taken.
-///
-/// Comparison is case-insensitive even though MATLAB's own is not: RSpice's
-/// importer refuses two signals whose names differ only in case, and a file
-/// this product writes has to be one it can read.
-///
-/// This terminates: suffixes of one digit width produce distinct names, there
-/// are nine of width one and ninety of width two, and `taken` is finite.
-fn unique_identifier(candidate: String, taken: &mut HashSet<String>) -> String {
-    if taken.insert(candidate.to_ascii_lowercase()) {
-        return candidate;
-    }
-    let mut suffix = 2_u32;
-    loop {
-        let tail = format!("_{suffix}");
-        let stem = &candidate[..candidate.len().min(MAX_NAME_CHARS - tail.len())];
-        let name = format!("{stem}{tail}");
-        if taken.insert(name.to_ascii_lowercase()) {
-            return name;
-        }
-        suffix += 1;
-    }
-}
-
-/// The dataset's own creation time, as UTC.
-///
-/// It is the analysis timestamp rather than the wall clock, so exporting the
-/// same result twice writes the same bytes. A timestamp no calendar can hold
-/// is stated as unstated rather than guessed at.
-fn created_on(timestamp: f64) -> String {
-    let seconds = timestamp.trunc();
-    if !seconds.is_finite() || seconds < i64::MIN as f64 || seconds > i64::MAX as f64 {
-        return "unstated".to_owned();
-    }
-    // The range is checked immediately above, so this cast is exact.
-    let Ok(stamp) = time::OffsetDateTime::from_unix_timestamp(seconds as i64) else {
-        return "unstated".to_owned();
-    };
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        stamp.year(),
-        u8::from(stamp.month()),
-        stamp.day(),
-        stamp.hour(),
-        stamp.minute(),
-        stamp.second()
-    )
-}
-
-/// One line of the provenance note: what a variable is, and in what.
-fn note_entry(variable: &str, source: &str, unit: Option<&str>) -> String {
-    let mut entry = variable.to_owned();
-    if variable != source {
-        entry.push_str(" = ");
-        entry.push_str(source);
-    }
-    if let Some(unit) = unit {
-        entry.push_str(" in ");
-        entry.push_str(unit);
-    }
-    entry
-}
-
-/// The header's descriptive text, and whether the note had to be cut to fit.
-///
-/// The signature comes first because RSpice's own importer identifies a
-/// `.mat` file by it, and MATLAB shows this field verbatim.
-fn header_text(created_on: &str, note: &str) -> (String, bool) {
-    let mut text =
-        format!("{HEADER_SIGNATURE}, Platform: RSpice, Created on: {created_on}; {note}");
-    if text.len() <= HEADER_TEXT_BYTES {
-        return (text, false);
-    }
-    let mut kept = HEADER_TEXT_BYTES - ELLIPSIS.len();
-    while !text.is_char_boundary(kept) {
-        kept -= 1;
-    }
-    text.truncate(kept);
-    text.push_str(ELLIPSIS);
-    (text, true)
 }
 
 /// A transient whose retained evidence is an event schedule rather than a
@@ -255,8 +146,7 @@ pub(super) fn prepare_matlab(
 
     // The coordinate claims its name first: it is written first, and the
     // importer takes the first variable whose name it recognises.
-    let mut taken = HashSet::with_capacity(waveforms.len() + 1);
-    taken.insert(coordinate_name.to_owned());
+    let mut names = MatNameAllocator::new(coordinate_name, waveforms.len());
     let rows = coordinate.len();
     let mut variables = vec![MatVariable {
         name: coordinate_name.to_owned(),
@@ -294,7 +184,7 @@ pub(super) fn prepare_matlab(
             }
             (false, _) => (waveform.name.clone(), waveform.y.as_ref().to_vec(), None),
         };
-        let name = unique_identifier(matlab_identifier(&source), &mut taken);
+        let name = names.allocate(&source);
         entries.push(note_entry(&name, &source, waveform.unit.as_deref()));
         variables.push(MatVariable { name, real, imag });
     }
@@ -445,7 +335,10 @@ mod tests {
     use super::*;
     use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType, WaveformData};
     use crate::workbench::workflows::result_import_workflow::parse_result_dataset;
-    use writer::{HEADER_BYTES, is_matlab_identifier};
+    use writer::publication::{ELLIPSIS, matlab_identifier};
+    use writer::{
+        HEADER_BYTES, HEADER_SIGNATURE, HEADER_TEXT_BYTES, MAX_NAME_CHARS, is_matlab_identifier,
+    };
 
     fn waveform(name: &str, x: Vec<f64>, y: Vec<f64>) -> WaveformData {
         WaveformData::new(name.to_owned(), x, y, "#4f81bd")

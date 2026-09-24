@@ -15,3 +15,4 @@ workspace = true
 num-complex.workspace = true
 npyz = { version = "0.9", features = ["complex"] }
 serde.workspace = true
+time.workspace = true
