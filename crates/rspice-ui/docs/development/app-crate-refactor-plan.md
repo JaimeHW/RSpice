@@ -1,6 +1,6 @@
 **RSpice application refactor — implementation plan**
 
-Prepared 2026-09-23 against `5d02b0e8b5a1811a46ca7c8f08a8e0113aea8a5e`; execution starts from `43d4d30c97afe83fa987e96ea25ef38e6f7bf743`. Status: **in progress; R00 baseline**. This plan follows the local architecture review, `crates/rspice-ui/docs/development/app-crate-architecture.md`.
+Prepared 2026-09-23 against `5d02b0e8b5a1811a46ca7c8f08a8e0113aea8a5e`; execution starts from `43d4d30c97afe83fa987e96ea25ef38e6f7bf743`. Status: **in progress; R00 inventory and R01 boundary repair**. This plan follows the local architecture review, `crates/rspice-ui/docs/development/app-crate-architecture.md`.
 
 The outcome is a renamed `rspice-app` that composes independently testable design, project, simulation, results, rendering, and platform services. The browser worker must build independently of the application and GUI stack. Supported behavior, numerical meaning, project data, and transactional guarantees must survive the refactor.
 
@@ -112,6 +112,8 @@ Exit: a reproducible baseline and complete work inventory exist. Record unrelate
 **R01 — Restore guards through ownership repair**
 
 The reviewed violations are `io → simulation` 15/13, `services → simulation` 32/8, `simulation → workbench` 44/28, `state → io` 7/5, `state → services` 46/9, and `state → simulation` 19/9. Re-measure before editing. Other known failures are 91 lint suppressions versus 54, three nested public-module declarations versus zero, missing module headers, and oversized source files.
+
+Progress at `ea4e5a697`: the three nested public modules are crate-private; all 27 missing module headers have descriptions; the editor-owned source-digest wrapper is removed in favor of the canonical state function; and SOA evidence/evaluation now lives under `results`, with worker-wire assertions in the simulation tests. The guard improved from 6 passed/5 failed to 8 passed/3 failed. Remaining excess edges are `io → simulation` 15/13, `services → simulation` 28/8, `simulation → workbench` 31/28, `state → io` 7/5, and `state → simulation` 19/9. Lint suppressions remain 91/54 and the oversized-file guard still fails. Native app/test checks, the browser app check, and the browser-worker check pass; focused SOA duration, derating, and worker JSON tests pass. R00 and R01 remain open.
 
 - [ ] Classify each excess reference as production logic, shared data, misplaced pure function, test-only integration, or stale source inspection. Move cross-owner integration tests upward; keep their assertions and meaningful execution coverage.
 - [ ] Move pure safety/yield/result evidence and checkpoint records below their executors; split execution from the methods validating retained evidence. Move model corner vocabulary below both catalog and runner.
