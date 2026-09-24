@@ -1535,18 +1535,18 @@ pub struct ProjectWorkspace {
     /// symbol, result, and report hardcopy workflows. Publication artifacts
     /// and transient preview state are intentionally not persisted here.
     #[serde(default)]
-    pub hardcopy_setups: crate::hardcopy::HardcopySetupStore,
+    pub hardcopy_setups: rspice_hardcopy_contract::HardcopySetupStore,
     /// Bounded, digest-sealed outcome history for print and export
     /// publications. Failures and cancellations are retained alongside
     /// successful artifacts so project evidence never implies more than the
     /// platform actually accepted.
     #[serde(default)]
-    pub hardcopy_receipts: crate::hardcopy::HardcopyReceiptLedger,
+    pub hardcopy_receipts: rspice_hardcopy_contract::HardcopyReceiptLedger,
     /// Reusable print-mapping sets owned by this project. Personal portable
     /// presets are persisted by `UserPreferences`; document mappings remain
     /// embedded in `hardcopy_setups` for reproducible publication.
     #[serde(default)]
-    pub project_print_mappings: crate::hardcopy::PrintMappingPresetCatalog,
+    pub project_print_mappings: rspice_hardcopy_contract::PrintMappingPresetCatalog,
     /// Project-owned named engineering-table views. Working and personal
     /// views are device preferences; only explicitly project-scoped views
     /// participate in project revisioning and collaboration.
@@ -1556,7 +1556,7 @@ pub struct ProjectWorkspace {
     /// named print-set publication. Every member pins its document revision
     /// and content digest; stale members fail closed when resolved.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    hardcopy_source_sets: Vec<crate::hardcopy::sources::HardcopySourceSet>,
+    hardcopy_source_sets: Vec<rspice_hardcopy_contract::sources::HardcopySourceSet>,
     /// Project-owned, versioned engineering report sources. Rendered review
     /// artifacts are derived from these documents and are never represented
     /// here unless a publication writer has produced and verified them.
@@ -1665,10 +1665,10 @@ impl Default for ProjectWorkspace {
             simulation_plan_payloads: Vec::new(),
             physical_layout_documents: BTreeMap::new(),
             pdk_callback_receipts: Vec::new(),
-            hardcopy_setups: crate::hardcopy::HardcopySetupStore::default(),
-            hardcopy_receipts: crate::hardcopy::HardcopyReceiptLedger::default(),
-            project_print_mappings: crate::hardcopy::PrintMappingPresetCatalog::new(
-                crate::hardcopy::PrintMappingCatalogOwner::Project,
+            hardcopy_setups: rspice_hardcopy_contract::HardcopySetupStore::default(),
+            hardcopy_receipts: rspice_hardcopy_contract::HardcopyReceiptLedger::default(),
+            project_print_mappings: rspice_hardcopy_contract::PrintMappingPresetCatalog::new(
+                rspice_hardcopy_contract::PrintMappingCatalogOwner::Project,
             ),
             engineering_table_views: crate::state::EngineeringTableViewStore::default(),
             hardcopy_source_sets: Vec::new(),
@@ -1695,7 +1695,7 @@ impl Default for ProjectWorkspace {
 }
 
 fn validate_hardcopy_source_set_catalog(
-    source_sets: &[crate::hardcopy::sources::HardcopySourceSet],
+    source_sets: &[rspice_hardcopy_contract::sources::HardcopySourceSet],
 ) -> Result<(), HardcopySourceSetPersistenceError> {
     if source_sets.len() > MAX_PROJECT_HARDCOPY_SOURCE_SETS {
         return Err(HardcopySourceSetPersistenceError::CatalogFull);

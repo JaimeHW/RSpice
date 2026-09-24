@@ -13,8 +13,8 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use crate::product::{ContentDigest, ObjectRevision};
-use crate::results::report_document::{ReportBlockId, ReportReferenceCurrentness};
+use rspice_app_types::product::{ContentDigest, ObjectRevision};
+use rspice_results::report_document::{ReportBlockId, ReportReferenceCurrentness};
 
 use super::contract::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
 
@@ -23,8 +23,8 @@ use super::contract::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
 pub const MAX_HARDCOPY_SOURCE_SET_MEMBERS: usize = 64;
 pub const HARDCOPY_SOURCE_SET_SCHEMA_VERSION: u32 = 1;
 
-pub(crate) const SOURCE_KEY_LIMIT: usize = 512;
-pub(crate) const DISPLAY_NAME_LIMIT: usize = 256;
+pub const SOURCE_KEY_LIMIT: usize = 512;
+pub const DISPLAY_NAME_LIMIT: usize = 256;
 
 /// User-visible document identity frozen with a hardcopy source. Internal
 /// source keys remain stable machine identifiers and are never repurposed as
@@ -158,7 +158,7 @@ impl HardcopySourceIdentity {
         Ok(self)
     }
 
-    pub(crate) fn validate(&self) -> Result<(), HardcopySourceError> {
+    pub fn validate(&self) -> Result<(), HardcopySourceError> {
         validate_label("source key", &self.source_key, SOURCE_KEY_LIMIT)?;
         validate_label("display name", &self.display_name, DISPLAY_NAME_LIMIT)?;
         if let Some(publication) = &self.publication {
@@ -416,7 +416,7 @@ struct HardcopySourceSetDigestMaterial<'a> {
     members: &'a [HardcopySourceSetMember],
 }
 
-pub(crate) fn canonical_digest<T: Serialize>(
+pub fn canonical_digest<T: Serialize>(
     domain: &[u8],
     value: &T,
 ) -> Result<ContentDigest, HardcopySourceError> {
@@ -440,7 +440,7 @@ impl std::io::Write for DigestWriter<'_> {
     }
 }
 
-pub(crate) fn validate_label(
+pub fn validate_label(
     field: &'static str,
     value: &str,
     maximum_bytes: usize,
@@ -569,14 +569,4 @@ pub enum HardcopySourceError {
     InvalidPreparedWorkerSnapshot(String),
     #[error("hardcopy contract rejected the source: {0}")]
     HardcopyContract(String),
-}
-
-#[cfg(test)]
-impl HardcopySourceSet {
-    /// Reorder members without recomputing the definition digest, so a test
-    /// can prove that validation rejects a tampered set. The field stays
-    /// private: order is part of what the digest authenticates.
-    pub(crate) fn reverse_members_for_test(&mut self) {
-        self.members.reverse();
-    }
 }

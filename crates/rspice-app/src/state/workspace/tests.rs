@@ -2147,7 +2147,7 @@ fn technology_binding_persists_while_runtime_dirty_state_resets() {
 
 #[test]
 fn hardcopy_page_setup_persists_and_uses_project_dirty_lifecycle() {
-    use crate::hardcopy::{
+    use rspice_hardcopy_contract::{
         ActiveHardcopySource, HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope,
         HardcopySetup, SetupSaveDisposition,
     };
@@ -2188,8 +2188,10 @@ fn hardcopy_page_setup_persists_and_uses_project_dirty_lifecycle() {
 
 #[test]
 fn project_print_mapping_routes_through_project_dirty_lifecycle() {
-    let mapping = crate::hardcopy::PrintMappingTable::try_new(
-        crate::hardcopy::PrintMappingSaveScope::ProjectPrintSet("documentation".to_owned()),
+    let mapping = rspice_hardcopy_contract::PrintMappingTable::try_new(
+        rspice_hardcopy_contract::PrintMappingSaveScope::ProjectPrintSet(
+            "documentation".to_owned(),
+        ),
         Vec::new(),
     )
     .unwrap();
@@ -2199,7 +2201,7 @@ fn project_print_mapping_routes_through_project_dirty_lifecycle() {
         .unwrap();
     assert_eq!(
         receipt.disposition(),
-        crate::hardcopy::PrintMappingSaveDisposition::Created
+        rspice_hardcopy_contract::PrintMappingSaveDisposition::Created
     );
     assert!(workspace.project_print_mappings_dirty);
     assert!(workspace.any_dirty());
@@ -2217,15 +2219,15 @@ fn project_print_mapping_routes_through_project_dirty_lifecycle() {
     let unchanged = restored.save_project_print_mapping(mapping).unwrap();
     assert_eq!(
         unchanged.disposition(),
-        crate::hardcopy::PrintMappingSaveDisposition::Unchanged
+        rspice_hardcopy_contract::PrintMappingSaveDisposition::Unchanged
     );
     assert!(!restored.any_dirty());
 }
 
 #[test]
 fn hardcopy_source_sets_persist_validate_and_use_project_dirty_lifecycle() {
-    use crate::hardcopy::sources::{HardcopySourceSet, HardcopySourceSetMember};
-    use crate::hardcopy::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
+    use rspice_hardcopy_contract::sources::{HardcopySourceSet, HardcopySourceSetMember};
+    use rspice_hardcopy_contract::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
 
     let member_id =
         HardcopyDocumentId::try_from_uuid(uuid::Uuid::from_u128(0x4853_4d45_4d42_4552)).unwrap();
@@ -2269,8 +2271,8 @@ fn hardcopy_source_sets_persist_validate_and_use_project_dirty_lifecycle() {
 
 #[test]
 fn hardcopy_source_set_catalog_rejects_case_folded_duplicate_names() {
-    use crate::hardcopy::sources::{HardcopySourceSet, HardcopySourceSetMember};
-    use crate::hardcopy::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
+    use rspice_hardcopy_contract::sources::{HardcopySourceSet, HardcopySourceSetMember};
+    use rspice_hardcopy_contract::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
 
     let build_set = |seed: u128, name: &str| {
         let member_id = HardcopyDocumentId::try_from_uuid(uuid::Uuid::from_u128(seed)).unwrap();

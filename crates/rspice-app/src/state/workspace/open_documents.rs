@@ -743,11 +743,12 @@ impl ProjectWorkspace {
     /// an unsaved project change.
     pub fn save_hardcopy_setup(
         &mut self,
-        source: &crate::hardcopy::ActiveHardcopySource,
-        setup: crate::hardcopy::HardcopySetup,
-    ) -> Result<crate::hardcopy::SetupSaveOutcome, crate::hardcopy::HardcopyError> {
+        source: &rspice_hardcopy_contract::ActiveHardcopySource,
+        setup: rspice_hardcopy_contract::HardcopySetup,
+    ) -> Result<rspice_hardcopy_contract::SetupSaveOutcome, rspice_hardcopy_contract::HardcopyError>
+    {
         let outcome = self.hardcopy_setups.save(source, setup)?;
-        if outcome.disposition() != crate::hardcopy::SetupSaveDisposition::Unchanged {
+        if outcome.disposition() != rspice_hardcopy_contract::SetupSaveDisposition::Unchanged {
             self.hardcopy_setups_dirty = true;
         }
         Ok(outcome)
@@ -758,8 +759,8 @@ impl ProjectWorkspace {
     /// project evidence.
     pub fn record_hardcopy_receipt(
         &mut self,
-        receipt: crate::hardcopy::HardcopyReceipt,
-    ) -> Result<(), crate::hardcopy::HardcopyError> {
+        receipt: rspice_hardcopy_contract::HardcopyReceipt,
+    ) -> Result<(), rspice_hardcopy_contract::HardcopyError> {
         self.hardcopy_receipts.append(receipt)?;
         self.hardcopy_receipts_dirty = true;
         Ok(())
@@ -769,20 +770,21 @@ impl ProjectWorkspace {
     /// dirty lifecycle as document page setups.
     pub fn save_project_print_mapping(
         &mut self,
-        table: crate::hardcopy::PrintMappingTable,
+        table: rspice_hardcopy_contract::PrintMappingTable,
     ) -> Result<
-        crate::hardcopy::PrintMappingSaveReceipt,
-        crate::hardcopy::PrintMappingPersistenceError,
+        rspice_hardcopy_contract::PrintMappingSaveReceipt,
+        rspice_hardcopy_contract::PrintMappingPersistenceError,
     > {
         let outcome = self.project_print_mappings.save(table)?;
-        if outcome.disposition() != crate::hardcopy::PrintMappingSaveDisposition::Unchanged {
+        if outcome.disposition() != rspice_hardcopy_contract::PrintMappingSaveDisposition::Unchanged
+        {
             self.project_print_mappings_dirty = true;
         }
         Ok(outcome)
     }
 
     #[must_use]
-    pub fn hardcopy_source_sets(&self) -> &[crate::hardcopy::sources::HardcopySourceSet] {
+    pub fn hardcopy_source_sets(&self) -> &[rspice_hardcopy_contract::sources::HardcopySourceSet] {
         &self.hardcopy_source_sets
     }
 
@@ -790,7 +792,7 @@ impl ProjectWorkspace {
     pub fn hardcopy_source_set(
         &self,
         source_key: &str,
-    ) -> Option<&crate::hardcopy::sources::HardcopySourceSet> {
+    ) -> Option<&rspice_hardcopy_contract::sources::HardcopySourceSet> {
         self.hardcopy_source_sets
             .iter()
             .find(|source_set| source_set.source_key() == source_key)
@@ -800,7 +802,7 @@ impl ProjectWorkspace {
     /// validated transaction. This never clones the rest of the project.
     pub fn save_hardcopy_source_set(
         &mut self,
-        source_set: crate::hardcopy::sources::HardcopySourceSet,
+        source_set: rspice_hardcopy_contract::sources::HardcopySourceSet,
     ) -> Result<bool, HardcopySourceSetPersistenceError> {
         source_set
             .validate()

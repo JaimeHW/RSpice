@@ -484,7 +484,7 @@ fn source_sets_authenticate_definition_and_every_member_atomically() {
         resolve_blank_schematic_sheet(identity("sheet-two"), HardcopyScope::CurrentSheet).unwrap();
     let members = [&first, &second]
         .into_iter()
-        .map(HardcopySourceSetMember::from_resolved)
+        .map(source_set_member_from_resolved)
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
     let source_set = HardcopySourceSet::try_new(
@@ -515,8 +515,9 @@ fn source_sets_authenticate_definition_and_every_member_atomically() {
             if source_key == "sheet-two"
     ));
 
-    let mut tampered = source_set.clone();
-    tampered.reverse_members_for_test();
+    let mut tampered_wire = serde_json::to_value(&source_set).unwrap();
+    tampered_wire["members"].as_array_mut().unwrap().reverse();
+    let tampered: HardcopySourceSet = serde_json::from_value(tampered_wire).unwrap();
     assert!(matches!(
         tampered.validate(),
         Err(HardcopySourceError::SourceSetDigestMismatch { .. })

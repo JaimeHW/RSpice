@@ -3,7 +3,7 @@
 //! A mapping's declared save scope is an ownership contract, not a label. A
 //! project print set is persisted with the project, while a portable personal
 //! preset belongs to the user/device profile. Document-scoped mappings remain
-//! embedded in the document's [`super::hardcopy::HardcopySetup`].
+//! embedded in the document's [`crate::contract::HardcopySetup`].
 
 use std::{collections::BTreeMap, error::Error, fmt};
 

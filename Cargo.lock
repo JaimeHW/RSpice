@@ -5254,6 +5254,7 @@ dependencies = [
  "rspice-cloud-client",
  "rspice-core",
  "rspice-design-model",
+ "rspice-hardcopy-contract",
  "rspice-pack",
  "rspice-publication-contract",
  "rspice-results",
@@ -5504,6 +5505,19 @@ dependencies = [
  "thiserror 2.0.20",
  "uuid",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "rspice-hardcopy-contract"
+version = "0.1.0"
+dependencies = [
+ "rspice-app-types",
+ "rspice-results",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.20",
+ "uuid",
 ]
 
 [[package]]

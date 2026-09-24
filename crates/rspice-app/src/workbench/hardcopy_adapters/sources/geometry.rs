@@ -651,20 +651,20 @@ pub(super) fn clip_line_to_axis_rect(
 
 /// Pin a resolved live document into a persistable source-set member.
 ///
-/// This constructor stays with the adapters because it reads
+/// This adapter stays with the application because it reads
 /// [`ResolvedHardcopyDocument`], which resolves live schematic and result
 /// documents. The record type itself is owned by `crate::hardcopy::sources`.
-impl HardcopySourceSetMember {
-    pub fn from_resolved(resolved: &ResolvedHardcopyDocument) -> Result<Self, HardcopySourceError> {
-        Self::try_new(
-            resolved.source_key(),
-            resolved.authority().display_name(),
-            resolved.authority().document_id(),
-            resolved.authority().revision(),
-            resolved.authority().content_digest(),
-            resolved.authority().scope().clone(),
-        )
-    }
+pub(crate) fn source_set_member_from_resolved(
+    resolved: &ResolvedHardcopyDocument,
+) -> Result<HardcopySourceSetMember, HardcopySourceError> {
+    HardcopySourceSetMember::try_new(
+        resolved.source_key(),
+        resolved.authority().display_name(),
+        resolved.authority().document_id(),
+        resolved.authority().revision(),
+        resolved.authority().content_digest(),
+        resolved.authority().scope().clone(),
+    )
 }
 
 #[cfg(test)]

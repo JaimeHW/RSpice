@@ -138,7 +138,7 @@ pub fn resolve_all_schematic_sheets(
 
     let members = resolved_sheets
         .iter()
-        .map(HardcopySourceSetMember::from_resolved)
+        .map(source_set_member_from_resolved)
         .collect::<Result<Vec<_>, _>>()?;
     let mut set_identity_material = b"rspice-hardcopy-all-schematic-sheets-v1:".to_vec();
     set_identity_material.extend_from_slice(source.identity.document_id.as_uuid().as_bytes());

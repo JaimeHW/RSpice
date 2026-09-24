@@ -552,10 +552,9 @@ impl ResolvedHardcopyDocument {
         Ok(found.then_some(outside))
     }
 
-    /// Ordered authenticated page groups for aggregate-aware pagination.
-    /// Ordinary documents return an empty vector and retain legacy extent
-    /// compilation; aggregate callers must pass every returned section to
-    /// `HardcopyPlan::compile_with_sections`.
+    /// Default-setup page groups for integration fixtures. Production callers
+    /// use `hardcopy_sections_for_setup` with the selected setup.
+    #[cfg(test)]
     pub fn hardcopy_sections(&self) -> Result<Vec<HardcopyContentSection>, HardcopySourceError> {
         self.hardcopy_sections_for_setup(crate::hardcopy::SchematicHardcopySetup::default())
     }

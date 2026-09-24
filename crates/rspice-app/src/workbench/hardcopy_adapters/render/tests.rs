@@ -31,7 +31,7 @@ use crate::state::{
 use crate::workbench::hardcopy_adapters::sources::{
     SchematicHardcopySource, SymbolHardcopySource, resolve_blank_schematic_sheet_with_format,
     resolve_hardcopy_source_set_with, resolve_schematic_source, resolve_symbol_source,
-    schematic_sheet_identity,
+    schematic_sheet_identity, source_set_member_from_resolved,
 };
 
 fn digest(byte: u8) -> ContentDigest {
@@ -2433,7 +2433,7 @@ fn named_print_set_projects_per_set_sheet_numbers_without_mutating_child_authori
     }
     let members = selected
         .iter()
-        .map(HardcopySourceSetMember::from_resolved)
+        .map(source_set_member_from_resolved)
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
     let source_set = HardcopySourceSet::try_new(

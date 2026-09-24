@@ -125,7 +125,7 @@ pub(crate) fn resolve_visualization_document_source(
     }
     let members = resolved_panes
         .iter()
-        .map(HardcopySourceSetMember::from_resolved)
+        .map(source_set_member_from_resolved)
         .collect::<Result<Vec<_>, _>>()?;
     let source_set = HardcopySourceSet::try_new(
         HardcopyDocumentId::try_from_uuid(document.id().as_uuid())
@@ -181,7 +181,7 @@ pub(crate) fn resolve_all_studio_panes(
     }
     let members = resolved_panes
         .iter()
-        .map(HardcopySourceSetMember::from_resolved)
+        .map(source_set_member_from_resolved)
         .collect::<Result<Vec<_>, _>>()?;
     let source_set = HardcopySourceSet::try_new(
         HardcopyDocumentId::try_from_uuid(Uuid::new_v5(

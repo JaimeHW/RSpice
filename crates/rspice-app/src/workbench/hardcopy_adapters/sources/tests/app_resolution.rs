@@ -297,7 +297,7 @@ fn enumeration_exposes_all_sheets_exact_members_and_available_named_sets() {
         "First only",
         HardcopyDocumentKind::SchematicOrSymbol,
         HardcopyScope::NamedPrintSet("First only".to_owned()),
-        vec![HardcopySourceSetMember::from_resolved(&first).unwrap()],
+        vec![source_set_member_from_resolved(&first).unwrap()],
     )
     .unwrap();
     let set_key = source_set.source_key();

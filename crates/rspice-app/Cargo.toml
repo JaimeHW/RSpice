@@ -49,6 +49,7 @@ rspice-automation-protocol = { path = "../rspice-automation-protocol", version =
 rspice-design-model = { workspace = true }
 rspice-app-types.workspace = true
 rspice-results.workspace = true
+rspice-hardcopy-contract.workspace = true
 
 # Verilog-A compiler (pure Rust, works on all platforms)
 rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }

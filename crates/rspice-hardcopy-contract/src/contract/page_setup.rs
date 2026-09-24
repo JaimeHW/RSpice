@@ -534,6 +534,10 @@ pub struct PrinterJobSettings {
 }
 
 impl PrinterJobSettings {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "preserve the existing validated printer-selection constructor during extraction"
+    )]
     pub fn try_new(
         capabilities_digest: ContentDigest,
         selected_paper_id: impl Into<String>,
