@@ -23,7 +23,6 @@ use crate::product::{
     AnalysisInstanceId, ContentDigest, DatasetId, DerivedAnalysisIdentity, JobId, ModelSourceId,
     ObjectRevision, ProjectId, RunId, SimulationPlanId,
 };
-use crate::simulation::plan::AnalysisKind;
 use crate::state::workspace::validate_cell_view_name_segment;
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
@@ -38,6 +37,7 @@ use crate::state::{
     SpecificationDefinition, SpecificationPolicy, SpecificationVerdict, ViewType, WaveformData,
     canonical_cell_view_owner_key, migrate_generated_veriloga_binding,
 };
+use rspice_simulation_contract::analysis_kind::AnalysisKind;
 
 /// Presence-aware persisted field used at schema-era boundaries.
 ///

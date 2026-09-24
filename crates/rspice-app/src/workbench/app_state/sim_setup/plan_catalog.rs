@@ -9,6 +9,7 @@
 use std::collections::HashSet;
 use std::fmt;
 
+use rspice_simulation_contract::run_set::RunSetState;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::product::{AnalysisInstanceId, ObjectRevision, SimulationPlanId};
@@ -163,7 +164,7 @@ pub struct StoredSimulationPlan {
     /// records did not persist one; migration restores a review-required
     /// reference-only declaration rather than copying the active plan's axes.
     #[serde(default = "legacy_inactive_run_set")]
-    run_set: crate::simulation::run_set::RunSetState,
+    run_set: RunSetState,
     /// Ordered model closure and per-library nominal section owned by this
     /// inactive plan.
     #[serde(default)]
@@ -177,8 +178,8 @@ pub struct StoredSimulationPlan {
     options: SimulationOptions,
 }
 
-fn legacy_inactive_run_set() -> crate::simulation::run_set::RunSetState {
-    crate::simulation::run_set::RunSetState::reference_only()
+fn legacy_inactive_run_set() -> RunSetState {
+    RunSetState::reference_only()
 }
 
 impl StoredSimulationPlan {
@@ -218,7 +219,7 @@ impl StoredSimulationPlan {
     }
 
     #[must_use]
-    pub const fn run_set(&self) -> &crate::simulation::run_set::RunSetState {
+    pub const fn run_set(&self) -> &RunSetState {
         &self.run_set
     }
 
@@ -285,7 +286,7 @@ pub struct SimulationPlanImportDocument {
     pub name: SimulationPlanName,
     pub analysis_plan: SimulationPlan,
     pub reference_pvt: ReferencePvtPoint,
-    pub run_set: crate::simulation::run_set::RunSetState,
+    pub run_set: RunSetState,
     pub model_bindings: Vec<crate::state::model_library::SimulationPlanModelBinding>,
     #[serde(default)]
     pub save_policy: crate::workbench::app_state::SimulationSavePolicy,
@@ -469,7 +470,7 @@ impl SimSetupState {
         candidate.active_plan_lineage = SimulationPlanLineage::default();
         candidate.analysis_plan = Some(plan);
         candidate.reference_pvt = ReferencePvtPoint::default();
-        candidate.run_set = crate::simulation::run_set::RunSetState::reference_only();
+        candidate.run_set = RunSetState::reference_only();
         candidate.model_bindings.clear();
         candidate.save_policy = crate::workbench::app_state::SimulationSavePolicy::default();
         candidate.options = SimulationOptions::default();
@@ -675,7 +676,7 @@ impl SimSetupState {
         let cloned_run_set = if contents.copy_pvt_and_model_bindings {
             self.run_set.clone()
         } else {
-            crate::simulation::run_set::RunSetState::reference_only()
+            RunSetState::reference_only()
         };
         let cloned_model_bindings = if contents.copy_pvt_and_model_bindings {
             self.model_bindings.clone()
@@ -958,6 +959,7 @@ fn validate_model_binding_list(
 mod tests {
     use super::*;
     use crate::simulation::plan::{AnalysisKind, AnalysisLifecycleState};
+    use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
     #[test]
     fn plan_names_are_trimmed_validated_and_case_insensitively_unique() {
@@ -990,9 +992,7 @@ mod tests {
             .run_set
             .dimensions
             .iter_mut()
-            .find(|dimension| {
-                dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Supply
-            })
+            .find(|dimension| dimension.kind == RunSetDimensionKind::Supply)
             .unwrap()
             .source = "netlist-source:VDD".to_owned();
         setup
@@ -1059,9 +1059,7 @@ mod tests {
                 .run_set()
                 .dimensions
                 .iter()
-                .find(|dimension| {
-                    dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Supply
-                })
+                .find(|dimension| dimension.kind == RunSetDimensionKind::Supply)
                 .unwrap()
                 .source,
             "netlist-source:VDD"
@@ -1076,9 +1074,7 @@ mod tests {
             .run_set
             .dimensions
             .iter_mut()
-            .find(|dimension| {
-                dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Supply
-            })
+            .find(|dimension| dimension.kind == RunSetDimensionKind::Supply)
             .unwrap()
             .source = "netlist-source:VCORE".to_owned();
         setup.model_bindings[0].selected_corner = Some("FF".to_owned());
@@ -1099,9 +1095,7 @@ mod tests {
                 .run_set
                 .dimensions
                 .iter()
-                .find(|dimension| {
-                    dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Supply
-                })
+                .find(|dimension| dimension.kind == RunSetDimensionKind::Supply)
                 .unwrap()
                 .source,
             "netlist-source:VDD",
@@ -1118,9 +1112,7 @@ mod tests {
                 .run_set()
                 .dimensions
                 .iter()
-                .find(|dimension| {
-                    dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Supply
-                })
+                .find(|dimension| dimension.kind == RunSetDimensionKind::Supply)
                 .unwrap()
                 .source,
             "netlist-source:VCORE",

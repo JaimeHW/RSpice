@@ -8,7 +8,7 @@
 use super::*;
 use crate::simulation::{
     dialog::{DampingStrategy, IntegrationMethod, MatrixSolver},
-    plan::{AnalysisDraft, AnalysisKind},
+    plan::AnalysisDraft,
 };
 use crate::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisType, Cell, CellViewRef, LayoutEdit,
@@ -18,6 +18,7 @@ use crate::state::{
     ViewType, WaveformData,
 };
 use crate::workbench::app_state::AppState;
+use rspice_simulation_contract::analysis_kind::AnalysisKind;
 
 fn downgrade_result_digests_to_v6(results: &mut ProjectSimulationResults) {
     for persisted_run in &mut results.runs {
@@ -1006,9 +1007,9 @@ fn unversioned_execution_context_migrates_to_sorted_legacy_order() {
     assert_eq!(
         enabled,
         vec![
-            crate::simulation::plan::AnalysisKind::Transient,
-            crate::simulation::plan::AnalysisKind::Ac,
-            crate::simulation::plan::AnalysisKind::Noise,
+            AnalysisKind::Transient,
+            AnalysisKind::Ac,
+            AnalysisKind::Noise,
         ]
     );
 }
@@ -1130,7 +1131,7 @@ fn unfinished_analysis_drafts_are_project_data_not_file_corruption() {
     let transient = stable
         .instances()
         .iter()
-        .find(|instance| instance.kind() == crate::simulation::plan::AnalysisKind::Transient)
+        .find(|instance| instance.kind() == AnalysisKind::Transient)
         .expect("transient instance");
     let crate::simulation::plan::AnalysisDraft::Transient(transient) = transient.draft() else {
         panic!("transient instance owns transient draft");
@@ -1139,7 +1140,7 @@ fn unfinished_analysis_drafts_are_project_data_not_file_corruption() {
     let monte_carlo = stable
         .instances()
         .iter()
-        .find(|instance| instance.kind() == crate::simulation::plan::AnalysisKind::MonteCarlo)
+        .find(|instance| instance.kind() == AnalysisKind::MonteCarlo)
         .expect("Monte Carlo instance");
     let crate::simulation::plan::AnalysisDraft::MonteCarlo(monte_carlo) = monte_carlo.draft()
     else {

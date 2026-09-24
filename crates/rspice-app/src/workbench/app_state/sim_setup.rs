@@ -12,13 +12,15 @@ pub(in crate::workbench) mod plan_catalog;
 
 use std::collections::HashSet;
 
+use rspice_simulation_contract::run_set::{ReferencePoint, RunSetDimensionKind, RunSetState};
+
 /// The nominal/reference operating point selected in the workbench chrome.
 ///
 /// This is execution state, not display state: temperature is copied into the
 /// effective solver options and process is used when resolving model-library
 /// sections for a run. It is also what an axis the run set does not declare
 /// resolves to, so it is one type rather than two that have to agree.
-pub type ReferencePvtPoint = crate::simulation::run_set::ReferencePoint;
+pub type ReferencePvtPoint = ReferencePoint;
 
 pub use rspice_simulation_contract::output_policy::SimulationSavePolicy;
 
@@ -65,7 +67,7 @@ pub struct SimSetupState {
     /// the Run Set page configures where the whole plan executes, while a
     /// Corner analysis remains an analysis instance with its own base mode.
     #[serde(default = "default_global_run_set")]
-    pub run_set: crate::simulation::run_set::RunSetState,
+    pub run_set: RunSetState,
     /// What folding a pre-unification Corner run space into [`Self::run_set`]
     /// had to drop, one sentence per instance that carried one.
     ///
@@ -331,7 +333,7 @@ impl SimSetupState {
     pub fn requested_temperatures_celsius(&self) -> Vec<f64> {
         match self
             .run_set
-            .enabled_dimension_of(crate::simulation::run_set::RunSetDimensionKind::Temperature)
+            .enabled_dimension_of(RunSetDimensionKind::Temperature)
         {
             Some(dimension) => dimension.canonical_values(),
             None => vec![self.reference_pvt.temperature_celsius],
@@ -668,8 +670,8 @@ impl SimSetupState {
 /// Missing global Run Set data belongs to a project from before the Studio
 /// owned this declaration. Migrating it to a one-point reference run avoids
 /// inventing 27 PVT tasks and new technology requirements on first open.
-fn default_global_run_set() -> crate::simulation::run_set::RunSetState {
-    crate::simulation::run_set::RunSetState::reference_only()
+fn default_global_run_set() -> RunSetState {
+    RunSetState::reference_only()
 }
 
 fn deserialize_analysis_set<'de, D>(deserializer: D) -> Result<HashSet<usize>, D::Error>
