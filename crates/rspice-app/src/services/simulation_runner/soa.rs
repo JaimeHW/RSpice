@@ -6,7 +6,8 @@
 use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use super::{is_ground_like, normalize_voltage_signal_name, parse_runner_netlist_with_abort};
 use crate::results::safety::{
-    SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter, SoAViolation, SoaVoltageBasis,
+    SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter, SoAViolation,
+    SoaVoltageBasis, finalize_soa_durations,
 };
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
@@ -493,8 +494,7 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         violation_count.push(manager.violations().len() as Value);
     }
 
-    if manager
-        .finalize_durations(&transient.time, abort)
+    if finalize_soa_durations(&mut manager, &transient.time, abort)
         .map_err(|error| ServiceRunError::from_core("SOA duration qualification", error))?
     {
         violation_count.fill(0.0);

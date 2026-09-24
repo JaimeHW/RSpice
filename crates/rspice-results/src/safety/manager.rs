@@ -1,4 +1,4 @@
-//! Sampling and duration finalization against the portable SOA contract.
+//! Complete sampled SOA rule coverage and retained worst-point evaluation.
 use super::{
     SoADefinition, SoAEvaluation, SoAParameter, SoARuleVerdict, SoAViolation, SoaDeratingSamples,
     SoaPowerDeratingEvidence, ViolationSeverity, compare_soa_stress,
@@ -263,13 +263,14 @@ impl SoAManager {
     }
 
     /// Reclassify complete excursions once the checked observation window is known.
-    pub fn finalize_durations(
+    pub fn finalize_durations_with(
         &mut self,
         time: &[f64],
-        abort: &dyn rspice_core::abort_signal::AbortSignal,
-    ) -> Result<bool, rspice_core::SimulationError> {
-        use super::{SoaLimitTrace, qualify_soa_duration_with_mode, soa_duration_verdict};
-        use rspice_core::SimulationError;
+        mut is_aborted: impl FnMut() -> bool,
+    ) -> Result<bool, super::SoaDurationScanError> {
+        use super::{
+            SoaDurationScanError, SoaLimitTrace, scan_soa_duration_with_mode, soa_duration_verdict,
+        };
         let policies: Vec<_> = self
             .device_defs
             .iter()
@@ -296,8 +297,8 @@ impl SoAManager {
         }
         let mut retained = Vec::new();
         for (index, event) in self.violations.drain(..).enumerate() {
-            if index % 256 == 0 && abort.is_aborted() {
-                return Err(SimulationError::Aborted);
+            if index % 256 == 0 && is_aborted() {
+                return Err(SoaDurationScanError::Aborted);
             }
             if !keys
                 .get(event.device_id.as_str())
@@ -310,7 +311,9 @@ impl SoAManager {
         for (device, parameter, maximum, minimum, mode) in policies {
             let key = (device.clone(), parameter);
             let stress = self.stress_history.get(&key).ok_or_else(|| {
-                SimulationError::Circuit("SOA duration is missing its stress history".into())
+                SoaDurationScanError::InvalidInput(
+                    "SOA duration is missing its stress history".into(),
+                )
             })?;
             let limits = self
                 .derating_history
@@ -322,7 +325,8 @@ impl SoAManager {
                 .envelope_history
                 .get(&key)
                 .map_or(limits, |history| SoaLimitTrace::Samples(&history.limits_a));
-            let scan = qualify_soa_duration_with_mode(time, stress, limits, minimum, mode, abort)?;
+            let scan =
+                scan_soa_duration_with_mode(time, stress, limits, minimum, mode, &mut is_aborted)?;
             let mut worst = 0;
             let mut verdict = soa_duration_verdict(
                 self.thresholds,
@@ -331,8 +335,8 @@ impl SoAManager {
                 scan.qualified_samples[0],
             );
             for i in 0..time.len() {
-                if i % 256 == 0 && abort.is_aborted() {
-                    return Err(SimulationError::Aborted);
+                if i % 256 == 0 && is_aborted() {
+                    return Err(SoaDurationScanError::Aborted);
                 }
                 let sample_verdict = soa_duration_verdict(
                     self.thresholds,
@@ -368,7 +372,7 @@ impl SoAManager {
                 }
             }
             let evaluation = self.evaluations.get_mut(&key).ok_or_else(|| {
-                SimulationError::Circuit("SOA duration is missing its evaluation".into())
+                SoaDurationScanError::InvalidInput("SOA duration is missing its evaluation".into())
             })?;
             evaluation.duration = Some(scan.evidence);
             evaluation.verdict = verdict;

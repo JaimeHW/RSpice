@@ -1,7 +1,7 @@
 //! Engine-facing adapter for portable SOA duration qualification.
+use super::{SoAManager, SoaDurationMode, SoaLimitTrace};
 #[cfg(test)]
 use super::{SoARuleVerdict, SoaThresholds};
-use super::{SoaDurationMode, SoaLimitTrace};
 use rspice_core::{SimulationError, abort_signal::AbortSignal};
 use rspice_results::safety::{SoaDurationScan, SoaDurationScanError, scan_soa_duration_with_mode};
 
@@ -38,7 +38,22 @@ pub fn qualify_soa_duration_with_mode(
     scan_soa_duration_with_mode(time, stress, limits, minimum_duration_s, mode, || {
         abort.is_aborted()
     })
-    .map_err(|error| match error {
+    .map_err(map_soa_duration_error)
+}
+
+/// Finish retained rule histories with the engine's cancellation and error types.
+pub fn finalize_soa_durations(
+    manager: &mut SoAManager,
+    time: &[f64],
+    abort: &dyn AbortSignal,
+) -> Result<bool, SimulationError> {
+    manager
+        .finalize_durations_with(time, || abort.is_aborted())
+        .map_err(map_soa_duration_error)
+}
+
+fn map_soa_duration_error(error: SoaDurationScanError) -> SimulationError {
+    match error {
         SoaDurationScanError::InvalidMinimumDuration(value) => {
             rspice_core::config::SimulationConfigError::InvalidValue {
                 field: "soa.minimum_duration_s",
@@ -49,7 +64,7 @@ pub fn qualify_soa_duration_with_mode(
         }
         SoaDurationScanError::InvalidInput(message) => SimulationError::Circuit(message),
         SoaDurationScanError::Aborted => SimulationError::Aborted,
-    })
+    }
 }
 
 #[cfg(test)]
@@ -230,17 +245,18 @@ fn soa_duration_qualifies_interpolated_excursions_and_reclassifies_worst_point()
             .unwrap();
         for (t, actual) in time.into_iter().zip(stress) {
             manager
-                .check_point(
+                .check_point_with_curve_voltages(
                     t,
                     &std::collections::HashMap::from([(
                         "M1".into(),
                         std::collections::HashMap::from([(SoAParameter::Vds, actual)]),
                     )]),
+                    &std::collections::HashMap::new(),
                 )
                 .unwrap();
         }
         assert_eq!(manager.evaluations().next().unwrap().worst_actual_value, 4.);
-        manager.finalize_durations(&time, &NoAbort).unwrap();
+        finalize_soa_durations(&mut manager, &time, &NoAbort).unwrap();
         let evaluation = manager.evaluations().next().unwrap();
         assert_eq!(evaluation.worst_actual_value, 2.);
         assert_eq!(evaluation.worst_time, 3.);

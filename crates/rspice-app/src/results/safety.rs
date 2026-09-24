@@ -1,15 +1,13 @@
-//! Safe operating area evidence and deterministic limit evaluation.
+//! App-facing SOA compatibility imports and engine error/cancellation adapters.
 //!
-//! Owns Safe Operating Area (SOA) records used by saved results, workers, and
-//! viewers. Evaluation has no application-state or host-storage dependency.
-
-pub(crate) mod soa_manager;
+//! Rule policy, sampled evaluation, and retained evidence live in
+//! `rspice_results::safety`.
 
 // Existing app callers migrate to the portable owner as their modules move.
 #[cfg(test)]
 pub use rspice_results::safety::SoaCumulativeDurationEvidence;
 pub use rspice_results::safety::{
-    SoADefinition, SoAEvaluation, SoALimit, SoAParameter, SoARuleVerdict, SoAViolation,
+    SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter, SoARuleVerdict, SoAViolation,
     SoaCurrentEnvelope, SoaCurrentEnvelopeEvidence, SoaDeratingSamples, SoaDurationEvidence,
     SoaDurationMode, SoaEnvelopeSamples, SoaLimitTrace, SoaPowerDerating, SoaPowerDeratingEvidence,
     SoaPulseCurve, SoaPulseInterpolation, SoaThresholds, SoaVoltageBasis, SoaVoltageInterpolation,
@@ -17,10 +15,8 @@ pub use rspice_results::safety::{
     soa_duration_verdict, soa_envelope_limit_waveform_name, soa_envelope_voltage_waveform_name,
     soa_power_limit_waveform_name, soa_stress_waveform_name,
 };
-pub use soa_manager::SoAManager;
-
 mod duration;
-pub use duration::qualify_soa_duration_with_mode;
+pub use duration::{finalize_soa_durations, qualify_soa_duration_with_mode};
 
 #[cfg(test)]
 pub(crate) fn soa_current_envelope_test_fixture() -> SoaCurrentEnvelope {

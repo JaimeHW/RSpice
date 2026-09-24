@@ -24,3 +24,5 @@ pub use duration::{
     SoaDurationScanError, SoaExcursion, SoaLimitTrace, scan_soa_duration_with_mode,
     soa_duration_verdict,
 };
+mod manager;
+pub use manager::SoAManager;
