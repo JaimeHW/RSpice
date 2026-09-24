@@ -10,6 +10,7 @@ pub mod measurements;
 pub mod operating_point;
 pub mod optimization;
 pub mod report_document;
+pub mod safety;
 pub mod sampling;
 pub mod stability;
 pub mod viewer_catalog;

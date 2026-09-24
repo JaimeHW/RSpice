@@ -974,7 +974,7 @@ fn soa_evidence_are_field_sensitive_v4_content_identity() {
     };
     evaluations[0].envelope = Some(crate::results::safety::SoaCurrentEnvelopeEvidence {
         maximum_current_a: 1.0,
-        curve: crate::results::safety::SoaCurrentEnvelope::test_fixture(),
+        curve: crate::results::safety::soa_current_envelope_test_fixture(),
     });
     assert_ne!(soa.result_data_digest(), curved.result_data_digest());
     for field in 0..10 {

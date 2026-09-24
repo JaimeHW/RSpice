@@ -12,7 +12,7 @@ use crate::simulation::{
 #[test]
 fn soa_current_envelope_studio_dispatch_retains_limits_and_saved_configuration() {
     for duration in [None, Some(2e-11)] {
-        let curve = SoaCurrentEnvelope::test_fixture();
+        let curve = crate::results::safety::soa_current_envelope_test_fixture();
         let config = SoaConfig {
             stop_time: 1e-9,
             step_time: 1e-10,

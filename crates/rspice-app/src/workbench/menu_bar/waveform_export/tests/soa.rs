@@ -168,8 +168,8 @@ fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
 
 #[test]
 fn soa_current_envelope_csv_retains_voltage_limits_and_authored_curves() {
-    use crate::results::safety::{SoaCurrentEnvelope, SoaCurrentEnvelopeEvidence};
-    let curve = SoaCurrentEnvelope::test_fixture();
+    use crate::results::safety::SoaCurrentEnvelopeEvidence;
+    let curve = crate::results::safety::soa_current_envelope_test_fixture();
     let mut traces = Vec::new();
     for (name, unit, values) in [
         ("SOA_ID(M1)", "A", vec![0.001, 0.002, 0.003]),

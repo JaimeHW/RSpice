@@ -390,7 +390,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
         unreachable!()
     };
     rules[0].parameter = SoAParameter::Id;
-    rules[0].current_envelope = Some(crate::results::safety::SoaCurrentEnvelope::test_fixture());
+    rules[0].current_envelope = Some(crate::results::safety::soa_current_envelope_test_fixture());
     assert_ne!(digest(&curves), digest(&configured));
     for field in 0..10 {
         let mut changed = curves.clone();
