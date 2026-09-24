@@ -39,6 +39,9 @@
 /// being drawn here.
 pub(crate) mod hierarchy_reference;
 
+#[cfg(test)]
+mod netlist_integration_tests;
+
 use crate::state::{Component, ComponentType, Point, Rotation, SchematicState, Wire};
 
 // =============================================================================
