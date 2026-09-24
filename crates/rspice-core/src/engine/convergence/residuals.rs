@@ -885,6 +885,23 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         probe: OperatingPointProbe<'_>,
+        linear_stamp: F,
+    ) -> Option<Value>
+    where
+        F: FnMut(&mut CircuitData, &mut StaticMatrix, &mut [Value]),
+    {
+        self.nonlinear_merit_with_startup_constraints(circuit, matrix, probe, &[], linear_stamp)
+    }
+
+    /// Globalization must judge the same equations as Newton. A hard startup
+    /// voltage replaces its nodal KCL equation; rejecting its clamp current
+    /// as a physical KCL error can stall an otherwise convergent IC solve.
+    pub(in crate::engine::convergence) fn nonlinear_merit_with_startup_constraints<F>(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        probe: OperatingPointProbe<'_>,
+        constraints: &[StartupVoltageConstraint],
         mut linear_stamp: F,
     ) -> Option<Value>
     where
@@ -917,6 +934,15 @@ impl Engine {
                 },
                 true,
                 &mut correction_rhs,
+            )
+            .ok()?;
+            Self::apply_node_voltage_constraints_at(
+                circuit,
+                probe,
+                rhs,
+                constraints,
+                solution,
+                Self::requires_vbic_correction_form(circuit),
             )
             .ok()?;
             if Self::requires_vbic_correction_form(circuit) {
@@ -1014,6 +1040,50 @@ impl Engine {
             Self::stamp_matrix_conditioning_diagonal(circuit, matrix, rhs.len(), gmin_floor);
             circuit.stamp_dc_direct(matrix, rhs);
         })
+    }
+}
+
+#[cfg(test)]
+mod startup_constraint_tests {
+    use super::*;
+    use crate::{SimulationConfig, SpiceDialect, netlist::Netlist};
+
+    #[test]
+    fn startup_merit_measures_constrained_equations_and_preserves_neighbor_kcl() {
+        // A 2 V clamp on a 1k/1k divider gives exactly 1 V at its midpoint.
+        // The clamp supplies 1 mA, so unconstrained KCL at held cannot vanish.
+        let netlist = Netlist::parse("IC merit\nR1 held out 1k\nR2 out 0 1k\n.end\n").unwrap();
+        for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+            let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+            let mut circuit = engine.build_circuit(&netlist).unwrap();
+            let mut matrix = engine.build_matrix(&circuit).unwrap();
+            circuit.link_indices(&matrix);
+            let constraints = [StartupVoltageConstraint {
+                positive: 1,
+                negative: 0,
+                voltage: 2.0,
+            }];
+            let mut merit = |solution: &[Value], constraints: &[StartupVoltageConstraint]| {
+                engine
+                    .nonlinear_merit_with_startup_constraints(
+                        &mut circuit,
+                        &mut matrix,
+                        OperatingPointProbe {
+                            solution,
+                            time: 0.0,
+                            analysis: crate::xspice::AnalysisType::Transient,
+                            junction_gmin: 0.0,
+                        },
+                        constraints,
+                        |circuit, matrix, rhs| circuit.stamp_dc_direct(matrix, rhs),
+                    )
+                    .unwrap()
+            };
+            assert_eq!(merit(&[2.0, 1.0], &constraints), 0.0);
+            assert!(merit(&[2.0, 1.0], &[]) > 1e-6);
+            assert!(merit(&[2.0, 1.1], &constraints) > 1e-6);
+            assert!(merit(&[2.1, 1.0], &constraints) > 1e-6);
+        }
     }
 }
 

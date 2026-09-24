@@ -465,7 +465,7 @@ impl Engine {
         )
     }
 
-    fn apply_node_voltage_constraints_at(
+    pub(in crate::engine::convergence) fn apply_node_voltage_constraints_at(
         circuit: &CircuitData,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
@@ -1791,6 +1791,15 @@ impl Engine {
                     .solve_into(&rhs, &mut new_solution)
                     .map_err(SimulationError::Solver)?;
             }
+            if !node_hints.is_empty() && Self::junction_limiting_owns_newton_steps(circuit) {
+                new_solution = Self::limit_step_delta_with_state_mask(
+                    &circuit.non_electrical_state_mask(),
+                    &solution,
+                    &new_solution,
+                    Self::MAX_DELTA_VOLTAGE_LIMIT,
+                );
+                circuit.enforce_ideal_voltage_constraints(&mut new_solution, time)?;
+            }
             Self::reset_nonfinite_values(&mut new_solution);
             Self::enforce_node_voltage_hints(circuit, matrix, &mut new_solution, node_hints);
 
@@ -2261,7 +2270,19 @@ impl Engine {
                 }
             }
             let mut damped_solution;
-            let new_solution = if requires_conservative_nonlinear_limiting && !junction_owns_steps {
+            let new_solution = if !node_constraints.is_empty() && junction_owns_steps {
+                // Hard clamps can produce enormous updates in the remaining
+                // compact-model internal nodes. Bound the electrical step,
+                // retaining device-local limiting's progress and the full
+                // constrained residual/voltage/device acceptance checks.
+                damped_solution = Self::limit_step_delta_with_state_mask(
+                    &circuit.non_electrical_state_mask(),
+                    &solution,
+                    &raw_solution,
+                    Self::MAX_DELTA_VOLTAGE_LIMIT,
+                );
+                &mut damped_solution
+            } else if requires_conservative_nonlinear_limiting && !junction_owns_steps {
                 damped_solution = self.apply_damping_strategy_for_circuit(
                     circuit.has_b3soi_devices(),
                     &circuit.non_electrical_state_mask(),
@@ -2272,7 +2293,7 @@ impl Engine {
                     },
                     junction_owns_steps,
                     |trial| {
-                        self.nonlinear_merit_with_linear_stamp_for_operating_point(
+                        self.nonlinear_merit_with_startup_constraints(
                             circuit,
                             matrix,
                             OperatingPointProbe {
@@ -2281,6 +2302,7 @@ impl Engine {
                                 analysis: crate::xspice::AnalysisType::Transient,
                                 junction_gmin,
                             },
+                            node_constraints,
                             |circuit, matrix, rhs| {
                                 circuit.refresh_jiles_atherton_inductances(trial);
                                 if use_transient_current_seed {
