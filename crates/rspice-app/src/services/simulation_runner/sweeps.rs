@@ -3,6 +3,7 @@
 #![allow(clippy::needless_range_loop, clippy::type_complexity)]
 
 use super::ServiceRunError;
+use rspice_app_types::product::ProcessCorner;
 
 mod corner;
 mod dc_axis;
@@ -27,7 +28,7 @@ pub(crate) use types::{
 /// its point count cannot drift from execution semantics.
 pub(crate) fn expand_corner_pvt_points(
     config: &CornerRunConfig,
-) -> Result<Vec<(CornerProcess, rspice_core::Value, rspice_core::Value)>, ServiceRunError> {
+) -> Result<Vec<(ProcessCorner, rspice_core::Value, rspice_core::Value)>, ServiceRunError> {
     execution::expand_corner_points(
         config,
         rspice_core::ResourceLimits::default().max_batch_runs,
@@ -45,6 +46,5 @@ pub use parametric::{
     run_parametric_analysis_with_source_path_and_abort,
 };
 pub use types::{
-    CornerBaseMode, CornerFrequencySweep, CornerModelBinding, CornerPoint, CornerProcess,
-    CornerRunConfig, TempRunConfig,
+    CornerBaseMode, CornerFrequencySweep, CornerPoint, CornerRunConfig, TempRunConfig,
 };

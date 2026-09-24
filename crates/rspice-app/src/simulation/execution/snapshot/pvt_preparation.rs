@@ -337,7 +337,7 @@ pub(super) fn prepare_pvt_point_source(
     let source = crate::services::simulation_runner::materialize_corner_process_source(
         executable_netlist,
         contract,
-        process_to_corner_runner(point.process),
+        point.process,
         &rspice_core::NoAbort,
     )
     .map_err(|error| {

@@ -69,7 +69,7 @@ pub(super) fn expand_corner_run_point_tasks(
     let mut points = Vec::with_capacity(expanded.len());
     for (process, voltage, temperature_celsius) in expanded {
         let pvt = PreparedPvtPoint {
-            process: process_from_corner_runner(process),
+            process,
             voltage: Some(voltage),
             supply_source_names: contract.supply_source_names.clone(),
             temperature_celsius,

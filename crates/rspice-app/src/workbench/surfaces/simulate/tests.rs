@@ -2121,9 +2121,9 @@ fn a_render_path_refusal_restated_every_frame_does_not_spin_the_sequence() {
 /// measures the divider output. The supply axis is what makes the corners
 /// disagree: `V(out)` is half the supply the point was solved at.
 fn corner_evidence_run() -> SimulationRun {
-    use crate::services::simulation_runner::{
-        CornerBaseMode, CornerModelBinding, CornerProcess, CornerRunConfig,
-    };
+    use crate::services::simulation_runner::{CornerBaseMode, CornerRunConfig};
+    use rspice_app_types::product::ProcessCorner;
+    use rspice_model_library::CornerModelBinding;
 
     let deck = "corner evidence\n\
          VDD vdd 0 DC 1.8\n\
@@ -2134,14 +2134,14 @@ fn corner_evidence_run() -> SimulationRun {
          .meas tran vout FIND V(out) AT=100n\n\
          .end\n";
     let binding =
-        |process: CornerProcess, label: &str, saturation_current: &str| CornerModelBinding {
+        |process: ProcessCorner, label: &str, saturation_current: &str| CornerModelBinding {
             process,
             source_label: label.to_owned(),
-            section: Some(process.as_keyword().to_owned()),
+            section: Some(process.short_name().to_owned()),
             materialized_model_cards: format!(".model DPROCESS D (IS={saturation_current})"),
         };
     let contract = CornerRunConfig {
-        process_corners: vec![CornerProcess::TT, CornerProcess::SS],
+        process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
         voltages: vec![1.8, 1.62],
         supply_source_names: vec!["VDD".to_owned()],
         temperatures_c: vec![27.0, 125.0],
@@ -2152,8 +2152,8 @@ fn corner_evidence_run() -> SimulationRun {
             step_time: 1.0e-9,
         },
         model_bindings: vec![
-            binding(CornerProcess::TT, "tt.lib", "1e-12"),
-            binding(CornerProcess::SS, "ss.lib", "1e-13"),
+            binding(ProcessCorner::TT, "tt.lib", "1e-12"),
+            binding(ProcessCorner::SS, "ss.lib", "1e-13"),
         ],
         points: Vec::new(),
     };
@@ -2249,9 +2249,9 @@ fn a_corner_run_answers_a_specification_at_each_of_its_own_points() {
 /// it was never given evidence for.
 #[test]
 fn a_corner_point_that_cannot_be_solved_is_retained_as_a_failure() {
-    use crate::services::simulation_runner::{
-        CornerBaseMode, CornerModelBinding, CornerProcess, CornerRunConfig,
-    };
+    use crate::services::simulation_runner::{CornerBaseMode, CornerRunConfig};
+    use rspice_app_types::product::ProcessCorner;
+    use rspice_model_library::CornerModelBinding;
 
     // The base analysis names a sweep source the deck does not define, so
     // every point fails in the engine rather than in preparation.
@@ -2262,7 +2262,7 @@ fn a_corner_point_that_cannot_be_solved_is_retained_as_a_failure() {
          .op\n\
          .end\n";
     let contract = CornerRunConfig {
-        process_corners: vec![CornerProcess::TT],
+        process_corners: vec![ProcessCorner::TT],
         voltages: vec![1.8, 1.62],
         supply_source_names: vec!["VDD".to_owned()],
         temperatures_c: vec![27.0],
@@ -2276,7 +2276,7 @@ fn a_corner_point_that_cannot_be_solved_is_retained_as_a_failure() {
             step: 0.5,
         },
         model_bindings: vec![CornerModelBinding {
-            process: CornerProcess::TT,
+            process: ProcessCorner::TT,
             source_label: "tt.lib".to_owned(),
             section: Some("TT".to_owned()),
             materialized_model_cards: ".model DPROCESS D (IS=1e-12)".to_owned(),

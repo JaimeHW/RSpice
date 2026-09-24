@@ -105,13 +105,13 @@ pub(super) fn expand_corner_points(
 
 #[cfg(test)]
 mod tests {
-    use super::super::types::CornerProcess;
     use super::*;
+    use rspice_app_types::product::ProcessCorner;
 
     #[test]
     fn full_corner_matrix_obeys_configured_batch_limit_before_allocation() {
         let config = CornerRunConfig {
-            process_corners: vec![CornerProcess::TT, CornerProcess::FF],
+            process_corners: vec![ProcessCorner::TT, ProcessCorner::FF],
             voltages: vec![0.9, 1.1],
             temperatures_c: vec![-40.0, 125.0],
             ..Default::default()
@@ -135,18 +135,18 @@ mod tests {
     fn an_explicit_point_list_is_expanded_verbatim_rather_than_recomposed() {
         let points = vec![
             CornerPoint {
-                process: CornerProcess::TT,
+                process: ProcessCorner::TT,
                 voltage: 0.9,
                 temperature_c: 125.0,
             },
             CornerPoint {
-                process: CornerProcess::TT,
+                process: ProcessCorner::TT,
                 voltage: 1.1,
                 temperature_c: -40.0,
             },
         ];
         let config = CornerRunConfig {
-            process_corners: vec![CornerProcess::TT],
+            process_corners: vec![ProcessCorner::TT],
             voltages: vec![0.9, 1.1],
             temperatures_c: vec![-40.0, 125.0],
             points: points.clone(),
@@ -164,10 +164,10 @@ mod tests {
     #[test]
     fn an_explicit_point_list_is_still_held_to_the_batch_limit() {
         let config = CornerRunConfig {
-            process_corners: vec![CornerProcess::TT],
+            process_corners: vec![ProcessCorner::TT],
             points: vec![
                 CornerPoint {
-                    process: CornerProcess::TT,
+                    process: ProcessCorner::TT,
                     voltage: 1.0,
                     temperature_c: 25.0,
                 };
@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn diagonal_corner_expansion_uses_largest_axis_as_run_count() {
         let config = CornerRunConfig {
-            process_corners: vec![CornerProcess::TT],
+            process_corners: vec![ProcessCorner::TT],
             voltages: vec![0.9, 1.0],
             temperatures_c: vec![-40.0, 25.0, 125.0],
             full_matrix: false,

@@ -319,8 +319,8 @@ pub(crate) struct WorkerCornerModelBinding {
     pub materialized_model_cards: String,
 }
 
-impl From<&crate::services::simulation_runner::CornerModelBinding> for WorkerCornerModelBinding {
-    fn from(value: &crate::services::simulation_runner::CornerModelBinding) -> Self {
+impl From<&rspice_model_library::CornerModelBinding> for WorkerCornerModelBinding {
+    fn from(value: &rspice_model_library::CornerModelBinding) -> Self {
         Self {
             process: WorkerCornerProcess::from(value.process),
             source_label: value.source_label.clone(),
@@ -330,10 +330,10 @@ impl From<&crate::services::simulation_runner::CornerModelBinding> for WorkerCor
     }
 }
 
-impl From<WorkerCornerModelBinding> for crate::services::simulation_runner::CornerModelBinding {
+impl From<WorkerCornerModelBinding> for rspice_model_library::CornerModelBinding {
     fn from(value: WorkerCornerModelBinding) -> Self {
         Self {
-            process: crate::services::simulation_runner::CornerProcess::from(value.process),
+            process: rspice_app_types::product::ProcessCorner::from(value.process),
             source_label: value.source_label,
             section: value.section,
             materialized_model_cards: value.materialized_model_cards,
@@ -380,7 +380,7 @@ impl From<WorkerCornerRunConfig> for crate::services::simulation_runner::CornerR
             process_corners: value
                 .process_corners
                 .into_iter()
-                .map(crate::services::simulation_runner::CornerProcess::from)
+                .map(rspice_app_types::product::ProcessCorner::from)
                 .collect(),
             voltages: value.voltages,
             supply_source_names: value.supply_source_names,
@@ -391,13 +391,13 @@ impl From<WorkerCornerRunConfig> for crate::services::simulation_runner::CornerR
             model_bindings: value
                 .model_bindings
                 .into_iter()
-                .map(crate::services::simulation_runner::CornerModelBinding::from)
+                .map(rspice_model_library::CornerModelBinding::from)
                 .collect(),
             points: value
                 .points
                 .into_iter()
                 .map(|point| crate::services::simulation_runner::CornerPoint {
-                    process: crate::services::simulation_runner::CornerProcess::from(point.process),
+                    process: rspice_app_types::product::ProcessCorner::from(point.process),
                     voltage: point.voltage,
                     temperature_c: point.temperature_c,
                 })
@@ -2059,19 +2059,19 @@ pub(crate) enum WorkerCornerProcess {
     FS,
 }
 
-impl From<crate::services::simulation_runner::CornerProcess> for WorkerCornerProcess {
-    fn from(value: crate::services::simulation_runner::CornerProcess) -> Self {
+impl From<rspice_app_types::product::ProcessCorner> for WorkerCornerProcess {
+    fn from(value: rspice_app_types::product::ProcessCorner) -> Self {
         match value {
-            crate::services::simulation_runner::CornerProcess::TT => Self::TT,
-            crate::services::simulation_runner::CornerProcess::SS => Self::SS,
-            crate::services::simulation_runner::CornerProcess::FF => Self::FF,
-            crate::services::simulation_runner::CornerProcess::SF => Self::SF,
-            crate::services::simulation_runner::CornerProcess::FS => Self::FS,
+            rspice_app_types::product::ProcessCorner::TT => Self::TT,
+            rspice_app_types::product::ProcessCorner::SS => Self::SS,
+            rspice_app_types::product::ProcessCorner::FF => Self::FF,
+            rspice_app_types::product::ProcessCorner::SF => Self::SF,
+            rspice_app_types::product::ProcessCorner::FS => Self::FS,
         }
     }
 }
 
-impl From<WorkerCornerProcess> for crate::services::simulation_runner::CornerProcess {
+impl From<WorkerCornerProcess> for rspice_app_types::product::ProcessCorner {
     fn from(value: WorkerCornerProcess) -> Self {
         match value {
             WorkerCornerProcess::TT => Self::TT,

@@ -233,7 +233,7 @@ mod tests {
         let results = vec![
             (
                 CornerPoint {
-                    process: super::super::types::CornerProcess::TT,
+                    process: rspice_app_types::product::ProcessCorner::TT,
                     voltage: 1.0,
                     temperature_c: 25.0,
                 },
@@ -241,7 +241,7 @@ mod tests {
             ),
             (
                 CornerPoint {
-                    process: super::super::types::CornerProcess::TT,
+                    process: rspice_app_types::product::ProcessCorner::TT,
                     voltage: 1.0,
                     temperature_c: 125.0,
                 },

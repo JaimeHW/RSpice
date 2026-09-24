@@ -863,8 +863,8 @@ fn a_filtered_space_reaches_the_executor_as_the_points_it_resolved() {
     let expanded = crate::services::simulation_runner::expand_corner_pvt_points(
         &crate::services::simulation_runner::CornerRunConfig {
             process_corners: vec![
-                crate::services::simulation_runner::CornerProcess::TT,
-                crate::services::simulation_runner::CornerProcess::SS,
+                rspice_app_types::product::ProcessCorner::TT,
+                rspice_app_types::product::ProcessCorner::SS,
             ],
             voltages: config.voltages.clone(),
             temperatures_c: config.temperatures.clone(),
@@ -873,10 +873,7 @@ fn a_filtered_space_reaches_the_executor_as_the_points_it_resolved() {
                 .points
                 .iter()
                 .map(|point| crate::services::simulation_runner::CornerPoint {
-                    process: match point.process {
-                        ProcessCorner::TT => crate::services::simulation_runner::CornerProcess::TT,
-                        _ => crate::services::simulation_runner::CornerProcess::SS,
-                    },
+                    process: point.process,
                     voltage: point.voltage,
                     temperature_c: point.temperature_celsius,
                 })

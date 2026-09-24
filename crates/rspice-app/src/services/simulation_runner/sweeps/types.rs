@@ -1,6 +1,8 @@
 //! Sweep result and configuration types.
 
+use rspice_app_types::product::ProcessCorner;
 use rspice_core::Value;
+use rspice_model_library::CornerModelBinding;
 
 pub(crate) const REFERENCE_MODEL_BINDING_BEGIN: &str = "* RSPICE REFERENCE MODEL BINDING BEGIN";
 pub(crate) const REFERENCE_MODEL_BINDING_END: &str = "* RSPICE REFERENCE MODEL BINDING END";
@@ -42,98 +44,10 @@ impl TempRunConfig {
     }
 }
 
-/// Process-corner designation for UI corner sweeps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CornerProcess {
-    TT,
-    SS,
-    FF,
-    SF,
-    FS,
-}
-
-/// One explicit foundry/library model binding for a process point.
-///
-/// Model cards are fully materialized from an authenticated in-memory source
-/// snapshot before a worker request is created. Workers never receive a model
-/// path that could be reopened after verification.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CornerModelBinding {
-    pub process: CornerProcess,
-    pub source_label: String,
-    pub section: Option<String>,
-    pub materialized_model_cards: String,
-}
-
-impl CornerModelBinding {
-    pub(crate) fn validate(&self) -> Result<(), String> {
-        let label = self.source_label.trim();
-        if label.is_empty() {
-            return Err("Corner model binding requires a source label".to_owned());
-        }
-        if label.chars().any(char::is_control) {
-            return Err(format!(
-                "Corner model source label contains a control character and cannot be represented safely: {label:?}"
-            ));
-        }
-        if let Some(section) = self.section.as_deref() {
-            let section = section.trim();
-            if section.is_empty() {
-                return Err("Corner model section cannot be empty".to_owned());
-            }
-            if section.chars().any(|character| {
-                character.is_whitespace()
-                    || character == '"'
-                    || character == '\''
-                    || character.is_control()
-            }) {
-                return Err(format!(
-                    "Corner model section contains an unsupported character: {section}"
-                ));
-            }
-        }
-        if self.materialized_model_cards.trim().is_empty() {
-            return Err(format!(
-                "Corner model binding '{label}' contains no materialized model cards"
-            ));
-        }
-        for line in self.materialized_model_cards.lines() {
-            if rspice_core::netlist::is_spice_end_card(
-                line,
-                rspice_core::config::ExpressionDialect::Ngspice,
-            ) {
-                return Err(format!(
-                    "Corner model binding '{label}' contains a terminal .end card"
-                ));
-            }
-            if rspice_core::netlist::parse_include_directive(line).is_some()
-                || rspice_core::netlist::parse_lib_directive(line).is_some()
-            {
-                return Err(format!(
-                    "Corner model binding '{label}' contains an unresolved include/library directive"
-                ));
-            }
-        }
-        Ok(())
-    }
-}
-
-impl CornerProcess {
-    pub(crate) fn as_keyword(self) -> &'static str {
-        match self {
-            Self::TT => "TT",
-            Self::SS => "SS",
-            Self::FF => "FF",
-            Self::SF => "SF",
-            Self::FS => "FS",
-        }
-    }
-}
-
 /// Explicit configuration for corner sweep execution.
 #[derive(Debug, Clone)]
 pub struct CornerRunConfig {
-    pub process_corners: Vec<CornerProcess>,
+    pub process_corners: Vec<ProcessCorner>,
     pub voltages: Vec<Value>,
     /// Exact independent voltage-source instances forming the supply domain.
     /// Voltage corners never infer these from grounding or magnitude.
@@ -224,7 +138,7 @@ impl CornerBaseMode {
 impl Default for CornerRunConfig {
     fn default() -> Self {
         Self {
-            process_corners: vec![CornerProcess::TT],
+            process_corners: vec![ProcessCorner::TT],
             voltages: vec![1.0],
             supply_source_names: Vec::new(),
             temperatures_c: vec![25.0],
@@ -306,7 +220,7 @@ impl CornerRunConfig {
             if !self.process_corners.contains(&point.process) {
                 return Err(format!(
                     "Explicit corner point uses process {} which the process axis does not declare",
-                    point.process.as_keyword()
+                    point.process.short_name()
                 ));
             }
         }
@@ -368,10 +282,10 @@ impl CornerRunConfig {
 /// process the deck cannot resolve through a section is a corner that cannot be
 /// run at all.
 fn require_model_section(
-    process: CornerProcess,
+    process: ProcessCorner,
     bindings: &[CornerModelBinding],
 ) -> Result<(), String> {
-    if process == CornerProcess::TT
+    if process == ProcessCorner::TT
         || bindings
             .iter()
             .any(|binding| binding.process == process && binding.section.is_some())
@@ -380,7 +294,7 @@ fn require_model_section(
     }
     Err(format!(
         "{} corner requires an explicit PDK model-library section",
-        process.as_keyword()
+        process.short_name()
     ))
 }
 
@@ -507,7 +421,7 @@ fn validate_transient_base(
 /// execution machinery.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CornerPoint {
-    pub process: CornerProcess,
+    pub process: ProcessCorner,
     pub voltage: Value,
     pub temperature_c: Value,
 }
@@ -516,7 +430,7 @@ impl CornerPoint {
     pub(super) fn label(&self) -> String {
         format!(
             "{}_{:.6}V_{:.6}C",
-            self.process.as_keyword(),
+            self.process.short_name(),
             self.voltage,
             self.temperature_c
         )
@@ -553,7 +467,7 @@ mod tests {
     #[test]
     fn non_typical_corner_requires_real_model_section() {
         let config = CornerRunConfig {
-            process_corners: vec![CornerProcess::FF],
+            process_corners: vec![ProcessCorner::FF],
             ..CornerRunConfig::default()
         };
 
@@ -567,17 +481,17 @@ mod tests {
     #[test]
     fn explicit_points_still_require_a_real_model_section_for_every_process_they_run() {
         let config = CornerRunConfig {
-            process_corners: vec![CornerProcess::TT, CornerProcess::SS],
+            process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
             voltages: vec![1.0],
             temperatures_c: vec![25.0],
             points: vec![
                 CornerPoint {
-                    process: CornerProcess::TT,
+                    process: ProcessCorner::TT,
                     voltage: 1.0,
                     temperature_c: 25.0,
                 },
                 CornerPoint {
-                    process: CornerProcess::SS,
+                    process: ProcessCorner::SS,
                     voltage: 1.0,
                     temperature_c: 25.0,
                 },
@@ -595,11 +509,11 @@ mod tests {
     #[test]
     fn a_process_no_explicit_point_runs_needs_no_binding() {
         let config = CornerRunConfig {
-            process_corners: vec![CornerProcess::TT, CornerProcess::SS],
+            process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
             voltages: vec![1.0],
             temperatures_c: vec![25.0],
             points: vec![CornerPoint {
-                process: CornerProcess::TT,
+                process: ProcessCorner::TT,
                 voltage: 1.0,
                 temperature_c: 25.0,
             }],
@@ -614,11 +528,11 @@ mod tests {
     #[test]
     fn an_explicit_point_naming_an_undeclared_process_is_refused() {
         let config = CornerRunConfig {
-            process_corners: vec![CornerProcess::TT],
+            process_corners: vec![ProcessCorner::TT],
             voltages: vec![1.0],
             temperatures_c: vec![25.0],
             points: vec![CornerPoint {
-                process: CornerProcess::FF,
+                process: ProcessCorner::FF,
                 voltage: 1.0,
                 temperature_c: 25.0,
             }],
@@ -638,12 +552,12 @@ mod tests {
     #[test]
     fn an_explicit_list_is_exempt_from_the_diagonal_pairing_rule() {
         let config = CornerRunConfig {
-            process_corners: vec![CornerProcess::TT],
+            process_corners: vec![ProcessCorner::TT],
             voltages: vec![0.9, 1.0, 1.1],
             temperatures_c: vec![-40.0, 125.0],
             full_matrix: false,
             points: vec![CornerPoint {
-                process: CornerProcess::TT,
+                process: ProcessCorner::TT,
                 voltage: 0.9,
                 temperature_c: 125.0,
             }],
@@ -653,45 +567,5 @@ mod tests {
         config
             .validate()
             .expect("an explicit list states each point in full, so there is nothing to pair");
-    }
-
-    #[test]
-    fn binding_rejects_commented_terminal_cards_including_the_first_record() {
-        for terminal in [".end; done", ".END // done", " .end $ done", ".end"] {
-            for cards in [terminal.to_owned(), format!(".model fast D\n{terminal}")] {
-                let binding = CornerModelBinding {
-                    process: CornerProcess::FF,
-                    source_label: "models.lib [ff]".to_owned(),
-                    section: Some("ff".to_owned()),
-                    materialized_model_cards: cards,
-                };
-                assert!(
-                    binding
-                        .validate()
-                        .expect_err("model payloads cannot terminate the deck")
-                        .contains("terminal .end")
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn binding_rejects_unsafe_labels_and_unresolved_directives() {
-        let binding = CornerModelBinding {
-            process: CornerProcess::FF,
-            source_label: "models.lib\n.end".to_owned(),
-            section: Some("ff".to_owned()),
-            materialized_model_cards: ".model fast D (IS=1e-12)".to_owned(),
-        };
-
-        assert!(binding.validate().is_err());
-
-        let unresolved = CornerModelBinding {
-            process: CornerProcess::FF,
-            source_label: "models.lib [ff]".to_owned(),
-            section: Some("ff".to_owned()),
-            materialized_model_cards: ".include \"late.inc\"".to_owned(),
-        };
-        assert!(unresolved.validate().is_err());
     }
 }

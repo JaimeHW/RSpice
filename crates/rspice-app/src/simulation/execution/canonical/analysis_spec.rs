@@ -9,7 +9,7 @@
 use super::encode_dc_modes;
 
 use crate::services::simulation_runner::{
-    CornerProcess, PacFrequencySweep, PeriodicCarrier, PnoiseFrequencySweep, PxfFrequencySweep,
+    PacFrequencySweep, PeriodicCarrier, PnoiseFrequencySweep, PxfFrequencySweep,
 };
 use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
 use crate::simulation::dialog::{IntegrationMethod, OpConfig};
@@ -17,6 +17,7 @@ use crate::simulation::multi_run::{
     AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
     FrequencySweep, OptimizationAlgorithm, OptimizationGoal,
 };
+use rspice_app_types::product::ProcessCorner;
 
 use super::{CanonicalWriter, canonical_analysis_kind, encode_op_config, encode_op_fields};
 
@@ -1657,13 +1658,13 @@ pub(in crate::simulation) const fn analysis_kind_tag(spec: &AnalysisSpec) -> u8 
     canonical_analysis_kind(spec).tag()
 }
 
-pub(super) fn corner_process_tag(process: CornerProcess) -> u8 {
+pub(super) fn corner_process_tag(process: ProcessCorner) -> u8 {
     match process {
-        CornerProcess::TT => 0,
-        CornerProcess::SS => 1,
-        CornerProcess::FF => 2,
-        CornerProcess::SF => 3,
-        CornerProcess::FS => 4,
+        ProcessCorner::TT => 0,
+        ProcessCorner::SS => 1,
+        ProcessCorner::FF => 2,
+        ProcessCorner::SF => 3,
+        ProcessCorner::FS => 4,
     }
 }
 

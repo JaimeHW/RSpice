@@ -4,6 +4,7 @@
 //! share the same definitions and evidence contracts.
 
 mod authoring;
+mod binding;
 mod corner;
 mod corner_expansion;
 pub mod correlation;
@@ -20,6 +21,7 @@ mod types;
 mod validation;
 
 pub use authoring::*;
+pub use binding::CornerModelBinding;
 pub use corner::*;
 pub use definition_metadata::*;
 pub use model::*;

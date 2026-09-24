@@ -1,10 +1,9 @@
 //! What a corner declaration's family says about the points it declared.
 
 use super::*;
-use crate::services::simulation_runner::{
-    CornerBaseMode, CornerFrequencySweep, CornerProcess, CornerRunConfig,
-};
+use crate::services::simulation_runner::{CornerBaseMode, CornerFrequencySweep, CornerRunConfig};
 use crate::state::{AnalysisResultFamilyMetadata, AnalysisType};
+use rspice_app_types::product::ProcessCorner;
 
 /// A 1:1 resistive divider on a supply the corner axis derates by 10%, so
 /// every reduction below has an answer that can be written down: the output
@@ -19,7 +18,7 @@ const DIVIDER: &str = "corner family\n\
 
 fn contract(base_mode: CornerBaseMode) -> CornerRunConfig {
     CornerRunConfig {
-        process_corners: vec![CornerProcess::TT],
+        process_corners: vec![ProcessCorner::TT],
         voltages: vec![1.8, 1.62],
         supply_source_names: vec!["VDD".to_owned()],
         temperatures_c: vec![27.0, 85.0],

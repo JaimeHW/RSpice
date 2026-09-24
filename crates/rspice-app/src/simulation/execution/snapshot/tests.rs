@@ -51,7 +51,7 @@ fn pvt_selected_operating_point_controls_reach_each_worker_and_solve() {
             temperature_task(vec![27.0, 125.0])
         } else {
             corner_task(
-                vec![crate::services::simulation_runner::CornerProcess::TT],
+                vec![rspice_app_types::product::ProcessCorner::TT],
                 vec![1.0],
                 vec![27.0, 125.0],
                 true,
@@ -186,7 +186,7 @@ fn monte_carlo_task() -> QueuedAnalysis {
 }
 
 fn corner_task(
-    process_corners: Vec<crate::services::simulation_runner::CornerProcess>,
+    process_corners: Vec<rspice_app_types::product::ProcessCorner>,
     voltages: Vec<f64>,
     temperatures_c: Vec<f64>,
     full_matrix: bool,
@@ -214,14 +214,14 @@ fn corner_task(
 }
 
 fn corner_binding(
-    process: crate::services::simulation_runner::CornerProcess,
+    process: rspice_app_types::product::ProcessCorner,
     source_label: &str,
     saturation_current: &str,
-) -> crate::services::simulation_runner::CornerModelBinding {
-    crate::services::simulation_runner::CornerModelBinding {
+) -> rspice_model_library::CornerModelBinding {
+    rspice_model_library::CornerModelBinding {
         process,
         source_label: source_label.to_owned(),
-        section: Some(process.as_keyword().to_owned()),
+        section: Some(process.short_name().to_owned()),
         materialized_model_cards: format!(".model DPROCESS D (IS={saturation_current})"),
     }
 }
@@ -1296,10 +1296,10 @@ fn model_identity_set_order_does_not_change_snapshot_identity() {
 
 #[test]
 fn pvt_metadata_counts_the_exact_full_corner_matrix_declared_by_one_task() {
-    use crate::services::simulation_runner::CornerProcess;
+    use rspice_app_types::product::ProcessCorner;
     let mut matrix = parts();
     let mut corner = corner_task(
-        vec![CornerProcess::TT, CornerProcess::FF],
+        vec![ProcessCorner::TT, ProcessCorner::FF],
         vec![0.9, 1.1],
         vec![-40.0, 125.0],
         true,
@@ -1309,7 +1309,7 @@ fn pvt_metadata_counts_the_exact_full_corner_matrix_declared_by_one_task() {
         .corner
         .as_mut()
         .expect("corner config")
-        .model_bindings = vec![corner_binding(CornerProcess::FF, "ff.lib", "1e-11")];
+        .model_bindings = vec![corner_binding(ProcessCorner::FF, "ff.lib", "1e-11")];
     matrix.tasks = vec![prepared("corner", "Corner", corner)];
 
     let snapshot = PreparedRunSnapshot::new(matrix).expect("full corner matrix snapshot");
@@ -1356,11 +1356,11 @@ fn pvt_metadata_counts_the_exact_full_corner_matrix_declared_by_one_task() {
 /// every point — still pairs with any length.
 #[test]
 fn a_diagonal_corner_sweep_refuses_unequal_axes_and_shares_a_scalar_one() {
-    use crate::services::simulation_runner::CornerProcess;
+    use rspice_app_types::product::ProcessCorner;
 
     let mut unequal = parts();
     let mut corner = corner_task(
-        vec![CornerProcess::SS, CornerProcess::FF],
+        vec![ProcessCorner::SS, ProcessCorner::FF],
         vec![0.9, 1.0, 1.1],
         vec![-40.0, 125.0],
         false,
@@ -1371,8 +1371,8 @@ fn a_diagonal_corner_sweep_refuses_unequal_axes_and_shares_a_scalar_one() {
         .as_mut()
         .expect("corner config")
         .model_bindings = vec![
-        corner_binding(CornerProcess::SS, "ss.lib", "1e-13"),
-        corner_binding(CornerProcess::FF, "ff.lib", "1e-11"),
+        corner_binding(ProcessCorner::SS, "ss.lib", "1e-13"),
+        corner_binding(ProcessCorner::FF, "ff.lib", "1e-11"),
     ];
     unequal.tasks = vec![prepared("corner", "Corner", corner)];
 
@@ -1385,7 +1385,7 @@ fn a_diagonal_corner_sweep_refuses_unequal_axes_and_shares_a_scalar_one() {
 
     let mut paired = parts();
     let mut corner = corner_task(
-        vec![CornerProcess::SS, CornerProcess::FF],
+        vec![ProcessCorner::SS, ProcessCorner::FF],
         vec![1.0],
         vec![-40.0, 125.0],
         false,
@@ -1396,8 +1396,8 @@ fn a_diagonal_corner_sweep_refuses_unequal_axes_and_shares_a_scalar_one() {
         .as_mut()
         .expect("corner config")
         .model_bindings = vec![
-        corner_binding(CornerProcess::SS, "ss.lib", "1e-13"),
-        corner_binding(CornerProcess::FF, "ff.lib", "1e-11"),
+        corner_binding(ProcessCorner::SS, "ss.lib", "1e-13"),
+        corner_binding(ProcessCorner::FF, "ff.lib", "1e-11"),
     ];
     paired.tasks = vec![prepared("corner", "Corner", corner)];
 
@@ -1508,15 +1508,15 @@ fn pvt_operating_point_dispatches_three_exact_temperatures_and_retains_only_fina
 
 #[test]
 fn op_plus_ss_corner_has_no_unrequested_reference_point() {
-    use crate::services::simulation_runner::CornerProcess;
+    use rspice_app_types::product::ProcessCorner;
 
-    let mut ss_corner = corner_task(vec![CornerProcess::SS], vec![0.9], vec![125.0], true);
+    let mut ss_corner = corner_task(vec![ProcessCorner::SS], vec![0.9], vec![125.0], true);
     ss_corner
         .spec_options
         .corner
         .as_mut()
         .expect("corner config")
-        .model_bindings = vec![corner_binding(CornerProcess::SS, "ss.lib", "1e-13")];
+        .model_bindings = vec![corner_binding(ProcessCorner::SS, "ss.lib", "1e-13")];
     let mut ss_only = parts();
     ss_only.tasks.push(prepared("ss", "SS Corner", ss_corner));
 
@@ -1539,10 +1539,10 @@ fn op_plus_ss_corner_has_no_unrequested_reference_point() {
 
 #[test]
 fn process_and_voltage_axes_change_the_authorized_op_execution_contract() {
-    use crate::services::simulation_runner::CornerProcess;
+    use rspice_app_types::product::ProcessCorner;
 
     let mut corner = corner_task(
-        vec![CornerProcess::TT, CornerProcess::SS],
+        vec![ProcessCorner::TT, ProcessCorner::SS],
         vec![1.0, 1.2],
         vec![27.0],
         true,
@@ -1553,8 +1553,8 @@ fn process_and_voltage_axes_change_the_authorized_op_execution_contract() {
         .as_mut()
         .expect("corner config")
         .model_bindings = vec![
-        corner_binding(CornerProcess::TT, "tt.lib", "1e-12"),
-        corner_binding(CornerProcess::SS, "ss.lib", "1e-13"),
+        corner_binding(ProcessCorner::TT, "tt.lib", "1e-12"),
+        corner_binding(ProcessCorner::SS, "ss.lib", "1e-13"),
     ];
     let mut pvt = parts();
     pvt.executable_netlist = "pvt\nVDD in 0 1\nR1 in 0 1k\n.op\n.end\n".to_owned();
@@ -1659,16 +1659,16 @@ fn downstream_ordering_dependency_targets_the_final_expanded_op_point() {
 
 #[test]
 fn identical_coordinates_with_different_model_contracts_do_not_deduplicate() {
-    use crate::services::simulation_runner::CornerProcess;
+    use rspice_app_types::product::ProcessCorner;
 
     let corner_with = |label: &str, saturation_current: &str| {
-        let mut corner = corner_task(vec![CornerProcess::TT], vec![1.0], vec![27.0], true);
+        let mut corner = corner_task(vec![ProcessCorner::TT], vec![1.0], vec![27.0], true);
         corner
             .spec_options
             .corner
             .as_mut()
             .expect("corner config")
-            .model_bindings = vec![corner_binding(CornerProcess::TT, label, saturation_current)];
+            .model_bindings = vec![corner_binding(ProcessCorner::TT, label, saturation_current)];
         corner
     };
     let mut ambiguous_coordinates = parts();
@@ -2176,10 +2176,10 @@ fn expanded_op_points_are_attributed_and_an_unexpanded_task_is_not() {
 /// scoped to nominal cannot be answered by a derated point.
 #[test]
 fn a_corner_axis_marks_exactly_one_point_nominal_and_names_its_contract() {
-    use crate::services::simulation_runner::CornerProcess;
+    use rspice_app_types::product::ProcessCorner;
 
     let mut corner = corner_task(
-        vec![CornerProcess::TT, CornerProcess::SS],
+        vec![ProcessCorner::TT, ProcessCorner::SS],
         vec![1.0, 1.2],
         vec![27.0],
         true,
@@ -2190,8 +2190,8 @@ fn a_corner_axis_marks_exactly_one_point_nominal_and_names_its_contract() {
         .as_mut()
         .expect("corner config")
         .model_bindings = vec![
-        corner_binding(CornerProcess::TT, "tt.lib", "1e-12"),
-        corner_binding(CornerProcess::SS, "ss.lib", "1e-13"),
+        corner_binding(ProcessCorner::TT, "tt.lib", "1e-12"),
+        corner_binding(ProcessCorner::SS, "ss.lib", "1e-13"),
     ];
     let mut pvt = parts();
     pvt.executable_netlist = "pvt\nVDD in 0 1\nR1 in 0 1k\n.op\n.end\n".to_owned();
@@ -2242,7 +2242,8 @@ const CORNER_EVIDENCE_DECK: &str = "corner evidence\n\
 /// axis, paired diagonally so the nominal point and one derated point are the
 /// whole space.
 fn transient_corner_task() -> QueuedAnalysis {
-    use crate::services::simulation_runner::{CornerBaseMode, CornerProcess, CornerRunConfig};
+    use crate::services::simulation_runner::{CornerBaseMode, CornerRunConfig};
+    use rspice_app_types::product::ProcessCorner;
 
     QueuedAnalysis {
         numeric_override: None,
@@ -2250,7 +2251,7 @@ fn transient_corner_task() -> QueuedAnalysis {
         config: None,
         spec_options: SpecExecutionOptions {
             corner: Some(CornerRunConfig {
-                process_corners: vec![CornerProcess::TT, CornerProcess::SS],
+                process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
                 voltages: vec![1.8, 1.62],
                 supply_source_names: vec!["VDD".to_owned()],
                 temperatures_c: vec![27.0, 125.0],
@@ -2261,8 +2262,8 @@ fn transient_corner_task() -> QueuedAnalysis {
                     step_time: 1.0e-9,
                 },
                 model_bindings: vec![
-                    corner_binding(CornerProcess::TT, "tt.lib", "1e-12"),
-                    corner_binding(CornerProcess::SS, "ss.lib", "1e-13"),
+                    corner_binding(ProcessCorner::TT, "tt.lib", "1e-12"),
+                    corner_binding(ProcessCorner::SS, "ss.lib", "1e-13"),
                 ],
                 points: Vec::new(),
             }),

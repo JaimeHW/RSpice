@@ -1584,7 +1584,9 @@ fn statistical_deferred_file_waveforms_are_rejected_before_dispatch() {
 
 #[test]
 fn corner_waveforms_are_checked_after_materialization_and_scope_resolution() {
-    use crate::services::simulation_runner::{CornerModelBinding, CornerProcess, CornerRunConfig};
+    use crate::services::simulation_runner::CornerRunConfig;
+    use rspice_app_types::product::ProcessCorner;
+    use rspice_model_library::CornerModelBinding;
 
     let root = "deck\n.param file=2\nX1 out source level=3\nR1 out 0 1k\n.op\n.end\n";
     for (waveform, file_backed) in [
@@ -1597,9 +1599,9 @@ fn corner_waveforms_are_checked_after_materialization_and_scope_resolution() {
             config: None,
             spec_options: SpecExecutionOptions {
                 corner: Some(CornerRunConfig {
-                    process_corners: vec![CornerProcess::FF],
+                    process_corners: vec![ProcessCorner::FF],
                     model_bindings: vec![CornerModelBinding {
-                        process: CornerProcess::FF,
+                        process: ProcessCorner::FF,
                         source_label: "foundry.lib [FF]".to_owned(),
                         section: Some("FF".to_owned()),
                         materialized_model_cards: format!(
@@ -1628,7 +1630,9 @@ fn corner_waveforms_are_checked_after_materialization_and_scope_resolution() {
 
 #[test]
 fn every_materialized_corner_binding_is_audited_before_dispatch() {
-    use crate::services::simulation_runner::{CornerModelBinding, CornerProcess, CornerRunConfig};
+    use crate::services::simulation_runner::CornerRunConfig;
+    use rspice_app_types::product::ProcessCorner;
+    use rspice_model_library::CornerModelBinding;
 
     let task = QueuedAnalysis {
         numeric_override: None,
@@ -1636,9 +1640,9 @@ fn every_materialized_corner_binding_is_audited_before_dispatch() {
         config: None,
         spec_options: SpecExecutionOptions {
             corner: Some(CornerRunConfig {
-                process_corners: vec![CornerProcess::FF],
+                process_corners: vec![ProcessCorner::FF],
                 model_bindings: vec![CornerModelBinding {
-                    process: CornerProcess::FF,
+                    process: ProcessCorner::FF,
                     source_label: "foundry.lib [FF]".to_owned(),
                     section: Some("FF".to_owned()),
                     materialized_model_cards:

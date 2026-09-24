@@ -490,10 +490,11 @@ fn noise_digest_changes_for_every_exact_execution_field() {
 /// one identity and either's results could be attributed to the other.
 #[test]
 fn corner_digest_changes_when_points_are_excluded_from_the_same_axes() {
-    use crate::services::simulation_runner::{CornerPoint, CornerProcess, CornerRunConfig};
+    use crate::services::simulation_runner::{CornerPoint, CornerRunConfig};
+    use rspice_app_types::product::ProcessCorner;
 
     let axes = CornerRunConfig {
-        process_corners: vec![CornerProcess::TT],
+        process_corners: vec![ProcessCorner::TT],
         voltages: vec![0.9, 1.1],
         temperatures_c: vec![-40.0, 125.0],
         full_matrix: true,
@@ -501,7 +502,7 @@ fn corner_digest_changes_when_points_are_excluded_from_the_same_axes() {
         ..CornerRunConfig::default()
     };
     let point = |voltage: f64, temperature_c: f64| CornerPoint {
-        process: CornerProcess::TT,
+        process: ProcessCorner::TT,
         voltage,
         temperature_c,
     };

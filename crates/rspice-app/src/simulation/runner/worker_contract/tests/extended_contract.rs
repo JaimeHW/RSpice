@@ -857,8 +857,8 @@ fn worker_spec_request_preserves_parametric_temp_execution_options() {
 fn worker_spec_request_preserves_corner_execution_options() {
     let corner = crate::services::simulation_runner::CornerRunConfig {
         process_corners: vec![
-            crate::services::simulation_runner::CornerProcess::SS,
-            crate::services::simulation_runner::CornerProcess::FF,
+            rspice_app_types::product::ProcessCorner::SS,
+            rspice_app_types::product::ProcessCorner::FF,
         ],
         voltages: vec![0.9, 1.0, 1.1],
         supply_source_names: vec!["VDD".to_owned()],
@@ -870,14 +870,14 @@ fn worker_spec_request_preserves_corner_execution_options() {
             step_time: 10.0e-9,
         },
         model_bindings: vec![
-            crate::services::simulation_runner::CornerModelBinding {
-                process: crate::services::simulation_runner::CornerProcess::SS,
+            rspice_model_library::CornerModelBinding {
+                process: rspice_app_types::product::ProcessCorner::SS,
                 source_label: "C:/pdk/models.lib [ss]".to_owned(),
                 section: Some("ss".to_owned()),
                 materialized_model_cards: ".model slow D (IS=1e-13)".to_owned(),
             },
-            crate::services::simulation_runner::CornerModelBinding {
-                process: crate::services::simulation_runner::CornerProcess::FF,
+            rspice_model_library::CornerModelBinding {
+                process: rspice_app_types::product::ProcessCorner::FF,
                 source_label: "C:/pdk/models.lib [ff]".to_owned(),
                 section: Some("ff".to_owned()),
                 materialized_model_cards: ".model fast D (IS=1e-11)".to_owned(),
@@ -888,12 +888,12 @@ fn worker_spec_request_preserves_corner_execution_options() {
         // combinations the declaration removed.
         points: vec![
             crate::services::simulation_runner::CornerPoint {
-                process: crate::services::simulation_runner::CornerProcess::SS,
+                process: rspice_app_types::product::ProcessCorner::SS,
                 voltage: 0.9,
                 temperature_c: 125.0,
             },
             crate::services::simulation_runner::CornerPoint {
-                process: crate::services::simulation_runner::CornerProcess::FF,
+                process: rspice_app_types::product::ProcessCorner::FF,
                 voltage: 1.1,
                 temperature_c: -40.0,
             },

@@ -3901,8 +3901,8 @@ endmodule
 
         let corner_bindings = combined
             .corner_model_bindings(&[
-                crate::services::simulation_runner::CornerProcess::SS,
-                crate::services::simulation_runner::CornerProcess::FF,
+                rspice_app_types::product::ProcessCorner::SS,
+                rspice_app_types::product::ProcessCorner::FF,
             ])
             .expect("explicit signed corner sections materialize");
         assert_eq!(corner_bindings.len(), 2);

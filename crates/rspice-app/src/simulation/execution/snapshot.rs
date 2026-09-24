@@ -1997,7 +1997,7 @@ fn derive_pvt_points(
                 ensure_pvt_point_capacity(expanded.len(), points.len(), max_pvt_points)?;
                 expanded.extend(points.into_iter().map(
                     |(process, voltage, temperature_celsius)| PreparedPvtPoint {
-                        process: process_from_corner_runner(process),
+                        process,
                         voltage: Some(voltage),
                         supply_source_names: corner.supply_source_names.clone(),
                         temperature_celsius,
@@ -2120,11 +2120,11 @@ fn corner_contract_digest(
     writer.sequence(contract.model_bindings.len());
     for binding in &contract.model_bindings {
         writer.u8(match binding.process {
-            crate::services::simulation_runner::CornerProcess::TT => 0,
-            crate::services::simulation_runner::CornerProcess::SS => 1,
-            crate::services::simulation_runner::CornerProcess::FF => 2,
-            crate::services::simulation_runner::CornerProcess::SF => 3,
-            crate::services::simulation_runner::CornerProcess::FS => 4,
+            rspice_app_types::product::ProcessCorner::TT => 0,
+            rspice_app_types::product::ProcessCorner::SS => 1,
+            rspice_app_types::product::ProcessCorner::FF => 2,
+            rspice_app_types::product::ProcessCorner::SF => 3,
+            rspice_app_types::product::ProcessCorner::FS => 4,
         });
         writer.string(&binding.source_label);
         writer.option(binding.section.as_ref(), |writer, section| {
@@ -2133,32 +2133,6 @@ fn corner_contract_digest(
         writer.string(&binding.materialized_model_cards);
     }
     writer.finish()
-}
-
-fn process_from_corner_runner(
-    process: crate::services::simulation_runner::CornerProcess,
-) -> ProcessCorner {
-    use crate::services::simulation_runner::CornerProcess;
-    match process {
-        CornerProcess::TT => ProcessCorner::TT,
-        CornerProcess::SS => ProcessCorner::SS,
-        CornerProcess::FF => ProcessCorner::FF,
-        CornerProcess::SF => ProcessCorner::SF,
-        CornerProcess::FS => ProcessCorner::FS,
-    }
-}
-
-fn process_to_corner_runner(
-    process: ProcessCorner,
-) -> crate::services::simulation_runner::CornerProcess {
-    use crate::services::simulation_runner::CornerProcess;
-    match process {
-        ProcessCorner::TT => CornerProcess::TT,
-        ProcessCorner::SS => CornerProcess::SS,
-        ProcessCorner::FF => CornerProcess::FF,
-        ProcessCorner::SF => CornerProcess::SF,
-        ProcessCorner::FS => CornerProcess::FS,
-    }
 }
 
 fn snapshot_digest(

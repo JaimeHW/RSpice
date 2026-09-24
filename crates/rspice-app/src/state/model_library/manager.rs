@@ -40,7 +40,8 @@ use super::{
     first_unreachable_source,
 };
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
-use crate::services::simulation_runner::{CornerModelBinding, CornerProcess};
+use rspice_app_types::product::ProcessCorner as CornerProcess;
+use rspice_model_library::CornerModelBinding;
 
 /// Published result of one atomic project-model definition transaction.
 #[derive(Debug, Clone)]
@@ -213,16 +214,6 @@ const fn pdk_model_process(process: CornerProcess) -> crate::state::pdk_config::
         CornerProcess::FF => crate::state::pdk_config::PdkModelProcess::Ff,
         CornerProcess::SF => crate::state::pdk_config::PdkModelProcess::Sf,
         CornerProcess::FS => crate::state::pdk_config::PdkModelProcess::Fs,
-    }
-}
-
-const fn simulation_corner_process(process: crate::product::ProcessCorner) -> CornerProcess {
-    match process {
-        crate::product::ProcessCorner::TT => CornerProcess::TT,
-        crate::product::ProcessCorner::SS => CornerProcess::SS,
-        crate::product::ProcessCorner::FF => CornerProcess::FF,
-        crate::product::ProcessCorner::SF => CornerProcess::SF,
-        crate::product::ProcessCorner::FS => CornerProcess::FS,
     }
 }
 
@@ -833,8 +824,7 @@ impl SealedModelExecutionSources {
         &self,
         process: crate::product::ProcessCorner,
     ) -> Result<ModelExecutionPlan, String> {
-        let corner_process = simulation_corner_process(process);
-        let materialized = self.bindings_for_processes(&[corner_process], true)?;
+        let materialized = self.bindings_for_processes(&[process], true)?;
         let (bindings, applied_resolutions) =
             resolve_materialized_definition_namespace(materialized, &self.resolution_records)?;
 
@@ -846,11 +836,7 @@ impl SealedModelExecutionSources {
                     library
                         .corners
                         .iter()
-                        .find(|corner| {
-                            corner
-                                .name
-                                .eq_ignore_ascii_case(corner_process.as_keyword())
-                        })
+                        .find(|corner| corner.name.eq_ignore_ascii_case(process.short_name()))
                         .map(|corner| corner.name.clone())
                 });
                 (library.name.clone(), selected)
@@ -859,7 +845,7 @@ impl SealedModelExecutionSources {
 
         let mut hasher = Sha256::new();
         hasher.update(b"rspice.model-execution-plan/v2\0");
-        hasher.update(corner_process.as_keyword().as_bytes());
+        hasher.update(process.short_name().as_bytes());
         for (library, corner) in &selected_library_corners {
             hash_plan_field(&mut hasher, library.as_bytes());
             hash_plan_field(&mut hasher, corner.as_deref().unwrap_or("").as_bytes());
@@ -926,7 +912,7 @@ impl SealedModelExecutionSources {
             {
                 return Err(format!(
                     "{} requires a PDK model library with an explicit process section",
-                    process.as_keyword()
+                    process.short_name()
                 ));
             }
             return Ok(Vec::new());
@@ -935,7 +921,7 @@ impl SealedModelExecutionSources {
         let mut bindings = Vec::new();
         for process in processes {
             for library in &self.libraries {
-                let keyword = process.as_keyword();
+                let keyword = process.short_name();
                 let requested_corner = honor_nominal_selection
                     .then_some(library.selected_corner.as_deref())
                     .flatten()
@@ -1020,7 +1006,7 @@ impl SealedModelExecutionSources {
                         .unwrap_or_else(|| "signed PDK".to_owned());
                     return Err(format!(
                         "{package} does not supply an explicit {} model-source contract",
-                        process.as_keyword()
+                        process.short_name()
                     ));
                 }
                 for source in selected {
@@ -1033,7 +1019,7 @@ impl SealedModelExecutionSources {
                         .map_err(|error| {
                             format!(
                                 "Failed to materialize signed PDK {} source '{}' from '{}': {error}",
-                                process.as_keyword(),
+                                process.short_name(),
                                 source.source_id,
                                 source.artifact_path
                             )
@@ -1762,7 +1748,7 @@ impl ModelLibraryManager {
     /// about" when the failure sentence itself names only the process.
     #[must_use]
     pub fn libraries_declaring_process(&self, process: crate::product::ProcessCorner) -> Vec<&str> {
-        let keyword = simulation_corner_process(process).as_keyword();
+        let keyword = process.short_name();
         self.libraries_sorted()
             .into_iter()
             .filter(|library| library.declares_process(keyword))

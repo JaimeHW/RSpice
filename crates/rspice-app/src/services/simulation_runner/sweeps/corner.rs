@@ -18,7 +18,7 @@ use rspice_core::abort_signal::NoAbort;
 pub(crate) fn materialize_corner_process_source(
     source: &str,
     config: &CornerRunConfig,
-    process: super::types::CornerProcess,
+    process: rspice_app_types::product::ProcessCorner,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<String> {
     ensure_not_aborted(abort)?;
@@ -26,7 +26,7 @@ pub(crate) fn materialize_corner_process_source(
     if !config.process_corners.contains(&process) {
         return Err(ServiceRunError::Failure(format!(
             "{} is not an enabled point in the prepared corner contract",
-            process.as_keyword()
+            process.short_name()
         )));
     }
     if config.model_bindings.is_empty() {
@@ -39,7 +39,7 @@ pub(crate) fn materialize_corner_process_source(
 fn materialize_corner_process_source_from_stripped(
     stripped_source: &str,
     config: &CornerRunConfig,
-    process: super::types::CornerProcess,
+    process: rspice_app_types::product::ProcessCorner,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<String> {
     let mut model_cards = Vec::new();
@@ -156,8 +156,10 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::super::execution::expand_corner_points;
-    use super::super::types::{CornerBaseMode, CornerModelBinding, CornerProcess};
+    use super::super::types::CornerBaseMode;
     use super::*;
+    use rspice_app_types::product::ProcessCorner;
+    use rspice_model_library::CornerModelBinding;
 
     struct AbortOnPoll {
         abort_on: usize,
@@ -263,13 +265,13 @@ mod tests {
     #[test]
     fn explicit_library_section_drives_non_typical_corner() {
         let config = CornerRunConfig {
-            process_corners: vec![CornerProcess::FF],
+            process_corners: vec![ProcessCorner::FF],
             voltages: vec![1.0],
             temperatures_c: vec![27.0],
             nominal_voltage: Some(1.0),
             base_mode: CornerBaseMode::Op,
             model_bindings: vec![CornerModelBinding {
-                process: CornerProcess::FF,
+                process: ProcessCorner::FF,
                 source_label: "models.lib [FF]".to_owned(),
                 section: Some("FF".to_owned()),
                 materialized_model_cards: ".model DFAST D (IS=1e-12)".to_owned(),
@@ -282,13 +284,13 @@ mod tests {
              {REFERENCE_MODEL_BINDING_END}\n.op\n.end\n"
         );
 
-        let bound = materialize_corner_process_source(&deck, &config, CornerProcess::FF, &NoAbort)
+        let bound = materialize_corner_process_source(&deck, &config, ProcessCorner::FF, &NoAbort)
             .expect("the selected FF section supplies DFAST");
 
         assert!(bound.contains(".model DFAST D (IS=1e-12)"), "{bound}");
         assert!(!bound.contains("IS=1e-9"), "{bound}");
         assert!(
-            materialize_corner_process_source(&deck, &config, CornerProcess::TT, &NoAbort)
+            materialize_corner_process_source(&deck, &config, ProcessCorner::TT, &NoAbort)
                 .expect_err("TT is not a point of this contract")
                 .to_string()
                 .contains("not an enabled point")
@@ -298,7 +300,7 @@ mod tests {
     #[test]
     fn a_diagonal_sweep_refuses_unequal_axes_rather_than_cycling_the_shorter_one() {
         let unequal = CornerRunConfig {
-            process_corners: vec![CornerProcess::TT],
+            process_corners: vec![ProcessCorner::TT],
             voltages: vec![0.9, 1.0],
             supply_source_names: vec!["VDD".to_owned()],
             temperatures_c: vec![-40.0, 27.0, 125.0],
@@ -329,9 +331,9 @@ mod tests {
     fn process_binding_honors_an_abort_raised_while_it_reads_the_deck() {
         let abort = AbortOnPoll::new(1);
         let config = CornerRunConfig {
-            process_corners: vec![CornerProcess::FF],
+            process_corners: vec![ProcessCorner::FF],
             model_bindings: vec![CornerModelBinding {
-                process: CornerProcess::FF,
+                process: ProcessCorner::FF,
                 source_label: "models.lib [FF]".to_owned(),
                 section: Some("FF".to_owned()),
                 materialized_model_cards: ".model DFAST D (IS=1e-12)".to_owned(),
@@ -342,7 +344,7 @@ mod tests {
         let result = materialize_corner_process_source(
             "abort\nR1 1 0 1k\n.op\n.end\n",
             &config,
-            CornerProcess::FF,
+            ProcessCorner::FF,
             &abort,
         );
 

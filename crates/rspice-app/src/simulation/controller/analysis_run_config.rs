@@ -300,33 +300,17 @@ impl SimulationController {
         corner_cfg: &crate::simulation::dialog::corner::CornerConfig,
         sealed_model_sources: &crate::state::model_library::SealedModelExecutionSources,
     ) -> Result<crate::services::simulation_runner::CornerRunConfig, String> {
-        use crate::product::ProcessCorner;
         use crate::services::simulation_runner::{
-            CornerBaseMode, CornerFrequencySweep, CornerPoint, CornerProcess, CornerRunConfig,
+            CornerBaseMode, CornerFrequencySweep, CornerPoint, CornerRunConfig,
         };
         use crate::simulation::dialog::corner::CornerBaseAnalysis;
 
-        fn corner_process(corner: ProcessCorner) -> CornerProcess {
-            match corner {
-                ProcessCorner::TT => CornerProcess::TT,
-                ProcessCorner::SS => CornerProcess::SS,
-                ProcessCorner::FF => CornerProcess::FF,
-                ProcessCorner::SF => CornerProcess::SF,
-                ProcessCorner::FS => CornerProcess::FS,
-            }
-        }
-
-        let process_corners: Vec<CornerProcess> = corner_cfg
-            .process_corners
-            .iter()
-            .copied()
-            .map(corner_process)
-            .collect();
+        let process_corners = corner_cfg.process_corners.clone();
         let points: Vec<CornerPoint> = corner_cfg
             .points
             .iter()
             .map(|point| CornerPoint {
-                process: corner_process(point.process),
+                process: point.process,
                 voltage: point.voltage,
                 temperature_c: point.temperature_celsius,
             })
