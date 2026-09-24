@@ -2,13 +2,13 @@
 
 use super::{PreparedTypedResultCsv, prepare_typed_result_csv};
 use crate::state::{AnalysisResultPayload, SimulationRun};
+use rspice_formats::table::CsvTableMerger;
 
 pub(super) fn prepare(
     run: &SimulationRun,
     indices: &[usize],
 ) -> Result<PreparedTypedResultCsv, String> {
-    let mut columns = vec!["analysis_sequence".to_owned(), "analysis_label".to_owned()];
-    let mut tables = Vec::new();
+    let mut merger = CsvTableMerger::new();
     for &index in indices {
         let analysis = run
             .analyses
@@ -30,43 +30,12 @@ pub(super) fn prepare(
             .ok_or("Noise spectrum cannot be exported")?
             .contents
         };
-        let mut reader = csv::Reader::from_reader(contents.as_bytes());
-        let headers = reader.headers().map_err(|e| e.to_string())?.clone();
-        for header in &headers {
-            if !columns.iter().any(|column| column == header) {
-                columns.push(header.to_owned());
-            }
-        }
-        let rows = reader
-            .records()
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        tables.push((analysis, headers, rows));
+        merger.push(analysis.id.to_string(), &analysis.label, &contents)?;
     }
-    let mut writer = csv::Writer::from_writer(Vec::new());
-    writer.write_record(&columns).map_err(|e| e.to_string())?;
-    let mut count = 0;
-    for (analysis, headers, rows) in tables {
-        let mapping = headers
-            .iter()
-            .map(|header| columns.iter().position(|c| c == header).unwrap())
-            .collect::<Vec<_>>();
-        let sequence = analysis.id.to_string();
-        for row in rows {
-            let mut cells = vec![""; columns.len()];
-            for (value, &index) in row.iter().zip(&mapping) {
-                cells[index] = value;
-            }
-            cells[0] = &sequence;
-            cells[1] = &analysis.label;
-            writer.write_record(cells).map_err(|e| e.to_string())?;
-            count += 1;
-        }
-    }
-    let bytes = writer.into_inner().map_err(|e| e.to_string())?;
+    let (contents, count) = merger.finish()?;
     Ok(PreparedTypedResultCsv {
         default_name: "rspice-noise-results.csv",
-        contents: String::from_utf8(bytes).map_err(|e| e.to_string())?,
+        contents,
         detail: format!(
             "{count} noise spectrum and evidence rows across {} analyses",
             indices.len()

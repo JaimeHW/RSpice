@@ -80,9 +80,100 @@ pub fn csv_to_tsv(contents: &str) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|error| format!("TSV encoder returned invalid UTF-8: {error}"))
 }
 
+struct ParsedLabeledCsvTable {
+    sequence: String,
+    label: String,
+    headers: csv::StringRecord,
+    rows: Vec<csv::StringRecord>,
+}
+
+/// Accumulate selected CSV tables in caller order, parsing each immediately.
+pub struct CsvTableMerger {
+    columns: Vec<String>,
+    parsed: Vec<ParsedLabeledCsvTable>,
+}
+
+impl Default for CsvTableMerger {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CsvTableMerger {
+    pub fn new() -> Self {
+        Self {
+            columns: vec!["analysis_sequence".to_owned(), "analysis_label".to_owned()],
+            parsed: Vec::new(),
+        }
+    }
+
+    /// Parse one validated table before the caller selects the next analysis.
+    pub fn push(&mut self, sequence: String, label: &str, contents: &str) -> Result<(), String> {
+        let mut reader = csv::Reader::from_reader(contents.as_bytes());
+        let headers = reader.headers().map_err(|error| error.to_string())?.clone();
+        for header in &headers {
+            if !self.columns.iter().any(|column| column == header) {
+                self.columns.push(header.to_owned());
+            }
+        }
+        let rows = reader
+            .records()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        self.parsed.push(ParsedLabeledCsvTable {
+            sequence,
+            label: label.to_owned(),
+            headers,
+            rows,
+        });
+        Ok(())
+    }
+
+    /// Encode the union of columns and return the text and data-row count.
+    pub fn finish(self) -> Result<(String, usize), String> {
+        let mut writer = csv::Writer::from_writer(Vec::new());
+        writer
+            .write_record(&self.columns)
+            .map_err(|error| error.to_string())?;
+        let mut count = 0;
+        for table in self.parsed {
+            let mapping = table
+                .headers
+                .iter()
+                .map(|header| {
+                    self.columns
+                        .iter()
+                        .position(|column| column == header)
+                        .unwrap()
+                })
+                .collect::<Vec<_>>();
+            for row in table.rows {
+                let mut cells = vec![""; self.columns.len()];
+                for (value, &index) in row.iter().zip(&mapping) {
+                    cells[index] = value;
+                }
+                cells[0] = &table.sequence;
+                cells[1] = &table.label;
+                writer
+                    .write_record(cells)
+                    .map_err(|error| error.to_string())?;
+                count += 1;
+            }
+        }
+        let bytes = writer.into_inner().map_err(|error| error.to_string())?;
+        Ok((
+            String::from_utf8(bytes).map_err(|error| error.to_string())?,
+            count,
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{EngineeringTableSource, csv_to_tsv, encode_delimited_table, escape_csv_field};
+    use super::{
+        CsvTableMerger, EngineeringTableSource, csv_to_tsv, encode_delimited_table,
+        escape_csv_field,
+    };
 
     struct SelectedTable;
 
@@ -128,6 +219,24 @@ mod tests {
         assert_eq!(
             csv_to_tsv(&csv).unwrap(),
             "name\tvalue\na,b\t\"one\"\"two\nthree\"\n"
+        );
+    }
+
+    #[test]
+    fn labeled_tables_merge_different_columns_and_quote_labels() {
+        let mut merger = CsvTableMerger::new();
+        merger
+            .push("7".to_owned(), "run,one", "kind,value\nspectrum,1\n")
+            .unwrap();
+        merger
+            .push("8".to_owned(), "run two", "status,kind\nready,metadata\n")
+            .unwrap();
+        assert_eq!(
+            merger.finish().unwrap(),
+            (
+                "analysis_sequence,analysis_label,kind,value,status\n7,\"run,one\",spectrum,1,\n8,run two,metadata,,ready\n".to_owned(),
+                2
+            )
         );
     }
 }
