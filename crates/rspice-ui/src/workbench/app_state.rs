@@ -1064,8 +1064,7 @@ impl AppState {
                     .to_owned(),
             );
         }
-        let current_digest =
-            crate::workbench::documents::netlist_document::source_content_digest(source);
+        let current_digest = crate::state::content_digest(source);
         if active_document
             == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
             && (self.ui.netlist.generation_error.is_some()

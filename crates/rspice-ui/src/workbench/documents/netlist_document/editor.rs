@@ -563,7 +563,7 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
                     ))
                     .with_line(materialized_external_line),
                 ];
-                let validation_id = super::source_content_digest(&buffer).to_string();
+                let validation_id = crate::state::content_digest(&buffer).to_string();
                 for diagnostic in &mut diagnostics {
                     diagnostic.bind_validation(revision, &validation_id);
                 }
@@ -597,7 +597,7 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
         }
     };
     diagnostics.extend(shadowed_include_diagnostics(state, &buffer));
-    let validation_id = super::source_content_digest(&buffer).to_string();
+    let validation_id = crate::state::content_digest(&buffer).to_string();
     for diagnostic in &mut diagnostics {
         diagnostic.bind_validation(revision, &validation_id);
     }

@@ -1311,8 +1311,7 @@ fn validated_owned_source_can_run_before_external_source_synchronization() {
             edited.to_owned(),
         )
     );
-    let edited_digest =
-        crate::workbench::documents::netlist_document::source_content_digest(edited);
+    let edited_digest = crate::state::content_digest(edited);
     assert_ne!(
         app.state.ui.netlist.externally_saved_content_digest,
         Some(edited_digest)

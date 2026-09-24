@@ -971,11 +971,7 @@ fn current_result_source_digest(app: &RSpiceApp) -> Option<ContentDigest> {
         && netlist.generated_input_digest.is_some()
         && netlist.generated_input_digest == netlist.current_generation_input_digest
         && !app.state.simulation.netlist_content.trim().is_empty())
-    .then(|| {
-        crate::workbench::documents::netlist_document::source_content_digest(
-            &app.state.simulation.netlist_content,
-        )
-    })
+    .then(|| crate::state::content_digest(&app.state.simulation.netlist_content))
 }
 
 fn run_has_current_success_authority(
@@ -2066,8 +2062,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = Workspace::Results;
         let source = "R1 1 0 1k\n";
-        let source_digest =
-            crate::workbench::documents::netlist_document::source_content_digest(source);
+        let source_digest = crate::state::content_digest(source);
         let generation_input = digest(0x81);
         app.state.simulation.netlist_content = source.to_owned();
         app.state.ui.netlist.generated_input_digest = Some(generation_input);

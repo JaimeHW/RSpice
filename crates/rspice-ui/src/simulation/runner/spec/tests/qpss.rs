@@ -481,7 +481,7 @@ pub(super) fn op_dependencies(
             op_deck,
         )
         .unwrap();
-    let source = crate::workbench::documents::netlist_document::source_content_digest(basis);
+    let source = crate::state::content_digest(basis);
     let artifact = ExecutionArtifactEnvelope::from_dc_operating_point_result(
         snapshot,
         binding.producer_instance_id(),
@@ -615,10 +615,7 @@ fn qpss_op_handoff_preserves_environment_and_consumers_across_worker_transport()
         &HashMap::from([(binding.producer_instance_id(), artifact)]),
     )
     .unwrap();
-    consumers.bind_source(
-        &consumer_deck,
-        crate::workbench::documents::netlist_document::source_content_digest(basis),
-    );
+    consumers.bind_source(&consumer_deck, crate::state::content_digest(basis));
     let (metadata, buffers) = consumers.encode_transfer().unwrap();
     let changed = metadata.replace(
         "\"temperature_celsius\":37.0",

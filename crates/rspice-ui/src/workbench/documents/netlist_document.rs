@@ -46,11 +46,6 @@ pub use editor::show as show_editor;
 pub(crate) use executed_deck::run_snapshot_source;
 pub use executed_deck::{ExecutedDeckSelection, ExecutedDeckVerification};
 
-/// Stable identity for the exact UTF-8 source bytes visible in the editor.
-pub fn source_content_digest(source: &str) -> crate::product::ContentDigest {
-    crate::state::content_digest(source)
-}
-
 /// Exact, derived state of one project-owned netlist publication.
 ///
 /// Project dirtiness, external publication, validation, and run eligibility
@@ -170,7 +165,7 @@ impl OwnedNetlistReplacement {
         Self {
             target: OwnedNetlistReplacementTarget::Root,
             original: original.to_owned(),
-            expected_digest: source_content_digest(original),
+            expected_digest: crate::state::content_digest(original),
             replacement,
             replacement_count,
         }
@@ -186,7 +181,7 @@ impl OwnedNetlistReplacement {
         Self {
             target: OwnedNetlistReplacementTarget::Dependency(logical_identity.into()),
             original: original.to_owned(),
-            expected_digest: source_content_digest(original),
+            expected_digest: crate::state::content_digest(original),
             replacement,
             replacement_count,
         }
@@ -202,7 +197,7 @@ impl OwnedNetlistReplacement {
         Self {
             target: OwnedNetlistReplacementTarget::RetainedRoot(deck_id),
             original: original.to_owned(),
-            expected_digest: source_content_digest(original),
+            expected_digest: crate::state::content_digest(original),
             replacement,
             replacement_count,
         }
@@ -222,7 +217,7 @@ impl OwnedNetlistReplacement {
                 logical_identity: logical_identity.into(),
             },
             original: original.to_owned(),
-            expected_digest: source_content_digest(original),
+            expected_digest: crate::state::content_digest(original),
             replacement,
             replacement_count,
         }
@@ -234,7 +229,7 @@ impl OwnedNetlistReplacement {
         Self {
             target: self.target.clone(),
             original: self.replacement.clone(),
-            expected_digest: source_content_digest(&self.replacement),
+            expected_digest: crate::state::content_digest(&self.replacement),
             replacement: self.original.clone(),
             replacement_count: self.replacement_count,
         }
@@ -342,7 +337,7 @@ fn replace_owned_sources_atomically_impl(
                     return Err("The root deck was included twice in one replacement.".to_owned());
                 }
                 root_seen = true;
-                if source_content_digest(root_source) != edit.expected_digest
+                if crate::state::content_digest(root_source) != edit.expected_digest
                     || current_document.content_digest() != edit.expected_digest
                 {
                     return Err(
@@ -396,7 +391,7 @@ fn replace_owned_sources_atomically_impl(
                 let original = original_dependencies[index]
                     .source()
                     .ok_or_else(|| format!("Owned include {identity:?} is no longer resolved."))?;
-                if source_content_digest(original) != edit.expected_digest
+                if crate::state::content_digest(original) != edit.expected_digest
                     || include.content_digest != edit.expected_digest
                 {
                     return Err(format!(
@@ -414,7 +409,7 @@ fn replace_owned_sources_atomically_impl(
                     .revision
                     .checked_add(1)
                     .ok_or_else(|| format!("Owned include {identity:?} revision overflowed."))?;
-                include.content_digest = source_content_digest(&edit.replacement);
+                include.content_digest = crate::state::content_digest(&edit.replacement);
                 dependencies_changed = true;
                 changed_count = changed_count
                     .checked_add(edit.replacement_count)
@@ -433,7 +428,7 @@ fn replace_owned_sources_atomically_impl(
                         format!("Retained top deck {deck_id} is no longer available.")
                     })?;
                 if deck.document.content_digest() != edit.expected_digest
-                    || source_content_digest(deck.document.source()) != edit.expected_digest
+                    || crate::state::content_digest(deck.document.source()) != edit.expected_digest
                 {
                     return Err(format!(
                         "Retained top deck {:?} changed after search results were produced; no source was changed.",
@@ -514,7 +509,7 @@ fn replace_owned_sources_atomically_impl(
                             deck.descriptor.artifact_name
                         )
                     })?;
-                if source_content_digest(&original) != edit.expected_digest
+                if crate::state::content_digest(&original) != edit.expected_digest
                     || include.content_digest != edit.expected_digest
                 {
                     return Err(format!(
@@ -536,7 +531,7 @@ fn replace_owned_sources_atomically_impl(
                 include.revision = include.revision.checked_add(1).ok_or_else(|| {
                     format!("Owned include {logical_identity:?} revision overflowed.")
                 })?;
-                include.content_digest = source_content_digest(&edit.replacement);
+                include.content_digest = crate::state::content_digest(&edit.replacement);
                 changed_count = changed_count
                     .checked_add(edit.replacement_count)
                     .ok_or_else(|| "Replacement count overflowed.".to_owned())?;

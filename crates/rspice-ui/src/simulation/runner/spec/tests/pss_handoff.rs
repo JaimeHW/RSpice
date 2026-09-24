@@ -83,10 +83,7 @@ fn pss_op_handoff_preserves_environment_for_all_consumers() {
         &HashMap::from([(binding.producer_instance_id(), artifact)]),
     )
     .unwrap();
-    dependencies.bind_source(
-        &consumer_deck,
-        crate::workbench::documents::netlist_document::source_content_digest(basis),
-    );
+    dependencies.bind_source(&consumer_deck, crate::state::content_digest(basis));
     let (metadata, buffers) = dependencies.encode_transfer().unwrap();
     let changed = metadata.replace(
         "\"temperature_celsius\":37.0",

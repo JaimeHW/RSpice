@@ -58,10 +58,7 @@ fn hb_op_handoff_preserves_environment_for_all_consumers() {
             })
             .unwrap_or_else(|| hb_deck.clone());
         let mut dependencies = dependencies.clone();
-        dependencies.bind_source(
-            &deck,
-            crate::workbench::documents::netlist_document::source_content_digest(basis),
-        );
+        dependencies.bind_source(&deck, crate::state::content_digest(basis));
         let solved = run(producer.clone(), Default::default(), &deck, &dependencies).unwrap();
         let SimulationResult::HarmonicBalance {
             operating_point, ..
@@ -122,10 +119,7 @@ fn hb_op_handoff_preserves_environment_for_all_consumers() {
         &HashMap::from([(binding.producer_instance_id(), artifact)]),
     )
     .unwrap();
-    dependencies.bind_source(
-        &consumer_deck,
-        crate::workbench::documents::netlist_document::source_content_digest(basis),
-    );
+    dependencies.bind_source(&consumer_deck, crate::state::content_digest(basis));
     let (metadata, buffers) = dependencies.encode_transfer().unwrap();
     let changed = metadata.replace(
         "\"temperature_celsius\":37.0",

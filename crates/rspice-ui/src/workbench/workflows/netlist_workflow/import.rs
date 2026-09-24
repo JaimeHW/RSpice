@@ -111,8 +111,7 @@ pub(super) fn apply_imported_netlist_transaction(
     candidate.design_execution_epoch = candidate.design_execution_epoch.wrapping_add(1);
     candidate.ui.netlist = Default::default();
     candidate.workbench.netlist_open_documents.clear();
-    let source_digest =
-        crate::workbench::documents::netlist_document::source_content_digest(&source);
+    let source_digest = crate::state::content_digest(&source);
     let reopenable_import = source_path.is_some();
     candidate.workspace.netlist_source = Some(source.clone());
     candidate.workspace.netlist_document = Some(document.clone());

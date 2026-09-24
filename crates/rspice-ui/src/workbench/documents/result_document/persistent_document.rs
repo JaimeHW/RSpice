@@ -282,11 +282,7 @@ fn current_result_source_digest(state: &AppState) -> Option<ContentDigest> {
         && netlist.generated_input_digest.is_some()
         && netlist.generated_input_digest == netlist.current_generation_input_digest
         && !state.simulation.netlist_content.trim().is_empty())
-    .then(|| {
-        crate::workbench::documents::netlist_document::source_content_digest(
-            &state.simulation.netlist_content,
-        )
-    })
+    .then(|| crate::state::content_digest(&state.simulation.netlist_content))
 }
 
 fn run_matches_current_authority(

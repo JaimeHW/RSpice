@@ -52,8 +52,7 @@ pub(crate) fn save_owned_netlist_source(
         ));
         return false;
     }
-    let visible_digest =
-        crate::workbench::documents::netlist_document::source_content_digest(&source);
+    let visible_digest = crate::state::content_digest(&source);
     let default_name = state
         .workspace
         .netlist_source_path

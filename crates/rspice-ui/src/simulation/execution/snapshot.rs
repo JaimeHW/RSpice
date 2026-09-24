@@ -1210,8 +1210,7 @@ impl PreparedRunSnapshot {
                 .executable_netlist_override
                 .as_deref()
                 .unwrap_or(&parts.executable_netlist);
-            task.source_basis_digest =
-                Some(crate::workbench::documents::netlist_document::source_content_digest(deck));
+            task.source_basis_digest = Some(crate::state::content_digest(deck));
             let Some(block) = task
                 .task
                 .numeric_override
@@ -1753,7 +1752,7 @@ fn validate_prepared_task_integrity(
         .as_deref()
         .unwrap_or(executable_netlist);
     let exact_source_digest = if task.executable_netlist_override.is_some() {
-        crate::workbench::documents::netlist_document::source_content_digest(exact_source)
+        crate::state::content_digest(exact_source)
     } else {
         source_digest
     };

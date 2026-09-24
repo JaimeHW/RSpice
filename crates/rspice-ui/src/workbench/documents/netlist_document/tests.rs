@@ -109,7 +109,7 @@ fn the_visible_outline_is_parsed_once_per_change_and_never_reused_across_one() {
 fn reactivating_the_active_owned_root_preserves_validation_evidence() {
     let mut state = owned_dependency_state();
     state.ui.netlist.revision = 9;
-    let digest = source_content_digest(ROOT);
+    let digest = crate::state::content_digest(ROOT);
     state.ui.netlist.validation = Some(NetlistValidationReceipt {
         visible_content_digest: digest,
         executable_source_digest: crate::product::ContentDigest::from_bytes([0x51; 32]),

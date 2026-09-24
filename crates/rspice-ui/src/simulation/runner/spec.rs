@@ -518,10 +518,7 @@ mod tests {
             &HashMap::from([(producer, artifact)]),
         )
         .expect("the exact producer binding resolves");
-        resolved.bind_source(
-            netlist,
-            crate::workbench::documents::netlist_document::source_content_digest(netlist),
-        );
+        resolved.bind_source(netlist, crate::state::content_digest(netlist));
         let (metadata, buffers) = resolved
             .encode_transfer()
             .expect("HB state serializes for worker transport");

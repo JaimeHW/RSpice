@@ -2690,10 +2690,7 @@ fn periodic_op_handoff_snapshot_preserves_source_basis_and_distinct_numerics() {
         let ac = authorized.tasks.pop_front().unwrap();
         assert_eq!(op.source_basis_digest, qp.source_basis_digest);
         assert_eq!(qp.source_basis_digest, ac.source_basis_digest);
-        assert_eq!(
-            op.source_basis_digest,
-            crate::workbench::documents::netlist_document::source_content_digest(source)
-        );
+        assert_eq!(op.source_basis_digest, crate::state::content_digest(source));
         assert_ne!(op.executable_netlist, qp.executable_netlist);
         assert!(ac.executable_netlist.contains("R1 out 0 1k"));
         let config = op.config().unwrap();

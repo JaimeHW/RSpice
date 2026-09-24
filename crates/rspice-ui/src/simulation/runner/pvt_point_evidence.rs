@@ -67,7 +67,7 @@ pub(in crate::simulation) fn run_hb_spec_with_op(
         ObjectRevision::INITIAL,
         ContentDigest::from_bytes([92; 32]),
     );
-    let source = crate::workbench::documents::netlist_document::source_content_digest(deck);
+    let source = crate::state::content_digest(deck);
     let artifact = ExecutionArtifactEnvelope::from_dc_operating_point_result(
         snapshot,
         binding.producer_instance_id(),

@@ -1650,9 +1650,7 @@ impl ResolvedExecutionDependencies {
             return;
         }
         self.source = Some(DependencySourceContext {
-            executable: crate::workbench::documents::netlist_document::source_content_digest(
-                executable,
-            ),
+            executable: crate::state::content_digest(executable),
             basis,
         });
     }
@@ -1662,7 +1660,7 @@ impl ResolvedExecutionDependencies {
         source: &str,
         expected_basis: ContentDigest,
     ) -> Result<(), ExecutionArtifactError> {
-        let actual = crate::workbench::documents::netlist_document::source_content_digest(source);
+        let actual = crate::state::content_digest(source);
         let basis = match self.source {
             Some(context) if context.executable == actual => context.basis,
             Some(_) => {

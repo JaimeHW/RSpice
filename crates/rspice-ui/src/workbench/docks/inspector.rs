@@ -2946,8 +2946,7 @@ fn generated_provenance(ui: &mut Ui, state: &AppState) {
 fn owned_source_provenance(ui: &mut Ui, state: &AppState) {
     design_section_header(ui, "Owned source provenance", None);
     let source = &state.simulation.netlist_content;
-    let source_digest =
-        crate::workbench::documents::netlist_document::source_content_digest(source);
+    let source_digest = crate::state::content_digest(source);
     property_row(
         ui,
         "Source origin",
@@ -3109,9 +3108,7 @@ fn generated_state(state: &AppState) -> &'static str {
     } else if netlist.generated_input_digest != netlist.current_generation_input_digest {
         "stale · refresh pending"
     } else {
-        let digest = crate::workbench::documents::netlist_document::source_content_digest(
-            &netlist.generated_source,
-        );
+        let digest = crate::state::content_digest(&netlist.generated_source);
         if netlist.validation.as_ref().is_some_and(|receipt| {
             receipt.visible_content_digest == digest
                 && receipt.project_revision == state.workspace.project.revision().get()

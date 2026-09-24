@@ -4,7 +4,7 @@ use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
-use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, source_content_digest};
+use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::{MessageId, RSpiceApp};
 
 pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
@@ -218,7 +218,7 @@ pub(super) fn owned_source_save_ready(app: &RSpiceApp) -> bool {
     {
         return false;
     }
-    let digest = source_content_digest(&app.state.simulation.netlist_content);
+    let digest = crate::state::content_digest(&app.state.simulation.netlist_content);
     app.state.ui.netlist.externally_saved_content_digest != Some(digest)
 }
 
@@ -235,7 +235,7 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
 
     let mut dialog = app.state.ui.netlist.save_dialog.clone();
     let messages = app.state.ui.messages();
-    let current_digest = source_content_digest(&app.state.simulation.netlist_content);
+    let current_digest = crate::state::content_digest(&app.state.simulation.netlist_content);
     let browser_copy = cfg!(target_arch = "wasm32");
     let message_valid = browser_copy || {
         let message = dialog.message.trim();

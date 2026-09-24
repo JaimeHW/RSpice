@@ -23,7 +23,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::design_system::{WorkbenchIcon, empty_state, empty_state_with_actions};
 use crate::workbench::documents::netlist_document::{
-    ActiveNetlistDocument, ExecutedDeckVerification, source_content_digest,
+    ActiveNetlistDocument, ExecutedDeckVerification,
 };
 use crate::workbench::{AppState, MessageId, RSpiceApp};
 
@@ -847,7 +847,7 @@ fn format_owned_netlist(ctx: &egui::Context, app: &mut RSpiceApp) {
         }
         return;
     }
-    let digest = source_content_digest(&source);
+    let digest = crate::state::content_digest(&source);
     let validation_current = app
         .state
         .ui

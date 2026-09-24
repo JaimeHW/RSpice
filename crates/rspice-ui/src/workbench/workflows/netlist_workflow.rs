@@ -43,7 +43,7 @@ pub(crate) fn poll_browser_netlist_workflow(state: &mut AppState) {
 /// match this one-shot authorized snapshot byte for byte.
 pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
     use crate::workbench::documents::netlist_document::{
-        ActiveNetlistDocument, NetlistValidationReceipt, source_content_digest,
+        ActiveNetlistDocument, NetlistValidationReceipt,
     };
 
     if app.state.ui.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
@@ -82,7 +82,7 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
         return false;
     }
 
-    let visible_digest = source_content_digest(&app.state.simulation.netlist_content);
+    let visible_digest = crate::state::content_digest(&app.state.simulation.netlist_content);
     match app
         .simulation_controller
         .validate_manual_deck_document(&app.state)

@@ -713,9 +713,7 @@ fn owned_provenance_requires_exact_saved_and_validated_bytes() {
     let mut state = AppState::default();
     state.simulation.netlist_content = "owned\n.end\n".to_owned();
     let project_revision = state.workspace.project.revision().get();
-    let digest = crate::workbench::documents::netlist_document::source_content_digest(
-        &state.simulation.netlist_content,
-    );
+    let digest = crate::state::content_digest(&state.simulation.netlist_content);
     state.ui.netlist.externally_saved_content_digest = Some(digest);
     state.ui.netlist.validation = Some(
         crate::workbench::documents::netlist_document::NetlistValidationReceipt {
@@ -738,9 +736,7 @@ fn owned_provenance_requires_exact_saved_and_validated_bytes() {
         "externally synchronized · validated · project modified"
     );
     state.simulation.netlist_content.push_str("* edit\n");
-    let edited = crate::workbench::documents::netlist_document::source_content_digest(
-        &state.simulation.netlist_content,
-    );
+    let edited = crate::state::content_digest(&state.simulation.netlist_content);
     assert_eq!(
         owned_source_state(&state, edited),
         "modified · validation required"
