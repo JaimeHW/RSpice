@@ -1127,7 +1127,7 @@ fn parsed_complete_model_catalog(
         .top_level_models
         .iter()
         .map(|model| {
-            let model = ModelLibraryManager::convert_parsed_model(model, root);
+            let model = DeviceModel::from_parsed(model, root, None);
             (model.name.clone(), model)
         })
         .collect();
@@ -1139,11 +1139,7 @@ fn parsed_complete_model_catalog(
                 .models
                 .iter()
                 .map(|model| {
-                    let model = ModelLibraryManager::convert_parsed_model_in_section(
-                        model,
-                        root,
-                        Some(&section.name),
-                    );
+                    let model = DeviceModel::from_parsed(model, root, Some(&section.name));
                     (model.name.clone(), model)
                 })
                 .collect();
@@ -1160,7 +1156,7 @@ fn parsed_model_projection(
 ) -> Result<HashMap<String, DeviceModel>, String> {
     let mut projection = HashMap::new();
     for model in &parsed.top_level_models {
-        let model = ModelLibraryManager::convert_parsed_model(model, root);
+        let model = DeviceModel::from_parsed(model, root, None);
         projection.insert(model.name.clone(), model);
     }
     let section_names = persisted_active_model_section_names(library)?;
@@ -1187,11 +1183,7 @@ fn parsed_model_projection(
                         first_name, first_section, section.name
                     ));
                 }
-                let model = ModelLibraryManager::convert_parsed_model_in_section(
-                    parsed_model,
-                    root,
-                    Some(&section.name),
-                );
+                let model = DeviceModel::from_parsed(parsed_model, root, Some(&section.name));
                 insert_case_insensitive_model_projection(&mut projection, model);
             }
         }
@@ -1252,7 +1244,7 @@ fn parsed_subcircuit_projection(
     let mut insert = |subcircuit: &rspice_core::library::ParsedSubcircuit,
                       section: Option<&str>|
      -> Result<(), String> {
-        let interface = ModelLibraryManager::convert_parsed_subcircuit(subcircuit, root, section);
+        let interface = ModelSubcircuitInterface::from_parsed(subcircuit, root, section);
         let key = subcircuit_interface_key(interface.section.as_deref(), &interface.name);
         let canonical = key.to_ascii_lowercase();
         if let Some(first) = canonical_names.insert(canonical, key.clone()) {

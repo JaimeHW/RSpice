@@ -557,7 +557,8 @@ impl ModelLibraryManager {
                     .join("; ")
             ));
         }
-        let mut device_model = Self::convert_parsed_model(&parsed.top_level_models[0], source_path);
+        let mut device_model =
+            DeviceModel::from_parsed(&parsed.top_level_models[0], source_path, None);
         device_model.spice_type = Some(bound.base.spice_type.to_ascii_uppercase());
         device_model.description = bound.base.description.clone();
         device_model.file_path = Some(source_path.clone());
@@ -1001,7 +1002,7 @@ impl ModelLibraryManager {
         }
         verify_project_model_round_trip(definition, parsed_model)?;
 
-        let mut device_model = Self::convert_parsed_model(parsed_model, &root);
+        let mut device_model = DeviceModel::from_parsed(parsed_model, &root, None);
         device_model.spice_type = Some(definition.spice_type.to_ascii_uppercase());
         device_model.description = definition.description.clone();
         device_model.source_line = Some(
@@ -1179,7 +1180,7 @@ impl ModelLibraryManager {
             });
         }
 
-        let mut device_model = Self::convert_parsed_model(&parsed.top_level_models[0], &root);
+        let mut device_model = DeviceModel::from_parsed(&parsed.top_level_models[0], &root, None);
         device_model.spice_type = Some(bound.base.spice_type.to_ascii_uppercase());
         device_model.description = bound.base.description.clone();
         device_model.source_line = Some(

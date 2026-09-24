@@ -28,11 +28,9 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest as _, Sha256};
 
-use super::ModelLibraryManager;
 use crate::product::ContentDigest;
 use crate::state::model_library::{
     ModelLibrary, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourcePin,
-    ProcessCorner,
 };
 
 pub(crate) fn normalize_browser_bundle_member_path(path: &str) -> Result<String, String> {
@@ -538,84 +536,6 @@ pub(super) fn build(
         })
         .collect();
     library.source_edges.sort();
-    // The bundle's own sections are the whole corner catalog. Catalog and
-    // selection are cleared together: a library pointing at a corner it does
-    // not define fails projection later with "selected corner does not
-    // exist". A section below re-selects when the source declares one.
-    library.corners.clear();
-    library.selected_corner = None;
-    for section_name in result.section_names() {
-        let mut corner = ProcessCorner::from_composite_section(section_name, root.clone(), false);
-        corner.description = format!("Process corner from {lib_name}");
-        library.corners.insert(corner.name.clone(), corner);
-    }
-    let section_names = result.section_names();
-    let selected_section = section.map(str::to_owned).or_else(|| {
-        section_names
-            .iter()
-            .find(|name| name.eq_ignore_ascii_case("tt"))
-            .or_else(|| section_names.first())
-            .map(|name| (*name).to_owned())
-    });
-    for model in &result.top_level_models {
-        let device_model = ModelLibraryManager::convert_parsed_model(model, &root);
-        library
-            .top_level_models
-            .insert(device_model.name.clone(), device_model.clone());
-        library
-            .models
-            .insert(device_model.name.clone(), device_model);
-    }
-    ModelLibraryManager::insert_parsed_subcircuits(
-        &mut library,
-        &result.top_level_subcircuits,
-        &root,
-        None,
-    )?;
-    for lib_section in &result.sections {
-        ModelLibraryManager::insert_parsed_subcircuits(
-            &mut library,
-            &lib_section.subcircuits,
-            &root,
-            Some(&lib_section.name),
-        )?;
-    }
-    for lib_section in &result.sections {
-        let section_models = library
-            .section_models
-            .entry(lib_section.name.clone())
-            .or_default();
-        for model in &lib_section.models {
-            let device_model = ModelLibraryManager::convert_parsed_model_in_section(
-                model,
-                &root,
-                Some(&lib_section.name),
-            );
-            section_models.insert(device_model.name.clone(), device_model);
-        }
-    }
-    if let Some(section_name) = selected_section.as_deref() {
-        let lib_section = result.get_section(section_name).ok_or_else(|| {
-            format!(
-                "Section '{section_name}' not found. Available: {:?}",
-                result.section_names()
-            )
-        })?;
-        library.selected_corner = Some(lib_section.name.clone());
-        if let Some(corner) = library.corners.get_mut(&lib_section.name) {
-            corner.is_default = true;
-        }
-    }
-    library.refresh_effective_model_projection();
-    // Subcircuit and HDL-source libraries need no artificial `.model` card.
-    if library.top_level_models.is_empty()
-        && library.section_models.values().all(HashMap::is_empty)
-        && library.subcircuits.is_empty()
-        && !ModelLibraryManager::has_authenticated_veriloga_sources(&result)?
-    {
-        return Err(format!(
-            "Model library '{lib_name}' contains no supported device models, addressable subcircuits or authenticated Verilog-A/AMS sources"
-        ));
-    }
+    let library = library.with_parsed_catalog(&result, &root, section, &lib_name)?;
     Ok((lib_name, library))
 }
