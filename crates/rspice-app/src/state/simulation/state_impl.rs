@@ -1581,7 +1581,7 @@ mod tests {
             all_converged: false,
             variables: Vec::new(),
         };
-        let provenance = YieldAnalysisProvenance::from_monte_carlo_result(
+        let provenance = crate::services::yield_manager::yield_provenance_from_monte_carlo_result(
             run.run_id,
             run.dataset_id,
             &monte_carlo,
@@ -1589,12 +1589,12 @@ mod tests {
         .expect("Monte Carlo result creates yield provenance");
         let source_dataset_id = run.dataset_id;
         let result = YieldResult {
-            spec: crate::services::yield_manager::YieldSpec::lower("V(out)", 0.9, "V"),
+            spec: rspice_results::yield_analysis::YieldSpec::lower("V(out)", 0.9, "V"),
             total_runs: 2,
             pass_count: 1,
             fail_count: 1,
             yield_percent: 50.0,
-            stats: crate::services::yield_manager::DistributionStats::default(),
+            stats: rspice_results::yield_analysis::DistributionStats::default(),
             trail: vec![true, false],
             samples: vec![1.0, 0.8],
         };
@@ -1619,7 +1619,7 @@ mod tests {
         assert_eq!(provenance.runs_completed, 2);
         assert_eq!(
             provenance.sampling_mode,
-            crate::services::yield_manager::MonteCarloSamplingMode::PseudoRandom
+            rspice_results::yield_analysis::MonteCarloSamplingMode::PseudoRandom
         );
         assert_eq!(
             state
@@ -1636,12 +1636,12 @@ mod tests {
 
         state.replace_yield_evidence(
             vec![YieldResult {
-                spec: crate::services::yield_manager::YieldSpec::lower("V(out)", 0.9, "V"),
+                spec: rspice_results::yield_analysis::YieldSpec::lower("V(out)", 0.9, "V"),
                 total_runs: 1,
                 pass_count: 1,
                 fail_count: 0,
                 yield_percent: 100.0,
-                stats: crate::services::yield_manager::DistributionStats::default(),
+                stats: rspice_results::yield_analysis::DistributionStats::default(),
                 trail: vec![true],
                 samples: vec![1.0],
             }],

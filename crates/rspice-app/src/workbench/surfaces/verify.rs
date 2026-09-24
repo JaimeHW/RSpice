@@ -646,7 +646,7 @@ fn verification_run(app: &RSpiceApp) -> Option<&crate::state::SimulationRun> {
     verification_run_index(app).and_then(|index| app.state.simulation.runs.get(index))
 }
 
-fn verification_yield_results(app: &RSpiceApp) -> &[crate::services::yield_manager::YieldResult] {
+fn verification_yield_results(app: &RSpiceApp) -> &[rspice_results::yield_analysis::YieldResult] {
     verification_run(app)
         .and_then(|run| {
             app.state
@@ -954,7 +954,7 @@ impl JointSampleSummary {
 }
 
 fn joint_sample_summary(
-    results: &[crate::services::yield_manager::YieldResult],
+    results: &[rspice_results::yield_analysis::YieldResult],
 ) -> Option<JointSampleSummary> {
     let first = results.first()?;
     let total = first.total_runs;
@@ -976,8 +976,8 @@ fn joint_sample_summary(
 }
 
 fn worst_individual_yield_result(
-    results: &[crate::services::yield_manager::YieldResult],
-) -> Option<&crate::services::yield_manager::YieldResult> {
+    results: &[rspice_results::yield_analysis::YieldResult],
+) -> Option<&rspice_results::yield_analysis::YieldResult> {
     results.iter().min_by(|a, b| {
         a.yield_percent
             .partial_cmp(&b.yield_percent)
@@ -1155,7 +1155,7 @@ fn yield_chart(ui: &mut Ui, app: &RSpiceApp, height: f32) {
     }
 }
 
-fn yield_limit_text(spec: &crate::services::yield_manager::YieldSpec) -> String {
+fn yield_limit_text(spec: &rspice_results::yield_analysis::YieldSpec) -> String {
     match (spec.min, spec.max) {
         (Some(min), Some(max)) => format!(
             "{}…{} {}",

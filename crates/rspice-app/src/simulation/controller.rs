@@ -19,7 +19,7 @@ use std::path::PathBuf;
 
 use crate::diagnostics::ConsoleMessage;
 use crate::io::{SignalType, WaveformDataset, WaveformFormat, WaveformSignal, WaveformWriter};
-use crate::services::yield_manager::{YieldAnalysisManager, YieldAnalysisProvenance};
+use crate::services::yield_manager::YieldAnalysisManager;
 use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, DcSweepConfig, NoiseAnalysisConfig, NoiseSweepType,
     PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
@@ -1991,7 +1991,7 @@ impl SimulationController {
                                     state.simulation.run_by_sequence(run_sequence)
                                 })
                                 .and_then(|run| {
-                                    YieldAnalysisProvenance::from_monte_carlo_result(
+                                    crate::services::yield_manager::yield_provenance_from_monte_carlo_result(
                                         run.run_id,
                                         run.dataset_id,
                                         &sim_result,

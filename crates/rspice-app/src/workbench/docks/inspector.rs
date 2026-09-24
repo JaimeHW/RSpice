@@ -2336,7 +2336,7 @@ struct FailedSample {
     normalized_margin: f64,
 }
 
-fn worst_samples(results: &[crate::services::yield_manager::YieldResult]) -> Vec<FailedSample> {
+fn worst_samples(results: &[rspice_results::yield_analysis::YieldResult]) -> Vec<FailedSample> {
     let mut failures = results
         .iter()
         .flat_map(|result| {
@@ -2372,7 +2372,7 @@ fn worst_samples(results: &[crate::services::yield_manager::YieldResult]) -> Vec
 }
 
 fn normalized_yield_margin(
-    spec: &crate::services::yield_manager::YieldSpec,
+    spec: &rspice_results::yield_analysis::YieldSpec,
     value: f64,
 ) -> Option<f64> {
     const SCALE_FLOOR: f64 = 1.0e-30;
@@ -2492,7 +2492,7 @@ fn failure_row(ui: &mut Ui, failure: &FailedSample) -> egui::Response {
     response
 }
 
-fn joint_yield(results: &[crate::services::yield_manager::YieldResult]) -> Option<(usize, usize)> {
+fn joint_yield(results: &[rspice_results::yield_analysis::YieldResult]) -> Option<(usize, usize)> {
     let total = results.first()?.total_runs;
     if total == 0
         || results

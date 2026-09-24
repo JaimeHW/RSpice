@@ -803,13 +803,13 @@ fn signed_margin_is_positive_inside_and_negative_outside_bounds() {
 fn joint_sample_summary_requires_aligned_trails_and_ands_every_spec() {
     let make_result = |target: &str, trail: Vec<bool>| {
         let pass_count = trail.iter().filter(|passes| **passes).count();
-        crate::services::yield_manager::YieldResult {
-            spec: crate::services::yield_manager::YieldSpec::lower(target, 0.0, ""),
+        rspice_results::yield_analysis::YieldResult {
+            spec: rspice_results::yield_analysis::YieldSpec::lower(target, 0.0, ""),
             total_runs: trail.len(),
             pass_count,
             fail_count: trail.len() - pass_count,
             yield_percent: pass_count as f64 / trail.len() as f64 * 100.0,
-            stats: crate::services::yield_manager::DistributionStats::default(),
+            stats: rspice_results::yield_analysis::DistributionStats::default(),
             samples: vec![1.0; trail.len()],
             trail,
         }
@@ -842,13 +842,13 @@ fn joint_sample_summary_requires_aligned_trails_and_ands_every_spec() {
 fn joint_headline_can_be_lower_than_every_individual_spec_yield() {
     let make_result = |target: &str, trail: Vec<bool>| {
         let pass_count = trail.iter().filter(|passes| **passes).count();
-        crate::services::yield_manager::YieldResult {
-            spec: crate::services::yield_manager::YieldSpec::lower(target, 0.0, ""),
+        rspice_results::yield_analysis::YieldResult {
+            spec: rspice_results::yield_analysis::YieldSpec::lower(target, 0.0, ""),
             total_runs: trail.len(),
             pass_count,
             fail_count: trail.len() - pass_count,
             yield_percent: pass_count as f64 / trail.len() as f64 * 100.0,
-            stats: crate::services::yield_manager::DistributionStats::default(),
+            stats: rspice_results::yield_analysis::DistributionStats::default(),
             samples: vec![1.0; trail.len()],
             trail,
         }

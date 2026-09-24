@@ -1,215 +1,35 @@
-//! Yield Analysis Manager
-//!
-//! Provides commercial-grade statistical analysis for Monte Carlo simulations.
-//! Extracts yield, distributions, and specifications pass/fail status.
-//!
-//! # Features
-//!
-//! - Statistical yield calculation (Pass/Fail %)
-//! - Automatic distribution extraction (Mean, StdDev, Skewness, Kurtosis)
-//! - Specification management (Min/Max targets)
-//! - Capability indices (Cp, Cpk)
-//! - Sensitivity analysis support (Importance)
-
+//! Yield analysis over completed simulation results.
 use crate::product::{DatasetId, RunId};
 use crate::simulation::results::SimulationResult;
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-// =============================================================================
-// Yield Specifications
-// =============================================================================
+use rspice_results::yield_analysis::{
+    MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
+    calculate_distribution_stats,
+};
 
-/// Type of specification limit
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SpecLimitType {
-    /// Lower specification limit (LSL)
-    Lower,
-    /// Upper specification limit (USL)
-    Upper,
-    /// Both LSL and USL (Range)
-    Range,
-}
-
-/// A target specification for a measurement
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct YieldSpec {
-    /// Name of the measurement/signal
-    pub target: String,
-    /// Type of limit
-    pub limit_type: SpecLimitType,
-    /// Lower limit value
-    pub min: Option<f64>,
-    /// Upper limit value
-    pub max: Option<f64>,
-    /// Target nominal value
-    pub target_val: Option<f64>,
-    /// Unit (e.g., "V", "ns")
-    pub unit: String,
-    /// Weight/Priority for optimization (0.0 - 1.0)
-    pub weight: f32,
-}
-
-impl YieldSpec {
-    /// Create a lower limit spec
-    #[cfg(test)]
-    pub fn lower(target: impl Into<String>, min: f64, unit: impl Into<String>) -> Self {
-        Self {
-            target: target.into(),
-            limit_type: SpecLimitType::Lower,
-            min: Some(min),
-            max: None,
-            target_val: None,
-            unit: unit.into(),
-            weight: 1.0,
-        }
-    }
-
-    /// Create an upper limit spec
-    #[cfg(test)]
-    pub fn upper(target: impl Into<String>, max: f64, unit: impl Into<String>) -> Self {
-        Self {
-            target: target.into(),
-            limit_type: SpecLimitType::Upper,
-            min: None,
-            max: Some(max),
-            target_val: None,
-            unit: unit.into(),
-            weight: 1.0,
-        }
-    }
-
-    /// Create a range spec
-    #[cfg(test)]
-    pub fn range(target: impl Into<String>, min: f64, max: f64, unit: impl Into<String>) -> Self {
-        Self {
-            target: target.into(),
-            limit_type: SpecLimitType::Range,
-            min: Some(min),
-            max: Some(max),
-            target_val: Some((min + max) / 2.0),
-            unit: unit.into(),
-            weight: 1.0,
-        }
-    }
-
-    /// Check if a value passes the specification
-    pub fn evaluates(&self, value: f64) -> bool {
-        match self.limit_type {
-            SpecLimitType::Lower => self.min.is_none_or(|m| value >= m),
-            SpecLimitType::Upper => self.max.is_none_or(|m| value <= m),
-            SpecLimitType::Range => {
-                let lower = self.min.is_none_or(|m| value >= m);
-                let upper = self.max.is_none_or(|m| value <= m);
-                lower && upper
-            }
-        }
-    }
-}
-
-// =============================================================================
-// Statistical Results
-// =============================================================================
-
-/// Statistical distribution data
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct DistributionStats {
-    pub count: usize,
-    pub mean: f64,
-    pub std_dev: f64,
-    pub min: f64,
-    pub max: f64,
-    pub median: f64,
-    pub skewness: f64,
-    pub kurtosis: f64,
-    /// Process capability index
-    pub cp: Option<f64>,
-    /// Process capability index (centered)
-    pub cpk: Option<f64>,
-}
-
-/// Yield result for a single specification
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct YieldResult {
-    pub spec: YieldSpec,
-    /// The yield denominator: every trial the engine reported, whether or not
-    /// it produced a finite observation.
-    ///
-    /// This is the one convention, and it is stated wherever the percentage is
-    /// shown. A trial that diverged is counted here and counted as a failure
-    /// — a specification a run could not evaluate is not a specification it
-    /// met — so the figure is the conservative one. It is *not* the number of
-    /// runs requested: trials the engine never completed are not in the
-    /// retained population at all, and the distribution panel names them
-    /// separately rather than folding them into this count.
-    pub total_runs: usize,
-    pub pass_count: usize,
-    pub fail_count: usize,
-    pub yield_percent: f64,
-    pub stats: DistributionStats,
-    /// Pass/Fail list for each iteration
-    pub trail: Vec<bool>,
-    /// Exact finite sample values used for the distribution statistics. This
-    /// keeps verification plots evidence-backed instead of reconstructing a
-    /// synthetic distribution from summary moments.
-    #[serde(default)]
-    pub samples: Vec<f64>,
-}
-
-/// Immutable identity of the retained result dataset used for the current
-/// yield evidence. Stable product IDs prevent a history reorder from silently
-/// retargeting verification results.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct YieldAnalysisProvenance {
-    pub source_run_id: RunId,
-    pub source_dataset_id: DatasetId,
-    pub seed: u64,
-    pub runs_requested: usize,
-    pub runs_completed: usize,
-    pub sampling_mode: MonteCarloSamplingMode,
-}
-
-/// Sampling algorithm used by the current Monte Carlo engine. The engine uses
-/// a deterministic pseudo-random number generator; stratified and Latin
-/// hypercube modes are not represented until they are actually implemented.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MonteCarloSamplingMode {
-    PseudoRandom,
-}
-
-impl MonteCarloSamplingMode {
-    #[must_use]
-    pub const fn display_name(self) -> &'static str {
-        match self {
-            Self::PseudoRandom => "Pseudo-random",
-        }
-    }
-}
-
-impl YieldAnalysisProvenance {
-    #[must_use]
-    pub fn from_monte_carlo_result(
-        source_run_id: RunId,
-        source_dataset_id: DatasetId,
-        result: &SimulationResult,
-    ) -> Option<Self> {
-        match result {
-            SimulationResult::MonteCarlo {
-                seed,
-                runs_requested,
-                runs_completed,
-                ..
-            } => Some(Self {
-                source_run_id,
-                source_dataset_id,
-                seed: *seed,
-                runs_requested: *runs_requested,
-                runs_completed: *runs_completed,
-                sampling_mode: MonteCarloSamplingMode::PseudoRandom,
-            }),
-            _ => None,
-        }
+/// Bind completed Monte Carlo evidence to its retained run and dataset.
+#[must_use]
+pub fn yield_provenance_from_monte_carlo_result(
+    source_run_id: RunId,
+    source_dataset_id: DatasetId,
+    result: &SimulationResult,
+) -> Option<YieldAnalysisProvenance> {
+    match result {
+        SimulationResult::MonteCarlo {
+            seed,
+            runs_requested,
+            runs_completed,
+            ..
+        } => Some(YieldAnalysisProvenance {
+            source_run_id,
+            source_dataset_id,
+            seed: *seed,
+            runs_requested: *runs_requested,
+            runs_completed: *runs_completed,
+            sampling_mode: MonteCarloSamplingMode::PseudoRandom,
+        }),
+        _ => None,
     }
 }
 
@@ -292,7 +112,7 @@ impl YieldAnalysisManager {
             }
 
             let num_runs = trail.len();
-            let stats = self.calculate_stats(&values, spec);
+            let stats = calculate_distribution_stats(&values, spec);
             let yield_result = YieldResult {
                 spec: spec.clone(),
                 total_runs: num_runs,
@@ -341,136 +161,6 @@ impl YieldAnalysisManager {
     /// Extract a specific measurement value from a simulation result
     fn extract_measurement(&self, result: &SimulationResult, name: &str) -> Option<f64> {
         result.measurement(name)
-    }
-
-    /// Calculate comprehensive statistical metrics
-    fn calculate_stats(&self, values: &[f64], spec: &YieldSpec) -> DistributionStats {
-        if values.is_empty() {
-            return DistributionStats::default();
-        }
-
-        // Defensive filtering so direct callers cannot poison statistics with NaN/Inf.
-        let mut finite_values = values
-            .iter()
-            .copied()
-            .filter(|value| value.is_finite())
-            .collect::<Vec<_>>();
-        if finite_values.is_empty() {
-            return DistributionStats::default();
-        }
-
-        if finite_values.len() == 1 {
-            let value = finite_values[0];
-            return DistributionStats {
-                count: 1,
-                mean: value,
-                std_dev: 0.0,
-                min: value,
-                max: value,
-                median: value,
-                skewness: 0.0,
-                kurtosis: 0.0,
-                cp: None,
-                cpk: None,
-            };
-        }
-
-        let n = finite_values.len() as f64;
-        let mean = finite_values.iter().sum::<f64>() / n;
-        let variance_num = finite_values
-            .iter()
-            .map(|value| (value - mean).powi(2))
-            .sum::<f64>();
-        let variance = variance_num / (n - 1.0);
-        let std_dev = if variance.is_finite() && variance > 0.0 {
-            variance.sqrt()
-        } else {
-            0.0
-        };
-
-        finite_values.sort_by(f64::total_cmp);
-        let lower_mid = finite_values[(finite_values.len() - 1) / 2];
-        let upper_mid = finite_values[finite_values.len() / 2];
-        let median = (lower_mid + upper_mid) * 0.5;
-        let min = finite_values[0];
-        let max = finite_values[finite_values.len() - 1];
-
-        // Skewness and kurtosis remain centered moments around the mean.
-        let (skewness, kurtosis) = if std_dev > 0.0 {
-            let m3 = finite_values
-                .iter()
-                .map(|value| (value - mean).powi(3))
-                .sum::<f64>()
-                / n;
-            let m4 = finite_values
-                .iter()
-                .map(|value| (value - mean).powi(4))
-                .sum::<f64>()
-                / n;
-            let skewness = m3 / std_dev.powi(3);
-            let kurtosis = (m4 / std_dev.powi(4)) - 3.0;
-            if skewness.is_finite() && kurtosis.is_finite() {
-                (skewness, kurtosis)
-            } else {
-                (0.0, 0.0)
-            }
-        } else {
-            (0.0, 0.0)
-        };
-
-        // Capability indices.
-        //
-        // Cp is the ratio of the specification width to the process width and
-        // therefore exists only for a two-sided specification. Cpk is the
-        // distance from the mean to the nearer bound in three-sigma units, and
-        // a bound that does not exist is not a nearer one: a one-sided
-        // specification reports the one-sided form — Cpu against an upper
-        // limit, Cpl against a lower one — which is what a capability study
-        // of a process with a single limit publishes. Refusing to compute it
-        // left the majority of specifications showing an em dash for the one
-        // index they can actually have.
-        let mut cp = None;
-        let mut cpk = None;
-
-        if std_dev > 0.0 {
-            // Exactly the bounds `YieldSpec::evaluates` judges against, so an
-            // index can never be computed from a limit the verdict ignores.
-            let finite = |value: &f64| value.is_finite();
-            let (lsl, usl) = match spec.limit_type {
-                SpecLimitType::Lower => (spec.min.filter(finite), None),
-                SpecLimitType::Upper => (None, spec.max.filter(finite)),
-                SpecLimitType::Range => (spec.min.filter(finite), spec.max.filter(finite)),
-            };
-            if let (Some(lsl), Some(usl)) = (lsl, usl)
-                && usl > lsl
-            {
-                let cp_val = (usl - lsl) / (6.0 * std_dev);
-                if cp_val.is_finite() {
-                    cp = Some(cp_val);
-                }
-            }
-            let cpu = usl.map(|usl| (usl - mean) / (3.0 * std_dev));
-            let cpl = lsl.map(|lsl| (mean - lsl) / (3.0 * std_dev));
-            let cpk_val = match (cpu, cpl) {
-                (Some(cpu), Some(cpl)) => Some(cpu.min(cpl)),
-                (Some(one), None) | (None, Some(one)) => Some(one),
-                (None, None) => None,
-            };
-            cpk = cpk_val.filter(|value| value.is_finite());
-        }
-
-        DistributionStats {
-            count: finite_values.len(),
-            mean,
-            std_dev,
-            min,
-            max,
-            median,
-            skewness,
-            kurtosis,
-            cp,
-            cpk,
-        }
     }
 }
 
@@ -610,57 +300,6 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(keys, vec!["alpha", "zeta"]);
-    }
-
-    /// A one-sided specification has a capability index. Cpk is the distance
-    /// from the mean to the nearer bound in three-sigma units, and a bound
-    /// that does not exist is not a nearer one — it is simply absent, which
-    /// is why the one-sided forms Cpu and Cpl are what a process with one
-    /// limit reports. Refusing to compute it left every lower- or upper-only
-    /// spec — the majority of them — showing an em dash.
-    #[test]
-    fn a_one_sided_specification_still_has_a_capability_index() {
-        let samples = vec![9.0, 10.0, 11.0];
-        // mean 10, sample std dev 1.
-        let mut lower = YieldAnalysisManager::new();
-        lower.add_spec(YieldSpec::lower("gain", 7.0, ""));
-        let stats = &lower.analyze(&[monte_carlo_result("gain", samples.clone())])["gain"].stats;
-        assert!((stats.mean - 10.0).abs() < 1.0e-12);
-        assert!((stats.std_dev - 1.0).abs() < 1.0e-12);
-        assert_eq!(
-            stats.cp, None,
-            "Cp is a two-sided ratio and has no one-sided form"
-        );
-        assert!(
-            stats.cpk.is_some_and(|cpk| (cpk - 1.0).abs() < 1.0e-12),
-            "lower-limit Cpl = (10 - 7) / (3 * 1) = 1, got {:?}",
-            stats.cpk
-        );
-
-        let mut upper = YieldAnalysisManager::new();
-        upper.add_spec(YieldSpec::upper("gain", 16.0, ""));
-        let stats = &upper.analyze(&[monte_carlo_result("gain", samples)])["gain"].stats;
-        assert_eq!(stats.cp, None);
-        assert!(
-            stats.cpk.is_some_and(|cpk| (cpk - 2.0).abs() < 1.0e-12),
-            "upper-limit Cpu = (16 - 10) / (3 * 1) = 2, got {:?}",
-            stats.cpk
-        );
-    }
-
-    /// The two-sided index is unchanged: Cpk is still the nearer of the two.
-    #[test]
-    fn a_two_sided_specification_reports_the_nearer_bound() {
-        let mut manager = YieldAnalysisManager::new();
-        manager.add_spec(YieldSpec::range("gain", 7.0, 16.0, ""));
-        let stats =
-            &manager.analyze(&[monte_carlo_result("gain", vec![9.0, 10.0, 11.0])])["gain"].stats;
-        assert!(stats.cp.is_some_and(|cp| (cp - 1.5).abs() < 1.0e-12));
-        assert!(
-            stats.cpk.is_some_and(|cpk| (cpk - 1.0).abs() < 1.0e-12),
-            "{:?}",
-            stats.cpk
-        );
     }
 
     /// The denominator convention, stated where the number is produced.

@@ -16,9 +16,6 @@ use super::{
     verification_navigator_requires_scroll,
 };
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-use crate::services::yield_manager::{
-    DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
-};
 use crate::simulation::run_set::RunSetDimensionKind;
 use crate::state::{
     AnalysisResult, AnalysisResultPayload, AnalysisType, SimulationRun, SimulationState,
@@ -30,6 +27,9 @@ use crate::workbench::documents::result_document::{
     SourceWaveformPresentationKey,
 };
 use crate::workbench::state::{SimulationPage, VerificationPage, Workspace};
+use rspice_results::yield_analysis::{
+    DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
+};
 
 fn result(trail: Vec<bool>) -> YieldResult {
     let pass_count = trail.iter().filter(|passes| **passes).count();

@@ -3,8 +3,8 @@
 //! Manages simulation execution state and results.
 
 use super::schematic::Point;
-use crate::services::yield_manager::{YieldAnalysisProvenance, YieldResult};
 use rspice_core::Value;
+use rspice_results::yield_analysis::{YieldAnalysisProvenance, YieldResult};
 use std::collections::HashMap;
 
 mod ac_bode;

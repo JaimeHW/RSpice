@@ -726,16 +726,16 @@ fn invalid_report_page_selection_resets_preview_pagination() {
 
 #[test]
 fn report_joint_yield_requires_aligned_all_spec_sample_trails() {
-    fn result(measurement: &str, trail: Vec<bool>) -> crate::services::yield_manager::YieldResult {
+    fn result(measurement: &str, trail: Vec<bool>) -> rspice_results::yield_analysis::YieldResult {
         let total_runs = trail.len();
         let pass_count = trail.iter().filter(|passed| **passed).count();
-        crate::services::yield_manager::YieldResult {
-            spec: crate::services::yield_manager::YieldSpec::lower(measurement, 0.0, "V"),
+        rspice_results::yield_analysis::YieldResult {
+            spec: rspice_results::yield_analysis::YieldSpec::lower(measurement, 0.0, "V"),
             total_runs,
             pass_count,
             fail_count: total_runs - pass_count,
             yield_percent: pass_count as f64 / total_runs as f64 * 100.0,
-            stats: crate::services::yield_manager::DistributionStats::default(),
+            stats: rspice_results::yield_analysis::DistributionStats::default(),
             trail,
             samples: vec![0.0; total_runs],
         }

@@ -1514,7 +1514,7 @@ struct ReportJointYield {
 }
 
 impl ReportJointYield {
-    fn from_results(results: &[crate::services::yield_manager::YieldResult]) -> Option<Self> {
+    fn from_results(results: &[rspice_results::yield_analysis::YieldResult]) -> Option<Self> {
         let total = results.first()?.total_runs;
         if total == 0
             || results

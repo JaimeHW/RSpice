@@ -11,7 +11,6 @@ use crate::analysis::histogram::data::Histogram;
 use crate::analysis::histogram::display::{HistogramDisplay, hist_axis};
 use crate::analysis::{HistogramBuilder, HistogramDisplayMode};
 use crate::product::DatasetId;
-use crate::services::yield_manager::{SpecLimitType, YieldResult};
 use crate::source_revision::SourceRevision;
 use crate::state::{
     AnalysisResultFamilyMetadata, AnalysisType, MonteCarloVariableMetadata, SimulationState,
@@ -20,6 +19,7 @@ use crate::ui::plot::{self, Axis, PlotSpec, XScale, fmt_si};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
+use rspice_results::yield_analysis::{SpecLimitType, YieldResult};
 
 use super::frame_work::{self, DatasetWalk};
 use super::strip::{self, LegendChip};
@@ -1072,12 +1072,12 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::yield_manager::{
-        DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldSpec,
-    };
     use crate::state::{
         AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, MonteCarloVariableMetadata,
         SimulationRun,
+    };
+    use rspice_results::yield_analysis::{
+        DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldSpec,
     };
 
     pub(super) fn result(target: &str, yield_percent: f64) -> YieldResult {
