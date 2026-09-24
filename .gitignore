@@ -75,7 +75,6 @@ __pycache__/
 /docs/
 # Application design notes are kept outside the public repository.
 /crates/rspice-app/docs/
-/crates/rspice-app/docs/
 /.codex-tools/
 /tmp/
 .agent/
