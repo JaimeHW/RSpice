@@ -19,6 +19,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rspice_core::library::SpiceLibraryIndex;
+#[cfg(test)]
+use rspice_model_library::ModelValidationFindingSeverity;
+use rspice_model_library::{
+    MODEL_RESOLUTION_RECORD_SCHEMA_VERSION, ModelConsumerScope, ModelResolutionRecord,
+    ModelValidationFinding, ModelValidationReceipt, ModelValidationReceiptInput,
+    SimulationPlanModelBinding,
+};
 
 #[cfg(test)]
 use super::ModelFileIdentity;
@@ -47,327 +54,11 @@ pub struct ProjectModelCommit {
     pub affects_execution: bool,
 }
 
-pub const MODEL_RESOLUTION_RECORD_SCHEMA_VERSION: u16 = 1;
-pub const MODEL_VALIDATION_RECEIPT_SCHEMA_VERSION: u16 = 1;
-
-/// Consumer namespace governed by one explicit provider decision.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ModelConsumerScope {
-    PrimitiveModel,
-    Subcircuit,
-}
-
-impl ModelConsumerScope {
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::PrimitiveModel => "primitive model",
-            Self::Subcircuit => "subcircuit",
-        }
-    }
-
-    const fn key(self) -> &'static str {
-        match self {
-            Self::PrimitiveModel => "model",
-            Self::Subcircuit => "subckt",
-        }
-    }
-}
-
-/// Exact project-owned decision for a contested executable definition.
-///
-/// The provider's authenticated source digest makes the decision expire when
-/// a source is refreshed, even if the library and definition names are reused.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ModelResolutionRecord {
-    pub schema_version: u16,
-    pub consumer_scope: ModelConsumerScope,
-    pub normalized_name: String,
-    pub provider_library: String,
-    pub provider_definition: String,
-    pub provider_source_digest: ContentDigest,
-    pub audit_reason: String,
-    pub created_at_unix_ms: u64,
-}
-
-impl ModelResolutionRecord {
-    fn key(&self) -> String {
-        resolution_record_key(self.consumer_scope, &self.normalized_name)
-    }
-
-    fn validate(&self) -> Result<(), String> {
-        if self.schema_version != MODEL_RESOLUTION_RECORD_SCHEMA_VERSION {
-            return Err(format!(
-                "model-resolution record for '{}' uses unsupported schema {}",
-                self.normalized_name, self.schema_version
-            ));
-        }
-        let normalized = self.normalized_name.trim().to_ascii_lowercase();
-        if normalized.is_empty() || normalized != self.normalized_name {
-            return Err("model-resolution name must be nonempty canonical lowercase".to_owned());
-        }
-        if self.provider_definition.to_ascii_lowercase() != self.normalized_name {
-            return Err(
-                "model-resolution provider definition does not match its canonical name".to_owned(),
-            );
-        }
-        for (field, value, maximum) in [
-            (
-                "provider library",
-                self.provider_library.as_str(),
-                512_usize,
-            ),
-            (
-                "provider definition",
-                self.provider_definition.as_str(),
-                512_usize,
-            ),
-            ("audit reason", self.audit_reason.as_str(), 2_048_usize),
-        ] {
-            if value.is_empty()
-                || value != value.trim()
-                || value.len() > maximum
-                || value.chars().any(|character| {
-                    character.is_control()
-                        && !(field == "audit reason" && matches!(character, '\n' | '\r' | '\t'))
-                })
-            {
-                return Err(format!(
-                    "model-resolution {field} must be nonempty, trimmed, at most {maximum} bytes, and contain no unsupported control characters"
-                ));
-            }
-        }
-        if self.created_at_unix_ms == 0 {
-            return Err("model-resolution timestamp must be nonzero".to_owned());
-        }
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ModelDefinitionProvider {
     pub library: String,
     pub definition: String,
     pub source_digest: ContentDigest,
-}
-
-fn resolution_record_key(scope: ModelConsumerScope, normalized_name: &str) -> String {
-    format!("{}:{normalized_name}", scope.key())
-}
-
-/// One ordered model-library binding owned by a simulation plan.
-///
-/// The name is the project-catalog identity, the digest prevents a refreshed
-/// or replaced source from being accepted under an old plan, and the optional
-/// corner is the plan's nominal section override. Vector order is executable
-/// precedence; it is never reconstructed from the manager's hash map.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SimulationPlanModelBinding {
-    pub library_name: String,
-    pub source_digest: ContentDigest,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selected_corner: Option<String>,
-}
-
-impl SimulationPlanModelBinding {
-    fn validate(&self) -> Result<(), String> {
-        for (field, value) in [("library name", self.library_name.as_str())]
-            .into_iter()
-            .chain(
-                self.selected_corner
-                    .as_deref()
-                    .map(|value| ("corner section", value)),
-            )
-        {
-            if value.is_empty() || value != value.trim() || value.chars().any(char::is_control) {
-                return Err(format!(
-                    "Simulation-plan model {field} must be nonempty, trimmed, and control-free"
-                ));
-            }
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ModelValidationFindingSeverity {
-    Information,
-    Warning,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ModelValidationFinding {
-    pub code: String,
-    pub severity: ModelValidationFindingSeverity,
-    pub message: String,
-}
-
-/// Durable evidence that one exact project revision passed the executable
-/// model pipeline on one supported platform and engine/schema build.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ModelValidationReceipt {
-    pub schema_version: u16,
-    pub project_revision: ObjectRevision,
-    pub model_execution_plan_digest: ContentDigest,
-    pub execution_catalog_digest: ContentDigest,
-    /// Number of authenticated ordinary-library source members represented by
-    /// `source_closure_digest`. The receipt stores one canonical digest rather
-    /// than duplicating every source path and digest into project metadata.
-    pub source_count: u64,
-    pub source_closure_digest: ContentDigest,
-    pub pdk_archive_digest: Option<ContentDigest>,
-    pub engine_version: String,
-    pub execution_schema_version: u32,
-    pub platform: String,
-    pub findings: Vec<ModelValidationFinding>,
-    pub validated_at_unix_ms: u64,
-    pub receipt_digest: ContentDigest,
-}
-
-impl ModelValidationReceipt {
-    fn issue(
-        project_revision: ObjectRevision,
-        model_execution_plan_digest: ContentDigest,
-        execution_catalog_digest: ContentDigest,
-        source_count: u64,
-        source_closure_digest: ContentDigest,
-        pdk_archive_digest: Option<ContentDigest>,
-        execution_schema_version: u32,
-        findings: Vec<ModelValidationFinding>,
-    ) -> Result<Self, String> {
-        let engine_version = env!("CARGO_PKG_VERSION").to_owned();
-        let platform = model_validation_platform().to_owned();
-        let validated_at_unix_ms = crate::time_compat::checked_unix_time_ms()
-            .map_err(|error| format!("system clock cannot timestamp model validation: {error}"))?;
-        let receipt_digest = model_validation_receipt_digest(
-            project_revision,
-            model_execution_plan_digest,
-            execution_catalog_digest,
-            source_count,
-            source_closure_digest,
-            pdk_archive_digest,
-            &engine_version,
-            execution_schema_version,
-            &platform,
-            &findings,
-            validated_at_unix_ms,
-        )?;
-        let receipt = Self {
-            schema_version: MODEL_VALIDATION_RECEIPT_SCHEMA_VERSION,
-            project_revision,
-            model_execution_plan_digest,
-            execution_catalog_digest,
-            source_count,
-            source_closure_digest,
-            pdk_archive_digest,
-            engine_version,
-            execution_schema_version,
-            platform,
-            findings,
-            validated_at_unix_ms,
-            receipt_digest,
-        };
-        receipt.verify()?;
-        Ok(receipt)
-    }
-
-    pub fn verify(&self) -> Result<(), String> {
-        if self.schema_version != MODEL_VALIDATION_RECEIPT_SCHEMA_VERSION {
-            return Err(format!(
-                "model-validation receipt uses unsupported schema {}",
-                self.schema_version
-            ));
-        }
-        if self.engine_version.trim().is_empty()
-            || self.engine_version != self.engine_version.trim()
-            || self.engine_version.len() > 128
-            || !matches!(
-                self.platform.as_str(),
-                "desktop-windows" | "desktop-macos" | "desktop-linux" | "browser-wasm32"
-            )
-            || self.validated_at_unix_ms == 0
-        {
-            return Err(
-                "model-validation receipt has an invalid engine, platform, or timestamp identity"
-                    .to_owned(),
-            );
-        }
-        if self.findings.is_empty() || self.findings.len() > 64 {
-            return Err(
-                "model-validation receipt must retain between 1 and 64 bounded findings".to_owned(),
-            );
-        }
-        for finding in &self.findings {
-            for (field, value, maximum) in [
-                ("finding code", finding.code.as_str(), 128_usize),
-                ("finding message", finding.message.as_str(), 2_048_usize),
-            ] {
-                if value.is_empty()
-                    || value != value.trim()
-                    || value.len() > maximum
-                    || value.chars().any(char::is_control)
-                {
-                    return Err(format!(
-                        "model-validation {field} must be nonempty, trimmed, control-free, and at most {maximum} bytes"
-                    ));
-                }
-            }
-        }
-        let expected = model_validation_receipt_digest(
-            self.project_revision,
-            self.model_execution_plan_digest,
-            self.execution_catalog_digest,
-            self.source_count,
-            self.source_closure_digest,
-            self.pdk_archive_digest,
-            &self.engine_version,
-            self.execution_schema_version,
-            &self.platform,
-            &self.findings,
-            self.validated_at_unix_ms,
-        )?;
-        if expected != self.receipt_digest {
-            return Err("model-validation receipt digest does not match its payload".to_owned());
-        }
-        Ok(())
-    }
-}
-
-fn model_validation_receipt_digest(
-    project_revision: ObjectRevision,
-    model_execution_plan_digest: ContentDigest,
-    execution_catalog_digest: ContentDigest,
-    source_count: u64,
-    source_closure_digest: ContentDigest,
-    pdk_archive_digest: Option<ContentDigest>,
-    engine_version: &str,
-    execution_schema_version: u32,
-    platform: &str,
-    findings: &[ModelValidationFinding],
-    validated_at_unix_ms: u64,
-) -> Result<ContentDigest, String> {
-    let bytes = serde_json::to_vec(&(
-        MODEL_VALIDATION_RECEIPT_SCHEMA_VERSION,
-        project_revision,
-        model_execution_plan_digest,
-        execution_catalog_digest,
-        source_count,
-        source_closure_digest,
-        pdk_archive_digest,
-        engine_version,
-        execution_schema_version,
-        platform,
-        findings,
-        validated_at_unix_ms,
-    ))
-    .map_err(|error| format!("Cannot serialize model-validation receipt payload: {error}"))?;
-    Ok(ContentDigest::from_bytes(Sha256::digest(bytes).into()))
 }
 
 const fn model_validation_platform() -> &'static str {
@@ -1675,16 +1366,21 @@ impl ModelLibraryManager {
         findings: Vec<ModelValidationFinding>,
     ) -> Result<ModelValidationReceipt, String> {
         let (source_count, source_closure_digest) = self.model_validation_source_identity();
-        let receipt = ModelValidationReceipt::issue(
+        let receipt = ModelValidationReceipt::issue(ModelValidationReceiptInput {
             project_revision,
-            plan_digest,
-            self.execution_catalog_digest(),
+            model_execution_plan_digest: plan_digest,
+            execution_catalog_digest: self.execution_catalog_digest(),
             source_count,
             source_closure_digest,
             pdk_archive_digest,
+            engine_version: env!("CARGO_PKG_VERSION").to_owned(),
             execution_schema_version,
+            platform: model_validation_platform().to_owned(),
             findings,
-        )?;
+            validated_at_unix_ms: crate::time_compat::checked_unix_time_ms().map_err(|error| {
+                format!("system clock cannot timestamp model validation: {error}")
+            })?,
+        })?;
         self.validation_receipt = Some(receipt.clone());
         Ok(receipt)
     }
@@ -1772,8 +1468,7 @@ impl ModelLibraryManager {
         definition: &str,
     ) -> Option<&ModelResolutionRecord> {
         let normalized = definition.trim().to_ascii_lowercase();
-        self.resolution_records
-            .get(&resolution_record_key(scope, &normalized))
+        self.resolution_records.get(&scope.record_key(&normalized))
     }
 
     pub(crate) fn restore_model_resolution_records(
@@ -1967,7 +1662,7 @@ impl ModelLibraryManager {
     ) -> bool {
         let normalized = definition.trim().to_ascii_lowercase();
         self.resolution_records
-            .remove(&resolution_record_key(scope, &normalized))
+            .remove(&scope.record_key(&normalized))
             .is_some()
     }
 

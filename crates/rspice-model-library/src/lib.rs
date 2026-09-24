@@ -14,8 +14,10 @@ mod model;
 mod project_revision;
 mod projection;
 pub mod qualification;
+mod resolution;
 pub mod source_bundle;
 mod types;
+mod validation;
 
 pub use authoring::*;
 pub use corner::*;
@@ -27,3 +29,6 @@ pub use corner_expansion::RetainedClosure;
 pub use facts::{ClosureFacts, closure_facts, envelope_is_invalid};
 pub use library::*;
 pub use project_revision::*;
+
+pub use resolution::*;
+pub use validation::*;
