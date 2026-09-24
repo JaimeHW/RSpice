@@ -1,8 +1,9 @@
 //! Unit-safe presentation and interactive quantity parsing.
 //!
-//! This domain is deliberately separate from the SPICE deck lexer and from
-//! PDK/layout database units. It normalizes external result units on import and
-//! presents immutable engineering values without rewriting stored results.
+//! Interactive quantity policy remains distinct from deck parsing and from
+//! PDK/layout database units. The `spice_value` submodule uses the core deck
+//! suffix table for authored simulation fields; display values never rewrite
+//! stored results.
 
 pub(crate) mod engineering;
 mod format;
@@ -10,6 +11,7 @@ mod layout;
 mod locale;
 mod parse;
 mod preferences;
+pub(crate) mod spice_value;
 pub(crate) mod unit;
 
 pub use engineering::{

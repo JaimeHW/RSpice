@@ -208,8 +208,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("state", "io", 5),
     ("state", "schematic", 2),
     ("state", "analysis", 1),
-    // `analysis` is viewer mathematics and must not reach into orchestration.
-    ("analysis", "simulation", 1),
     // Editors and orchestration referencing each other sideways; retired by
     // the granularity folds and the `properties`/`panels` merge.
     ("io", "simulation", 13),

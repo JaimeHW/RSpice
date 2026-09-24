@@ -9,7 +9,7 @@ impl DcAxisMode {
                 let values = values
                     .split(|c: char| c.is_whitespace() || c == ',' || c == ';')
                     .filter(|s| !s.is_empty())
-                    .map(crate::simulation::spice_value::parse_spice_value_checked)
+                    .map(crate::quantity::spice_value::parse_spice_value_checked)
                     .collect::<Result<Vec<_>, _>>()?;
                 if values.is_empty() {
                     return Err("DC list cannot be empty".into());

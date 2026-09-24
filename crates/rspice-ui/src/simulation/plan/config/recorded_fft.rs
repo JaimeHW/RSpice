@@ -62,7 +62,7 @@ fn optional_quantity(field: &str, label: &str) -> Result<Option<f64>, String> {
     if trimmed.is_empty() {
         return Ok(None);
     }
-    crate::simulation::spice_value::parse_spice_value_checked(trimmed)
+    crate::quantity::spice_value::parse_spice_value_checked(trimmed)
         .map(Some)
         .map_err(|error| format!("{label}: {error}"))
 }

@@ -108,8 +108,8 @@ mod tests {
     /// honour. They are refused rather than silently rescaled, which is why
     /// they reach neither side of this comparison.
     ///
-    /// The test lives here rather than beside the other parser because
-    /// `quantity` is the crate's bottom layer and may not name `simulation`.
+    /// Both parsers live at the bottom of the dependency graph; this corpus
+    /// checks their shared accepted spellings without merging their policies.
     #[test]
     fn the_interactive_parser_agrees_wherever_both_accept_a_spelling() {
         use crate::quantity::parse_engineering_value;

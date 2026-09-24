@@ -176,7 +176,7 @@ pub fn format_engineering_value_with(value: f64, precision: EngineeringPrecision
 
     // Below femto the ladder runs out. The decade under it was spelled `a`,
     // which no reader in the toolchain takes any more — not this module's
-    // parser, not the deck-bound one in `simulation::spice_value`, not the
+    // parser, not the deck-bound one in `quantity::spice_value`, not the
     // options one, and never the engine's own lexer, which has no atto at all
     // — so writing it would be writing text nothing can read back. A plain
     // exponent is what every one of them reads, and it is the same under all

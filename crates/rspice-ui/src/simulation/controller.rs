@@ -72,13 +72,12 @@ mod results_convert;
 mod results_post;
 mod results_update;
 mod sensitivity_result;
-pub(crate) mod spice_value;
 mod touchstone;
 mod transient_post;
 pub(crate) use transient_post::{DerivedViewerLoadState, build_eye_from_waveform};
 
 use self::live_transient::LiveTransientAccumulator;
-use self::spice_value::parse_spice_value_checked;
+use crate::quantity::spice_value::parse_spice_value_checked;
 
 #[derive(Debug, Clone)]
 pub(super) struct QueuedAnalysis {

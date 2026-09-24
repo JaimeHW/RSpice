@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::quantity::spice_value::parse_spice_value_checked;
 use crate::services::simulation_runner::PeriodicCarrier;
 use crate::simulation::config::{
     AcSweepType, NoiseAnalysisConfig, NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType,
@@ -20,7 +21,6 @@ use crate::simulation::dialog::{
     PssDialogState, PstbDialogState, PxfDialogState, PzDialogState, SensDialogState,
     SoaDialogState, SpDialogState, StbDialogState, TempDialogState, XfDialogState,
 };
-use crate::simulation::spice_value::parse_spice_value_checked;
 use crate::workbench::app_state::{AcSetup, DcSetup, TranSetup};
 
 use super::AnalysisKind;

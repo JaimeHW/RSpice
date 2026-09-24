@@ -85,7 +85,7 @@ impl AcDataDraft {
                             .split(|ch: char| ch == ',' || ch == ';' || ch.is_whitespace())
                             .filter(|value| !value.is_empty())
                             .map(|value| {
-                                crate::simulation::spice_value::parse_spice_value_checked(value)
+                                crate::quantity::spice_value::parse_spice_value_checked(value)
                                     .map_err(|error| format!("AC DATA {}: {error}", column.name))
                             })
                             .collect::<Result<Vec<_>, _>>()?;

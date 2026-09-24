@@ -804,7 +804,7 @@ pub(super) fn normalize_quantity(
 ///
 /// Two readers, because two of them are in the controller: an analysis's
 /// numeric drafts reach the engine through
-/// [`crate::simulation::spice_value::parse_spice_value_checked`] on most paths
+/// [`crate::quantity::spice_value::parse_spice_value_checked`] on most paths
 /// and through [`crate::simulation::dialog::parse_si_value`] on the rest, and
 /// the two do not accept exactly the same spellings — `x` and `µ` are SI-side
 /// only, `gig` and `tera` are SPICE-side. Asking both is the fail-closed
@@ -822,7 +822,7 @@ fn schema_reads(text: &str, schema_value: f64) -> bool {
             (read - schema_value).abs() <= scale * 1e-12
         }
     };
-    crate::simulation::spice_value::parse_spice_value_checked(text).is_ok_and(agrees)
+    crate::quantity::spice_value::parse_spice_value_checked(text).is_ok_and(agrees)
         && crate::simulation::dialog::parse_si_value(text).is_ok_and(agrees)
 }
 

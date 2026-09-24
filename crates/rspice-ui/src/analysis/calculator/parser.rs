@@ -110,7 +110,7 @@ impl<'a> Lexer<'a> {
             }
         }
         let normalized = s.replace(['\u{00b5}', '\u{03bc}'], "u");
-        crate::simulation::controller::spice_value::parse_spice_value_checked(&normalized)
+        crate::quantity::spice_value::parse_spice_value_checked(&normalized)
             .map_err(|err| ParseError::new(start, err))
     }
 

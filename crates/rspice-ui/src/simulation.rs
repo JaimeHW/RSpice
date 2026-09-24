@@ -28,7 +28,6 @@ pub(crate) mod point_family;
 pub(crate) mod results;
 pub(crate) mod run_set;
 pub(crate) mod runner;
-pub(crate) mod spice_value;
 pub(crate) mod status;
 pub(crate) mod stimulus_realize;
 pub(crate) mod table_route;

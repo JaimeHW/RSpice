@@ -184,7 +184,7 @@ fn parse_time_or_frequency(
 /// can be told apart in a field where a human is looking at the letter, while
 /// the engine's dialect folds case and reads both as milli. A field bound for
 /// a deck must use the engine's table instead — see
-/// `crate::simulation::spice_value`.
+/// `crate::quantity::spice_value`.
 fn parse_prefix(
     prefix: &str,
     policy: EngineeringSuffixPolicy,

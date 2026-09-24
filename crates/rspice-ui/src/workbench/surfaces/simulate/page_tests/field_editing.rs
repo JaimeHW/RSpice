@@ -233,7 +233,7 @@ fn a_spelling_the_deck_cannot_read_is_rewritten_in_engineering_notation() {
         "a 17-digit exponent is not engineering notation: {rewritten}"
     );
     assert!(
-        crate::simulation::spice_value::parse_spice_value_checked(&rewritten).is_ok(),
+        crate::quantity::spice_value::parse_spice_value_checked(&rewritten).is_ok(),
         "whatever is left behind has to be a value the deck can read: {rewritten}"
     );
 }

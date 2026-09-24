@@ -12,7 +12,7 @@
 //! decimal digit, one column keyword or one ordering rule would produce a deck
 //! that parses and sweeps a different axis than the form shows.
 
-use crate::simulation::spice_value::parse_spice_value_checked;
+use crate::quantity::spice_value::parse_spice_value_checked;
 
 /// Frequency column keyword written into a generated `.DATA` table.
 ///

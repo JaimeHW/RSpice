@@ -191,8 +191,8 @@ fn default_dc_points() -> String {
 
 impl DcSetup {
     pub fn to_config(&self) -> Result<crate::simulation::config::DcSweepConfig, String> {
+        use crate::quantity::spice_value::parse_spice_value_checked as parse;
         use crate::simulation::config::{DcAxisMode, DcSweepConfig, DcSweepModes};
-        use crate::simulation::spice_value::parse_spice_value_checked as parse;
         let primary = DcAxisMode::from_draft(self.mode, &self.values, &self.points)?;
         let axis = |mode: &DcAxisMode, start: &str, stop: &str, step: &str| {
             if let DcAxisMode::List { values } = mode {
@@ -720,7 +720,7 @@ impl SimSetupState {
     /// First validation problem in an analysis draft, if any — the same
     /// parse the controller performs when it builds the run plan.
     pub fn validation_error(&self, index: usize) -> Option<String> {
-        use crate::simulation::controller::spice_value::parse_spice_value_checked as parse;
+        use crate::quantity::spice_value::parse_spice_value_checked as parse;
         let field = |name: &str, error: String| Some(format!("{name}: {error}"));
         match index {
             0 => self.op.to_config().err(),
@@ -833,7 +833,7 @@ impl SimSetupState {
     }
 
     fn ac_sweep_error(&self) -> Option<String> {
-        use crate::simulation::controller::spice_value::parse_spice_value_checked as parse;
+        use crate::quantity::spice_value::parse_spice_value_checked as parse;
         if let Err(e) = parse(&self.ac.fstart) {
             return Some(format!("start frequency: {e}"));
         }
