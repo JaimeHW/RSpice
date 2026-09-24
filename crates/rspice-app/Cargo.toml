@@ -51,7 +51,7 @@ rspice-app-types.workspace = true
 rspice-results.workspace = true
 rspice-hardcopy-contract.workspace = true
 rspice-model-library.workspace = true
-rspice-formats.workspace = true
+rspice-formats = { workspace = true, features = ["columnar"] }
 rspice-simulation-contract.workspace = true
 
 # Verilog-A compiler (pure Rust, works on all platforms)
@@ -69,12 +69,9 @@ toml.workspace = true
 rspice-publication-contract.workspace = true
 csv.workspace = true
 rust_xlsxwriter = { version = "0.92", default-features = false }
-# arrow-rs 59 is the first release whose parquet drops the `thrift` crate
-# (GHSA-2f9f-gq7v-9h6m); every parquet <= 58 pins the unpatched `thrift ^0.17`.
 arrow-array = "59"
-arrow-ipc = "59"
 arrow-schema = "59"
-bytes = "1"
+# Engineering-table Parquet export still uses the app-owned table projection.
 parquet = { version = "59", default-features = false, features = ["arrow"] }
 fst-reader = "0.17"
 rustyhdf5 = { version = "1.93", default-features = false }
@@ -130,6 +127,7 @@ rfd = { version = "0.17", features = ["file-handle-inner"] }
 dirs = "6.0"
 
 [dev-dependencies]
+arrow-ipc = "59"
 matfile = "0.5"
 wat = "1"
 fst-writer = "0.3"

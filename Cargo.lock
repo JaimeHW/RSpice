@@ -5218,7 +5218,6 @@ dependencies = [
  "arrow-ipc",
  "arrow-schema",
  "base64 0.23.1",
- "bytes",
  "csv",
  "dirs",
  "ed25519-dalek",
@@ -5514,9 +5513,14 @@ dependencies = [
 name = "rspice-formats"
 version = "0.1.0"
 dependencies = [
+ "arrow-array",
+ "arrow-ipc",
+ "arrow-schema",
+ "bytes",
  "matfile",
  "npyz",
  "num-complex",
+ "parquet",
  "serde",
  "time",
  "zip",

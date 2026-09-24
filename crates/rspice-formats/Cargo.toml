@@ -11,10 +11,22 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+columnar = ["dep:arrow-array", "dep:arrow-ipc", "dep:bytes", "dep:parquet"]
+
 [dependencies]
+arrow-array = { version = "59", optional = true }
+arrow-ipc = { version = "59", optional = true }
+bytes = { version = "1", optional = true }
 matfile = "0.5"
 num-complex.workspace = true
 npyz = { version = "0.9", features = ["complex"] }
+# arrow-rs 59 is the first release whose parquet drops the `thrift` crate
+# (GHSA-2f9f-gq7v-9h6m); every parquet <= 58 pins the unpatched `thrift ^0.17`.
+parquet = { version = "59", default-features = false, features = ["arrow"], optional = true }
 serde.workspace = true
 time.workspace = true
 zip = { version = "7.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[dev-dependencies]
+arrow-schema = "59"

@@ -886,123 +886,39 @@ pub(super) fn parse_arrow_ipc(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
-    use arrow_ipc::reader::{FileReader, StreamReader};
-    let mut batches = Vec::new();
-    let file_attempt = FileReader::try_new(Cursor::new(bytes), None);
-    let metadata = match file_attempt {
-        Ok(reader) => {
-            let metadata = reader.schema().metadata().clone();
-            for batch in reader {
-                batches.push(batch.map_err(|error| {
-                    adapter_error(format, format_args!("invalid Arrow record batch: {error}"))
-                })?);
-            }
-            metadata
-        }
-        Err(file_error) => {
-            let reader = StreamReader::try_new(Cursor::new(bytes), None).map_err(|stream_error| {
-                adapter_error(
-                    format,
-                    format_args!(
-                        "neither Arrow file nor stream framing is valid (file: {file_error}; stream: {stream_error})"
-                    ),
-                )
-            })?;
-            let metadata = reader.schema().metadata().clone();
-            for batch in reader {
-                batches.push(batch.map_err(|error| {
-                    adapter_error(format, format_args!("invalid Arrow stream batch: {error}"))
-                })?);
-            }
-            metadata
-        }
-    };
-    parse_arrow_batches(format, batches, metadata)
+    let table = rspice_formats::columnar::decode_arrow_ipc(
+        bytes,
+        columnar_limits(),
+        format.canonical_id(),
+    )?;
+    finish_columnar_table(format, table)
 }
 
 pub(super) fn parse_parquet(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
-    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-    let builder = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::copy_from_slice(bytes))
-        .map_err(|error| {
-            adapter_error(format, format_args!("invalid Parquet metadata: {error}"))
-        })?;
-    let metadata = builder.schema().metadata().clone();
-    let reader = builder.with_batch_size(16_384).build().map_err(|error| {
-        adapter_error(
-            format,
-            format_args!("could not create Parquet reader: {error}"),
-        )
-    })?;
-    let mut batches = Vec::new();
-    for batch in reader {
-        batches.push(batch.map_err(|error| {
-            adapter_error(format, format_args!("invalid Parquet row group: {error}"))
-        })?);
-    }
-    parse_arrow_batches(format, batches, metadata)
+    let table =
+        rspice_formats::columnar::decode_parquet(bytes, columnar_limits(), format.canonical_id())?;
+    finish_columnar_table(format, table)
 }
 
-fn parse_arrow_batches(
+fn columnar_limits() -> rspice_formats::columnar::ColumnarLimits {
+    rspice_formats::columnar::ColumnarLimits {
+        max_columns: MAX_RESULT_COLUMNS,
+        max_rows: MAX_RESULT_ROWS,
+        max_values: MAX_RESULT_VALUES,
+    }
+}
+
+fn finish_columnar_table(
     format: ResultImportFormat,
-    batches: Vec<arrow_array::RecordBatch>,
-    metadata: HashMap<String, String>,
+    table: rspice_formats::columnar::DecodedColumnarTable,
 ) -> Result<ParsedResultDataset, String> {
-    let first = batches
-        .first()
-        .ok_or_else(|| adapter_error(format, "the table contains no record batches"))?;
-    let schema = first.schema();
-    if schema.fields().len() < 2 || schema.fields().len() > MAX_RESULT_COLUMNS.saturating_mul(2) {
-        return Err(adapter_error(
-            format,
-            format_args!(
-                "the table has {} fields; expected 2..={}",
-                schema.fields().len(),
-                MAX_RESULT_COLUMNS
-            ),
-        ));
-    }
-    let row_count = batches
-        .iter()
-        .try_fold(0_usize, |count, batch| count.checked_add(batch.num_rows()))
-        .ok_or_else(|| adapter_error(format, "row count overflow"))?;
-    if row_count > MAX_RESULT_ROWS {
-        return Err(adapter_error(
-            format,
-            format_args!("the table has {row_count} rows; the limit is {MAX_RESULT_ROWS}"),
-        ));
-    }
-    let table_values = row_count
-        .checked_mul(schema.fields().len())
-        .ok_or_else(|| adapter_error(format, "table value count overflow"))?;
-    if table_values > MAX_RESULT_VALUES {
-        return Err(adapter_error(
-            format,
-            format_args!(
-                "the table contains {table_values} values; the limit is {MAX_RESULT_VALUES}"
-            ),
-        ));
-    }
-    let mut columns = schema
-        .fields()
-        .iter()
-        .map(|field| (field.name().clone(), Vec::with_capacity(row_count)))
-        .collect::<Vec<_>>();
-    for batch in batches {
-        if batch.schema().as_ref() != schema.as_ref() {
-            return Err(adapter_error(
-                format,
-                "record-batch schema changed within the source",
-            ));
-        }
-        for (index, array) in batch.columns().iter().enumerate() {
-            let name = columns[index].0.clone();
-            let values = arrow_numeric_values(format, &name, array.as_ref())?;
-            columns[index].1.extend(values);
-        }
-    }
+    let rspice_formats::columnar::DecodedColumnarTable {
+        metadata,
+        mut columns,
+    } = table;
     let coordinate_name = metadata
         .get("rspice.coordinate")
         .cloned()
@@ -1024,83 +940,6 @@ fn parse_arrow_batches(
         .unwrap_or_else(|| analysis_from_coordinate(&coordinate_name));
     let signals = combine_real_imag_columns(format, columns)?;
     finish_dataset(format, analysis, coordinate_name, coordinate, signals)
-}
-
-fn arrow_numeric_values(
-    format: ResultImportFormat,
-    name: &str,
-    array: &dyn arrow_array::Array,
-) -> Result<Vec<f64>, String> {
-    use arrow_array::{
-        BooleanArray, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
-        UInt8Array, UInt16Array, UInt32Array, UInt64Array,
-    };
-    if array.null_count() != 0 {
-        return Err(adapter_error(
-            format,
-            format_args!(
-                "column '{name}' contains {} null values",
-                array.null_count()
-            ),
-        ));
-    }
-    macro_rules! float_values {
-        ($ty:ty) => {
-            array
-                .as_any()
-                .downcast_ref::<$ty>()
-                .map(|array| array.values().iter().map(|value| *value as f64).collect())
-        };
-    }
-    macro_rules! signed_values {
-        ($ty:ty) => {
-            array.as_any().downcast_ref::<$ty>().map(|array| {
-                array
-                    .values()
-                    .iter()
-                    .map(|value| exact_signed_integer(format, name, *value as i64))
-                    .collect::<Result<Vec<_>, _>>()
-            })
-        };
-    }
-    macro_rules! unsigned_values {
-        ($ty:ty) => {
-            array.as_any().downcast_ref::<$ty>().map(|array| {
-                array
-                    .values()
-                    .iter()
-                    .map(|value| exact_unsigned_integer(format, name, *value as u64))
-                    .collect::<Result<Vec<_>, _>>()
-            })
-        };
-    }
-    let values = float_values!(Float64Array)
-        .or_else(|| float_values!(Float32Array))
-        .map(Ok)
-        .or_else(|| signed_values!(Int64Array))
-        .or_else(|| signed_values!(Int32Array))
-        .or_else(|| signed_values!(Int16Array))
-        .or_else(|| signed_values!(Int8Array))
-        .or_else(|| unsigned_values!(UInt64Array))
-        .or_else(|| unsigned_values!(UInt32Array))
-        .or_else(|| unsigned_values!(UInt16Array))
-        .or_else(|| unsigned_values!(UInt8Array))
-        .or_else(|| {
-            array.as_any().downcast_ref::<BooleanArray>().map(|array| {
-                Ok((0..array.len())
-                    .map(|index| if array.value(index) { 1.0 } else { 0.0 })
-                    .collect())
-            })
-        });
-    values.ok_or_else(|| {
-        adapter_error(
-            format,
-            format_args!(
-                "column '{name}' has unsupported Arrow type {}",
-                array.data_type()
-            ),
-        )
-    })?
 }
 
 fn complex_component(name: &str) -> Option<(String, bool)> {

@@ -1,5 +1,7 @@
 //! Portable engineering-data codecs.
 
+#[cfg(feature = "columnar")]
+pub mod columnar;
 pub mod matlab;
 pub mod numeric;
 pub mod numpy;
