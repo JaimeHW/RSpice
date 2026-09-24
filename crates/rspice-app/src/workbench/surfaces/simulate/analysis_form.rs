@@ -1212,3 +1212,83 @@ fn study_base_row(
         *selected_base = choices[selected].0;
     }
 }
+
+pub(super) fn prerequisite_rows(
+    ui: &mut Ui,
+    selected: &super::SelectedAnalysis,
+) -> Option<super::AnalysisAction> {
+    if selected.prerequisite_roles.is_empty() {
+        super::property_row(ui, "Prerequisites", "none declared");
+        return None;
+    }
+    let mut requested = None;
+    for prerequisite in &selected.prerequisite_roles {
+        let bound = selected
+            .dependencies
+            .iter()
+            .find(|dependency| dependency.prerequisite() == *prerequisite);
+        let target = bound.map_or_else(
+            || {
+                if selected.enabled {
+                    "unbound · preflight blocked".to_owned()
+                } else {
+                    "unbound · required when enabled".to_owned()
+                }
+            },
+            |dependency| dependency.target().to_string(),
+        );
+        let label = format!("{} prerequisite", prerequisite.stable_id().to_uppercase());
+        let candidates = selected
+            .prerequisite_candidates
+            .iter()
+            .find_map(|(kind, candidates)| (*kind == *prerequisite).then_some(candidates));
+        let Some(candidates) = candidates.filter(|candidates| !candidates.is_empty()) else {
+            super::property_row(ui, &label, &target);
+            continue;
+        };
+        let options = candidates
+            .iter()
+            .map(|candidate| candidate.label.clone())
+            .collect::<Vec<_>>();
+        let current = bound
+            .and_then(|dependency| {
+                candidates
+                    .iter()
+                    .find(|candidate| candidate.id == dependency.target())
+            })
+            .map_or("Select compatible instance", |candidate| {
+                candidate.label.as_str()
+            });
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let width = ui.available_width().max(1.0);
+            // The property rows above and below this one are the same block,
+            // so the control starts where their values do. The share this
+            // replaces was a second account of the same column that collapsed
+            // to the label's own text width, opening a second label column a
+            // hundred points left of the first.
+            super::paint_control_row_label(ui, &label, width);
+            let select_width = (ui.available_width() - super::PROPERTY_ROW_TRAILING_PAD).max(1.0);
+            let salt = format!(
+                "analysis.{}.prerequisite.{}",
+                selected.id,
+                prerequisite.stable_id()
+            );
+            if let Some(index) = select(
+                ui,
+                &salt,
+                &format!("Select {label}"),
+                current,
+                &options,
+                select_width,
+            ) && let Some(candidate) = candidates.get(index)
+            {
+                requested = Some(super::AnalysisAction::BindDependency {
+                    prerequisite: *prerequisite,
+                    target: candidate.id,
+                });
+            }
+        });
+    }
+    requested
+}
