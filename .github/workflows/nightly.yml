@@ -394,17 +394,17 @@ jobs:
         with:
           key: nightly-release-${{ matrix.os }}
       - name: Build shipped binaries
-        run: cargo build --locked --release -p rspice-ui -p rspice-cli --features rspice-ui/generated-veriloga-catalog
+        run: cargo build --locked --release -p rspice-app -p rspice-cli --features rspice-app/generated-veriloga-catalog
       - name: Stage release artifacts
         shell: bash
         run: |
           mkdir -p release-artifacts
           if [ "$RUNNER_OS" = "Windows" ]; then
             cp target/release/rspice.exe release-artifacts/
-            cp target/release/rspice-ui.exe release-artifacts/
+            cp target/release/rspice-app.exe release-artifacts/
           else
             cp target/release/rspice release-artifacts/
-            cp target/release/rspice-ui release-artifacts/
+            cp target/release/rspice-app release-artifacts/
           fi
       - name: Upload release artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -209,7 +209,7 @@ jobs:
       - name: Test remaining workspace crates
         run: >-
           cargo test --locked --workspace --no-fail-fast
-          --exclude rspice-core --exclude rspice-ui --exclude rspice-conformance
+          --exclude rspice-core --exclude rspice-app --exclude rspice-conformance
           --exclude rspice-python --exclude rspice-wasm
           --exclude 'rspice-veriloga-model*' --exclude 'rspice-*-catalog-dump'
 
@@ -225,10 +225,10 @@ jobs:
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - name: Test UI units, integration tests, and doctests (Linux)
-        run: cargo test --locked -p rspice-ui --no-fail-fast
+        run: cargo test --locked -p rspice-app --no-fail-fast
       - name: Test generated Verilog-A GUI contracts
         run: >-
-          cargo test --locked -p rspice-ui
+          cargo test --locked -p rspice-app
           --features generated-veriloga-catalog
           --lib generated_veriloga
 
@@ -412,7 +412,7 @@ jobs:
       - name: CLI integration tests
         run: cargo test --locked -p rspice-cli --tests
       - name: UI library tests
-        run: cargo test --locked -p rspice-ui --lib
+        run: cargo test --locked -p rspice-app --lib
       - name: Verilog-A native JIT unit tests
         run: |
           cargo test --locked -p rspice-veriloga --features native --lib native:: -- --test-threads=1
@@ -567,7 +567,7 @@ jobs:
       - name: Check desktop crates
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check --locked -p rspice-cli -p rspice-ui
+        run: cargo check --locked -p rspice-cli -p rspice-app
       - name: Qualify portable generated Verilog-A shard
         env:
           RUSTFLAGS: -D warnings
@@ -577,7 +577,7 @@ jobs:
       - name: CLI integration tests
         run: cargo test --locked -p rspice-cli --tests
       - name: UI library tests
-        run: cargo test --locked -p rspice-ui --lib
+        run: cargo test --locked -p rspice-app --lib
 
   wasm:
     name: Check (wasm32)
@@ -596,14 +596,14 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo build --locked -p rspice-wasm --lib --target wasm32-unknown-unknown --release
-      - name: Check rspice-ui
+      - name: Check rspice-app
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check --locked -p rspice-ui --features generated-veriloga-catalog --target wasm32-unknown-unknown
-      - name: Check rspice-ui browser worker
+        run: cargo check --locked -p rspice-app --features generated-veriloga-catalog --target wasm32-unknown-unknown
+      - name: Check rspice-app browser worker
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check --locked -p rspice-ui --bin rspice-ui-worker --features browser-worker --target wasm32-unknown-unknown
+        run: cargo check --locked -p rspice-app --bin rspice-ui-worker --features browser-worker --target wasm32-unknown-unknown
       - name: Check rspice-publication-contract
         env:
           RUSTFLAGS: -D warnings
@@ -643,15 +643,15 @@ jobs:
       - name: Test UI clocks in a browser window
         env:
           WASM_BINDGEN_USE_BROWSER: '1'
-        run: cargo test --locked -p rspice-ui --target wasm32-unknown-unknown --test browser_clock
+        run: cargo test --locked -p rspice-app --target wasm32-unknown-unknown --test browser_clock
       - name: Test UI clocks in a dedicated worker
         env:
           WASM_BINDGEN_USE_DEDICATED_WORKER: '1'
-        run: cargo test --locked -p rspice-ui --target wasm32-unknown-unknown --test browser_clock
+        run: cargo test --locked -p rspice-app --target wasm32-unknown-unknown --test browser_clock
       - name: Test UI worker structured-clone transport in Node
         run: |
           node --version
-          cargo test --locked -p rspice-ui --target wasm32-unknown-unknown --features browser-worker --test browser_worker_transport
+          cargo test --locked -p rspice-app --target wasm32-unknown-unknown --features browser-worker --test browser_worker_transport
 
   wasm-ui-size:
     name: Browser build & qualification
@@ -665,14 +665,14 @@ jobs:
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - name: Build production browser UI image
-        run: cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --features generated-veriloga-catalog --target wasm32-unknown-unknown
+        run: cargo build --locked --profile web-release -p rspice-app --bin rspice-app --features generated-veriloga-catalog --target wasm32-unknown-unknown
       - name: Install pinned wasm-bindgen CLI
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
       - name: Generate production browser UI bindings
         run: >-
           wasm-bindgen --target web --out-name rspice-ui
           --out-dir crates/rspice-app/web/pkg
-          target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
+          target/wasm32-unknown-unknown/web-release/rspice-app.wasm
       - name: Report browser UI image size
         run: >-
           python3 tools/ci/check_wasm_artifact_size.py
@@ -680,7 +680,7 @@ jobs:
           --label rspice-ui
       - name: Build production browser worker image
         run: >-
-          cargo build --locked --profile web-release -p rspice-ui
+          cargo build --locked --profile web-release -p rspice-app
           --bin rspice-ui-worker --features browser-worker,generated-veriloga-catalog
           --target wasm32-unknown-unknown
       - name: Generate production browser worker bindings
@@ -700,14 +700,14 @@ jobs:
         run: python3 tools/ci/check_browser_monte_carlo_checkpoint.py
       - name: Build instrumented browser workbench
         run: >-
-          cargo build --locked --profile web-release -p rspice-ui
-          --bin rspice-ui --features browser-qualification,generated-veriloga-catalog
+          cargo build --locked --profile web-release -p rspice-app
+          --bin rspice-app --features browser-qualification,generated-veriloga-catalog
           --target wasm32-unknown-unknown
       - name: Generate browser workbench bindings
         run: >-
           wasm-bindgen --target web --out-name rspice-ui
           --out-dir crates/rspice-app/web/pkg
-          target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
+          target/wasm32-unknown-unknown/web-release/rspice-app.wasm
       - name: Qualify browser review and recovery workflow
         run: >-
           python3 tools/ci/check_browser_workbench.py --software-webgpu

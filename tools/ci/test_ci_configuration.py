@@ -284,7 +284,7 @@ class CiConfigurationTests(unittest.TestCase):
         defaults = set(metadata["workspace_default_members"])
         self.assertEqual(
             {package["name"] for package in metadata["packages"] if package["id"] in defaults},
-            {"rspice-cli", "rspice-ui"},
+            {"rspice-cli", "rspice-app"},
         )
         for name in ("rspice-conformance", "rspice-sheet-publisher"):
             package = next(package for package in metadata["packages"] if package["name"] == name)
@@ -446,7 +446,7 @@ class CiConfigurationTests(unittest.TestCase):
         """
         shipping = (
             "rspice-cli",
-            "rspice-ui",
+            "rspice-app",
             "rspice-python",
             "rspice-wasm",
             "rspice-core",
@@ -599,7 +599,7 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertNotIn("run: cargo clean", workflow)
         self.assertNotIn("--no-run", workflow)
         self.assertIn("CARGO_BUILD_JOBS: \"2\"", workflow)
-        for package, job in (("rspice-core", "test-linux"), ("rspice-ui", "test-ui")):
+        for package, job in (("rspice-core", "test-linux"), ("rspice-app", "test-ui")):
             body = re.split(r"\n  [a-z][a-z0-9-]*:", workflow.split(f"  {job}:\n", 1)[1], maxsplit=1)[0]
             # A complete package selection includes lib, bin, integration and doc
             # tests. Restricting it to --lib previously missed UI integration tests.
@@ -610,7 +610,7 @@ class CiConfigurationTests(unittest.TestCase):
         command = shlex.split(step.split("run: >-", 1)[1])
         self.assertEqual(command[:4], ["cargo", "test", "--locked", "--workspace"])
         exclusions = [command[i + 1] for i, word in enumerate(command) if word == "--exclude"]
-        dedicated = {"rspice-core", "rspice-ui", "rspice-python", "rspice-wasm", "rspice-conformance"}
+        dedicated = {"rspice-core", "rspice-app", "rspice-python", "rspice-wasm", "rspice-conformance"}
         generated = {name for name in workspace_member_names()
                      if name.startswith("rspice-veriloga-model") or name.endswith("-catalog-dump")}
         excluded = {name for name in workspace_member_names()
@@ -656,7 +656,7 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("WASM_BINDGEN_USE_DEDICATED_WORKER: '1'", job)
         self.assertIn("cargo test --locked -p rspice-wasm -p rspice-cloud-client --lib --target wasm32-unknown-unknown", job)
         self.assertEqual(job.count("--test browser_clock"), 2)
-        self.assertIn("cargo test --locked -p rspice-ui --target wasm32-unknown-unknown --features browser-worker --test browser_worker_transport", job)
+        self.assertIn("cargo test --locked -p rspice-app --target wasm32-unknown-unknown --features browser-worker --test browser_worker_transport", job)
 
     def test_browser_size_reports_measure_the_delivered_bindgen_modules(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
@@ -713,7 +713,7 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-cloud-client",
             "rspice-sheet-publisher",
             "rspice-core",
-            "rspice-ui",
+            "rspice-app",
         ):
             self.assertIn(package, covered)
 
@@ -1374,7 +1374,7 @@ class CiConfigurationTests(unittest.TestCase):
         )
 
         for mobile_target in ["aarch64-linux-android", "x86_64-linux-android"]:
-            tree = cargo_tree_for_target("rspice-ui", mobile_target)
+            tree = cargo_tree_for_target("rspice-app", mobile_target)
             self.assertNotIn('rspice-veriloga feature "native"', tree)
             self.assertIn('rspice-core feature "veriloga"', tree)
 
@@ -1383,11 +1383,11 @@ class CiConfigurationTests(unittest.TestCase):
 
         self.assertIn("cargo check --locked -p rspice-wasm --target wasm32-unknown-unknown", workflow)
         self.assertIn(
-            "cargo check --locked -p rspice-ui --features generated-veriloga-catalog --target wasm32-unknown-unknown",
+            "cargo check --locked -p rspice-app --features generated-veriloga-catalog --target wasm32-unknown-unknown",
             workflow,
         )
         self.assertIn(
-            "cargo check --locked -p rspice-ui --bin rspice-ui-worker --features browser-worker --target wasm32-unknown-unknown",
+            "cargo check --locked -p rspice-app --bin rspice-ui-worker --features browser-worker --target wasm32-unknown-unknown",
             workflow,
         )
         self.assertIn(
@@ -1395,11 +1395,11 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
         )
         self.assertIn(
-            "cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --features generated-veriloga-catalog --target wasm32-unknown-unknown",
+            "cargo build --locked --profile web-release -p rspice-app --bin rspice-app --features generated-veriloga-catalog --target wasm32-unknown-unknown",
             workflow,
         )
         self.assertIn("--bin rspice-ui-worker --features browser-worker,generated-veriloga-catalog", workflow)
-        self.assertIn("--bin rspice-ui --features browser-qualification,generated-veriloga-catalog", workflow)
+        self.assertIn("--bin rspice-app --features browser-qualification,generated-veriloga-catalog", workflow)
         self.assertIn("node --test tools/ci/test_wasm_loader.mjs", workflow)
         self.assertIn("tools/ci/check_wasm_artifact_size.py", workflow)
         self.assertGreaterEqual(
@@ -1469,7 +1469,7 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("cargo llvm-cov --locked ${{ matrix.packages }}", coverage)
         for group in ("core", "ui", "libraries"):
             self.assertIn(f"group: {group}", coverage)
-        self.assertIn("--workspace --exclude rspice-core --exclude rspice-ui", coverage)
+        self.assertIn("--workspace --exclude rspice-core --exclude rspice-app", coverage)
         self.assertIn("--exclude 'rspice-veriloga-model*'", coverage)
         self.assertNotIn("  push:", coverage)
         self.assertNotIn("  pull_request:", coverage)
@@ -1654,9 +1654,9 @@ class CiConfigurationTests(unittest.TestCase):
         workflow = read_text(".github/workflows/ci.yml")
 
         self.assertIn("runs-on: macos-latest", workflow)
-        self.assertIn("cargo check --locked -p rspice-cli -p rspice-ui", workflow)
+        self.assertIn("cargo check --locked -p rspice-cli -p rspice-app", workflow)
         self.assertIn("cargo test --locked -p rspice-cli --tests", workflow)
-        self.assertIn("cargo test --locked -p rspice-ui --lib", workflow)
+        self.assertIn("cargo test --locked -p rspice-app --lib", workflow)
         # The desktop claim includes reclaiming a killed run's staging files,
         # whose liveness answer is per-host and pinned in `rspice-output`. The
         # job checked and tested the two crates above and never built that one.
@@ -1678,7 +1678,7 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertEqual(
             declared,
             {"default", "generated-veriloga-catalog", "browser-worker", "browser-qualification"},
-            "rspice-ui declares a Cargo feature the README does not describe; add "
+            "rspice-app declares a Cargo feature the README does not describe; add "
             "the row, or drop the flag if no cfg reads it",
         )
         for feature in declared - {"default"}:

@@ -262,7 +262,7 @@ def release_payloads(
     binary: Path, ui_binary: Path, runtime_root: Path, target: str
 ) -> list[Payload]:
     executable = "rspice.exe" if "windows" in target else "rspice"
-    ui_executable = "rspice-ui.exe" if "windows" in target else "rspice-ui"
+    ui_executable = "rspice-app.exe" if "windows" in target else "rspice-app"
     sources = [
         (executable, binary, 0o755),
         (ui_executable, ui_binary, 0o755),

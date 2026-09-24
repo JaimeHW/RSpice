@@ -258,7 +258,7 @@ jobs:
           RSPICE_AUTOMATION_RUNTIME_KEY_ID: ${{ steps.runtime.outputs.signing_key_id }}
           RSPICE_AUTOMATION_RUNTIME_PUBLIC_KEY_HEX: ${{ steps.runtime.outputs.public_key_hex }}
           RUSTFLAGS: -D warnings -A dead-code
-        run: cargo build --locked --release -p rspice-ui --features generated-veriloga-catalog --target ${{ matrix.target }}
+        run: cargo build --locked --release -p rspice-app --features generated-veriloga-catalog --target ${{ matrix.target }}
       - name: Smoke packaged backend identity and readiness
         shell: bash
         env:
@@ -292,7 +292,7 @@ jobs:
         run: |
           set -euo pipefail
           binary="target/${RELEASE_TARGET}/release/rspice"
-          ui_binary="target/${RELEASE_TARGET}/release/rspice-ui"
+          ui_binary="target/${RELEASE_TARGET}/release/rspice-app"
           case "$RELEASE_TARGET" in
             *windows*) binary="${binary}.exe"; ui_binary="${ui_binary}.exe" ;;
           esac
@@ -361,13 +361,13 @@ jobs:
             --override-filename rspice-cli.cdx
           cargo cyclonedx --format json --spec-version 1.5 --target all \
             --manifest-path crates/rspice-app/Cargo.toml \
-            --override-filename rspice-ui.cdx
+            --override-filename rspice-app.cdx
           cargo cyclonedx --format json --spec-version 1.5 --target all \
             --manifest-path crates/rspice-automation-runtime/Cargo.toml \
             --override-filename rspice-automation-runtime.cdx
           mkdir -p dist
           mv crates/rspice-cli/rspice-cli.cdx.json "dist/rspice-${RELEASE_VERSION}-cli.cdx.json"
-          mv crates/rspice-app/rspice-ui.cdx.json "dist/rspice-${RELEASE_VERSION}-ui.cdx.json"
+          mv crates/rspice-app/rspice-app.cdx.json "dist/rspice-${RELEASE_VERSION}-ui.cdx.json"
           mv crates/rspice-automation-runtime/rspice-automation-runtime.cdx.json \
             "dist/rspice-${RELEASE_VERSION}-automation-runtime.cdx.json"
           cd dist

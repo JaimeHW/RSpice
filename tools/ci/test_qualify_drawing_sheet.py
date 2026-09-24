@@ -372,7 +372,7 @@ class DrawingSheetQualificationTests(unittest.TestCase):
             scopes = self._fixture_root(root)
 
             def failing_executor(command, command_root, timeout):
-                if "rspice-ui" in command and "drawing_sheet" in command:
+                if "rspice-app" in command and "drawing_sheet" in command:
                     return CommandOutcome(1, "", "intentional failure")
                 return self._executor(command, command_root, timeout)
 
@@ -433,7 +433,7 @@ class DrawingSheetQualificationTests(unittest.TestCase):
 
             def ignored_executor(command, command_root, timeout):
                 outcome = self._executor(command, command_root, timeout)
-                if "rspice-ui" in command and "drawing_sheet" in command:
+                if "rspice-app" in command and "drawing_sheet" in command:
                     return CommandOutcome(
                         0,
                         outcome.stdout.replace(

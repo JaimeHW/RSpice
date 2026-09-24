@@ -57,12 +57,12 @@ complete clean-commit product CI gates below.
 
 ```text
 cargo test --locked -p rspice-core --test save_directives
-cargo test --locked -p rspice-ui --lib
+cargo test --locked -p rspice-app --lib
 cargo test --locked -p rspice-sheet-publisher
-cargo test --locked -p rspice-ui --test module_layering
-cargo check --locked -p rspice-ui --target wasm32-unknown-unknown
-cargo check --locked -p rspice-ui --target x86_64-pc-windows-msvc
-cargo check --locked -p rspice-ui --target x86_64-unknown-linux-gnu
+cargo test --locked -p rspice-app --test module_layering
+cargo check --locked -p rspice-app --target wasm32-unknown-unknown
+cargo check --locked -p rspice-app --target x86_64-pc-windows-msvc
+cargo check --locked -p rspice-app --target x86_64-unknown-linux-gnu
 ```
 
 The macOS build and tests must run on the supported Apple build host; a Rust

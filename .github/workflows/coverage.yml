@@ -31,10 +31,10 @@ jobs:
           - group: core
             packages: -p rspice-core
           - group: ui
-            packages: -p rspice-ui
+            packages: -p rspice-app
           - group: libraries
             packages: >-
-              --workspace --exclude rspice-core --exclude rspice-ui
+              --workspace --exclude rspice-core --exclude rspice-app
               --exclude rspice-python --exclude rspice-wasm --exclude rspice-conformance
               --exclude 'rspice-veriloga-model*' --exclude 'rspice-*-catalog-dump'
     env:

@@ -28,11 +28,11 @@ class NativeReleasePackageTests(unittest.TestCase):
     def fixtures(self, root: Path, target: str) -> tuple[Path, Path, Path]:
         suffix = ".exe" if "windows" in target else ""
         binary = root / f"rspice{suffix}"
-        ui_binary = root / f"rspice-ui{suffix}"
+        ui_binary = root / f"rspice-app{suffix}"
         runtime = root / "python-runtime"
         (runtime / "bin").mkdir(parents=True)
         binary.write_bytes(b"deterministic-rspice-binary\x00fixture")
-        ui_binary.write_bytes(b"deterministic-rspice-ui-binary\x00fixture")
+        ui_binary.write_bytes(b"deterministic-rspice-app-binary\x00fixture")
         runtime_python = runtime / "bin" / f"python{suffix}"
         runtime_python.write_bytes(b"managed-python\x00fixture")
         runtime_python.chmod(0o755)
@@ -77,14 +77,14 @@ class NativeReleasePackageTests(unittest.TestCase):
                 names = package.getnames()
                 prefix = f"rspice-{workspace_version()}-x86_64-unknown-linux-gnu"
                 self.assertIn(f"{prefix}/rspice", names)
-                self.assertIn(f"{prefix}/rspice-ui", names)
+                self.assertIn(f"{prefix}/rspice-app", names)
                 self.assertIn(f"{prefix}/runtimes/python/bin/python", names)
                 self.assertIn(
                     f"{prefix}/runtimes/python/runtime-manifest.ed25519.json", names
                 )
                 manifest = json.load(package.extractfile(f"{prefix}/RELEASE-MANIFEST.json"))
                 executable = package.getmember(f"{prefix}/rspice")
-                ui_executable = package.getmember(f"{prefix}/rspice-ui")
+                ui_executable = package.getmember(f"{prefix}/rspice-app")
                 runtime_executable = package.getmember(
                     f"{prefix}/runtimes/python/bin/python"
                 )
@@ -103,7 +103,7 @@ class NativeReleasePackageTests(unittest.TestCase):
                 "LICENSE",
                 "NOTICE",
                 "README.md",
-                "rspice-ui",
+                "rspice-app",
                 "runtimes/python/runtime-manifest.json",
                 "runtimes/python/runtime-manifest.ed25519.json",
                 "runtimes/python/worker/rspice_worker.py",
@@ -143,7 +143,7 @@ class NativeReleasePackageTests(unittest.TestCase):
             prefix = f"rspice-{workspace_version()}-x86_64-pc-windows-msvc"
             with zipfile.ZipFile(archive) as package:
                 self.assertIn(f"{prefix}/rspice.exe", package.namelist())
-                self.assertIn(f"{prefix}/rspice-ui.exe", package.namelist())
+                self.assertIn(f"{prefix}/rspice-app.exe", package.namelist())
                 self.assertIn(
                     f"{prefix}/runtimes/python/bin/python.exe", package.namelist()
                 )
