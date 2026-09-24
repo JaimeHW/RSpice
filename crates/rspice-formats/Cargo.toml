@@ -12,4 +12,6 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+num-complex.workspace = true
+npyz = { version = "0.9", features = ["complex"] }
 serde.workspace = true

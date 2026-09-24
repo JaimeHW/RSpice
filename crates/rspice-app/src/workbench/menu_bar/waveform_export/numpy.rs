@@ -39,8 +39,8 @@ use crate::workbench::workflows::export_workflow::{
     ExportWorkflowIo, SaveDialogConfig, deterministic_stored_zip,
 };
 
-use npyz::WriterBuilder as _;
 use num_complex::Complex64;
+use rspice_formats::numpy::{encode_complex_array, encode_real_array};
 
 /// `result_import_workflow::MAX_RESULT_COLUMNS`, and
 /// `result_import_adapters::MAX_ARCHIVE_MEMBERS`, which are the same number.
@@ -229,36 +229,6 @@ pub(super) fn prepare_numpy(
         ));
     }
     Ok(export)
-}
-
-fn npy_error(error: std::io::Error) -> String {
-    format!("The NumPy array could not be written: {error}")
-}
-
-fn encode_real_array(shape: &[u64], values: &[f64]) -> Result<Vec<u8>, String> {
-    let mut bytes = Vec::new();
-    let mut writer = npyz::WriteOptions::<f64>::new()
-        .default_dtype()
-        .shape(shape)
-        .writer(&mut bytes)
-        .begin_nd()
-        .map_err(npy_error)?;
-    writer.extend(values.iter().copied()).map_err(npy_error)?;
-    writer.finish().map_err(npy_error)?;
-    Ok(bytes)
-}
-
-fn encode_complex_array(shape: &[u64], values: &[Complex64]) -> Result<Vec<u8>, String> {
-    let mut bytes = Vec::new();
-    let mut writer = npyz::WriteOptions::<Complex64>::new()
-        .default_dtype()
-        .shape(shape)
-        .writer(&mut bytes)
-        .begin_nd()
-        .map_err(npy_error)?;
-    writer.extend(values.iter().copied()).map_err(npy_error)?;
-    writer.finish().map_err(npy_error)?;
-    Ok(bytes)
 }
 
 /// One 2-D array, C order, coordinate first.
