@@ -297,7 +297,7 @@ fn numeric(expression: &Expr) -> Option<f64> {
 }
 
 fn same_scale(a: &MeasurementUnit, b: &MeasurementUnit) -> bool {
-    a.parsed().zip(b.parsed()).is_some_and(|(a, b)| a == b)
+    a.same_scale_as(b)
 }
 
 fn probe_unit(name: &str, arguments: usize) -> Option<MeasurementUnit> {

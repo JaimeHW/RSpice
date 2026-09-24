@@ -5465,6 +5465,7 @@ dependencies = [
  "rayon",
  "rspice-matrix",
  "rspice-output",
+ "rspice-units",
  "rspice-veriloga",
  "rspice-veriloga-models",
  "rspice-veriloga-runtime",
@@ -5620,6 +5621,7 @@ dependencies = [
  "num-complex",
  "png",
  "rspice-app-types",
+ "rspice-units",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -5646,6 +5648,14 @@ dependencies = [
  "rspice-app-types",
  "rspice-core",
  "rspice-results",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rspice-units"
+version = "0.1.0"
+dependencies = [
  "serde",
  "serde_json",
 ]

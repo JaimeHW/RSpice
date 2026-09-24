@@ -286,6 +286,7 @@ getrandom = { workspace = true, features = ["wasm_js"] }
 rustyhdf5 = { version = "1.93", default-features = false }
 rspice-matrix.workspace = true
 rspice-output.workspace = true
+rspice-units.workspace = true
 rspice-veriloga-runtime.workspace = true
 rspice-veriloga-models = { workspace = true, optional = true }
 # The shared typed result document in `execution::result_document` is a

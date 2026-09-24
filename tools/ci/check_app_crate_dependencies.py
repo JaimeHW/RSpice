@@ -13,8 +13,9 @@ ROOT = Path(__file__).resolve().parents[2]
 # Direct application-layer edges. Existing engine/trust crates are checked by
 # their own boundaries; these rows forbid a new extracted crate reaching up.
 ALLOWED: dict[str, set[str]] = {
+    "rspice-units": set(),
     "rspice-app-types": set(),
-    "rspice-results": {"rspice-app-types"},
+    "rspice-results": {"rspice-app-types", "rspice-units"},
     "rspice-model-library": {"rspice-app-types", "rspice-results"},
     "rspice-simulation-contract": {
         "rspice-app-types", "rspice-results", "rspice-model-library",
@@ -73,7 +74,7 @@ def violations(
         if name in HEADLESS:
             for dep in sorted(dep for dep in closure if dep.startswith("egui") or dep in GUI_PACKAGES):
                 issues.append(f"{name} reaches GUI package {dep}")
-        if name == "rspice-app-types":
+        if name in {"rspice-app-types", "rspice-units"}:
             for dep in sorted(
                 dep for dep in closure
                 if dep in ENGINE_PACKAGES or dep.startswith("rspice-veriloga-model-")
