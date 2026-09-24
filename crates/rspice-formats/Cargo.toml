@@ -16,3 +16,4 @@ num-complex.workspace = true
 npyz = { version = "0.9", features = ["complex"] }
 serde.workspace = true
 time.workspace = true
+zip = { version = "7.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }

@@ -5518,6 +5518,7 @@ dependencies = [
  "num-complex",
  "serde",
  "time",
+ "zip",
 ]
 
 [[package]]

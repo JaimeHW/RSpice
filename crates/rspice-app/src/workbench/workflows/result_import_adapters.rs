@@ -1206,84 +1206,15 @@ pub(super) fn parse_npz(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes))
-        .map_err(|error| adapter_error(format, format_args!("invalid NPZ archive: {error}")))?;
-    if archive.len() > MAX_ARCHIVE_MEMBERS {
-        return Err(adapter_error(
-            format,
-            format_args!(
-                "archive has {} members; the limit is {MAX_ARCHIVE_MEMBERS}",
-                archive.len()
-            ),
-        ));
-    }
-    let mut arrays = Vec::new();
-    let mut names = HashSet::new();
-    let mut expanded = 0_u64;
-    for index in 0..archive.len() {
-        let member = archive.by_index(index).map_err(|error| {
-            adapter_error(
-                format,
-                format_args!("invalid archive member {index}: {error}"),
-            )
-        })?;
-        if member.is_dir() {
-            continue;
-        }
-        let member_name = member.name().to_owned();
-        if member_name.starts_with('/') || member_name.contains("..") || member_name.contains('\\')
-        {
-            return Err(adapter_error(
-                format,
-                format_args!("unsafe archive member '{member_name}'"),
-            ));
-        }
-        if !member_name.to_ascii_lowercase().ends_with(".npy") {
-            return Err(adapter_error(
-                format,
-                format_args!(
-                    "unsupported NPZ member '{member_name}'; only .npy arrays are accepted"
-                ),
-            ));
-        }
-        expanded = expanded
-            .checked_add(member.size())
-            .ok_or_else(|| adapter_error(format, "archive expanded-size accounting overflow"))?;
-        if expanded > MAX_ARCHIVE_EXPANDED_BYTES {
-            return Err(adapter_error(format, "NPZ expanded-byte limit exceeded"));
-        }
-        let stem = Path::new(&member_name)
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| {
-                adapter_error(format, format_args!("invalid member name '{member_name}'"))
-            })?
-            .to_owned();
-        if !names.insert(stem.to_ascii_lowercase()) {
-            return Err(adapter_error(
-                format,
-                format_args!("archive repeats array identity '{stem}'"),
-            ));
-        }
-        let mut member_bytes = Vec::with_capacity(usize::try_from(member.size()).unwrap_or(0));
-        member
-            .take(MAX_RESULT_DATASET_BYTES + 1)
-            .read_to_end(&mut member_bytes)
-            .map_err(|error| {
-                adapter_error(
-                    format,
-                    format_args!("could not decode '{member_name}': {error}"),
-                )
-            })?;
-        arrays.push((
-            stem,
-            rspice_formats::numpy::reader::decode_npy(
-                &member_bytes,
-                MAX_RESULT_VALUES,
-                format.canonical_id(),
-            )?,
-        ));
-    }
+    let mut arrays = rspice_formats::numpy::archive::decode_npz_arrays(
+        bytes,
+        rspice_formats::numpy::archive::NpzReadLimits {
+            max_members: MAX_ARCHIVE_MEMBERS,
+            max_expanded_bytes: MAX_ARCHIVE_EXPANDED_BYTES,
+            max_numeric_values: MAX_RESULT_VALUES,
+        },
+        format.canonical_id(),
+    )?;
     let coordinate_index = arrays
         .iter()
         .position(|(name, _)| is_coordinate_name(name))

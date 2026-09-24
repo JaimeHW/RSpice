@@ -1,6 +1,8 @@
-//! Named NumPy arrays in a deterministic stored ZIP archive.
+//! Named NumPy arrays in NPZ archives.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
+use std::io::{Cursor, Read};
+use std::path::Path;
 
 use super::{MAX_COLUMNS, NamedArray, encode_complex_array, encode_real_array};
 use crate::zip::deterministic_stored_zip;
@@ -102,9 +104,115 @@ pub fn encode_npz(
     deterministic_stored_zip(&entries)
 }
 
+/// Limits imposed by the caller's import transaction before decoding an NPZ.
+#[derive(Debug, Clone, Copy)]
+pub struct NpzReadLimits {
+    pub max_members: usize,
+    pub max_expanded_bytes: u64,
+    pub max_numeric_values: usize,
+}
+
+fn adapter_error(format: &str, detail: impl std::fmt::Display) -> String {
+    format!("{format} import: {detail}")
+}
+
+/// Decode named NPY members after validating the archive and its bounds.
+pub fn decode_npz_arrays(
+    bytes: &[u8],
+    limits: NpzReadLimits,
+    format: &str,
+) -> Result<Vec<(String, super::reader::NpyArray)>, String> {
+    let max_members = limits.max_members;
+    let max_expanded_bytes = limits.max_expanded_bytes;
+    let max_numeric_values = limits.max_numeric_values;
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes))
+        .map_err(|error| adapter_error(format, format_args!("invalid NPZ archive: {error}")))?;
+    if archive.len() > max_members {
+        return Err(adapter_error(
+            format,
+            format_args!(
+                "archive has {} members; the limit is {max_members}",
+                archive.len()
+            ),
+        ));
+    }
+    let mut arrays = Vec::new();
+    let mut names = HashSet::new();
+    let mut expanded = 0_u64;
+    let mut decoded_expanded = 0_u64;
+    for index in 0..archive.len() {
+        let member = archive.by_index(index).map_err(|error| {
+            adapter_error(
+                format,
+                format_args!("invalid archive member {index}: {error}"),
+            )
+        })?;
+        if member.is_dir() {
+            continue;
+        }
+        let member_name = member.name().to_owned();
+        if member_name.starts_with('/') || member_name.contains("..") || member_name.contains('\\')
+        {
+            return Err(adapter_error(
+                format,
+                format_args!("unsafe archive member '{member_name}'"),
+            ));
+        }
+        if !member_name.to_ascii_lowercase().ends_with(".npy") {
+            return Err(adapter_error(
+                format,
+                format_args!(
+                    "unsupported NPZ member '{member_name}'; only .npy arrays are accepted"
+                ),
+            ));
+        }
+        expanded = expanded
+            .checked_add(member.size())
+            .ok_or_else(|| adapter_error(format, "archive expanded-size accounting overflow"))?;
+        if expanded > max_expanded_bytes {
+            return Err(adapter_error(format, "NPZ expanded-byte limit exceeded"));
+        }
+        let stem = Path::new(&member_name)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                adapter_error(format, format_args!("invalid member name '{member_name}'"))
+            })?
+            .to_owned();
+        if !names.insert(stem.to_ascii_lowercase()) {
+            return Err(adapter_error(
+                format,
+                format_args!("archive repeats array identity '{stem}'"),
+            ));
+        }
+        let mut member_bytes = Vec::with_capacity(usize::try_from(member.size()).unwrap_or(0));
+        member
+            .take(max_expanded_bytes.saturating_add(1))
+            .read_to_end(&mut member_bytes)
+            .map_err(|error| {
+                adapter_error(
+                    format,
+                    format_args!("could not decode '{member_name}': {error}"),
+                )
+            })?;
+        decoded_expanded = decoded_expanded
+            .checked_add(member_bytes.len() as u64)
+            .ok_or_else(|| adapter_error(format, "archive expanded-size accounting overflow"))?;
+        if decoded_expanded > max_expanded_bytes {
+            return Err(adapter_error(format, "NPZ expanded-byte limit exceeded"));
+        }
+        arrays.push((
+            stem,
+            super::reader::decode_npy(&member_bytes, max_numeric_values, format)?,
+        ));
+    }
+    Ok(arrays)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{NamedArray, encode_npz};
+    use super::{NamedArray, NpzReadLimits, decode_npz_arrays, encode_npz};
+    use crate::zip::deterministic_stored_zip;
 
     #[test]
     fn rejects_unbalanced_columns_before_writing_archive_members() {
@@ -114,5 +222,35 @@ mod tests {
             imag: None,
         };
         assert!(encode_npz("time", &[0.0, 1.0], &[signal]).is_err());
+    }
+
+    #[test]
+    fn npz_reader_rejects_unsafe_duplicate_and_oversized_members() {
+        let npy = crate::numpy::encode_real_array(&[1], &[1.0]).expect("NPY fixture");
+        let limits = NpzReadLimits {
+            max_members: 2,
+            max_expanded_bytes: npy.len() as u64 * 2,
+            max_numeric_values: 2,
+        };
+        let unsafe_archive =
+            deterministic_stored_zip(&[("../time.npy", npy.as_slice())]).expect("ZIP fixture");
+        let error =
+            decode_npz_arrays(&unsafe_archive, limits, "numpy_npz").expect_err("unsafe member");
+        assert!(error.contains("unsafe archive member"));
+
+        let duplicate_archive =
+            deterministic_stored_zip(&[("time.npy", npy.as_slice()), ("TIME.npy", npy.as_slice())])
+                .expect("ZIP fixture");
+        let error = decode_npz_arrays(&duplicate_archive, limits, "numpy_npz")
+            .expect_err("duplicate identity");
+        assert!(error.contains("archive repeats array identity"));
+
+        let small_limit = NpzReadLimits {
+            max_expanded_bytes: npy.len() as u64 - 1,
+            ..limits
+        };
+        let error = decode_npz_arrays(&duplicate_archive, small_limit, "numpy_npz")
+            .expect_err("expanded limit");
+        assert!(error.contains("NPZ expanded-byte limit exceeded"));
     }
 }
