@@ -27,8 +27,8 @@
 //! required.
 //!
 //! Every entry below states its consumer, so the last condition is checked by
-//! reading the table rather than by remembering. `numeric_override::tests`
-//! then proves the whole rule mechanically: it emits each option, parses the
+//! reading the table rather than by remembering. The app's numerical override
+//! integration tests then prove the whole rule mechanically: they emit each option, parse the
 //! deck, resolves it, and fails on any option that leaves both the resolved
 //! `SimulationConfig` and the parsed `SimulationOptions` unchanged.
 //!
@@ -93,12 +93,12 @@ mod nonlin_tran;
 mod output;
 mod timeint;
 
-use crate::simulation::accuracy::AnalysisAccuracy;
-use crate::simulation::dialog::{
-    DampingStrategy, HbTimeDomainMode, IntegrationMethod, MatrixSolver, OpHomotopy, format_si_value,
+use crate::accuracy::AnalysisAccuracy;
+use crate::analysis_kind::AnalysisKind;
+use crate::config::OpHomotopy;
+use crate::options::{
+    DampingStrategy, HbTimeDomainMode, IntegrationMethod, MatrixSolver, format_si_value,
 };
-
-use crate::simulation::plan::AnalysisKind;
 
 /// One solver option an analysis may depart from the plan on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -266,7 +266,6 @@ impl OptionPackage {
 
     /// The package name alone, which is what the parser matches. Empty for the
     /// global set, which has no name because it has no selector.
-    #[cfg(test)]
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -329,8 +328,7 @@ pub(super) const NOT_TIME_STEPPED: &str =
     "this analysis never advances time, so a time-integration bound would not reach its solve";
 pub(super) const FFT_HAS_NO_SOLVE_OF_ITS_OWN: &str =
     "an FFT analysis runs no solve of its own; state the option on the transient it is bound to";
-pub(super) const FOURIER_HAS_NO_SOLVE_OF_ITS_OWN: &str =
-    "Fourier analyzes the bound transient result; configure solver and time-reporting options on that transient analysis";
+pub(super) const FOURIER_HAS_NO_SOLVE_OF_ITS_OWN: &str = "Fourier analyzes the bound transient result; configure solver and time-reporting options on that transient analysis";
 pub(super) const NOT_HARMONIC_BALANCE: &str =
     "only a harmonic-balance solve reads this package, and this analysis does not run one";
 pub(super) const CARRIER_OWNS_HB_INITIAL_STATE: &str =
@@ -505,7 +503,7 @@ impl NumericOverrideOption {
     /// equally why the Solver ledger does not report the plan's ITL1 as that
     /// analysis's effective Newton budget.
     ///
-    /// [`crate::simulation::accuracy::AccuracyPolicy::apply`] assigns
+    /// [`crate::accuracy::AccuracyPolicy::apply`] assigns
     /// `max_iterations` from the tier *after* the deck's `.OPTIONS` have been
     /// resolved, so an ITL1 written into either options block — the plan's or
     /// this record's — is overwritten before the first Newton step. One
@@ -580,7 +578,6 @@ impl NumericOverrideOption {
     }
 
     /// The card this option's key rides on.
-    #[cfg(test)]
     #[must_use]
     pub fn package(self) -> OptionPackage {
         self.spec().package
@@ -751,7 +748,7 @@ impl NumericOverrideOption {
 ///
 /// The deck's `.OPTIONS` are not the last word on an operating point or a
 /// transfer function. Both resolve an accuracy tier through
-/// [`crate::simulation::accuracy::AccuracyPolicy::apply`], and the operating
+/// [`crate::accuracy::AccuracyPolicy::apply`], and the operating
 /// point additionally resolves a homotopy choice through
 /// [`OpHomotopy::apply`] — each on top of the fully resolved configuration.
 /// Five catalog options land on fields those two assign, so whether such an
@@ -792,7 +789,7 @@ impl SolverOwnership {
         study_inherited_options: None,
     };
 
-    pub(crate) fn for_study(options: impl Iterator<Item = NumericOverrideOption>) -> Self {
+    pub fn for_study(options: impl Iterator<Item = NumericOverrideOption>) -> Self {
         Self {
             study_inherited_options: Some(
                 options.fold(0, |mask, option| mask | (1_u64 << option as u32)),

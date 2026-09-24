@@ -731,7 +731,9 @@ fn the_time_stepped_options_are_refused_by_a_kind_that_never_steps() {
     ] {
         assert_eq!(
             option.refusal_for(AnalysisKind::Ac),
-            Some(catalog::NOT_TIME_STEPPED),
+            Some(
+                "this analysis never advances time, so a time-integration bound would not reach its solve"
+            ),
             "{} is only read on a time-stepped path",
             option.key()
         );
@@ -741,7 +743,9 @@ fn the_time_stepped_options_are_refused_by_a_kind_that_never_steps() {
     for kind in [AnalysisKind::Ac, AnalysisKind::Transient] {
         assert_eq!(
             NumericOverrideOption::HbInitialState.refusal_for(kind),
-            Some(catalog::NOT_HARMONIC_BALANCE),
+            Some(
+                "only a harmonic-balance solve reads this package, and this analysis does not run one"
+            ),
             "{} does not run a harmonic-balance solve",
             kind.label()
         );
@@ -757,13 +761,17 @@ fn the_time_stepped_options_are_refused_by_a_kind_that_never_steps() {
     for kind in [AnalysisKind::Hbsp, AnalysisKind::Hbnoise] {
         assert_eq!(
             NumericOverrideOption::HbInitialState.refusal_for(kind),
-            Some(catalog::CARRIER_OWNS_HB_INITIAL_STATE)
+            Some(
+                "this analysis reuses the bound HB solution; configure initial state on that HB analysis"
+            )
         );
     }
     // And a kind that does step carries all of them but the one the transient
     // form owns.
-    let stepping =
-        NumericOverrideOption::applicable_to_instance(AnalysisKind::Envelope, SolverOwnership::NONE);
+    let stepping = NumericOverrideOption::applicable_to_instance(
+        AnalysisKind::Envelope,
+        SolverOwnership::NONE,
+    );
     assert!(stepping.contains(&NumericOverrideOption::Chgtol));
     assert!(stepping.contains(&NumericOverrideOption::MaximumTimestep));
 }
@@ -1101,7 +1109,11 @@ fn an_option_card_per_package_keeps_the_parsers_scope_from_leaking() {
             NumericOverrideOption::HbInitialState,
             "DC operating point",
         ),
-        (AnalysisKind::Envelope, NumericOverrideOption::Reltol, "1e-5"),
+        (
+            AnalysisKind::Envelope,
+            NumericOverrideOption::Reltol,
+            "1e-5",
+        ),
     ] {
         record
             .set_for_instance(kind, SolverOwnership::NONE, option, authored)

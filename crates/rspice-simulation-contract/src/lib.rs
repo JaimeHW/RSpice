@@ -6,5 +6,6 @@ pub mod analysis_lifecycle;
 pub mod analysis_tag;
 pub mod config;
 pub mod dependency_contract;
+pub mod numeric_override;
 pub mod options;
 pub mod spice_value;
