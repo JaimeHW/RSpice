@@ -9,148 +9,19 @@
 use std::collections::HashSet;
 use std::fmt;
 
+use rspice_simulation_contract::plan_catalog::SimulationPlanNameError;
+pub use rspice_simulation_contract::plan_catalog::{
+    SimulationPlanCloneOptions, SimulationPlanCloneOutcome, SimulationPlanLineage,
+    SimulationPlanName,
+};
 use rspice_simulation_contract::run_set::RunSetState;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
-use crate::product::{AnalysisInstanceId, ObjectRevision, SimulationPlanId};
+use crate::product::{ObjectRevision, SimulationPlanId};
 use crate::simulation::dialog::SimulationOptions;
 use crate::simulation::plan::{AnalysisPlanError, SimulationPlan};
 
 use crate::workbench::app_state::{ReferencePvtPoint, SimSetupState};
-
-const DEFAULT_PLAN_NAME: &str = "Lab characterization";
-const MAX_PLAN_NAME_CHARACTERS: usize = 96;
-
-/// Validated, user-visible simulation-plan name.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
-#[serde(transparent)]
-pub struct SimulationPlanName(String);
-
-impl SimulationPlanName {
-    /// Validate and normalize a user-entered plan name.
-    pub fn new(value: impl Into<String>) -> Result<Self, SimulationPlanCatalogError> {
-        let value = value.into();
-        let normalized = value.trim();
-        if normalized.is_empty() {
-            return Err(SimulationPlanCatalogError::InvalidName(
-                "Plan name cannot be empty.".to_owned(),
-            ));
-        }
-        if normalized.chars().count() > MAX_PLAN_NAME_CHARACTERS {
-            return Err(SimulationPlanCatalogError::InvalidName(format!(
-                "Plan name cannot exceed {MAX_PLAN_NAME_CHARACTERS} characters."
-            )));
-        }
-        if normalized.chars().any(char::is_control) {
-            return Err(SimulationPlanCatalogError::InvalidName(
-                "Plan name cannot contain control characters.".to_owned(),
-            ));
-        }
-        Ok(Self(normalized.to_owned()))
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    fn uniqueness_key(&self) -> String {
-        self.0.to_lowercase()
-    }
-}
-
-impl Default for SimulationPlanName {
-    fn default() -> Self {
-        Self(DEFAULT_PLAN_NAME.to_owned())
-    }
-}
-
-impl fmt::Display for SimulationPlanName {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
-impl<'de> Deserialize<'de> for SimulationPlanName {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Self::new(value).map_err(serde::de::Error::custom)
-    }
-}
-
-/// Durable source lineage for one working simulation plan.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SimulationPlanLineage {
-    #[serde(default)]
-    source_plan_id: Option<SimulationPlanId>,
-    #[serde(default)]
-    source_revision: Option<ObjectRevision>,
-    #[serde(default)]
-    clone_contents: Option<SimulationPlanCloneOptions>,
-}
-
-impl SimulationPlanLineage {
-    #[must_use]
-    #[cfg(test)]
-    pub const fn root() -> Self {
-        Self {
-            source_plan_id: None,
-            source_revision: None,
-            clone_contents: None,
-        }
-    }
-
-    #[must_use]
-    #[cfg(test)]
-    pub const fn cloned_from(
-        source_plan_id: SimulationPlanId,
-        source_revision: ObjectRevision,
-    ) -> Self {
-        Self::cloned_from_with_contents(
-            source_plan_id,
-            source_revision,
-            SimulationPlanCloneOptions::ALL_PLAN_CONTENTS,
-        )
-    }
-
-    #[must_use]
-    pub const fn cloned_from_with_contents(
-        source_plan_id: SimulationPlanId,
-        source_revision: ObjectRevision,
-        clone_contents: SimulationPlanCloneOptions,
-    ) -> Self {
-        Self {
-            source_plan_id: Some(source_plan_id),
-            source_revision: Some(source_revision),
-            clone_contents: Some(clone_contents),
-        }
-    }
-
-    #[must_use]
-    pub const fn source_plan_id(self) -> Option<SimulationPlanId> {
-        self.source_plan_id
-    }
-
-    #[must_use]
-    pub const fn source_revision(self) -> Option<ObjectRevision> {
-        self.source_revision
-    }
-
-    #[must_use]
-    #[cfg(test)]
-    pub const fn clone_contents(self) -> Option<SimulationPlanCloneOptions> {
-        self.clone_contents
-    }
-
-    fn is_valid(self) -> bool {
-        self.source_plan_id.is_some() == self.source_revision.is_some()
-            && self.source_plan_id.is_some() == self.clone_contents.is_some()
-    }
-}
 
 /// Complete persisted state for an inactive named plan.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -232,47 +103,6 @@ impl StoredSimulationPlan {
     pub const fn archived(&self) -> bool {
         self.archived
     }
-}
-
-/// Content domains copied into a newly cloned plan.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SimulationPlanCloneOptions {
-    pub copy_analyses: bool,
-    pub copy_advanced_options: bool,
-    pub copy_variables_outputs_and_specifications: bool,
-    pub copy_pvt_and_model_bindings: bool,
-    pub copy_regression_baseline_ownership: bool,
-}
-
-impl Default for SimulationPlanCloneOptions {
-    fn default() -> Self {
-        Self::ALL_PLAN_CONTENTS
-    }
-}
-
-impl SimulationPlanCloneOptions {
-    /// Exact checked state shown by the mockup's initial clone workflow.
-    pub const ALL_PLAN_CONTENTS: Self = Self {
-        copy_analyses: true,
-        copy_advanced_options: true,
-        copy_variables_outputs_and_specifications: true,
-        copy_pvt_and_model_bindings: true,
-        copy_regression_baseline_ownership: false,
-    };
-}
-
-/// Committed clone transaction used by adjacent project-owned domains to
-/// copy their payloads under the exact same source and destination IDs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SimulationPlanCloneOutcome {
-    pub source_plan_id: SimulationPlanId,
-    pub source_revision: ObjectRevision,
-    pub cloned_plan_id: SimulationPlanId,
-    pub contents: SimulationPlanCloneOptions,
-    /// Exact source-to-clone analysis mapping for plan-owned payloads whose
-    /// scope targets a selected analysis instance.
-    pub analysis_identity_map: Vec<(AnalysisInstanceId, AnalysisInstanceId)>,
 }
 
 /// Portable, payload-independent simulation-plan document. The workspace
@@ -364,6 +194,12 @@ impl std::error::Error for SimulationPlanCatalogError {
             Self::InvalidPlan(error) => Some(error),
             _ => None,
         }
+    }
+}
+
+impl From<SimulationPlanNameError> for SimulationPlanCatalogError {
+    fn from(error: SimulationPlanNameError) -> Self {
+        Self::InvalidName(error.to_string())
     }
 }
 
@@ -958,6 +794,7 @@ fn validate_model_binding_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::product::AnalysisInstanceId;
     use crate::simulation::plan::{AnalysisKind, AnalysisLifecycleState};
     use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
@@ -1039,7 +876,11 @@ mod tests {
         );
         assert_eq!(
             setup.active_plan_lineage(),
-            SimulationPlanLineage::cloned_from(source_id, setup.inactive_plans()[0].revision())
+            SimulationPlanLineage::cloned_from_with_contents(
+                source_id,
+                setup.inactive_plans()[0].revision(),
+                SimulationPlanCloneOptions::ALL_PLAN_CONTENTS,
+            )
         );
         let clone_instance = &setup.analysis_plan.as_ref().unwrap().instances()[0];
         assert_ne!(clone_instance.id(), source_instance_id);
@@ -1083,7 +924,10 @@ mod tests {
         setup
             .activate_plan(source_id)
             .expect("source can be reactivated");
-        assert_eq!(setup.active_plan_name().as_str(), DEFAULT_PLAN_NAME);
+        assert_eq!(
+            setup.active_plan_name().as_str(),
+            SimulationPlanName::default().as_str()
+        );
         assert_eq!(setup.analysis_plan.as_ref().unwrap().id(), source_id);
         assert_eq!(
             setup.analysis_plan.as_ref().unwrap().instances()[0].id(),
@@ -1171,7 +1015,10 @@ mod tests {
             .expect("fresh plan commits");
         assert_ne!(created_id, original_id);
         assert_eq!(setup.active_plan_name().as_str(), "Fresh characterization");
-        assert_eq!(setup.active_plan_lineage(), SimulationPlanLineage::root());
+        assert_eq!(
+            setup.active_plan_lineage(),
+            SimulationPlanLineage::default()
+        );
         assert!(setup.model_bindings.is_empty());
 
         setup
