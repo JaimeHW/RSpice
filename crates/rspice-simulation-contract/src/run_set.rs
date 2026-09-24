@@ -2,6 +2,12 @@
 
 use serde::{Deserialize, Serialize};
 
+mod state_contracts;
+
+pub use state_contracts::{
+    ReferencePoint, RunSetForecast, RunSetReceipt, RunSetReceiptStatus, RunSetStatus,
+};
+
 /// What a dimension varies, and therefore how it reaches the engine.
 ///
 /// A kind becomes executable through its source authority. For example,

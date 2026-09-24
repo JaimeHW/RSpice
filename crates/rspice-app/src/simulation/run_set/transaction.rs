@@ -101,60 +101,7 @@ impl RunSetAction {
     }
 }
 
-/// Whether a transaction took effect.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunSetReceiptStatus {
-    Completed,
-    Blocked,
-}
-
-impl RunSetReceiptStatus {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Completed => "completed",
-            Self::Blocked => "blocked",
-        }
-    }
-}
-
-/// The record one transaction leaves behind.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RunSetReceipt {
-    pub sequence: usize,
-    pub action: &'static str,
-    pub target_id: String,
-    pub before_revision: u32,
-    pub after_revision: u32,
-    pub status: RunSetReceiptStatus,
-    pub error_ids: Vec<&'static str>,
-    /// FNV-1a/64 over the fields above, so two identical transactions produce
-    /// the same digest and any difference produces a different one.
-    pub digest: String,
-}
-
-impl RunSetReceipt {
-    /// The one-line form the page shows.
-    #[must_use]
-    pub fn status_line(&self) -> String {
-        match self.status {
-            RunSetReceiptStatus::Completed => format!(
-                "Run-set receipt #{} · {} · revision {} to {}",
-                self.sequence, self.action, self.before_revision, self.after_revision
-            ),
-            RunSetReceiptStatus::Blocked => format!(
-                "Run-set {} blocked · {} · revision {} retained",
-                self.action,
-                if self.error_ids.is_empty() {
-                    "validation failed".to_owned()
-                } else {
-                    self.error_ids.join(", ")
-                },
-                self.before_revision
-            ),
-        }
-    }
-}
+pub use rspice_simulation_contract::run_set::{RunSetReceipt, RunSetReceiptStatus};
 
 /// What a dispatch produced.
 #[derive(Debug, Clone)]

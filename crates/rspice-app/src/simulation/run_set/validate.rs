@@ -5,8 +5,6 @@
 //! point at the control that caused it, and so a refusal keeps its meaning when
 //! its wording changes.
 
-use serde::{Deserialize, Serialize};
-
 use super::model::{InvalidValuePolicy, RunSetCompositionMode, RunSetDimensionKind, RunSetState};
 use crate::simulation::plan::AnalysisKind;
 
@@ -46,55 +44,7 @@ pub struct RunSetWarning {
     pub message: String,
 }
 
-/// What the composed space costs, exactly.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct RunSetForecast {
-    /// Maximum points the space resolves to. Equal to the minimum for every
-    /// deterministic composition.
-    pub point_count: usize,
-    #[serde(default)]
-    pub point_count_minimum: usize,
-    #[serde(default)]
-    pub point_count_maximum: usize,
-    #[serde(default = "default_forecast_exact")]
-    pub exact: bool,
-    /// Enabled analysis instances, each contributing one task per point.
-    pub enabled_analysis_count: usize,
-    /// `point_count × enabled_analysis_count`.
-    pub task_count: usize,
-    /// Modelled solve cost, in milliseconds.
-    pub cost_ms: u64,
-    /// Modelled stored bytes.
-    pub storage_bytes: u64,
-}
-
-const fn default_forecast_exact() -> bool {
-    true
-}
-
-/// Whether the run set may be previewed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum RunSetStatus {
-    /// No validate-and-preview has run since the last edit.
-    #[default]
-    NotEvaluated,
-    /// The declaration is executable exactly as written.
-    Ready,
-    /// At least one refusal stands.
-    Invalid,
-}
-
-impl RunSetStatus {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::NotEvaluated => "not evaluated",
-            Self::Ready => "ready",
-            Self::Invalid => "invalid",
-        }
-    }
-}
+pub use rspice_simulation_contract::run_set::{RunSetForecast, RunSetStatus};
 
 /// The complete result of validating a run set.
 #[derive(Debug, Clone, PartialEq)]

@@ -29,6 +29,7 @@ pub use model::{
 pub use model::{NETLIST_SUPPLY_SOURCE_PREFIX, RunSetComposition};
 pub use participation::{AnalysisRunAt, nominal_point_key, participating_point_keys};
 pub use points::{RunSetPoint, compose, point_key_label, resolve, retained};
+pub use rspice_simulation_contract::run_set::ReferencePoint;
 #[cfg(test)]
 pub use transaction::dispatch;
 pub use transaction::{RunSetAction, RunSetReceipt, RunSetReceiptStatus, dispatch_for_plan};
@@ -426,26 +427,3 @@ const PROCESS_CORNERS: [ProcessCorner; 5] = [
 /// swept value and the nominal it is divided by, so the executor's ratio is
 /// exactly one.
 const UNSWEPT_SUPPLY: f64 = 1.0;
-
-/// The plan's nominal point.
-///
-/// A dimension the run set does not declare still has to resolve to something
-/// the executor can run; it resolves to this, so an undeclared axis means "the
-/// plan's reference value" rather than a constant this module invented. It is
-/// the same point the workbench chrome selects and the solver's `TEMP` option
-/// carries — `ReferencePvtPoint` is this type, not a copy of it.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ReferencePoint {
-    pub process: ProcessCorner,
-    pub temperature_celsius: f64,
-}
-
-impl Default for ReferencePoint {
-    fn default() -> Self {
-        Self {
-            process: ProcessCorner::TT,
-            temperature_celsius: 27.0,
-        }
-    }
-}
