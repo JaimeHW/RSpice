@@ -14,33 +14,19 @@
 use std::collections::HashMap;
 
 mod algorithms;
-mod constraint;
-pub use constraint::{
-    OptimizationConstraint, OptimizationConstraintObservation, OptimizationScore,
-    validate_optimization_constraint_result, validate_optimization_constraints,
-};
 mod design_var;
 mod domain;
 pub use domain::OptimizationVariableDomain;
 mod engine_core;
 mod lifecycle;
-mod objective;
-pub use objective::{
-    OptimizationObjectiveGoal, OptimizationObjectiveObservation, OptimizationObjectiveTerm,
+// Internal transition alias; runtime callers move to the results owner in R04.
+pub use crate::results::optimization::{
+    OptimizationConstraint, OptimizationConstraintObservation, OptimizationObjectiveGoal,
+    OptimizationObjectiveObservation, OptimizationObjectiveTerm, OptimizationScore,
+    validate_optimization_constraint_result, validate_optimization_constraints,
     validate_optimization_objectives,
 };
 mod types;
-
-/// Blank retains the original measurement scale.
-pub(crate) fn validate_requested_unit(unit: &str) -> Result<(), String> {
-    if unit.chars().any(char::is_control) {
-        return Err("Optimization units must not contain control characters".into());
-    }
-    if !unit.trim().is_empty() {
-        rspice_core::analysis::MeasurementUnit::known(unit)?;
-    }
-    Ok(())
-}
 
 pub use design_var::DesignVar;
 pub use types::{OptimizerAlgo, OptimizerConfig};

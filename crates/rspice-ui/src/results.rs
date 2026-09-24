@@ -1,5 +1,6 @@
 //! Canonical result data and Visualization Studio contracts.
 
+pub(crate) mod optimization;
 pub(crate) mod report_document;
 pub(crate) mod safety;
 /// The stability-margin conventions, stated once for both cards that report

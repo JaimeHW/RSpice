@@ -169,7 +169,7 @@ impl OptimizationConfig {
     /// Validate optimization settings.
     pub fn validate(&self) -> Result<(), String> {
         self.search.validate()?;
-        crate::simulation::optimizer::validate_requested_unit(&self.objective_unit)?;
+        crate::results::optimization::validate_requested_unit(&self.objective_unit)?;
         if self.variables.is_empty() {
             return Err("At least one optimization variable is required".to_string());
         }

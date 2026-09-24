@@ -1957,9 +1957,9 @@ fn encode_family_metadata(
                         writer.string(&term.unit);
                     }
                     writer.u8(match term.goal {
-                        crate::simulation::optimizer::OptimizationObjectiveGoal::Minimize => 0,
-                        crate::simulation::optimizer::OptimizationObjectiveGoal::Maximize => 1,
-                        crate::simulation::optimizer::OptimizationObjectiveGoal::Target => 2,
+                        crate::results::optimization::OptimizationObjectiveGoal::Minimize => 0,
+                        crate::results::optimization::OptimizationObjectiveGoal::Maximize => 1,
+                        crate::results::optimization::OptimizationObjectiveGoal::Target => 2,
                     });
                     writer.bool(term.target.is_some());
                     if let Some(target) = term.target {

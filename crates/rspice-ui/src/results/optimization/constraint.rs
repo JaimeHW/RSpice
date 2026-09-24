@@ -118,7 +118,7 @@ impl OptimizationScore {
                 || self.violation < other.violation
                 || self.violation == other.violation && self.cost < other.cost)
     }
-    pub(super) fn phase_value(self, feasibility: bool) -> f64 {
+    pub(crate) fn phase_value(self, feasibility: bool) -> f64 {
         if !self.is_valid() {
             f64::INFINITY
         } else if feasibility {
