@@ -32,7 +32,7 @@ mod spec;
 /// reading `sample::SweepShape` is told where the answer comes from, and the
 /// branch queries beside it read as one contract rather than as loose
 /// functions among the plot's own types.
-pub(crate) mod sample;
+pub(crate) use rspice_results::sampling as sample;
 
 pub use cursor::CursorPair;
 #[cfg(test)]

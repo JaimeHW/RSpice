@@ -13,7 +13,9 @@
 //! where each one lives in the source arrays. It is pure — caching it is the
 //! caller's business, because only the caller knows when its data changed.
 
-use super::decimate::{SampleInterpolation, sample_at_with};
+mod monotone;
+
+pub use monotone::{LogicalView, SampleInterpolation, sample_at, sample_at_with};
 
 /// Which way a monotone run of samples travels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

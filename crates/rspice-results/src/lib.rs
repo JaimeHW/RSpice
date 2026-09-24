@@ -6,6 +6,7 @@ pub mod interpolation;
 pub mod measurements;
 pub mod operating_point;
 pub mod report_document;
+pub mod sampling;
 pub mod stability;
 pub mod viewer_catalog;
 pub mod visualization_document;
