@@ -5,8 +5,8 @@
 //! point at the control that caused it, and so a refusal keeps its meaning when
 //! its wording changes.
 
-use super::model::{InvalidValuePolicy, RunSetCompositionMode, RunSetDimensionKind, RunSetState};
-use crate::simulation::plan::AnalysisKind;
+use super::{InvalidValuePolicy, RunSetCompositionMode, RunSetDimensionKind, RunSetState};
+use crate::analysis_kind::AnalysisKind;
 
 /// One refusal, identified by a stable code.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,7 +44,7 @@ pub struct RunSetWarning {
     pub message: String,
 }
 
-pub use rspice_simulation_contract::run_set::{RunSetForecast, RunSetStatus};
+use super::{RunSetForecast, RunSetStatus};
 
 /// The complete result of validating a run set.
 #[derive(Debug, Clone, PartialEq)]
@@ -61,7 +61,7 @@ impl RunSetValidation {
         self.status == RunSetStatus::Ready
     }
 
-    pub(crate) fn push_global_error(&mut self, id: &'static str, message: impl Into<String>) {
+    pub fn push_global_error(&mut self, id: &'static str, message: impl Into<String>) {
         self.errors.push(RunSetError::global(id, message));
         self.status = RunSetStatus::Invalid;
     }
@@ -126,10 +126,6 @@ pub fn validate_with_task_count(
     enabled_analysis_count: usize,
     exact_task_count: Option<usize>,
 ) -> RunSetValidation {
-    #[cfg(test)]
-    crate::simulation::cost_probe::record(
-        crate::simulation::cost_probe::Derivation::RunSetValidation,
-    );
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
 
@@ -179,7 +175,7 @@ pub fn validate_with_task_count(
         seen_kinds.push(dimension.kind);
 
         if dimension.kind == RunSetDimensionKind::Supply {
-            match super::model::parse_supply_source_authority(&dimension.source) {
+            match super::parse_supply_source_authority(&dimension.source) {
                 Ok(authority) => supply_authorities.push((&dimension.id, authority)),
                 Err(message) => errors.push(RunSetError::about(
                     "RUNSET-SUPPLY-BINDING",
@@ -189,7 +185,7 @@ pub fn validate_with_task_count(
             }
         }
         if dimension.kind == RunSetDimensionKind::Parameter {
-            match super::model::parse_parameter_source_authority(&dimension.source) {
+            match super::parse_parameter_source_authority(&dimension.source) {
                 Ok(authority) => parameter_authorities.push((&dimension.id, authority)),
                 Err(message) => errors.push(RunSetError::about(
                     "RUNSET-PARAMETER-BINDING",
@@ -199,7 +195,7 @@ pub fn validate_with_task_count(
             }
         }
         if dimension.kind == RunSetDimensionKind::Source {
-            match super::model::parse_source_value_authority(&dimension.source) {
+            match super::parse_source_value_authority(&dimension.source) {
                 Ok(authority) => source_authorities.push((&dimension.id, authority)),
                 Err(message) => errors.push(RunSetError::about(
                     "RUNSET-SOURCE-BINDING",
@@ -240,7 +236,7 @@ pub fn validate_with_task_count(
                 RunSetDimensionKind::ProcessSection => format!(
                     "{} is not a process section; expected one of {}.",
                     detail,
-                    super::model::PROCESS_SECTIONS.join(", ")
+                    super::PROCESS_SECTIONS.join(", ")
                 ),
                 RunSetDimensionKind::Supply => {
                     format!("{detail} is not a positive supply voltage.")

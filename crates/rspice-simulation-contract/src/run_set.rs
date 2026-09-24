@@ -3,9 +3,22 @@
 use serde::{Deserialize, Serialize};
 
 mod budgeting;
+mod model;
+mod participation;
+mod points;
 mod state_contracts;
+mod transaction;
+mod validate;
 
 pub use budgeting::{format_bytes, format_duration_ms, modelled_cost_ms, parse_bytes};
+pub use model::{RunSetSnapshot, RunSetState};
+pub use participation::{nominal_point_key, participating_point_keys};
+pub use points::{RunSetPoint, compose, point_key_label, resolve, retained};
+pub use transaction::{RunSetAction, RunSetTransaction, dispatch, dispatch_for_plan};
+pub use validate::{
+    RunSetError, RunSetValidation, RunSetWarning, forecast_point_count, validate,
+    validate_for_plan, validate_with_task_count,
+};
 
 pub use state_contracts::{
     ReferencePoint, RunSetForecast, RunSetReceipt, RunSetReceiptStatus, RunSetStatus,

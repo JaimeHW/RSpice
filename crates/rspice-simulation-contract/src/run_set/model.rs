@@ -12,13 +12,9 @@
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(test)]
-pub use rspice_simulation_contract::run_set::NETLIST_SUPPLY_SOURCE_PREFIX;
-pub use rspice_simulation_contract::run_set::{
-    InvalidValuePolicy, PROCESS_SECTIONS, RunSetAdaptivePolicy, RunSetBudgets, RunSetComposition,
-    RunSetCompositionMode, RunSetDimension, RunSetDimensionKind, RunSetValue,
-    parse_parameter_source_authority, parse_source_value_authority, parse_supply_source_authority,
-    process_section_index,
+use super::{
+    ReferencePoint, RunSetBudgets, RunSetComposition, RunSetDimension, RunSetDimensionKind,
+    RunSetForecast, RunSetReceipt,
 };
 
 /// The complete run-set working state.
@@ -40,11 +36,11 @@ pub struct RunSetState {
     pub budgets: RunSetBudgets,
     /// The forecast frozen by the last successful preview.
     #[serde(default)]
-    pub preview: Option<super::RunSetForecast>,
+    pub preview: Option<RunSetForecast>,
     /// Transaction receipts, oldest first. Session evidence: a receipt records
     /// what a user did in this sitting, not a property of the saved plan.
     #[serde(skip)]
-    pub receipts: Vec<super::RunSetReceipt>,
+    pub receipts: Vec<RunSetReceipt>,
     /// Undo stack of editable snapshots.
     #[serde(skip)]
     pub history: Vec<RunSetSnapshot>,
@@ -63,7 +59,7 @@ pub struct RunSetSnapshot {
     pub dimensions: Vec<RunSetDimension>,
     pub composition: RunSetComposition,
     pub budgets: RunSetBudgets,
-    pub preview: Option<super::RunSetForecast>,
+    pub preview: Option<RunSetForecast>,
 }
 
 impl Default for RunSetState {
@@ -172,6 +168,44 @@ impl RunSetState {
                         .any(|dimension| dimension.kind == *kind)
             })
             .collect()
+    }
+
+    /// The temperatures this plan's axis declares, whether or not the axis is
+    /// enabled, or the reference temperature when it declares none.
+    ///
+    /// Deliberately not [`Self::enabled_dimension_of`]. Enabling an axis says
+    /// "cross the whole plan by this"; it does not decide which temperatures
+    /// the plan considers meaningful. A qualification programme names its
+    /// temperatures once, and an analysis that inherits them wants that list
+    /// even when the operator has chosen not to run every analysis across it.
+    ///
+    /// An axis whose values do not all parse yields `None` rather than a
+    /// shortened list: silently dropping a value would run a narrower sweep
+    /// than the one declared, and validation already names the bad value.
+    #[must_use]
+    pub fn declared_temperatures_celsius(&self, reference: ReferencePoint) -> Option<Vec<f64>> {
+        let Some(dimension) = self
+            .dimensions
+            .iter()
+            .find(|dimension| dimension.kind == RunSetDimensionKind::Temperature)
+            .filter(|dimension| !dimension.values.is_empty())
+        else {
+            return Some(vec![reference.temperature_celsius]);
+        };
+        dimension
+            .values
+            .iter()
+            .map(|value| value.canonical)
+            .collect::<Option<Vec<f64>>>()
+    }
+
+    /// How many points the declared space expands to.
+    ///
+    /// Derived from the same point-count rule the forecast uses, without
+    /// allocating validation findings for callers that only need the size.
+    #[must_use]
+    pub fn point_count(&self) -> usize {
+        super::forecast_point_count(self)
     }
 
     /// Capture the editable state for the undo stack.

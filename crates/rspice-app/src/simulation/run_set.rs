@@ -11,322 +11,125 @@
 //! would be indistinguishable from one that worked, which is the failure this
 //! module is shaped to prevent.
 
-mod model;
-mod participation;
-mod points;
-mod transaction;
-mod validate;
-
+mod corner_projection;
 #[cfg(test)]
 mod tests;
 
-pub use model::{
-    InvalidValuePolicy, RunSetAdaptivePolicy, RunSetBudgets, RunSetCompositionMode,
-    RunSetDimension, RunSetDimensionKind, RunSetState, parse_parameter_source_authority,
-    parse_source_value_authority, parse_supply_source_authority,
-};
+pub use corner_projection::RunSetCornerProjection;
 #[cfg(test)]
-pub use model::{NETLIST_SUPPLY_SOURCE_PREFIX, RunSetComposition};
-pub use participation::{AnalysisRunAt, nominal_point_key, participating_point_keys};
-pub use points::{RunSetPoint, compose, point_key_label, resolve, retained};
-pub use rspice_simulation_contract::run_set::ReferencePoint;
-#[cfg(test)]
-pub use transaction::dispatch;
-pub use transaction::{RunSetAction, RunSetReceipt, RunSetReceiptStatus, dispatch_for_plan};
-pub use validate::{
-    RunSetForecast, RunSetStatus, RunSetValidation, forecast_point_count, validate,
-    validate_for_plan, validate_with_task_count,
-};
+pub use corner_projection::from_corner_config;
 
-use crate::product::ProcessCorner;
-use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig, CornerPointSpec};
-
+pub use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
 pub use rspice_simulation_contract::run_set::{
-    format_bytes, format_duration_ms, modelled_cost_ms, parse_bytes,
+    InvalidValuePolicy, ReferencePoint, RunSetAction, RunSetAdaptivePolicy, RunSetBudgets,
+    RunSetCompositionMode, RunSetDimension, RunSetDimensionKind, RunSetForecast, RunSetPoint,
+    RunSetReceiptStatus, RunSetState, RunSetStatus, RunSetTransaction, RunSetValidation,
+    forecast_point_count, format_bytes, format_duration_ms, modelled_cost_ms, nominal_point_key,
+    parse_bytes, parse_parameter_source_authority, parse_source_value_authority,
+    parse_supply_source_authority, participating_point_keys, point_key_label, retained,
 };
+#[cfg(test)]
+pub use rspice_simulation_contract::run_set::{NETLIST_SUPPLY_SOURCE_PREFIX, RunSetComposition};
 
-impl RunSetState {
-    /// Derive the executable corner configuration this run set declares.
-    ///
-    /// Every enabled dimension binds to one axis of the corner executor, so the
-    /// space shown on the page and the space the engine expands are the same
-    /// declaration read twice rather than two configurations kept in step. A
-    /// dimension that is absent contributes exactly one point: the run still
-    /// happens, at the deck's own value for that quantity.
-    ///
-    /// A filtered space cannot be stated as axes at all — that is the point of
-    /// it — so it is carried as the resolved point list instead. The axes are
-    /// still emitted, holding the distinct values those points use, because the
-    /// process axis is what decides which model sections are materialized.
-    pub fn to_corner_config(
-        &self,
-        base_analysis: CornerBaseAnalysis,
-        reference: ReferencePoint,
-    ) -> Result<CornerConfig, String> {
-        let validation = validate(self, 1);
-        if let Some(error) = validation.errors.first() {
-            return Err(error.message.clone());
-        }
-
-        let process_corners = match self.enabled_dimension_of(RunSetDimensionKind::ProcessSection) {
-            Some(dimension) => dimension
-                .values
-                .iter()
-                .map(|value| {
-                    model::process_section_index(&value.lexical)
-                        .map(|index| PROCESS_CORNERS[index])
-                        .ok_or_else(|| format!("{} is not a process section", value.lexical))
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-            // No process axis: every point resolves through the plan's
-            // reference section, which is exactly one process corner.
-            None => vec![reference.process],
-        };
-
-        // With no supply axis the ratio the executor applies is 1.0, so the
-        // deck's own supply is used untouched. The value itself is arbitrary
-        // and only has to match the nominal the executor divides by.
-        let (voltages, supply_source_names) =
-            match self.enabled_dimension_of(RunSetDimensionKind::Supply) {
-                Some(dimension) => (
-                    dimension.canonical_values(),
-                    model::parse_supply_source_authority(&dimension.source)?,
-                ),
-                None => (vec![UNSWEPT_SUPPLY], Vec::new()),
-            };
-
-        let temperatures = match self.enabled_dimension_of(RunSetDimensionKind::Temperature) {
-            Some(dimension) => dimension.canonical_values(),
-            None => vec![reference.temperature_celsius],
-        };
-
-        let points = if self.composition.filters() {
-            self.explicit_points(reference)?
-        } else {
-            Vec::new()
-        };
-
-        // An axis value every point excluded is a value the run never reaches,
-        // and leaving it on the process axis would demand a PDK section for a
-        // corner that is not executed. So a filtered space narrows its axes to
-        // the values its points actually use.
-        let config = if points.is_empty() {
-            CornerConfig {
-                process_corners,
-                voltages,
-                supply_source_names,
-                temperatures,
-                full_matrix: self.composition.mode != RunSetCompositionMode::Zipped,
-                points,
-                base_analysis,
-            }
-        } else {
-            CornerConfig {
-                process_corners: retain_used(&process_corners, &points, |point| point.process),
-                voltages: retain_used(&voltages, &points, |point| point.voltage),
-                supply_source_names,
-                temperatures: retain_used(&temperatures, &points, |point| {
-                    point.temperature_celsius
-                }),
-                full_matrix: true,
-                points,
-                base_analysis,
-            }
-        };
-        config.validate()?;
-        Ok(config)
-    }
-
-    /// The resolved points of a filtered space, each stated in full.
-    ///
-    /// An axis the run set does not declare has no coordinate on the point, so
-    /// it is filled from the plan's reference here — the executor takes points,
-    /// not partial ones, and leaving a hole would make the filtered path
-    /// disagree with the axis path about what an undeclared axis means.
-    fn explicit_points(&self, reference: ReferencePoint) -> Result<Vec<CornerPointSpec>, String> {
-        let resolved = resolve(self).ok_or_else(|| {
-            "The declared space does not expand exactly, so its points cannot be executed"
-                .to_owned()
-        })?;
-        resolved
-            .into_iter()
-            .map(|point| {
-                let mut spec = CornerPointSpec {
-                    process: reference.process,
-                    voltage: UNSWEPT_SUPPLY,
-                    temperature_celsius: reference.temperature_celsius,
-                };
-                for (dimension, value) in &point.coordinates {
-                    let canonical = value
-                        .canonical
-                        .ok_or_else(|| format!("{} is not a usable value", value.lexical))?;
-                    match dimension.kind {
-                        RunSetDimensionKind::ProcessSection => {
-                            spec.process =
-                                *PROCESS_CORNERS.get(canonical as usize).ok_or_else(|| {
-                                    format!("{} is not a process section", value.lexical)
-                                })?;
-                        }
-                        RunSetDimensionKind::Supply => spec.voltage = canonical,
-                        RunSetDimensionKind::Temperature => spec.temperature_celsius = canonical,
-                        // Non-PVT coordinates are materialized directly into
-                        // the prepared task/deck. They do not alter the corner
-                        // projection used by legacy corner services.
-                        RunSetDimensionKind::Parameter
-                        | RunSetDimensionKind::Source
-                        | RunSetDimensionKind::Model
-                        | RunSetDimensionKind::Frequency
-                        | RunSetDimensionKind::Time
-                        | RunSetDimensionKind::Seed
-                        | RunSetDimensionKind::Sample
-                        | RunSetDimensionKind::AnalysisSelection
-                        | RunSetDimensionKind::DigitalConfiguration
-                        | RunSetDimensionKind::ExternalDataset => {}
-                    }
-                }
-                Ok(spec)
-            })
-            .collect()
-    }
-
-    /// The temperatures this plan's axis declares, whether or not the axis is
-    /// enabled, or the reference temperature when it declares none.
-    ///
-    /// Deliberately not [`Self::enabled_dimension_of`]. Enabling an axis says
-    /// "cross the whole plan by this"; it does not decide which temperatures
-    /// the plan considers meaningful. A qualification programme names its
-    /// temperatures once, and an analysis that inherits them wants that list
-    /// even when the operator has chosen not to run every analysis across it.
-    ///
-    /// An axis whose values do not all parse yields `None` rather than a
-    /// shortened list: silently dropping a value would run a narrower sweep
-    /// than the one declared, and validation already names the bad value.
-    #[must_use]
-    pub fn declared_temperatures_celsius(&self, reference: ReferencePoint) -> Option<Vec<f64>> {
-        let Some(dimension) = self
-            .dimensions
-            .iter()
-            .find(|dimension| dimension.kind == RunSetDimensionKind::Temperature)
-            .filter(|dimension| !dimension.values.is_empty())
-        else {
-            return Some(vec![reference.temperature_celsius]);
-        };
-        dimension
-            .values
-            .iter()
-            .map(|value| value.canonical)
-            .collect::<Option<Vec<f64>>>()
-    }
-
-    /// How many points the declared space expands to.
-    ///
-    /// Derived from the same validation the page reports, so a caller that only
-    /// needs the size cannot arrive at a different one.
-    #[must_use]
-    pub fn point_count(&self) -> usize {
-        validate(self, 1).forecast.point_count
-    }
-
-    /// Build a run set from an executable corner configuration.
-    ///
-    /// Test-only since the Corner draft stopped declaring a space of its own:
-    /// nothing in the product now turns a `CornerConfig` back into a run set,
-    /// because the run set is what produced it. It survives as the way a test
-    /// states a space the way the engine sees it.
-    ///
-    /// It reads the axes only: an explicit point list is what a space looks
-    /// like once it has stopped being an axis composition, and there is no axis
-    /// form to recover it into.
+/// Expand a run set while recording app test-only frame cost.
+#[must_use]
+pub fn compose(state: &RunSetState) -> Option<Vec<RunSetPoint<'_>>> {
     #[cfg(test)]
-    #[must_use]
-    pub fn from_corner_config(config: &CornerConfig) -> Self {
-        let mut state = Self {
-            revision: 1,
-            sequence: 4,
-            dimensions: Vec::new(),
-            composition: RunSetComposition {
-                mode: if config.full_matrix {
-                    RunSetCompositionMode::Cartesian
-                } else {
-                    RunSetCompositionMode::Zipped
-                },
-                excluded_points: std::collections::BTreeSet::new(),
-                ..RunSetComposition::default()
-            },
-            budgets: RunSetBudgets::default(),
-            preview: None,
-            receipts: Vec::new(),
-            history: Vec::new(),
-            future: Vec::new(),
-        };
+    crate::simulation::cost_probe::record(
+        crate::simulation::cost_probe::Derivation::SpaceExpansion,
+    );
+    rspice_simulation_contract::run_set::compose(state)
+}
 
-        let sections: Vec<String> = config
-            .process_corners
-            .iter()
-            .map(|corner| corner.short_name().to_owned())
-            .collect();
-        state.dimensions.push(RunSetDimension::new(
-            "dimension-process",
-            RunSetDimensionKind::ProcessSection,
-            &sections.iter().map(String::as_str).collect::<Vec<_>>(),
-            1,
-        ));
+/// Resolve executable points while recording app test-only frame cost.
+#[must_use]
+pub fn resolve(state: &RunSetState) -> Option<Vec<RunSetPoint<'_>>> {
+    #[cfg(test)]
+    crate::simulation::cost_probe::record(
+        crate::simulation::cost_probe::Derivation::SpaceExpansion,
+    );
+    rspice_simulation_contract::run_set::resolve(state)
+}
 
-        let supplies: Vec<String> = config.voltages.iter().map(f64::to_string).collect();
-        let mut supply = RunSetDimension::new(
-            "dimension-supply",
-            RunSetDimensionKind::Supply,
-            &supplies.iter().map(String::as_str).collect::<Vec<_>>(),
-            1,
+/// Validate a run set while recording app test-only frame cost.
+#[must_use]
+pub fn validate(state: &RunSetState, enabled_analysis_count: usize) -> RunSetValidation {
+    #[cfg(test)]
+    crate::simulation::cost_probe::record(
+        crate::simulation::cost_probe::Derivation::RunSetValidation,
+    );
+    rspice_simulation_contract::run_set::validate(state, enabled_analysis_count)
+}
+
+/// Validate against a plan's exact analysis kinds and queue size.
+#[must_use]
+pub fn validate_for_plan(
+    state: &RunSetState,
+    enabled_analysis_kinds: &[crate::simulation::plan::AnalysisKind],
+    exact_task_count: Option<usize>,
+) -> RunSetValidation {
+    #[cfg(test)]
+    crate::simulation::cost_probe::record(
+        crate::simulation::cost_probe::Derivation::RunSetValidation,
+    );
+    rspice_simulation_contract::run_set::validate_for_plan(
+        state,
+        enabled_analysis_kinds,
+        exact_task_count,
+    )
+}
+
+/// Validate with a supplied queue count.
+#[must_use]
+pub fn validate_with_task_count(
+    state: &RunSetState,
+    enabled_analysis_count: usize,
+    exact_task_count: Option<usize>,
+) -> RunSetValidation {
+    #[cfg(test)]
+    crate::simulation::cost_probe::record(
+        crate::simulation::cost_probe::Derivation::RunSetValidation,
+    );
+    rspice_simulation_contract::run_set::validate_with_task_count(
+        state,
+        enabled_analysis_count,
+        exact_task_count,
+    )
+}
+
+/// Apply a plan-aware run-set transaction.
+pub fn dispatch_for_plan(
+    state: &mut RunSetState,
+    action: RunSetAction,
+    enabled_analysis_kinds: &[crate::simulation::plan::AnalysisKind],
+    exact_task_count: Option<usize>,
+    workload_error: Option<String>,
+) -> RunSetTransaction {
+    #[cfg(test)]
+    if matches!(&action, RunSetAction::Preview) {
+        crate::simulation::cost_probe::record(
+            crate::simulation::cost_probe::Derivation::RunSetValidation,
         );
-        if !config.supply_source_names.is_empty() {
-            supply.source = format!(
-                "{}{}",
-                model::NETLIST_SUPPLY_SOURCE_PREFIX,
-                config.supply_source_names.join(",")
-            );
-        }
-        // A single supply value is not a sweep: it is the deck's own value, and
-        // enabling an axis for it would report a dimension the run does not
-        // actually vary.
-        supply.enabled = config.voltages.len() > 1;
-        state.dimensions.push(supply);
-
-        let temperatures: Vec<String> = config.temperatures.iter().map(f64::to_string).collect();
-        state.dimensions.push(RunSetDimension::new(
-            "dimension-temperature",
-            RunSetDimensionKind::Temperature,
-            &temperatures.iter().map(String::as_str).collect::<Vec<_>>(),
-            1,
-        ));
-
-        state
     }
+    rspice_simulation_contract::run_set::dispatch_for_plan(
+        state,
+        action,
+        enabled_analysis_kinds,
+        exact_task_count,
+        workload_error,
+    )
 }
 
-/// The declared axis values at least one point uses, in declaration order.
-fn retain_used<T: PartialEq + Copy>(
-    declared: &[T],
-    points: &[CornerPointSpec],
-    coordinate: impl Fn(&CornerPointSpec) -> T,
-) -> Vec<T> {
-    declared
-        .iter()
-        .copied()
-        .filter(|value| points.iter().any(|point| coordinate(point) == *value))
-        .collect()
+#[cfg(test)]
+pub fn dispatch(
+    state: &mut RunSetState,
+    action: RunSetAction,
+    enabled_analysis_count: usize,
+) -> RunSetTransaction {
+    if matches!(&action, RunSetAction::Preview) {
+        crate::simulation::cost_probe::record(
+            crate::simulation::cost_probe::Derivation::RunSetValidation,
+        );
+    }
+    rspice_simulation_contract::run_set::dispatch(state, action, enabled_analysis_count)
 }
-
-/// Process corners in the order [`PROCESS_SECTIONS`] names them.
-const PROCESS_CORNERS: [ProcessCorner; 5] = [
-    ProcessCorner::TT,
-    ProcessCorner::SS,
-    ProcessCorner::FF,
-    ProcessCorner::SF,
-    ProcessCorner::FS,
-];
-
-/// Placeholder supply used when no supply axis is declared. It is both the
-/// swept value and the nominal it is divided by, so the executor's ratio is
-/// exactly one.
-const UNSWEPT_SUPPLY: f64 = 1.0;

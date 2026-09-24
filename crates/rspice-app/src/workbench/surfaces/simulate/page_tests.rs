@@ -1393,7 +1393,7 @@ fn the_applies_to_control_is_built_from_the_declared_run_set() {
     }
 
     fn six_point_run_set() -> RunSetState {
-        RunSetState::from_corner_config(&CornerConfig {
+        crate::simulation::run_set::from_corner_config(&CornerConfig {
             process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
             voltages: vec![1.0],
             supply_source_names: Vec::new(),

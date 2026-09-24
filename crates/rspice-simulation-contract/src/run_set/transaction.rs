@@ -6,11 +6,11 @@
 //! keeps the invalid input visible: nothing is silently corrected, and no task
 //! matrix is created.
 
-use super::model::{
+use super::validate::{RunSetError, RunSetValidation};
+use super::{
     InvalidValuePolicy, RunSetComposition, RunSetCompositionMode, RunSetDimension,
     RunSetDimensionKind, RunSetState,
 };
-use super::validate::{RunSetError, RunSetValidation};
 
 /// A command against a run set.
 #[derive(Debug, Clone, PartialEq)]
@@ -101,7 +101,7 @@ impl RunSetAction {
     }
 }
 
-pub use rspice_simulation_contract::run_set::{RunSetReceipt, RunSetReceiptStatus};
+use super::{RunSetReceipt, RunSetReceiptStatus};
 
 /// What a dispatch produced.
 #[derive(Debug, Clone)]
@@ -122,7 +122,6 @@ impl RunSetTransaction {
 ///
 /// A mutation is applied to a clone and adopted only if it succeeds, so a
 /// refused command cannot leave a half-applied edit behind.
-#[cfg(test)]
 pub fn dispatch(
     state: &mut RunSetState,
     action: RunSetAction,
@@ -137,7 +136,7 @@ pub fn dispatch(
 pub fn dispatch_for_plan(
     state: &mut RunSetState,
     action: RunSetAction,
-    enabled_analysis_kinds: &[crate::simulation::plan::AnalysisKind],
+    enabled_analysis_kinds: &[crate::analysis_kind::AnalysisKind],
     exact_task_count: Option<usize>,
     workload_error: Option<String>,
 ) -> RunSetTransaction {

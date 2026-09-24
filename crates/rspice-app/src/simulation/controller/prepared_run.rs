@@ -22,6 +22,7 @@ use crate::simulation::execution::{
     manual_deck_analysis_instance_id, manual_executable_source_digest,
     manual_source_receipt_digest,
 };
+use crate::simulation::run_set::RunSetCornerProjection;
 
 mod deferred_sources;
 mod dependency_expansion;

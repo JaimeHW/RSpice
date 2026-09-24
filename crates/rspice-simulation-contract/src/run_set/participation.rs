@@ -20,9 +20,9 @@
 use std::collections::HashSet;
 
 use super::ReferencePoint;
-use super::model::{RunSetDimensionKind, RunSetState};
 use super::points::RunSetPoint;
-pub use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
+use super::{RunSetDimensionKind, RunSetState};
+pub use crate::analysis_run_at::AnalysisRunAt;
 
 /// The point a [`AnalysisRunAt::NominalPoint`] instance runs at.
 ///

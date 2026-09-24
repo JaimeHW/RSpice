@@ -277,7 +277,7 @@ mod tests {
 
         let mut app = RSpiceApp::test_instance();
         app.state.sim_setup.run_set =
-            crate::simulation::run_set::RunSetState::from_corner_config(&CornerConfig {
+            crate::simulation::run_set::from_corner_config(&CornerConfig {
                 process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
                 voltages: vec![1.0],
                 supply_source_names: Vec::new(),

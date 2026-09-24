@@ -68,6 +68,7 @@ fn the_default_run_set_is_the_commercial_pvt_space_and_requires_a_supply_binding
 
     assert!(validation.is_ready(), "{:?}", validation.errors);
     assert_eq!(validation.forecast.point_count, 27);
+    assert_eq!(state.point_count(), validation.forecast.point_count);
     assert!(
         state
             .enabled_dimension_of(RunSetDimensionKind::Supply)
@@ -206,6 +207,7 @@ fn adaptive_composition_fails_closed_without_the_campaign_scheduler() {
             .iter()
             .any(|error| error.id == "RUNSET-ADAPTIVE-EXECUTOR")
     );
+    assert_eq!(state.point_count(), validation.forecast.point_count);
     assert!(resolve(&state).is_none());
 }
 
@@ -653,6 +655,7 @@ fn excluding_one_point_shortens_the_space_by_exactly_that_point() {
     let validation = validate(&state, 1);
     assert!(validation.is_ready(), "{:?}", validation.errors);
     assert_eq!(validation.forecast.point_count, 26);
+    assert_eq!(state.point_count(), validation.forecast.point_count);
     assert_eq!(validation.forecast.task_count, 26);
 
     let points = resolve(&state).expect("a filtered space resolves");

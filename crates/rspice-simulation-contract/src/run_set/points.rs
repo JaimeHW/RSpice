@@ -6,7 +6,7 @@
 //! from a run set that validates: an unresolvable declaration yields no points
 //! rather than a partial list that would read as a shorter run.
 
-use super::model::{RunSetCompositionMode, RunSetDimension, RunSetState, RunSetValue};
+use super::{RunSetCompositionMode, RunSetDimension, RunSetState, RunSetValue};
 
 /// One executable point: the value each enabled dimension contributes.
 #[derive(Debug, Clone, PartialEq)]
@@ -297,10 +297,6 @@ pub(super) fn validate_conditional_predicate(state: &RunSetState) -> Result<(), 
 /// may read it.
 #[must_use]
 pub fn compose(state: &RunSetState) -> Option<Vec<RunSetPoint<'_>>> {
-    #[cfg(test)]
-    crate::simulation::cost_probe::record(
-        crate::simulation::cost_probe::Derivation::SpaceExpansion,
-    );
     let dimensions: Vec<&RunSetDimension> = expandable_dimensions(state);
     if dimensions.iter().any(|dimension| {
         dimension

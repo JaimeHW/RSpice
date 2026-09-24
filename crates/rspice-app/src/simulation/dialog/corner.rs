@@ -17,7 +17,7 @@
 //! Run transient analysis at SS corner with reduced voltage and hot temperature.
 
 use crate::product::ProcessCorner;
-use crate::simulation::run_set::RunSetState;
+use crate::simulation::run_set::{RunSetCornerProjection, RunSetState};
 
 // =============================================================================
 // Base Analysis Type
