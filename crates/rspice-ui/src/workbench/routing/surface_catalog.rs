@@ -270,7 +270,7 @@ define_surface_catalog! {
     LvsPexWorkbench => { id: "lvs-pex-workbench", label: "LVS and parasitic extraction", archetype: SpecialistWorkspace, tier: QualifiedExternalFirst, status: ExternalFirst, deep_link: "?surface=lvs-pex-workbench" },
     EmWorkbench => { id: "em-workbench", label: "EM, IR and electrothermal", archetype: SpecialistWorkspace, tier: QualifiedExternalFirst, status: ExternalFirst, deep_link: "?surface=em-workbench" },
     SiPiWorkbench => { id: "si-pi-workbench", label: "SI, PI and SerDes", archetype: SpecialistWorkspace, tier: QualifiedExternalFirst, status: ExternalFirst, deep_link: "?surface=si-pi-workbench" },
-    ReliabilityWorkbench => { id: "reliability-workbench", label: "Reliability, fault and SOA", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=reliability-workbench" },
+    DeviceSafetyWorkbench => { id: "device-safety-workbench", label: "Safe operating area", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=device-safety-workbench" },
     VisualizationStudio => { id: "visualization-studio", label: "Visualization Studio", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=visualization-studio" },
     DigitalEventWorkbench => { id: "digital-event-workbench", label: "Digital & AMS event viewer", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=digital-event-workbench" },
     RfDataDisplayWorkbench => { id: "rf-data-display-workbench", label: "RF data display worksheet", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: Preview, deep_link: "?surface=rf-data-display-workbench" },

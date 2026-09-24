@@ -891,13 +891,6 @@ impl FamilyManifest {
                     .collect();
                 (points, *failures)
             }
-            AnalysisResultFamilyMetadata::Reliability { years } => {
-                dimensions.insert(
-                    0,
-                    dimension("years", "Years", Some("yr"), FamilyValueKind::Number),
-                );
-                (indexed_numeric_points("years", years), 0)
-            }
             AnalysisResultFamilyMetadata::Optimization { iterations, .. } => {
                 dimensions.insert(
                     0,

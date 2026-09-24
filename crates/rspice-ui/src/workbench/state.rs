@@ -428,7 +428,7 @@ impl EngineeringProfile {
     pub const fn detail(self) -> &'static str {
         match self {
             Self::AnalogIc => {
-                "Schematic, custom layout, AMS, RF/periodic, variation, reliability, PDK, model and sign-off workflows."
+                "Schematic, custom layout, AMS, RF/periodic, variation, PDK, model and sign-off workflows."
             }
             Self::RfMicrowave => {
                 "Periodic, network, load-pull, EM, RF display, measurement and application-design workflows."
@@ -437,7 +437,7 @@ impl EngineeringProfile {
                 "Channel, SerDes, PDN, package, board, EM, compliance and manufacturing workflows."
             }
             Self::Power => {
-                "Converters, devices, magnetics, controls, electrothermal, reliability and lab-correlation workflows."
+                "Converters, devices, magnetics, controls, electrothermal and lab-correlation workflows."
             }
             Self::Emerging => {
                 "Electronic-photonic, field, heterogeneous integration and quantum electronics research workflows."
@@ -740,7 +740,7 @@ pub enum VerificationPage {
     Corners,
     Tuning,
     Optimization,
-    Reliability,
+    DeviceSafety,
     #[serde(alias = "History")]
     Regression,
     Drc,
@@ -756,7 +756,7 @@ impl VerificationPage {
         Self::Corners,
         Self::Tuning,
         Self::Optimization,
-        Self::Reliability,
+        Self::DeviceSafety,
         Self::Regression,
         Self::Drc,
     ];
@@ -766,7 +766,7 @@ impl VerificationPage {
         Self::Corners,
         Self::Tuning,
         Self::Optimization,
-        Self::Reliability,
+        Self::DeviceSafety,
         Self::Regression,
     ];
 
@@ -784,7 +784,7 @@ impl VerificationPage {
             Self::Corners => "Process-corner verification",
             Self::Tuning => "Live design-space exploration",
             Self::Optimization => "Optimization candidate",
-            Self::Reliability => "Reliability and safe-operating-area verification",
+            Self::DeviceSafety => "Safe-operating-area verification",
             Self::Regression => "Golden regression comparison",
             Self::Drc => "Design-rule checking",
         }

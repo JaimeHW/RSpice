@@ -1461,25 +1461,34 @@ fn typed_result_payloads_round_trip_and_reject_payload_tampering() {
         ),
     );
     run.add_analysis(
-        AnalysisResult::new(4, AnalysisType::Reliability, "Reliability")
-            .with_family_metadata(AnalysisResultFamilyMetadata::Reliability { years: vec![10.0] })
-            .with_result_payload(AnalysisResultPayload::Reliability {
-                devices: vec![crate::state::ReliabilityDeviceEvidence {
+        AnalysisResult::new(4, AnalysisType::Soa, "SOA")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Soa {
+                time: vec![0.0, 1.0],
+            })
+            .with_result_payload(AnalysisResultPayload::Soa {
+                source_history: None,
+                evaluations: vec![crate::state::SoaEvaluationEvidence {
+                    duration: None,
+                    thresholds: Default::default(),
+                    envelope: None,
+                    derating: None,
                     device_id: "M1".to_owned(),
-                    stress: crate::state::ReliabilityStressEvidence {
-                        average_gate_stress_v: 1.2,
-                        average_drain_stress_v: 1.8,
-                        average_temperature_k: 358.15,
-                        duration_s: 3_600.0,
-                    },
-                    checkpoints: vec![crate::state::ReliabilityCheckpointEvidence {
-                        years: 10.0,
-                        shift: crate::state::ReliabilityShiftEvidence {
-                            threshold_voltage_shift_v: 0.03,
-                            mobility_shift: -0.004,
-                            drain_source_resistance_shift: 0.0015,
-                        },
-                    }],
+                    parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
+                    limit_value: 3.3,
+                    worst_actual_value: 3.2,
+                    worst_time_s: 1.0,
+                    sample_count: 2,
+                    unit: "V".to_owned(),
+                    description: "Maximum drain-source voltage".to_owned(),
+                    verdict: crate::state::SoaRuleVerdictEvidence::Warning,
+                }],
+                violations: vec![crate::state::SoaViolationEvidence {
+                    device_id: "M1".to_owned(),
+                    parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
+                    limit_value: 3.3,
+                    actual_value: 3.2,
+                    time_s: 1.0,
+                    severity: crate::state::SoaViolationSeverityEvidence::Warning,
                 }],
             }),
     );
@@ -1633,17 +1642,17 @@ fn typed_result_payloads_round_trip_and_reject_payload_tampering() {
             .contains("result_data_digest does not match retained analysis content")
     );
 
-    let mut reliability_tampered: serde_json::Value =
-        serde_json::from_str(&json).expect("project JSON");
-    reliability_tampered["runs"][0]["analyses"][3]["result_payload"]["devices"][0]["checkpoints"]
-        [0]["shift"]["mobility_shift"] = serde_json::json!(-0.004_000_000_000_000_001_f64);
-    let reliability_tampered: ProjectSimulationResults =
-        serde_json::from_value(reliability_tampered)
-            .expect("tampered reliability payload remains structural");
+    let mut soa_tampered: serde_json::Value = serde_json::from_str(&json).expect("project JSON");
+    soa_tampered["runs"][0]["analyses"][3]["result_payload"]["evaluations"][0]["worst_actual_value"] =
+        serde_json::json!(3.200_000_000_000_000_6_f64);
+    soa_tampered["runs"][0]["analyses"][3]["result_payload"]["violations"][0]["actual_value"] =
+        serde_json::json!(3.200_000_000_000_000_6_f64);
+    let soa_tampered: ProjectSimulationResults =
+        serde_json::from_value(soa_tampered).expect("tampered SOA payload remains structural");
     assert!(
-        reliability_tampered
+        soa_tampered
             .validate()
-            .expect_err("reliability field tampering invalidates the result digest")
+            .expect_err("SOA field tampering invalidates the result digest")
             .contains("result_data_digest does not match retained analysis content")
     );
 
@@ -1771,9 +1780,9 @@ fn schema_v9_digests_are_authenticated_before_current_resealing() {
         ),
     );
     run.add_analysis(
-        AnalysisResult::new(2, AnalysisType::Reliability, "Reliability").with_family_metadata(
-            AnalysisResultFamilyMetadata::Reliability {
-                years: vec![1.0, 5.0, 10.0],
+        AnalysisResult::new(2, AnalysisType::Soa, "SOA").with_family_metadata(
+            AnalysisResultFamilyMetadata::Soa {
+                time: vec![0.0, 1.0],
             },
         ),
     );
@@ -1813,7 +1822,7 @@ fn schema_v9_digests_are_authenticated_before_current_resealing() {
         .expect("resealed current results validate");
     assert!(
         migrated.runs[0].analyses[1].result_payload.is_missing(),
-        "migration preserves the absence of v10 reliability evidence"
+        "migration preserves the absence of v10 SOA evidence"
     );
     assert_ne!(
         migrated.runs[0].dataset_content_digest, v9.runs[0].dataset_content_digest,
@@ -1836,23 +1845,37 @@ fn schema_v9_digests_are_authenticated_before_current_resealing() {
 
     let mut injected = v9.clone();
     injected.runs[0].analyses[0].result_payload =
-        PersistedField::Value(AnalysisResultPayload::Reliability {
-            devices: vec![crate::state::ReliabilityDeviceEvidence {
+        PersistedField::Value(AnalysisResultPayload::Soa {
+            source_history: None,
+            evaluations: vec![crate::state::SoaEvaluationEvidence {
+                duration: None,
+                thresholds: Default::default(),
+                envelope: None,
+                derating: None,
                 device_id: "M1".to_owned(),
-                stress: crate::state::ReliabilityStressEvidence {
-                    average_gate_stress_v: 1.0,
-                    average_drain_stress_v: 1.0,
-                    average_temperature_k: 300.0,
-                    duration_s: 1.0,
-                },
-                checkpoints: Vec::new(),
+                parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
+                limit_value: 3.3,
+                worst_actual_value: 3.2,
+                worst_time_s: 1.0,
+                sample_count: 2,
+                unit: "V".to_owned(),
+                description: "Maximum drain-source voltage".to_owned(),
+                verdict: crate::state::SoaRuleVerdictEvidence::Warning,
+            }],
+            violations: vec![crate::state::SoaViolationEvidence {
+                device_id: "M1".to_owned(),
+                parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
+                limit_value: 3.3,
+                actual_value: 3.2,
+                time_s: 1.0,
+                severity: crate::state::SoaViolationSeverityEvidence::Warning,
             }],
         });
     assert!(
         injected
             .migrate_to_current(ProjectId::new())
             .expect_err("schema-v9 cannot inject v10 evidence")
-            .contains("Reliability/SOA evidence introduced by schema v10")
+            .contains("SOA evidence introduced by schema v10")
     );
 
     let mut injected_op = v9;
@@ -1873,25 +1896,34 @@ fn schema_v10_digests_are_authenticated_before_v11_tf_resealing() {
     run.finish_lifecycle(SimulationRunLifecycle::Completed)
         .expect("fixture run completes");
     run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
-            .with_family_metadata(AnalysisResultFamilyMetadata::Reliability { years: vec![10.0] })
-            .with_result_payload(AnalysisResultPayload::Reliability {
-                devices: vec![crate::state::ReliabilityDeviceEvidence {
+        AnalysisResult::new(1, AnalysisType::Soa, "SOA")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Soa {
+                time: vec![0.0, 1.0],
+            })
+            .with_result_payload(AnalysisResultPayload::Soa {
+                source_history: None,
+                evaluations: vec![crate::state::SoaEvaluationEvidence {
+                    duration: None,
+                    thresholds: Default::default(),
+                    envelope: None,
+                    derating: None,
                     device_id: "M1".to_owned(),
-                    stress: crate::state::ReliabilityStressEvidence {
-                        average_gate_stress_v: 1.2,
-                        average_drain_stress_v: 1.8,
-                        average_temperature_k: 358.15,
-                        duration_s: 3_600.0,
-                    },
-                    checkpoints: vec![crate::state::ReliabilityCheckpointEvidence {
-                        years: 10.0,
-                        shift: crate::state::ReliabilityShiftEvidence {
-                            threshold_voltage_shift_v: 0.03,
-                            mobility_shift: -0.004,
-                            drain_source_resistance_shift: 0.0015,
-                        },
-                    }],
+                    parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
+                    limit_value: 3.3,
+                    worst_actual_value: 3.2,
+                    worst_time_s: 1.0,
+                    sample_count: 2,
+                    unit: "V".to_owned(),
+                    description: "Maximum drain-source voltage".to_owned(),
+                    verdict: crate::state::SoaRuleVerdictEvidence::Warning,
+                }],
+                violations: vec![crate::state::SoaViolationEvidence {
+                    device_id: "M1".to_owned(),
+                    parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
+                    limit_value: 3.3,
+                    actual_value: 3.2,
+                    time_s: 1.0,
+                    severity: crate::state::SoaViolationSeverityEvidence::Warning,
                 }],
             }),
     );
@@ -1902,7 +1934,7 @@ fn schema_v10_digests_are_authenticated_before_v11_tf_resealing() {
     simulation.runs = vec![run].into();
     simulation.next_run_id = 34;
     let mut v10 = ProjectSimulationResults::from_state(&simulation);
-    v10.schema_version = RELIABILITY_SOA_RESULTS_SCHEMA_VERSION;
+    v10.schema_version = SOA_RESULTS_SCHEMA_VERSION;
     for analysis in &mut v10.runs[0].analyses {
         analysis.result_data_digest = PersistedField::Value(
             analysis
@@ -1939,12 +1971,12 @@ fn schema_v10_digests_are_authenticated_before_v11_tf_resealing() {
     );
 
     let mut tampered = v10.clone();
-    let Some(AnalysisResultPayload::Reliability { devices }) =
+    let Some(AnalysisResultPayload::Soa { evaluations, .. }) =
         tampered.runs[0].analyses[0].result_payload.as_mut()
     else {
-        panic!("schema-v10 reliability payload")
+        panic!("schema-v10 SOA payload")
     };
-    devices[0].stress.duration_s = 3_600.000_000_000_000_5;
+    evaluations[0].worst_actual_value = 3.200_000_000_000_000_6;
     assert!(
         tampered
             .migrate_to_current(ProjectId::new())
@@ -2058,35 +2090,37 @@ fn schema_v7_digest_migration_is_deterministic_and_rejects_anachronistic_fields(
 #[test]
 fn legacy_schema_field_gate_rejects_relabelled_typed_evidence() {
     let mut run = SimulationRun::new(4);
-    run.add_analysis(AnalysisResult::new(
-        1,
-        AnalysisType::Reliability,
-        "Reliability",
-    ));
+    run.add_analysis(AnalysisResult::new(1, AnalysisType::Soa, "SOA"));
     seal_legacy_unattributed(&mut run);
     let mut persisted_run = ProjectSimulationRun::from(&run);
     persisted_run.analyses[0].result_data_digest = PersistedField::Missing;
     persisted_run.dataset_content_digest = PersistedField::Missing;
-    persisted_run.analyses[0].result_payload =
-        PersistedField::Value(AnalysisResultPayload::Reliability {
-            devices: vec![crate::state::ReliabilityDeviceEvidence {
-                device_id: "M1".to_owned(),
-                stress: crate::state::ReliabilityStressEvidence {
-                    average_gate_stress_v: 1.0,
-                    average_drain_stress_v: 1.0,
-                    average_temperature_k: 300.0,
-                    duration_s: 1.0,
-                },
-                checkpoints: vec![crate::state::ReliabilityCheckpointEvidence {
-                    years: 1.0,
-                    shift: crate::state::ReliabilityShiftEvidence {
-                        threshold_voltage_shift_v: 0.01,
-                        mobility_shift: -0.001,
-                        drain_source_resistance_shift: 0.0001,
-                    },
-                }],
-            }],
-        });
+    persisted_run.analyses[0].result_payload = PersistedField::Value(AnalysisResultPayload::Soa {
+        source_history: None,
+        evaluations: vec![crate::state::SoaEvaluationEvidence {
+            duration: None,
+            thresholds: Default::default(),
+            envelope: None,
+            derating: None,
+            device_id: "M1".to_owned(),
+            parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
+            limit_value: 3.3,
+            worst_actual_value: 3.2,
+            worst_time_s: 1.0,
+            sample_count: 2,
+            unit: "V".to_owned(),
+            description: "Maximum drain-source voltage".to_owned(),
+            verdict: crate::state::SoaRuleVerdictEvidence::Warning,
+        }],
+        violations: vec![crate::state::SoaViolationEvidence {
+            device_id: "M1".to_owned(),
+            parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
+            limit_value: 3.3,
+            actual_value: 3.2,
+            time_s: 1.0,
+            severity: crate::state::SoaViolationSeverityEvidence::Warning,
+        }],
+    });
 
     for source_schema in
         LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION..=CONTENT_DIGEST_RESULTS_SCHEMA_VERSION
@@ -2099,8 +2133,9 @@ fn legacy_schema_field_gate_rejects_relabelled_typed_evidence() {
     }
 
     persisted_run.analyses[0].result_payload = PersistedField::Missing;
-    persisted_run.analyses[0].family_metadata =
-        Some(AnalysisResultFamilyMetadata::Reliability { years: vec![1.0] });
+    persisted_run.analyses[0].family_metadata = Some(AnalysisResultFamilyMetadata::Soa {
+        time: vec![0.0, 1.0],
+    });
     for source_schema in
         LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION..FAMILY_METADATA_RESULTS_SCHEMA_VERSION
     {

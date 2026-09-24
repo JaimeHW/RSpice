@@ -15,7 +15,6 @@ mod qpnoise_controls_tests;
 mod qpss_controls_tests;
 #[cfg(test)]
 mod qpxf_controls_tests;
-mod reliability;
 
 pub(in crate::simulation) use analysis_spec::analysis_kind_tag;
 use analysis_spec::{
@@ -1256,7 +1255,6 @@ pub(in crate::simulation) const fn canonical_analysis_kind(
         AnalysisSpec::MonteCarlo { .. } => CanonicalAnalysisKind::MonteCarlo,
         AnalysisSpec::Parametric => CanonicalAnalysisKind::Parametric,
         AnalysisSpec::Corner => CanonicalAnalysisKind::Corner,
-        AnalysisSpec::Reliability { .. } => CanonicalAnalysisKind::Reliability,
         AnalysisSpec::Optimization { .. } => CanonicalAnalysisKind::Optimization,
         AnalysisSpec::Soa { .. } => CanonicalAnalysisKind::Soa,
         AnalysisSpec::SParameter { .. } => CanonicalAnalysisKind::SParameter,

@@ -11,7 +11,6 @@ pub use qpnoise::QpnoiseControls;
 pub use qpxf::QpxfControls;
 mod qpss;
 pub use qpac::QpacControls;
-mod reliability;
 mod run_type;
 mod types;
 pub use qpss::QpssControls;

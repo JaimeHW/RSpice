@@ -141,7 +141,7 @@ const INITIAL_PAGES: [(&str, &str); 7] = [
     ("2", "Design and configuration"),
     ("3", "Nominal results"),
     ("4", "PVT and yield"),
-    ("5", "Reliability and regression"),
+    ("5", "SOA and regression"),
     ("6", "Physical DRC and waivers"),
     ("A", "Run manifests"),
 ];

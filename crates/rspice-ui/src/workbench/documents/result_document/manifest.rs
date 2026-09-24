@@ -822,10 +822,6 @@ const fn domain_meta(analysis: AnalysisType) -> DomainMeta {
             axis: "PVT family",
             precision: "f64 / complex128",
         },
-        A::Reliability => DomainMeta {
-            axis: "mission age",
-            precision: "f64",
-        },
         A::Optimization => DomainMeta {
             axis: "iteration / candidate",
             precision: "f64",
@@ -957,9 +953,6 @@ fn family_values_label(family: &AnalysisResultFamilyMetadata) -> String {
             variables,
             ..
         } => format!("{runs_completed} samples / {} variables", variables.len()),
-        AnalysisResultFamilyMetadata::Reliability { years } => {
-            format!("{} mission ages", years.len())
-        }
         AnalysisResultFamilyMetadata::Optimization { iterations, .. } => {
             format!("{} iterations", iterations.len())
         }
@@ -1216,14 +1209,6 @@ fn payload_values_label(payload: &AnalysisResultPayload) -> String {
             format!("{} scalar values", values.len())
         }
         AnalysisResultPayload::TransferFunction { .. } => "transfer / impedance scalars".to_owned(),
-        AnalysisResultPayload::ReliabilityMission { response } => format!(
-            "{} mission phases / {} aged circuit points",
-            response.stress.phases.len(),
-            response.aged.len()
-        ),
-        AnalysisResultPayload::Reliability { devices } => {
-            format!("{} reliability devices", devices.len())
-        }
         AnalysisResultPayload::Soa {
             source_history: _,
             evaluations,
@@ -1660,7 +1645,6 @@ mod tests {
             AnalysisType::MonteCarlo,
             AnalysisType::Parametric,
             AnalysisType::Corner,
-            AnalysisType::Reliability,
             AnalysisType::Optimization,
             AnalysisType::Soa,
             AnalysisType::SParameter,

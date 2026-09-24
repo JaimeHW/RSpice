@@ -1716,7 +1716,6 @@ const fn axis_signal_for_analysis_type(
         A::MonteCarlo => ("value", SignalType::Unknown),
         A::Parametric => ("sweep", SignalType::Unknown),
         A::Corner => ("temperature", SignalType::Unknown),
-        A::Reliability => ("lifetime", SignalType::Unknown),
         A::Optimization => ("iteration", SignalType::Unknown),
         // A scalar operating point has no abscissa to name.
         A::DcOp => ("x", SignalType::Unknown),

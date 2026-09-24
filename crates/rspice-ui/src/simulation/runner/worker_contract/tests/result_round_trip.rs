@@ -348,46 +348,6 @@ fn worker_result_round_trip() {
         other => panic!("expected Monte Carlo result, got {other:?}"),
     }
 
-    let reliability = SimulationResult::Reliability {
-        years: vec![1.0, 10.0],
-        waveforms: HashMap::from([(
-            "DVTH(M1)".to_string(),
-            WaveformData::new_time_domain("DVTH(M1)", vec![1.0, 10.0], vec![0.01, 0.03]),
-        )]),
-        device_results: vec![crate::simulation::reliability_engine::ReliabilityResult {
-            device_id: "M1".to_string(),
-            stress: crate::simulation::reliability_engine::StressMetrics {
-                avg_vgs_stress: 1.1,
-                avg_vds_stress: 1.7,
-                avg_temp: 398.0,
-                duration: 1.0e6,
-            },
-            shifts: HashMap::from([(
-                "10y".to_string(),
-                crate::simulation::reliability_engine::ParamShift {
-                    vth_shift: 0.03,
-                    mobility_shift: -0.02,
-                    rds_shift: 0.004,
-                },
-            )]),
-        }],
-    };
-    let reliability = round_trip_result(reliability);
-    match reliability {
-        SimulationResult::Reliability {
-            years,
-            waveforms,
-            device_results,
-        } => {
-            assert_eq!(years, vec![1.0, 10.0]);
-            assert_eq!(waveforms["DVTH(M1)"].y_values, vec![0.01, 0.03]);
-            assert_eq!(device_results[0].device_id, "M1");
-            assert_eq!(device_results[0].stress.avg_temp, 398.0);
-            assert_eq!(device_results[0].shifts["10y"].vth_shift, 0.03);
-        }
-        other => panic!("expected reliability result, got {other:?}"),
-    }
-
     let optimization = SimulationResult::Optimization {
         best_objectives: Vec::new(),
         best_constraints: Vec::new(),

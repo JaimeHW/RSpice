@@ -1299,21 +1299,6 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 variation_source: *variation_source,
                 params: params.clone(),
             }),
-            AnalysisSpec::Reliability {
-                study,
-                target_years,
-                enable_hci,
-                enable_nbti,
-                enable_em,
-                min_stress_voltage,
-            } => Ok(Self::Reliability {
-                study: study.clone(),
-                target_years: target_years.clone(),
-                enable_hci: *enable_hci,
-                enable_nbti: *enable_nbti,
-                enable_em: *enable_em,
-                min_stress_voltage: *min_stress_voltage,
-            }),
             AnalysisSpec::Optimization {
                 search,
                 variables,
@@ -1713,21 +1698,6 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
             } => Self::MonteCarlo {
                 variation_source,
                 params,
-            },
-            WorkerAnalysisSpec::Reliability {
-                study,
-                target_years,
-                enable_hci,
-                enable_nbti,
-                enable_em,
-                min_stress_voltage,
-            } => Self::Reliability {
-                study,
-                target_years,
-                enable_hci,
-                enable_nbti,
-                enable_em,
-                min_stress_voltage,
             },
             WorkerAnalysisSpec::Optimization {
                 search,

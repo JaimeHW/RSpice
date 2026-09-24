@@ -498,8 +498,6 @@ pub(super) fn retained_pole_zero_payload(
         | AnalysisResultPayload::DcMismatch { .. }
         | AnalysisResultPayload::TransferFunction { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }
-        | AnalysisResultPayload::ReliabilityMission { .. }
-        | AnalysisResultPayload::Reliability { .. }
         | AnalysisResultPayload::Soa { .. }
         | AnalysisResultPayload::TransientEvents { .. }
         | AnalysisResultPayload::FftSpectrum { .. }
@@ -601,8 +599,6 @@ pub(super) fn retained_sensitivity_payload(
         | AnalysisResultPayload::DcMismatch { .. }
         | AnalysisResultPayload::TransferFunction { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }
-        | AnalysisResultPayload::ReliabilityMission { .. }
-        | AnalysisResultPayload::Reliability { .. }
         | AnalysisResultPayload::Soa { .. }
         | AnalysisResultPayload::TransientEvents { .. }
         | AnalysisResultPayload::FftSpectrum { .. }

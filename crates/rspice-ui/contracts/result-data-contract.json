@@ -108,7 +108,6 @@
       "dcmatch",
       "fourier",
       "disto",
-      "reliability",
       "soa",
       "opt"
     ],
@@ -145,7 +144,6 @@
       "dynamic-droop-viewer",
       "viewer-digital-events",
       "viewer-soa",
-      "viewer-reliability",
       "viewer-optimization",
       "viewer-pz",
       "field-viewer-3d",
@@ -174,7 +172,6 @@
       "eye",
       "events",
       "soa",
-      "reliability",
       "optimization",
       "pz"
     ],
@@ -1243,22 +1240,6 @@
         "viewer-spectrum"
       ],
       "implementationJourney": "compatibility distortion products with explicit THD/IMD post-processing provenance",
-      "exactAlternativeRequired": true,
-      "operationalStatesRequired": true,
-      "supportedPlatforms": [
-        "desktop",
-        "browser",
-        "tablet"
-      ]
-    },
-    "reliability": {
-      "analysisId": "reliability",
-      "availability": "preview",
-      "defaultViewerId": "viewer-reliability",
-      "compatibleViewerIds": [
-        "viewer-reliability"
-      ],
-      "implementationJourney": "mission-profile degradation, mechanism contribution, accumulated damage, and lifetime margins",
       "exactAlternativeRequired": true,
       "operationalStatesRequired": true,
       "supportedPlatforms": [
@@ -2441,25 +2422,6 @@
       "interactionBoundary": "Selection, viewport, and presentation edits create result-document state only; exact source values, coordinates, units, manifests, and producer receipts remain immutable.",
       "publication": "Vector and raster presentation plus the profile-owned exact structured alternative, complete provenance, currentness, and accessibility descriptions."
     },
-    "viewer-reliability": {
-      "engineeringTask": "Inspect mission-profile stress, degradation mechanisms, parameter drift, accumulated damage, lifetime prediction, and requirement margins.",
-      "primaryRepresentation": "mission timeline, degradation curves, mechanism contribution table, and lifetime summary",
-      "selectionIdentity": "mission profile · interval · device/mechanism · operating family",
-      "exactReadouts": [
-        "stress duty cycle",
-        "parameter drift",
-        "accumulated damage",
-        "lifetime and confidence margin"
-      ],
-      "domainActions": [
-        "Choose mission profile",
-        "Compare mechanisms",
-        "Locate limiting device",
-        "Open lifetime table"
-      ],
-      "interactionBoundary": "Selection, viewport, and presentation edits create result-document state only; exact source values, coordinates, units, manifests, and producer receipts remain immutable.",
-      "publication": "Vector and raster presentation plus the profile-owned exact structured alternative, complete provenance, currentness, and accessibility descriptions."
-    },
     "viewer-optimization": {
       "engineeringTask": "Inspect deterministic optimization history, variables, objectives, hard constraints, candidate feasibility, convergence, and Pareto tradeoffs.",
       "primaryRepresentation": "candidate-history table linked to convergence traces, constraint margins, and Pareto projections",
@@ -2847,17 +2809,15 @@
     },
     "verification-optimization": {
       "label": "Verification & optimization",
-      "description": "SOA violations, reliability and aging evidence, optimization history, constraints, and candidate tradeoffs",
+      "description": "SOA violations, optimization history, constraints, and candidate tradeoffs",
       "classification": "release-target",
       "defaultViewerId": "viewer-soa",
       "viewerIds": [
         "viewer-soa",
-        "viewer-reliability",
         "viewer-optimization"
       ],
       "quickModeIds": [
         "soa",
-        "reliability",
         "optimization"
       ],
       "route": "result-document",
@@ -6443,83 +6403,6 @@
       "releaseEvidenceEligible": false
     },
     {
-      "id": "viewer-reliability",
-      "canonical": {
-        "group": "Verification & optimization",
-        "title": "Reliability and aging",
-        "domain": "REL · mission profile, degradation, and lifetime",
-        "x": "Mission time / stress interval",
-        "y": "Degradation / lifetime margin",
-        "art": "reliability",
-        "analysisIds": [
-          "reliability"
-        ],
-        "quickModes": [
-          {
-            "id": "reliability",
-            "icon": "verify",
-            "label": "Reliability",
-            "analysisIds": [
-              "reliability"
-            ]
-          }
-        ]
-      },
-      "capability": {
-        "viewerId": "viewer-reliability",
-        "classification": "preview",
-        "creationFamilyIds": [
-          "verification-optimization"
-        ],
-        "interactionProfileId": "verification-instrument",
-        "design": {
-          "engineeringTask": "Inspect mission-profile stress, degradation mechanisms, parameter drift, accumulated damage, lifetime prediction, and requirement margins.",
-          "primaryRepresentation": "mission timeline, degradation curves, mechanism contribution table, and lifetime summary",
-          "selectionIdentity": "mission profile · interval · device/mechanism · operating family",
-          "exactReadouts": [
-            "stress duty cycle",
-            "parameter drift",
-            "accumulated damage",
-            "lifetime and confidence margin"
-          ],
-          "domainActions": [
-            "Choose mission profile",
-            "Compare mechanisms",
-            "Locate limiting device",
-            "Open lifetime table"
-          ],
-          "interactionBoundary": "Selection, viewport, and presentation edits create result-document state only; exact source values, coordinates, units, manifests, and producer receipts remain immutable.",
-          "publication": "Vector and raster presentation plus the profile-owned exact structured alternative, complete provenance, currentness, and accessibility descriptions."
-        },
-        "producerPolicy": "preview-producer-or-postprocessor-required",
-        "defaultComposition": "primary viewer plus inspector and exact structured alternative",
-        "specificationStatus": "authoritative-profile-bound",
-        "mockupStatus": "interactive-design-fixture-producer-unqualified",
-        "supportedPlatforms": [
-          "desktop",
-          "browser",
-          "tablet"
-        ],
-        "phoneStatus": "deferred",
-        "releaseEvidenceEligible": false
-      },
-      "persistentModelId": "result-document",
-      "viewerFamilyId": "cartesian",
-      "quickModeIds": [
-        "reliability"
-      ],
-      "inputAuthority": {
-        "analysisIds": [
-          "reliability"
-        ],
-        "externalCapabilityId": null
-      },
-      "structuredAlternativeId": "exact-coordinate-family-and-measurement-table",
-      "precisionPolicyId": "result-precision-policy",
-      "availability": "canonical-design-target",
-      "releaseEvidenceEligible": false
-    },
-    {
       "id": "viewer-optimization",
       "canonical": {
         "group": "Verification & optimization",
@@ -7296,20 +7179,6 @@
         "soa"
       ],
       "documentId": "viewer-soa",
-      "projectionOnly": true,
-      "persistentObjectType": null,
-      "persistenceOwnerId": "result-document",
-      "storagePolicy": "Persist the owning result-document viewer selection and parameters only; never create a quick-mode document, dataset, revision, migration stream, or autosave namespace.",
-      "routePolicy": "Resolve this mode to its canonical documentId and return the persistent result-document identity."
-    },
-    {
-      "id": "reliability",
-      "icon": "verify",
-      "label": "Reliability",
-      "analysisIds": [
-        "reliability"
-      ],
-      "documentId": "viewer-reliability",
       "projectionOnly": true,
       "persistentObjectType": null,
       "persistenceOwnerId": "result-document",
@@ -8974,12 +8843,12 @@
     "promotionRule": "No protected readiness label is permitted until exact current implementation, numeric, adapter, migration, accessibility, platform, human, and sign-off evidence resolves through its owning authority."
   },
   "counts": {
-    "analysisCoverage": 34,
-    "viewerDocuments": 41,
-    "quickModes": 21,
+    "analysisCoverage": 33,
+    "viewerDocuments": 40,
+    "quickModes": 20,
     "viewerFamilies": 9,
     "viewerInteractionProfiles": 13,
-    "viewerDesignSpecifications": 41,
+    "viewerDesignSpecifications": 40,
     "viewerOperationalStates": 16,
     "creationFamilies": 9,
     "plotPropertyPages": 59,

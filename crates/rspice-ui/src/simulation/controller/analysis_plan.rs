@@ -531,7 +531,6 @@ impl SimulationController {
                 | AnalysisSpec::Envelope { .. }
                 | AnalysisSpec::Fourier { .. }
                 | AnalysisSpec::Fft { .. }
-                | AnalysisSpec::Reliability { .. }
                 | AnalysisSpec::Optimization { .. }
                 | AnalysisSpec::Soa { .. }
                 | AnalysisSpec::Qpss { .. }

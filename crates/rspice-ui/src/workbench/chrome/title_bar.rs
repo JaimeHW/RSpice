@@ -1631,8 +1631,8 @@ fn verify_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item_as(
         ui,
         app,
-        Command::VerificationPage(VerificationPage::Reliability),
-        "Reliability, fault and SOA",
+        Command::VerificationPage(VerificationPage::DeviceSafety),
+        "Safe operating area",
         None,
     );
     command_item_as(

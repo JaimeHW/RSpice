@@ -9,34 +9,6 @@ use crate::simulation::multi_run::{AnalysisSpec, OptimizationGoal};
 /// Validate one device-level specification.
 pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
     match spec {
-        AnalysisSpec::Reliability {
-            study,
-            target_years,
-            enable_hci,
-            enable_nbti,
-            enable_em,
-            min_stress_voltage,
-        } => {
-            if target_years.is_empty() {
-                return Err("Reliability target_years must not be empty".to_string());
-            }
-            if target_years
-                .iter()
-                .any(|years| !years.is_finite() || *years <= 0.0)
-            {
-                return Err("Reliability target_years must be finite and > 0".to_string());
-            }
-            if !enable_hci && !enable_nbti && !enable_em {
-                return Err("Reliability requires at least one enabled mechanism".to_string());
-            }
-            if !min_stress_voltage.is_finite() || *min_stress_voltage < 0.0 {
-                return Err("Reliability min_stress_voltage must be finite and >= 0".to_string());
-            }
-            if let Some(study) = study {
-                study.validate(target_years, *enable_hci, *enable_nbti, *enable_em)?;
-            }
-            Ok(())
-        }
         AnalysisSpec::Optimization {
             search,
             variables,

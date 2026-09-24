@@ -740,70 +740,6 @@ fn relative_transfer_function_gain_requires_exact_nonzero_nominals() {
 }
 
 #[test]
-fn reliability_payload_requires_canonical_devices_and_exact_lifetime_coverage() {
-    let device = ReliabilityDeviceEvidence {
-        device_id: "M1".to_owned(),
-        stress: ReliabilityStressEvidence {
-            average_gate_stress_v: 1.2,
-            average_drain_stress_v: 1.8,
-            average_temperature_k: 358.15,
-            duration_s: 3_600.0,
-        },
-        checkpoints: vec![
-            ReliabilityCheckpointEvidence {
-                years: 1.0,
-                shift: ReliabilityShiftEvidence {
-                    threshold_voltage_shift_v: 0.01,
-                    mobility_shift: -0.001,
-                    drain_source_resistance_shift: 0.0005,
-                },
-            },
-            ReliabilityCheckpointEvidence {
-                years: 10.0,
-                shift: ReliabilityShiftEvidence {
-                    threshold_voltage_shift_v: 0.03,
-                    mobility_shift: -0.004,
-                    drain_source_resistance_shift: 0.0015,
-                },
-            },
-        ],
-    };
-    let valid = AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
-        .with_family_metadata(AnalysisResultFamilyMetadata::Reliability {
-            years: vec![1.0, 10.0],
-        })
-        .with_result_payload(AnalysisResultPayload::Reliability {
-            devices: vec![device.clone()],
-        });
-    assert!(valid.validate_retained_evidence().is_ok());
-
-    let payload_without_axis = AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
-        .with_result_payload(AnalysisResultPayload::Reliability {
-            devices: vec![device.clone()],
-        });
-    assert!(
-        payload_without_axis
-            .validate_retained_evidence()
-            .expect_err("reliability payload requires its lifetime axis")
-            .contains("missing its retained lifetime axis")
-    );
-
-    let incomplete = AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
-        .with_family_metadata(AnalysisResultFamilyMetadata::Reliability {
-            years: vec![1.0, 5.0, 10.0],
-        })
-        .with_result_payload(AnalysisResultPayload::Reliability {
-            devices: vec![device],
-        });
-    assert!(
-        incomplete
-            .validate_retained_evidence()
-            .expect_err("missing lifetime evidence is rejected")
-            .contains("do not match")
-    );
-}
-
-#[test]
 fn soa_payload_requires_complete_rule_coverage_consistent_events_and_axis() {
     let evaluation = SoaEvaluationEvidence {
         duration: None,
@@ -918,14 +854,7 @@ fn soa_payload_requires_complete_rule_coverage_consistent_events_and_axis() {
 }
 
 #[test]
-fn reliability_and_soa_axes_are_canonical_engineering_coordinates() {
-    for years in [Vec::new(), vec![0.0], vec![10.0, 1.0], vec![1.0, 1.0]] {
-        assert!(
-            AnalysisResultFamilyMetadata::Reliability { years }
-                .validate_for(AnalysisType::Reliability)
-                .is_err()
-        );
-    }
+fn soa_axes_are_canonical_engineering_coordinates() {
     for time in [Vec::new(), vec![-1.0, 0.0], vec![0.0, 0.0], vec![1.0, 0.0]] {
         assert!(
             AnalysisResultFamilyMetadata::Soa { time }
@@ -933,13 +862,6 @@ fn reliability_and_soa_axes_are_canonical_engineering_coordinates() {
                 .is_err()
         );
     }
-    assert!(
-        AnalysisResultFamilyMetadata::Reliability {
-            years: vec![1.0, 5.0, 10.0],
-        }
-        .validate_for(AnalysisType::Reliability)
-        .is_ok()
-    );
     assert!(
         AnalysisResultFamilyMetadata::Soa {
             time: vec![-0.0, 1.0e-9, 2.0e-9],

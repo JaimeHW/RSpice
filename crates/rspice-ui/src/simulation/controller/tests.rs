@@ -729,12 +729,7 @@ fn failed_result_retention_never_satisfies_prepared_dependencies() {
     let run_sequence = state.simulation.start_run().id;
     let provenance = synthetic_result_provenance();
     let instance = provenance.source_instance_id();
-    let failed = AnalysisResult::failed(
-        1,
-        AnalysisType::Reliability,
-        "Reliability",
-        "invalid retained evidence",
-    );
+    let failed = AnalysisResult::failed(1, AnalysisType::Soa, "SOA", "invalid retained evidence");
     let mut controller = SimulationController::new();
 
     assert!(

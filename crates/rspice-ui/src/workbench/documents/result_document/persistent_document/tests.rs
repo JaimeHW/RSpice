@@ -1427,7 +1427,6 @@ fn interactive_result_viewers_keep_canonical_document_identity() {
         ResultViewer::PoleZero,
         ResultViewer::Events,
         ResultViewer::Soa,
-        ResultViewer::Reliability,
         ResultViewer::Optimization,
     ] {
         let document_id = viewer

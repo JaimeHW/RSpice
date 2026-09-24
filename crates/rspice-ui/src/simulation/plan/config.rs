@@ -17,8 +17,8 @@ use crate::simulation::dependency_contract::{
 use crate::simulation::dialog::{
     CornerDialogState, EnvelopeDialogState, FourierDialogState, HbDialogState, McDialogState,
     NoiseReferenceType, OpDialogState, OptimizationDialogState, PacDialogState, PnoiseDialogState,
-    PssDialogState, PstbDialogState, PxfDialogState, PzDialogState, ReliabilityDialogState,
-    SensDialogState, SoaDialogState, SpDialogState, StbDialogState, TempDialogState, XfDialogState,
+    PssDialogState, PstbDialogState, PxfDialogState, PzDialogState, SensDialogState,
+    SoaDialogState, SpDialogState, StbDialogState, TempDialogState, XfDialogState,
 };
 use crate::simulation::spice_value::parse_spice_value_checked;
 use crate::workbench::app_state::{AcSetup, DcSetup, TranSetup};
@@ -527,8 +527,6 @@ pub enum AnalysisDraft {
     Envelope(EnvelopeDialogState),
     #[serde(rename = "fourier")]
     Fourier(FourierDialogState),
-    #[serde(rename = "reliability")]
-    Reliability(ReliabilityDialogState),
     #[serde(rename = "opt")]
     Optimization(OptimizationDialogState),
     #[serde(rename = "soa")]
@@ -608,9 +606,6 @@ impl AnalysisDraft {
             AnalysisKind::Corner => Self::Corner(initialized_default!(CornerDialogState)),
             AnalysisKind::Envelope => Self::Envelope(initialized_default!(EnvelopeDialogState)),
             AnalysisKind::Fourier => Self::Fourier(initialized_default!(FourierDialogState)),
-            AnalysisKind::Reliability => {
-                Self::Reliability(initialized_default!(ReliabilityDialogState))
-            }
             AnalysisKind::Optimization => {
                 Self::Optimization(initialized_default!(OptimizationDialogState))
             }
@@ -660,10 +655,6 @@ impl AnalysisDraft {
             Self::TransferFunction(state) => SolverOwnership {
                 accuracy: AnalysisAccuracy::ALL.get(state.accuracy_idx).copied(),
                 homotopy: None,
-                ..SolverOwnership::NONE
-            },
-            Self::Reliability(state) => SolverOwnership {
-                time_integration: Some(state.study.transient_stress),
                 ..SolverOwnership::NONE
             },
             Self::Temperature(state) if state.base_analysis.is_none() => SolverOwnership {
@@ -744,7 +735,6 @@ impl AnalysisDraft {
             Self::Corner(_) => AnalysisKind::Corner,
             Self::Envelope(_) => AnalysisKind::Envelope,
             Self::Fourier(_) => AnalysisKind::Fourier,
-            Self::Reliability(_) => AnalysisKind::Reliability,
             Self::Optimization(_) => AnalysisKind::Optimization,
             Self::Soa(_) => AnalysisKind::Soa,
             Self::Disto(_) => AnalysisKind::Disto,
@@ -852,7 +842,6 @@ impl AnalysisDraft {
             Self::Corner(state) => state.initialized = true,
             Self::Envelope(state) => state.initialized = true,
             Self::Fourier(state) => state.initialized = true,
-            Self::Reliability(state) => state.initialized = true,
             Self::Optimization(state) => state.initialized = true,
             Self::Soa(state) => state.initialized = true,
             Self::Transient(_)

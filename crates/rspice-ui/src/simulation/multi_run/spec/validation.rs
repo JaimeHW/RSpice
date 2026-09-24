@@ -39,7 +39,6 @@ impl AnalysisSpec {
             AnalysisSpec::Envelope { .. } => periodic::validate(self),
             AnalysisSpec::Fourier { .. } => post_process::validate(self),
             AnalysisSpec::Fft { .. } => post_process::validate(self),
-            AnalysisSpec::Reliability { .. } => device::validate(self),
             AnalysisSpec::Optimization { .. } => device::validate(self),
             AnalysisSpec::Soa { .. } => device::validate(self),
             AnalysisSpec::Qpss { .. } => periodic::validate(self),

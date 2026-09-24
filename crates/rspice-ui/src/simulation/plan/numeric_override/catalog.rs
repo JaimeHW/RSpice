@@ -339,8 +339,7 @@ pub(super) const CARRIER_OWNS_SOLVER_OPTIONS: &str = "this analysis uses the bou
 pub(super) const ENVELOPE_HAS_NO_HB_INITIALIZER: &str =
     "select HB under Initial periodic solve to configure its initial state";
 pub(super) const PSS_RETAINS_COMPLETE_ORBIT: &str = "PSS always retains every orbit signal for dependent analyses; reporting times only change display sampling";
-pub(super) const RELIABILITY_OWNS_REPORTING: &str = "Reliability reports the Years checkpoints and retains all bound-device stress evidence; transient output sampling and signal-retention switches do not control this result";
-pub(super) const RELIABILITY_CONSTANT_STRESS: &str = "this Reliability mission uses constant operating-point stress; enable Transient stress to configure time integration";
+
 pub(super) const STUDY_DC_BASE: &str = "this study's built-in base runs only DC operating points; select a configured time-domain base analysis to use time-integration controls";
 const PVT_STATIC_BASE: &str = "the selected study base does not advance time; select Transient under Base to configure time integration and transient reporting";
 const STUDY_OPTION_NOT_INHERITED: &str = "the selected base and its active prerequisites do not inherit this study default; configure the option on the analysis that owns it";
@@ -649,11 +648,6 @@ impl NumericOverrideOption {
             return Some(reason);
         }
         match self {
-            Self::StrobeInterval | Self::OutputTimePoints | Self::RetainEverySignal
-                if matches!(kind, AnalysisKind::Reliability) =>
-            {
-                Some(RELIABILITY_OWNS_REPORTING)
-            }
             Self::RetainEverySignal if matches!(kind, AnalysisKind::Pss) => {
                 Some(PSS_RETAINS_COMPLETE_ORBIT)
             }
@@ -722,13 +716,13 @@ impl NumericOverrideOption {
             _ if ownership.time_integration == Some(false)
                 && self.spec().reach == OptionReach::TimeStepped =>
             {
-                Some(if matches!(kind, AnalysisKind::Reliability) {
-                    RELIABILITY_CONSTANT_STRESS
-                } else if matches!(kind, AnalysisKind::Temperature | AnalysisKind::Corner) {
-                    PVT_STATIC_BASE
-                } else {
-                    STUDY_DC_BASE
-                })
+                Some(
+                    if matches!(kind, AnalysisKind::Temperature | AnalysisKind::Corner) {
+                        PVT_STATIC_BASE
+                    } else {
+                        STUDY_DC_BASE
+                    },
+                )
             }
             Self::HbInitialState if ownership.hb_initializer == Some(false) => {
                 Some(ENVELOPE_HAS_NO_HB_INITIALIZER)
@@ -778,7 +772,7 @@ pub struct SolverOwnership {
     /// DC guess consumes conventional solver controls. Spectral numerics have
     /// dedicated form fields. `None` preserves full-waveform applicability.
     pub multirate_envelope_dc: Option<bool>,
-    /// Reliability's stress mode and studies' built-in DC base can exclude
+    /// Studies' built-in DC base can exclude
     /// time integration; HB's transient-assisted initializer enables it.
     /// `None` leaves the decision to the kind.
     pub time_integration: Option<bool>,

@@ -331,8 +331,6 @@ impl SimulationResult {
             }
             SimulationResult::Parametric { waveforms, .. }
             | SimulationResult::Corner { waveforms, .. }
-            | SimulationResult::ReliabilityMission { waveforms, .. }
-            | SimulationResult::Reliability { waveforms, .. }
             | SimulationResult::Optimization { waveforms, .. }
             | SimulationResult::Soa { waveforms, .. } => {
                 waveform_last_value_by_name(waveforms, key)
@@ -494,8 +492,6 @@ impl SimulationResult {
             | SimulationResult::HarmonicBalance { waveforms, .. }
             | SimulationResult::Parametric { waveforms, .. }
             | SimulationResult::Corner { waveforms, .. }
-            | SimulationResult::ReliabilityMission { waveforms, .. }
-            | SimulationResult::Reliability { waveforms, .. }
             | SimulationResult::Optimization { waveforms, .. }
             | SimulationResult::Soa { waveforms, .. } => waveforms
                 .iter()

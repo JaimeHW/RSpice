@@ -1229,7 +1229,6 @@ const fn pane_kind_for_viewer_art(art: ViewerArt) -> PaneKind {
         | ViewerArt::Margin
         | ViewerArt::DigitalEvents
         | ViewerArt::Soa
-        | ViewerArt::Reliability
         | ViewerArt::Optimization
         | ViewerArt::PoleZero
         | ViewerArt::Thermal

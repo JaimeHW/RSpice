@@ -68,7 +68,6 @@ pub enum ViewerArt {
     Margin,
     DigitalEvents,
     Soa,
-    Reliability,
     Optimization,
     PoleZero,
     Thermal,
@@ -97,7 +96,6 @@ impl ViewerArt {
             Self::Margin => "margin",
             Self::DigitalEvents => "digital-events",
             Self::Soa => "soa",
-            Self::Reliability => "reliability",
             Self::Optimization => "optimization",
             Self::PoleZero => "pz",
             Self::Thermal => "thermal",
@@ -325,7 +323,6 @@ mod tests {
         "dynamic-droop-viewer",
         "viewer-digital-events",
         "viewer-soa",
-        "viewer-reliability",
         "viewer-optimization",
         "viewer-pz",
         "field-viewer-3d",
@@ -339,7 +336,7 @@ mod tests {
     #[test]
     fn catalog_has_exact_manifest_document_ids_and_order() {
         assert_eq!(VIEWER_DOCUMENTS.len(), CANONICAL_VIEWER_COUNT);
-        assert_eq!(CANONICAL_VIEWER_COUNT, 41);
+        assert_eq!(CANONICAL_VIEWER_COUNT, 40);
         assert_eq!(
             VIEWER_DOCUMENTS
                 .iter()
@@ -379,7 +376,7 @@ mod tests {
                 .iter()
                 .filter(|document| document.group == group)
                 .count()),
-            [5, 3, 9, 9, 4, 1, 3, 1, 6]
+            [5, 3, 9, 9, 4, 1, 2, 1, 6]
         );
     }
 

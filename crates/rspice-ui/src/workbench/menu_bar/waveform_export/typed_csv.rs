@@ -2,7 +2,7 @@
 //! publishes.
 //!
 //! An operating point, a sensitivity table, a periodic-orbit certificate, a
-//! reliability checkpoint and their kin each retain evidence with its own
+//! SOA observation and their kin each retain evidence with its own
 //! shape, and each spells that evidence as its own rows. Those spellings are
 //! one concern — what a family's table looks like — and they live here
 //! so that the routing in the parent reads as routing.
@@ -14,7 +14,6 @@ use super::{PreparedTypedResultCsv, csv_text};
 mod qpac;
 mod qpnoise;
 mod qpxf;
-mod reliability;
 
 pub(super) fn prepare_typed_result_csv(
     analysis: &crate::state::AnalysisResult,
@@ -696,42 +695,6 @@ pub(super) fn prepare_typed_result_csv(
                 default_name: "transfer-function.csv",
                 contents,
                 detail: format!("{rows} exact transfer-function values"),
-            })
-        }
-        AnalysisResultPayload::ReliabilityMission { response } => reliability::prepare(response),
-        AnalysisResultPayload::Reliability { devices } => {
-            let mut contents = String::from(
-                "device,lifetime_years,average_gate_stress_v,average_drain_stress_v,average_temperature_k,duration_s,threshold_voltage_shift_v,mobility_shift,drain_source_resistance_shift\n",
-            );
-            let row_count = devices
-                .iter()
-                .map(|device| device.checkpoints.len())
-                .sum::<usize>();
-            for device in devices {
-                for checkpoint in &device.checkpoints {
-                    let shift = &checkpoint.shift;
-                    contents.push_str(&format!(
-                        "{},{:.17e},{:.17e},{:.17e},{:.17e},{:.17e},{:.17e},{:.17e},{:.17e}\n",
-                        csv_text(&device.device_id),
-                        checkpoint.years,
-                        device.stress.average_gate_stress_v,
-                        device.stress.average_drain_stress_v,
-                        device.stress.average_temperature_k,
-                        device.stress.duration_s,
-                        shift.threshold_voltage_shift_v,
-                        shift.mobility_shift,
-                        shift.drain_source_resistance_shift,
-                    ));
-                }
-            }
-            Some(PreparedTypedResultCsv {
-                default_name: "reliability-evidence.csv",
-                contents,
-                detail: format!(
-                    "{} devices, {} exact lifetime-shift rows",
-                    devices.len(),
-                    row_count
-                ),
             })
         }
         AnalysisResultPayload::Soa {

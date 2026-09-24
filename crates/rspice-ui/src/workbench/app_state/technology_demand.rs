@@ -12,7 +12,7 @@
 //! starts, and preflight must be able to report it next to the plan's other
 //! blockers.
 //!
-//! Demand is deliberately narrow. Monte Carlo, reliability, temperature
+//! Demand is deliberately narrow. Monte Carlo, temperature
 //! sweeps, technology-defined global nets, signed-PDK Verilog-A and model
 //! references named in a netlist all resolve against the attached model
 //! library, and none of them requires the project itself to own a signed

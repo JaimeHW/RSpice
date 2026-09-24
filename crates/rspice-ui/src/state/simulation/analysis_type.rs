@@ -46,8 +46,6 @@ pub enum AnalysisType {
     Parametric,
     /// Corner sweep analysis
     Corner,
-    /// Reliability aging analysis
-    Reliability,
     /// Optimization analysis
     Optimization,
     /// Safety/SOA analysis
@@ -129,7 +127,6 @@ impl AnalysisType {
             AnalysisType::MonteCarlo => ".mc",
             AnalysisType::Parametric => ".step",
             AnalysisType::Corner => ".step",
-            AnalysisType::Reliability => ".reliability",
             AnalysisType::Optimization => ".opt",
             AnalysisType::Soa => ".soa",
             AnalysisType::SParameter => ".sp",
@@ -169,7 +166,6 @@ impl AnalysisType {
             AnalysisType::MonteCarlo => "Monte Carlo",
             AnalysisType::Parametric => "Parametric Sweep",
             AnalysisType::Corner => "Corner Sweep",
-            AnalysisType::Reliability => "Reliability",
             AnalysisType::Optimization => "Optimization",
             AnalysisType::Soa => "Safety (SOA)",
             AnalysisType::SParameter => "S-Parameter",
@@ -209,7 +205,6 @@ impl AnalysisType {
             AnalysisType::MonteCarlo => "MC",
             AnalysisType::Parametric => "PAR",
             AnalysisType::Corner => "CRN",
-            AnalysisType::Reliability => "REL",
             AnalysisType::Optimization => "OPT",
             AnalysisType::Soa => "SOA",
             AnalysisType::SParameter => "SP",
@@ -283,7 +278,6 @@ impl AnalysisType {
             AnalysisType::MonteCarlo => ("Value", "", "Count", "count"),
             AnalysisType::Parametric => ("Sweep", "", "Voltage", "V"),
             AnalysisType::Corner => ("Temperature", "C", "Voltage", "V"),
-            AnalysisType::Reliability => ("Lifetime", "year", "Shift", ""),
             AnalysisType::Optimization => ("Iteration", "iter", "Cost", "cost"),
             AnalysisType::DcMismatch => ("Parameter", "", "Contribution", "%"),
         }

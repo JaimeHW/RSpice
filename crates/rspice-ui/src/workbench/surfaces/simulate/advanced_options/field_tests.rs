@@ -148,20 +148,10 @@ fn time_stepped_forms_can_author_and_clear_their_step_ceiling() {
     for kind in [
         AnalysisKind::Pss,
         AnalysisKind::Envelope,
-        AnalysisKind::Reliability,
         AnalysisKind::Optimization,
     ] {
         let (mut app, instance) = studio(kind);
         let plan = app.state.sim_setup.stable_analysis_plan_mut().unwrap();
-        if kind == AnalysisKind::Reliability {
-            plan.edit(instance, |draft| {
-                let AnalysisDraft::Reliability(state) = draft else {
-                    unreachable!()
-                };
-                state.study.transient_stress = true;
-            })
-            .unwrap();
-        }
         if kind == AnalysisKind::Optimization {
             let op = plan.insert(AnalysisKind::OperatingPoint).unwrap().0;
             let pss = plan.insert(AnalysisKind::Pss).unwrap().0;

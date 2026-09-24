@@ -77,9 +77,6 @@ pub enum AnalysisResultFamilyMetadata {
         #[serde(default)]
         member_measurements: Vec<FamilyMemberMeasurements>,
     },
-    Reliability {
-        years: Vec<f64>,
-    },
     Optimization {
         iterations: Vec<f64>,
         best_cost: f64,
@@ -138,8 +135,7 @@ impl AnalysisResultFamilyMetadata {
                 member_measurements,
                 ..
             } => member_measurements,
-            Self::Reliability { .. }
-            | Self::Optimization { .. }
+            Self::Optimization { .. }
             | Self::Soa { .. }
             | Self::PeriodicNoise { .. }
             | Self::SParameter { .. } => &[],
@@ -154,7 +150,6 @@ impl AnalysisResultFamilyMetadata {
             (Self::Parametric { .. }, AnalysisType::Parametric)
                 | (Self::Corner { .. }, AnalysisType::Corner)
                 | (Self::MonteCarlo { .. }, AnalysisType::MonteCarlo)
-                | (Self::Reliability { .. }, AnalysisType::Reliability)
                 | (Self::Optimization { .. }, AnalysisType::Optimization)
                 | (Self::Soa { .. }, AnalysisType::Soa)
                 | (
@@ -266,18 +261,6 @@ impl AnalysisResultFamilyMetadata {
                             variable.name
                         ));
                     }
-                }
-            }
-            Self::Reliability { years } => {
-                require_finite_values(years, "reliability years")?;
-                if years.is_empty()
-                    || years.iter().any(|years| *years <= 0.0)
-                    || !strictly_increasing(years)
-                {
-                    return Err(
-                        "reliability years must be non-empty, positive, unique, and strictly increasing"
-                            .to_owned(),
-                    );
                 }
             }
             Self::Optimization {

@@ -854,39 +854,7 @@ fn transfer_function_evidence_is_field_sensitive_v4_content_identity() {
 }
 
 #[test]
-fn reliability_and_soa_evidence_are_field_sensitive_v4_content_identity() {
-    let reliability = AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
-        .with_result_payload(AnalysisResultPayload::Reliability {
-            devices: vec![ReliabilityDeviceEvidence {
-                device_id: "M1".to_owned(),
-                stress: ReliabilityStressEvidence {
-                    average_gate_stress_v: 1.2,
-                    average_drain_stress_v: 1.8,
-                    average_temperature_k: 358.15,
-                    duration_s: 3_600.0,
-                },
-                checkpoints: vec![ReliabilityCheckpointEvidence {
-                    years: 10.0,
-                    shift: ReliabilityShiftEvidence {
-                        threshold_voltage_shift_v: 0.03,
-                        mobility_shift: -0.004,
-                        drain_source_resistance_shift: 0.0015,
-                    },
-                }],
-            }],
-        });
-    let mut changed_reliability = reliability.clone();
-    let Some(AnalysisResultPayload::Reliability { devices }) =
-        changed_reliability.result_payload.as_mut()
-    else {
-        panic!("reliability payload")
-    };
-    devices[0].stress.duration_s = 3_601.0;
-    assert_ne!(
-        reliability.result_data_digest(),
-        changed_reliability.result_data_digest()
-    );
-
+fn soa_evidence_are_field_sensitive_v4_content_identity() {
     let soa = AnalysisResult::new(1, AnalysisType::Soa, "SOA").with_result_payload(
         AnalysisResultPayload::Soa {
             source_history: None,

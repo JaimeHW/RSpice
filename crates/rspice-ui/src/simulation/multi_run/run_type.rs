@@ -43,8 +43,6 @@ pub enum AnalysisRunType {
     Parametric,
     /// Corner analysis
     Corner,
-    /// Reliability aging analysis
-    Reliability,
     /// Optimization analysis
     Optimization,
     /// Safety/SOA analysis
@@ -93,7 +91,6 @@ impl AnalysisRunType {
             AnalysisRunType::MonteCarlo => "Monte Carlo",
             AnalysisRunType::Parametric => "Parametric",
             AnalysisRunType::Corner => "Corner",
-            AnalysisRunType::Reliability => "Reliability",
             AnalysisRunType::Optimization => "Optimization",
             AnalysisRunType::Soa => "Safety (SOA)",
             AnalysisRunType::SParameter => "S-Parameter",

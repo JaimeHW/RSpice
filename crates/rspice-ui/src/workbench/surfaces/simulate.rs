@@ -1907,7 +1907,6 @@ fn analysis_icon(kind: AnalysisKind) -> WorkbenchIcon {
         AnalysisKind::MonteCarlo | AnalysisKind::Temperature | AnalysisKind::Corner => {
             WorkbenchIcon::Grid
         }
-        AnalysisKind::Reliability => WorkbenchIcon::Verify,
         AnalysisKind::Ac
         | AnalysisKind::AcData
         | AnalysisKind::DcSweep

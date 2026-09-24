@@ -18,26 +18,6 @@ fn configure_fixture_inputs(draft: &mut AnalysisDraft) {
         }
         AnalysisDraft::Hbnoise(draft) => draft.source_resistor = "R1".into(),
         AnalysisDraft::Fft(draft) => draft.output = "V(out)".into(),
-        AnalysisDraft::Reliability(draft) => {
-            use crate::simulation::dialog::reliability::{ReliabilityConfig, ReliabilityDialogState};
-            let crate::simulation::results::SimulationResult::ReliabilityMission {
-                response, ..
-            } = crate::simulation::results::SimulationResult::reliability_mission_test_fixture()
-            else {
-                unreachable!()
-            };
-            let request = response.stress.request.clone();
-            // Synthetic calibration verifies request wiring only. The separate
-            // mission execution test supplies the matching PMOS circuit.
-            *draft = ReliabilityDialogState::from_config(&ReliabilityConfig {
-                study: Some(request.study),
-                target_years: request.target_years,
-                enable_hci: request.enable_hci,
-                enable_nbti: request.enable_nbti,
-                enable_em: request.enable_em,
-                min_stress_voltage: request.min_stress_voltage,
-            });
-        }
         _ => {}
     }
 }

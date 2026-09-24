@@ -673,7 +673,6 @@ fn result_tabs_follow_the_upgraded_mockup_mode_order() {
             ResultViewer::PoleZero,
             ResultViewer::Events,
             ResultViewer::Soa,
-            ResultViewer::Reliability,
             ResultViewer::Optimization,
         ]
     );
@@ -881,13 +880,12 @@ fn a_page_outside_the_mockup_families_keeps_every_sheet_reachable() {
 
 /// Every campaign analysis the Simulate catalog can launch must land on a
 /// sheet that draws it. These four sheets shipped in the repository for
-/// months with no `mod` declaration, so SOA, ageing, optimizer and event
+/// months with no `mod` declaration, so SOA, optimizer and event
 /// runs produced results the Results workspace could not show at all.
 #[test]
 fn every_campaign_analysis_reaches_a_sheet_that_can_draw_it() {
     for (analysis, viewer) in [
         (soa_analysis(), ResultViewer::Soa),
-        (reliability_analysis(), ResultViewer::Reliability),
         (optimization_analysis(), ResultViewer::Optimization),
         (events_analysis(), ResultViewer::Events),
     ] {
@@ -953,7 +951,6 @@ fn rendered_tab_labels(analysis: AnalysisResult) -> Vec<String> {
 fn each_new_sheet_gets_a_tab_on_its_own_evidence_and_only_then() {
     let cases = [
         (soa_analysis(), "SOA"),
-        (reliability_analysis(), "Ageing"),
         (optimization_analysis(), "Optimization"),
         (events_analysis(), "Events"),
     ];
@@ -1021,7 +1018,6 @@ fn every_tab_the_strip_draws_can_be_opened() {
 fn every_newly_reachable_sheet_draws_and_meshes() {
     for (analysis, viewer) in [
         (soa_analysis(), ResultViewer::Soa),
-        (reliability_analysis(), ResultViewer::Reliability),
         (optimization_analysis(), ResultViewer::Optimization),
         (events_analysis(), ResultViewer::Events),
     ] {

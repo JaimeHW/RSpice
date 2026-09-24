@@ -20,22 +20,6 @@ pub(super) fn run_device_spec(
 ) -> Result<SimulationResult, SimulationError> {
     super::ensure_not_aborted(abort)?;
     match spec {
-        spec @ AnalysisSpec::Reliability { .. } => {
-            let request = spec
-                .reliability_request()
-                .map_err(SimulationError::InvalidConfig)?;
-            let response = super::run_abort_aware_service(abort, || {
-                svc_runner::run_reliability_analysis_with_source_path_and_abort(
-                    netlist,
-                    &request,
-                    source_path,
-                    abort,
-                )
-            })?;
-            super::ensure_not_aborted(abort)?;
-            SimulationResult::from_reliability_response(std::sync::Arc::new(response))
-                .map_err(SimulationError::InvalidConfig)
-        }
         AnalysisSpec::Optimization {
             search,
             variables,
@@ -498,38 +482,6 @@ fn insert_scalar_waveform(
             y_imag: None,
         },
     );
-}
-
-#[cfg(test)]
-mod reliability_tests {
-    use super::*;
-    #[test]
-    fn reliability_mission_dispatch_uses_explicit_calibration_and_real_aged_runs() {
-        let SimulationResult::ReliabilityMission {
-            response: expected, ..
-        } = SimulationResult::reliability_mission_test_fixture()
-        else {
-            panic!("wrong family");
-        };
-        let r = &expected.stress.request;
-        let spec = AnalysisSpec::Reliability {
-            study: Some(r.study.clone()),
-            target_years: r.target_years.clone(),
-            enable_hci: r.enable_hci,
-            enable_nbti: r.enable_nbti,
-            enable_em: r.enable_em,
-            min_stress_voltage: r.min_stress_voltage,
-        };
-        let result = super::super::run_spec_request(&crate::simulation::engine_bridge::EngineBridge::new(), spec,
-            crate::simulation::runner::SpecExecutionOptions::default(),
-            "mission fixture\n.param VDD=1\nVS s 0 {VDD}\nVG g 0 0\nVD d 0 0.1\nM1 d g s s PM W=10u L=1u\n.model PM PMOS (LEVEL=1 VTO=-0.2 KP=100u)\n.end\n",
-            None, &crate::simulation::execution::ResolvedExecutionDependencies::default(), &rspice_core::NoAbort).unwrap();
-        let SimulationResult::ReliabilityMission { response, .. } = result else {
-            panic!("wrong family");
-        };
-        assert_eq!(response, expected);
-        assert!(response.aged.iter().all(|p| !p.parameters.is_empty()));
-    }
 }
 
 #[cfg(test)]

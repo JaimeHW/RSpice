@@ -448,7 +448,6 @@ pub(in crate::simulation) fn output_kind_supports_run_type(
                 | AnalysisRunType::MonteCarlo
                 | AnalysisRunType::Parametric
                 | AnalysisRunType::Corner
-                | AnalysisRunType::Reliability
                 | AnalysisRunType::Optimization
                 | AnalysisRunType::Soa
                 | AnalysisRunType::SParameter
@@ -788,7 +787,6 @@ fn deterministic_sample_count(
             };
             frequency_point_count(*start_freq, *stop_freq, *points_per_decade, sweep)
         }),
-        AnalysisSpec::Reliability { target_years, .. } => Some(target_years.len()),
         // One-sided, DC through Nyquist: the transform length decides it, so
         // a recorded FFT's point count is bounded by its own request.
         AnalysisSpec::Fft { request } => Some(request.points / 2 + 1),

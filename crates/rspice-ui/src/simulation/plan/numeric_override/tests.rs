@@ -567,11 +567,7 @@ fn an_empty_record_adds_nothing_to_a_deck() {
 
 #[test]
 fn a_step_ceiling_is_emitted_through_the_timeint_package() {
-    for kind in [
-        AnalysisKind::Envelope,
-        AnalysisKind::Reliability,
-        AnalysisKind::Optimization,
-    ] {
+    for kind in [AnalysisKind::Envelope, AnalysisKind::Optimization] {
         let mut record = AnalysisNumericOverride::default();
         record
             .set_for_instance(

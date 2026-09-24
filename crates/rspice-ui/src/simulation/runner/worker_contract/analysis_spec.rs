@@ -170,15 +170,6 @@ pub(crate) enum WorkerAnalysisSpec {
         #[serde(default)]
         params: Vec<String>,
     },
-    Reliability {
-        #[serde(default)]
-        study: Option<crate::simulation::reliability_engine::ReliabilityStudy>,
-        target_years: Vec<f64>,
-        enable_hci: bool,
-        enable_nbti: bool,
-        enable_em: bool,
-        min_stress_voltage: f64,
-    },
     Optimization {
         #[serde(default)]
         search: crate::services::simulation_runner::OptimizationSearchControls,

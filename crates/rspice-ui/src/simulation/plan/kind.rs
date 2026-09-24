@@ -60,8 +60,6 @@ pub enum AnalysisKind {
     Envelope,
     #[serde(rename = "fourier")]
     Fourier,
-    #[serde(rename = "reliability")]
-    Reliability,
     #[serde(rename = "opt")]
     Optimization,
     #[serde(rename = "soa")]
@@ -109,7 +107,7 @@ impl AnalysisKind {
     }
 
     /// All plan-recognized kinds in the stable historical-index order.
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 35] = [
         Self::OperatingPoint,
         Self::Transient,
         Self::Ac,
@@ -131,7 +129,6 @@ impl AnalysisKind {
         Self::Corner,
         Self::Envelope,
         Self::Fourier,
-        Self::Reliability,
         Self::Optimization,
         Self::Soa,
         Self::Disto,
@@ -150,7 +147,7 @@ impl AnalysisKind {
 
     /// Canonical display order from `product-manifest.js`. This is separate
     /// from [`Self::ALL`] so the historical singleton indices remain stable.
-    pub const MANIFEST_ORDER: [Self; 36] = [
+    pub const MANIFEST_ORDER: [Self; 35] = [
         Self::OperatingPoint,
         Self::Transient,
         Self::Ac,
@@ -186,7 +183,6 @@ impl AnalysisKind {
         Self::Fourier,
         Self::Fft,
         Self::Disto,
-        Self::Reliability,
         Self::Soa,
         Self::Optimization,
     ];
@@ -215,7 +211,6 @@ impl AnalysisKind {
             Self::Corner => "corner",
             Self::Envelope => "envelope",
             Self::Fourier => "fourier",
-            Self::Reliability => "reliability",
             Self::Optimization => "opt",
             Self::Soa => "soa",
             Self::Disto => "disto",
@@ -257,21 +252,20 @@ impl AnalysisKind {
             Self::Corner => 18,
             Self::Envelope => 19,
             Self::Fourier => 20,
-            Self::Reliability => 21,
-            Self::Optimization => 22,
-            Self::Soa => 23,
-            Self::Disto => 24,
-            Self::Qpss => 25,
-            Self::Hbsp => 26,
-            Self::Hbnoise => 27,
-            Self::Psp => 28,
-            Self::Qpac => 29,
-            Self::Qpnoise => 30,
-            Self::Qpxf => 31,
-            Self::TransientNoise => 32,
-            Self::DcMismatch => 33,
-            Self::AcData => 34,
-            Self::Fft => 35,
+            Self::Optimization => 21,
+            Self::Soa => 22,
+            Self::Disto => 23,
+            Self::Qpss => 24,
+            Self::Hbsp => 25,
+            Self::Hbnoise => 26,
+            Self::Psp => 27,
+            Self::Qpac => 28,
+            Self::Qpnoise => 29,
+            Self::Qpxf => 30,
+            Self::TransientNoise => 31,
+            Self::DcMismatch => 32,
+            Self::AcData => 33,
+            Self::Fft => 34,
         }
     }
 
@@ -299,7 +293,6 @@ impl AnalysisKind {
             Self::Corner => "Process corners",
             Self::Envelope => "Envelope",
             Self::Fourier => "Fourier measurements",
-            Self::Reliability => "Reliability & aging",
             Self::Optimization => "Optimization",
             Self::Soa => "Safe operating area",
             Self::Disto => "Distortion compatibility",
@@ -350,7 +343,6 @@ impl AnalysisKind {
             Self::DcMismatch => "DCMATCH",
             Self::Fourier => "FOUR",
             Self::Disto => "DISTO",
-            Self::Reliability => "REL",
             Self::Soa => "SOA",
             Self::Optimization => "OPT",
             Self::AcData => "ACTAB",
@@ -376,7 +368,6 @@ impl AnalysisKind {
             Self::DcMismatch => "DM",
             Self::Fourier => "FO",
             Self::Disto => "DI",
-            Self::Reliability => "REL",
             Self::Soa => "SOA",
             Self::Optimization => "OPT",
             Self::AcData => "ACT",
@@ -459,10 +450,6 @@ impl AnalysisKind {
             Self::Disto => {
                 "Circuit-wide second- and third-order Volterra distortion from declared DISTOF1 and DISTOF2 source excitations."
             }
-            Self::Reliability => {
-                "Stress-driven HCI, NBTI, and electromigration degradation across \
-                 declared lifetime points."
-            }
             Self::Soa => "Sampled MOS/JFET/MESFET and BJT terminal-voltage magnitude limit checks.",
             Self::Optimization => {
                 "Bounded variables driven against one scalar objective, with a \
@@ -536,11 +523,11 @@ impl AnalysisKind {
                 glyph: "Σ",
                 detail: "Fourier, FFT and compatibility post-processing",
             },
-            Self::Reliability | Self::Soa => AnalysisCategory {
+            Self::Soa => AnalysisCategory {
                 id: "verification",
                 label: "Verification checks",
                 glyph: "✓",
-                detail: "Reliability, aging and electrical SOA",
+                detail: "Electrical safe operating area",
             },
             Self::Optimization => AnalysisCategory {
                 id: "optimization",
@@ -589,7 +576,6 @@ impl AnalysisKind {
             Self::MonteCarlo => CanonicalAnalysisKind::MonteCarlo,
             Self::Temperature => CanonicalAnalysisKind::Parametric,
             Self::Corner => CanonicalAnalysisKind::Corner,
-            Self::Reliability => CanonicalAnalysisKind::Reliability,
             Self::Optimization => CanonicalAnalysisKind::Optimization,
             Self::Soa => CanonicalAnalysisKind::Soa,
             Self::SParameter => CanonicalAnalysisKind::SParameter,
@@ -624,7 +610,7 @@ impl AnalysisKind {
     /// This is the domain gate for every time-integration control: a bound on
     /// the step controller reaches a solve only if that solve takes steps. The
     /// list includes studies whose selected base or stress window can run a
-    /// transient. Reliability can integrate a representative stress window;
+    /// transient.
     /// optimization can evaluate transient measurements for each candidate.
     pub const fn advances_time(self) -> bool {
         matches!(
@@ -635,7 +621,6 @@ impl AnalysisKind {
                 | Self::Soa
                 | Self::TransientNoise
                 | Self::MonteCarlo
-                | Self::Reliability
                 | Self::Optimization
                 | Self::Temperature
                 | Self::Corner
@@ -703,7 +688,6 @@ impl AnalysisKind {
             | Self::Temperature
             | Self::Corner
             | Self::Envelope
-            | Self::Reliability
             | Self::Optimization
             | Self::Soa => NONE,
         }
@@ -762,7 +746,6 @@ mod tests {
             preview,
             vec![
                 AnalysisKind::Envelope,
-                AnalysisKind::Reliability,
                 AnalysisKind::Qpss,
                 AnalysisKind::Hbsp,
                 AnalysisKind::Hbnoise,
@@ -806,8 +789,10 @@ mod tests {
             );
         }
         assert_eq!(ids.len(), AnalysisKind::ALL.len());
-        assert_eq!(AnalysisKind::from_legacy_index(36), None);
+        assert_eq!(AnalysisKind::from_legacy_index(35), None);
         assert_eq!(AnalysisKind::from_stable_id("AC"), None);
+        assert_eq!(AnalysisKind::from_stable_id("reliability"), None);
+        assert!(serde_json::from_str::<AnalysisKind>(r#""reliability""#).is_err());
     }
 
     #[test]
@@ -855,7 +840,7 @@ mod tests {
     #[test]
     fn canonical_manifest_order_and_metadata_are_complete() {
         let manifest = AnalysisKind::MANIFEST_ORDER;
-        assert_eq!(manifest.len(), 36);
+        assert_eq!(manifest.len(), 35);
         assert_eq!(manifest[3], AnalysisKind::AcData);
         assert_eq!(manifest[11], AnalysisKind::Qpss);
         assert_eq!(manifest[14], AnalysisKind::Hbsp);
@@ -890,16 +875,7 @@ mod tests {
         assert_eq!(
             stepping,
             [
-                "tran",
-                "mc",
-                "pss",
-                "temp",
-                "corner",
-                "envelope",
-                "reliability",
-                "opt",
-                "soa",
-                "tnoise"
+                "tran", "mc", "pss", "temp", "corner", "envelope", "opt", "soa", "tnoise"
             ]
         );
     }

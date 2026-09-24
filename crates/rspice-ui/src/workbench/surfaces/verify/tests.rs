@@ -750,50 +750,6 @@ fn responsive_verify_geometry_matches_mockup_breakpoints() {
 }
 
 #[test]
-fn reliability_projection_rows_preserve_numeric_axis_and_every_retained_metric() {
-    let device = crate::state::ReliabilityDeviceEvidence {
-        device_id: "M1".to_owned(),
-        stress: crate::state::ReliabilityStressEvidence {
-            average_gate_stress_v: 1.2,
-            average_drain_stress_v: 1.8,
-            average_temperature_k: 350.0,
-            duration_s: 3_600.0,
-        },
-        checkpoints: vec![
-            crate::state::ReliabilityCheckpointEvidence {
-                years: 1.0,
-                shift: crate::state::ReliabilityShiftEvidence {
-                    threshold_voltage_shift_v: 0.01,
-                    mobility_shift: -0.001,
-                    drain_source_resistance_shift: 0.0005,
-                },
-            },
-            crate::state::ReliabilityCheckpointEvidence {
-                years: 10.0,
-                shift: crate::state::ReliabilityShiftEvidence {
-                    threshold_voltage_shift_v: 0.03,
-                    mobility_shift: -0.004,
-                    drain_source_resistance_shift: 0.0015,
-                },
-            },
-        ],
-    };
-
-    let duration = reliability_projection_row(&device, 3);
-    assert!(duration[0].text.contains("duration"));
-    assert!(duration[1].text.contains("3600"));
-    let vth = reliability_projection_row(&device, 4);
-    assert!(vth[2].text.contains("0.010000"));
-    assert!(vth[3].text.contains("0.030000"));
-    let mobility = reliability_projection_row(&device, 5);
-    assert_eq!(mobility[2].text, "-0.1000%");
-    assert_eq!(mobility[3].text, "-0.4000%");
-    let rds = reliability_projection_row(&device, 6);
-    assert_eq!(rds[2].text, "+0.0500%");
-    assert_eq!(rds[3].text, "+0.1500%");
-}
-
-#[test]
 fn soa_cross_probe_selects_the_exact_schematic_device() {
     let mut app = RSpiceApp::test_instance();
     app.state.schematic.components.push(
@@ -805,7 +761,7 @@ fn soa_cross_probe_selects_the_exact_schematic_device() {
         .with_name_value("M1", "NMOS"),
     );
 
-    cross_probe_reliability_device(&mut app, "m1")
+    cross_probe_soa_device(&mut app, "m1")
         .expect("device identity cross-probes case-insensitively");
 
     assert!(app.state.schematic.selection.has_component(42));
@@ -813,7 +769,7 @@ fn soa_cross_probe_selects_the_exact_schematic_device() {
         app.state.workbench.workspace,
         super::super::super::state::Workspace::Design
     );
-    assert!(cross_probe_reliability_device(&mut app, "M404").is_err());
+    assert!(cross_probe_soa_device(&mut app, "M404").is_err());
 }
 
 #[test]
@@ -1795,7 +1751,7 @@ fn verify_refuses_the_datasets_the_studio_refuses_and_names_why() {
 }
 
 // ---------------------------------------------------------------------------
-// The reliability panes' evidence gate
+// The SOA evidence gate
 // ---------------------------------------------------------------------------
 
 /// Retained samples in the fixture SOA stress histories. Large enough that a
@@ -1871,45 +1827,7 @@ fn soa_evidence_analysis() -> AnalysisResult {
         })
 }
 
-/// A reliability analysis whose checkpoints match its retained lifetime axis.
-fn reliability_evidence_analysis() -> AnalysisResult {
-    use crate::state::{
-        ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence, ReliabilityShiftEvidence,
-        ReliabilityStressEvidence,
-    };
-
-    let years = vec![1.0, 10.0];
-    let devices = (0..EVIDENCE_RULES)
-        .map(|device| ReliabilityDeviceEvidence {
-            device_id: format!("M{device:03}"),
-            stress: ReliabilityStressEvidence {
-                average_gate_stress_v: 1.2,
-                average_drain_stress_v: 1.8,
-                average_temperature_k: 358.15,
-                duration_s: 3_600.0,
-            },
-            checkpoints: years
-                .iter()
-                .enumerate()
-                .map(|(index, years)| ReliabilityCheckpointEvidence {
-                    years: *years,
-                    shift: ReliabilityShiftEvidence {
-                        threshold_voltage_shift_v: 0.01 * (index as f64 + 1.0),
-                        mobility_shift: -0.001 * (index as f64 + 1.0),
-                        drain_source_resistance_shift: 0.0005 * (index as f64 + 1.0),
-                    },
-                })
-                .collect(),
-        })
-        .collect();
-    AnalysisResult::new(2, AnalysisType::Reliability, "Reliability")
-        .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::Reliability { years })
-        .with_result_payload(crate::state::AnalysisResultPayload::Reliability { devices })
-}
-
-/// An application whose active run retains validated SOA and reliability
-/// evidence, which is what both panes on the reliability tab report from.
-fn app_retaining_reliability_evidence() -> RSpiceApp {
+fn app_retaining_soa_evidence() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     let plan_id = app
         .state
@@ -1917,32 +1835,26 @@ fn app_retaining_reliability_evidence() -> RSpiceApp {
         .stable_analysis_plan()
         .expect("default plan")
         .id();
-    let mut run = sealed_run(
+    let run = sealed_run(
         1,
         plan_id,
         AnalysisInstanceId::new(),
         9,
         soa_evidence_analysis(),
     );
-    run.add_analysis(attributed(reliability_evidence_analysis()));
     app.state.simulation.runs = vec![run].into();
     assert!(app.state.simulation.select_run(0));
     app
 }
 
-/// Both reliability panes gate on retained evidence, and the validator walks
-/// every retained sample of every waveform. Asked inside the panes' own
-/// filters that was two whole-dataset walks a frame, for a reader who was not
-/// touching anything and a verdict that cannot change while the dataset does
-/// not.
 #[test]
-fn the_reliability_panes_validate_retained_evidence_once_per_dataset_generation() {
+fn the_soa_pane_validate_retained_evidence_once_per_dataset_generation() {
     use crate::workbench::documents::result_document::frame_work::{DatasetWalk, WorkCounts};
 
-    let mut app = app_retaining_reliability_evidence();
+    let mut app = app_retaining_soa_evidence();
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
-    // One frame of the reliability tab against unchanged state and identical
+    // One frame of the SOA tab against unchanged state and identical
     // input, drawn through the pane's own entry point.
     let mut frame = || {
         let _ = ctx.run_ui(
@@ -1954,7 +1866,7 @@ fn the_reliability_panes_validate_retained_evidence_once_per_dataset_generation(
                 ..Default::default()
             },
             |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| reliability(ui, &mut app));
+                egui::CentralPanel::default().show(ctx, |ui| device_safety(ui, &mut app));
             },
         );
     };
@@ -1967,8 +1879,8 @@ fn the_reliability_panes_validate_retained_evidence_once_per_dataset_generation(
     frame();
     assert_eq!(
         opening.since().get(DatasetWalk::EvidenceValidation),
-        2,
-        "the SOA and aging gates must each ask the memoized owner once on the \
+        1,
+        "the SOA gate must ask the memoized owner once on the \
          opening frame; a gate that walks the dataset itself is not counted here \
          and would leave the idle-frame assertion below measuring nothing"
     );
@@ -1982,16 +1894,14 @@ fn the_reliability_panes_validate_retained_evidence_once_per_dataset_generation(
     assert_eq!(
         work.get(DatasetWalk::EvidenceValidation),
         0,
-        "the reliability panes revalidated the retained dataset on an idle frame; counted work was {:?}",
+        "the SOA pane revalidated the retained dataset on an idle frame; counted work was {:?}",
         work.nonzero()
     );
 }
 
-/// A retained-source edit invalidates the verdict before the next frame or
-/// display-version bump. Idle reads still reuse the memo, as checked above.
 #[test]
-fn the_reliability_evidence_gate_rejects_source_edits_before_a_version_bump() {
-    let mut app = app_retaining_reliability_evidence();
+fn the_soa_evidence_gate_rejects_source_edits_before_a_version_bump() {
+    let mut app = app_retaining_soa_evidence();
     let version = app.state.simulation.data_version;
     assert!(
         latest_validated_analysis(&app, AnalysisType::Soa).is_some(),
@@ -2020,53 +1930,5 @@ fn the_reliability_evidence_gate_rejects_source_edits_before_a_version_bump() {
     assert!(
         latest_validated_analysis(&app, AnalysisType::Soa).is_none(),
         "the gate served a verdict from the previous dataset generation"
-    );
-}
-
-/// Routing the gate through the memo must not change which analyses the panes
-/// accept: validated evidence still resolves, and evidence the validator
-/// refuses is still withheld rather than rendered.
-#[test]
-fn the_reliability_evidence_gate_admits_exactly_what_the_validator_accepts() {
-    let mut app = app_retaining_reliability_evidence();
-    for analysis_type in [AnalysisType::Soa, AnalysisType::Reliability] {
-        let admitted = latest_validated_analysis(&app, analysis_type).is_some();
-        let validates = app
-            .state
-            .simulation
-            .active_run()
-            .expect("the fixture selects a run")
-            .analyses
-            .iter()
-            .rev()
-            .find(|analysis| analysis.analysis_type == analysis_type)
-            .is_some_and(|analysis| analysis.validate_retained_evidence().is_ok());
-        assert_eq!(
-            admitted, validates,
-            "{analysis_type:?} evidence must be admitted exactly when it validates"
-        );
-    }
-
-    let analysis = app.state.simulation.runs[0]
-        .analyses
-        .iter_mut()
-        .find(|analysis| analysis.analysis_type == AnalysisType::Reliability)
-        .expect("the fixture retains a reliability analysis");
-    // Checkpoints that no longer cover the retained lifetime axis.
-    match &mut analysis.result_payload {
-        Some(crate::state::AnalysisResultPayload::Reliability { devices }) => {
-            devices[0].checkpoints.pop();
-        }
-        _ => panic!("the fixture retains a reliability payload"),
-    }
-    app.state.simulation.data_version = app.state.simulation.data_version.wrapping_add(1);
-
-    assert!(
-        latest_validated_analysis(&app, AnalysisType::Reliability).is_none(),
-        "refused reliability evidence must be withheld, not rendered"
-    );
-    assert!(
-        latest_validated_analysis(&app, AnalysisType::Soa).is_some(),
-        "one refused analysis must not close the other pane's gate"
     );
 }

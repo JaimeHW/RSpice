@@ -271,7 +271,7 @@ const WORKSPACE_ACTIONS: [MobileNavigationAction; 8] = [
         command: Command::OpenWorkspace(Workspace::Verify),
         icon: WorkbenchIcon::Verify,
         label: "Verify",
-        detail: "PVT, yield, reliability and regression",
+        detail: "PVT, yield, SOA and regression",
     },
     MobileNavigationAction {
         command: Command::OpenWorkspace(Workspace::Models),

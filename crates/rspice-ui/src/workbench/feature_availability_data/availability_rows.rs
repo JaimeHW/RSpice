@@ -8,7 +8,7 @@
 
 use super::*;
 
-pub const ANALYSIS_AVAILABILITY_ROWS: [AnalysisAvailabilityRow; 36] = [
+pub const ANALYSIS_AVAILABILITY_ROWS: [AnalysisAvailabilityRow; 35] = [
     AnalysisAvailabilityRow {
         id: "op",
         code: "OP",
@@ -241,13 +241,6 @@ pub const ANALYSIS_AVAILABILITY_ROWS: [AnalysisAvailabilityRow; 36] = [
         analysis_kind: Some(AnalysisKind::Disto),
     },
     AnalysisAvailabilityRow {
-        id: "reliability",
-        code: "REL",
-        title: "Reliability & aging",
-        intended_tier: AnalysisIntendedTier::PreviewNonSignOff,
-        analysis_kind: Some(AnalysisKind::Reliability),
-    },
-    AnalysisAvailabilityRow {
         id: "soa",
         code: "SOA",
         title: "Safe operating area",
@@ -317,7 +310,7 @@ impl SpecialistWorkspaceRow {
                     | SurfaceId::AmsWorkbench
                     | SurfaceId::RfWorkbench
                     | SurfaceId::HighSigmaWorkbench
-                    | SurfaceId::ReliabilityWorkbench
+                    | SurfaceId::DeviceSafetyWorkbench
                     | SurfaceId::VisualizationStudio
                     | SurfaceId::DigitalEventWorkbench
                     | SurfaceId::StatisticalVisualizationWorkbench
@@ -343,7 +336,7 @@ impl SpecialistWorkspaceRow {
                     | SurfaceId::RfWorkbench
                     | SurfaceId::RfApplicationWorkbench
                     | SurfaceId::HighSigmaWorkbench
-                    | SurfaceId::ReliabilityWorkbench
+                    | SurfaceId::DeviceSafetyWorkbench
                     | SurfaceId::VisualizationStudio
                     | SurfaceId::RfDataDisplayWorkbench
                     | SurfaceId::StatisticalVisualizationWorkbench
@@ -365,7 +358,7 @@ impl SpecialistWorkspaceRow {
                 self.surface_id,
                 SurfaceId::ReleaseCockpit
                     | SurfaceId::MultiTestStudio
-                    | SurfaceId::ReliabilityWorkbench
+                    | SurfaceId::DeviceSafetyWorkbench
                     | SurfaceId::VisualizationStudio
                     | SurfaceId::ReportAuthoring
                     | SurfaceId::JobDiagnostics
@@ -382,7 +375,7 @@ impl SpecialistWorkspaceRow {
                 self.surface_id,
                 SurfaceId::ReleaseCockpit
                     | SurfaceId::MultiTestStudio
-                    | SurfaceId::ReliabilityWorkbench
+                    | SurfaceId::DeviceSafetyWorkbench
                     | SurfaceId::VisualizationStudio
                     | SurfaceId::StatisticalVisualizationWorkbench
                     | SurfaceId::ReportAuthoring
@@ -402,7 +395,7 @@ impl SpecialistWorkspaceRow {
                 self.surface_id,
                 SurfaceId::ReleaseCockpit
                     | SurfaceId::MultiTestStudio
-                    | SurfaceId::ReliabilityWorkbench
+                    | SurfaceId::DeviceSafetyWorkbench
                     | SurfaceId::VisualizationStudio
                     | SurfaceId::ReportAuthoring
                     | SurfaceId::ModelEditor
@@ -526,9 +519,9 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         module_availability: CommercialModuleAvailability::ExternalIntegration,
     },
     SpecialistWorkspaceRow {
-        surface_id: SurfaceId::ReliabilityWorkbench,
+        surface_id: SurfaceId::DeviceSafetyWorkbench,
         owner: Workspace::Verify,
-        purpose: "Own mission profiles, fault campaigns, aging, SOA, safety coverage, and append-only dispositions.",
+        purpose: "Configure SOA checks, inspect device stress and rule violations, and cross-probe their circuit locations.",
         tier: CanonicalTier::Preview,
         evidence_role: "non-sign-off until separately qualified",
         primary_module_id: "results-verification",

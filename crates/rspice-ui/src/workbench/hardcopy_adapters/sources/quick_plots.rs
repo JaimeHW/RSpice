@@ -66,7 +66,6 @@ pub(super) fn resolve_results_quick_view_parts(
         | ResultViewer::Specs
         | ResultViewer::Table
         | ResultViewer::Soa
-        | ResultViewer::Reliability
         | ResultViewer::Optimization
         | ResultViewer::Events
         | ResultViewer::Scatter

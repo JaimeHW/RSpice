@@ -1,4 +1,4 @@
-//! Verification evidence, specifications, checks, reliability, and history.
+//! Verification evidence, specifications, checks and history.
 
 mod tuning;
 
@@ -70,7 +70,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     VerificationPage::Corners => corners(ui, app),
                     VerificationPage::Tuning => tuning(ui, app),
                     VerificationPage::Optimization => optimization(ui, app),
-                    VerificationPage::Reliability => reliability(ui, app),
+                    VerificationPage::DeviceSafety => device_safety(ui, app),
                     VerificationPage::Regression => regression(ui, app, body_viewport_height),
                     VerificationPage::Drc => physical_drc(ui, app),
                 }
@@ -122,13 +122,13 @@ fn verification_heading(ui: &mut Ui, app: &mut RSpiceApp) {
             "Optimization candidate",
             "Bounded design variables and convergence evidence produced by the production optimization engine.",
         ),
-        VerificationPage::Reliability => (
+        VerificationPage::DeviceSafety => (
             run.map_or_else(
-                || "RELIABILITY · NO RETAINED DATASET".to_owned(),
-                |run| format!("RELIABILITY · RUN {} · DATASET {}", run.id, run.dataset_id),
+                || "SOA · NO RETAINED DATASET".to_owned(),
+                |run| format!("SOA · RUN {} · DATASET {}", run.id, run.dataset_id),
             ),
-            "Reliability and safe-operating-area verification",
-            "Electrical SOA and aging evidence from executed analyses; geometry remains owned by Physical DRC.",
+            "Safe-operating-area verification",
+            "Electrical SOA evidence from executed analyses; geometry remains owned by Physical DRC.",
         ),
         VerificationPage::Regression => (
             "REGRESSION · GOVERNED RETAINED BASELINE".to_owned(),
@@ -262,7 +262,7 @@ fn verification_header_actions(ui: &mut Ui, app: &mut RSpiceApp, page: Verificat
         }
         VerificationPage::Yield
         | VerificationPage::Optimization
-        | VerificationPage::Reliability
+        | VerificationPage::DeviceSafety
         | VerificationPage::Drc => {}
     }
 }
@@ -1675,7 +1675,6 @@ fn verification_table_empty_message(id: &str) -> &'static str {
         "verify-corner-worst-points" => "No point-attributed corner verdicts",
         "verify-optimization-results" => "No retained optimization traces",
         "verify-soa-rule-results" => "No evaluated SOA rules",
-        "verify-reliability-device-results" => "No retained device-aging projections",
         "verify-regression-checks" => "No aligned regression checks",
         _ => "No retained evidence",
     }

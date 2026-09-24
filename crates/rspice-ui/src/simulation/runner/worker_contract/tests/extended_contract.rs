@@ -426,14 +426,6 @@ fn analysis_spec_round_trips_supported_variants() {
             compute_thd: false,
             normalize: true,
         },
-        AnalysisSpec::Reliability {
-            study: None,
-            target_years: vec![1.0, 10.0],
-            enable_hci: true,
-            enable_nbti: true,
-            enable_em: false,
-            min_stress_voltage: 1.2,
-        },
         AnalysisSpec::Optimization {
             objective_unit: "mW".into(),
             objective_expression: Some("-V(out)*I(VSUP)".into()),

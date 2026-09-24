@@ -48,10 +48,6 @@ impl SimulationResult {
             SimulationResult::Corner { waveforms, .. } => {
                 waveforms.keys().map(|s| s.as_str()).collect()
             }
-            SimulationResult::ReliabilityMission { waveforms, .. }
-            | SimulationResult::Reliability { waveforms, .. } => {
-                waveforms.keys().map(|s| s.as_str()).collect()
-            }
             SimulationResult::Optimization { waveforms, .. } => {
                 waveforms.keys().map(|s| s.as_str()).collect()
             }
@@ -80,8 +76,6 @@ impl SimulationResult {
             | SimulationResult::HarmonicBalance { waveforms, .. } => waveforms.get(name),
             SimulationResult::Parametric { waveforms, .. } => waveforms.get(name),
             SimulationResult::Corner { waveforms, .. } => waveforms.get(name),
-            SimulationResult::ReliabilityMission { waveforms, .. }
-            | SimulationResult::Reliability { waveforms, .. } => waveforms.get(name),
             SimulationResult::Optimization { waveforms, .. } => waveforms.get(name),
             SimulationResult::Soa { waveforms, .. } => waveforms.get(name),
             _ => None,
@@ -197,12 +191,6 @@ impl SimulationResult {
             } => *runs_completed > 0 || !variables.is_empty(),
             SimulationResult::Parametric { sweep_values, .. } => !sweep_values.is_empty(),
             SimulationResult::Corner { x_values, .. } => !x_values.is_empty(),
-            SimulationResult::ReliabilityMission {
-                years, waveforms, ..
-            }
-            | SimulationResult::Reliability {
-                years, waveforms, ..
-            } => !years.is_empty() && !waveforms.is_empty(),
             SimulationResult::Optimization {
                 iterations,
                 waveforms,
@@ -240,9 +228,6 @@ impl SimulationResult {
             SimulationResult::MonteCarlo { .. } => "Monte Carlo",
             SimulationResult::Parametric { .. } => "Parametric",
             SimulationResult::Corner { .. } => "Corner",
-            SimulationResult::ReliabilityMission { .. } | SimulationResult::Reliability { .. } => {
-                "Reliability"
-            }
             SimulationResult::Optimization { .. } => "Optimization",
             SimulationResult::Soa { .. } => "Safety (SOA)",
             SimulationResult::Fft { .. } => "FFT",

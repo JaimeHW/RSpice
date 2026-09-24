@@ -418,13 +418,6 @@ fn viewer_can_render(
             analysis.result_payload,
             Some(AnalysisResultPayload::Soa { ref evaluations, .. }) if !evaluations.is_empty()
         ),
-        ResultViewer::Reliability => match &analysis.result_payload {
-            Some(AnalysisResultPayload::ReliabilityMission { response }) => {
-                !response.aged.is_empty()
-            }
-            Some(AnalysisResultPayload::Reliability { devices }) => !devices.is_empty(),
-            _ => false,
-        },
         ResultViewer::Optimization => matches!(
             analysis.family_metadata,
             Some(AnalysisResultFamilyMetadata::Optimization { ref iterations, .. }) if !iterations.is_empty()

@@ -822,7 +822,6 @@ fn waveform_axis(analysis_type: AnalysisType) -> Result<(&'static str, &'static 
         | Kind::MonteCarlo
         | Kind::Parametric
         | Kind::Corner
-        | Kind::Reliability
         | Kind::Optimization
         | Kind::Soa
         | Kind::DcMismatch => Ok(("sweep", "1")),

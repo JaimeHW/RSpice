@@ -46,7 +46,6 @@ fn viewer_art_variant(art: &str) -> &'static str {
         "margin" => "Margin",
         "digital-events" => "DigitalEvents",
         "soa" => "Soa",
-        "reliability" => "Reliability",
         "optimization" => "Optimization",
         "pz" => "PoleZero",
         "thermal" => "Thermal",

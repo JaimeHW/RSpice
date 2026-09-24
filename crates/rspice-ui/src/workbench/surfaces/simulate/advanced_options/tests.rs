@@ -148,62 +148,6 @@ fn periodic_consumer_solver_ownership_matches_form_ledger_and_authoring() {
     }
 }
 
-#[test]
-fn reliability_output_ownership_and_stress_mode_match_form_and_ledger() {
-    let kind = AnalysisKind::Reliability;
-    let options = SimulationOptions::default();
-    for transient in [false, true] {
-        let mut draft = AnalysisDraft::for_kind(kind);
-        let AnalysisDraft::Reliability(setup) = &mut draft else {
-            unreachable!()
-        };
-        setup.study.transient_stress = transient;
-        let ownership = draft.solver_ownership();
-        let form: Vec<_> = form_rows(kind, &draft, None, &options)
-            .into_iter()
-            .flat_map(|s| s.rows)
-            .map(|row| row.option)
-            .collect();
-        let ledger = rows_with(kind, &draft, None, &options);
-        let mut record = AnalysisNumericOverride::default();
-        for option in [O::StrobeInterval, O::OutputTimePoints, O::RetainEverySignal] {
-            let reason = option.refusal_for_instance(kind, ownership).unwrap();
-            assert!(reason.contains("Years checkpoints"));
-            assert_eq!(origin_of(&ledger, option), reason);
-            assert!(!form.contains(&option));
-            assert!(
-                record
-                    .set_for_instance(kind, ownership, option, "1")
-                    .unwrap_err()
-                    .contains(reason)
-            );
-        }
-        for option in [O::Itl4, O::Trtol, O::IntegrationMethod] {
-            assert_eq!(form.contains(&option), transient, "{}", option.key());
-            assert_eq!(
-                option.refusal_for_instance(kind, ownership).is_none(),
-                transient
-            );
-            if !transient {
-                assert!(origin_of(&ledger, option).contains("enable Transient stress"));
-            }
-        }
-        record
-            .set_for_instance(kind, ownership, O::Reltol, "1e-5")
-            .unwrap();
-        assert!(
-            form_rows(kind, &draft, Some(&record), &options)
-                .iter()
-                .flat_map(|s| &s.rows)
-                .any(|row| row.option == O::Reltol)
-        );
-    }
-    // Ordinary transient analyses still own all three output controls.
-    for option in [O::StrobeInterval, O::OutputTimePoints, O::RetainEverySignal] {
-        assert!(option.refusal_for(AnalysisKind::Transient).is_none());
-    }
-}
-
 fn rows_for(
     kind: AnalysisKind,
     record: Option<&AnalysisNumericOverride>,

@@ -2182,37 +2182,16 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
                 property_row(ui, "State", "no retained optimization evidence");
             }
         }
-        VerificationPage::Reliability => {
+        VerificationPage::DeviceSafety => {
             let active_run = app.state.simulation.active_run();
             let has_soa = active_run
                 .and_then(|run| verified_analysis(run, crate::state::AnalysisType::Soa))
                 .is_some();
-            let has_aging = active_run
-                .and_then(|run| verified_analysis(run, crate::state::AnalysisType::Reliability))
-                .is_some();
-            let mission = active_run.and_then(|run| {
-                verified_analysis(run, crate::state::AnalysisType::Reliability)
-                    .filter(|analysis| {
-                        crate::workbench::documents::result_document::analysis_evidence_is_valid(
-                            &app.state,
-                            run.dataset_id,
-                            analysis,
-                        )
-                    })
-                    .and_then(|analysis| match &analysis.result_payload {
-                        Some(crate::state::AnalysisResultPayload::ReliabilityMission {
-                            response,
-                        }) => Some(response),
-                        _ => None,
-                    })
-            });
             section_header(
                 ui,
-                "Reliability details",
-                Some(if mission.is_some() {
-                    "retained mission evidence"
-                } else if has_soa || has_aging {
-                    "execution receipt only"
+                "SOA details",
+                Some(if has_soa {
+                    "execution receipt retained"
                 } else {
                     "not run"
                 }),
@@ -2221,49 +2200,11 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui,
                 "SOA evidence",
                 if has_soa {
-                    "payload unavailable"
+                    "inspect retained rule results"
                 } else {
                     "unavailable"
                 },
             );
-            property_row(ui, "SOA verdict", "blocked");
-            property_row(
-                ui,
-                "Aging evidence",
-                if mission.is_some() {
-                    "stress, calibration and aged circuit results"
-                } else if has_aging {
-                    "payload unavailable"
-                } else {
-                    "unavailable"
-                },
-            );
-            property_row(
-                ui,
-                "Reliability verdict",
-                if mission.is_some() {
-                    "engineering preview"
-                } else {
-                    "blocked"
-                },
-            );
-            if let Some(response) = mission {
-                property_row(
-                    ui,
-                    "Model pack",
-                    &response.stress.request.study.model_pack.id,
-                );
-                property_row(
-                    ui,
-                    "Mission phases",
-                    &response.stress.phases.len().to_string(),
-                );
-                property_row(
-                    ui,
-                    "Aged operating points",
-                    &response.aged.len().to_string(),
-                );
-            }
             property_row(ui, "Geometry", "owned by Physical DRC");
         }
         VerificationPage::Regression => {

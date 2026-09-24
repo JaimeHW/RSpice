@@ -68,7 +68,7 @@ pub(super) fn validate_v8_result_digests(run: &ProjectSimulationRun) -> Result<(
 }
 
 /// Authenticate a schema-v9 run with the exact typed-payload digest encoding
-/// that wrote it before schema-v10 Reliability/SOA evidence is admitted.
+/// that wrote it before schema-v10 SOA evidence is admitted.
 pub(super) fn validate_v9_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
     validate_legacy_noise_summary_shape(run, TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION)?;
     reject_legacy_operating_point_evidence(run, TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION)?;
@@ -76,11 +76,10 @@ pub(super) fn validate_v9_result_digests(run: &ProjectSimulationRun) -> Result<(
     for analysis in &run.analyses {
         if matches!(
             analysis.result_payload.as_ref(),
-            Some(AnalysisResultPayload::Reliability { .. })
-                | Some(AnalysisResultPayload::Soa { .. })
+            Some(AnalysisResultPayload::Soa { .. })
         ) {
             return Err(format!(
-                "schema-v9 analysis {} contains Reliability/SOA evidence introduced by schema v10",
+                "schema-v9 analysis {} contains SOA evidence introduced by schema v10",
                 analysis.id
             ));
         }
@@ -135,13 +134,13 @@ pub(super) fn validate_v9_result_digests(run: &ProjectSimulationRun) -> Result<(
     Ok(())
 }
 
-/// Authenticate a schema-v10 run with the exact Reliability/SOA-capable
+/// Authenticate a schema-v10 run with the exact SOA-capable
 /// digest encoding that wrote it. Typed TF evidence is a schema-v11 field and
 /// must be rejected before the authenticated v10 document is resealed.
 pub(super) fn validate_v10_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
-    validate_legacy_noise_summary_shape(run, RELIABILITY_SOA_RESULTS_SCHEMA_VERSION)?;
-    reject_legacy_operating_point_evidence(run, RELIABILITY_SOA_RESULTS_SCHEMA_VERSION)?;
-    reject_legacy_waveform_units(run, RELIABILITY_SOA_RESULTS_SCHEMA_VERSION)?;
+    validate_legacy_noise_summary_shape(run, SOA_RESULTS_SCHEMA_VERSION)?;
+    reject_legacy_operating_point_evidence(run, SOA_RESULTS_SCHEMA_VERSION)?;
+    reject_legacy_waveform_units(run, SOA_RESULTS_SCHEMA_VERSION)?;
     for analysis in &run.analyses {
         if matches!(
             analysis.result_payload.as_ref(),

@@ -25,7 +25,6 @@ pub use output_contract::{
 pub(crate) mod placed_sources;
 pub(crate) mod plan;
 pub(crate) mod point_family;
-pub(crate) mod reliability_engine;
 pub(crate) mod results;
 pub(crate) mod run_set;
 pub(crate) mod runner;
@@ -35,17 +34,16 @@ pub(crate) mod stimulus_realize;
 pub(crate) mod table_route;
 pub(crate) mod veriloga;
 
-// The optimizer, reliability engine, netlist generator, options translator, and
+// The optimizer, netlist generator, options translator, and
 // engine bridge are all reached through their own modules; flattening their
 // types here duplicated the path without shortening any call site.
 pub use config::AnalysisConfig;
 pub use controller::SimulationController;
 // Test-only aliases for private modules: execution reaches the bridge and
-// the reliability engine through their module paths.
+// these helpers through their module paths.
 #[cfg(test)]
 pub use engine_bridge::EngineBridge;
 #[cfg(test)]
-pub use reliability_engine::{ParamShift, ReliabilityResult, StressMetrics};
 pub use results::{SimulationResult, WaveformData};
 pub use runner::SimulationRunner;
 pub use status::SimulationStatus;

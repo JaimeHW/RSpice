@@ -16,11 +16,9 @@ use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
     ComplexResultValue, FloquetOrbitKindEvidence, FloquetSpectrumCertificateEvidence,
     FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence, PssFloquetMultiplierEvidence,
-    PstbFloquetModeEvidence, PstbStabilityClassificationEvidence, ReliabilityCheckpointEvidence,
-    ReliabilityDeviceEvidence, ReliabilityShiftEvidence, ReliabilityStressEvidence,
-    SensitivityResultMode, SensitivityResultRow, SimulationRun, SoaEvaluationEvidence,
-    SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
-    SoaViolationSeverityEvidence, WaveformData,
+    PstbFloquetModeEvidence, PstbStabilityClassificationEvidence, SensitivityResultMode,
+    SensitivityResultRow, SimulationRun, SoaEvaluationEvidence, SoaParameterEvidence,
+    SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence, WaveformData,
 };
 
 #[derive(Debug)]
@@ -174,7 +172,6 @@ fn state_with_typed_result(analysis: AnalysisResult) -> AppState {
         AnalysisType::PoleZero => crate::workbench::ResultViewer::PoleZero,
         AnalysisType::Sensitivity => crate::workbench::ResultViewer::Contribution,
         AnalysisType::Tf => crate::workbench::ResultViewer::TransferFunction,
-        AnalysisType::Reliability => crate::workbench::ResultViewer::Reliability,
         AnalysisType::Soa => crate::workbench::ResultViewer::Soa,
         AnalysisType::Optimization => crate::workbench::ResultViewer::Optimization,
         kind if kind.is_time_domain() => crate::workbench::ResultViewer::Waves,
@@ -778,49 +775,6 @@ fn csv_export_preserves_unavailable_sensitivity_without_fabricating_zero() {
 }
 
 #[test]
-fn csv_export_publishes_exact_reliability_device_and_shift_evidence() {
-    let analysis = AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
-        .with_family_metadata(AnalysisResultFamilyMetadata::Reliability { years: vec![10.0] })
-        .with_result_payload(AnalysisResultPayload::Reliability {
-            devices: vec![ReliabilityDeviceEvidence {
-                device_id: "M1".to_owned(),
-                stress: ReliabilityStressEvidence {
-                    average_gate_stress_v: 1.2,
-                    average_drain_stress_v: 1.8,
-                    average_temperature_k: 358.15,
-                    duration_s: 3_600.0,
-                },
-                checkpoints: vec![ReliabilityCheckpointEvidence {
-                    years: 10.0,
-                    shift: ReliabilityShiftEvidence {
-                        threshold_voltage_shift_v: 0.0125,
-                        mobility_shift: -0.003,
-                        drain_source_resistance_shift: 0.001,
-                    },
-                }],
-            }],
-        });
-    let mut state = state_with_typed_result(analysis);
-    let io = MockExportWorkflowIo::default();
-
-    action_export_csv_with_io(&mut state, &io);
-
-    let files = io.text_files.borrow();
-    assert_eq!(files[0].0, PathBuf::from("reliability-evidence.csv"));
-    assert!(
-        files[0]
-            .1
-            .starts_with("device,lifetime_years,average_gate_stress_v")
-    );
-    assert!(
-        files[0]
-            .1
-            .contains("M1,1.00000000000000000e1,1.19999999999999996e0")
-    );
-    assert!(files[0].1.contains("1.25000000000000007e-2"));
-}
-
-#[test]
 fn typed_csv_exports_every_pss_multiplier_and_its_certificate() {
     let payload = AnalysisResultPayload::PssFloquet {
         period_s: Some(2.0),
@@ -963,25 +917,34 @@ fn typed_csv_exports_complete_pstb_modes_and_all_stability_provenance() {
 
 #[test]
 fn typed_csv_rejects_payloads_that_contradict_their_retained_axis() {
-    let analysis = AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
-        .with_family_metadata(AnalysisResultFamilyMetadata::Reliability { years: vec![1.0] })
-        .with_result_payload(AnalysisResultPayload::Reliability {
-            devices: vec![ReliabilityDeviceEvidence {
+    let analysis = AnalysisResult::new(1, AnalysisType::Soa, "SOA")
+        .with_family_metadata(AnalysisResultFamilyMetadata::Soa {
+            time: vec![0.0, 0.5],
+        })
+        .with_result_payload(AnalysisResultPayload::Soa {
+            source_history: None,
+            evaluations: vec![crate::state::SoaEvaluationEvidence {
+                duration: None,
+                thresholds: Default::default(),
+                envelope: None,
+                derating: None,
                 device_id: "M1".to_owned(),
-                stress: ReliabilityStressEvidence {
-                    average_gate_stress_v: 1.2,
-                    average_drain_stress_v: 1.8,
-                    average_temperature_k: 358.15,
-                    duration_s: 3_600.0,
-                },
-                checkpoints: vec![ReliabilityCheckpointEvidence {
-                    years: 10.0,
-                    shift: ReliabilityShiftEvidence {
-                        threshold_voltage_shift_v: 0.0125,
-                        mobility_shift: -0.003,
-                        drain_source_resistance_shift: 0.001,
-                    },
-                }],
+                parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
+                limit_value: 3.3,
+                worst_actual_value: 3.2,
+                worst_time_s: 1.0,
+                sample_count: 2,
+                unit: "V".to_owned(),
+                description: "Maximum drain-source voltage".to_owned(),
+                verdict: crate::state::SoaRuleVerdictEvidence::Warning,
+            }],
+            violations: vec![crate::state::SoaViolationEvidence {
+                device_id: "M1".to_owned(),
+                parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
+                limit_value: 3.3,
+                actual_value: 3.2,
+                time_s: 1.0,
+                severity: crate::state::SoaViolationSeverityEvidence::Warning,
             }],
         });
     let state = state_with_typed_result(analysis);
@@ -2341,7 +2304,6 @@ fn every_analysis_type_pins_the_coordinate_identity_it_exports() {
         (AnalysisType::MonteCarlo, "value", SignalType::Unknown),
         (AnalysisType::Parametric, "sweep", SignalType::Unknown),
         (AnalysisType::Corner, "temperature", SignalType::Unknown),
-        (AnalysisType::Reliability, "lifetime", SignalType::Unknown),
         (AnalysisType::Optimization, "iteration", SignalType::Unknown),
         (AnalysisType::DcOp, "x", SignalType::Unknown),
     ];

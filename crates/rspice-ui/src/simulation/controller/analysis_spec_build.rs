@@ -156,21 +156,6 @@ impl SimulationController {
                     &draft.share_threshold,
                 )?,
             },
-            AnalysisDraft::Reliability(draft) => {
-                let mut draft = draft.clone();
-                draft.ensure_initialized();
-                let config = draft
-                    .to_config()
-                    .map_err(|error| format!("invalid reliability settings: {error}"))?;
-                AnalysisSpec::Reliability {
-                    study: config.study,
-                    target_years: config.target_years,
-                    enable_hci: config.enable_hci,
-                    enable_nbti: config.enable_nbti,
-                    enable_em: config.enable_em,
-                    min_stress_voltage: config.min_stress_voltage,
-                }
-            }
             _ => return Ok(None),
         };
         spec.validate()?;
@@ -252,7 +237,7 @@ impl SimulationController {
                 )?,
                 sweep: Self::map_frequency_sweep(state.sim_setup.ac.sweep),
             }),
-            24 => self.build_disto_spec(state),
+            23 => self.build_disto_spec(state),
             3 => {
                 let config = state.sim_setup.dc.to_config()?;
                 Ok(AnalysisSpec::DcSweep {
@@ -293,9 +278,8 @@ impl SimulationController {
             18 => self.build_corner_sweep_spec(state),
             19 => self.build_envelope_spec(state),
             20 => self.build_fourier_spec(state),
-            21 => self.build_reliability_spec(state),
-            22 => self.build_optimization_spec(state),
-            23 => self.build_soa_spec(state),
+            21 => self.build_optimization_spec(state),
+            22 => self.build_soa_spec(state),
             _ => Err(format!(
                 "analysis index {idx} is outside the canonical Simulation Studio catalog"
             )),
@@ -704,22 +688,6 @@ impl SimulationController {
             stop_time: fourier_cfg.stop_time,
             compute_thd: fourier_cfg.compute_thd,
             normalize: fourier_cfg.normalize,
-        })
-    }
-
-    pub(super) fn build_reliability_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut reliability_state = state.sim_setup.reliability.clone();
-        reliability_state.ensure_initialized();
-        let reliability_cfg = reliability_state
-            .to_config()
-            .map_err(|e| format!("invalid reliability settings: {}", e))?;
-        Ok(AnalysisSpec::Reliability {
-            study: reliability_cfg.study,
-            target_years: reliability_cfg.target_years,
-            enable_hci: reliability_cfg.enable_hci,
-            enable_nbti: reliability_cfg.enable_nbti,
-            enable_em: reliability_cfg.enable_em,
-            min_stress_voltage: reliability_cfg.min_stress_voltage,
         })
     }
 

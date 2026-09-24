@@ -1573,128 +1573,6 @@ pub(super) fn semantic_result_summary(
                 }
             }
         }
-        ResultViewer::Reliability => {
-            if let Some(AnalysisResultPayload::ReliabilityMission { response }) =
-                &analysis.result_payload
-            {
-                tables.push(SemanticTable {
-                    title: format!(
-                        "Reliability mission · {} · {}",
-                        response.stress.request.study.model_pack.id,
-                        response.stress.request.study.model_pack.process
-                    ),
-                    columns: [
-                        "Phase",
-                        "Years",
-                        "Device",
-                        "Model",
-                        "Parameter",
-                        "Mode",
-                        "Fresh",
-                        "Aged",
-                    ]
-                    .map(str::to_owned)
-                    .to_vec(),
-                    rows: response
-                        .aged
-                        .iter()
-                        .flat_map(|p| {
-                            p.parameters.iter().map(move |v| {
-                                vec![
-                                    (p.phase_index + 1).to_string(),
-                                    exact_number(p.years),
-                                    v.device.clone(),
-                                    v.compact_model.clone(),
-                                    v.parameter.clone(),
-                                    format!("{:?}", v.update),
-                                    exact_number(v.fresh_value),
-                                    exact_number(v.aged_value),
-                                ]
-                            })
-                        })
-                        .collect(),
-                });
-                tables.push(SemanticTable {
-                    title: "Equivalent aging and electromigration lifetime".into(),
-                    columns: [
-                        "Years",
-                        "Device",
-                        "Aging model",
-                        "Reference / elapsed seconds",
-                        "EM consumed lifetime",
-                        "Trap occupancies",
-                    ]
-                    .map(str::to_owned)
-                    .to_vec(),
-                    rows: response
-                        .stress
-                        .checkpoints
-                        .iter()
-                        .flat_map(|p| {
-                            p.devices.iter().flat_map(move |d| {
-                                d.contributions.iter().map(move |c| {
-                                    vec![
-                                        exact_number(p.years),
-                                        d.device.clone(),
-                                        c.model_id.clone(),
-                                        exact_number(c.equivalent_seconds),
-                                        c.electromigration_lifetime_fraction
-                                            .map_or_else(String::new, exact_number),
-                                        c.trap_occupancies
-                                            .iter()
-                                            .map(|t| {
-                                                format!(
-                                                    "{} = {}",
-                                                    t.trap_id,
-                                                    exact_number(t.occupancy)
-                                                )
-                                            })
-                                            .collect::<Vec<_>>()
-                                            .join("; "),
-                                    ]
-                                })
-                            })
-                        })
-                        .collect(),
-                });
-            } else {
-                let Some(AnalysisResultPayload::Reliability { devices }) = &analysis.result_payload
-                else {
-                    return Err(HardcopySourceError::MissingViewerEvidence("reliability"));
-                };
-                for device in devices {
-                    tables.push(SemanticTable {
-                        title: format!(
-                            "{} · {} K average, {} s stressed",
-                            device.device_id,
-                            exact_number(device.stress.average_temperature_k),
-                            exact_number(device.stress.duration_s)
-                        ),
-                        columns: vec![
-                            "Years".to_owned(),
-                            "ΔVth (V)".to_owned(),
-                            "Δmobility".to_owned(),
-                            "ΔRds".to_owned(),
-                        ],
-                        rows: device
-                            .checkpoints
-                            .iter()
-                            .map(|checkpoint| {
-                                vec![
-                                    exact_number(checkpoint.years),
-                                    exact_number(checkpoint.shift.threshold_voltage_shift_v),
-                                    exact_number(checkpoint.shift.mobility_shift),
-                                    exact_number(checkpoint.shift.drain_source_resistance_shift),
-                                ]
-                            })
-                            .collect(),
-                    });
-                }
-                if tables.is_empty() {
-                    return Err(HardcopySourceError::MissingViewerEvidence("reliability"));
-                }
-            }
-        }
         ResultViewer::Optimization => {
             let Some(AnalysisResultFamilyMetadata::Optimization {
                 best_cost,
@@ -2110,24 +1988,11 @@ fn periodic_result_tables(payload: &AnalysisResultPayload) -> Option<Vec<Semanti
                 },
             ])
         }
-        AnalysisResultPayload::DcSweep { .. }
-        | AnalysisResultPayload::OperatingPoint { .. }
-        | AnalysisResultPayload::PoleZero { .. }
-        | AnalysisResultPayload::Sensitivity { .. }
-        | AnalysisResultPayload::SensitivityStudy { .. }
-        | AnalysisResultPayload::DcMismatch { .. }
-        | AnalysisResultPayload::ScalarMeasurements { .. }
-        | AnalysisResultPayload::TransferFunction { .. }
-        | AnalysisResultPayload::ReliabilityMission { .. }
-        | AnalysisResultPayload::Reliability { .. }
-        | AnalysisResultPayload::Soa { .. }
-        | AnalysisResultPayload::TransientEvents { .. }
+        AnalysisResultPayload::DcSweep { .. } | AnalysisResultPayload::OperatingPoint { .. } | AnalysisResultPayload::PoleZero { .. } | AnalysisResultPayload::Sensitivity { .. } | AnalysisResultPayload::SensitivityStudy { .. } | AnalysisResultPayload::DcMismatch { .. } | AnalysisResultPayload::ScalarMeasurements { .. } | AnalysisResultPayload::TransferFunction { .. } | AnalysisResultPayload::Soa { .. } | AnalysisResultPayload::TransientEvents { .. }
         // A recorded spectrum exports through the ordinary complex waveform
         // path; its payload states the transform, not a table of its own.
-        | AnalysisResultPayload::FftSpectrum { .. }
-        | AnalysisResultPayload::Qpac { .. }
-        | AnalysisResultPayload::Qpxf { .. }
-        | AnalysisResultPayload::Qpnoise { .. } | AnalysisResultPayload::Qpss { .. } => None,
+        | AnalysisResultPayload::FftSpectrum { .. } | AnalysisResultPayload::Qpac { .. } | AnalysisResultPayload::Qpxf { .. } | AnalysisResultPayload::Qpnoise { .. }
+            | AnalysisResultPayload::Qpss { .. } => None,
     }
 }
 

@@ -82,7 +82,6 @@ pub enum CanonicalAnalysisKind {
     MonteCarlo,
     Parametric,
     Corner,
-    Reliability,
     Optimization,
     Soa,
     SParameter,
@@ -108,7 +107,7 @@ impl CanonicalAnalysisKind {
     /// This is what makes the protocol closed without a second literal:
     /// [`Self::from_tag`] searches this array, so a tag is acceptable exactly
     /// when some kind claims it.
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 36] = [
         Self::DcOp,
         Self::DcSweep,
         Self::Ac,
@@ -129,7 +128,6 @@ impl CanonicalAnalysisKind {
         Self::MonteCarlo,
         Self::Parametric,
         Self::Corner,
-        Self::Reliability,
         Self::Optimization,
         Self::Soa,
         Self::SParameter,
@@ -180,7 +178,6 @@ impl CanonicalAnalysisKind {
             Self::MonteCarlo => 17,
             Self::Parametric => 18,
             Self::Corner => 19,
-            Self::Reliability => 20,
             Self::Optimization => 21,
             Self::Soa => 22,
             Self::SParameter => 23,
@@ -243,8 +240,7 @@ impl CanonicalAnalysisKind {
             | Self::Qpnoise
             | Self::Qpxf
             | Self::TransientNoise
-            | Self::DcMismatch
-            | Self::Reliability => AnalysisAvailability::Preview,
+            | Self::DcMismatch => AnalysisAvailability::Preview,
             _ => AnalysisAvailability::Production,
         }
     }
@@ -301,7 +297,6 @@ impl CanonicalAnalysisKind {
             Self::MonteCarlo => AnalysisType::MonteCarlo,
             Self::Parametric => AnalysisType::Parametric,
             Self::Corner => AnalysisType::Corner,
-            Self::Reliability => AnalysisType::Reliability,
             Self::Optimization => AnalysisType::Optimization,
             Self::Soa => AnalysisType::Soa,
             Self::SParameter => AnalysisType::SParameter,
@@ -343,17 +338,8 @@ mod tests {
     }
 
     #[test]
-    fn the_protocol_is_contiguous_and_closed_above_its_high_water_mark() {
-        // Contiguity is not a rule the protocol needs, but a gap would mean a
-        // retired tag, and retiring one redefines historical snapshots. Assert
-        // it so a deletion has to argue with a test rather than pass quietly.
-        for (index, kind) in CanonicalAnalysisKind::ALL.into_iter().enumerate() {
-            assert_eq!(
-                u8::try_from(index).expect("the protocol is far smaller than 256 kinds"),
-                kind.tag(),
-                "canonical tags must stay contiguous in ALL order"
-            );
-        }
+    fn the_protocol_rejects_removed_and_unknown_tags() {
+        assert!(CanonicalAnalysisKind::from_tag(20).is_none());
         let highest = CanonicalAnalysisKind::ALL[CanonicalAnalysisKind::ALL.len() - 1].tag();
         assert_eq!(highest, 36);
         assert!(CanonicalAnalysisKind::from_tag(highest + 1).is_none());
@@ -390,7 +376,6 @@ mod tests {
         assert_eq!(
             runnable,
             vec![
-                CanonicalAnalysisKind::Reliability,
                 CanonicalAnalysisKind::Envelope,
                 CanonicalAnalysisKind::Qpss,
                 CanonicalAnalysisKind::Hbsp,

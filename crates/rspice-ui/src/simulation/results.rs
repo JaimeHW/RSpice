@@ -4,7 +4,6 @@
 //! to the waveform viewer and other UI components.
 
 use crate::services::safety::{SoAEvaluation, SoAViolation};
-use crate::simulation::reliability_engine::ReliabilityResult;
 use std::collections::HashMap;
 
 mod accessors;
@@ -21,7 +20,6 @@ mod qpnoise;
 mod qpss;
 mod qpxf;
 mod recorded_fft;
-mod reliability;
 mod waveform;
 
 pub use monte_carlo::MonteCarloVariableResult;
@@ -412,25 +410,6 @@ pub enum SimulationResult {
         num_failures: usize,
         /// What each corner measured, with the corner's own identity.
         member_measurements: Vec<crate::state::FamilyMemberMeasurements>,
-    },
-
-    /// Historical reliability aging result retained so saved runs and worker
-    /// responses from earlier builds remain readable in their original format.
-    #[allow(dead_code)]
-    Reliability {
-        /// Lifetime checkpoints in years.
-        years: Vec<f64>,
-        /// Waveforms indexed by signal name.
-        waveforms: HashMap<String, WaveformData>,
-        /// Structured per-device reliability outputs.
-        device_results: Vec<ReliabilityResult>,
-    },
-
-    /// Complete calibrated mission, stress, model changes and electrical evidence.
-    ReliabilityMission {
-        years: Vec<f64>,
-        waveforms: HashMap<String, WaveformData>,
-        response: std::sync::Arc<rspice_core::engine::ReliabilityRunResult>,
     },
 
     /// Optimization analysis result.

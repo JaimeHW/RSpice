@@ -194,8 +194,7 @@ pub(super) fn run_spec_request_with_environment_and_checkpoint_observer(
             &table_options,
             abort_flag,
         ),
-        AnalysisSpec::Reliability { .. }
-        | AnalysisSpec::Optimization { .. }
+        AnalysisSpec::Optimization { .. }
         | AnalysisSpec::Soa { .. }
         | AnalysisSpec::DcMismatch { .. } => device::run_device_spec(
             spec,
@@ -349,7 +348,6 @@ fn spec_variant_name(spec: &AnalysisSpec) -> &'static str {
         AnalysisSpec::MonteCarlo { .. } => "AnalysisSpec::MonteCarlo",
         AnalysisSpec::Parametric => "AnalysisSpec::Parametric",
         AnalysisSpec::Corner => "AnalysisSpec::Corner",
-        AnalysisSpec::Reliability { .. } => "AnalysisSpec::Reliability",
         AnalysisSpec::Optimization { .. } => "AnalysisSpec::Optimization",
         AnalysisSpec::Soa { .. } => "AnalysisSpec::Soa",
         AnalysisSpec::Pss { .. } => "AnalysisSpec::Pss",
@@ -387,7 +385,6 @@ mod tests {
     mod qpnoise;
     mod qpss;
     mod qpxf;
-    mod reliability;
     mod spot_frequency;
     use std::collections::HashMap;
     use std::fs;
@@ -1570,35 +1567,6 @@ R2 out 0 1k\n\
             !message.contains("rejected before dispatch"),
             "the refusal is the engine's, not a Studio pre-judgement: {message}"
         );
-    }
-
-    #[test]
-    fn reliability_rejects_hard_coded_aging_without_a_pdk_model() {
-        let result = run_spec_request(
-            &EngineBridge::new(),
-            AnalysisSpec::Reliability {
-                study: None,
-                target_years: vec![1.0, 10.0],
-                enable_hci: true,
-                enable_nbti: true,
-                enable_em: false,
-                min_stress_voltage: 0.1,
-            },
-            SpecExecutionOptions::default(),
-            "reliability must fail closed\nV1 out 0 1\n.end\n",
-            None,
-            &ResolvedExecutionDependencies::default(),
-            &rspice_core::abort_signal::NoAbort,
-        );
-
-        match result {
-            Err(SimulationError::InvalidConfig(message)) => {
-                assert!(message.contains("Reliability"));
-                assert!(message.contains("unavailable"));
-                assert!(message.contains("rejected before dispatch"));
-            }
-            other => panic!("expected PDK-less reliability refusal, got {other:?}"),
-        }
     }
 
     #[test]

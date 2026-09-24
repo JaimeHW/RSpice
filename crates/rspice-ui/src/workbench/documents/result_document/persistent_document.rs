@@ -1260,10 +1260,6 @@ pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) ->
         "viewer-optimization" => {
             super::view_context::analysis_supports_viewer(ResultViewer::Optimization, analysis)
         }
-        // Reliability remains a typed canonical pane, but its producer and
-        // numeric evidence are preview-classified by the current contract.
-        // It must not become creatable merely because a quick sheet exists.
-        "viewer-reliability" => false,
         _ => false,
     }
 }

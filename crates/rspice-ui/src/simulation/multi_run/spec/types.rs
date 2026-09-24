@@ -493,16 +493,6 @@ pub enum AnalysisSpec {
     Parametric,
     /// Corner analysis
     Corner,
-    /// Reliability aging analysis
-    Reliability {
-        #[serde(default)]
-        study: Option<crate::simulation::reliability_engine::ReliabilityStudy>,
-        target_years: Vec<f64>,
-        enable_hci: bool,
-        enable_nbti: bool,
-        enable_em: bool,
-        min_stress_voltage: f64,
-    },
     /// Optimization analysis.
     Optimization {
         #[serde(default)]

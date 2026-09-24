@@ -267,8 +267,7 @@ An egui application with a wgpu renderer, organized as seven workspaces
 (Project, Design, Simulate, Results, Verify, Models, and Netlist) covering
 schematic and symbol editing, analysis-plan setup, waveform and RF result views,
 verification evidence, model and PDK binding, and direct netlist editing. Its
-simulation runner is the only surface that reaches PXF, PSTB, SOA, and
-reliability analyses.
+simulation runner is the only surface that reaches PXF, PSTB, and SOA analyses.
 
 The IDE also hosts the surfaces built around a run rather than inside it: signed
 model packs, governed Python automation, published figure and report bundles,

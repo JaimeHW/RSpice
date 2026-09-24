@@ -28,7 +28,6 @@ impl AnalysisSpec {
             AnalysisSpec::MonteCarlo { .. } => AnalysisRunType::MonteCarlo,
             AnalysisSpec::Parametric => AnalysisRunType::Parametric,
             AnalysisSpec::Corner => AnalysisRunType::Corner,
-            AnalysisSpec::Reliability { .. } => AnalysisRunType::Reliability,
             AnalysisSpec::Optimization { .. } => AnalysisRunType::Optimization,
             AnalysisSpec::Soa { .. } => AnalysisRunType::Soa,
             AnalysisSpec::SParameter { .. } => AnalysisRunType::SParameter,

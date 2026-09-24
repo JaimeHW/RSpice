@@ -394,9 +394,6 @@ pub struct SimSetupState {
     /// Fourier.
     #[serde(default, skip_serializing)]
     pub fourier: crate::simulation::dialog::fourier::FourierDialogState,
-    /// Reliability / aging.
-    #[serde(default, skip_serializing)]
-    pub reliability: crate::simulation::dialog::reliability::ReliabilityDialogState,
     /// Optimization.
     #[serde(default, skip_serializing)]
     pub optimization: crate::simulation::dialog::optimization::OptimizationDialogState,
@@ -501,7 +498,6 @@ impl SimSetupState {
         self.corner.initialized = true;
         self.envelope.initialized = true;
         self.fourier.initialized = true;
-        self.reliability.initialized = true;
         self.optimization.initialized = true;
         self.soa.initialized = true;
         self.options_draft =
@@ -684,31 +680,13 @@ impl SimSetupState {
                 "f0 {} · {}h @ {}",
                 self.fourier.fundamental, self.fourier.harmonics, self.fourier.output_node
             ),
-            21 => {
-                let rel = &self.reliability;
-                let flags = [
-                    (rel.enable_hci, "HCI"),
-                    (rel.enable_nbti, "NBTI"),
-                    (rel.enable_em, "EM"),
-                ];
-                let on: Vec<&str> = flags.iter().filter(|(f, _)| *f).map(|(_, n)| *n).collect();
-                format!(
-                    "{} y · {}",
-                    self.reliability.years_csv,
-                    if on.is_empty() {
-                        "no mechanisms".to_owned()
-                    } else {
-                        on.join(" ")
-                    }
-                )
-            }
-            22 => format!(
+            21 => format!(
                 "{} {} · {}",
                 ["minimize", "maximize", "target"][self.optimization.goal_mode.min(2)],
                 self.optimization.objective_node,
                 ["gradient", "pattern", "anneal"][self.optimization.algorithm.min(2)]
             ),
-            23 => {
+            22 => {
                 let soa = &self.soa;
                 let flags = [
                     (soa.check_vgs_max, "vgs"),
@@ -727,7 +705,7 @@ impl SimSetupState {
                     }
                 )
             }
-            24 => {
+            23 => {
                 let ratio = self.disto_f2_over_f1.trim();
                 if ratio.is_empty() {
                     format!("{} -> {}", self.ac.fstart, self.ac.fstop)
@@ -830,10 +808,9 @@ impl SimSetupState {
                 .err(),
             19 => self.envelope.to_config().err(),
             20 => self.fourier.to_config().err(),
-            21 => self.reliability.to_config().err(),
-            22 => self.optimization.to_config().err(),
-            23 => self.soa.to_config().err(),
-            24 => {
+            21 => self.optimization.to_config().err(),
+            22 => self.soa.to_config().err(),
+            23 => {
                 if let Some(error) = self.ac_sweep_error() {
                     return Some(error);
                 }
@@ -897,7 +874,6 @@ impl SimSetupState {
         self.corner.ensure_initialized();
         self.envelope.ensure_initialized();
         self.fourier.ensure_initialized();
-        self.reliability.ensure_initialized();
         self.optimization.ensure_initialized();
         self.soa.ensure_initialized();
     }

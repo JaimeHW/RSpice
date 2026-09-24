@@ -96,7 +96,6 @@ impl SimulationController {
             AnalysisSpec::Qpac { .. } => Ok(spec.qpac_card()?.to_spice()),
             AnalysisSpec::Qpxf { .. } => Ok(spec.qpxf_card()?.to_spice()),
             AnalysisSpec::Qpnoise { .. } => Ok(spec.qpnoise_card()?.to_spice()),
-            AnalysisSpec::Reliability { .. } => spec.reliability_plan_statement(),
             _ => self
                 .analysis_spec_to_config(state, spec)
                 .map(|cfg| cfg.to_spice()),

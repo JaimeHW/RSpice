@@ -756,23 +756,6 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.usize(*points_per_decade);
             writer.bool(*compute_nyquist);
         }
-        AnalysisSpec::Reliability {
-            study,
-            target_years,
-            enable_hci,
-            enable_nbti,
-            enable_em,
-            min_stress_voltage,
-        } => {
-            encode_f64_slice(writer, target_years);
-            writer.bool(*enable_hci);
-            writer.bool(*enable_nbti);
-            writer.bool(*enable_em);
-            writer.f64(*min_stress_voltage);
-            if let Some(study) = study {
-                super::reliability::encode(writer, study);
-            }
-        }
         AnalysisSpec::Optimization {
             search,
             variables,

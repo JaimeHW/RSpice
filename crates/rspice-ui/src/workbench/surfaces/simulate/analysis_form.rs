@@ -35,7 +35,6 @@ mod pstb;
 mod pxf;
 mod quasi_periodic;
 mod recorded_fft;
-mod reliability;
 mod run_space;
 mod s_parameter;
 mod sensitivity;
@@ -1167,7 +1166,6 @@ pub(super) fn form(
             envelope::fields(ui, setup, envelope_modulation_sources, policy, locale)
         }
         AnalysisDraft::Fourier(setup) => fourier::fields(ui, setup, policy, locale),
-        AnalysisDraft::Reliability(setup) => reliability::fields(ui, setup),
         AnalysisDraft::Optimization(setup) => optimization::fields(ui, setup, study_bases),
         AnalysisDraft::Soa(setup) => soa::fields(ui, setup, policy, locale),
         AnalysisDraft::Disto(setup) => disto::fields(ui, setup, policy, locale),

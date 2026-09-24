@@ -36,8 +36,6 @@ pub(crate) use qpss::{
     run_qpss_analysis_with_dc_seed_on_materialized_with_abort,
 };
 pub(crate) use qpxf::run_qpxf_analysis_from_qpss_on_materialized_with_abort;
-mod reliability;
-pub use reliability::run_reliability_analysis_with_source_path_and_abort;
 mod soa;
 mod sparameter;
 mod stb;

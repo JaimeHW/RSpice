@@ -20,7 +20,6 @@ mod qpnoise;
 mod qpss;
 mod qpxf;
 mod quasi_periodic_display;
-mod reliability;
 
 pub use family_metadata::{AnalysisResultFamilyMetadata, MonteCarloVariableMetadata};
 
@@ -668,42 +667,6 @@ pub struct SensitivityResultRow {
     pub normalized: rspice_core::analysis::sensitivity::SensitivityValue<f64>,
 }
 
-/// Exact stress metrics retained for one device in a reliability run.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ReliabilityStressEvidence {
-    pub average_gate_stress_v: f64,
-    pub average_drain_stress_v: f64,
-    pub average_temperature_k: f64,
-    pub duration_s: f64,
-}
-
-/// Exact parameter shifts retained at one lifetime checkpoint.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ReliabilityShiftEvidence {
-    pub threshold_voltage_shift_v: f64,
-    pub mobility_shift: f64,
-    pub drain_source_resistance_shift: f64,
-}
-
-/// One numerically ordered lifetime checkpoint and its exact parameter shifts.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ReliabilityCheckpointEvidence {
-    pub years: f64,
-    pub shift: ReliabilityShiftEvidence,
-}
-
-/// Immutable reliability evidence for one analyzed device.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ReliabilityDeviceEvidence {
-    pub device_id: String,
-    pub stress: ReliabilityStressEvidence,
-    pub checkpoints: Vec<ReliabilityCheckpointEvidence>,
-}
-
 /// One committed digital event on an XSPICE event node.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1310,9 +1273,6 @@ pub enum AnalysisResultPayload {
     Qpac {
         response: std::sync::Arc<rspice_core::engine::QpacAnalysisResult>,
     },
-    ReliabilityMission {
-        response: std::sync::Arc<rspice_core::engine::ReliabilityRunResult>,
-    },
     Qpnoise {
         response: std::sync::Arc<rspice_core::engine::QpnoiseAnalysisResult>,
     },
@@ -1455,9 +1415,6 @@ pub enum AnalysisResultPayload {
         nominal_input: Option<f64>,
         /// Nominal output value used by relative normalization, otherwise absent.
         nominal_output: Option<f64>,
-    },
-    Reliability {
-        devices: Vec<ReliabilityDeviceEvidence>,
     },
     Soa {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2130,100 +2087,6 @@ impl AnalysisResultPayload {
                     }
                 }
             }
-            Self::ReliabilityMission { response } => {
-                if analysis_type != AnalysisType::Reliability {
-                    return Err("Reliability mission belongs to a different analysis type".into());
-                }
-                response
-                    .validate_retained_payload_with_abort(
-                        &rspice_core::ResourceLimits::default(),
-                        &rspice_core::NoAbort,
-                    )
-                    .map_err(|e| e.to_string())?;
-            }
-            Self::Reliability { devices } => {
-                if analysis_type != AnalysisType::Reliability {
-                    return Err(format!(
-                        "reliability payload does not match analysis type {analysis_type:?}"
-                    ));
-                }
-                if devices.is_empty() {
-                    return Err("reliability payload contains no device evidence".to_owned());
-                }
-                let mut previous_device: Option<&str> = None;
-                for device in devices {
-                    require_non_empty(&device.device_id, "reliability device identity")?;
-                    if previous_device.is_some_and(|previous| previous >= device.device_id.as_str())
-                    {
-                        return Err(
-                            "reliability devices must have unique, strictly sorted identities"
-                                .to_owned(),
-                        );
-                    }
-                    previous_device = Some(&device.device_id);
-                    for (label, value) in [
-                        ("average gate stress", device.stress.average_gate_stress_v),
-                        ("average drain stress", device.stress.average_drain_stress_v),
-                        ("average temperature", device.stress.average_temperature_k),
-                        ("stress duration", device.stress.duration_s),
-                    ] {
-                        if !value.is_finite() {
-                            return Err(format!(
-                                "reliability device '{}' has non-finite {label}",
-                                device.device_id
-                            ));
-                        }
-                    }
-                    if device.stress.average_temperature_k <= 0.0 {
-                        return Err(format!(
-                            "reliability device '{}' has a non-positive absolute temperature",
-                            device.device_id
-                        ));
-                    }
-                    if device.stress.duration_s < 0.0 {
-                        return Err(format!(
-                            "reliability device '{}' has a negative stress duration",
-                            device.device_id
-                        ));
-                    }
-                    if device.checkpoints.is_empty() {
-                        return Err(format!(
-                            "reliability device '{}' has no lifetime checkpoints",
-                            device.device_id
-                        ));
-                    }
-                    let mut previous_years = None;
-                    for checkpoint in &device.checkpoints {
-                        if !checkpoint.years.is_finite() || checkpoint.years <= 0.0 {
-                            return Err(format!(
-                                "reliability device '{}' has an invalid lifetime checkpoint",
-                                device.device_id
-                            ));
-                        }
-                        if previous_years.is_some_and(|previous| previous >= checkpoint.years) {
-                            return Err(format!(
-                                "reliability device '{}' checkpoints must be unique and strictly increasing",
-                                device.device_id
-                            ));
-                        }
-                        previous_years = Some(checkpoint.years);
-                        let shift = &checkpoint.shift;
-                        if [
-                            shift.threshold_voltage_shift_v,
-                            shift.mobility_shift,
-                            shift.drain_source_resistance_shift,
-                        ]
-                        .into_iter()
-                        .any(|value| !value.is_finite())
-                        {
-                            return Err(format!(
-                                "reliability device '{}' checkpoint '{}' years has a non-finite shift",
-                                device.device_id, checkpoint.years
-                            ));
-                        }
-                    }
-                }
-            }
             Self::Soa {
                 source_history: _,
                 evaluations,
@@ -2502,12 +2365,7 @@ impl AnalysisResultPayload {
     #[must_use]
     pub fn has_data(&self) -> bool {
         match self {
-            Self::ReliabilityMission { .. } | Self::Qpac { .. } | Self::Qpxf { .. } | Self::Qpnoise { .. } | Self::Qpss { .. } | Self::DcSweep { .. }
-            | Self::OperatingPoint { .. }
-            | Self::PoleZero { .. }
-            | Self::PssFloquet { .. }
-            | Self::Pstb { .. }
-            | Self::Sensitivity { .. }
+            Self::Qpac { .. } | Self::Qpxf { .. } | Self::Qpnoise { .. } | Self::Qpss { .. } | Self::DcSweep { .. } | Self::OperatingPoint { .. } | Self::PoleZero { .. } | Self::PssFloquet { .. } | Self::Pstb { .. } | Self::Sensitivity { .. }
             // A study is an answer even when its filter selected nothing the
             // engine could differentiate: the refusal is the run's, and what
             // it retained states the filter that produced it.
@@ -2526,7 +2384,6 @@ impl AnalysisResultPayload {
                 output_resistance,
                 ..
             } => gain.is_some() || input_resistance.is_some() || output_resistance.is_some(),
-            Self::Reliability { devices } => !devices.is_empty(),
             Self::Soa { evaluations, .. } => !evaluations.is_empty(),
             Self::TransientEvents {
                 digital_traces,

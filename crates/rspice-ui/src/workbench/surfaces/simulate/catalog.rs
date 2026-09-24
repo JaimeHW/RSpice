@@ -556,7 +556,7 @@ pub(super) const fn analysis_catalog_kind_label(kind: AnalysisKind) -> &'static 
         | AnalysisKind::Corner
         | AnalysisKind::DcMismatch => "Run-set controller",
         AnalysisKind::Fourier | AnalysisKind::Disto => "Derived measurement",
-        AnalysisKind::Reliability | AnalysisKind::Soa => "Verification workspace",
+        AnalysisKind::Soa => "Verification workspace",
         AnalysisKind::Optimization => "Optimization workspace",
         _ => "Numerical solver",
     }

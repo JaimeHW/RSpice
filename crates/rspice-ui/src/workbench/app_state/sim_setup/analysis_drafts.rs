@@ -470,7 +470,6 @@ impl SimSetupState {
             AnalysisKind::Corner => AnalysisDraft::Corner(self.corner.clone()),
             AnalysisKind::Envelope => AnalysisDraft::Envelope(self.envelope.clone()),
             AnalysisKind::Fourier => AnalysisDraft::Fourier(self.fourier.clone()),
-            AnalysisKind::Reliability => AnalysisDraft::Reliability(self.reliability.clone()),
             AnalysisKind::Optimization => AnalysisDraft::Optimization(self.optimization.clone()),
             AnalysisKind::Soa => AnalysisDraft::Soa(self.soa.clone()),
             AnalysisKind::Disto => AnalysisDraft::Disto(DistoDraft {
@@ -529,7 +528,6 @@ impl SimSetupState {
             AnalysisDraft::Corner(value) => self.corner = value.clone(),
             AnalysisDraft::Envelope(value) => self.envelope = value.clone(),
             AnalysisDraft::Fourier(value) => self.fourier = value.clone(),
-            AnalysisDraft::Reliability(value) => self.reliability = value.clone(),
             AnalysisDraft::Optimization(value) => self.optimization = value.clone(),
             AnalysisDraft::Soa(value) => self.soa = value.clone(),
             AnalysisDraft::Disto(value) => {

@@ -1086,25 +1086,6 @@ fn encode_result_payload(
             writer.option(nominal_input.as_ref(), |writer, value| writer.f64(*value));
             writer.option(nominal_output.as_ref(), |writer, value| writer.f64(*value));
         }
-        AnalysisResultPayload::Reliability { devices } => {
-            writer.u8(3);
-            writer.sequence(devices.len());
-            for device in devices {
-                writer.string(&device.device_id);
-                writer.f64(device.stress.average_gate_stress_v);
-                writer.f64(device.stress.average_drain_stress_v);
-                writer.f64(device.stress.average_temperature_k);
-                writer.f64(device.stress.duration_s);
-                writer.sequence(device.checkpoints.len());
-                for checkpoint in &device.checkpoints {
-                    writer.f64(checkpoint.years);
-                    let shift = &checkpoint.shift;
-                    writer.f64(shift.threshold_voltage_shift_v);
-                    writer.f64(shift.mobility_shift);
-                    writer.f64(shift.drain_source_resistance_shift);
-                }
-            }
-        }
         AnalysisResultPayload::Soa {
             source_history,
             evaluations,
@@ -1261,19 +1242,6 @@ fn encode_result_payload(
         // is: no build before this one could write a sensitivity study, so
         // there is no older encoding of one to replay. The frozen
         // `Sensitivity` arm keeps tag 1 and is untouched.
-        AnalysisResultPayload::ReliabilityMission { response } => {
-            writer.u8(18);
-            let identity = response
-                .retained_identity_with_abort(
-                    &rspice_core::ResourceLimits::default(),
-                    &rspice_core::NoAbort,
-                )
-                .unwrap_or_else(|error| format!("invalid reliability: {error}"));
-            writer.string(&identity);
-            writer.retained_bytes = writer
-                .retained_bytes
-                .saturating_add(AnalysisResultPayload::reliability_response_bytes(response) as u64);
-        }
         AnalysisResultPayload::Qpnoise { response } => {
             writer.u8(17);
             writer.string(&response.metadata.retained_identity);
@@ -1937,10 +1905,6 @@ fn encode_family_metadata(
                 }
             }
         }
-        AnalysisResultFamilyMetadata::Reliability { years } => {
-            writer.u8(3);
-            writer.f64_slice(years);
-        }
         AnalysisResultFamilyMetadata::Optimization {
             iterations,
             best_cost,
@@ -2154,7 +2118,6 @@ const fn analysis_type_tag(analysis_type: AnalysisType) -> u8 {
         AnalysisType::MonteCarlo => 14,
         AnalysisType::Parametric => 15,
         AnalysisType::Corner => 16,
-        AnalysisType::Reliability => 17,
         AnalysisType::Optimization => 18,
         AnalysisType::Soa => 19,
         AnalysisType::SParameter => 20,

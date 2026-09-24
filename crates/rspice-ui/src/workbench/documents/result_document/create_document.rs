@@ -745,7 +745,6 @@ const fn analysis_manifest_id(analysis: AnalysisType) -> &'static str {
         AnalysisType::Stb => "stb",
         AnalysisType::MonteCarlo => "mc",
         AnalysisType::Corner => "corner",
-        AnalysisType::Reliability => "reliability",
         AnalysisType::Optimization => "opt",
         AnalysisType::Soa => "soa",
         AnalysisType::SParameter => "sp",
@@ -1342,7 +1341,6 @@ fn pane_kind(art: ViewerArt) -> PaneKind {
         | ViewerArt::Margin
         | ViewerArt::DigitalEvents
         | ViewerArt::Soa
-        | ViewerArt::Reliability
         | ViewerArt::Optimization
         | ViewerArt::PoleZero
         | ViewerArt::Thermal

@@ -48,7 +48,6 @@ pub(crate) mod temp;
 pub(crate) mod envelope;
 pub(crate) mod fourier;
 pub(crate) mod optimization;
-pub(crate) mod reliability;
 pub(crate) mod soa;
 
 // Options
@@ -106,7 +105,6 @@ pub use temp::TempDialogState;
 pub use envelope::EnvelopeDialogState;
 pub use fourier::FourierDialogState;
 pub use optimization::OptimizationDialogState;
-pub use reliability::ReliabilityDialogState;
 pub use soa::SoaDialogState;
 
 // Re-exports - Framework

@@ -27,7 +27,6 @@ mod polar;
 mod population;
 mod pz;
 mod qpnoise;
-mod reliability;
 mod retained_memo;
 mod scatter;
 mod sensitivity;
@@ -945,8 +944,6 @@ pub enum ResultViewer {
     Events,
     /// Safe-operating-area rule evidence with per-rule stress history.
     Soa,
-    /// Ageing shift and lifetime checkpoints per stressed device.
-    Reliability,
     /// Optimizer cost convergence and the candidate history behind it.
     Optimization,
     /// Immutable task and retained-value inventory for the active dataset.
@@ -985,13 +982,12 @@ impl ResultViewer {
             ResultViewer::BoxViolin => "DIST",
             ResultViewer::Events => "EVENTS",
             ResultViewer::Soa => "SOA",
-            ResultViewer::Reliability => "AGEING",
             ResultViewer::Optimization => "OPT",
             ResultViewer::Manifest => "MANIFEST",
         }
     }
 
-    const PRIMARY: [ResultViewer; 25] = [
+    const PRIMARY: [ResultViewer; 24] = [
         ResultViewer::Waves,
         ResultViewer::DcSweep,
         ResultViewer::Bode,
@@ -1019,7 +1015,6 @@ impl ResultViewer {
         // sake of tabs that are usually dim.
         ResultViewer::Events,
         ResultViewer::Soa,
-        ResultViewer::Reliability,
         ResultViewer::Optimization,
     ];
     const DATASET_NATIVE: [ResultViewer; 1] = [ResultViewer::Manifest];
@@ -1060,7 +1055,6 @@ impl ResultViewer {
             ResultViewer::BoxViolin => "Distribution",
             ResultViewer::Events => "Events",
             ResultViewer::Soa => "SOA",
-            ResultViewer::Reliability => "Ageing",
             ResultViewer::Optimization => "Optimization",
             ResultViewer::Manifest => "Manifest",
         }
@@ -1100,7 +1094,6 @@ impl ResultViewer {
             ResultViewer::BoxViolin => "viewer-box-violin",
             ResultViewer::Events => "viewer-digital-events",
             ResultViewer::Soa => "viewer-soa",
-            ResultViewer::Reliability => "viewer-reliability",
             ResultViewer::Optimization => "viewer-optimization",
         })
     }
@@ -1134,7 +1127,6 @@ impl ResultViewer {
             "viewer-transfer-function" => ResultViewer::TransferFunction,
             "viewer-digital-events" => ResultViewer::Events,
             "viewer-soa" => ResultViewer::Soa,
-            "viewer-reliability" => ResultViewer::Reliability,
             "viewer-optimization" => ResultViewer::Optimization,
             _ => return None,
         })
@@ -1163,7 +1155,6 @@ impl ResultViewer {
             | ResultViewer::TransferFunction
             | ResultViewer::Specs
             | ResultViewer::Soa
-            | ResultViewer::Reliability
             | ResultViewer::Events
             | ResultViewer::Table => WorkbenchIcon::Grid,
             ResultViewer::Optimization => WorkbenchIcon::Results,
@@ -2101,17 +2092,6 @@ pub(crate) struct SoaRuleSelection {
     pub parameter: SoaParameterEvidence,
 }
 
-/// One ageing checkpoint picked out of the reliability table.
-///
-/// The checkpoint year is held as raw bits so the selection compares exactly
-/// against the retained value instead of through a float tolerance.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ReliabilitySelection {
-    pub analysis: AnalysisPresentationKey,
-    pub device_id: String,
-    pub checkpoint_year_bits: u64,
-}
-
 /// One optimizer candidate picked out of the iteration history.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OptimizationSelection {
@@ -2659,9 +2639,6 @@ pub struct ResultsState {
     /// table. Off by default: the table is the evidence, the trace is the
     /// follow-up question.
     pub(super) soa_stress_trace_open: bool,
-    /// Ageing checkpoint whose retained shift the inspector reports.
-    /// Transient.
-    pub(super) selected_reliability: Option<ReliabilitySelection>,
     /// Optimizer candidate whose retained cost and variables the inspector
     /// reports. Transient.
     pub(super) selected_optimization: Option<OptimizationSelection>,
@@ -3811,9 +3788,8 @@ impl ResultsState {
 
     /// Drop every pinned viewport this sheet owns.
     ///
-    /// A single-canvas sheet is not always a single *plot*: the ageing sheet
-    /// draws a degradation curve and a lifetime curve under ordinals 0 and 1.
-    /// A Fit that reset only ordinal 0 would leave half the sheet zoomed.
+    /// A sheet can own several plots. Reset every ordinal so Fit does not
+    /// leave any of its plots zoomed.
     pub(crate) fn reset_viewer_plot_views(&mut self, viewer: ResultViewer) {
         if let Some(context) = self.persistent_pane_context {
             let plot = PlotPresentationKey::Document(context.document_id, context.pane_id);
@@ -5052,7 +5028,6 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         ResultViewer::BoxViolin => box_violin::show(ui, &mut SheetContext::of(&mut app.state)),
         ResultViewer::Events => events::show(ui, &mut app.state),
         ResultViewer::Soa => soa::show(ui, &mut app.state),
-        ResultViewer::Reliability => reliability::show(ui, &mut app.state),
         ResultViewer::Optimization => optimization::show(ui, &mut app.state),
         ResultViewer::Manifest => manifest::show(ui, &mut app.state),
     }
@@ -5834,7 +5809,7 @@ fn export_menu(ui: &mut Ui, state: &mut AppState) {
     ui.menu_button("Export…", |ui| {
         // Not "waveform data": the export routes on the active sheet and then
         // on the retained payload, so it writes a spectrum here and SOA rules,
-        // ageing checkpoints, optimizer candidates or an event history there —
+        // SOA observations, optimizer candidates or an event history there —
         // none of them samples.
         if ui.button("Result data (CSV)…").clicked() {
             state.ui.export_csv_requested = true;
@@ -6302,17 +6277,6 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
                 )
             }
         }
-        ResultViewer::Reliability => {
-            if reliability::active_payload_is_valid(state) {
-                ViewerAvailability::available(
-                    "Retained ageing evidence is available for the active analysis",
-                )
-            } else {
-                ViewerAvailability::unavailable(
-                    "Requires the active analysis to contain a valid retained reliability payload",
-                )
-            }
-        }
         ResultViewer::Optimization => {
             if optimization::active_metadata_is_valid(state) {
                 ViewerAvailability::available(
@@ -6558,7 +6522,6 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ResultViewer::BoxViolin => box_violin::right_panel(ui, &mut SheetContext::of(state)),
         ResultViewer::Events => events::right_panel(ui, state),
         ResultViewer::Soa => soa::right_panel(ui, state),
-        ResultViewer::Reliability => reliability::right_panel(ui, state),
         ResultViewer::Optimization => optimization::right_panel(ui, state),
         ResultViewer::Manifest => manifest::right_panel(ui, state),
     }

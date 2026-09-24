@@ -1284,13 +1284,6 @@ fn quick_result_availability(
             analysis.result_payload.as_ref(),
             Some(AnalysisResultPayload::Soa { evaluations, .. }) if !evaluations.is_empty()
         ),
-        ResultViewer::Reliability => match &analysis.result_payload {
-            Some(AnalysisResultPayload::ReliabilityMission { response }) => {
-                !response.aged.is_empty()
-            }
-            Some(AnalysisResultPayload::Reliability { devices }) => !devices.is_empty(),
-            _ => false,
-        },
         ResultViewer::Optimization => matches!(
             analysis.family_metadata.as_ref(),
             Some(AnalysisResultFamilyMetadata::Optimization { iterations, .. })

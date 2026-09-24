@@ -968,7 +968,7 @@ fn verification_routes_are_the_exact_canonical_seven() {
             VerificationPage::Corners,
             VerificationPage::Tuning,
             VerificationPage::Optimization,
-            VerificationPage::Reliability,
+            VerificationPage::DeviceSafety,
             VerificationPage::Regression,
             VerificationPage::Drc,
         ]

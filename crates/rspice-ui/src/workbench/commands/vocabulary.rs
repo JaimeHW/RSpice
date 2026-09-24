@@ -850,9 +850,6 @@ impl Command {
                 "Open safe-operating-area viewer",
                 "Results",
             ),
-            Self::ResultViewer(crate::workbench::ResultViewer::Reliability) => {
-                spec("result-ageing", "Open ageing viewer", "Results")
-            }
             Self::ResultViewer(crate::workbench::ResultViewer::Optimization) => {
                 spec("result-optimization", "Open optimization viewer", "Results")
             }
@@ -871,8 +868,8 @@ impl Command {
             Self::VerificationPage(VerificationPage::Optimization) => {
                 spec("optimization", "Optimization", "Verify")
             }
-            Self::VerificationPage(VerificationPage::Reliability) => {
-                spec("reliability", "Reliability and SOA", "Verify")
+            Self::VerificationPage(VerificationPage::DeviceSafety) => {
+                spec("device-safety", "Safe operating area", "Verify")
             }
             Self::VerificationPage(VerificationPage::Regression) => {
                 spec("regression", "Regression plan", "Verify")
@@ -1330,13 +1327,12 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ResultViewer(crate::workbench::ResultViewer::BoxViolin),
     Command::ResultViewer(crate::workbench::ResultViewer::Events),
     Command::ResultViewer(crate::workbench::ResultViewer::Soa),
-    Command::ResultViewer(crate::workbench::ResultViewer::Reliability),
     Command::ResultViewer(crate::workbench::ResultViewer::Optimization),
     Command::ResultViewer(crate::workbench::ResultViewer::Manifest),
     Command::EditSpecifications,
     Command::VerificationPage(VerificationPage::Corners),
     Command::VerificationPage(VerificationPage::Optimization),
-    Command::VerificationPage(VerificationPage::Reliability),
+    Command::VerificationPage(VerificationPage::DeviceSafety),
     Command::VerificationPage(VerificationPage::Regression),
     Command::ModelsPage(ModelsPage::Symbols),
     Command::ModelsPage(ModelsPage::Corners),

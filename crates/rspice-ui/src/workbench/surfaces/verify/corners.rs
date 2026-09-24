@@ -1,4 +1,4 @@
-//! Corners, optimization, and reliability: verification beyond the nominal run.
+//! Corners, optimization and SOA: verification beyond the nominal run.
 //!
 //! Each of these panes reports evidence from runs other than the nominal one,
 //! and each states which run it came from. A corner without a completed run,
@@ -511,38 +511,27 @@ pub(super) fn optimization(ui: &mut Ui, app: &mut RSpiceApp) {
     action_receipt(ui, app);
 }
 
-pub(super) fn reliability(ui: &mut Ui, app: &mut RSpiceApp) {
-    card(ui, "Reliability execution", |ui| {
+pub(super) fn device_safety(ui: &mut Ui, app: &mut RSpiceApp) {
+    card(ui, "Safe operating area", |ui| {
         ui.horizontal_wrapped(|ui| {
-            if Button::new("Run preview plan").accent().show(ui).clicked() {
-                let result = request_analysis_run(
-                    app,
-                    &[
-                        crate::simulation::plan::AnalysisKind::Soa,
-                        crate::simulation::plan::AnalysisKind::Reliability,
-                    ],
-                );
+            if Button::new("Run SOA checks").accent().show(ui).clicked() {
+                let result =
+                    request_analysis_run(app, &[crate::simulation::plan::AnalysisKind::Soa]);
                 record_verification_action(
                     app,
                     result,
-                    "Electrical SOA and reliability preview analyses were dispatched through the active plan.",
+                    "SOA checks were dispatched through the active plan.",
                 );
             }
-            if Button::new("Edit mission profile").show(ui).clicked() {
-                let result = open_analysis_configuration(
-                    app,
-                    crate::simulation::plan::AnalysisKind::Reliability,
-                );
-                record_verification_action(
-                    app,
-                    result,
-                    "The typed reliability mission-profile configuration was opened.",
-                );
+            if Button::new("Edit SOA checks").show(ui).clicked() {
+                let result =
+                    open_analysis_configuration(app, crate::simulation::plan::AnalysisKind::Soa);
+                record_verification_action(app, result, "The SOA configuration was opened.");
             }
         });
         execution_card_note(
             ui,
-            "Electrical reliability evaluates operating stress and mission aging. Physical geometry checks remain owned by the Physical DRC flow.",
+            "SOA checks evaluate device operating stress against configured limits.",
         );
     });
 
@@ -643,7 +632,7 @@ pub(super) fn reliability(ui: &mut Ui, app: &mut RSpiceApp) {
         );
     }
     if let Some(device_id) = cross_probe_device {
-        let result = cross_probe_reliability_device(app, &device_id);
+        let result = cross_probe_soa_device(app, &device_id);
         record_verification_action(
             app,
             result,
@@ -651,115 +640,6 @@ pub(super) fn reliability(ui: &mut Ui, app: &mut RSpiceApp) {
         );
     }
 
-    let reliability_payload =
-        latest_validated_analysis(app, crate::state::AnalysisType::Reliability).and_then(
-            |analysis| match (&analysis.family_metadata, &analysis.result_payload) {
-                (
-                    Some(crate::state::AnalysisResultFamilyMetadata::Reliability { years }),
-                    Some(crate::state::AnalysisResultPayload::Reliability { devices }),
-                ) => Some((years.as_slice(), devices.as_slice())),
-                _ => None,
-            },
-        );
-    if let Some(response) = latest_validated_analysis(app, crate::state::AnalysisType::Reliability)
-        .and_then(|a| match &a.result_payload {
-            Some(crate::state::AnalysisResultPayload::ReliabilityMission { response }) => {
-                Some(response)
-            }
-            _ => None,
-        })
-    {
-        let headers = vec![
-            ("Phase / years".to_owned(), 0.2),
-            ("Device / parameter".to_owned(), 0.3),
-            ("Fresh".to_owned(), 0.25),
-            ("Aged".to_owned(), 0.25),
-        ];
-        table_section_header(
-            ui,
-            "Aging projection",
-            Some("engineering preview · calibrated mission evidence"),
-            None,
-        );
-        let rows: Vec<_> = response
-            .aged
-            .iter()
-            .flat_map(|p| p.parameters.iter().map(move |v| (p, v)))
-            .collect();
-        let _ = render_virtual_data_table(
-            ui,
-            "verify-reliability-mission",
-            &headers,
-            rows.len(),
-            false,
-            |index| {
-                let (p, v) = rows[index];
-                vec![
-                    TableCell::text(format!("{} / {}", p.phase_index + 1, p.years)),
-                    TableCell::text(format!("{} / {}", v.device, v.parameter)),
-                    TableCell::mono(format_scalar(v.fresh_value)),
-                    TableCell::mono(format_scalar(v.aged_value)),
-                ]
-            },
-        );
-        for p in &response.stress.checkpoints {
-            for d in &p.devices {
-                for c in &d.contributions {
-                    if let Some(value) = c.electromigration_lifetime_fraction {
-                        ui.label(format!(
-                            "{} / {}: {} years, {} consumed EM lifetime",
-                            d.device, c.model_id, p.years, value
-                        ));
-                    }
-                }
-            }
-        }
-    } else if let Some((years, devices)) = reliability_payload {
-        let mut headers = vec![
-            ("Device / metric".to_owned(), 0.24),
-            ("Run stress".to_owned(), 0.18),
-        ];
-        let checkpoint_width = 0.58 / years.len() as f32;
-        headers.extend(
-            years
-                .iter()
-                .map(|years| (format!("{} years", format_scalar(*years)), checkpoint_width)),
-        );
-        table_section_header(
-            ui,
-            "Aging projection",
-            Some("engineering preview · not sign-off eligible"),
-            None,
-        );
-        let _ = render_virtual_data_table(
-            ui,
-            "verify-reliability-device-results",
-            &headers,
-            devices.len().saturating_mul(7),
-            false,
-            |row_index| reliability_projection_row(&devices[row_index / 7], row_index % 7),
-        );
-    } else {
-        let headers = vec![
-            ("Device / metric".to_owned(), 0.45),
-            ("Run stress".to_owned(), 0.25),
-            ("Lifetime projection".to_owned(), 0.30),
-        ];
-        table_section_header(
-            ui,
-            "Aging projection",
-            Some("no validated active-dataset evidence"),
-            None,
-        );
-        let _ = render_virtual_data_table(
-            ui,
-            "verify-reliability-device-results",
-            &headers,
-            0,
-            false,
-            |_| Vec::new(),
-        );
-    }
     action_receipt(ui, app);
 }
 
@@ -768,62 +648,7 @@ pub(super) fn execution_card_note(ui: &mut Ui, note: &str) {
     ui.add(egui::Label::new(note).wrap());
 }
 
-pub(super) fn reliability_projection_row(
-    device: &crate::state::ReliabilityDeviceEvidence,
-    metric: usize,
-) -> Vec<TableCell> {
-    let dash = || TableCell::mono("\u{2014}");
-    let mut row = match metric {
-        0 => vec![
-            TableCell::mono(format!("{} · VGS stress", device.device_id)),
-            TableCell::mono(format_value(device.stress.average_gate_stress_v, "V")),
-        ],
-        1 => vec![
-            TableCell::mono(format!("{} · VDS stress", device.device_id)),
-            TableCell::mono(format_value(device.stress.average_drain_stress_v, "V")),
-        ],
-        2 => vec![
-            TableCell::mono(format!("{} · temperature", device.device_id)),
-            TableCell::mono(format_value(device.stress.average_temperature_k, "K")),
-        ],
-        3 => vec![
-            TableCell::mono(format!("{} · duration", device.device_id)),
-            TableCell::mono(format_value(device.stress.duration_s, "s")),
-        ],
-        4 => vec![
-            TableCell::mono(format!("{} · \u{0394}Vth", device.device_id)),
-            dash(),
-        ],
-        5 => vec![
-            TableCell::mono(format!("{} · \u{0394} mobility", device.device_id)),
-            dash(),
-        ],
-        _ => vec![
-            TableCell::mono(format!("{} · \u{0394}Rds", device.device_id)),
-            dash(),
-        ],
-    };
-    for checkpoint in &device.checkpoints {
-        row.push(match metric {
-            0..=3 => dash(),
-            4 => TableCell::mono(format_value(
-                checkpoint.shift.threshold_voltage_shift_v,
-                "V",
-            )),
-            5 => TableCell::mono(format!("{:+.4}%", checkpoint.shift.mobility_shift * 100.0)),
-            _ => TableCell::mono(format!(
-                "{:+.4}%",
-                checkpoint.shift.drain_source_resistance_shift * 100.0
-            )),
-        });
-    }
-    row
-}
-
-pub(super) fn cross_probe_reliability_device(
-    app: &mut RSpiceApp,
-    device_id: &str,
-) -> Result<(), String> {
+pub(super) fn cross_probe_soa_device(app: &mut RSpiceApp, device_id: &str) -> Result<(), String> {
     let component_id = app
         .state
         .schematic

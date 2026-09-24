@@ -295,8 +295,7 @@ pub(in crate::simulation) fn retain_plan_saved_outputs(
     if !matches!(
         analysis.result_payload,
         Some(
-            crate::state::AnalysisResultPayload::ReliabilityMission { .. }
-                | crate::state::AnalysisResultPayload::Qpss { .. }
+            crate::state::AnalysisResultPayload::Qpss { .. }
                 | crate::state::AnalysisResultPayload::Qpac { .. }
                 | crate::state::AnalysisResultPayload::Qpxf { .. }
                 | crate::state::AnalysisResultPayload::Qpnoise { .. }

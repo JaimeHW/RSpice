@@ -1304,49 +1304,8 @@ impl AnalysisResult {
         }
 
         match (&self.family_metadata, &self.result_payload) {
-            (
-                None,
-                Some(
-                    AnalysisResultPayload::Reliability { .. }
-                    | AnalysisResultPayload::ReliabilityMission { .. },
-                ),
-            ) => {
-                return Err("reliability payload is missing its retained lifetime axis".to_owned());
-            }
-            (
-                Some(AnalysisResultFamilyMetadata::Reliability { years }),
-                Some(AnalysisResultPayload::ReliabilityMission { response }),
-            ) => {
-                if *years != response.stress.request.target_years {
-                    return Err(
-                        "Reliability mission lifetime axis differs from the retained request"
-                            .into(),
-                    );
-                }
-            }
             (None, Some(AnalysisResultPayload::Soa { .. })) => {
                 return Err("SOA payload is missing its retained time axis".to_owned());
-            }
-            (
-                Some(AnalysisResultFamilyMetadata::Reliability { years }),
-                Some(AnalysisResultPayload::Reliability { devices }),
-            ) => {
-                for device in devices {
-                    if device.checkpoints.len() != years.len()
-                        || !device
-                            .checkpoints
-                            .iter()
-                            .zip(years)
-                            .all(|(checkpoint, years)| {
-                                same_retained_float(checkpoint.years, *years)
-                            })
-                    {
-                        return Err(format!(
-                            "reliability device '{}' checkpoints do not match the retained lifetime axis",
-                            device.device_id
-                        ));
-                    }
-                }
             }
             (
                 Some(AnalysisResultFamilyMetadata::Soa { time }),
@@ -1543,15 +1502,6 @@ impl AnalysisResult {
                         ));
                     }
                 }
-            }
-            (Some(AnalysisResultFamilyMetadata::Reliability { .. }), Some(payload))
-                if !matches!(
-                    payload,
-                    AnalysisResultPayload::Reliability { .. }
-                        | AnalysisResultPayload::ReliabilityMission { .. }
-                ) =>
-            {
-                return Err("reliability metadata has a mismatched retained payload".to_owned());
             }
             (Some(AnalysisResultFamilyMetadata::Soa { .. }), Some(payload))
                 if !matches!(payload, AnalysisResultPayload::Soa { .. }) =>

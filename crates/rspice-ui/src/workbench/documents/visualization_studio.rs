@@ -2827,11 +2827,7 @@ fn resolved_viewer_availability_for_binding(
         }
         // Dataset-native Results projections, which therefore can never be
         // resolved from a Visualization Studio document definition.
-        ResultViewer::Manifest
-        | ResultViewer::Events
-        | ResultViewer::Soa
-        | ResultViewer::Reliability
-        | ResultViewer::Optimization => false,
+        ResultViewer::Manifest | ResultViewer::Events | ResultViewer::Soa | ResultViewer::Optimization => false,
     };
     if !available {
         return Err(if binding_is_active {
@@ -2916,7 +2912,6 @@ const fn analysis_manifest_id(analysis: crate::state::AnalysisType) -> &'static 
         AnalysisType::Stb => "stb",
         AnalysisType::MonteCarlo => "mc",
         AnalysisType::Corner => "corner",
-        AnalysisType::Reliability => "reliability",
         AnalysisType::Optimization => "opt",
         AnalysisType::Soa => "soa",
         AnalysisType::SParameter => "sp",

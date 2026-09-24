@@ -136,7 +136,7 @@ impl ProjectSimulationResults {
     /// digests from the exact retained values during migration; no samples or
     /// analysis evidence are reconstructed. Schema v8 digests are verified
     /// with their original encoding before payload absence is migrated. Schema
-    /// v9 digests are likewise authenticated before Reliability/SOA evidence
+    /// v9 digests are likewise authenticated before SOA evidence
     /// absence is preserved. Schema-v10 digests are authenticated before TF
     /// evidence absence is preserved. Schema-v11 digests are authenticated
     /// with their required scalar output-noise encoding before optional output

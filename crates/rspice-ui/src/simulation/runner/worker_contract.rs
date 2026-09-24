@@ -13,8 +13,6 @@ mod analysis_spec;
 mod conversions;
 mod qpac;
 mod qpnoise;
-mod reliability;
-use reliability::validate_worker_reliability_result;
 mod qpxf;
 use qpnoise::validate_worker_qpnoise_result;
 use qpxf::validate_worker_qpxf_result;
@@ -69,7 +67,7 @@ use crate::simulation::config::{
     SensitivityConfig, SensitivitySweep, TransientAnalysisConfig,
 };
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, TfAccuracy, TfNormalization};
-use crate::simulation::reliability_engine::{ParamShift, ReliabilityResult, StressMetrics};
+
 use crate::simulation::results::{
     DcOpResult, DigitalEventPoint, EventNodeHistory, MonteCarloVariableResult, RealEventPoint,
     SimulationResult, TransferFunctionQuantity, TransferFunctionScalar, TransientEventHistory,
@@ -106,7 +104,8 @@ pub(crate) struct WorkerRequest {
 /// 40: AC DATA carries authored parameter columns or netlist table ownership.
 /// 41: Envelope can select multirate integration and its carrier/event controls.
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 41;
+/// 42: remove the unsupported Reliability analysis.
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 42;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -406,8 +405,6 @@ impl WorkerResponse {
                 validate_worker_qpss_result(&result).map_err(SimulationError::InvalidConfig)?;
                 validate_worker_qpac_result(&result).map_err(SimulationError::InvalidConfig)?;
                 validate_worker_qpxf_result(&result).map_err(SimulationError::InvalidConfig)?;
-                validate_worker_reliability_result(&result)
-                    .map_err(SimulationError::InvalidConfig)?;
                 validate_worker_qpnoise_result(&result).map_err(SimulationError::InvalidConfig)?;
                 if let WorkerSimulationResult::Pss {
                     operating_point,
@@ -1001,16 +998,6 @@ pub(crate) enum WorkerSimulationResult {
         /// answers it with a distribution, and the two disagree about one run.
         #[serde(default)]
         member_measurements: Vec<crate::state::FamilyMemberMeasurements>,
-    },
-    ReliabilityMission {
-        years: Vec<f64>,
-        waveforms: Vec<WorkerWaveform>,
-        response: rspice_core::engine::ReliabilityRunResult,
-    },
-    Reliability {
-        years: Vec<f64>,
-        waveforms: Vec<WorkerWaveform>,
-        device_results: Vec<WorkerReliabilityResult>,
     },
     Optimization {
         iterations: Vec<f64>,
@@ -1669,24 +1656,6 @@ impl WorkerSimulationResult {
                         total.saturating_add(bytes)
                     })
             }
-            WorkerSimulationResult::ReliabilityMission {
-                years,
-                waveforms,
-                response,
-            } => sum_payload_bytes([
-                f64_payload_bytes(years.len()),
-                waveforms_payload_bytes(waveforms),
-                crate::state::AnalysisResultPayload::reliability_response_bytes(response),
-            ]),
-            WorkerSimulationResult::Reliability {
-                years,
-                waveforms,
-                device_results,
-            } => sum_payload_bytes([
-                f64_payload_bytes(years.len()),
-                waveforms_payload_bytes(waveforms),
-                reliability_results_payload_bytes(device_results),
-            ]),
             WorkerSimulationResult::Optimization {
                 iterations,
                 waveforms,
@@ -1750,7 +1719,8 @@ impl WorkerSimulationResult {
 /// 33: retained HB results carry separate behavioral integral spectra.
 /// 34: QPSS results retain typed behavioral integral coordinates.
 /// 35: SOA reporting views retain the complete observation history.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 35;
+/// 36: remove Reliability result payloads.
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 36;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
@@ -2090,32 +2060,6 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                     .map(WorkerMonteCarloVariable::from)
                     .collect(),
                 member_measurements,
-            }),
-            SimulationResult::ReliabilityMission {
-                years,
-                waveforms,
-                response,
-            } => {
-                let result = Self::ReliabilityMission {
-                    years,
-                    waveforms: worker_waveforms(waveforms),
-                    response: Arc::unwrap_or_clone(response),
-                };
-                validate_worker_reliability_result(&result)
-                    .map_err(SimulationError::InvalidConfig)?;
-                Ok(result)
-            }
-            SimulationResult::Reliability {
-                years,
-                waveforms,
-                device_results,
-            } => Ok(Self::Reliability {
-                years,
-                waveforms: worker_waveforms(waveforms),
-                device_results: device_results
-                    .into_iter()
-                    .map(WorkerReliabilityResult::from)
-                    .collect(),
             }),
             SimulationResult::Optimization {
                 iterations,
@@ -2468,27 +2412,6 @@ impl From<WorkerSimulationResult> for SimulationResult {
                     .map(MonteCarloVariableResult::from)
                     .collect(),
                 member_measurements,
-            },
-            WorkerSimulationResult::ReliabilityMission {
-                years,
-                waveforms,
-                response,
-            } => Self::ReliabilityMission {
-                years,
-                waveforms: waveform_map(waveforms),
-                response: Arc::new(response),
-            },
-            WorkerSimulationResult::Reliability {
-                years,
-                waveforms,
-                device_results,
-            } => Self::Reliability {
-                years,
-                waveforms: waveform_map(waveforms),
-                device_results: device_results
-                    .into_iter()
-                    .map(ReliabilityResult::from)
-                    .collect(),
             },
             WorkerSimulationResult::Optimization {
                 iterations,

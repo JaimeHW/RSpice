@@ -1508,7 +1508,8 @@ const EXECUTION_IDENTITY_RESULTS_SCHEMA_VERSION: u32 = 6;
 const FAMILY_METADATA_RESULTS_SCHEMA_VERSION: u32 = 7;
 const CONTENT_DIGEST_RESULTS_SCHEMA_VERSION: u32 = 8;
 const TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION: u32 = 9;
-const RELIABILITY_SOA_RESULTS_SCHEMA_VERSION: u32 = 10;
+const SOA_RESULTS_SCHEMA_VERSION: u32 = 10;
+
 const TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION: u32 = 11;
 const OPERATING_POINT_RESULTS_SCHEMA_VERSION: u32 = 12;
 const WAVEFORM_UNIT_RESULTS_SCHEMA_VERSION: u32 = 13;
@@ -1578,7 +1579,6 @@ fn analysis_type_key(analysis_type: AnalysisType) -> &'static str {
         AnalysisType::MonteCarlo => "MonteCarlo",
         AnalysisType::Parametric => "Parametric",
         AnalysisType::Corner => "Corner",
-        AnalysisType::Reliability => "Reliability",
         AnalysisType::Optimization => "Optimization",
         AnalysisType::Soa => "Soa",
         AnalysisType::SParameter => "SParameter",
@@ -1617,7 +1617,6 @@ fn analysis_type_from_key(key: &str) -> Option<AnalysisType> {
         "MonteCarlo" | ".mc" => Some(AnalysisType::MonteCarlo),
         "Parametric" | ".step" => Some(AnalysisType::Parametric),
         "Corner" => Some(AnalysisType::Corner),
-        "Reliability" | ".reliability" => Some(AnalysisType::Reliability),
         "Optimization" | ".opt" => Some(AnalysisType::Optimization),
         "Soa" | ".soa" => Some(AnalysisType::Soa),
         "SParameter" | ".sp" => Some(AnalysisType::SParameter),

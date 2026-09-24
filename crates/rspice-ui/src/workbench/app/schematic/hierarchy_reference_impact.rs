@@ -295,7 +295,6 @@ const fn saved_output_kind_supports_analysis(
                 | AnalysisKind::Corner
                 | AnalysisKind::Envelope
                 | AnalysisKind::Fourier
-                | AnalysisKind::Reliability
                 | AnalysisKind::Optimization
                 | AnalysisKind::Soa
                 | AnalysisKind::Qpss

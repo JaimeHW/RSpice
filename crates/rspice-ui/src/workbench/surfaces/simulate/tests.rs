@@ -1030,9 +1030,7 @@ fn analysis_catalog_search_preserves_canonical_group_order() {
     assert!(
         all.iter()
             .position(|kind| *kind == AnalysisKind::MonteCarlo)
-            < all
-                .iter()
-                .position(|kind| *kind == AnalysisKind::Reliability)
+            < all.iter().position(|kind| *kind == AnalysisKind::Soa)
     );
     assert_eq!(
         filtered_catalog_kinds("periodic noise"),

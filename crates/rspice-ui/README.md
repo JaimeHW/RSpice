@@ -24,7 +24,7 @@ and the central engineering surface. Its seven canonical workspaces are:
   binary at build time from `assets/component_symbols/`.
 - **Simulate**: analysis setup forms.
 - **Results**: immutable run/dataset selection and precision result viewers.
-- **Verify**: checks, specifications, measurements, yield, and reliability
+- **Verify**: checks, specifications, measurements, yield, and SOA
   evidence owned by the project.
 - **Models**: model and library catalog, bindings, Verilog-A, and PDK setup.
 - **Netlist**: a syntax-highlighted SPICE netlist editor with completion
@@ -364,7 +364,7 @@ The CLI and Python execution of authored `.MC` cards honor START. Core callers c
 | `schematic/` | Schematic rendering: canvas view (pan/zoom/interaction), SVG symbol library, component palette, source labels, SVG export |
 | `state/` | Application state: schematic state (components, wires, nets, selection, snap, clipboard, undo history, symbol generation), simulation state (runs, waveforms, cross-probing), workspace, library browser, model library, property registry, PDK config |
 | `simulation/` | Simulation control: the controller state machine, `engine_bridge/` (the rspice-core adapter: parsing, per-analysis dispatch, result conversion, abort handling), netlist generation from the schematic, multi-run batching, optimizer, options translation, automation, netlist viewer |
-| `services/` | Backend services: `drc/` rule checking, `license.rs`, `safety/` SOA checks, `simulation_runner/` per-analysis launchers (AC, DC, transient, HB, PSS, noise, pole-zero, sensitivity, Monte Carlo, sweeps, optimization, reliability, distortion, transfer function, pnoise sidebands, PAC/PXF), `yield_manager.rs` |
+| `services/` | Backend services: `drc/` rule checking, `license.rs`, `safety/` SOA checks, `simulation_runner/` per-analysis launchers (AC, DC, transient, HB, PSS, noise, pole-zero, sensitivity, Monte Carlo, sweeps, optimization, distortion, transfer function, pnoise sidebands, PAC/PXF), `yield_manager.rs` |
 | `analysis/` | Result-viewer data and state: Bode, FFT, histogram, Nyquist, pole-zero, Smith chart, eye diagram, phase noise, HB tones, waveform calculator |
 | `io/` | File formats: schematic JSON, project files, SPICE `.lib` parsing, netlist export, waveform I/O, Cadence PSF (including binary) |
 | `properties/` | Property editing: engineering-notation value parsing/formatting, model browser, PWL editor, tabbed property dialog, property bridge |
@@ -382,7 +382,7 @@ The CLI and Python execution of authored `.MC` cards honor START. Core callers c
 The UI never calls `rspice-core` from a surface or widget. Execution enters
 through `src/simulation/runner/`: config-backed SPICE analyses are adapted by
 `src/simulation/engine_bridge/`, while specialized RF, periodic, statistical,
-reliability, optimization, and sweep analyses are adapted by
+optimization and sweep analyses are adapted by
 `src/services/simulation_runner/`. Both adapters consume the same
 preflight-sealed netlist and abort signal and convert engine results into the
 UI's waveform containers. Platform differences are set in `Cargo.toml`:

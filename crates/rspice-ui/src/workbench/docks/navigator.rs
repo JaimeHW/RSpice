@@ -3504,22 +3504,6 @@ fn retained_result_artifacts(
                 None,
                 ResultViewer::TransferFunction,
             ),
-            AnalysisResultPayload::ReliabilityMission { response } => (
-                "payload/reliability-mission",
-                "Reliability mission evidence",
-                ResultArtifactKind::Array,
-                response.aged.len(),
-                None,
-                ResultViewer::Reliability,
-            ),
-            AnalysisResultPayload::Reliability { devices } => (
-                "payload/reliability",
-                "Reliability device evidence",
-                ResultArtifactKind::Array,
-                devices.len(),
-                None,
-                ResultViewer::Reliability,
-            ),
             AnalysisResultPayload::Soa {
                 source_history: _,
                 evaluations,
@@ -3615,11 +3599,6 @@ fn retained_result_artifacts(
                     .map(|variable| variable.samples.len())
                     .sum(),
                 ResultViewer::Hist,
-            ),
-            AnalysisResultFamilyMetadata::Reliability { years } => (
-                "Reliability checkpoints",
-                years.len(),
-                ResultViewer::Reliability,
             ),
             AnalysisResultFamilyMetadata::Optimization { iterations, .. } => (
                 "Optimization iterations",
@@ -6221,7 +6200,7 @@ const fn verification_flow_label(page: VerificationPage) -> &'static str {
         VerificationPage::Corners => "Process corners",
         VerificationPage::Tuning => "Parameter tuning sandbox",
         VerificationPage::Optimization => "Optimization",
-        VerificationPage::Reliability => "Electrical reliability & SOA",
+        VerificationPage::DeviceSafety => "Electrical SOA",
         VerificationPage::Regression => "Regression · main",
         VerificationPage::Drc => "Physical DRC",
     }
@@ -6413,18 +6392,16 @@ fn verification_flow_presentation(
                 },
             }
         }
-        VerificationPage::Reliability => {
+        VerificationPage::DeviceSafety => {
             let soa_evidence =
                 active_run.and_then(|run| verified_analysis(run, crate::state::AnalysisType::Soa));
-            let aging_evidence = active_run
-                .and_then(|run| verified_analysis(run, crate::state::AnalysisType::Reliability));
-            let has_evidence = soa_evidence.is_some() || aging_evidence.is_some();
+            let has_evidence = soa_evidence.is_some();
             VerificationFlowPresentation {
                 label: verification_flow_label(page).to_owned(),
                 detail: if has_evidence {
                     "Execution receipt retained · dataset-owned payload unavailable".to_owned()
                 } else {
-                    "No source-attributed reliability or SOA evidence".to_owned()
+                    "No source-attributed SOA evidence".to_owned()
                 },
                 status: if has_evidence {
                     "verdict unavailable".to_owned()

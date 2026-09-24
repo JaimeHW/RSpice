@@ -1049,9 +1049,7 @@ fn initial_status_for_spec(
             source: "CORNER".to_string(),
             progress: 0.0,
         },
-        AnalysisSpec::Reliability { .. } | AnalysisSpec::Optimization { .. } => {
-            SimulationStatus::PostProcessing
-        }
+        AnalysisSpec::Optimization { .. } => SimulationStatus::PostProcessing,
         AnalysisSpec::Soa { stop_time, .. } | AnalysisSpec::Envelope { stop_time, .. } => {
             SimulationStatus::Transient {
                 time: 0.0,

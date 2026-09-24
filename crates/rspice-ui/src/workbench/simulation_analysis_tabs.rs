@@ -38,10 +38,10 @@ pub const TAB_TRANSFER_FUNCTION: usize = 17;
 pub const TAB_CORNER: usize = 18;
 pub const TAB_ENVELOPE: usize = 19;
 pub const TAB_FOURIER: usize = 20;
-pub const TAB_RELIABILITY: usize = 21;
-pub const TAB_OPTIMIZATION: usize = 22;
-pub const TAB_SOA: usize = 23;
-pub const TAB_DISTO: usize = 24;
+
+pub const TAB_OPTIMIZATION: usize = 21;
+pub const TAB_SOA: usize = 22;
+pub const TAB_DISTO: usize = 23;
 pub const ANALYSIS_COUNT: usize = TAB_DISTO + 1;
 
 // `SIMULATION_ANALYSIS_CATEGORIES` and `QUICK_RUN_ANALYSES` used to sit here:

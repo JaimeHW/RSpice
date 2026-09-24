@@ -656,7 +656,7 @@ impl ProjectSimulationResultsData {
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
             return self.validate();
         }
-        if source_schema == RELIABILITY_SOA_RESULTS_SCHEMA_VERSION {
+        if source_schema == SOA_RESULTS_SCHEMA_VERSION {
             for run in &mut self.runs {
                 validate_v10_result_digests(run)?;
                 synthesize_legacy_periodic_markers(run)?;
@@ -671,12 +671,11 @@ impl ProjectSimulationResultsData {
                 if let Some(analysis) = run.analyses.iter().find(|analysis| {
                     matches!(
                         analysis.result_payload.as_ref(),
-                        Some(AnalysisResultPayload::Reliability { .. })
-                            | Some(AnalysisResultPayload::Soa { .. })
+                        Some(AnalysisResultPayload::Soa { .. })
                     )
                 }) {
                     return Err(format!(
-                        "schema-v9 analysis {} contains Reliability/SOA evidence introduced by schema v10",
+                        "schema-v9 analysis {} contains SOA evidence introduced by schema v10",
                         analysis.id
                     ));
                 }

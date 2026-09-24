@@ -373,39 +373,6 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
         })
     );
 
-    let reliability = controller.convert_to_analysis_result_with_metadata_owned(
-        crate::simulation::SimulationResult::Reliability {
-            years: vec![1.0, 5.0, 10.0],
-            waveforms: empty_waveforms(),
-            device_results: vec![crate::simulation::ReliabilityResult {
-                device_id: "M1".to_owned(),
-                stress: crate::simulation::StressMetrics {
-                    avg_vgs_stress: 1.2,
-                    avg_vds_stress: 1.8,
-                    avg_temp: 358.15,
-                    duration: 3_600.0,
-                },
-                shifts: std::collections::HashMap::from([
-                    ("1y".to_owned(), crate::simulation::ParamShift::default()),
-                    ("5y".to_owned(), crate::simulation::ParamShift::default()),
-                    ("10y".to_owned(), crate::simulation::ParamShift::default()),
-                ]),
-            }],
-        },
-        AnalysisType::Reliability,
-        "Reliability",
-    );
-    assert_eq!(
-        reliability.family_metadata,
-        Some(AnalysisResultFamilyMetadata::Reliability {
-            years: vec![1.0, 5.0, 10.0],
-        })
-    );
-    assert!(matches!(
-        reliability.result_payload,
-        Some(AnalysisResultPayload::Reliability { ref devices }) if devices.len() == 1
-    ));
-
     let optimization = controller.convert_to_analysis_result_with_metadata_owned(
         crate::simulation::SimulationResult::Optimization {
             best_objectives: Vec::new(),
@@ -668,26 +635,8 @@ fn dc_mismatch_evidence() -> crate::state::DcMismatchEvidence {
 }
 
 #[test]
-fn incomplete_reliability_and_soa_results_fail_closed_without_retained_payloads() {
+fn incomplete_soa_results_fail_closed_without_retained_payloads() {
     let controller = SimulationController::new();
-    let reliability = controller.convert_to_analysis_result_with_metadata_owned(
-        crate::simulation::SimulationResult::Reliability {
-            years: vec![1.0, 10.0],
-            waveforms: std::collections::HashMap::new(),
-            device_results: Vec::new(),
-        },
-        AnalysisType::Reliability,
-        "Reliability",
-    );
-    assert!(!reliability.success);
-    assert!(reliability.result_payload.is_none());
-    assert!(
-        reliability
-            .error_message
-            .as_deref()
-            .is_some_and(|message| message.contains("no device evidence"))
-    );
-
     let soa = controller.convert_to_analysis_result_with_metadata_owned(
         crate::simulation::SimulationResult::Soa {
             source_history: None,

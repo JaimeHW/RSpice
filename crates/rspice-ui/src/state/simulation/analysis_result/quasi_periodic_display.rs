@@ -6,9 +6,6 @@ use std::sync::Arc;
 
 impl AnalysisResultPayload {
     pub(crate) fn retained_display_basis(&self) -> Result<Option<Vec<WaveformData>>, String> {
-        if let Self::ReliabilityMission { response } = self {
-            return Self::reliability_display_traces(response).map(Some);
-        }
         let mut traces = match self {
             Self::Qpss { operating_point } => qpss::display_traces(operating_point)?,
             Self::Qpac { response } => Self::qpac_display_traces(response)?

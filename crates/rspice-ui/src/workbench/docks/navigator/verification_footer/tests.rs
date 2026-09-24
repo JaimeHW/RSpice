@@ -519,7 +519,7 @@ fn verification_navigation_exposes_the_operational_tuning_route() {
             "Process corners",
             "Parameter tuning sandbox",
             "Optimization",
-            "Electrical reliability & SOA",
+            "Electrical SOA",
             "Regression · main",
         ]
     );

@@ -69,46 +69,6 @@ pub(super) fn soa_analysis() -> AnalysisResult {
         })
 }
 
-pub(super) fn reliability_analysis() -> AnalysisResult {
-    use crate::state::{
-        AnalysisResultFamilyMetadata, ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence,
-        ReliabilityShiftEvidence, ReliabilityStressEvidence,
-    };
-    AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
-        .with_family_metadata(AnalysisResultFamilyMetadata::Reliability {
-            years: vec![1.0, 5.0],
-        })
-        .with_result_payload(AnalysisResultPayload::Reliability {
-            devices: vec![ReliabilityDeviceEvidence {
-                device_id: "M1".to_owned(),
-                stress: ReliabilityStressEvidence {
-                    average_gate_stress_v: 1.1,
-                    average_drain_stress_v: 1.8,
-                    average_temperature_k: 358.0,
-                    duration_s: 1.0e-6,
-                },
-                checkpoints: vec![
-                    ReliabilityCheckpointEvidence {
-                        years: 1.0,
-                        shift: ReliabilityShiftEvidence {
-                            threshold_voltage_shift_v: 1.0e-3,
-                            mobility_shift: -1.0e-4,
-                            drain_source_resistance_shift: 2.0e-3,
-                        },
-                    },
-                    ReliabilityCheckpointEvidence {
-                        years: 5.0,
-                        shift: ReliabilityShiftEvidence {
-                            threshold_voltage_shift_v: 4.0e-3,
-                            mobility_shift: -4.0e-4,
-                            drain_source_resistance_shift: 8.0e-3,
-                        },
-                    },
-                ],
-            }],
-        })
-}
-
 pub(super) fn optimization_analysis() -> AnalysisResult {
     use crate::state::AnalysisResultFamilyMetadata;
     AnalysisResult::new(1, AnalysisType::Optimization, "Optimization")
@@ -311,7 +271,6 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
             }),
         ResultViewer::Events => events_analysis(),
         ResultViewer::Soa => soa_analysis(),
-        ResultViewer::Reliability => reliability_analysis(),
         ResultViewer::Optimization => optimization_analysis(),
     };
 
