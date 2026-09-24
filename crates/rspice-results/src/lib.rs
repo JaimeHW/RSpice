@@ -2,6 +2,7 @@
 //!
 //! Presentation and execution use these contracts without owning their data.
 
+pub mod measurements;
 pub mod operating_point;
 pub mod report_document;
 pub mod stability;
