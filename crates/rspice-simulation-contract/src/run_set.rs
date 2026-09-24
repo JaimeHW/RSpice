@@ -2,7 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
+mod budgeting;
 mod state_contracts;
+
+pub use budgeting::{format_bytes, format_duration_ms, modelled_cost_ms, parse_bytes};
 
 pub use state_contracts::{
     ReferencePoint, RunSetForecast, RunSetReceipt, RunSetReceiptStatus, RunSetStatus,
