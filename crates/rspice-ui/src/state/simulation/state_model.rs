@@ -128,7 +128,7 @@ impl SimulationState {
         &self,
         project_revision: crate::product::ObjectRevision,
         allow_changed_revision: bool,
-    ) -> Option<crate::simulation::dialog::OpPreviousState> {
+    ) -> Option<crate::results::operating_point::OpPreviousState> {
         let analysis = self.retained_op_result(project_revision, allow_changed_revision)?;
         let provenance = analysis.provenance()?;
         let AnalysisResultPayload::OperatingPoint {
@@ -141,7 +141,7 @@ impl SimulationState {
         else {
             return None;
         };
-        Some(crate::simulation::dialog::OpPreviousState {
+        Some(crate::results::operating_point::OpPreviousState {
             source_content_digest: *source_content_digest,
             producer_snapshot_digest: provenance.prepared_snapshot_digest(),
             producer_result_digest: analysis.result_data_digest(),
