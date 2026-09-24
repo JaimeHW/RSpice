@@ -13,7 +13,7 @@ mod complex_functions;
 mod complex_ops;
 pub(crate) mod evaluator;
 pub(crate) mod functions;
-pub(crate) mod interpolation;
+pub(crate) use rspice_results::interpolation;
 pub(crate) mod parser;
 mod sample_projection;
 mod value;
