@@ -248,8 +248,11 @@ fn format_time(t: f64) -> String {
     }
 }
 
+fn default_period_text() -> String {
+    "1".to_owned()
+}
+
 #[cfg(test)]
-#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::{FourierConfig, FourierDialogState};
 
@@ -386,8 +389,4 @@ mod tests {
             .expect_err("NaN Fourier start time must be rejected");
         assert!(err.contains("finite"));
     }
-}
-
-fn default_period_text() -> String {
-    "1".to_owned()
 }

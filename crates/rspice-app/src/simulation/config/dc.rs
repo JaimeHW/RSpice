@@ -219,8 +219,41 @@ fn sweeps_an_independent_source(source: &str) -> bool {
         && name.starts_with(['V', 'v', 'I', 'i'])
 }
 
+impl crate::services::simulation_runner::CornerBaseMode {
+    pub(crate) fn from_dc_config(config: &crate::simulation::config::DcSweepConfig) -> Self {
+        if let (Some(source2), Some(start2), Some(stop2), Some(step2)) =
+            (&config.source2, config.start2, config.stop2, config.step2)
+        {
+            Self::DcSweepNested {
+                source_name: config.source.clone(),
+                start: config.start,
+                stop: config.stop,
+                step: config.step,
+                source2: source2.clone(),
+                start2,
+                stop2,
+                step2,
+                modes: config.modes.clone(),
+            }
+        } else {
+            let mut modes = config.modes.clone();
+            if config.hysteresis {
+                modes.primary = crate::simulation::config::DcAxisMode::List {
+                    values: config.retrace_points(),
+                };
+            }
+            Self::DcSweep {
+                source_name: config.source.clone(),
+                start: config.start,
+                stop: config.stop,
+                step: config.step,
+                modes,
+            }
+        }
+    }
+}
+
 #[cfg(test)]
-#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
@@ -415,39 +448,5 @@ mod tests {
         one_way
             .validate()
             .expect("a one-way temperature sweep is unaffected");
-    }
-}
-
-impl crate::services::simulation_runner::CornerBaseMode {
-    pub(crate) fn from_dc_config(config: &crate::simulation::config::DcSweepConfig) -> Self {
-        if let (Some(source2), Some(start2), Some(stop2), Some(step2)) =
-            (&config.source2, config.start2, config.stop2, config.step2)
-        {
-            Self::DcSweepNested {
-                source_name: config.source.clone(),
-                start: config.start,
-                stop: config.stop,
-                step: config.step,
-                source2: source2.clone(),
-                start2,
-                stop2,
-                step2,
-                modes: config.modes.clone(),
-            }
-        } else {
-            let mut modes = config.modes.clone();
-            if config.hysteresis {
-                modes.primary = crate::simulation::config::DcAxisMode::List {
-                    values: config.retrace_points(),
-                };
-            }
-            Self::DcSweep {
-                source_name: config.source.clone(),
-                start: config.start,
-                stop: config.stop,
-                step: config.step,
-                modes,
-            }
-        }
     }
 }

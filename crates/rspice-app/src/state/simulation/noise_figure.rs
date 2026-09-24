@@ -69,8 +69,36 @@ impl PeriodicNoiseConversionEvidence {
     }
 }
 
+impl NoiseFigureEvidence {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.input_source.trim().is_empty()
+            || self.source_resistor.trim().is_empty()
+            || [
+                self.source_resistance_ohm,
+                self.source_temperature_kelvin,
+                self.reference_temperature_kelvin,
+            ]
+            .into_iter()
+            .any(|value| !value.is_finite() || value <= 0.0)
+        {
+            return Err("Noise figure has an invalid source reference".into());
+        }
+        if self.frequencies.is_empty()
+            || self.frequencies.len() != self.decibels.len()
+            || self
+                .frequencies
+                .iter()
+                .any(|value| !value.is_finite() || *value <= 0.0)
+            || self.frequencies.windows(2).any(|pair| pair[1] <= pair[0])
+            || self.decibels.iter().any(|value| !value.is_finite())
+        {
+            return Err("Noise figure has an invalid frequency or decibel series".into());
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
-#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
@@ -100,34 +128,5 @@ mod tests {
         invalid.input_sideband = 2;
         assert!(invalid.validate((1e3, 1e4)).is_err());
         assert!(valid.validate((1e4, 1e3)).is_err());
-    }
-}
-
-impl NoiseFigureEvidence {
-    pub fn validate(&self) -> Result<(), String> {
-        if self.input_source.trim().is_empty()
-            || self.source_resistor.trim().is_empty()
-            || [
-                self.source_resistance_ohm,
-                self.source_temperature_kelvin,
-                self.reference_temperature_kelvin,
-            ]
-            .into_iter()
-            .any(|value| !value.is_finite() || value <= 0.0)
-        {
-            return Err("Noise figure has an invalid source reference".into());
-        }
-        if self.frequencies.is_empty()
-            || self.frequencies.len() != self.decibels.len()
-            || self
-                .frequencies
-                .iter()
-                .any(|value| !value.is_finite() || *value <= 0.0)
-            || self.frequencies.windows(2).any(|pair| pair[1] <= pair[0])
-            || self.decibels.iter().any(|value| !value.is_finite())
-        {
-            return Err("Noise figure has an invalid frequency or decibel series".into());
-        }
-        Ok(())
     }
 }
