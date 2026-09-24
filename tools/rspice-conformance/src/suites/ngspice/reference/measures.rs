@@ -64,7 +64,8 @@ enum MeasureKind {
     /// is the physics and the phase is not: a ring started from its own
     /// metastable operating point grows out of roundoff, so two builds of
     /// the same reference simulator disagree on where the waveform is at a
-    /// given time while agreeing on how fast it runs. Fewer than two
+    /// given time. The measurement window must exclude startup and the
+    /// period itself must be stable under timestep refinement. Fewer than two
     /// crossings is a failure rather than a skip, so a stuck node cannot
     /// pass by never oscillating.
     Period {

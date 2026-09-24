@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "ngspice_csnumprec": 17,
+  "runs": [
+    {
+      "line": 67,
+      "dataset": "tran1",
+      "probes": [
+        "v(18)",
+        "v(6)",
+        "i(vdd)"
+      ]
+    }
+  ],
+  "characterization": {
+    "reason": "The unforced 5 ns ring starts from a metastable DC equilibrium. Its startup period and peak vary under ngspice timestep refinement; Xyce can remain at DC. Preserve finite complete original execution without claiming a unique startup waveform.",
+    "qualification_case": "various/ro_17_4_startup.cir"
+  }
+}

@@ -1,7 +1,9 @@
 //! Capture the original ordered script through ngspice's own interpreter.
 
 use super::*;
-use crate::suites::execution::control::{ControlContract, ControlOracle, ControlRunReference};
+use crate::suites::execution::control::{
+    ControlContract, ControlOracle, ControlRunReference, declarative_run_kind,
+};
 
 const MARKER: &str = "RSPICE_CONTROL_CAPTURE";
 
@@ -155,6 +157,7 @@ fn instrument(source: &str) -> Result<String, String> {
                     | "op"
                     | "ac"
                     | "tran"
+                    | "run"
                     | "quit"
                     | "break"
                     | "continue"
@@ -188,8 +191,13 @@ fn instrument(source: &str) -> Result<String, String> {
         }
         output.push_str(line);
         output.push('\n');
-        if in_control && matches!(command.as_str(), "op" | "ac" | "tran") {
-            writeln!(output, "echo {MARKER} {} {command}\nwrite", index + 1).unwrap();
+        if in_control && matches!(command.as_str(), "op" | "ac" | "tran" | "run") {
+            let kind = if command == "run" {
+                declarative_run_kind(source)?
+            } else {
+                &command
+            };
+            writeln!(output, "echo {MARKER} {} {kind}\nwrite", index + 1).unwrap();
         }
     }
     if in_control {

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "ngspice_csnumprec": 17,
+  "runs": [
+    {
+      "line": 68,
+      "dataset": "tran1",
+      "probes": [
+        "v(18)",
+        "v(6)",
+        "i(vdd)"
+      ]
+    }
+  ]
+}

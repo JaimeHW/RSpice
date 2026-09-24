@@ -72,6 +72,29 @@ the authored expressions, circuit, model, convergence tolerances, or comparison
 budgets. Binary raw output avoids text rounding. Old promoted `.oracle.out`
 artifacts remain separate from the ordered-run references.
 
+`run` is captured when the deck declares exactly one OP, AC, or transient
+analysis. A transient control case may use `!measures` with its gates sidecar.
+Multiple-analysis `run` and multi-occurrence measure sidecars require distinct
+reference identities and currently fail explicitly.
+
+An unforced oscillator starting at a metastable DC operating point has no
+specified startup disturbance. The original `various/ro_17_4.cir` therefore
+retains its full 5 ns execution and native reference as **characterization**,
+with `oracle_compared=false`. Its contract states the reason and names a
+required numerical companion. Finite complete output, run identity, final
+time, declared probes, and presentation resolution are still checked. The old
+startup thresholds remain verbatim in `.startup-characterization.tsv`; they
+are historical diagnostics, not a passing numerical gate.
+
+`ro_17_4_startup.cir` preserves every original device, model and control command,
+adds `.ic v(18)=1`, and runs 30 ns with a 20 ps maximum step. It compares the first
+startup crossings and settled period/rail amplitude over 20–30 ns against a
+separate native ngspice reference. Period and rail tolerances are unchanged;
+startup crossings allow one maximum timestep. No solver startup perturbation
+is inserted. The source relation and distinct coverage counts are regression
+checked. Xyce 7.10 supports explicit initial conditions too, but substitutes
+BSIM4 4.6.1 for this deck's 4.5.0, so it is not this case's numerical oracle.
+
 ## Corpora
 
 Deck corpora are vendored at the workspace root, not inside this crate:

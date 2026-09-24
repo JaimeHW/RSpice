@@ -21,6 +21,18 @@ pub(super) struct ControlContract {
     /// Reference interpreter precision; 17 retains binary64 scalar arguments.
     pub ngspice_csnumprec: u8,
     pub runs: Vec<ControlRunContract>,
+    /// A recorded trajectory without a reproducible numerical startup target.
+    /// Such runs count only as execution coverage, never as oracle comparisons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub characterization: Option<ControlCharacterization>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ControlCharacterization {
+    pub reason: String,
+    /// Corpus-relative companion with explicitly defined numerical conditions.
+    pub qualification_case: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -66,13 +78,16 @@ impl ControlContract {
         let lines: Vec<_> = source.lines().collect();
         let mut names = BTreeSet::new();
         for run in &contract.runs {
-            let command = run
+            let mut command = run
                 .line
                 .checked_sub(1)
                 .and_then(|line| lines.get(line))
                 .and_then(|line| line.split_whitespace().next())
                 .unwrap_or_default()
                 .to_ascii_lowercase();
+            if command == "run" {
+                command = declarative_run_kind(source)?.to_string();
+            }
             if !matches!(command.as_str(), "op" | "ac" | "tran")
                 || !run.dataset.strip_prefix(&command).is_some_and(|ordinal| {
                     ordinal.parse::<usize>().is_ok_and(|ordinal| ordinal > 0)
@@ -96,6 +111,18 @@ impl ControlContract {
                 ));
             }
         }
+        if let Some(characterization) = &contract.characterization {
+            if characterization.reason.trim().is_empty()
+                || characterization.qualification_case.is_empty()
+                || Path::new(&characterization.qualification_case)
+                    .components()
+                    .any(|part| !matches!(part, std::path::Component::Normal(_)))
+                || contract.runs.len() != 1
+                || !contract.runs[0].dataset.starts_with("tran")
+            {
+                return Err("characterization requires a reason, a corpus-relative qualification case and one transient run".into());
+            }
+        }
         Ok(contract)
     }
 
@@ -107,6 +134,28 @@ impl ControlContract {
         )
         .to_hex()
         .to_string()
+    }
+}
+
+/// The capture format currently records one plot per command occurrence.
+/// Refuse multi-analysis RUN rather than capturing only its final plot.
+pub(super) fn declarative_run_kind(source: &str) -> Result<&'static str, String> {
+    let program = ControlProgram::parse_deck_with_abort(
+        source,
+        ControlLimits::default(),
+        &rspice_core::NoAbort,
+    )
+    .map_err(|error| error.to_string())?;
+    let netlist =
+        Netlist::parse(program.declarative_source()).map_err(|error| error.to_string())?;
+    match netlist.analyses.as_slice() {
+        [AnalysisCommand::Op] => Ok("op"),
+        [AnalysisCommand::Ac { .. }] => Ok("ac"),
+        [AnalysisCommand::Tran { .. }] => Ok("tran"),
+        _ => Err(
+            "ordered RUN capture requires exactly one declarative OP, AC or transient analysis"
+                .into(),
+        ),
     }
 }
 
@@ -193,12 +242,35 @@ impl ExecutionRunner {
         let mut compared = false;
         let execution = (|| -> Result<(), ExecutionOutcome> {
             let mismatch = |diagnostic| ExecutionOutcome::ReferenceMismatch { diagnostic };
-            if self.is_measures(key) || path.with_extension("gates.tsv").exists() {
+            let measures = self.is_measures(key);
+            if measures != path.with_extension("gates.tsv").is_file() {
                 return Err(mismatch(
-                    "ordered control measure sidecars require a per-run measure contract".into(),
+                    "ordered control !measures and its gates sidecar must agree".into(),
                 ));
             }
             let contract = ControlContract::load(path, source).map_err(mismatch)?;
+            if let Some(characterization) = &contract.characterization {
+                let companion = &characterization.qualification_case;
+                if measures
+                    || companion == key
+                    || !self.is_control(companion)
+                    || !self.is_measures(companion)
+                    || self.contract_for(companion) != ExecutionContract::Executes
+                    || !self.root.join(companion).is_file()
+                    || !self
+                        .root
+                        .join(companion)
+                        .with_extension("gates.tsv")
+                        .is_file()
+                {
+                    return Err(mismatch("characterization must name a separate executing control case with numerical measure gates".into()));
+                }
+            }
+            if measures
+                && (contract.runs.len() != 1 || !contract.runs[0].dataset.starts_with("tran"))
+            {
+                return Err(mismatch("ordered measure sidecars require exactly one transient run; multiple runs need distinct measure identities".into()));
+            }
             let reference = std::fs::read_to_string(path.with_extension("control.oracle.json"))
                 .map_err(|error| mismatch(format!("control oracle: {error}")))?;
             let oracle: ControlOracle = serde_json::from_str(&reference)
@@ -328,15 +400,42 @@ impl ExecutionRunner {
                                             "{label}: transient interval is incomplete"
                                         )));
                                     }
-                                    runner.compare_transient_reference(
-                                        path,
-                                        circuit.netlist(),
-                                        result,
-                                    )
+                                    if contract.characterization.is_some() {
+                                        for probe in &expected.probes {
+                                            let probe = probe.to_ascii_lowercase();
+                                            let column = if let Some(name) = probe
+                                                .strip_prefix("v(")
+                                                .and_then(|name| name.strip_suffix(')'))
+                                            {
+                                                result.node_names.iter().position(|node| node.eq_ignore_ascii_case(name))
+                                                    .and_then(|index| result.voltages.get(index))
+                                            } else if let Some(name) = probe
+                                                .strip_prefix("i(")
+                                                .and_then(|name| name.strip_suffix(')'))
+                                            {
+                                                result.branch_names.iter().position(|branch| branch.eq_ignore_ascii_case(name))
+                                                    .and_then(|index| result.branch_currents.get(index))
+                                            } else {
+                                                None
+                                            };
+                                            if column.is_none_or(|values| values.len() != result.time.len()) {
+                                                return Err(mismatch(format!("{label}: incomplete characterization probe {probe}")));
+                                            }
+                                        }
+                                        Ok(Vec::new())
+                                    } else if measures {
+                                        runner.compare_transient_measures(path, result)
+                                    } else {
+                                        runner.compare_transient_reference(
+                                            path,
+                                            circuit.netlist(),
+                                            result,
+                                        )
+                                    }
                                 }
                             }
                             .map_err(mismatch)?;
-                            compared = true;
+                            compared |= contract.characterization.is_none();
                             if !comparison.is_empty() {
                                 return Err(mismatch(format!(
                                     "{label}: {:?}",
@@ -419,7 +518,7 @@ mod tests {
         let root = temporary.path().join("paranoia");
         std::fs::create_dir(&root).unwrap();
         let path = root.join("ordered.sp");
-        let source = "ordered divider\nV1 in 0 0\nR1 in out 1k\nR2 out 0 1k\n.control\nforeach level 1 2\nalter V1 $level\nop\nend\nplot op1.out op2.out\n.endc\n.end\n";
+        let source = "ordered divider\nV1 in 0 0\nR1 in out 1k\nR2 out 0 1k\n.op\n.control\nforeach level 1 2\nalter V1 $level\nrun\nend\nplot op1.out op2.out\n.endc\n.end\n";
         std::fs::write(&path, source).unwrap();
         std::fs::write(
             root.join("execution-manifest.tsv"),
@@ -429,9 +528,10 @@ mod tests {
         let contract = ControlContract {
             version: 1,
             ngspice_csnumprec: 17,
+            characterization: None,
             runs: (1..=2)
                 .map(|ordinal| ControlRunContract {
-                    line: 8,
+                    line: 9,
                     dataset: format!("op{ordinal}"),
                     probes: vec!["v(out)".into()],
                 })
@@ -450,7 +550,7 @@ mod tests {
             contract_fingerprint: contract.fingerprint(),
             runs: (1..=2)
                 .map(|ordinal| ControlRunReference {
-                    line: 8,
+                    line: 9,
                     dataset: format!("op{ordinal}"),
                     axis: "op".into(),
                     coordinates: vec![0.0],
@@ -504,6 +604,49 @@ mod tests {
     #[test]
     fn original_memristor_control_compares_all_three_frequency_runs() {
         original_script("memristor/memristor.sp", 3);
+    }
+
+    #[test]
+    fn ring_explicit_startup_and_settled_cycles_meet_measure_gates() {
+        original_script("various/ro_17_4_startup.cir", 1);
+    }
+
+    #[test]
+    fn original_ring_is_complete_execution_without_numerical_credit() {
+        let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests");
+        let mut runner = ExecutionRunner::new(
+            ExecutionCorpus::Paranoia,
+            &tests,
+            ExecutionConfig::default(),
+        );
+        let result = runner.run_deck("various/ro_17_4.cir");
+        assert!(result.passed && !result.oracle_compared, "{result:?}");
+        assert_eq!(result.analyses.len(), 1);
+        runner.manifest.remove("various/ro_17_4_startup.cir");
+        let missing = runner.run_deck("various/ro_17_4.cir");
+        assert!(
+            matches!(missing.outcome, ExecutionOutcome::ReferenceMismatch { .. }),
+            "{missing:?}"
+        );
+        assert!(missing.analyses.is_empty());
+    }
+
+    #[test]
+    fn ring_qualification_preserves_the_original_circuit_and_model() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/paranoia/various");
+        let original = std::fs::read_to_string(root.join("ro_17_4.cir"))
+            .unwrap()
+            .replace("\r\n", "\n");
+        let startup = std::fs::read_to_string(root.join("ro_17_4_startup.cir"))
+            .unwrap()
+            .replace("\r\n", "\n");
+        assert_eq!(
+            startup,
+            original.replace(".tran .1ns 5n", ".ic v(18)=1\n.tran .1ns 30n 0 20p"),
+        );
+        assert!(
+            declarative_run_kind(&original.replace(".tran .1ns 5n", ".op\n.tran .1ns 5n")).is_err()
+        );
     }
 
     fn original_script(key: &str, count: usize) {
