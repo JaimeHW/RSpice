@@ -1598,7 +1598,6 @@ fn budgeted_lines(source: &str) -> usize {
 /// is held exact by its own `assert_eq!`. A ceiling equal to its measurement
 /// is the state this file wants; only the ones above it were doing nothing.
 const OVERSIZED_FILES: &[(&str, usize)] = &[
-    ("simulation/execution/snapshot.rs", 3_047),
     ("state/model_library/manager.rs", 3_847),
     ("state/pdk_config/technology_package.rs", 4_598),
     // 2026-09-05, +9 (3,455 -> 3,464): the `stimulus_library` project field,
