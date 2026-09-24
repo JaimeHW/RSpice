@@ -82,9 +82,9 @@ pub enum AnalysisResultFamilyMetadata {
         best_cost: f64,
         best_variables: BTreeMap<String, f64>,
         #[serde(default)]
-        best_objectives: Vec<crate::results::optimization::OptimizationObjectiveObservation>,
+        best_objectives: Vec<rspice_results::optimization::OptimizationObjectiveObservation>,
         #[serde(default)]
-        best_constraints: Vec<crate::results::optimization::OptimizationConstraintObservation>,
+        best_constraints: Vec<rspice_results::optimization::OptimizationConstraintObservation>,
         converged: bool,
     },
     Soa {
@@ -271,11 +271,11 @@ impl AnalysisResultFamilyMetadata {
                 best_constraints,
                 converged,
             } => {
-                crate::results::optimization::validate_optimization_objectives(
+                rspice_results::optimization::validate_optimization_objectives(
                     best_objectives,
                     *best_cost,
                 )?;
-                crate::results::optimization::validate_optimization_constraint_result(
+                rspice_results::optimization::validate_optimization_constraint_result(
                     best_constraints,
                     *converged,
                 )?;

@@ -223,7 +223,7 @@ impl OptimizationRunConfig {
 
     pub(super) fn validate(&self) -> Result<(), String> {
         self.search.validate()?;
-        crate::results::optimization::validate_requested_unit(&self.objective_unit)?;
+        rspice_results::optimization::validate_requested_unit(&self.objective_unit)?;
         if self.variables.is_empty() {
             return Err("Optimization requires at least one variable".to_string());
         }

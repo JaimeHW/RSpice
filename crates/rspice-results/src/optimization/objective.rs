@@ -119,6 +119,6 @@ fn optimization_units_keep_zero_cost_evidence_valid() {
         value: 0.0,
         contribution,
     };
-    validate_optimization_objectives(&[observation.clone()], -0.0).unwrap();
+    validate_optimization_objectives(std::slice::from_ref(&observation), -0.0).unwrap();
     assert!(validate_optimization_objectives(&[observation], f64::from_bits(1)).is_err());
 }

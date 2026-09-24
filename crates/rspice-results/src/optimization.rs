@@ -16,12 +16,12 @@ pub use objective::{
 };
 
 /// Blank retains the original measurement scale.
-pub(crate) fn validate_requested_unit(unit: &str) -> Result<(), String> {
+pub fn validate_requested_unit(unit: &str) -> Result<(), String> {
     if unit.chars().any(char::is_control) {
         return Err("Optimization units must not contain control characters".into());
     }
     if !unit.trim().is_empty() {
-        rspice_core::analysis::MeasurementUnit::known(unit)?;
+        rspice_units::MeasurementUnit::known(unit)?;
     }
     Ok(())
 }

@@ -8,6 +8,7 @@ pub mod fft;
 pub mod interpolation;
 pub mod measurements;
 pub mod operating_point;
+pub mod optimization;
 pub mod report_document;
 pub mod sampling;
 pub mod stability;

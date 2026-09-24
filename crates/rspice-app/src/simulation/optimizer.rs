@@ -19,8 +19,8 @@ mod domain;
 pub use domain::OptimizationVariableDomain;
 mod engine_core;
 mod lifecycle;
-// Internal transition alias; runtime callers move to the results owner in R04.
-pub use crate::results::optimization::{
+// Runtime callers use these exact result-owned types until R11 extracts execution.
+pub use rspice_results::optimization::{
     OptimizationConstraint, OptimizationConstraintObservation, OptimizationObjectiveGoal,
     OptimizationObjectiveObservation, OptimizationObjectiveTerm, OptimizationScore,
     validate_optimization_constraint_result, validate_optimization_constraints,

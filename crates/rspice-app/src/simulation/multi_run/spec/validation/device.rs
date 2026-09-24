@@ -26,7 +26,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             ..
         } => {
             search.validate()?;
-            crate::results::optimization::validate_requested_unit(objective_unit)?;
+            rspice_results::optimization::validate_requested_unit(objective_unit)?;
             if variables.is_empty() {
                 return Err("Optimization variables must not be empty".to_string());
             }
