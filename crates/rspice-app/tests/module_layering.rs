@@ -1631,7 +1631,7 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("workbench/documents/visualization_studio.rs", 4_695),
     ("workbench/documents/visualization_studio/dock.rs", 3_520),
     ("workbench/surfaces/pdk_technology_admin.rs", 5_115),
-    ("workbench/surfaces/report_authoring.rs", 4_294),
+    ("workbench/surfaces/report_authoring.rs", 3_909),
 ];
 
 #[test]
