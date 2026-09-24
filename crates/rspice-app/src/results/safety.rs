@@ -6,19 +6,21 @@
 pub(crate) mod soa_manager;
 
 // Existing app callers migrate to the portable owner as their modules move.
+#[cfg(test)]
+pub use rspice_results::safety::SoaCumulativeDurationEvidence;
 pub use rspice_results::safety::{
     SoADefinition, SoAEvaluation, SoALimit, SoAParameter, SoARuleVerdict, SoAViolation,
-    SoaCumulativeDurationEvidence, SoaCurrentEnvelope, SoaCurrentEnvelopeEvidence,
-    SoaDeratingSamples, SoaDurationEvidence, SoaDurationMode, SoaEnvelopeSamples, SoaPowerDerating,
-    SoaPowerDeratingEvidence, SoaPulseCurve, SoaPulseInterpolation, SoaThresholds, SoaVoltageBasis,
-    SoaVoltageInterpolation, ViolationSeverity, compare_soa_stress,
-    soa_derating_temperature_waveform_name, soa_duration_verdict, soa_envelope_limit_waveform_name,
-    soa_envelope_voltage_waveform_name, soa_power_limit_waveform_name, soa_stress_waveform_name,
+    SoaCurrentEnvelope, SoaCurrentEnvelopeEvidence, SoaDeratingSamples, SoaDurationEvidence,
+    SoaDurationMode, SoaEnvelopeSamples, SoaLimitTrace, SoaPowerDerating, SoaPowerDeratingEvidence,
+    SoaPulseCurve, SoaPulseInterpolation, SoaThresholds, SoaVoltageBasis, SoaVoltageInterpolation,
+    ViolationSeverity, compare_soa_stress, soa_derating_temperature_waveform_name,
+    soa_duration_verdict, soa_envelope_limit_waveform_name, soa_envelope_voltage_waveform_name,
+    soa_power_limit_waveform_name, soa_stress_waveform_name,
 };
 pub use soa_manager::SoAManager;
 
 mod duration;
-pub use duration::{SoaLimitTrace, qualify_soa_duration_with_mode};
+pub use duration::qualify_soa_duration_with_mode;
 
 #[cfg(test)]
 pub(crate) fn soa_current_envelope_test_fixture() -> SoaCurrentEnvelope {
