@@ -19,42 +19,7 @@ use crate::analysis::calculator::{ast::CalculatorExpr, parser::Parser};
 use crate::product::{AnalysisInstanceId, ObjectRevision, SavedOutputId};
 use crate::state::ProbeTarget;
 
-/// Plan-level rule for choosing which simulation quantities enter retained
-/// result datasets. This is intentionally separate from each output's save
-/// policy: the mode chooses the set, while `SavedOutputPolicy` controls how an
-/// item in that set is sampled and stored.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum OutputSelectionMode {
-    /// Use explicit saved outputs when present; otherwise synthesize a small,
-    /// deterministic set of useful top-level node voltages.
-    #[default]
-    Automatic,
-    /// Retain only outputs explicitly owned by the simulation plan.
-    ExplicitOnly,
-    /// Retain every result quantity produced by the selected engine analyses.
-    SaveAll,
-}
-
-impl OutputSelectionMode {
-    pub const ALL: [Self; 3] = [Self::Automatic, Self::ExplicitOnly, Self::SaveAll];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Automatic => "Automatic",
-            Self::ExplicitOnly => "Explicit only",
-            Self::SaveAll => "Save all",
-        }
-    }
-
-    pub const fn description(self) -> &'static str {
-        match self {
-            Self::Automatic => "Explicit outputs, or a bounded top-level fallback when none exist",
-            Self::ExplicitOnly => "Only plan outputs and schematic probes",
-            Self::SaveAll => "Every engine-produced quantity, subject to the storage ceiling",
-        }
-    }
-}
+pub use rspice_simulation_contract::output_policy::OutputSelectionMode;
 
 /// Authored authority for a saved output. Probe-owned rows remain in the plan
 /// so undo can restore their exact identity, but execution includes them only

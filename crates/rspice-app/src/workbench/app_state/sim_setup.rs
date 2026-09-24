@@ -20,50 +20,7 @@ use std::collections::HashSet;
 /// resolves to, so it is one type rather than two that have to agree.
 pub type ReferencePvtPoint = crate::simulation::run_set::ReferencePoint;
 
-/// Plan-owned result delivery and retention policy. These controls are part of
-/// the executable plan rather than project-global UI preferences: switching a
-/// plan switches the policy, and a prepared snapshot authenticates it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SimulationSavePolicy {
-    /// How the plan chooses the quantities retained in each result dataset.
-    #[serde(default)]
-    pub output_selection_mode: crate::state::OutputSelectionMode,
-    /// Maximum retained datasets produced by this plan. Golden baselines are
-    /// exempt and may make the limit temporarily unenforceable.
-    pub retained_dataset_limit: usize,
-    /// Hard preflight ceiling for the bounded saved-output forecast.
-    pub maximum_storage_bytes: u64,
-    /// Whether contracts requesting live delivery may open a live stream.
-    pub live_streaming_enabled: bool,
-    /// Whether accepted transient samples are retained as failure diagnostics
-    /// if the final solve fails or is interrupted.
-    pub retain_failure_diagnostics: bool,
-}
-
-impl Default for SimulationSavePolicy {
-    fn default() -> Self {
-        Self {
-            output_selection_mode: crate::state::OutputSelectionMode::Automatic,
-            retained_dataset_limit: 20,
-            maximum_storage_bytes: 10 * 1024 * 1024 * 1024,
-            live_streaming_enabled: true,
-            retain_failure_diagnostics: true,
-        }
-    }
-}
-
-impl SimulationSavePolicy {
-    pub fn validate(self) -> Result<(), String> {
-        if self.retained_dataset_limit == 0 || self.retained_dataset_limit > 10_000 {
-            return Err("Plan retention must be from 1 through 10,000 datasets.".to_owned());
-        }
-        if self.maximum_storage_bytes == 0 {
-            return Err("Plan saved-output storage budget must be greater than zero.".to_owned());
-        }
-        Ok(())
-    }
-}
+pub use rspice_simulation_contract::output_policy::SimulationSavePolicy;
 
 pub use rspice_simulation_contract::drafts::{AcSetup, DcSetup, TranSetup};
 
