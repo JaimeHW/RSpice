@@ -2329,7 +2329,7 @@ fn every_analysis_type_pins_the_coordinate_identity_it_exports() {
     );
     assert_eq!(
         distinct.len(),
-        34,
+        33,
         "AnalysisType has a variant this table does not pin; add its row and this count",
     );
 }
