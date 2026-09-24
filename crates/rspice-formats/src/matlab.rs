@@ -34,18 +34,18 @@ use std::fmt;
 
 /// *Level 5 MAT-File Header Format*: 116 bytes of descriptive text, 8 bytes
 /// of subsystem-data offset, 2 bytes of version and 2 of endian indicator.
-pub(super) const HEADER_BYTES: usize = 128;
+pub const HEADER_BYTES: usize = 128;
 
 /// The descriptive text field of that header.
-pub(super) const HEADER_TEXT_BYTES: usize = 116;
+pub const HEADER_TEXT_BYTES: usize = 116;
 
 /// The prefix MATLAB itself writes, and the signature RSpice's own importer
 /// identifies a `.mat` file by. A file that does not open with it is not one
 /// this product could read back.
-pub(super) const HEADER_SIGNATURE: &str = "MATLAB 5.0 MAT-file";
+pub const HEADER_SIGNATURE: &str = "MATLAB 5.0 MAT-file";
 
 /// `namelengthmax`: the longest variable name MATLAB accepts.
-pub(super) const MAX_NAME_CHARS: usize = 63;
+pub const MAX_NAME_CHARS: usize = 63;
 
 // *Data Types*. Only the five this layout uses are named.
 const MI_INT8: u32 = 1;
@@ -63,7 +63,7 @@ const ALIGNMENT: usize = 8;
 
 /// One variable: a column of doubles under a MATLAB name.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct MatVariable {
+pub struct MatVariable {
     pub name: String,
     pub real: Vec<f64>,
     /// `Some` makes the array complex. It must be exactly as long as `real`.
@@ -75,7 +75,7 @@ pub(super) struct MatVariable {
 /// Each one is a file MATLAB would either reject or silently misread, which
 /// is worse: a duplicate name loads as one variable, not two.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum MatWriteError {
+pub enum MatWriteError {
     /// The header text does not begin with [`HEADER_SIGNATURE`].
     HeaderSignature,
     /// The header text is longer than the field that holds it.
@@ -136,7 +136,7 @@ impl fmt::Display for MatWriteError {
 /// Whether `name` is a name MATLAB will accept back.
 ///
 /// Length is checked separately so the refusal can say which rule was broken.
-pub(super) fn is_matlab_identifier(name: &str) -> bool {
+pub fn is_matlab_identifier(name: &str) -> bool {
     let mut characters = name.chars();
     characters
         .next()
@@ -145,7 +145,7 @@ pub(super) fn is_matlab_identifier(name: &str) -> bool {
 }
 
 /// Serialize a Level 5 MAT-file.
-pub(super) fn write_mat_v5(
+pub fn write_mat_v5(
     header_text: &str,
     variables: &[MatVariable],
 ) -> Result<Vec<u8>, MatWriteError> {

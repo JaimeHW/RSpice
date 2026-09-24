@@ -34,7 +34,7 @@
 //! confirmation, and into the header's 116-byte descriptive text, truncated
 //! there with an ellipsis when it does not fit and said to be.
 
-mod writer;
+use rspice_formats::matlab as writer;
 
 use std::collections::HashSet;
 

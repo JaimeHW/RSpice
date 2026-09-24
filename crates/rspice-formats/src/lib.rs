@@ -1,5 +1,6 @@
 //! Portable engineering-data codecs.
 
+pub mod matlab;
 pub mod waveform_io;
 
 pub use waveform_io::{
