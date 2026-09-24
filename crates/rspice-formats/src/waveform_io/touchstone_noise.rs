@@ -261,7 +261,7 @@ pub(super) fn append_noise_signals(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::waveform_io::{WaveformFormat, WaveformWriter, read_touchstone_bytes};
+    use crate::waveform_io::{WaveformFormat, WaveformWriter, read_touchstone_bytes};
 
     fn fixture(version: u32, reference: &str, noise: &str) -> String {
         let network = "1 0.1 0 0.5 0 0.2 0 0.1 0\n3 0.2 0 0.6 0 0.2 0 0.2 0\n";

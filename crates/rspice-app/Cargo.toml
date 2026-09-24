@@ -51,6 +51,7 @@ rspice-app-types.workspace = true
 rspice-results.workspace = true
 rspice-hardcopy-contract.workspace = true
 rspice-model-library.workspace = true
+rspice-formats.workspace = true
 
 # Verilog-A compiler (pure Rust, works on all platforms)
 rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }

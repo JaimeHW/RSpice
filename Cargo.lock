@@ -5254,6 +5254,7 @@ dependencies = [
  "rspice-cloud-client",
  "rspice-core",
  "rspice-design-model",
+ "rspice-formats",
  "rspice-hardcopy-contract",
  "rspice-model-library",
  "rspice-pack",
@@ -5506,6 +5507,13 @@ dependencies = [
  "thiserror 2.0.20",
  "uuid",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "rspice-formats"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

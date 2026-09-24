@@ -29,6 +29,7 @@ members = [
     "crates/rspice-results",
     "crates/rspice-hardcopy-contract",
     "crates/rspice-model-library",
+    "crates/rspice-formats",
     "crates/rspice-veriloga",
     "crates/rspice-python",
     "crates/rspice-wasm",
@@ -150,6 +151,7 @@ rspice-app-types = { path = "crates/rspice-app-types", version = "0.1.0" }
 rspice-results = { path = "crates/rspice-results", version = "0.1.0" }
 rspice-hardcopy-contract = { path = "crates/rspice-hardcopy-contract", version = "0.1.0" }
 rspice-model-library = { path = "crates/rspice-model-library", version = "0.1.0" }
+rspice-formats = { path = "crates/rspice-formats", version = "0.1.0" }
 rspice-cloud-client = { path = "crates/rspice-cloud-client", version = "0.1.0" }
 rspice-cloud-contract = { path = "crates/rspice-cloud-contract", version = "0.1.0" }
 rspice-cloud-domain = { path = "crates/rspice-cloud-domain", version = "0.1.0" }

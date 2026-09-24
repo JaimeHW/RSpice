@@ -34,7 +34,7 @@ impl WaveformWriter {
     /// Callers should use this only after `write_text` has validated the full
     /// matrix; it is provided so save workflows can choose the required
     /// `.sNp` extension without re-materializing the matrix.
-    pub(crate) fn touchstone_port_count(dataset: &WaveformDataset) -> Option<usize> {
+    pub fn touchstone_port_count(dataset: &WaveformDataset) -> Option<usize> {
         dataset
             .signals
             .iter()
@@ -588,9 +588,8 @@ mod tests {
         // Five rows of five pairs, each split four then one.
         assert_eq!(pairs_per_line, vec![4, 1, 4, 1, 4, 1, 4, 1, 4, 1], "{text}");
 
-        let reopened =
-            crate::io::waveform_io::read_touchstone_bytes("wrapped.s5p", text.as_bytes())
-                .expect("the wrapped export reopens");
+        let reopened = crate::waveform_io::read_touchstone_bytes("wrapped.s5p", text.as_bytes())
+            .expect("the wrapped export reopens");
         for row in 1..=5 {
             for column in 1..=5 {
                 assert_eq!(
@@ -611,9 +610,8 @@ mod tests {
         let text = WaveformWriter::new(WaveformFormat::Touchstone)
             .write_text(&positional_touchstone_dataset(3, 2))
             .expect("touchstone text serializes");
-        let reopened =
-            crate::io::waveform_io::read_touchstone_bytes("roundtrip.ts", text.as_bytes())
-                .expect("the export reopens");
+        let reopened = crate::waveform_io::read_touchstone_bytes("roundtrip.ts", text.as_bytes())
+            .expect("the export reopens");
 
         for row in 1..=3 {
             for column in 1..=3 {
@@ -737,9 +735,8 @@ mod tests {
         let text = WaveformWriter::new(WaveformFormat::Touchstone)
             .write_text(&dataset)
             .expect("Touchstone text serializes");
-        let reopened =
-            crate::io::waveform_io::read_touchstone_bytes("roundtrip.ts", text.as_bytes())
-                .expect("Touchstone export reopens");
+        let reopened = crate::waveform_io::read_touchstone_bytes("roundtrip.ts", text.as_bytes())
+            .expect("Touchstone export reopens");
         assert_eq!(
             reopened.get_signal("S11_RE").unwrap().data[0].to_bits(),
             exact.to_bits()

@@ -35,10 +35,7 @@ struct Options {
 }
 
 /// Parse one selected Touchstone artifact without touching project state.
-pub(crate) fn read_touchstone_bytes(
-    source_name: &str,
-    bytes: &[u8],
-) -> Result<WaveformDataset, String> {
+pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<WaveformDataset, String> {
     let text = std::str::from_utf8(bytes)
         .map_err(|error| format!("Touchstone source is not valid UTF-8: {error}"))?;
     let mut options = Options {

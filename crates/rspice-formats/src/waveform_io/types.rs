@@ -101,6 +101,12 @@ impl WaveformSignal {
         self.data.len()
     }
 
+    /// Whether this signal contains no points.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
     /// Get value at index
     pub fn get(&self, idx: usize) -> Option<f64> {
         self.data.get(idx).copied()
@@ -186,7 +192,6 @@ impl WaveformDataset {
     }
 
     /// Get signal by name
-    #[cfg(test)]
     pub fn get_signal(&self, name: &str) -> Option<&WaveformSignal> {
         self.signals.iter().find(|s| s.name == name)
     }
@@ -202,7 +207,6 @@ impl WaveformDataset {
     }
 
     /// Get signal names
-    #[cfg(test)]
     pub fn signal_names(&self) -> Vec<&str> {
         self.signals.iter().map(|s| s.name.as_str()).collect()
     }
