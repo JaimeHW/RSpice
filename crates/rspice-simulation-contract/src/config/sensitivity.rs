@@ -93,9 +93,9 @@ impl SensitivitySweep {
     /// One conversion, named once, because a sweep that meant decades on the
     /// way out and octaves on the way back would solve a different band than
     /// the plan states.
-    pub fn to_spec(self) -> crate::simulation::multi_run::SensitivitySweepSpec {
-        use crate::simulation::multi_run::FrequencySweep;
-        crate::simulation::multi_run::SensitivitySweepSpec {
+    pub fn to_spec(self) -> super::SensitivitySweepSpec {
+        use super::FrequencySweep;
+        super::SensitivitySweepSpec {
             stop_frequency: self.stop_frequency,
             points: self.points,
             variation: match self.variation {
@@ -107,8 +107,8 @@ impl SensitivitySweep {
     }
 
     /// The inverse of [`SensitivitySweep::to_spec`].
-    pub fn from_spec(spec: crate::simulation::multi_run::SensitivitySweepSpec) -> Self {
-        use crate::simulation::multi_run::FrequencySweep;
+    pub fn from_spec(spec: super::SensitivitySweepSpec) -> Self {
+        use super::FrequencySweep;
         Self {
             stop_frequency: spec.stop_frequency,
             points: spec.points,
@@ -153,7 +153,7 @@ impl Default for SensitivityConfig {
 
 impl SensitivityConfig {
     /// Preserve historical positive spot cards; DC-limit spots use a linear grid.
-    pub(crate) fn ac_sweep_config(&self) -> Option<super::AcAnalysisConfig> {
+    pub fn ac_sweep_config(&self) -> Option<super::AcAnalysisConfig> {
         if !self.ac_mode {
             return None;
         }

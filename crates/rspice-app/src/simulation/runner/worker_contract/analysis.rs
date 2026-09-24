@@ -944,7 +944,7 @@ pub(crate) enum WorkerAnalysisConfig {
         #[serde(default = "crate::simulation::config::design_parameters_filter")]
         filter: String,
         #[serde(default)]
-        sweep: Option<crate::simulation::multi_run::SensitivitySweepSpec>,
+        sweep: Option<rspice_simulation_contract::config::SensitivitySweepSpec>,
     },
 }
 

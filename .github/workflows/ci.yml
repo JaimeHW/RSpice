@@ -61,7 +61,7 @@ jobs:
         run: |
           python3 tools/ci/test_app_crate_dependencies.py
           python3 tools/ci/check_app_crate_dependencies.py
-          cargo test --locked -p rspice-app-types -p rspice-results -p rspice-hardcopy-contract -p rspice-model-library -p rspice-formats --lib
+          cargo test --locked -p rspice-app-types -p rspice-results -p rspice-hardcopy-contract -p rspice-model-library -p rspice-formats -p rspice-simulation-contract --lib
       - name: UI incremental build identity regressions
         run: python3 tools/ci/test_ui_build_identity.py
       - name: Browser artifact reporting regression tests

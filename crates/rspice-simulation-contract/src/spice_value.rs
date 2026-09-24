@@ -15,7 +15,7 @@
 
 use rspice_core::netlist::lexer::spice_suffix_scale;
 
-pub(crate) fn parse_spice_value_checked(s: &str) -> Result<f64, String> {
+pub fn parse_spice_value_checked(s: &str) -> Result<f64, String> {
     let s = s.trim();
     if s.is_empty() {
         return Err("value is empty".to_string());
@@ -86,7 +86,7 @@ mod tests {
     ];
 
     /// This parser and the interactive
-    /// [`crate::quantity::parse_engineering_value`] read the same fields of
+    /// [`rspice_app_types::quantity::parse_engineering_value`] read the same fields of
     /// the same design — a stop time, a source amplitude — so where both
     /// accept a spelling they have to agree on the number.
     ///
@@ -112,7 +112,7 @@ mod tests {
     /// checks their shared accepted spellings without merging their policies.
     #[test]
     fn the_interactive_parser_agrees_wherever_both_accept_a_spelling() {
-        use crate::quantity::parse_engineering_value;
+        use rspice_app_types::quantity::parse_engineering_value;
 
         let divergent = ["1MHz"];
         for text in CORPUS {

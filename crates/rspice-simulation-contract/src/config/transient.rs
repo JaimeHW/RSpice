@@ -52,7 +52,7 @@ impl TransientAnalysisConfig {
         cmd
     }
 
-    pub(crate) fn resolved_maximum_step(
+    pub fn resolved_maximum_step(
         &self,
     ) -> Result<f64, rspice_core::execution::TransientMaximumStepError> {
         rspice_core::execution::resolve_transient_maximum_step(

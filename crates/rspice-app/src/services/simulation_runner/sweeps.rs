@@ -6,8 +6,6 @@ use super::ServiceRunError;
 use rspice_app_types::product::ProcessCorner;
 
 mod corner;
-mod dc_axis;
-pub use dc_axis::{DcAxisMode, DcSweepModes};
 mod execution;
 mod mapping;
 mod netlist_mutation;

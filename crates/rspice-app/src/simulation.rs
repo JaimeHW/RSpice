@@ -10,7 +10,7 @@ pub(crate) mod config;
 pub(crate) mod controller;
 #[cfg(test)]
 pub(crate) mod cost_probe;
-pub(crate) mod dependency_contract;
+pub(crate) use rspice_simulation_contract::dependency_contract;
 pub(crate) mod dialog;
 pub(crate) mod engine_bridge;
 pub(crate) mod execution;

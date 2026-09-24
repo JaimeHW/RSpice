@@ -111,29 +111,4 @@ impl AnalysisRunType {
     }
 }
 
-// =============================================================================
-// Analysis Specification
-// =============================================================================
-
-/// Frequency sweep mode used by AC/noise analyses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
-pub enum FrequencySweep {
-    /// Decade (logarithmic)
-    #[default]
-    Decade,
-    /// Octave (logarithmic)
-    Octave,
-    /// Linear
-    Linear,
-}
-
-impl FrequencySweep {
-    /// Keyword expected by the simulation runner.
-    pub fn runner_keyword(self) -> &'static str {
-        match self {
-            FrequencySweep::Decade => "dec",
-            FrequencySweep::Octave => "oct",
-            FrequencySweep::Linear => "lin",
-        }
-    }
-}
+pub use rspice_simulation_contract::config::FrequencySweep;

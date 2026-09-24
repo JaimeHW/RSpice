@@ -31,7 +31,7 @@ pub struct DcSweepConfig {
     /// branch is only meaningful if it starts from the state the forward branch
     /// finished in.
     pub hysteresis: bool,
-    pub modes: crate::simulation::config::DcSweepModes,
+    pub modes: crate::config::DcSweepModes,
 }
 
 impl Default for DcSweepConfig {
@@ -217,40 +217,6 @@ fn sweeps_an_independent_source(source: &str) -> bool {
         && !name.eq_ignore_ascii_case("TEMPER")
         && !name.contains([':', '@', '[', ']'])
         && name.starts_with(['V', 'v', 'I', 'i'])
-}
-
-impl crate::services::simulation_runner::CornerBaseMode {
-    pub(crate) fn from_dc_config(config: &crate::simulation::config::DcSweepConfig) -> Self {
-        if let (Some(source2), Some(start2), Some(stop2), Some(step2)) =
-            (&config.source2, config.start2, config.stop2, config.step2)
-        {
-            Self::DcSweepNested {
-                source_name: config.source.clone(),
-                start: config.start,
-                stop: config.stop,
-                step: config.step,
-                source2: source2.clone(),
-                start2,
-                stop2,
-                step2,
-                modes: config.modes.clone(),
-            }
-        } else {
-            let mut modes = config.modes.clone();
-            if config.hysteresis {
-                modes.primary = crate::simulation::config::DcAxisMode::List {
-                    values: config.retrace_points(),
-                };
-            }
-            Self::DcSweep {
-                source_name: config.source.clone(),
-                start: config.start,
-                stop: config.stop,
-                step: config.step,
-                modes,
-            }
-        }
-    }
 }
 
 #[cfg(test)]

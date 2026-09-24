@@ -5260,6 +5260,7 @@ dependencies = [
  "rspice-pack",
  "rspice-publication-contract",
  "rspice-results",
+ "rspice-simulation-contract",
  "rspice-veriloga",
  "rust_xlsxwriter",
  "rustfft",
@@ -5636,6 +5637,16 @@ dependencies = [
  "rustix 1.1.4",
  "windows-sys 0.61.2",
  "zeroize",
+]
+
+[[package]]
+name = "rspice-simulation-contract"
+version = "0.1.0"
+dependencies = [
+ "rspice-app-types",
+ "rspice-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

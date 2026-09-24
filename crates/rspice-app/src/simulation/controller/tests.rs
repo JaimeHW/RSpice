@@ -15,10 +15,10 @@ use std::path::Path;
 
 #[test]
 fn studio_ac_data_authored_columns_and_netlist_tables_reach_results() {
-    use crate::simulation::plan::{AcDataDraft, AnalysisDraft};
-    use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
     use crate::simulation::config::AcDataTableOptions;
+    use crate::simulation::plan::{AcDataDraft, AnalysisDraft};
     use crate::simulation::results::SimulationResult;
+    use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
 
     let controller = SimulationController::new();
     let state = AppState::default();
@@ -321,8 +321,8 @@ fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
 fn sensitivity_dc_limit_and_disabled_ac_fields_reach_the_solver_and_results() {
     use crate::simulation::dialog::sens::{SensConfig, SensDialogState};
     use crate::simulation::plan::AnalysisDraft;
-    use crate::simulation::runner::worker_contract::{WorkerAnalysisSpec, WorkerSimulationResult};
     use crate::simulation::results::SimulationResult;
+    use crate::simulation::runner::worker_contract::{WorkerAnalysisSpec, WorkerSimulationResult};
     use crate::state::SensitivityBasisEvidence;
     let source = "DC-limit sensitivity\n.param rt=1k\nV1 in 0 DC 1 AC 1\nR1 in out {rt}\nR2 out 0 1k\n.end\n";
     let controller = SimulationController::new();
@@ -440,7 +440,7 @@ fn sensitivity_dc_limit_and_disabled_ac_fields_reach_the_solver_and_results() {
             ac_mode: true,
             frequency: Some(0.0),
             filter: String::new(),
-            sweep: Some(crate::simulation::multi_run::SensitivitySweepSpec {
+            sweep: Some(rspice_simulation_contract::config::SensitivitySweepSpec {
                 stop_frequency: 1000.0,
                 points: 3,
                 variation,

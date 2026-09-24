@@ -89,7 +89,7 @@ pub enum CornerBaseMode {
     ConfiguredOp(Box<crate::simulation::dialog::OpConfig>),
     /// Run DC sweep and record the final converged point at each corner.
     DcSweep {
-        modes: super::DcSweepModes,
+        modes: rspice_simulation_contract::config::DcSweepModes,
         source_name: String,
         start: Value,
         stop: Value,
@@ -97,7 +97,7 @@ pub enum CornerBaseMode {
     },
     /// Run an authored two-source nested DC sweep at each point.
     DcSweepNested {
-        modes: super::DcSweepModes,
+        modes: rspice_simulation_contract::config::DcSweepModes,
         source_name: String,
         start: Value,
         stop: Value,
@@ -456,6 +456,42 @@ impl CornerMetricLabel {
         match self {
             Self::Voltage => format!("V({})", node_name),
             Self::AcMagnitude => format!("|V({})|", node_name),
+        }
+    }
+}
+
+impl CornerBaseMode {
+    pub(crate) fn from_dc_config(
+        config: &rspice_simulation_contract::config::DcSweepConfig,
+    ) -> Self {
+        if let (Some(source2), Some(start2), Some(stop2), Some(step2)) =
+            (&config.source2, config.start2, config.stop2, config.step2)
+        {
+            Self::DcSweepNested {
+                source_name: config.source.clone(),
+                start: config.start,
+                stop: config.stop,
+                step: config.step,
+                source2: source2.clone(),
+                start2,
+                stop2,
+                step2,
+                modes: config.modes.clone(),
+            }
+        } else {
+            let mut modes = config.modes.clone();
+            if config.hysteresis {
+                modes.primary = rspice_simulation_contract::config::DcAxisMode::List {
+                    values: config.retrace_points(),
+                };
+            }
+            Self::DcSweep {
+                source_name: config.source.clone(),
+                start: config.start,
+                stop: config.stop,
+                step: config.step,
+                modes,
+            }
         }
     }
 }

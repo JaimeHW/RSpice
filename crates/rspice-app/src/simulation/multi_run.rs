@@ -17,6 +17,5 @@ pub use run_type::{AnalysisRunType, FrequencySweep};
 pub use spec::{
     AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
     HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable, PssMethod,
-    QpacControls, QpnoiseControls, QpssControls, QpxfControls, SensitivitySweepSpec, SpPort,
-    TfAccuracy, TfNormalization,
+    QpacControls, QpnoiseControls, QpssControls, QpxfControls, SpPort, TfAccuracy, TfNormalization,
 };

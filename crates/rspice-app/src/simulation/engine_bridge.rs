@@ -27,6 +27,8 @@ use super::config::AnalysisConfig;
 use super::results::SimulationResult;
 use super::runner::SimulationError;
 
+#[cfg(test)]
+mod ac_grid_tests;
 mod ac_noise;
 mod dc;
 mod error;

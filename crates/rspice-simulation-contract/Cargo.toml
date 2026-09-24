@@ -1,0 +1,20 @@
+[package]
+name = "rspice-simulation-contract"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false }
+serde.workspace = true
+
+[dev-dependencies]
+rspice-app-types.workspace = true
+serde_json.workspace = true

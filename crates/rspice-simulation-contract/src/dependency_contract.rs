@@ -10,13 +10,13 @@
 /// `AnalysisSpec` so the editable plan and immutable execution boundary use
 /// the same compatibility predicate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::simulation) struct PeriodicStateCapability {
+pub struct PeriodicStateCapability {
     pub shooting: bool,
     pub autonomous: bool,
 }
 
 /// Validate the execution contract shared by PAC, PXF, PNOISE, and PSTB.
-pub(in crate::simulation) fn validate_periodic_state_contract(
+pub fn validate_periodic_state_contract(
     consumer: &str,
     capability: PeriodicStateCapability,
     require_autonomous: bool,
@@ -43,7 +43,7 @@ pub(in crate::simulation) fn validate_periodic_state_contract(
 /// `rspice-core/src/engine/pss_noise.rs` refuses `NOISEREF=PHASE` against such
 /// a carrier for exactly that reason, and the plan editor says the same thing
 /// before a run rather than after one.
-pub(in crate::simulation) fn validate_harmonic_balance_carrier_contract(
+pub fn validate_harmonic_balance_carrier_contract(
     consumer: &str,
     require_autonomous: bool,
 ) -> Result<(), String> {
@@ -56,7 +56,7 @@ pub(in crate::simulation) fn validate_harmonic_balance_carrier_contract(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(in crate::simulation) struct FourierTransientRequirement {
+pub struct FourierTransientRequirement {
     pub start_time: f64,
     pub stop_time: f64,
     pub fundamental_freq: f64,
@@ -91,7 +91,7 @@ impl FourierTransientRequirement {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(in crate::simulation) struct TransientCapability {
+pub struct TransientCapability {
     pub start_time: f64,
     pub stop_time: f64,
     pub step_time: f64,
@@ -124,7 +124,7 @@ impl TransientCapability {
     }
 }
 
-pub(in crate::simulation) fn validate_fourier_transient_contract(
+pub fn validate_fourier_transient_contract(
     requirement: FourierTransientRequirement,
     capability: TransientCapability,
 ) -> Result<(), String> {

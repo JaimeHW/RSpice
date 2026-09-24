@@ -4,7 +4,7 @@
 //! authored-deck parsing, and result-import units stay with their consumers.
 
 mod locale;
-pub(crate) mod spice_value;
+pub(crate) use rspice_simulation_contract::spice_value;
 pub(crate) mod unit;
 
 pub use locale::platform_number_locale;

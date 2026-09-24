@@ -8,18 +8,7 @@ use crate::simulation::dialog::{
 use crate::simulation::multi_run::FrequencySweep;
 use serde::{Deserialize, Serialize};
 
-/// The rest of an AC sensitivity band, beyond the start frequency.
-///
-/// Held beside `frequency` rather than replacing it, because one frequency
-/// and a sweep starting there are the same card with a different count, and
-/// nothing should have two spellings for the band's lower edge.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SensitivitySweepSpec {
-    pub stop_frequency: f64,
-    pub points: u32,
-    pub variation: FrequencySweep,
-}
+use rspice_simulation_contract::config::SensitivitySweepSpec;
 
 /// Numerical formulation used to solve a periodic steady-state request.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
