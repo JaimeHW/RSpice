@@ -33,6 +33,7 @@ use std::collections::HashSet;
 use std::fmt;
 
 pub mod publication;
+pub mod reader;
 
 /// *Level 5 MAT-File Header Format*: 116 bytes of descriptive text, 8 bytes
 /// of subsystem-data offset, 2 bytes of version and 2 of endian indicator.

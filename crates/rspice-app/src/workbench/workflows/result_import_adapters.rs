@@ -1267,37 +1267,36 @@ pub(super) fn parse_matlab_v5(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
-    let parsed = std::panic::catch_unwind(|| matfile::MatFile::parse(Cursor::new(bytes)))
-        .map_err(|_| adapter_error(format, "MATLAB parser rejected malformed input"))?
-        .map_err(|error| adapter_error(format, format_args!("invalid MATLAB v5 file: {error}")))?;
-    if parsed.arrays().len() > MAX_RESULT_COLUMNS.saturating_mul(2) {
-        return Err(adapter_error(format, "too many MATLAB variables"));
-    }
-    let coordinate_index = parsed
-        .arrays()
+    let parsed = rspice_formats::matlab::reader::MatFile::parse(
+        bytes,
+        MAX_RESULT_COLUMNS.saturating_mul(2),
+        format.canonical_id(),
+    )?;
+    let arrays = parsed.arrays();
+    let coordinate_index = arrays
         .iter()
         .position(|array| is_coordinate_name(array.name()));
     if let Some(coordinate_index) = coordinate_index {
-        let coordinate_array = &parsed.arrays()[coordinate_index];
-        let (coordinate, coordinate_imag) = matlab_values(coordinate_array, format)?;
-        if coordinate_imag.is_some() || !matlab_is_vector(coordinate_array.size()) {
+        let coordinate_array = &arrays[coordinate_index];
+        let (coordinate, coordinate_imag) = coordinate_array.values(format.canonical_id())?;
+        if coordinate_imag.is_some() || !coordinate_array.is_vector() {
             return Err(adapter_error(
                 format,
                 "MATLAB coordinate variable must be a real vector",
             ));
         }
         let mut signals = Vec::new();
-        for (index, array) in parsed.arrays().iter().enumerate() {
+        for (index, array) in arrays.iter().enumerate() {
             if index == coordinate_index {
                 continue;
             }
-            if !matlab_is_vector(array.size()) {
+            if !array.is_vector() {
                 return Err(adapter_error(
                     format,
                     format_args!("MATLAB variable '{}' is not a vector", array.name()),
                 ));
             }
-            let (real, imag) = matlab_values(array, format)?;
+            let (real, imag) = array.values(format.canonical_id())?;
             signals.push(ImportedSignal {
                 name: array.name().to_owned(),
                 real,
@@ -1314,7 +1313,7 @@ pub(super) fn parse_matlab_v5(
         );
     }
 
-    if parsed.arrays().len() != 1 {
+    if arrays.len() != 1 {
         return Err(adapter_error(
             format,
             format_args!(
@@ -1323,7 +1322,7 @@ pub(super) fn parse_matlab_v5(
             ),
         ));
     }
-    let array = &parsed.arrays()[0];
+    let array = &arrays[0];
     let size = array.size();
     if size.len() != 2 || size[0] < MIN_RESULT_ROWS || size[1] < 2 {
         return Err(adapter_error(
@@ -1331,7 +1330,7 @@ pub(super) fn parse_matlab_v5(
             "without a named coordinate, MATLAB data must be one rows-by-columns table with the coordinate in column one",
         ));
     }
-    let (real, imag) = matlab_values(array, format)?;
+    let (real, imag) = array.values(format.canonical_id())?;
     if imag.is_some() {
         return Err(adapter_error(
             format,
@@ -1350,82 +1349,6 @@ pub(super) fn parse_matlab_v5(
         })
         .collect();
     finish_dataset(format, AnalysisType::DcSweep, "x", coordinate, signals)
-}
-
-fn matlab_is_vector(size: &[usize]) -> bool {
-    size.iter().filter(|dimension| **dimension > 1).count() <= 1
-}
-
-fn matlab_values(
-    array: &matfile::Array,
-    format: ResultImportFormat,
-) -> Result<(Vec<f64>, Option<Vec<f64>>), String> {
-    macro_rules! convert {
-        ($real:expr, $imag:expr) => {{
-            (
-                $real.iter().map(|value| *value as f64).collect(),
-                $imag
-                    .as_ref()
-                    .map(|values| values.iter().map(|value| *value as f64).collect()),
-            )
-        }};
-    }
-    let values = match array.data() {
-        matfile::NumericData::Int8 { real, imag } => convert!(real, imag),
-        matfile::NumericData::UInt8 { real, imag } => convert!(real, imag),
-        matfile::NumericData::Int16 { real, imag } => convert!(real, imag),
-        matfile::NumericData::UInt16 { real, imag } => convert!(real, imag),
-        matfile::NumericData::Int32 { real, imag } => convert!(real, imag),
-        matfile::NumericData::UInt32 { real, imag } => convert!(real, imag),
-        matfile::NumericData::Int64 { real, imag } => (
-            real.iter()
-                .map(|value| exact_signed_integer(format, array.name(), *value))
-                .collect::<Result<Vec<_>, _>>()?,
-            imag.as_ref()
-                .map(|values| {
-                    values
-                        .iter()
-                        .map(|value| exact_signed_integer(format, array.name(), *value))
-                        .collect::<Result<Vec<_>, _>>()
-                })
-                .transpose()?,
-        ),
-        matfile::NumericData::UInt64 { real, imag } => (
-            real.iter()
-                .map(|value| exact_unsigned_integer(format, array.name(), *value))
-                .collect::<Result<Vec<_>, _>>()?,
-            imag.as_ref()
-                .map(|values| {
-                    values
-                        .iter()
-                        .map(|value| exact_unsigned_integer(format, array.name(), *value))
-                        .collect::<Result<Vec<_>, _>>()
-                })
-                .transpose()?,
-        ),
-        matfile::NumericData::Single { real, imag } => convert!(real, imag),
-        matfile::NumericData::Double { real, imag } => (real.clone(), imag.clone()),
-    };
-    let expected = array
-        .size()
-        .iter()
-        .try_fold(1_usize, |count, dimension| count.checked_mul(*dimension))
-        .ok_or_else(|| {
-            adapter_error(
-                format,
-                format_args!("MATLAB variable '{}' shape overflows", array.name()),
-            )
-        })?;
-    if values.0.len() != expected || values.1.as_ref().is_some_and(|imag| imag.len() != expected) {
-        return Err(adapter_error(
-            format,
-            format_args!(
-                "MATLAB variable '{}' payload does not match its shape",
-                array.name()
-            ),
-        ));
-    }
-    Ok(values)
 }
 
 // -------------------------------------------------------------------------

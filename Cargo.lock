@@ -5514,6 +5514,7 @@ dependencies = [
 name = "rspice-formats"
 version = "0.1.0"
 dependencies = [
+ "matfile",
  "npyz",
  "num-complex",
  "serde",
