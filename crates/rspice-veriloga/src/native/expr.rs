@@ -4637,7 +4637,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_zi_call_derivative(expr_id, name, args, &[wrt])
             }
             "limit" => self.lower_limit_derivative(expr_id, name, args, wrt),
-            "table_model" => self.lower_table_model_derivative(expr_id, name, args, wrt),
+            "table_model" => self.lower_table_model_derivative(expr_id, name, args, &[wrt]),
             "abs" | "fabs" => {
                 self.require_intrinsic_arity(name, args, 1)?;
                 self.lower(args[0])?;
@@ -4752,7 +4752,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 |this, temperature| this.lower_derivative(temperature, wrt),
             ),
             "limit" => self.lower_limit_derivative(expr_id, name, args, wrt),
-            "table_model" => self.lower_table_model_derivative(expr_id, name, args, wrt),
+            "table_model" => self.lower_table_model_derivative(expr_id, name, args, &[wrt]),
             "simparam" => self.lower_simparam_action(name, args, true, |this, fallback| {
                 this.lower_derivative(fallback, wrt)
             }),
@@ -4780,9 +4780,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.require_intrinsic_arity_range(name, args, 1, 2)?;
                 self.lower_second_derivative(args[0], first, second)
             }
-            "table_model" => Err(self.unsupported(format!(
-                "second derivative of system function '{name}' at expression {expr_id}"
-            ))),
+            "table_model" => {
+                self.lower_table_model_derivative(expr_id, name, args, &[first, second])
+            }
             "simparam" => self.lower_simparam_action(name, args, true, |this, fallback| {
                 this.lower_second_derivative(fallback, first, second)
             }),
@@ -4852,9 +4852,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.require_intrinsic_arity_range(name, args, 1, 2)?;
                 self.lower_second_derivative(args[0], first, second)
             }
-            "table_model" => Err(self.unsupported(format!(
-                "second derivative of intrinsic function '{name}' at expression {expr_id}"
-            ))),
+            "table_model" => {
+                self.lower_table_model_derivative(expr_id, name, args, &[first, second])
+            }
             "abs" | "fabs" => {
                 self.require_intrinsic_arity(name, args, 1)?;
                 self.lower(args[0])?;
@@ -5739,7 +5739,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         expr_id: ExprId,
         name: &str,
         args: &[ExprId],
-        wrt: CanonicalDerivativeAxis,
+        axes: &[CanonicalDerivativeAxis],
     ) -> JitResult<()> {
         if args.len() < 2 {
             return Err(self.unsupported(format!(
@@ -5758,7 +5758,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             table_id,
             self.limits.lookup_table_count,
         )?;
-        self.lower_derivative(args[0], wrt)?;
+        // The selected table segment is affine. Its slope is locally constant
+        // at every order; all higher chain-rule terms come from the input.
+        // Evaluate the original input for segment selection, not a derivative
+        // payload. This also preserves the established right-side knot rule.
+        self.lower_mixed_derivative(args[0], axes)?;
         self.lower(args[0])?;
         self.append_unary(NativeOp::TableDerivative(table_id))?;
         self.append_arithmetic("Mul")

@@ -323,7 +323,8 @@ use super::*;
 // Version 99 qualifies higher-order canonical postfix derivatives (Wasm emitter 55).
 // Version 100 supports higher absdelay input derivatives with fixed timing.
 // Version 101 carries mixed transport-delay actions (Wasm ABI 18).
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 101;
+// Version 102 supports higher table input derivatives (Wasm emitter 58).
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 102;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

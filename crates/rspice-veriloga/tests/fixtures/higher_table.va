@@ -1,0 +1,12 @@
+module higher_table(p,n);
+    inout p,n;
+    electrical p,n;
+    real u,x;
+    integer k;
+    analog begin
+        u=exp(2*V(p,n));
+        x=$table_model(u,0.0,1.0,1.0,3.0,2.0,9.0);
+        for(k=0;k<3;k=k+1) x=ddx(x,V(p,n));
+        I(p,n)<+x;
+    end
+endmodule

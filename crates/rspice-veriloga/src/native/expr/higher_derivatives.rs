@@ -588,6 +588,7 @@ impl MirEquationLowerer<'_, '_> {
                 self.require_intrinsic_arity_range(name, args, 1, 2)?;
                 self.lower_mixed_derivative(args[0], axes)
             }
+            "table_model" => self.lower_table_model_derivative(expression, name, args, axes),
             "ddx" => {
                 self.require_intrinsic_arity(name, args, 2)?;
                 self.lower_ddx_projection_mixed(args[0], args[1], axes)

@@ -149,7 +149,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 18;
 /// Version 55 differentiates higher-order canonical postfix expressions with shared AD.
 /// Version 56 reuses delay history for higher input derivatives with fixed timing.
 /// Version 57 emits mixed input/timing transport-delay actions.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 57;
+/// Version 58 lowers higher derivatives through a table's active affine segment.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 58;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -1798,6 +1799,7 @@ endmodule
             );
             context.laplace_filters = report.model.laplace_filters.clone();
             context.zi_filters = report.model.zi_filters.clone();
+            context.lookup_tables = report.model.lookup_tables.clone();
             context.transition_filters.resize_with(
                 state_layout
                     .family_len(crate::canonical_ir::state::CanonicalStateFamily::TransitionFilter),
@@ -3295,6 +3297,41 @@ endmodule
                             "{expression}, postfix={postfix}, V={voltage}, {entry}: {actual} != {expected}"
                         );
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_higher_table_derivatives_follow_the_active_segment() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        let source = include_str!("../../tests/fixtures/higher_table.va");
+        for postfix in [false, true] {
+            let mut harness =
+                FusedKernelHarness::for_source_with_plan(source, "higher_table", postfix);
+            harness.reset();
+            let value = harness.stamp_value_export(0);
+            let jacobian = harness.jacobian_export(0, 0);
+            for voltage in [-0.4_f64, 0.0, 0.3, 0.8, -0.4] {
+                harness
+                    .store
+                    .data_mut()
+                    .context_mut()
+                    .begin_stateful_evaluation();
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
+                harness.call_assignments();
+                harness.call_prelude();
+                let u = (2.0 * voltage).exp();
+                let slope = if u < 1.0 { 2.0 } else { 6.0 };
+                for (entry, gain) in [(&jacobian, 16.0), (&value, 8.0)] {
+                    assert_eq!(harness.call(entry), 0);
+                    let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                    let expected = gain * slope * u;
+                    assert!(
+                        (actual - expected).abs() < 1e-10,
+                        "postfix={postfix}, v={voltage}: {actual} != {expected}"
+                    );
                 }
             }
         }
