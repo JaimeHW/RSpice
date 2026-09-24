@@ -1581,12 +1581,13 @@ mod tests {
             all_converged: false,
             variables: Vec::new(),
         };
-        let provenance = crate::services::yield_manager::yield_provenance_from_monte_carlo_result(
-            run.run_id,
-            run.dataset_id,
-            &monte_carlo,
-        )
-        .expect("Monte Carlo result creates yield provenance");
+        let provenance =
+            crate::services::yield_result_adapter::yield_provenance_from_monte_carlo_result(
+                run.run_id,
+                run.dataset_id,
+                &monte_carlo,
+            )
+            .expect("Monte Carlo result creates yield provenance");
         let source_dataset_id = run.dataset_id;
         let result = YieldResult {
             spec: rspice_results::yield_analysis::YieldSpec::lower("V(out)", 0.9, "V"),

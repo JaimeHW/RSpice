@@ -19,7 +19,6 @@ use std::path::PathBuf;
 
 use crate::diagnostics::ConsoleMessage;
 use crate::io::{SignalType, WaveformDataset, WaveformFormat, WaveformSignal, WaveformWriter};
-use crate::services::yield_manager::YieldAnalysisManager;
 use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, DcSweepConfig, NoiseAnalysisConfig, NoiseSweepType,
     PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
@@ -53,6 +52,7 @@ use crate::state::{
 };
 use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
+use rspice_results::yield_analysis::YieldAnalysisManager;
 
 mod analysis_commands;
 mod analysis_helpers;
@@ -1991,7 +1991,7 @@ impl SimulationController {
                                     state.simulation.run_by_sequence(run_sequence)
                                 })
                                 .and_then(|run| {
-                                    crate::services::yield_manager::yield_provenance_from_monte_carlo_result(
+                                    crate::services::yield_result_adapter::yield_provenance_from_monte_carlo_result(
                                         run.run_id,
                                         run.dataset_id,
                                         &sim_result,

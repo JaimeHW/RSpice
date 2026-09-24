@@ -1,12 +1,11 @@
-//! Yield analysis over completed simulation results.
+//! Adapter from completed simulation results to portable yield analysis.
 use crate::product::{DatasetId, RunId};
 use crate::simulation::results::SimulationResult;
+use rspice_results::yield_analysis::{MonteCarloSamplingMode, YieldAnalysisProvenance, YieldInput};
+#[cfg(test)]
+use rspice_results::yield_analysis::{YieldAnalysisManager, YieldSpec};
+#[cfg(test)]
 use std::collections::BTreeMap;
-
-use rspice_results::yield_analysis::{
-    MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
-    calculate_distribution_stats,
-};
 
 /// Bind completed Monte Carlo evidence to its retained run and dataset.
 #[must_use]
@@ -33,121 +32,13 @@ pub fn yield_provenance_from_monte_carlo_result(
     }
 }
 
-// =============================================================================
-// Yield Analysis Manager
-// =============================================================================
-
-/// Manager for yield analysis workflows
-pub struct YieldAnalysisManager {
-    /// Active specifications
-    specs: BTreeMap<String, YieldSpec>,
-    /// Results cached by spec name
-    results: BTreeMap<String, YieldResult>,
-}
-
-impl Default for YieldAnalysisManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl YieldAnalysisManager {
-    pub fn new() -> Self {
-        Self {
-            specs: BTreeMap::new(),
-            results: BTreeMap::new(),
-        }
+impl YieldInput for SimulationResult {
+    fn is_monte_carlo(&self) -> bool {
+        matches!(self, Self::MonteCarlo { .. })
     }
 
-    /// Add a yield specification
-    #[cfg(test)]
-    pub fn add_spec(&mut self, spec: YieldSpec) {
-        self.specs.insert(spec.target.clone(), spec);
-    }
-
-    /// Run yield analysis over retained simulation results. A Monte Carlo
-    /// result contributes every exact target sample; other result kinds
-    /// contribute at most one scalar measurement each.
-    pub fn analyze(&mut self, mc_results: &[SimulationResult]) -> &BTreeMap<String, YieldResult> {
-        self.results.clear();
-
-        for (name, spec) in &self.specs {
-            let mut pass_count = 0;
-            let mut trail = Vec::new();
-            let mut values = Vec::new();
-
-            for result in mc_results {
-                if let Some(samples) = Self::monte_carlo_samples(result, name) {
-                    trail.reserve(samples.len());
-                    values.reserve(samples.len());
-                    for value in samples.iter().copied() {
-                        let passes = value.is_finite() && spec.evaluates(value);
-                        if passes {
-                            pass_count += 1;
-                        }
-                        trail.push(passes);
-                        if value.is_finite() {
-                            values.push(value);
-                        }
-                    }
-                } else if matches!(result, SimulationResult::MonteCarlo { .. }) {
-                    // A Monte Carlo result is a collection of trials, never a
-                    // single observation represented by its summary mean. If
-                    // the target variable is absent, there is no exact sample
-                    // evidence to evaluate for this specification.
-                    continue;
-                } else if let Some(value) = self.extract_measurement(result, name) {
-                    let passes = value.is_finite() && spec.evaluates(value);
-                    if passes {
-                        pass_count += 1;
-                    }
-                    trail.push(passes);
-                    if value.is_finite() {
-                        values.push(value);
-                    }
-                } else {
-                    // Missing measurement is treated as a failed run for this spec.
-                    trail.push(false);
-                }
-            }
-
-            let num_runs = trail.len();
-            let stats = calculate_distribution_stats(&values, spec);
-            let yield_result = YieldResult {
-                spec: spec.clone(),
-                total_runs: num_runs,
-                pass_count,
-                fail_count: num_runs.saturating_sub(pass_count),
-                yield_percent: if num_runs == 0 {
-                    0.0
-                } else {
-                    (pass_count as f64 / num_runs as f64) * 100.0
-                },
-                stats,
-                trail,
-                samples: values,
-            };
-            self.results.insert(name.clone(), yield_result);
-        }
-
-        &self.results
-    }
-
-    /// Analyze one aggregate Monte Carlo dataset. Non-Monte-Carlo results do
-    /// not clear or replace the previously retained Monte Carlo evidence.
-    pub fn analyze_monte_carlo(
-        &mut self,
-        result: &SimulationResult,
-    ) -> Option<&BTreeMap<String, YieldResult>> {
-        matches!(result, SimulationResult::MonteCarlo { .. })
-            .then(|| self.analyze(std::slice::from_ref(result)))
-    }
-
-    /// Return exact Monte Carlo samples for a target. `mean(name)` remains an
-    /// accepted target spelling for compatibility, but it selects the sample
-    /// population rather than collapsing it to the recorded summary mean.
-    fn monte_carlo_samples<'a>(result: &'a SimulationResult, target: &str) -> Option<&'a [f64]> {
-        let SimulationResult::MonteCarlo { variables, .. } = result else {
+    fn monte_carlo_samples(&self, target: &str) -> Option<&[f64]> {
+        let Self::MonteCarlo { variables, .. } = self else {
             return None;
         };
         let target = target.trim();
@@ -158,9 +49,8 @@ impl YieldAnalysisManager {
             .map(|variable| variable.samples.as_slice())
     }
 
-    /// Extract a specific measurement value from a simulation result
-    fn extract_measurement(&self, result: &SimulationResult, name: &str) -> Option<f64> {
-        result.measurement(name)
+    fn measurement(&self, name: &str) -> Option<f64> {
+        SimulationResult::measurement(self, name)
     }
 }
 
@@ -287,27 +177,12 @@ mod tests {
         assert_eq!(yield_result.samples, vec![1.2, 0.8]);
     }
 
-    #[test]
-    fn specifications_and_results_iterate_in_deterministic_target_order() {
-        let mut manager = YieldAnalysisManager::new();
-        manager.add_spec(YieldSpec::lower("zeta", 0.0, ""));
-        manager.add_spec(YieldSpec::lower("alpha", 0.0, ""));
-
-        let keys = manager
-            .analyze(&[])
-            .keys()
-            .map(String::as_str)
-            .collect::<Vec<_>>();
-
-        assert_eq!(keys, vec!["alpha", "zeta"]);
-    }
-
     /// The denominator convention, stated where the number is produced.
     ///
     /// It counts every trial the engine completed, not every trial that
     /// produced a usable observation: a diverged trial is in the denominator
     /// *and* in the failures, because a specification a run could not
-    /// evaluate is not one it met. That is what [`YieldResult::total_runs`]
+    /// evaluate is not one it met. That is what [`rspice_results::yield_analysis::YieldResult::total_runs`]
     /// documents, and this name used to claim the opposite of it.
     #[test]
     fn the_yield_denominator_counts_every_trial_the_engine_completed() {
@@ -351,8 +226,8 @@ mod tests {
             .clone();
         assert!(manager.analyze_monte_carlo(&scalar).is_none());
 
-        assert_eq!(manager.results["gain"].total_runs, initial.total_runs);
-        assert_eq!(manager.results["gain"].trail, initial.trail);
-        assert_eq!(manager.results["gain"].samples, initial.samples);
+        assert_eq!(manager.results()["gain"].total_runs, initial.total_runs);
+        assert_eq!(manager.results()["gain"].trail, initial.trail);
+        assert_eq!(manager.results()["gain"].samples, initial.samples);
     }
 }
