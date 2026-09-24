@@ -482,18 +482,32 @@ pub struct ModelReleaseCandidate {
     pub checklist: PromotionChecklist,
 }
 
+/// Release declarations evaluated against an exact suite and its retained evidence.
+pub struct ModelReleaseCandidateInput<'a> {
+    pub identity: ReleaseCandidateIdentity,
+    pub source: ModelSourceEvidenceBinding,
+    pub suite: &'a QualificationSuite,
+    pub evidence: &'a QualificationEvidence,
+    pub documentation: DocumentationSet,
+    pub license: Option<LicenseDeclaration>,
+    pub consumer_impact: Option<ConsumerImpactAssessment>,
+    pub compatibility: Option<CompatibilityAssessment>,
+    pub approvals: Vec<PromotionApproval>,
+}
+
 impl ModelReleaseCandidate {
-    pub fn try_new(
-        identity: ReleaseCandidateIdentity,
-        source: ModelSourceEvidenceBinding,
-        suite: &QualificationSuite,
-        evidence: &QualificationEvidence,
-        documentation: DocumentationSet,
-        license: Option<LicenseDeclaration>,
-        consumer_impact: Option<ConsumerImpactAssessment>,
-        compatibility: Option<CompatibilityAssessment>,
-        mut approvals: Vec<PromotionApproval>,
-    ) -> QualificationResult<Self> {
+    pub fn try_new(input: ModelReleaseCandidateInput<'_>) -> QualificationResult<Self> {
+        let ModelReleaseCandidateInput {
+            identity,
+            source,
+            suite,
+            evidence,
+            documentation,
+            license,
+            consumer_impact,
+            compatibility,
+            mut approvals,
+        } = input;
         approvals.sort_by_key(|value| value.role);
         let evidence_digest = evidence.content_digest()?;
         let mut value = Self {

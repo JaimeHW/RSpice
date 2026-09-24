@@ -17,7 +17,6 @@ mod facts;
 mod library;
 mod manager;
 mod project_revision;
-mod qualification;
 
 pub(crate) use compatibility::{
     models_have_compatible_device_family, placement_component_for_model,
@@ -75,23 +74,22 @@ pub use manager::{
 };
 pub(crate) use manager::{SealedModelLibraryVerilogAAuthority, model_library_source_digest};
 pub use project_revision::ProjectModelRevisionDefinition;
-pub use qualification::{
+pub use rspice_model_library::DeviceModel;
+pub use rspice_model_library::qualification::{
     ApprovalDecision, CompatibilityAssessment, CompatibilityDisposition, ConsumerChange,
     ConsumerImpactAssessment, DocumentReference, DocumentationDeclaration, DocumentationSet,
     FiniteValue, LicenseDeclaration, LicenseScope, ModelQualificationState, ModelReleaseCandidate,
     ModelReleaseIdentity, ModelSourceEvidenceBinding, NonNegativeFinite,
     PlatformCompatibilityEvidence, PromotionApproval, PromotionApprovalRole, QualificationAnalysis,
-    QualificationErrorCode, QualificationEvidence, QualificationExecutionProgress,
-    QualificationExecutionSession, QualificationExecutionStep, QualificationOutputDefinition,
+    QualificationErrorCode, QualificationEvidence, QualificationOutputDefinition,
     QualificationPlatform, QualificationPlatformRun, QualificationProbe, QualificationReference,
     QualificationSample, QualificationSuite, QualificationVector, QualificationVectorDisposition,
     QualificationVectorDispositionCause, QualificationVectorOutcome,
     QualificationVectorRequiredAction, ReleaseCandidateIdentity, RequiredDocumentation,
 };
 #[cfg(test)]
-pub use qualification::{
+pub use rspice_model_library::qualification::{
     MODEL_QUALIFICATION_SCHEMA_VERSION, PlatformQualificationOutcome,
     QualificationPlatformVectorOutcome,
 };
-pub use rspice_model_library::DeviceModel;
 pub use rspice_model_library::{ModelLevel, ModelType};

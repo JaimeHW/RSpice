@@ -756,3 +756,238 @@ pub fn save_open_candidate(app: &mut RSpiceApp) -> Result<ObjectRevision, String
     )));
     Ok(committed_revision)
 }
+
+impl ModelEditorState {
+    pub(super) fn build_qualification_suite(&self) -> Result<QualificationSuite, String> {
+        let draft = self
+            .draft
+            .as_ref()
+            .ok_or_else(|| "No project-owned model candidate is open".to_owned())?;
+        if draft.definition_is_dirty() {
+            return Err(
+                "Save the model definition before binding a qualification vector to it".to_owned(),
+            );
+        }
+        let fields = &self.qualification_authoring;
+        let source = ModelSourceEvidenceBinding::try_new_project_bound(
+            draft.model_name.clone(),
+            draft.source_id,
+            draft.base_source_digest,
+            draft.base_source_revision,
+        )
+        .map_err(|error| error.to_string())?;
+        let definition = draft.definition().map_err(|diagnostics| {
+            diagnostics
+                .into_iter()
+                .map(|diagnostic| format!("{}: {}", diagnostic.field, diagnostic.message))
+                .collect::<Vec<_>>()
+                .join("; ")
+        })?;
+        let model_source = definition
+            .canonical_source()
+            .map_err(|error| error.to_string())?
+            .into_bytes();
+        if fields.model_section.trim() != fields.model_section {
+            return Err("Model section must not contain outer whitespace".to_owned());
+        }
+        let model_section =
+            (!fields.model_section.is_empty()).then(|| fields.model_section.clone());
+        let execution_model_source = definition
+            .qualification_model_source(model_section.as_deref())
+            .map_err(|error| error.to_string())?
+            .into_bytes();
+        // SPICE reserves the first physical line as a deck title. Keep the
+        // selected model card after an explicit title so a section card that
+        // begins directly with `.model` is parsed rather than discarded.
+        let mut executable_input = b"RSpice model qualification\n".to_vec();
+        executable_input.extend_from_slice(&execution_model_source);
+        if !executable_input.ends_with(b"\n") {
+            executable_input.push(b'\n');
+        }
+        executable_input.extend_from_slice(fields.executable_input.as_bytes());
+        let analysis = match fields.analysis {
+            QualificationAuthoringAnalysis::DcOperatingPoint => {
+                QualificationAnalysis::DcOperatingPoint
+            }
+            QualificationAuthoringAnalysis::DcSweep => QualificationAnalysis::DcSweep {
+                source: fields.sweep_source.clone(),
+                start: FiniteValue::new(parse_finite(&fields.sweep_start, "Sweep start")?)
+                    .map_err(|error| error.to_string())?,
+                stop: FiniteValue::new(parse_finite(&fields.sweep_stop, "Sweep stop")?)
+                    .map_err(|error| error.to_string())?,
+                step: FiniteValue::new(parse_finite(&fields.sweep_step, "Sweep step")?)
+                    .map_err(|error| error.to_string())?,
+            },
+            QualificationAuthoringAnalysis::AcSweep => QualificationAnalysis::AcSweep {
+                frequencies: parse_frequency_axis(&fields.frequencies)?,
+            },
+            QualificationAuthoringAnalysis::Noise => QualificationAnalysis::Noise {
+                output_node: fields.noise_output_node.clone(),
+                output_reference: (!fields.noise_output_reference.is_empty())
+                    .then(|| fields.noise_output_reference.clone()),
+                input_source: fields.noise_input_source.clone(),
+                frequencies: parse_frequency_axis(&fields.frequencies)?,
+                temperature_kelvin: FiniteValue::new(parse_finite(
+                    &fields.noise_temperature_kelvin,
+                    "Noise temperature",
+                )?)
+                .map_err(|error| error.to_string())?,
+            },
+            QualificationAuthoringAnalysis::Transient => QualificationAnalysis::Transient {
+                stop_time: FiniteValue::new(parse_finite(
+                    &fields.transient_stop_time,
+                    "Transient stop time",
+                )?)
+                .map_err(|error| error.to_string())?,
+                max_step: FiniteValue::new(parse_finite(
+                    &fields.transient_max_step,
+                    "Transient maximum step",
+                )?)
+                .map_err(|error| error.to_string())?,
+            },
+        };
+        let probe = match fields.probe {
+            QualificationAuthoringProbe::NodeVoltage => QualificationProbe::NodeVoltage {
+                node: fields.probe_target.clone(),
+            },
+            QualificationAuthoringProbe::BranchCurrent => QualificationProbe::BranchCurrent {
+                branch: fields.probe_target.clone(),
+            },
+            QualificationAuthoringProbe::DcObservable => QualificationProbe::DcObservable {
+                expression: fields.probe_target.clone(),
+            },
+            QualificationAuthoringProbe::SweepValue => QualificationProbe::SweepValue,
+            QualificationAuthoringProbe::AcNodeVoltageMagnitude => {
+                QualificationProbe::AcNodeVoltageMagnitude {
+                    node: fields.probe_target.clone(),
+                }
+            }
+            QualificationAuthoringProbe::AcNodeVoltagePhaseDegrees => {
+                QualificationProbe::AcNodeVoltagePhaseDegrees {
+                    node: fields.probe_target.clone(),
+                }
+            }
+            QualificationAuthoringProbe::AcNodeVoltageReal => {
+                QualificationProbe::AcNodeVoltageReal {
+                    node: fields.probe_target.clone(),
+                }
+            }
+            QualificationAuthoringProbe::AcNodeVoltageImaginary => {
+                QualificationProbe::AcNodeVoltageImaginary {
+                    node: fields.probe_target.clone(),
+                }
+            }
+            QualificationAuthoringProbe::AcBranchCurrentMagnitude => {
+                QualificationProbe::AcBranchCurrentMagnitude {
+                    branch: fields.probe_target.clone(),
+                }
+            }
+            QualificationAuthoringProbe::AcBranchCurrentPhaseDegrees => {
+                QualificationProbe::AcBranchCurrentPhaseDegrees {
+                    branch: fields.probe_target.clone(),
+                }
+            }
+            QualificationAuthoringProbe::AcBranchCurrentReal => {
+                QualificationProbe::AcBranchCurrentReal {
+                    branch: fields.probe_target.clone(),
+                }
+            }
+            QualificationAuthoringProbe::AcBranchCurrentImaginary => {
+                QualificationProbe::AcBranchCurrentImaginary {
+                    branch: fields.probe_target.clone(),
+                }
+            }
+            QualificationAuthoringProbe::AcEffectiveCapacitance => {
+                QualificationProbe::AcEffectiveCapacitance {
+                    branch: fields.probe_target.clone(),
+                    excitation_magnitude: FiniteValue::new(parse_finite(
+                        &fields.excitation_magnitude,
+                        "AC excitation magnitude",
+                    )?)
+                    .map_err(|error| error.to_string())?,
+                }
+            }
+            QualificationAuthoringProbe::FrequencyValue => QualificationProbe::FrequencyValue,
+            QualificationAuthoringProbe::NoiseOutputDensity => {
+                QualificationProbe::NoiseOutputDensity
+            }
+            QualificationAuthoringProbe::NoiseInputReferredDensity => {
+                QualificationProbe::NoiseInputReferredDensity
+            }
+            QualificationAuthoringProbe::NoiseOutputAmplitude => {
+                QualificationProbe::NoiseOutputAmplitude
+            }
+            QualificationAuthoringProbe::NoiseInputReferredAmplitude => {
+                QualificationProbe::NoiseInputReferredAmplitude
+            }
+            QualificationAuthoringProbe::TransientNodeVoltage => {
+                QualificationProbe::TransientNodeVoltage {
+                    node: fields.probe_target.clone(),
+                }
+            }
+            QualificationAuthoringProbe::TransientBranchCurrent => {
+                QualificationProbe::TransientBranchCurrent {
+                    branch: fields.probe_target.clone(),
+                }
+            }
+            QualificationAuthoringProbe::TimeValue => QualificationProbe::TimeValue,
+        };
+        let sample = match fields.sample {
+            QualificationAuthoringSample::OperatingPoint => QualificationSample::OperatingPoint,
+            QualificationAuthoringSample::FirstSweepPoint => QualificationSample::FirstSweepPoint,
+            QualificationAuthoringSample::LastSweepPoint => QualificationSample::LastSweepPoint,
+            QualificationAuthoringSample::SweepPoint => QualificationSample::SweepPoint {
+                index: fields
+                    .sample_index
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|error| format!("Sweep point index is invalid: {error}"))?,
+            },
+            QualificationAuthoringSample::FirstFrequencyPoint => {
+                QualificationSample::FirstFrequencyPoint
+            }
+            QualificationAuthoringSample::LastFrequencyPoint => {
+                QualificationSample::LastFrequencyPoint
+            }
+            QualificationAuthoringSample::FrequencyPoint => QualificationSample::FrequencyPoint {
+                index: parse_sample_index(&fields.sample_index, "Frequency point index")?,
+            },
+            QualificationAuthoringSample::FirstTimePoint => QualificationSample::FirstTimePoint,
+            QualificationAuthoringSample::LastTimePoint => QualificationSample::LastTimePoint,
+            QualificationAuthoringSample::TimePoint => QualificationSample::TimePoint {
+                index: parse_sample_index(&fields.sample_index, "Time point index")?,
+            },
+        };
+        let output = QualificationOutputDefinition::try_new(fields.quantity.clone(), probe, sample)
+            .map_err(|error| error.to_string())?;
+        let reference = QualificationReference::try_new(
+            fields.quantity.clone(),
+            parse_finite(&fields.expected, "Expected value")?,
+            parse_non_negative(&fields.absolute_tolerance, "Absolute tolerance")?,
+            parse_non_negative(&fields.relative_tolerance, "Relative tolerance")?,
+        )
+        .map_err(|error| error.to_string())?;
+        let vector = QualificationVector::try_new(
+            rspice_model_library::qualification::QualificationVectorInput {
+                id: fields.vector_id.clone(),
+                name: fields.vector_name.clone(),
+                source,
+                model_source,
+                model_section,
+                execution_model_source,
+                executable_input,
+                analysis,
+                outputs: vec![output],
+                references: vec![reference],
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        QualificationSuite::try_new(
+            fields.suite_id.clone(),
+            fields.suite_name.clone(),
+            ObjectRevision::INITIAL,
+            vec![vector],
+        )
+        .map_err(|error| error.to_string())
+    }
+}

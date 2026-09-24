@@ -7,20 +7,6 @@
 
 use super::*;
 
-// Synchronous tests drive the same cooperative session used by the application.
-fn execute_current_platform(
-    suite: &QualificationSuite,
-    source: &ModelSourceEvidenceBinding,
-    abort: &dyn rspice_core::AbortSignal,
-) -> Result<QualificationPlatformRun, QualificationExecutionError> {
-    let mut session = QualificationExecutionSession::try_new(suite, source)?;
-    loop {
-        if let QualificationExecutionStep::Complete { run, .. } = session.step(abort)? {
-            return Ok(run);
-        }
-    }
-}
-
 fn digest(byte: u8) -> ContentDigest {
     ContentDigest::from_bytes([byte; 32])
 }
@@ -55,14 +41,16 @@ fn vector_for_source(
             String::from_utf8(retained_model.clone()).unwrap()
         )
         .into_bytes();
-    QualificationVector::try_new_source_bound(
-        id,
-        name,
-        source(source_variant),
-        retained_model,
-        input,
-        QualificationAnalysis::DcOperatingPoint,
-        vec![
+    QualificationVector::try_new(QualificationVectorInput {
+        id: id.into(),
+        name: name.into(),
+        source: source(source_variant),
+        model_section: None,
+        execution_model_source: retained_model.clone(),
+        model_source: retained_model,
+        executable_input: input,
+        analysis: QualificationAnalysis::DcOperatingPoint,
+        outputs: vec![
             QualificationOutputDefinition::try_new(
                 "drain_current",
                 QualificationProbe::NodeVoltage {
@@ -72,8 +60,10 @@ fn vector_for_source(
             )
             .unwrap(),
         ],
-        vec![QualificationReference::try_new("drain_current", 1.0, 0.01, 0.005).unwrap()],
-    )
+        references: vec![
+            QualificationReference::try_new("drain_current", 1.0, 0.01, 0.005).unwrap(),
+        ],
+    })
     .unwrap()
 }
 
@@ -116,16 +106,18 @@ fn executable_vector(
         String::from_utf8(retained_model.clone()).unwrap()
     )
     .into_bytes();
-    QualificationVector::try_new_source_bound(
-        id,
-        name,
-        source(7),
-        retained_model,
-        input,
+    QualificationVector::try_new(QualificationVectorInput {
+        id: id.into(),
+        name: name.into(),
+        source: source(7),
+        model_section: None,
+        execution_model_source: retained_model.clone(),
+        model_source: retained_model,
+        executable_input: input,
         analysis,
         outputs,
         references,
-    )
+    })
     .unwrap()
 }
 
@@ -291,21 +283,21 @@ fn candidate(
     source: &ModelSourceEvidenceBinding,
 ) -> ModelReleaseCandidate {
     candidate_with_snapshot(
-        ModelReleaseCandidate::try_new(
-            ReleaseCandidateIdentity {
+        ModelReleaseCandidate::try_new(ModelReleaseCandidateInput {
+            identity: ReleaseCandidateIdentity {
                 id: "demo180-nch-candidate-18".into(),
                 model_id: "demo180_nch".into(),
                 version: "4.8.3-rc.1".into(),
             },
-            source.clone(),
+            source: source.clone(),
             suite,
             evidence,
-            documents(),
-            Some(license()),
-            Some(impact()),
-            Some(compatibility()),
-            approvals(),
-        )
+            documentation: documents(),
+            license: Some(license()),
+            consumer_impact: Some(impact()),
+            compatibility: Some(compatibility()),
+            approvals: approvals(),
+        })
         .unwrap(),
     )
 }
@@ -314,6 +306,25 @@ fn candidate_with_snapshot(mut candidate: ModelReleaseCandidate) -> ModelRelease
     candidate.definition_source = model_source(7);
     candidate.definition_metadata = Some(ModelDefinitionMetadata::default());
     candidate
+}
+
+// Deliberately synthetic retained evidence for contract/lifecycle assertions.
+// Actual solver-to-evidence behavior is tested by the application service.
+fn passing_platform_run(
+    suite: &QualificationSuite,
+    source: &ModelSourceEvidenceBinding,
+) -> QualificationPlatformRun {
+    let platform = QualificationPlatform::Desktop;
+    let outcomes = suite
+        .vectors
+        .iter()
+        .map(|vector| QualificationPlatformVectorOutcome {
+            vector_id: vector.id.clone(),
+            input_digest: vector.input_digest,
+            outcome: platform_outcome(platform, true),
+        })
+        .collect();
+    QualificationPlatformRun::try_new(platform, source.clone(), suite, outcomes).unwrap()
 }
 
 #[test]
@@ -458,21 +469,21 @@ fn missing_required_document_license_impact_or_compatibility_blocks_promotion() 
     }])
     .unwrap();
     let candidate = candidate_with_snapshot(
-        ModelReleaseCandidate::try_new(
-            ReleaseCandidateIdentity {
+        ModelReleaseCandidate::try_new(ModelReleaseCandidateInput {
+            identity: ReleaseCandidateIdentity {
                 id: "candidate-docs".into(),
                 model_id: "demo180_nch".into(),
                 version: "4.8.3-rc.docs".into(),
             },
-            source.clone(),
-            &suite,
-            &evidence,
-            incomplete_docs,
-            Some(license()),
-            Some(impact()),
-            Some(compatibility()),
-            approvals(),
-        )
+            source: source.clone(),
+            suite: &suite,
+            evidence: &evidence,
+            documentation: incomplete_docs,
+            license: Some(license()),
+            consumer_impact: Some(impact()),
+            compatibility: Some(compatibility()),
+            approvals: approvals(),
+        })
         .unwrap(),
     );
     assert_eq!(
@@ -484,21 +495,21 @@ fn missing_required_document_license_impact_or_compatibility_blocks_promotion() 
     );
 
     let candidate = candidate_with_snapshot(
-        ModelReleaseCandidate::try_new(
-            ReleaseCandidateIdentity {
+        ModelReleaseCandidate::try_new(ModelReleaseCandidateInput {
+            identity: ReleaseCandidateIdentity {
                 id: "candidate-missing".into(),
                 model_id: "demo180_nch".into(),
                 version: "4.8.3-rc.missing".into(),
             },
-            source.clone(),
-            &suite,
-            &evidence,
-            documents(),
-            None,
-            None,
-            None,
-            approvals(),
-        )
+            source: source.clone(),
+            suite: &suite,
+            evidence: &evidence,
+            documentation: documents(),
+            license: None,
+            consumer_impact: None,
+            compatibility: None,
+            approvals: approvals(),
+        })
         .unwrap(),
     );
     assert_eq!(
@@ -510,21 +521,21 @@ fn missing_required_document_license_impact_or_compatibility_blocks_promotion() 
     );
 
     let candidate = candidate_with_snapshot(
-        ModelReleaseCandidate::try_new(
-            ReleaseCandidateIdentity {
+        ModelReleaseCandidate::try_new(ModelReleaseCandidateInput {
+            identity: ReleaseCandidateIdentity {
                 id: "candidate-impact".into(),
                 model_id: "demo180_nch".into(),
                 version: "4.8.3-rc.impact".into(),
             },
-            source.clone(),
-            &suite,
-            &evidence,
-            documents(),
-            Some(license()),
-            None,
-            Some(compatibility()),
-            approvals(),
-        )
+            source: source.clone(),
+            suite: &suite,
+            evidence: &evidence,
+            documentation: documents(),
+            license: Some(license()),
+            consumer_impact: None,
+            compatibility: Some(compatibility()),
+            approvals: approvals(),
+        })
         .unwrap(),
     );
     assert_eq!(
@@ -536,21 +547,21 @@ fn missing_required_document_license_impact_or_compatibility_blocks_promotion() 
     );
 
     let candidate = candidate_with_snapshot(
-        ModelReleaseCandidate::try_new(
-            ReleaseCandidateIdentity {
+        ModelReleaseCandidate::try_new(ModelReleaseCandidateInput {
+            identity: ReleaseCandidateIdentity {
                 id: "candidate-compatibility".into(),
                 model_id: "demo180_nch".into(),
                 version: "4.8.3-rc.compatibility".into(),
             },
-            source.clone(),
-            &suite,
-            &evidence,
-            documents(),
-            Some(license()),
-            Some(impact()),
-            None,
-            approvals(),
-        )
+            source: source.clone(),
+            suite: &suite,
+            evidence: &evidence,
+            documentation: documents(),
+            license: Some(license()),
+            consumer_impact: Some(impact()),
+            compatibility: None,
+            approvals: approvals(),
+        })
         .unwrap(),
     );
     assert_eq!(
@@ -602,21 +613,21 @@ fn approvals_are_independent_and_checklist_cannot_be_forged() {
     let mut same_person = approvals();
     same_person[1].approver_id = "M.CHEN".into();
     assert_eq!(
-        ModelReleaseCandidate::try_new(
-            ReleaseCandidateIdentity {
+        ModelReleaseCandidate::try_new(ModelReleaseCandidateInput {
+            identity: ReleaseCandidateIdentity {
                 id: "candidate-approval".into(),
                 model_id: "demo180_nch".into(),
                 version: "4.8.3-rc.approval".into(),
             },
-            source.clone(),
-            &suite,
-            &evidence,
-            documents(),
-            Some(license()),
-            Some(impact()),
-            Some(compatibility()),
-            same_person,
-        )
+            source: source.clone(),
+            suite: &suite,
+            evidence: &evidence,
+            documentation: documents(),
+            license: Some(license()),
+            consumer_impact: Some(impact()),
+            compatibility: Some(compatibility()),
+            approvals: same_person,
+        })
         .unwrap_err()
         .code,
         QualificationErrorCode::DuplicateId
@@ -882,16 +893,16 @@ fn qualified_section_digest_resolves_only_exact_passing_evidence() {
     let mut executable = b"RSpice model qualification\n".to_vec();
     executable.extend_from_slice(&section_source);
     executable.extend_from_slice(b"V1 output 0 DC 1\nM1 output output 0 0 demo180_nch\n.end\n");
-    let section_vector = QualificationVector::try_new_source_section_bound(
-        "tt-vector",
-        "TT operating point",
-        section_binding.clone(),
-        complete_source,
-        Some("TT".to_owned()),
-        section_source,
-        executable,
-        QualificationAnalysis::DcOperatingPoint,
-        vec![
+    let section_vector = QualificationVector::try_new(QualificationVectorInput {
+        id: "tt-vector".into(),
+        name: "TT operating point".into(),
+        source: section_binding.clone(),
+        model_source: complete_source,
+        model_section: Some("TT".to_owned()),
+        execution_model_source: section_source,
+        executable_input: executable,
+        analysis: QualificationAnalysis::DcOperatingPoint,
+        outputs: vec![
             QualificationOutputDefinition::try_new(
                 "drain_current",
                 QualificationProbe::NodeVoltage {
@@ -901,8 +912,10 @@ fn qualified_section_digest_resolves_only_exact_passing_evidence() {
             )
             .unwrap(),
         ],
-        vec![QualificationReference::try_new("drain_current", 1.0, 0.01, 0.005).unwrap()],
-    )
+        references: vec![
+            QualificationReference::try_new("drain_current", 1.0, 0.01, 0.005).unwrap(),
+        ],
+    })
     .unwrap();
     let section_suite = QualificationSuite::try_new(
         "tt-suite",
@@ -1046,140 +1059,6 @@ fn suites_cannot_mix_source_revisions() {
 }
 
 #[test]
-fn native_execution_measures_outputs_and_applies_declared_tolerances() {
-    let source = source(7);
-    let passing_suite = suite();
-    let run = execute_current_platform(&passing_suite, &source, &rspice_core::NoAbort).unwrap();
-    assert_eq!(run.platform, QualificationPlatform::Desktop);
-    assert!(run.passed);
-    assert_eq!(run.vector_outcomes.len(), passing_suite.vectors.len());
-    let reference = &run.vector_outcomes[0].outcome.references[0];
-    assert_eq!(reference.expected_value, FiniteValue::new(1.0).unwrap());
-    assert_eq!(reference.observed_value, FiniteValue::new(1.0).unwrap());
-
-    let mut failing_suite = passing_suite.clone();
-    for vector in &mut failing_suite.vectors {
-        vector.references[0].expected = FiniteValue::new(2.0).unwrap();
-    }
-    let run = execute_current_platform(&failing_suite, &source, &rspice_core::NoAbort).unwrap();
-    assert!(!run.passed);
-    assert!(
-        run.vector_outcomes
-            .iter()
-            .all(|value| !value.outcome.passed)
-    );
-}
-
-#[test]
-fn ac_cv_noise_and_transient_vectors_execute_real_solver_results() {
-    let ac_vector = executable_vector(
-        "ac-cv",
-        "AC and effective capacitance",
-        "V1 output 0 DC 0 AC 1\nM1 output output 0 0 demo180_nch\n.end\n",
-        QualificationAnalysis::AcSweep {
-            frequencies: vec![FiniteValue::new(1.0e3).unwrap()],
-        },
-        vec![
-            QualificationOutputDefinition::try_new(
-                "capacitance",
-                QualificationProbe::AcEffectiveCapacitance {
-                    branch: "V1".to_owned(),
-                    excitation_magnitude: FiniteValue::new(1.0).unwrap(),
-                },
-                QualificationSample::FirstFrequencyPoint,
-            )
-            .unwrap(),
-            QualificationOutputDefinition::try_new(
-                "voltage-magnitude",
-                QualificationProbe::AcNodeVoltageMagnitude {
-                    node: "output".to_owned(),
-                },
-                QualificationSample::FirstFrequencyPoint,
-            )
-            .unwrap(),
-        ],
-        vec![
-            QualificationReference::try_new("capacitance", 0.0, 1.0, 0.0).unwrap(),
-            QualificationReference::try_new("voltage-magnitude", 1.0, 1.0e-10, 1.0e-10).unwrap(),
-        ],
-    );
-    let noise_vector = executable_vector(
-        "noise",
-        "Output noise",
-        "V1 input 0 DC 0 AC 1\nR1 input output 1k\nR2 output 0 1k\nM1 output input 0 0 demo180_nch\n.end\n",
-        QualificationAnalysis::Noise {
-            output_node: "output".to_owned(),
-            output_reference: None,
-            input_source: "V1".to_owned(),
-            frequencies: vec![FiniteValue::new(1.0e3).unwrap()],
-            temperature_kelvin: FiniteValue::new(300.15).unwrap(),
-        },
-        vec![
-            QualificationOutputDefinition::try_new(
-                "output-noise-density",
-                QualificationProbe::NoiseOutputDensity,
-                QualificationSample::FirstFrequencyPoint,
-            )
-            .unwrap(),
-        ],
-        vec![QualificationReference::try_new("output-noise-density", 0.0, 1.0, 0.0).unwrap()],
-    );
-    let transient_vector = executable_vector(
-        "transient",
-        "Transient voltage",
-        "V1 output 0 DC 1\nM1 output output 0 0 demo180_nch\n.end\n",
-        QualificationAnalysis::Transient {
-            stop_time: FiniteValue::new(1.0e-6).unwrap(),
-            max_step: FiniteValue::new(1.0e-7).unwrap(),
-        },
-        vec![
-            QualificationOutputDefinition::try_new(
-                "output-voltage",
-                QualificationProbe::TransientNodeVoltage {
-                    node: "output".to_owned(),
-                },
-                QualificationSample::LastTimePoint,
-            )
-            .unwrap(),
-        ],
-        vec![QualificationReference::try_new("output-voltage", 1.0, 1.0e-8, 1.0e-8).unwrap()],
-    );
-    let suite = QualificationSuite::try_new(
-        "advanced",
-        "Advanced qualification",
-        ObjectRevision::INITIAL,
-        vec![ac_vector, noise_vector, transient_vector],
-    )
-    .unwrap();
-
-    let run = execute_current_platform(&suite, &source(7), &rspice_core::NoAbort).unwrap();
-    assert!(run.passed, "{run:#?}");
-    for outcome in &run.vector_outcomes {
-        assert!(outcome.outcome.failure.is_none(), "{outcome:#?}");
-        assert!(
-            outcome
-                .outcome
-                .references
-                .iter()
-                .all(|reference| reference.observed_value.get().is_finite()),
-            "{outcome:#?}"
-        );
-    }
-    let ac = run
-        .vector_outcomes
-        .iter()
-        .find(|outcome| outcome.vector_id == "ac-cv")
-        .unwrap();
-    let voltage = ac
-        .outcome
-        .references
-        .iter()
-        .find(|reference| reference.quantity == "voltage-magnitude")
-        .unwrap();
-    assert!((voltage.observed_value.get() - 1.0).abs() <= 1.0e-10);
-}
-
-#[test]
 fn advanced_analysis_axes_and_probe_domains_fail_closed() {
     let mut vector = executable_vector(
         "axis",
@@ -1230,138 +1109,6 @@ fn advanced_analysis_axes_and_probe_domains_fail_closed() {
     assert_eq!(
         error.code,
         QualificationErrorCode::InvalidExecutionDefinition
-    );
-}
-
-#[test]
-fn execution_failures_are_retained_as_failing_platform_outcomes() {
-    let source = source(7);
-    let mut suite = suite();
-    suite.vectors[0].outputs[0].probe = QualificationProbe::NodeVoltage {
-        node: "missing-node".into(),
-    };
-    let run = execute_current_platform(&suite, &source, &rspice_core::NoAbort).unwrap();
-    let failed = run
-        .vector_outcomes
-        .iter()
-        .find(|value| value.vector_id == "dc-001")
-        .unwrap();
-    assert!(!failed.outcome.passed);
-    assert_eq!(
-        failed.outcome.failure.as_ref().unwrap().stage,
-        QualificationFailureStage::Measurement
-    );
-    assert!(failed.outcome.references.is_empty());
-    assert!(run.validate_bound(&suite, &source).is_ok());
-}
-
-#[test]
-fn missing_runtime_parity_cannot_be_promoted_to_evidence() {
-    let source = source(7);
-    let suite = suite();
-    let desktop = execute_current_platform(&suite, &source, &rspice_core::NoAbort).unwrap();
-    let error =
-        QualificationEvidence::assemble_platform_runs("evidence", &suite, &source, vec![desktop])
-            .unwrap_err();
-    assert_eq!(error.code, QualificationErrorCode::EvidenceCoverageMismatch);
-}
-
-#[test]
-fn cancellation_publishes_no_partial_platform_run() {
-    let result = execute_current_platform(
-        &suite(),
-        &source(7),
-        &rspice_core::abort_signal::ImmediateAbort,
-    );
-    assert!(matches!(
-        result,
-        Err(QualificationExecutionError::Cancelled)
-    ));
-}
-
-#[test]
-fn cooperative_session_runs_one_vector_per_step_and_cancels_atomically() {
-    let source = source(7);
-    let suite = suite();
-    let mut session = QualificationExecutionSession::try_new(&suite, &source).unwrap();
-    assert_eq!(session.progress().completed_vectors, 0);
-    let step = session.step(&rspice_core::NoAbort).unwrap();
-    let QualificationExecutionStep::InProgress(progress) = step else {
-        panic!("a two-vector suite must not publish a run after one step");
-    };
-    assert_eq!(progress.completed_vectors, 1);
-    assert!(!session.is_finished());
-    session.cancel();
-    assert!(session.is_cancelled());
-    assert!(matches!(
-        session.step(&rspice_core::NoAbort),
-        Err(QualificationExecutionError::Cancelled)
-    ));
-}
-
-#[test]
-fn cooperative_session_publishes_only_the_terminal_validated_run() {
-    let source = source(7);
-    let suite = suite();
-    let mut session = QualificationExecutionSession::try_new(&suite, &source).unwrap();
-    assert!(matches!(
-        session.step(&rspice_core::NoAbort).unwrap(),
-        QualificationExecutionStep::InProgress(_)
-    ));
-    let terminal = session.step(&rspice_core::NoAbort).unwrap();
-    let QualificationExecutionStep::Complete { progress, run } = terminal else {
-        panic!("the final vector must publish the complete platform run");
-    };
-    assert_eq!(progress.completed_vectors, suite.vectors.len());
-    run.validate_bound(&suite, &source).unwrap();
-    assert!(session.is_finished());
-    assert!(matches!(
-        session.step(&rspice_core::NoAbort),
-        Err(QualificationExecutionError::SessionFinished)
-    ));
-}
-
-#[test]
-fn assembled_evidence_is_deterministic_and_requires_real_run_records() {
-    let source = source(7);
-    let suite = suite();
-    let desktop = execute_current_platform(&suite, &source, &rspice_core::NoAbort).unwrap();
-    let wasm_outcomes = desktop
-        .vector_outcomes
-        .iter()
-        .map(|value| {
-            let mut value = value.clone();
-            value.outcome.platform = QualificationPlatform::WebAssembly;
-            value
-        })
-        .collect();
-    // The session identifies its actual runtime; imported runs use the same
-    // bound-run validator.
-    let wasm = QualificationPlatformRun::try_new(
-        QualificationPlatform::WebAssembly,
-        source.clone(),
-        &suite,
-        wasm_outcomes,
-    )
-    .unwrap();
-    let first = QualificationEvidence::assemble_platform_runs(
-        "evidence",
-        &suite,
-        &source,
-        vec![desktop.clone(), wasm.clone()],
-    )
-    .unwrap();
-    let second = QualificationEvidence::assemble_platform_runs(
-        "evidence",
-        &suite,
-        &source,
-        vec![wasm, desktop],
-    )
-    .unwrap();
-    assert_eq!(first, second);
-    assert_eq!(
-        serde_json::to_string(&first).unwrap(),
-        serde_json::to_string(&second).unwrap()
     );
 }
 
@@ -1575,7 +1322,7 @@ fn atomic_promotion_commits_release_and_record_or_rolls_back_duplicates() {
 fn platform_runs_persist_and_exact_pair_assembles_evidence_atomically() {
     let suite = suite();
     let source = source(7);
-    let desktop = execute_current_platform(&suite, &source, &rspice_core::NoAbort).unwrap();
+    let desktop = passing_platform_run(&suite, &source);
     let wasm = imported_platform_run(
         &desktop,
         QualificationPlatform::WebAssembly,
@@ -1617,7 +1364,7 @@ fn platform_runs_persist_and_exact_pair_assembles_evidence_atomically() {
 fn stale_tampered_or_incomplete_platform_runs_roll_back() {
     let suite = suite();
     let source = source(7);
-    let desktop = execute_current_platform(&suite, &source, &rspice_core::NoAbort).unwrap();
+    let desktop = passing_platform_run(&suite, &source);
     let mut state = ModelQualificationState::try_new(
         vec![suite.clone()],
         Vec::new(),
@@ -1680,7 +1427,7 @@ fn stale_tampered_or_incomplete_platform_runs_roll_back() {
 fn suite_and_vector_lifecycle_is_atomic_revisioned_and_evidence_safe() {
     let suite = suite();
     let source = source(7);
-    let desktop = execute_current_platform(&suite, &source, &rspice_core::NoAbort).unwrap();
+    let desktop = passing_platform_run(&suite, &source);
     let mut state = ModelQualificationState::try_new(
         vec![suite.clone()],
         vec![desktop],
@@ -1782,15 +1529,15 @@ fn failed_disposition_blocks_promotion_until_exact_cross_platform_rerun_passes()
     )
     .unwrap();
     state
-        .record_vector_disposition_atomically(
-            "disp-failed-dc-001",
-            &suite.id,
-            "dc-001",
-            &source,
-            QualificationVectorDispositionCause::Failed,
-            QualificationVectorRequiredAction::Rerun,
-            "Reference mismatch requires an exact parity rerun",
-        )
+        .record_vector_disposition_atomically(QualificationVectorDispositionInput {
+            disposition_id: "disp-failed-dc-001".into(),
+            suite_id: &suite.id,
+            vector_id: "dc-001",
+            current_source: &source,
+            cause: QualificationVectorDispositionCause::Failed,
+            required_action: QualificationVectorRequiredAction::Rerun,
+            reason: "Reference mismatch requires an exact parity rerun".into(),
+        })
         .unwrap();
     let retained = state.clone();
     let error = state
@@ -1815,7 +1562,7 @@ fn failed_disposition_blocks_promotion_until_exact_cross_platform_rerun_passes()
     );
     assert_eq!(state, retained);
 
-    let desktop = execute_current_platform(&suite, &source, &rspice_core::NoAbort).unwrap();
+    let desktop = passing_platform_run(&suite, &source);
     let wasm = imported_platform_run(
         &desktop,
         QualificationPlatform::WebAssembly,
@@ -1857,29 +1604,29 @@ fn stale_dispositions_cannot_be_waived_by_rerun_and_retirement_is_explicit() {
     .unwrap();
     let empty = state.clone();
     let error = state
-        .record_vector_disposition_atomically(
-            "stale-rerun",
-            &suite.id,
-            "dc-001",
-            &current_source,
-            QualificationVectorDispositionCause::Stale,
-            QualificationVectorRequiredAction::Rerun,
-            "Source revision changed",
-        )
+        .record_vector_disposition_atomically(QualificationVectorDispositionInput {
+            disposition_id: "stale-rerun".into(),
+            suite_id: &suite.id,
+            vector_id: "dc-001",
+            current_source: &current_source,
+            cause: QualificationVectorDispositionCause::Stale,
+            required_action: QualificationVectorRequiredAction::Rerun,
+            reason: "Source revision changed".into(),
+        })
         .unwrap_err();
     assert_eq!(error.code, QualificationErrorCode::DispositionInvalid);
     assert_eq!(state, empty);
 
     state
-        .record_vector_disposition_atomically(
-            "stale-retire",
-            &suite.id,
-            "dc-001",
-            &current_source,
-            QualificationVectorDispositionCause::Stale,
-            QualificationVectorRequiredAction::Retire,
-            "The old source-bound vector is outside the current candidate",
-        )
+        .record_vector_disposition_atomically(QualificationVectorDispositionInput {
+            disposition_id: "stale-retire".into(),
+            suite_id: &suite.id,
+            vector_id: "dc-001",
+            current_source: &current_source,
+            cause: QualificationVectorDispositionCause::Stale,
+            required_action: QualificationVectorRequiredAction::Retire,
+            reason: "The old source-bound vector is outside the current candidate".into(),
+        })
         .unwrap();
     assert!(state.vector_dispositions[0].is_open());
     state.delete_suite_atomically(&suite.id).unwrap();

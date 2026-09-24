@@ -426,15 +426,17 @@ pub(super) fn build_release_candidate(
         version: required_authoring_text("Candidate version", &fields.candidate_version)?,
     };
     let mut candidate = ModelReleaseCandidate::try_new(
-        identity,
-        evidence.source.clone(),
-        suite,
-        evidence,
-        documentation,
-        Some(license),
-        Some(consumer_impact),
-        Some(compatibility),
-        approvals,
+        rspice_model_library::qualification::ModelReleaseCandidateInput {
+            identity,
+            source: evidence.source.clone(),
+            suite,
+            evidence,
+            documentation,
+            license: Some(license),
+            consumer_impact: Some(consumer_impact),
+            compatibility: Some(compatibility),
+            approvals,
+        },
     )
     .map_err(|error| error.to_string())?;
     let definition = draft.definition().map_err(|diagnostics| {

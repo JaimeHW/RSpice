@@ -4,7 +4,7 @@
 //! measurement failures are retained as failed outcomes in a complete run.
 //! Only the terminal step publishes a validated platform run.
 
-use super::*;
+use rspice_model_library::qualification::*;
 
 /// Observable suite progress. Emitting progress never publishes partial
 /// qualification evidence; cancellation discards the in-progress run.
@@ -268,10 +268,9 @@ fn execute_qualification_vector(
 
     let mut references = Vec::with_capacity(vector.outputs.len());
     for output in &vector.outputs {
-        let reference = find_ci(&vector.references, &output.quantity, |value| {
-            &value.quantity
-        })
-        .expect("vector output/reference coverage validated before execution");
+        let reference = vector
+            .reference(&output.quantity)
+            .expect("vector output/reference coverage validated before execution");
         let observed = match measure_qualification_output(output, &executed) {
             Ok(value) if value.is_finite() => value,
             Ok(_) => {
@@ -559,3 +558,6 @@ const fn current_qualification_platform() -> QualificationPlatform {
 const fn current_qualification_platform() -> QualificationPlatform {
     QualificationPlatform::Desktop
 }
+
+#[cfg(test)]
+mod tests;

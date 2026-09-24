@@ -24,7 +24,7 @@ pub struct ReferenceErrorEvidence {
 }
 
 impl ReferenceErrorEvidence {
-    pub(super) fn try_new(
+    pub fn try_new(
         quantity: impl Into<String>,
         expected_value: f64,
         observed_value: f64,
@@ -141,7 +141,7 @@ pub struct QualificationExecutionFailure {
 }
 
 impl QualificationExecutionFailure {
-    pub(super) fn try_new(
+    pub fn try_new(
         stage: QualificationFailureStage,
         code: impl Into<String>,
         message: impl Into<String>,
@@ -172,7 +172,7 @@ pub struct PlatformQualificationOutcome {
 }
 
 impl PlatformQualificationOutcome {
-    pub(super) fn try_new(
+    pub fn try_new(
         platform: QualificationPlatform,
         mut references: Vec<ReferenceErrorEvidence>,
     ) -> QualificationResult<Self> {
@@ -189,7 +189,7 @@ impl PlatformQualificationOutcome {
         Ok(value)
     }
 
-    pub(super) fn try_failed(
+    pub fn try_failed(
         platform: QualificationPlatform,
         failure: QualificationExecutionFailure,
     ) -> QualificationResult<Self> {
@@ -640,7 +640,7 @@ pub struct QualificationPlatformRun {
 }
 
 impl QualificationPlatformRun {
-    pub(super) fn try_new(
+    pub fn try_new(
         platform: QualificationPlatform,
         source: ModelSourceEvidenceBinding,
         suite: &QualificationSuite,

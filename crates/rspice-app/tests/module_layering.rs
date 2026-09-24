@@ -1340,7 +1340,7 @@ fn source_files_have_no_byte_order_mark() {
 /// `helpers::infer_primary_{source_name,output_node}_with_abort` went too:
 /// both took a first-or-last element off a solved deck, and the offer needs a
 /// *sole* source or it has nothing to offer.
-const MAX_LINT_SUPPRESSIONS: usize = 52;
+const MAX_LINT_SUPPRESSIONS: usize = 51;
 
 /// The crate does not accumulate lint suppressions.
 #[test]
@@ -1612,7 +1612,6 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("workbench/app/dialogs/hardcopy/render.rs", 3_112),
     ("workbench/docks/inspector.rs", 3_221),
     ("workbench/docks/navigator.rs", 6_668),
-    ("workbench/documents/model_editor.rs", 2_614),
     // 2026-09-06, +100 (6_418 -> 6_518): three viewer sheets joined the
     // workspace. Every line is a single-owner table this file exists to own —
     // the `ResultViewer` variants and their tab order, the two directions of

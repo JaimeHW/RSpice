@@ -376,57 +376,48 @@ pub struct QualificationVector {
     pub references: Vec<QualificationReference>,
 }
 
+/// Authored inputs for one exact source-bound qualification vector.
+/// Digests and validated ordering are derived by [`QualificationVector::try_new`].
+pub struct QualificationVectorInput {
+    pub id: String,
+    pub name: String,
+    pub source: ModelSourceEvidenceBinding,
+    pub model_source: Vec<u8>,
+    pub model_section: Option<String>,
+    pub execution_model_source: Vec<u8>,
+    pub executable_input: Vec<u8>,
+    pub analysis: QualificationAnalysis,
+    pub outputs: Vec<QualificationOutputDefinition>,
+    pub references: Vec<QualificationReference>,
+}
+
 impl QualificationVector {
-    /// Construct an executable vector from separately retained canonical model
-    /// bytes and the complete testbench bytes. Validation proves that the
-    /// canonical bytes match the exact project source identity, occur in the
-    /// testbench, parse as the named model, and are actually instantiated.
-    pub fn try_new_source_bound(
-        id: impl Into<String>,
-        name: impl Into<String>,
-        source: ModelSourceEvidenceBinding,
-        model_source: Vec<u8>,
-        executable_input: Vec<u8>,
-        analysis: QualificationAnalysis,
-        outputs: Vec<QualificationOutputDefinition>,
-        references: Vec<QualificationReference>,
-    ) -> QualificationResult<Self> {
-        let execution_model_source = model_source.clone();
-        Self::try_new_source_section_bound(
+    /// Find a reference using the same quantity identity rules as validation.
+    pub fn reference(&self, quantity: &str) -> Option<&QualificationReference> {
+        find_ci(&self.references, quantity, |value| &value.quantity)
+    }
+
+    /// Validate a source-bound executable vector and its output/reference contract.
+    pub fn try_new(input: QualificationVectorInput) -> QualificationResult<Self> {
+        let QualificationVectorInput {
             id,
             name,
             source,
             model_source,
-            None,
+            model_section,
             execution_model_source,
             executable_input,
             analysis,
-            outputs,
-            references,
-        )
-    }
-
-    /// Construct a vector that proves and executes one exact base or named
-    /// section from the retained canonical model source.
-    pub fn try_new_source_section_bound(
-        id: impl Into<String>,
-        name: impl Into<String>,
-        source: ModelSourceEvidenceBinding,
-        model_source: Vec<u8>,
-        model_section: Option<String>,
-        execution_model_source: Vec<u8>,
-        executable_input: Vec<u8>,
-        analysis: QualificationAnalysis,
-        mut outputs: Vec<QualificationOutputDefinition>,
-        mut references: Vec<QualificationReference>,
-    ) -> QualificationResult<Self> {
+            mut outputs,
+            mut references,
+        } = input;
         outputs.sort_by(|left, right| normalized(&left.quantity).cmp(&normalized(&right.quantity)));
         references
             .sort_by(|left, right| normalized(&left.quantity).cmp(&normalized(&right.quantity)));
         let input_digest = digest_bytes(&executable_input);
         let value = Self {
-            id: id.into(),
-            name: name.into(),
+            id,
+            name,
             source,
             model_source,
             model_section,
