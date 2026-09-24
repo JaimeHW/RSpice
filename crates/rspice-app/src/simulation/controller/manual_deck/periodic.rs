@@ -1684,7 +1684,7 @@ mod tests {
             ".pss fund=1Meg harms=0",
             ".pss fund=1Meg points=8",
             ".pss fund=1Meg harms=9 points=16",
-            ".pnoise dec 10 1 1Meg out=out maxsideband=0",
+            ".pnoise dec 10 1 1Meg out=out maxsideband=-1",
             ".pac lin 10 1Meg 1k input=V1 out=out",
             // Two spellings of one quantity on one card.
             ".pac dec 10 1k 1Meg input=V1 out=out maxsideband=2 sidebandmin=-1",

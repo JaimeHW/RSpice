@@ -981,9 +981,14 @@ fn qpss_card_studio_and_manual_deck_resolve_the_same_complete_configuration() {
         "QPSS integration\nVDRIVE in 0 AC .1\nR1 in out 1k\nR2 out 0 1k\nIDRIVE 0 out AC 1u\n{directive}\n.end\n"
     );
     let queue = super::manual_deck::build_manual_deck_queue(&state, &deck).unwrap();
-    assert_eq!(queue.len(), 1);
+    assert_eq!(queue.len(), 2, "QPSS also needs an operating-point seed");
     assert_eq!(queue[0].spec.driven_qpss_config().unwrap(), expected);
     assert_eq!(queue[0].analysis_line, directive);
+    assert!(matches!(
+        queue[1].spec,
+        AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. }
+    ));
+    assert_eq!(queue[1].analysis_line, ".op (implicit QPSS seed)");
     assert!(
         crate::state::CanonicalAnalysisKind::Qpss
             .execution_blocker()
