@@ -9,6 +9,7 @@ mod corner;
 mod corner_expansion;
 pub mod correlation;
 mod definition_metadata;
+mod execution;
 mod facts;
 mod library;
 mod model;
@@ -34,3 +35,7 @@ pub use project_revision::*;
 
 pub use resolution::*;
 pub use validation::*;
+
+pub use execution::{
+    MaterializedPlanBinding, ModelExecutionPlan, resolve_materialized_definition_namespace,
+};

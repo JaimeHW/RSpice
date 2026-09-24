@@ -50,8 +50,7 @@ pub use rspice_model_library::{StatisticalDefinition, StatisticalVariableDefinit
 #[cfg(test)]
 pub(crate) use device_class::DEVICE_CLASS;
 pub use manager::{
-    ModelExecutionPlan, ModelLibraryManager, PackModelHit, ProjectModelCommit,
-    SealedModelExecutionSources,
+    ModelLibraryManager, PackModelHit, ProjectModelCommit, SealedModelExecutionSources,
 };
 pub(crate) use manager::{SealedModelLibraryVerilogAAuthority, model_library_source_digest};
 pub use rspice_model_library::DeviceModel;
@@ -77,7 +76,7 @@ pub use rspice_model_library::qualification::{
 };
 pub use rspice_model_library::{ClosureFacts, closure_facts, envelope_is_invalid};
 pub use rspice_model_library::{
-    ModelConsumerScope, ModelResolutionRecord, ModelValidationFinding,
+    ModelConsumerScope, ModelExecutionPlan, ModelResolutionRecord, ModelValidationFinding,
     ModelValidationFindingSeverity, ModelValidationReceipt, SimulationPlanModelBinding,
 };
 pub use rspice_model_library::{ModelLevel, ModelType};

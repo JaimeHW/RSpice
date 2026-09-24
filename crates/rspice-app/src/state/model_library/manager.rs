@@ -36,12 +36,14 @@ use super::{
     ModelLibrary, ModelQualificationState, ModelSectionQualification, ModelSourceAuthority,
     ModelSourceContent, ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin, ModelType,
     ParameterDataType, ParameterDefinition, ParameterSource, ParameterValue, ProcessCorner,
-    ProjectModelDefinition, ProjectModelRevisionDefinition, SEALED_MODEL_SOURCE_MARKER,
-    first_unreachable_source,
+    ProjectModelDefinition, ProjectModelRevisionDefinition, first_unreachable_source,
 };
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 use rspice_app_types::product::ProcessCorner as CornerProcess;
-use rspice_model_library::CornerModelBinding;
+use rspice_model_library::{
+    CornerModelBinding, MaterializedPlanBinding, ModelExecutionPlan,
+    resolve_materialized_definition_namespace,
+};
 
 /// Published result of one atomic project-model definition transaction.
 #[derive(Debug, Clone)]
@@ -113,61 +115,6 @@ pub(crate) struct SealedModelLibraryVerilogAAuthority {
     pub(crate) roots: Vec<SealedModelLibraryVerilogARoot>,
 }
 
-/// Immutable, content-addressed model namespace used by one nominal run.
-///
-/// This is the semantic boundary shared by preflight, save validation, and
-/// prepared-run construction.  It records the exact per-library corner that
-/// was selected when sources were sealed and rejects a contested executable
-/// namespace before the engine can fall back to first-definition lookup.
-#[derive(Debug, Clone)]
-pub struct ModelExecutionPlan {
-    reference_process: crate::product::ProcessCorner,
-    selected_library_corners: Vec<(String, Option<String>)>,
-    bindings: Vec<CornerModelBinding>,
-    applied_resolutions: Vec<ModelResolutionRecord>,
-    digest: ContentDigest,
-}
-
-impl ModelExecutionPlan {
-    #[must_use]
-    pub const fn reference_process(&self) -> crate::product::ProcessCorner {
-        self.reference_process
-    }
-
-    #[must_use]
-    pub fn selected_library_corners(&self) -> &[(String, Option<String>)] {
-        &self.selected_library_corners
-    }
-
-    #[must_use]
-    pub fn bindings(&self) -> &[CornerModelBinding] {
-        &self.bindings
-    }
-
-    #[must_use]
-    pub fn applied_resolutions(&self) -> &[ModelResolutionRecord] {
-        &self.applied_resolutions
-    }
-
-    #[must_use]
-    pub const fn digest(&self) -> ContentDigest {
-        self.digest
-    }
-
-    #[must_use]
-    pub fn model_cards(&self) -> Vec<String> {
-        self.bindings
-            .iter()
-            .map(|binding| {
-                format!(
-                    "{SEALED_MODEL_SOURCE_MARKER}{}\n{}",
-                    binding.source_label, binding.materialized_model_cards
-                )
-            })
-            .collect()
-    }
-}
-
 #[derive(Debug, Clone)]
 struct SealedExecutionLibrary {
     name: String,
@@ -190,23 +137,6 @@ struct MaterializedCornerSection {
     materialized_model_cards: String,
 }
 
-#[derive(Debug, Clone)]
-struct MaterializedPlanBinding {
-    binding: CornerModelBinding,
-    provider_library: String,
-    provider_source_digest: ContentDigest,
-    allows_selected_section_override: bool,
-}
-
-#[derive(Debug, Clone)]
-struct MaterializedDefinition {
-    scope: ModelConsumerScope,
-    normalized_name: String,
-    exact_name: String,
-    binding_index: usize,
-    name_span: std::ops::Range<usize>,
-}
-
 const fn pdk_model_process(process: CornerProcess) -> crate::state::pdk_config::PdkModelProcess {
     match process {
         CornerProcess::TT => crate::state::pdk_config::PdkModelProcess::Tt,
@@ -217,350 +147,9 @@ const fn pdk_model_process(process: CornerProcess) -> crate::state::pdk_config::
     }
 }
 
-fn hash_plan_field(hasher: &mut Sha256, value: &[u8]) {
+fn hash_validation_source_field(hasher: &mut Sha256, value: &[u8]) {
     hasher.update((value.len() as u64).to_le_bytes());
     hasher.update(value);
-}
-
-fn materialized_definitions(binding_index: usize, cards: &str) -> Vec<MaterializedDefinition> {
-    // The editor source map deliberately treats the first line as a SPICE
-    // title. Prefix one title so the first actual model card is inspected.
-    let prefix = "RSpice materialized provider\n";
-    let wrapped = format!("{prefix}{cards}");
-    let map = rspice_core::netlist::source_map_for_editor(&wrapped);
-    map.model_defs
-        .into_iter()
-        .filter(|definition| definition.scope.is_none())
-        .map(|definition| MaterializedDefinition {
-            scope: ModelConsumerScope::PrimitiveModel,
-            normalized_name: definition.name.to_ascii_lowercase(),
-            exact_name: definition.name,
-            binding_index,
-            name_span: (definition.span.start - prefix.len())..(definition.span.end - prefix.len()),
-        })
-        .chain(
-            map.subckt_defs
-                .into_iter()
-                .filter(|definition| definition.scope.is_none())
-                .map(|definition| MaterializedDefinition {
-                    scope: ModelConsumerScope::Subcircuit,
-                    normalized_name: definition.name.to_ascii_lowercase(),
-                    exact_name: definition.name,
-                    binding_index,
-                    name_span: (definition.span.start - prefix.len())
-                        ..(definition.span.end - prefix.len()),
-                }),
-        )
-        .collect()
-}
-
-/// Canonical project-owned model revisions intentionally carry one top-level
-/// base card plus one complete card in each `.lib` section. Selecting such a
-/// section must replace the base card, while duplicates in imported or signed
-/// sources remain errors. Perform that one narrowly authorized rewrite before
-/// resolving conflicts between independent providers.
-fn apply_project_section_overrides(bindings: &mut [MaterializedPlanBinding]) -> Result<(), String> {
-    let definitions = bindings
-        .iter()
-        .enumerate()
-        .flat_map(|(index, binding)| {
-            materialized_definitions(index, &binding.binding.materialized_model_cards)
-        })
-        .collect::<Vec<_>>();
-    let mut groups = BTreeMap::<(ModelConsumerScope, String), Vec<&MaterializedDefinition>>::new();
-    for definition in &definitions {
-        groups
-            .entry((definition.scope, definition.normalized_name.clone()))
-            .or_default()
-            .push(definition);
-    }
-    let mut losers = BTreeMap::<usize, Vec<&MaterializedDefinition>>::new();
-    let mut unresolved = Vec::new();
-    for ((scope, normalized_name), providers) in groups {
-        let mut same_source = BTreeMap::<(String, String), Vec<&MaterializedDefinition>>::new();
-        for definition in providers {
-            let binding = &bindings[definition.binding_index];
-            same_source
-                .entry((
-                    binding.provider_library.clone(),
-                    binding.provider_source_digest.to_string(),
-                ))
-                .or_default()
-                .push(definition);
-        }
-        for ((library, digest), definitions) in same_source {
-            if definitions.len() < 2 {
-                continue;
-            }
-            let binding_index = definitions[0].binding_index;
-            let authorized = definitions
-                .iter()
-                .all(|definition| definition.binding_index == binding_index)
-                && bindings[binding_index].allows_selected_section_override
-                && bindings[binding_index].binding.section.is_some();
-            if !authorized {
-                unresolved.push(format!(
-                    "{} '{}' is repeated inside authenticated provider '{}' at source {}",
-                    scope.label(),
-                    normalized_name,
-                    library,
-                    digest
-                ));
-                continue;
-            }
-            let winner_span = definitions
-                .iter()
-                .max_by_key(|definition| definition.name_span.start)
-                .map(|definition| definition.name_span.clone())
-                .expect("same-source override group is nonempty");
-            for definition in definitions {
-                if definition.name_span != winner_span {
-                    losers
-                        .entry(definition.binding_index)
-                        .or_default()
-                        .push(definition);
-                }
-            }
-        }
-    }
-    if !unresolved.is_empty() {
-        unresolved.truncate(8);
-        return Err(format!(
-            "Executable model namespace is contested and fails closed: {}. Repair the duplicate source before simulation.",
-            unresolved.join("; ")
-        ));
-    }
-    for (binding_index, mut definitions) in losers {
-        definitions.sort_by_key(|definition| std::cmp::Reverse(definition.name_span.start));
-        for definition in definitions {
-            bindings[binding_index].binding.materialized_model_cards =
-                mask_materialized_definition(
-                    &bindings[binding_index].binding.materialized_model_cards,
-                    definition,
-                )?;
-        }
-    }
-    Ok(())
-}
-
-/// Apply exact project-owned provider decisions to a frozen materialization.
-/// Losing definitions are blanked before the engine parses the cards, so the
-/// engine consumes one unambiguous namespace rather than relying on include
-/// order or first-match lookup.
-fn resolve_materialized_definition_namespace(
-    mut bindings: Vec<MaterializedPlanBinding>,
-    records: &[ModelResolutionRecord],
-) -> Result<(Vec<CornerModelBinding>, Vec<ModelResolutionRecord>), String> {
-    apply_project_section_overrides(&mut bindings)?;
-    let definitions = bindings
-        .iter()
-        .enumerate()
-        .flat_map(|(index, binding)| {
-            materialized_definitions(index, &binding.binding.materialized_model_cards)
-        })
-        .collect::<Vec<_>>();
-    let mut groups = BTreeMap::<(ModelConsumerScope, String), Vec<&MaterializedDefinition>>::new();
-    for definition in &definitions {
-        groups
-            .entry((definition.scope, definition.normalized_name.clone()))
-            .or_default()
-            .push(definition);
-    }
-    let record_index = records
-        .iter()
-        .map(|record| {
-            (
-                (record.consumer_scope, record.normalized_name.clone()),
-                record,
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    let mut losers = BTreeMap::<usize, Vec<&MaterializedDefinition>>::new();
-    let mut applied = Vec::new();
-    let mut unresolved = Vec::new();
-
-    for ((scope, normalized_name), providers) in groups {
-        if providers.len() < 2 {
-            continue;
-        }
-        let provider_descriptions = providers
-            .iter()
-            .map(|definition| {
-                let binding = &bindings[definition.binding_index];
-                format!(
-                    "{}/{} at {} (source {})",
-                    binding.provider_library,
-                    definition.exact_name,
-                    binding.binding.source_label,
-                    binding.provider_source_digest
-                )
-            })
-            .collect::<Vec<_>>();
-        if providers.iter().enumerate().any(|(index, left)| {
-            providers.iter().skip(index + 1).any(|right| {
-                let left = &bindings[left.binding_index];
-                let right = &bindings[right.binding_index];
-                left.provider_library == right.provider_library
-                    && left.provider_source_digest == right.provider_source_digest
-            })
-        }) {
-            unresolved.push(format!(
-                "{} '{}' is repeated inside one authenticated provider: {}",
-                scope.label(),
-                normalized_name,
-                provider_descriptions.join(", ")
-            ));
-            continue;
-        }
-        let Some(record) = record_index.get(&(scope, normalized_name.clone())) else {
-            unresolved.push(format!(
-                "{} '{}' from {}",
-                scope.label(),
-                normalized_name,
-                provider_descriptions.join(", ")
-            ));
-            continue;
-        };
-        let winners = providers
-            .iter()
-            .filter(|definition| {
-                let binding = &bindings[definition.binding_index];
-                binding.provider_library == record.provider_library
-                    && binding.provider_source_digest == record.provider_source_digest
-                    && definition.exact_name == record.provider_definition
-            })
-            .copied()
-            .collect::<Vec<_>>();
-        if winners.len() != 1 {
-            unresolved.push(format!(
-                "{} '{}' has a stale provider decision for '{}/{}' at source {}; active providers are {}",
-                scope.label(),
-                normalized_name,
-                record.provider_library,
-                record.provider_definition,
-                record.provider_source_digest,
-                provider_descriptions.join(", ")
-            ));
-            continue;
-        }
-        let winner = winners[0];
-        for provider in providers {
-            if !std::ptr::eq(provider, winner) {
-                losers
-                    .entry(provider.binding_index)
-                    .or_default()
-                    .push(provider);
-            }
-        }
-        applied.push((*record).clone());
-    }
-
-    if !unresolved.is_empty() {
-        unresolved.truncate(8);
-        return Err(format!(
-            "Executable model namespace is contested and fails closed: {}. Publish an exact source-qualified provider decision or repair the duplicate source before simulation.",
-            unresolved.join("; ")
-        ));
-    }
-
-    for (binding_index, mut definitions) in losers {
-        definitions.sort_by_key(|definition| std::cmp::Reverse(definition.name_span.start));
-        for definition in definitions {
-            bindings[binding_index].binding.materialized_model_cards =
-                mask_materialized_definition(
-                    &bindings[binding_index].binding.materialized_model_cards,
-                    definition,
-                )?;
-        }
-    }
-    applied.sort_by_key(|left| left.key());
-    applied.dedup_by(|left, right| left.key() == right.key());
-    let bindings = bindings
-        .into_iter()
-        .filter(|binding| !binding.binding.materialized_model_cards.trim().is_empty())
-        .map(|binding| {
-            binding.binding.validate()?;
-            Ok(binding.binding)
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    Ok((bindings, applied))
-}
-
-fn mask_materialized_definition(
-    cards: &str,
-    definition: &MaterializedDefinition,
-) -> Result<String, String> {
-    if definition.name_span.end > cards.len() {
-        return Err(format!(
-            "cannot apply provider decision for '{}' because its source span is invalid",
-            definition.exact_name
-        ));
-    }
-    let bytes = cards.as_bytes();
-    let start = bytes[..definition.name_span.start]
-        .iter()
-        .rposition(|byte| *byte == b'\n')
-        .map_or(0, |index| index + 1);
-    let mut end = physical_line_end(bytes, start);
-    match definition.scope {
-        ModelConsumerScope::PrimitiveModel => {
-            while end < bytes.len() {
-                let next_end = physical_line_end(bytes, end);
-                let line = std::str::from_utf8(&bytes[end..next_end]).map_err(|error| {
-                    format!("materialized model source is not UTF-8 at continuation: {error}")
-                })?;
-                if line.trim_start().starts_with('+') {
-                    end = next_end;
-                } else {
-                    break;
-                }
-            }
-        }
-        ModelConsumerScope::Subcircuit => {
-            let mut cursor = start;
-            let mut depth = 0_usize;
-            let mut closed = false;
-            while cursor < bytes.len() {
-                let next = physical_line_end(bytes, cursor);
-                let line = std::str::from_utf8(&bytes[cursor..next]).map_err(|error| {
-                    format!("materialized subcircuit source is not UTF-8: {error}")
-                })?;
-                let head = line.split_whitespace().next().unwrap_or("");
-                if head.eq_ignore_ascii_case(".subckt") {
-                    depth += 1;
-                } else if head.eq_ignore_ascii_case(".ends") {
-                    depth = depth.saturating_sub(1);
-                    if depth == 0 {
-                        end = next;
-                        closed = true;
-                        break;
-                    }
-                }
-                cursor = next;
-            }
-            if !closed {
-                return Err(format!(
-                    "cannot apply provider decision because subcircuit '{}' has no matching .ENDS",
-                    definition.exact_name
-                ));
-            }
-        }
-    }
-    let mut masked = bytes.to_vec();
-    for byte in &mut masked[start..end] {
-        if *byte != b'\n' && *byte != b'\r' {
-            *byte = b' ';
-        }
-    }
-    String::from_utf8(masked)
-        .map_err(|error| format!("resolved model materialization is not UTF-8: {error}"))
-}
-
-fn physical_line_end(bytes: &[u8], start: usize) -> usize {
-    bytes[start..]
-        .iter()
-        .position(|byte| *byte == b'\n')
-        .map_or(bytes.len(), |offset| start + offset + 1)
 }
 
 impl SealedModelExecutionSources {
@@ -825,9 +414,6 @@ impl SealedModelExecutionSources {
         process: crate::product::ProcessCorner,
     ) -> Result<ModelExecutionPlan, String> {
         let materialized = self.bindings_for_processes(&[process], true)?;
-        let (bindings, applied_resolutions) =
-            resolve_materialized_definition_namespace(materialized, &self.resolution_records)?;
-
         let selected_library_corners = self
             .libraries
             .iter()
@@ -843,36 +429,12 @@ impl SealedModelExecutionSources {
             })
             .collect::<Vec<_>>();
 
-        let mut hasher = Sha256::new();
-        hasher.update(b"rspice.model-execution-plan/v2\0");
-        hasher.update(process.short_name().as_bytes());
-        for (library, corner) in &selected_library_corners {
-            hash_plan_field(&mut hasher, library.as_bytes());
-            hash_plan_field(&mut hasher, corner.as_deref().unwrap_or("").as_bytes());
-        }
-        for binding in &bindings {
-            hash_plan_field(&mut hasher, binding.source_label.as_bytes());
-            hash_plan_field(
-                &mut hasher,
-                binding.section.as_deref().unwrap_or("").as_bytes(),
-            );
-            hash_plan_field(&mut hasher, binding.materialized_model_cards.as_bytes());
-        }
-        for resolution in &applied_resolutions {
-            let bytes = serde_json::to_vec(resolution).map_err(|error| {
-                format!("Cannot digest applied model provider decision: {error}")
-            })?;
-            hash_plan_field(&mut hasher, &bytes);
-        }
-        let digest = ContentDigest::from_bytes(hasher.finalize().into());
-
-        Ok(ModelExecutionPlan {
-            reference_process: process,
+        ModelExecutionPlan::try_new(
+            process,
             selected_library_corners,
-            bindings,
-            applied_resolutions,
-            digest,
-        })
+            materialized,
+            &self.resolution_records,
+        )
     }
 
     /// Materialize the exact model cards for the nominal/reference process.
@@ -944,19 +506,17 @@ impl SealedModelExecutionSources {
                 match corner.as_ref() {
                     Some(corner) => {
                         for section in self.materialize_library_corner(library, corner)? {
-                            let binding = MaterializedPlanBinding {
-                                binding: CornerModelBinding {
+                            let binding = MaterializedPlanBinding::try_new(
+                                CornerModelBinding {
                                     process: *process,
                                     source_label: section.source_label,
                                     section: Some(section.section),
                                     materialized_model_cards: section.materialized_model_cards,
                                 },
-                                provider_library: library.name.clone(),
-                                provider_source_digest: library.source_digest,
-                                allows_selected_section_override: library
-                                    .allows_selected_section_override,
-                            };
-                            binding.binding.validate()?;
+                                library.name.clone(),
+                                library.source_digest,
+                                library.allows_selected_section_override,
+                            )?;
                             bindings.push(binding);
                         }
                     }
@@ -974,18 +534,17 @@ impl SealedModelExecutionSources {
                                     library.root_path.display()
                                 )
                             })?;
-                        let binding = MaterializedPlanBinding {
-                            binding: CornerModelBinding {
+                        let binding = MaterializedPlanBinding::try_new(
+                            CornerModelBinding {
                                 process: *process,
                                 source_label: library.provenance.clone(),
                                 section: None,
                                 materialized_model_cards,
                             },
-                            provider_library: library.name.clone(),
-                            provider_source_digest: library.source_digest,
-                            allows_selected_section_override: false,
-                        };
-                        binding.binding.validate()?;
+                            library.name.clone(),
+                            library.source_digest,
+                            false,
+                        )?;
                         bindings.push(binding);
                     }
                 }
@@ -1039,18 +598,17 @@ impl SealedModelExecutionSources {
                             )
                         })
                         .unwrap_or_else(|| source.source_id.clone());
-                    let binding = MaterializedPlanBinding {
-                        binding: CornerModelBinding {
+                    let binding = MaterializedPlanBinding::try_new(
+                        CornerModelBinding {
                             process: *process,
                             source_label: package,
                             section: source.section.clone(),
                             materialized_model_cards,
                         },
-                        provider_library: format!("signed-pdk:{}", source.source_id),
-                        provider_source_digest: source.artifact_digest,
-                        allows_selected_section_override: false,
-                    };
-                    binding.binding.validate()?;
+                        format!("signed-pdk:{}", source.source_id),
+                        source.artifact_digest,
+                        false,
+                    )?;
                     bindings.push(binding);
                 }
             }
@@ -1438,8 +996,8 @@ impl ModelLibraryManager {
         let mut hasher = Sha256::new();
         hasher.update(b"rspice.model-validation-source-closure/v1\0");
         for (library, digest) in identities {
-            hash_plan_field(&mut hasher, library.as_bytes());
-            hash_plan_field(&mut hasher, digest.as_bytes());
+            hash_validation_source_field(&mut hasher, library.as_bytes());
+            hash_validation_source_field(&mut hasher, digest.as_bytes());
         }
         (
             source_count,
