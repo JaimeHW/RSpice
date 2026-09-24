@@ -150,7 +150,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 18;
 /// Version 56 reuses delay history for higher input derivatives with fixed timing.
 /// Version 57 emits mixed input/timing transport-delay actions.
 /// Version 58 lowers higher derivatives through a table's active affine segment.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 58;
+/// Version 59 retains table interpolation across the finite binary64 range.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 59;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -3304,8 +3305,19 @@ endmodule
 
     #[test]
     fn wasm_higher_table_derivatives_follow_the_active_segment() {
+        check_higher_table_derivatives(include_str!("../../tests/fixtures/higher_table.va"));
+    }
+
+    #[test]
+    fn wasm_higher_tiny_table_derivatives_follow_the_active_segment() {
+        let source = include_str!("../../tests/fixtures/higher_table.va")
+            .replace("u=exp", "u=1e-40*exp")
+            .replace("0.0,1.0,1.0,3.0,2.0,9.0", "0.0,1.0,1e-40,3.0,2e-40,9.0");
+        check_higher_table_derivatives(&source);
+    }
+
+    fn check_higher_table_derivatives(source: &str) {
         use super::abi::FRAME_RESULT_OFFSET;
-        let source = include_str!("../../tests/fixtures/higher_table.va");
         for postfix in [false, true] {
             let mut harness =
                 FusedKernelHarness::for_source_with_plan(source, "higher_table", postfix);

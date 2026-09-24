@@ -5,7 +5,18 @@ use rspice_veriloga::device::VerilogADevice;
 
 #[test]
 fn higher_table_derivatives_follow_the_active_segment() {
-    let source = include_str!("fixtures/higher_table.va");
+    check_higher_table_derivatives(include_str!("fixtures/higher_table.va"));
+}
+
+#[test]
+fn higher_tiny_table_derivatives_follow_the_active_segment() {
+    let source = include_str!("fixtures/higher_table.va")
+        .replace("u=exp", "u=1e-40*exp")
+        .replace("0.0,1.0,1.0,3.0,2.0,9.0", "0.0,1.0,1e-40,3.0,2e-40,9.0");
+    check_higher_table_derivatives(&source);
+}
+
+fn check_higher_table_derivatives(source: &str) {
     let report = VerilogACompiler::default()
         .compile_runtime(source, None)
         .unwrap();

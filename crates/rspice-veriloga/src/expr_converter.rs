@@ -2536,7 +2536,7 @@ impl<'a> ExprConverter<'a> {
         });
 
         for idx in 1..pairs.len() {
-            if (pairs[idx].0 - pairs[idx - 1].0).abs() < 1e-30 {
+            if pairs[idx].0 == pairs[idx - 1].0 {
                 return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                     "$table_model x values must be strictly monotonic".into(),
                 ))

@@ -324,7 +324,8 @@ use super::*;
 // Version 100 supports higher absdelay input derivatives with fixed timing.
 // Version 101 carries mixed transport-delay actions (Wasm ABI 18).
 // Version 102 supports higher table input derivatives (Wasm emitter 58).
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 102;
+// Version 103 retains distinct tiny table intervals (Wasm emitter 59).
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 103;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

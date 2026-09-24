@@ -7,6 +7,7 @@
 //! infinities.
 
 use super::*;
+use rspice_veriloga_runtime::arithmetic::sum_products_ratio;
 
 impl Default for LookupTable {
     fn default() -> Self {
@@ -160,13 +161,38 @@ impl LookupTable {
         let y0 = self.y_data[i];
         let y1 = self.y_data[j];
 
-        // Guard against division by zero
-        if (x1 - x0).abs() < 1e-30 {
+        // Distinct binary64 abscissae define an interval at every scale.
+        if x1 == x0 || x == x0 {
             return y0;
         }
+        if x == x1 {
+            return y1;
+        }
 
-        let t = (x - x0) / (x1 - x0);
-        y0 + t * (y1 - y0)
+        let dx = x1 - x0;
+        let dy = y1 - y0;
+        let t = (x - x0) / dx;
+        let step = t * dy;
+        let result = y0 + step;
+        let cancellation =
+            y0 != 0.0 && step != 0.0 && y0.is_sign_negative() != step.is_sign_negative();
+        // Preserve the inexpensive ordinary path. Range loss and cancellation
+        // require rounding the complete affine ratio, before forming a tiny
+        // weight or an overflowing difference/product.
+        if dx.is_finite()
+            && dy.is_finite()
+            && t.is_normal()
+            && (step.is_normal() || dy == 0.0)
+            && result.is_finite()
+            && !cancellation
+        {
+            return result;
+        }
+        sum_products_ratio(
+            [(y0, x1), (y1, x), (-y0, x), (-y1, x0)].into_iter(),
+            [(x1, 1.0), (-x0, 1.0)].into_iter(),
+        )
+        .unwrap_or(f64::NAN)
     }
 
     /// Linear extrapolation using points at indices i and j
@@ -184,11 +210,19 @@ impl LookupTable {
         let y0 = self.y_data[i];
         let y1 = self.y_data[j];
 
-        if (x1 - x0).abs() < 1e-30 {
+        if x1 == x0 {
             return 0.0;
         }
-
-        (y1 - y0) / (x1 - x0)
+        let dy = y1 - y0;
+        let dx = x1 - x0;
+        if dy.is_finite() && dx.is_finite() {
+            return dy / dx;
+        }
+        sum_products_ratio(
+            [(y1, 1.0), (-y0, 1.0)].into_iter(),
+            [(x1, 1.0), (-x0, 1.0)].into_iter(),
+        )
+        .unwrap_or(f64::NAN)
     }
 
     /// Validate the table data (sorted, no NaN, etc.)
