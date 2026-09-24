@@ -3,6 +3,7 @@
 pub mod accuracy;
 pub mod analysis_kind;
 pub mod analysis_lifecycle;
+pub mod analysis_run_at;
 pub mod analysis_tag;
 pub mod config;
 pub mod dependency_contract;
