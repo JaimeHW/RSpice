@@ -83,7 +83,7 @@ impl AnalysisResultPayload {
                 "fft_fundamental_magnitude" => {
                     return rspice_core::execution::transient_fft_output_unit(
                         &spectrum.physical_type,
-                        spectrum.format.core(),
+                        rspice_simulation_contract::config::fft_format_to_core(spectrum.format),
                     )
                     .ok()
                     .and_then(|unit| MeasurementUnit::known(&unit.symbol()).ok())

@@ -196,7 +196,7 @@ pub use simulation::{
     DcCurveSelection, DcSweepDirection, DcSweepEvidence, DcSweepFamily, DcSweepQuantity,
 };
 pub use simulation::{DcMismatchContributorEvidence, DcMismatchEvidence, DcMismatchScopeEvidence};
-pub use simulation::{FftSpectrumEvidence, FftSpectrumFormatEvidence, FftSpectrumStatusEvidence};
+pub use simulation::{FftSpectrumEvidence, FftSpectrumStatusEvidence};
 pub use simulation::{SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow};
 // Test-only, like the attribution vocabulary above: outside tests the
 // compatibility mode of a recorded spectrum is only ever read through the

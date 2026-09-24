@@ -10,7 +10,7 @@
 use rspice_core::engine::{
     TransientFftHarmonic, TransientFftMetrics, TransientFftResult, TransientFftStatus,
 };
-use rspice_core::netlist::{FftFormat, XyceFftMode};
+use rspice_core::netlist::XyceFftMode;
 use serde::{Deserialize, Serialize};
 
 /// Whether the transient retained enough accepted history for the transform.
@@ -60,42 +60,7 @@ impl From<TransientFftStatus> for FftSpectrumStatusEvidence {
     }
 }
 
-/// Effective `.FFT FORMAT`, as the engine resolved it for this spectrum.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum FftSpectrumFormatEvidence {
-    #[default]
-    Normalized,
-    Unnormalized,
-}
-
-impl From<FftFormat> for FftSpectrumFormatEvidence {
-    fn from(format: FftFormat) -> Self {
-        match format {
-            FftFormat::Normalized => Self::Normalized,
-            FftFormat::Unnormalized => Self::Unnormalized,
-        }
-    }
-}
-
-impl FftSpectrumFormatEvidence {
-    #[must_use]
-    pub const fn core(self) -> FftFormat {
-        match self {
-            Self::Normalized => FftFormat::Normalized,
-            Self::Unnormalized => FftFormat::Unnormalized,
-        }
-    }
-
-    /// The keyword `.FFT FORMAT=` spells this with.
-    #[must_use]
-    pub const fn keyword(self) -> &'static str {
-        match self {
-            Self::Normalized => "NORM",
-            Self::Unnormalized => "UNORM",
-        }
-    }
-}
+use rspice_results::fft::FftSpectrumFormatEvidence;
 
 /// Effective `.OPTIONS FFT FFT_MODE` compatibility mode of this spectrum.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -281,7 +246,7 @@ impl From<&TransientFftResult> for FftSpectrumEvidence {
             sample_interval_s: result.sample_interval,
             point_count: result.point_count,
             accurate_sampling: result.accurate_sampling,
-            format: result.format.into(),
+            format: rspice_simulation_contract::config::fft_format_from_core(result.format),
             mode: result.mode.into(),
             window: result.window_name.clone(),
             alpha: result.alpha,

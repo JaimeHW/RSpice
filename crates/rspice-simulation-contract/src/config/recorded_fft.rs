@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 /// Spelled with the retained evidence's own enum rather than a second
 /// two-variant copy: the keyword a card is written with and the keyword a
 /// result reports have to be the same table.
-pub use crate::state::FftSpectrumFormatEvidence as FftFormatChoice;
+pub use rspice_results::fft::FftSpectrumFormatEvidence as FftFormatChoice;
 
 /// Every window the engine implements, in the order the form offers them.
 ///
@@ -141,7 +141,7 @@ impl FftRequest {
             start: analysis.start,
             stop: analysis.stop,
             points: analysis.points,
-            format: analysis.format.map(FftFormatChoice::from),
+            format: analysis.format.map(fft_format_from_core),
             window: window_keyword(analysis.window).to_owned(),
             alfa: (analysis.alpha != FftAnalysis::DEFAULT_ALPHA).then_some(analysis.alpha),
             fundamental: analysis.fundamental_frequency,
@@ -283,6 +283,24 @@ impl FftRequest {
             ));
         }
         Ok(())
+    }
+}
+
+/// Convert the engine's resolved FFT format to its portable result representation.
+#[must_use]
+pub const fn fft_format_from_core(format: rspice_core::netlist::FftFormat) -> FftFormatChoice {
+    match format {
+        rspice_core::netlist::FftFormat::Normalized => FftFormatChoice::Normalized,
+        rspice_core::netlist::FftFormat::Unnormalized => FftFormatChoice::Unnormalized,
+    }
+}
+
+/// Convert retained FFT format evidence to the engine's unit-policy vocabulary.
+#[must_use]
+pub const fn fft_format_to_core(format: FftFormatChoice) -> rspice_core::netlist::FftFormat {
+    match format {
+        FftFormatChoice::Normalized => rspice_core::netlist::FftFormat::Normalized,
+        FftFormatChoice::Unnormalized => rspice_core::netlist::FftFormat::Unnormalized,
     }
 }
 

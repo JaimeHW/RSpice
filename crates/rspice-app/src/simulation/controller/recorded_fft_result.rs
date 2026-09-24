@@ -20,7 +20,7 @@ fn magnitude_unit(spectrum: &RecordedFftSpectrum) -> String {
     use rspice_core::execution::SignalUnit;
     let unit = rspice_core::execution::transient_fft_output_unit(
         &spectrum.evidence.physical_type,
-        spectrum.evidence.format.core(),
+        rspice_simulation_contract::config::fft_format_to_core(spectrum.evidence.format),
     );
     match unit {
         Ok(SignalUnit::Volt) => "V".to_owned(),

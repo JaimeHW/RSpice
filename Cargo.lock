@@ -5645,6 +5645,7 @@ version = "0.1.0"
 dependencies = [
  "rspice-app-types",
  "rspice-core",
+ "rspice-results",
  "serde",
  "serde_json",
 ]

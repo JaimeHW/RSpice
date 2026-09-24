@@ -147,7 +147,7 @@ mod tests {
             sample_interval_s: 8.0e-3 / 256.0,
             point_count: 256,
             accurate_sampling: true,
-            format: crate::state::FftSpectrumFormatEvidence::Unnormalized,
+            format: rspice_results::fft::FftSpectrumFormatEvidence::Unnormalized,
             mode: crate::state::FftSpectrumModeEvidence::HspiceCompatible,
             window: "RECT".to_owned(),
             alpha: 3.0,

@@ -834,10 +834,7 @@ fn a_dc_mismatch_result_survives_the_worker_wire() {
 #[test]
 fn a_recorded_fft_spectrum_survives_the_worker_boundary_bit_for_bit() {
     use crate::simulation::results::RecordedFftSpectrum;
-    use crate::state::{
-        FftSpectrumEvidence, FftSpectrumFormatEvidence, FftSpectrumModeEvidence,
-        FftSpectrumStatusEvidence,
-    };
+    use crate::state::{FftSpectrumEvidence, FftSpectrumModeEvidence, FftSpectrumStatusEvidence};
 
     let point_count = 8usize;
     let bins = point_count / 2 + 1;
@@ -853,7 +850,7 @@ fn a_recorded_fft_spectrum_survives_the_worker_boundary_bit_for_bit() {
             sample_interval_s: (1.0 / resolution) / point_count as f64,
             point_count,
             accurate_sampling: true,
-            format: FftSpectrumFormatEvidence::Unnormalized,
+            format: rspice_results::fft::FftSpectrumFormatEvidence::Unnormalized,
             mode: FftSpectrumModeEvidence::HspiceCompatible,
             window: "RECT".to_owned(),
             alpha: 3.0,

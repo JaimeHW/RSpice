@@ -33,8 +33,8 @@ pub enum TfNormalization {
 ///
 /// This runner used to carry its own four-tier enum and its own resolution of
 /// it, which disagreed with the operating point's on every tier. Both now name
-/// the one contract in [`crate::simulation::accuracy`].
-pub type TfAccuracy = crate::simulation::accuracy::AnalysisAccuracy;
+/// the one contract in [`rspice_simulation_contract::accuracy`].
+pub type TfAccuracy = rspice_simulation_contract::accuracy::AnalysisAccuracy;
 
 /// Physical quantity at one side of the transfer derivative.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

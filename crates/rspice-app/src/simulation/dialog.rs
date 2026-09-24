@@ -53,14 +53,9 @@ pub(crate) mod soa;
 // Options
 pub(crate) mod options;
 
-// Re-exports - Core. Only the operating point keeps a config type here, and it
-// is the one the engine actually takes: `engine_bridge`, `execution`, and
-// `multi_run` all pass `OpConfig` itself. AC, DC, noise, and transient had a
-// second config apiece in this module -- their own `to_spice`, `validate`, and
-// `total_points`, reachable from nothing but a `From` impl that nobody called.
-// Execution takes the `simulation::config` types, so those four are gone.
-pub use op::{
-    OpAccuracy, OpAnnotation, OpConfig, OpDeviceDetail, OpDialogState, OpHomotopy, OpInitialGuess,
+pub use op::OpDialogState;
+pub use rspice_simulation_contract::config::{
+    OpAccuracy, OpAnnotation, OpConfig, OpDeviceDetail, OpHomotopy, OpInitialGuess,
     OpNodeInitialization, OpPreviousState, OpRunPointContext, OpSaveDevice, OpTemperatureMode,
 };
 

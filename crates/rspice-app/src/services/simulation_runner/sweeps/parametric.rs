@@ -203,7 +203,7 @@ fn run_base_analysis(
             let result =
                 crate::simulation::engine_bridge::EngineBridge::run_materialized_with_abort(
                     engine,
-                    &crate::simulation::AnalysisConfig::DcOp(*config.clone()),
+                    &rspice_simulation_contract::config::AnalysisConfig::DcOp(*config.clone()),
                     netlist,
                     abort,
                 )

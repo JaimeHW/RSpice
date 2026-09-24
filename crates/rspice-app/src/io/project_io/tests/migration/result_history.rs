@@ -1855,8 +1855,8 @@ fn a_results_history_saved_at_schema_27_restores_with_its_digests_unchanged() {
 #[test]
 fn a_result_schema_before_28_cannot_carry_a_recorded_fft() {
     use crate::state::{
-        AnalysisResultPayload, FftSpectrumEvidence, FftSpectrumFormatEvidence,
-        FftSpectrumModeEvidence, FftSpectrumStatusEvidence,
+        AnalysisResultPayload, FftSpectrumEvidence, FftSpectrumModeEvidence,
+        FftSpectrumStatusEvidence,
     };
 
     let spectrum = FftSpectrumEvidence {
@@ -1868,7 +1868,7 @@ fn a_result_schema_before_28_cannot_carry_a_recorded_fft() {
         sample_interval_s: 8.0e-3 / 256.0,
         point_count: 256,
         accurate_sampling: true,
-        format: FftSpectrumFormatEvidence::Unnormalized,
+        format: rspice_results::fft::FftSpectrumFormatEvidence::Unnormalized,
         mode: FftSpectrumModeEvidence::HspiceCompatible,
         window: "RECT".to_owned(),
         alpha: 3.0,

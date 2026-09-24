@@ -51,9 +51,7 @@ pub use sensitivity_study::{
 };
 
 mod fft_spectrum;
-pub use fft_spectrum::{
-    FftMetricsEvidence, FftSpectrumEvidence, FftSpectrumFormatEvidence, FftSpectrumStatusEvidence,
-};
+pub use fft_spectrum::{FftMetricsEvidence, FftSpectrumEvidence, FftSpectrumStatusEvidence};
 // Test-only, like the attribution vocabulary in `state.rs`: outside tests the
 // compatibility mode a spectrum was computed under is only ever read through
 // the evidence's own field, never named as a type.
@@ -78,8 +76,8 @@ pub use analysis_result::{
     OperatingPointTemperatureEvidence, OperatingPointValue, PeriodicNoiseOutputQuantity,
     PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate, PssFloquetMultiplierEvidence,
     PstbFloquetModeEvidence, PstbStabilityClassificationEvidence, RealEventPointEvidence,
-    RealEventTraceEvidence, SensitivityResultMode, SensitivityResultRow, SoaSourceHistory,
-    SoaSourceWaveform, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
+    RealEventTraceEvidence, SensitivityResultMode, SensitivityResultRow, SoaEvaluationEvidence,
+    SoaParameterEvidence, SoaRuleVerdictEvidence, SoaSourceHistory, SoaSourceWaveform,
     SoaViolationEvidence, SoaViolationSeverityEvidence, TransferFunctionAccuracyEvidence,
     TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
     TransferFunctionScalarEvidence,

@@ -61,3 +61,21 @@ impl OpPreviousState {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn previous_state_rejects_case_insensitive_duplicate_mna_identities() {
+        let previous = OpPreviousState {
+            source_content_digest: ContentDigest::from_bytes([1; 32]),
+            producer_snapshot_digest: ContentDigest::from_bytes([2; 32]),
+            producer_result_digest: ContentDigest::from_bytes([3; 32]),
+            node_names: vec!["out".to_owned(), "OUT".to_owned()],
+            branch_names: vec!["V1".to_owned()],
+            solution: vec![0.5, 0.5, -0.5e-3],
+        };
+        assert!(previous.validate().unwrap_err().contains("duplicate"));
+    }
+}

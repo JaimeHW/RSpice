@@ -213,8 +213,10 @@ mod tests {
 
     #[test]
     fn every_tier_owns_the_iteration_budget() {
-        let mut base = SimulationConfig::default();
-        base.max_iterations = 63;
+        let base = SimulationConfig {
+            max_iterations: 63,
+            ..SimulationConfig::default()
+        };
         for accuracy in AnalysisAccuracy::ALL {
             let policy = accuracy.solver_policy();
             assert_eq!(
@@ -228,8 +230,10 @@ mod tests {
 
     #[test]
     fn no_tier_loosens_a_tolerance_the_reader_tightened() {
-        let mut base = SimulationConfig::default();
-        base.tolerance = 1.0e-12;
+        let mut base = SimulationConfig {
+            tolerance: 1.0e-12,
+            ..SimulationConfig::default()
+        };
         base.convergence_config.voltage_reltol = 1.0e-12;
         base.convergence_config.voltage_abstol = 1.0e-15;
         base.convergence_config.current_abstol = 1.0e-18;

@@ -3,10 +3,10 @@
 //! Commercial-grade simulation execution and configuration.
 //! Manages the complete simulation workflow from netlist generation to result display.
 
-pub(crate) mod accuracy;
+pub(crate) use rspice_simulation_contract::accuracy;
 pub(crate) mod automation;
 pub(crate) mod capture_ledger;
-pub(crate) mod config;
+pub(crate) use rspice_simulation_contract::config;
 pub(crate) mod controller;
 #[cfg(test)]
 pub(crate) mod cost_probe;

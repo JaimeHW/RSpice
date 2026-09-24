@@ -86,7 +86,7 @@ pub enum CornerBaseMode {
     #[default]
     Op,
     /// Preserve the selected operating-point card's startup and reporting controls.
-    ConfiguredOp(Box<crate::simulation::dialog::OpConfig>),
+    ConfiguredOp(Box<rspice_simulation_contract::config::OpConfig>),
     /// Run DC sweep and record the final converged point at each corner.
     DcSweep {
         modes: rspice_simulation_contract::config::DcSweepModes,

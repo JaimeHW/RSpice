@@ -9,7 +9,7 @@ pub(super) fn unit(symbol: &str) -> MeasurementUnit {
 pub(super) fn fft_unit(evidence: &crate::state::FftSpectrumEvidence) -> MeasurementUnit {
     rspice_core::execution::transient_fft_output_unit(
         &evidence.physical_type,
-        evidence.format.core(),
+        rspice_simulation_contract::config::fft_format_to_core(evidence.format),
     )
     .map_or(MeasurementUnit::Unknown, |physical| {
         unit(&physical.symbol())

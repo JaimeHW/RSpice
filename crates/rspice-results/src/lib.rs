@@ -3,6 +3,7 @@
 //! Presentation and execution use these contracts without owning their data.
 
 pub mod calculator;
+pub mod fft;
 pub mod interpolation;
 pub mod measurements;
 pub mod operating_point;
