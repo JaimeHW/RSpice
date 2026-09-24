@@ -1255,7 +1255,7 @@ fn normalize_browser_directory_member_names(raw_paths: &[String]) -> Result<Vec<
             directory_root = Some(root.to_owned());
         }
         members.push(
-            crate::state::model_library::normalize_browser_bundle_member_path(member).map_err(
+            rspice_model_library::source_bundle::normalize_member_path(member).map_err(
                 |error| format!("Browser source member '{raw_path}' is invalid: {error}"),
             )?,
         );

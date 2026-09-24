@@ -11,8 +11,6 @@ mod sealing;
 mod source_bundle;
 
 pub(crate) use catalog_identity::model_library_source_digest;
-#[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) use source_bundle::normalize_browser_bundle_member_path;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};

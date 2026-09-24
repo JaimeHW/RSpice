@@ -14,6 +14,7 @@ mod model;
 mod project_revision;
 mod projection;
 pub mod qualification;
+pub mod source_bundle;
 mod types;
 
 pub use authoring::*;

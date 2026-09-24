@@ -335,6 +335,30 @@ fn browser_bundle_discovers_native_spectre_include_edges_after_adaptation() {
 }
 
 #[test]
+fn browser_bundle_compiler_rejection_leaves_the_catalog_unchanged() {
+    let mut manager = ModelLibraryManager::new();
+    manager.add_library(ModelLibrary::new("existing"));
+    let before = manager.library_snapshot();
+    let error = manager
+        .load_library_bundle_from_root(
+            "candidate.scs",
+            "candidate.scs",
+            vec![
+                (
+                    "candidate.scs".to_owned(),
+                    b"simulator lang=spectre\nahdl_include \"device.va\"\nmodel native_d diode is=2e-14\n".to_vec(),
+                ),
+                ("device.va".to_owned(), b"// No device module is declared.\n".to_vec()),
+            ],
+            None,
+        )
+        .expect_err("an otherwise valid catalog cannot bypass HDL validation");
+    assert!(error.contains("Uploaded Verilog-A"), "{error}");
+    assert!(error.contains("device.va"), "{error}");
+    assert_eq!(manager.library_snapshot(), before);
+}
+
+#[test]
 fn browser_bundle_retains_native_spectre_ahdl_dependency_without_parsing_it_as_spice() {
     let mut manager = ModelLibraryManager::new();
     let name = manager

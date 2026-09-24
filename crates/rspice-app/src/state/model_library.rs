@@ -49,8 +49,6 @@ pub use rspice_model_library::{StatisticalDefinition, StatisticalVariableDefinit
 // `state` may not reference `workbench`.
 #[cfg(test)]
 pub(crate) use device_class::DEVICE_CLASS;
-#[cfg(any(test, target_arch = "wasm32"))]
-pub(crate) use manager::normalize_browser_bundle_member_path;
 pub use manager::{
     ModelConsumerScope, ModelExecutionPlan, ModelLibraryManager, ModelResolutionRecord,
     ModelValidationFinding, ModelValidationFindingSeverity, ModelValidationReceipt, PackModelHit,
