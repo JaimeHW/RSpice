@@ -44,7 +44,7 @@ pub enum ResultImportFormat {
 }
 
 impl ResultImportFormat {
-    pub(crate) const ALL: [Self; 17] = [
+    pub const ALL: [Self; 17] = [
         Self::RSpiceResultBundle,
         Self::RSpiceDatasetBundle,
         Self::CsvRfc4180,
@@ -64,7 +64,7 @@ impl ResultImportFormat {
         Self::Fst,
     ];
 
-    pub(crate) const fn canonical_id(self) -> &'static str {
+    pub const fn canonical_id(self) -> &'static str {
         match self {
             Self::RSpiceResultBundle => "rspice-result-bundle",
             Self::RSpiceDatasetBundle => "rspice-dataset-bundle",
@@ -86,7 +86,7 @@ impl ResultImportFormat {
         }
     }
 
-    pub(crate) fn from_canonical_id(id: &str) -> Option<Self> {
+    pub fn from_canonical_id(id: &str) -> Option<Self> {
         Self::ALL
             .into_iter()
             .find(|format| format.canonical_id() == id)
@@ -103,7 +103,7 @@ pub struct ResultImportSource {
 }
 
 impl ResultImportSource {
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), String> {
         if self.source_name.trim().is_empty() || self.source_name.chars().any(char::is_control) {
             return Err("import source requires a non-empty control-free file name".to_owned());
         }
