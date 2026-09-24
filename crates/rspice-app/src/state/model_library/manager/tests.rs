@@ -1793,11 +1793,19 @@ fn project_model_create_and_replace_publish_exact_retained_execution_bytes() {
     assert!(sealed.sources[0].1.contains("REVISION_TAG=\"r1\""));
 
     let replaced = manager
-        .replace_project_model(
+        .replace_project_model_revision_in_library(
             "owned_models",
             source_id,
             revision,
-            &project_definition(0.51, "r2"),
+            revision,
+            "owned_nch",
+            first_digest,
+            &ProjectModelRevisionDefinition::new(
+                project_definition(0.51, "r2"),
+                reconcile_project_model_revision_metadata(&project_definition(0.51, "r2"), None)
+                    .expect("candidate metadata"),
+            ),
+            &ModelQualificationState::default(),
         )
         .expect("replace project model");
     let ModelSourceAuthority::ProjectOwned {
@@ -1826,7 +1834,7 @@ fn project_model_replacement_is_guarded_and_atomic() {
     let ModelSourceAuthority::ProjectOwned {
         source_id,
         revision,
-        ..
+        digest,
     } = created.after.source_authority
     else {
         panic!("created model must be project-owned")
@@ -1834,11 +1842,18 @@ fn project_model_replacement_is_guarded_and_atomic() {
     let original = created.after.source_contents[0].bytes.clone();
 
     let stale = manager
-        .replace_project_model(
+        .replace_project_model_revision_in_library(
             "owned_models",
             ModelSourceId::new(),
             revision,
-            &project_definition(0.52, "r2"),
+            revision,
+            "owned_nch",
+            digest,
+            &ProjectModelRevisionDefinition::new(
+                project_definition(0.52, "r2"),
+                created.after.model_definition_metadata["owned_nch"].clone(),
+            ),
+            &ModelQualificationState::default(),
         )
         .expect_err("stale identity must fail");
     assert!(stale.contains("changed after this candidate was opened"));
@@ -1847,22 +1862,24 @@ fn project_model_replacement_is_guarded_and_atomic() {
         original
     );
 
-    let no_op = manager
-        .replace_project_model(
-            "owned_models",
-            source_id,
-            revision,
-            &project_definition(0.48, "r1"),
-        )
-        .expect_err("unchanged source must not create a revision");
-    assert!(no_op.contains("no source changes"));
-
     let mut invalid = project_definition(f64::NAN, "r2");
     invalid
         .string_parameters
         .insert("VTH0".to_owned(), "duplicate".to_owned());
     let invalid_error = manager
-        .replace_project_model("owned_models", source_id, revision, &invalid)
+        .replace_project_model_revision_in_library(
+            "owned_models",
+            source_id,
+            revision,
+            revision,
+            "owned_nch",
+            digest,
+            &ProjectModelRevisionDefinition::new(
+                invalid,
+                created.after.model_definition_metadata["owned_nch"].clone(),
+            ),
+            &ModelQualificationState::default(),
+        )
         .expect_err("invalid candidate must fail before publication");
     assert!(
         invalid_error.contains("more than once") || invalid_error.contains("finite"),
@@ -1876,8 +1893,8 @@ fn project_model_replacement_is_guarded_and_atomic() {
 
 fn sectioned_project_revision(vth0: f64) -> ProjectModelRevisionDefinition {
     let base = project_definition(vth0, "r1");
-    let metadata =
-        reconcile_project_model_metadata(&base, None).expect("synthesize typed project metadata");
+    let metadata = reconcile_project_model_revision_metadata(&base, None)
+        .expect("synthesize typed project metadata");
     let mut definition = ProjectModelRevisionDefinition::new(base, metadata);
     definition
         .metadata
@@ -1934,10 +1951,13 @@ fn complete_project_revision_publishes_sections_and_executes_selected_corner() {
         ProjectModelRevisionDefinition::new(project_definition(0.48, "r1"), metadata.clone());
     metadata_only.metadata.parameters[0].unit = Some("dimensionless".to_owned());
     let replaced = manager
-        .replace_project_model_revision(
+        .replace_project_model_revision_in_library(
             "owned_sections",
             source_id,
             revision,
+            revision,
+            "owned_nch",
+            digest,
             &metadata_only,
             &ModelQualificationState::default(),
         )

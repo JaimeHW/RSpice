@@ -3,8 +3,6 @@
 //! Every mutation renders, parses, and checks the candidate completely before
 //! the manager is touched, so a rejected edit leaves the library exactly as it
 //! was — there is no partially-created model and no half-applied revision.
-//! Each revision is built as a whole library rather than patched in place,
-//! which is what makes the round-trip verification at the end meaningful.
 
 use super::*;
 
@@ -82,49 +80,6 @@ impl ModelLibraryManager {
         Ok(commit)
     }
 
-    /// Create a new single-card model whose exact source is owned by the
-    /// project. The candidate is rendered, parsed, and checked completely
-    /// before the manager is mutated.
-    #[cfg(test)]
-    pub fn create_project_model(
-        &mut self,
-        library_name: &str,
-        definition: &ProjectModelDefinition,
-    ) -> Result<ProjectModelCommit, String> {
-        validate_project_library_name(library_name)?;
-        if let Some(existing) = self
-            .libraries
-            .keys()
-            .find(|existing| existing.eq_ignore_ascii_case(library_name))
-        {
-            return Err(format!(
-                "Model library '{library_name}' conflicts with existing library '{existing}'"
-            ));
-        }
-
-        let source_id = ModelSourceId::new();
-        let revision = ObjectRevision::INITIAL;
-        let root = super::super::project_owned_source_path(source_id);
-        let after = Self::build_project_model_library(
-            library_name,
-            None,
-            source_id,
-            revision,
-            root,
-            definition,
-        )?;
-        let model_name = definition.name.clone();
-        self.libraries
-            .insert(library_name.to_owned(), after.clone());
-        Ok(ProjectModelCommit {
-            library_name: library_name.to_owned(),
-            model_name,
-            before: None,
-            after,
-            affects_execution: true,
-        })
-    }
-
     /// Create one complete project-owned model revision. The base card,
     /// process sections, typed schema, statistical definition, and temperature
     /// laws are validated and published with one source identity or not at
@@ -149,9 +104,8 @@ impl ModelLibraryManager {
         let source_id = ModelSourceId::new();
         let revision = ObjectRevision::INITIAL;
         let root = super::super::project_owned_source_path(source_id);
-        let after = Self::build_project_model_revision_library(
+        let after = Self::build_new_project_model_library(
             library_name,
-            None,
             source_id,
             revision,
             root,
@@ -165,183 +119,6 @@ impl ModelLibraryManager {
             library_name: library_name.to_owned(),
             model_name,
             before: None,
-            after,
-            affects_execution: true,
-        })
-    }
-
-    /// Replace one editable project model using optimistic source-revision
-    /// guards. External, built-in, multi-card, and stale sources fail closed.
-    #[cfg(test)]
-    pub fn replace_project_model(
-        &mut self,
-        library_name: &str,
-        expected_source_id: ModelSourceId,
-        expected_revision: ObjectRevision,
-        definition: &ProjectModelDefinition,
-    ) -> Result<ProjectModelCommit, String> {
-        let before = self
-            .libraries
-            .get(library_name)
-            .cloned()
-            .ok_or_else(|| format!("Model library '{library_name}' does not exist"))?;
-        let ModelSourceAuthority::ProjectOwned {
-            source_id,
-            revision,
-            ..
-        } = before.source_authority
-        else {
-            return Err(format!(
-                "Model library '{library_name}' is not project-owned; create an editable project copy before changing it"
-            ));
-        };
-        if source_id != expected_source_id || revision != expected_revision {
-            return Err(format!(
-                "Model library '{library_name}' changed after this candidate was opened; reload or compare before saving"
-            ));
-        }
-        if before.models.len() != 1
-            || before.source_closure.len() != 1
-            || before.source_contents.len() != 1
-            || !before.source_edges.is_empty()
-            || !before.corners.is_empty()
-        {
-            return Err(format!(
-                "Model library '{library_name}' is not an editable single-card definition"
-            ));
-        }
-        let next_revision = revision
-            .next()
-            .map_err(|error| format!("Cannot revise model library '{library_name}': {error}"))?;
-        let root = before.root_path.clone().ok_or_else(|| {
-            format!("Project-owned model library '{library_name}' has no source identity")
-        })?;
-        let after = Self::build_project_model_library(
-            library_name,
-            Some(&before),
-            source_id,
-            next_revision,
-            root,
-            definition,
-        )?;
-        if before.source_contents[0].bytes == after.source_contents[0].bytes {
-            return Err("Model candidate has no source changes to save".to_owned());
-        }
-        let model_name = definition.name.clone();
-        self.libraries
-            .insert(library_name.to_owned(), after.clone());
-        Ok(ProjectModelCommit {
-            library_name: library_name.to_owned(),
-            model_name,
-            before: Some(before),
-            after,
-            affects_execution: true,
-        })
-    }
-
-    /// Replace one complete project-owned model revision using optimistic
-    /// source-revision guards. Validation and canonical source parsing finish
-    /// before the live manager is mutated.
-    #[cfg(test)]
-    pub fn replace_project_model_revision(
-        &mut self,
-        library_name: &str,
-        expected_source_id: ModelSourceId,
-        expected_revision: ObjectRevision,
-        definition: &ProjectModelRevisionDefinition,
-        qualification: &ModelQualificationState,
-    ) -> Result<ProjectModelCommit, String> {
-        let before = self
-            .libraries
-            .get(library_name)
-            .cloned()
-            .ok_or_else(|| format!("Model library '{library_name}' does not exist"))?;
-        let ModelSourceAuthority::ProjectOwned {
-            source_id,
-            revision,
-            ..
-        } = before.source_authority
-        else {
-            return Err(format!(
-                "Model library '{library_name}' is not project-owned; create an editable project copy before changing it"
-            ));
-        };
-        if source_id != expected_source_id || revision != expected_revision {
-            return Err(format!(
-                "Model library '{library_name}' changed after this candidate was opened; reload or compare before saving"
-            ));
-        }
-        if before.source_closure.len() != 1
-            || before.source_contents.len() != 1
-            || !before.source_edges.is_empty()
-        {
-            return Err(format!(
-                "Model library '{library_name}' is not a complete editable project-model revision"
-            ));
-        }
-        let previous_model_name = before.models.keys().next().ok_or_else(|| {
-            format!("Project-owned model library '{library_name}' has no model projection")
-        })?;
-        if before.models.len() != 1
-            || !before
-                .model_definition_metadata
-                .contains_key(previous_model_name)
-        {
-            return Err(format!(
-                "Model library '{library_name}' does not have one coherent editable definition"
-            ));
-        }
-        let display_name = before
-            .model_definition_metadata
-            .get(previous_model_name)
-            .and_then(|metadata| metadata.sections.first())
-            .and_then(|section| section.model_files.first())
-            .map_or_else(
-                || format!("{library_name}.model"),
-                |identity| identity.display_name.clone(),
-            );
-        let current_identity_candidate = definition
-            .clone()
-            .bind_project_source_identity(source_id, revision, display_name)
-            .map_err(|error| format!("Project model revision is invalid: {error}"))?;
-        let current_identity_source = current_identity_candidate
-            .canonical_source()
-            .map_err(|error| format!("Project model source is invalid: {error}"))?;
-        if before.source_contents[0].bytes == current_identity_source.into_bytes()
-            && before.model_definition_metadata.get(previous_model_name)
-                == Some(&current_identity_candidate.metadata)
-            && before
-                .model_qualification
-                .get(previous_model_name)
-                .cloned()
-                .unwrap_or_default()
-                == *qualification
-        {
-            return Err("Model candidate has no semantic changes to save".to_owned());
-        }
-
-        let next_revision = revision
-            .next()
-            .map_err(|error| format!("Cannot revise model library '{library_name}': {error}"))?;
-        let root = before.root_path.clone().ok_or_else(|| {
-            format!("Project-owned model library '{library_name}' has no source identity")
-        })?;
-        let after = Self::build_project_model_revision_library(
-            library_name,
-            Some(&before),
-            source_id,
-            next_revision,
-            root,
-            definition,
-            qualification,
-        )?;
-        let model_name = definition.base.name.clone();
-        self.libraries
-            .insert(library_name.to_owned(), after.clone());
-        Ok(ProjectModelCommit {
-            library_name: library_name.to_owned(),
-            model_name,
-            before: Some(before),
             after,
             affects_execution: true,
         })
@@ -953,148 +730,8 @@ impl ModelLibraryManager {
         })
     }
 
-    #[cfg(test)]
-    fn build_project_model_library(
+    fn build_new_project_model_library(
         library_name: &str,
-        previous: Option<&ModelLibrary>,
-        source_id: ModelSourceId,
-        revision: ObjectRevision,
-        root: PathBuf,
-        definition: &ProjectModelDefinition,
-    ) -> Result<ModelLibrary, String> {
-        let source = definition.canonical_source()?;
-        let bytes = source.into_bytes();
-        let digest = ContentDigest::from_bytes(Sha256::digest(&bytes).into());
-        let mut parser =
-            rspice_core::library::LibParser::new(root.parent().unwrap_or_else(|| Path::new("/")));
-        let parsed = parser.parse_string(
-            rspice_core::netlist::decode_source_bytes(&bytes)
-                .map_err(|error| format!("Project model source cannot be decoded: {error}"))?
-                .as_str(),
-        );
-        if !parsed.is_ok() {
-            return Err(format!(
-                "Project model source is invalid: {}",
-                parsed
-                    .errors
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            ));
-        }
-        if parsed.top_level_models.len() != 1
-            || parsed.model_count() != 1
-            || parsed.subcircuit_count() != 0
-            || !parsed.sections.is_empty()
-        {
-            return Err(
-                "Project model source must contain exactly one top-level .model card and no sections or subcircuits"
-                    .to_owned(),
-            );
-        }
-        let parsed_model = &parsed.top_level_models[0];
-        if parsed_model.name != definition.name {
-            return Err(format!(
-                "Parsed model identity '{}' does not match candidate '{}'",
-                parsed_model.name, definition.name
-            ));
-        }
-        verify_project_model_round_trip(definition, parsed_model)?;
-
-        let mut device_model = DeviceModel::from_parsed(parsed_model, &root, None);
-        device_model.spice_type = Some(definition.spice_type.to_ascii_uppercase());
-        device_model.description = definition.description.clone();
-        device_model.source_line = Some(
-            definition
-                .description
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .count()
-                + 1,
-        );
-
-        let mut library = ModelLibrary::new(library_name);
-        let previous_model_name = previous
-            .and_then(|library| library.models.keys().next())
-            .cloned();
-        if let Some(previous) = previous {
-            library.pdk_name = previous.pdk_name.clone();
-            library.technology_node = previous.technology_node.clone();
-            library.expanded = previous.expanded;
-        }
-        library.root_path = Some(root.clone());
-        library.source_authority = ModelSourceAuthority::ProjectOwned {
-            source_id,
-            revision,
-            digest,
-        };
-        library.source_closure = vec![ModelSourcePin {
-            path: root.clone(),
-            digest,
-        }];
-        library.source_contents = vec![ModelSourceContent { path: root, bytes }];
-        library.source_edges.clear();
-        library.models.clear();
-        library.top_level_models.clear();
-        library.section_models.clear();
-        library.add_model(device_model);
-        let previous_metadata = previous_model_name.as_deref().and_then(|model_name| {
-            previous.and_then(|library| library.model_definition_metadata.get(model_name))
-        });
-        let mut metadata = reconcile_project_model_metadata(definition, previous_metadata)?;
-        metadata.source_identity = Some(ModelFileIdentity {
-            source_id: source_id.to_string(),
-            revision: revision.get(),
-            content_digest: digest.to_string(),
-            display_name: format!("{library_name}.model"),
-        });
-        library
-            .model_definition_metadata
-            .insert(definition.name.clone(), metadata);
-        if let Some(previous) = previous
-            && let Some(previous_model_name) = previous_model_name.as_deref()
-            && let Some(qualification) = previous.model_qualification.get(previous_model_name)
-        {
-            if previous_model_name != definition.name && *qualification != Default::default() {
-                return Err(
-                    "A qualified model cannot be renamed without an explicit release-lineage migration"
-                        .to_owned(),
-                );
-            }
-            if previous_model_name == definition.name {
-                library
-                    .model_qualification
-                    .insert(definition.name.clone(), qualification.clone());
-            }
-        }
-        if let Some(previous) = previous
-            && let Some(previous_model_name) = previous_model_name.as_deref()
-            && let Some(correlation) = previous.model_correlation.get(previous_model_name)
-        {
-            if previous_model_name != definition.name
-                && *correlation != ModelCorrelationState::default()
-            {
-                return Err(
-                    "A model with correlation history cannot be renamed without an explicit evidence-lineage migration"
-                        .to_owned(),
-                );
-            }
-            if previous_model_name == definition.name {
-                library
-                    .model_correlation
-                    .insert(definition.name.clone(), correlation.clone());
-            }
-        }
-        library.corners.clear();
-        library.selected_corner = None;
-        library.version = revision.get().to_string();
-        Ok(library)
-    }
-
-    fn build_project_model_revision_library(
-        library_name: &str,
-        previous: Option<&ModelLibrary>,
         source_id: ModelSourceId,
         revision: ObjectRevision,
         root: PathBuf,
@@ -1104,7 +741,7 @@ impl ModelLibraryManager {
         qualification
             .validate_for_model(&definition.base.name)
             .map_err(|error| format!("Project model qualification is invalid: {error}"))?;
-        let mut bound = definition
+        let bound = definition
             .clone()
             .bind_project_source_identity(source_id, revision, format!("{library_name}.model"))
             .map_err(|error| format!("Project model revision is invalid: {error}"))?;
@@ -1125,28 +762,6 @@ impl ModelLibraryManager {
             revision,
         )
         .map_err(|error| format!("Project model source identity is invalid: {error}"))?;
-        let source_changed = previous.is_some_and(|library| {
-            !matches!(
-                library.source_authority,
-                ModelSourceAuthority::ProjectOwned {
-                    source_id: previous_source_id,
-                    revision: previous_revision,
-                    digest: previous_digest,
-                } if previous_source_id == source_id
-                    && previous_revision == revision
-                    && previous_digest == identity.content_digest
-            )
-        });
-        if source_changed {
-            for section in &mut bound.metadata.sections {
-                if !matches!(
-                    section.qualification,
-                    ModelSectionQualification::Unqualified
-                ) {
-                    section.qualification = ModelSectionQualification::Unqualified;
-                }
-            }
-        }
         let retained_qualification = qualification
             .reconcile_after_source_revision(&current_source)
             .map_err(|error| {
@@ -1193,15 +808,7 @@ impl ModelLibraryManager {
                 + 1,
         );
 
-        let previous_model_name = previous
-            .and_then(|library| library.models.keys().next())
-            .cloned();
         let mut library = ModelLibrary::new(library_name);
-        if let Some(previous) = previous {
-            library.pdk_name = previous.pdk_name.clone();
-            library.technology_node = previous.technology_node.clone();
-            library.expanded = previous.expanded;
-        }
         library.root_path = Some(root.clone());
         library.source_authority = ModelSourceAuthority::ProjectOwned {
             source_id,
@@ -1226,39 +833,11 @@ impl ModelLibraryManager {
             .model_definition_metadata
             .insert(bound.base.name.clone(), bound.metadata.clone());
         library.model_qualification.clear();
-        if let Some(previous_model_name) = previous_model_name.as_deref()
-            && previous_model_name != bound.base.name
-            && *qualification != Default::default()
-        {
-            return Err(
-                "A qualified model cannot be renamed without an explicit release-lineage migration"
-                    .to_owned(),
-            );
-        }
         if retained_qualification != Default::default() {
             library
                 .model_qualification
                 .insert(bound.base.name.clone(), retained_qualification);
         }
-        if let Some(previous) = previous
-            && let Some(previous_model_name) = previous_model_name.as_deref()
-            && let Some(correlation) = previous.model_correlation.get(previous_model_name)
-        {
-            if previous_model_name != bound.base.name
-                && *correlation != ModelCorrelationState::default()
-            {
-                return Err(
-                    "A model with correlation history cannot be renamed without an explicit evidence-lineage migration"
-                        .to_owned(),
-                );
-            }
-            if previous_model_name == bound.base.name {
-                library
-                    .model_correlation
-                    .insert(bound.base.name.clone(), correlation.clone());
-            }
-        }
-
         library.corners.clear();
         let selected_corner = bound
             .metadata
@@ -1280,5 +859,23 @@ impl ModelLibraryManager {
         library.refresh_effective_model_projection();
         library.version = revision.get().to_string();
         Ok(library)
+    }
+}
+
+#[cfg(test)]
+impl ModelLibraryManager {
+    /// Seed a sectionless test model through the production revision transaction.
+    pub(crate) fn create_project_model(
+        &mut self,
+        library_name: &str,
+        definition: &ProjectModelDefinition,
+    ) -> Result<ProjectModelCommit, String> {
+        definition.validate()?;
+        let metadata = reconcile_project_model_revision_metadata(definition, None)?;
+        self.create_project_model_revision(
+            library_name,
+            &ProjectModelRevisionDefinition::new(definition.clone(), metadata),
+            &ModelQualificationState::default(),
+        )
     }
 }

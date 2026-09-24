@@ -496,14 +496,21 @@ fn editor_validation_is_revision_bound_and_reports_typed_input_errors() {
         .expect("reopen editor");
     let draft = editor.draft.as_ref().expect("draft");
     manager
-        .replace_project_model(
+        .replace_project_model_revision_in_library(
             "owned-models",
             draft.source_id,
+            draft.base_library_revision,
             draft.base_source_revision,
-            &ProjectModelDefinition {
-                description: "Concurrent change".to_owned(),
-                ..definition()
-            },
+            &draft.model_name,
+            draft.base_source_digest,
+            &ProjectModelRevisionDefinition::new(
+                ProjectModelDefinition {
+                    description: "Concurrent change".to_owned(),
+                    ..definition()
+                },
+                draft.base_definition.metadata.clone(),
+            ),
+            &draft.qualification,
         )
         .expect("advance model source");
     assert!(!editor.validate_candidate(&manager, ObjectRevision::INITIAL));
@@ -952,6 +959,28 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
     );
     assert!(!reopened.is_dirty());
     assert!(app.state.workbench.model_editor.validation.is_some());
+
+    assert!(
+        save_open_candidate(&mut app)
+            .expect_err("unchanged draft must not publish another revision")
+            .contains("no semantic changes")
+    );
+    assert_eq!(
+        app.state.workspace.project.revision(),
+        committed_project_revision
+    );
+    assert_eq!(
+        app.state
+            .model_library_manager
+            .get_library("owned-models")
+            .unwrap()
+            .project_source_revision(),
+        Some(ObjectRevision::new(2).expect("source revision"))
+    );
+    assert_eq!(
+        app.state.design_execution_epoch,
+        starting_execution_epoch.wrapping_add(1)
+    );
 }
 
 #[test]

@@ -27,8 +27,6 @@ use rspice_model_library::{
     SimulationPlanModelBinding,
 };
 
-#[cfg(test)]
-use super::ModelFileIdentity;
 #[cfg(not(target_arch = "wasm32"))]
 use super::is_foreign_platform_absolute_path;
 use super::{
@@ -2548,20 +2546,6 @@ fn validate_section_qualification_evidence(
     Ok(())
 }
 
-#[cfg(test)]
-fn reconcile_project_model_metadata(
-    definition: &ProjectModelDefinition,
-    previous: Option<&ModelDefinitionMetadata>,
-) -> Result<ModelDefinitionMetadata, String> {
-    if previous.is_some_and(|metadata| !metadata.sections.is_empty()) {
-        return Err(
-            "A sectioned model must be changed through the complete project-model revision transaction"
-                .to_owned(),
-        );
-    }
-    reconcile_project_model_revision_metadata(definition, previous)
-}
-
 fn reconcile_project_model_revision_metadata(
     definition: &ProjectModelDefinition,
     previous: Option<&ModelDefinitionMetadata>,
@@ -2636,50 +2620,6 @@ fn reconcile_project_model_revision_metadata(
         .validate()
         .map_err(|error| format!("Project model metadata is invalid: {error}"))?;
     Ok(metadata)
-}
-
-#[cfg(test)]
-fn verify_project_model_round_trip(
-    definition: &ProjectModelDefinition,
-    parsed: &rspice_core::library::ParsedModel,
-) -> Result<(), String> {
-    let expected_numeric = definition
-        .numeric_parameters
-        .iter()
-        .map(|(name, value)| (name.to_ascii_lowercase(), *value))
-        .collect::<HashMap<_, _>>();
-    if parsed.parameters.len() != expected_numeric.len()
-        || expected_numeric.iter().any(|(name, value)| {
-            parsed
-                .parameters
-                .get(name)
-                .is_none_or(|parsed| parsed.to_bits() != value.to_bits())
-        })
-    {
-        return Err(
-            "Project model numeric parameters did not survive canonical source parsing exactly"
-                .to_owned(),
-        );
-    }
-    let expected_strings = definition
-        .string_parameters
-        .iter()
-        .map(|(name, value)| (name.to_ascii_lowercase(), value.as_str()))
-        .collect::<HashMap<_, _>>();
-    if parsed.string_params.len() != expected_strings.len()
-        || expected_strings.iter().any(|(name, value)| {
-            parsed
-                .string_params
-                .get(name)
-                .is_none_or(|parsed| parsed != value)
-        })
-    {
-        return Err(
-            "Project model string parameters did not survive canonical source parsing exactly"
-                .to_owned(),
-        );
-    }
-    Ok(())
 }
 
 #[cfg(test)]
