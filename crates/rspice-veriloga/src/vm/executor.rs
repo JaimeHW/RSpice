@@ -879,6 +879,16 @@ impl<'a> Vm<'a> {
                 let result = table.derivative(input);
                 self.stack.push(result);
             }
+            Instruction::TableDerivativeApply(table_id) => {
+                let derivative = self.pop()?;
+                let input = self.pop()?;
+                let table = self
+                    .context
+                    .lookup_tables
+                    .get(*table_id)
+                    .ok_or(VmError::InvalidInstruction("missing lookup table"))?;
+                self.stack.push(table.apply_derivative(input, derivative));
+            }
 
             // $limit function: bounds value change per Newton iteration
             // Stack: [new_value, step_limit] -> [limited_value]

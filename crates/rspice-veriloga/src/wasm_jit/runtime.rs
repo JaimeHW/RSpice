@@ -273,6 +273,15 @@ fn evaluate_stateful_helper(
             )?;
             (Instruction::TableDerivative(index), 1)
         }
+        402 => {
+            require_slot(
+                session,
+                index,
+                session.context.lookup_tables.len(),
+                "lookup table derivative action",
+            )?;
+            (Instruction::TableDerivativeApply(index), 2)
+        }
         410 => {
             if !session.context.evaluation_mode.limiting_enabled() {
                 return Ok(operands[0]);
@@ -1204,9 +1213,9 @@ mod tests {
     #[test]
     fn emitted_stateful_helpers_require_the_active_runtime_session() {
         for opcode in [
-            400, 401, 410, 411, 412, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 432, 440,
-            442, 443, 444, 445, 446, 447, 448, 449, 460, 461, 462, 470, 471, 480, 481, 482, 483,
-            484,
+            400, 401, 402, 410, 411, 412, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 432,
+            440, 442, 443, 444, 445, 446, 447, 448, 449, 460, 461, 462, 470, 471, 480, 481, 482,
+            483, 484,
         ] {
             assert!(
                 is_stateful_opcode(opcode),

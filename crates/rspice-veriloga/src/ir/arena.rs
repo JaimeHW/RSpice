@@ -275,6 +275,12 @@ pub enum Node {
         /// Index of the `(x, y)` data in the arena's table list.
         table: TableId,
     },
+    /// Local table slope applied to a derivative payload before final rounding.
+    TableDerivativeApply {
+        input: NodeId,
+        input_derivative: NodeId,
+        table: TableId,
+    },
     /// Symbolic partial derivative. The axis is `ExprArena::ddx_axis(axis)`.
     Ddx {
         /// Differentiated expression.
@@ -943,6 +949,11 @@ pub fn for_each_child<F: FnMut(NodeId)>(arena: &ExprArena, node: &Node, f: &mut 
         | Node::NamedLimit {
             proposed: left,
             candidate: right,
+        }
+        | Node::TableDerivativeApply {
+            input: left,
+            input_derivative: right,
+            ..
         } => {
             f(*left);
             f(*right);
@@ -1358,6 +1369,22 @@ pub fn rebuild_children(
             |input| Node::TableLookup { input, table },
             descend,
         ),
+        Node::TableDerivativeApply {
+            input,
+            input_derivative,
+            table,
+        } => {
+            let new_input = descend(arena, input);
+            let new_derivative = descend(arena, input_derivative);
+            if new_input == input && new_derivative == input_derivative {
+                return id;
+            }
+            arena.push(Node::TableDerivativeApply {
+                input: new_input,
+                input_derivative: new_derivative,
+                table,
+            })
+        }
         Node::VarIndexed { payload, index } => rebuild_unary(
             arena,
             id,
@@ -1791,6 +1818,11 @@ mod tests {
         out.push(arena.push(Node::LimiterPrevious(one)));
         out.push(arena.push(Node::TableLookup { input: one, table }));
         out.push(arena.push(Node::TableDerivative { input: one, table }));
+        out.push(arena.push(Node::TableDerivativeApply {
+            input: one,
+            input_derivative: two,
+            table,
+        }));
         out.push(arena.push(Node::Ddx { expr: one, axis }));
         out.push(arena.push(Node::DdtDerivative {
             primal: one,

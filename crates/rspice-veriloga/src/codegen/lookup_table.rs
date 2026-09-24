@@ -127,6 +127,51 @@ impl LookupTable {
         self.slope(idx, idx + 1)
     }
 
+    /// Apply the active slope without rounding it before its input derivative.
+    pub fn apply_derivative(&self, x: f64, input_derivative: f64) -> f64 {
+        if !x.is_finite() || !input_derivative.is_finite() {
+            return f64::NAN;
+        }
+        let Some([x0, x1, y0, y1]) = self.derivative_segment(x) else {
+            return 0.0;
+        };
+        if x0 == x1 || y0 == y1 || input_derivative == 0.0 {
+            return 0.0;
+        }
+        let dx = x1 - x0;
+        let dy = y1 - y0;
+        let slope = dy / dx;
+        let result = slope * input_derivative;
+        if dx.is_finite() && dy.is_finite() && slope.is_normal() && result.is_normal() {
+            return result;
+        }
+        sum_products_ratio(
+            [(y1, input_derivative), (-y0, input_derivative)].into_iter(),
+            [(x1, 1.0), (-x0, 1.0)].into_iter(),
+        )
+        .unwrap_or(f64::NAN)
+    }
+
+    pub(crate) fn derivative_segment(&self, x: f64) -> Option<[f64; 4]> {
+        let n = self.x_data.len();
+        if n < 2 {
+            return None;
+        }
+        let i = if x <= self.x_data[0] {
+            0
+        } else if x >= self.x_data[n - 1] {
+            n - 2
+        } else {
+            self.find_interval(x)
+        };
+        Some([
+            self.x_data[i],
+            self.x_data[i + 1],
+            self.y_data[i],
+            self.y_data[i + 1],
+        ])
+    }
+
     /// Binary search to find the interval containing x
     /// Returns index `i` such that `x_data[i] <= x < x_data[i+1]`
     #[inline]

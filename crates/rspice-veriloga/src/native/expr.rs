@@ -188,6 +188,7 @@ pub(crate) enum NativeOp {
     IntegerBinaryConst(IntegerBinaryOp, i64),
     TableLookup(usize),
     TableDerivative(usize),
+    TableDerivativeApply(usize),
     LimitState(usize),
     LimiterPrevious(usize),
     LimiterStore(usize),
@@ -1767,6 +1768,23 @@ impl NativeProgram {
                         1,
                     )?;
                     ops.push(NativeOp::TableDerivative(*table_id));
+                }
+                Instruction::TableDerivativeApply(table_id) => {
+                    validate_index(
+                        model.clone(),
+                        "TableDerivativeApply table",
+                        *table_id,
+                        limits.lookup_table_count,
+                    )?;
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        2,
+                    )?;
+                    depth -= 1;
+                    ops.push(NativeOp::TableDerivativeApply(*table_id));
                 }
                 Instruction::LimitState(index) => {
                     require_stack(
@@ -5762,10 +5780,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         // at every order; all higher chain-rule terms come from the input.
         // Evaluate the original input for segment selection, not a derivative
         // payload. This also preserves the established right-side knot rule.
-        self.lower_mixed_derivative(args[0], axes)?;
         self.lower(args[0])?;
-        self.append_unary(NativeOp::TableDerivative(table_id))?;
-        self.append_arithmetic("Mul")
+        self.lower_mixed_derivative(args[0], axes)?;
+        self.pop_binary("canonical table derivative action")?;
+        self.ops.push(NativeOp::TableDerivativeApply(table_id));
+        Ok(())
     }
 
     fn lower_analog_operator_derivative(
@@ -8258,6 +8277,7 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::IntegerBinaryConst(_, _) => "IntegerBinaryConst",
         NativeOp::TableLookup(_) => "TableLookup",
         NativeOp::TableDerivative(_) => "TableDerivative",
+        NativeOp::TableDerivativeApply(_) => "TableDerivativeApply",
         NativeOp::LimitState(_) => "LimitState",
         NativeOp::LimiterPrevious(_) => "LimiterPrevious",
         NativeOp::LimiterStore(_) => "LimiterStore",
@@ -9252,6 +9272,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::BinaryMath(_)
         | NativeOp::CheckedValue
         | NativeOp::IntegerBinary(_)
+        | NativeOp::TableDerivativeApply(_)
         | NativeOp::LimiterStore(_)
         | NativeOp::LimitState(_)
         | NativeOp::AbsDelayState(_)
@@ -9472,6 +9493,7 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::DdtDerivativeState(_) => "DdtDerivativeState",
         Instruction::IdtJacobian => "IdtJacobian",
         Instruction::TableDerivative(_) => "TableDerivative",
+        Instruction::TableDerivativeApply(_) => "TableDerivativeApply",
         Instruction::LimitState(_) => "LimitState",
         Instruction::NamedLimiterPrevious(_) => "NamedLimiterPrevious",
         Instruction::NamedLimiterStore(_) => "NamedLimiterStore",

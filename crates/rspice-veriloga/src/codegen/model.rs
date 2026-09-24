@@ -947,6 +947,9 @@ pub enum Instruction {
     AbsDelayStateMixedDerivative(usize),
     /// Mixed action with an explicit maximum-delay operand after delay_partial.
     AbsDelayStateMixedDerivativeMax(usize),
+    /// Stack: `[input, input_derivative] -> [table_slope * input_derivative]`.
+    /// Applies the payload before dividing so a local slope need not fit f64.
+    TableDerivativeApply(usize),
 }
 
 impl CompiledModel {

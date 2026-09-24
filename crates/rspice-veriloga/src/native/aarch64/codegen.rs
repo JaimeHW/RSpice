@@ -1766,6 +1766,12 @@ impl FunctionCompiler {
                 table_id,
                 rspice_table_derivative_native as *const () as usize,
             )?,
+            NativeOp::TableDerivativeApply(table_id) => self.emit_operand_context_helper(
+                prepared,
+                2,
+                table_id,
+                crate::native::abi::rspice_table_derivative_apply_native as *const () as usize,
+            )?,
             NativeOp::LimitState(state_id) => self.emit_operand_context_helper(
                 prepared,
                 2,

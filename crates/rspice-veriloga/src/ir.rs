@@ -1556,6 +1556,11 @@ impl DeviceIR {
                 Node::TableLookup { input, .. } | Node::TableDerivative { input, .. } => {
                     contains_ddt(arena, input)
                 }
+                Node::TableDerivativeApply {
+                    input,
+                    input_derivative,
+                    ..
+                } => contains_ddt(arena, input) || contains_ddt(arena, input_derivative),
                 Node::Ddx { expr, .. } => contains_ddt(arena, expr),
                 Node::LastCrossing { expr, direction } => {
                     contains_ddt(arena, expr) || contains_ddt_opt(arena, direction)
@@ -2412,6 +2417,9 @@ pub mod autodiff {
             // The condition only selects; the branches carry the slope
             Node::Conditional(_, then_expr, else_expr) => recurse(then_expr) | recurse(else_expr),
             Node::TableLookup { input, .. } | Node::TableDerivative { input, .. } => recurse(input),
+            Node::TableDerivativeApply {
+                input_derivative, ..
+            } => recurse(input_derivative),
             Node::Ddx { expr: inner, .. } => recurse(inner),
             Node::IdtCompanion(inner)
             | Node::DdtDerivative {
@@ -3527,6 +3535,9 @@ pub mod autodiff {
                 input_derivative, ..
             } => collect!(input_derivative),
             Node::TableLookup { input, .. } => collect!(input),
+            Node::TableDerivativeApply {
+                input_derivative, ..
+            } => collect!(input_derivative),
             Node::Ddx { .. } => {
                 // ddx is resolved along its solver axis before the outer noise
                 // derivative. Preserve that ordering; walking the raw operand
@@ -4880,9 +4891,24 @@ pub mod autodiff {
             // Table lookup: slope of the active segment times the inner
             // derivative
             Node::TableLookup { input, table } => {
-                let slope = arena.push(Node::TableDerivative { input, table });
-                let di = differentiate!(input);
-                binary!(BinaryOp::Mul, slope, di)
+                let input_derivative = differentiate!(input);
+                arena.push(Node::TableDerivativeApply {
+                    input,
+                    input_derivative,
+                    table,
+                })
+            }
+            Node::TableDerivativeApply {
+                input,
+                input_derivative,
+                table,
+            } => {
+                let input_derivative = differentiate!(input_derivative);
+                arena.push(Node::TableDerivativeApply {
+                    input,
+                    input_derivative,
+                    table,
+                })
             }
 
             Node::Heavy(_, payload) => {

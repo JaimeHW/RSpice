@@ -58,7 +58,8 @@ use wasmparser::{Encoding, ExternalKind, Imports, Operator, Parser, Payload, Typ
 /// Version 16 adds immutable procedural evaluation inputs to the frame header.
 /// Version 17 adds storage-independent checked array-index helper opcode 3.
 /// Version 18 adds exact mixed input/timing transport-delay actions.
-pub const WASM_JIT_ABI_VERSION: u32 = 18;
+/// Version 19 adds a table derivative payload action.
+pub const WASM_JIT_ABI_VERSION: u32 = 19;
 
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing
@@ -151,7 +152,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 18;
 /// Version 57 emits mixed input/timing transport-delay actions.
 /// Version 58 lowers higher derivatives through a table's active affine segment.
 /// Version 59 retains table interpolation across the finite binary64 range.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 59;
+/// Version 60 preserves table derivative payloads through slope division.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 60;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -3298,6 +3300,45 @@ endmodule
                             "{expression}, postfix={postfix}, V={voltage}, {entry}: {actual} != {expected}"
                         );
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_higher_subnormal_table_derivatives_follow_the_active_segment() {
+        let source = include_str!("../../tests/fixtures/higher_table.va")
+            .replace("u=exp", "u=1e-310*exp")
+            .replace("0.0,1.0,1.0,3.0,2.0,9.0", "0.0,1.0,1e-310,3.0,2e-310,9.0");
+        check_higher_table_derivatives(&source);
+    }
+
+    #[test]
+    fn wasm_table_chain_rule_retains_finite_derivatives_with_unrepresentable_slopes() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        for (input, data, gain) in [
+            ("1e-310*V(p)", "0.0,0.0,1e-310,1.0", 1.0),
+            ("1e308*V(p)", "0.0,0.0,1e308,1e-310", 1e-310),
+        ] {
+            let source = format!(
+                "module table_range(p); inout p; electrical p; analog I(p)<+$table_model({input},{data}); endmodule"
+            );
+            for postfix in [false, true] {
+                let mut harness =
+                    FusedKernelHarness::for_source_with_plan(&source, "table_range", postfix);
+                harness.reset();
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 0.5);
+                harness.call_assignments();
+                harness.call_prelude();
+                let value = harness.stamp_value_export(0);
+                let jacobian = harness.jacobian_export(0, 0);
+                for (entry, expected) in [(&jacobian, gain), (&value, 0.5 * gain)] {
+                    assert_eq!(harness.call(entry), 0);
+                    let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                    assert!(
+                        (actual / expected - 1.0).abs() < 1e-12,
+                        "postfix={postfix}, {input}: {actual} != {expected}"
+                    );
                 }
             }
         }

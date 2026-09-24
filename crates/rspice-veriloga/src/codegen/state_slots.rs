@@ -69,7 +69,12 @@ impl CanonicalStateOperator {
                 Self::Limit,
                 Instruction::NamedLimiterPrevious(slot) | Instruction::NamedLimiterStore(slot),
             ) => Some(*slot),
-            (Self::TableLookup, Instruction::TableLookup(slot)) => Some(*slot),
+            (
+                Self::TableLookup,
+                Instruction::TableLookup(slot)
+                | Instruction::TableDerivative(slot)
+                | Instruction::TableDerivativeApply(slot),
+            ) => Some(*slot),
             _ => None,
         }
     }
@@ -118,7 +123,12 @@ impl CanonicalStateOperator {
                 | Instruction::NamedLimiterPrevious(held)
                 | Instruction::NamedLimiterStore(held),
             )
-            | (Self::TableLookup, Instruction::TableLookup(held)) => {
+            | (
+                Self::TableLookup,
+                Instruction::TableLookup(held)
+                | Instruction::TableDerivative(held)
+                | Instruction::TableDerivativeApply(held),
+            ) => {
                 *held = slot;
                 true
             }

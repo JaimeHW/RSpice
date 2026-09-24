@@ -128,12 +128,9 @@ impl BlockProgram {
 /// the mapping's own terms.
 ///
 /// Only operations with a named bytecode counterpart are classified.
-/// `TableDerivative` addresses an array the bytecode side reaches under a
-/// different instruction, and the named-limiter pair `LimiterPrevious` /
-/// `LimiterStore` is emitted once per implicit-argument read rather than once
-/// per site, so classifying either here would risk refusing a module over a
-/// slot the mapping simply never counted. They are left unclassified on
-/// purpose.
+/// The named-limiter pair `LimiterPrevious` / `LimiterStore` is emitted once
+/// per implicit-argument read rather than once per site, so classifying it
+/// here would risk refusing a module over a slot the mapping never counted.
 fn state_slot(op: NativeOp) -> Option<(CanonicalStateFamily, usize)> {
     let (operator, slot) = match op {
         NativeOp::DdtState(slot) | NativeOp::DdtDerivativeState(slot) => {
@@ -169,7 +166,9 @@ fn state_slot(op: NativeOp) -> Option<(CanonicalStateFamily, usize)> {
         NativeOp::AboveState(slot) => (CanonicalStateOperator::Above, slot),
         NativeOp::TimerState(slot) => (CanonicalStateOperator::Timer, slot),
         NativeOp::LimitState(slot) => (CanonicalStateOperator::Limit, slot),
-        NativeOp::TableLookup(slot) => (CanonicalStateOperator::TableLookup, slot),
+        NativeOp::TableLookup(slot)
+        | NativeOp::TableDerivative(slot)
+        | NativeOp::TableDerivativeApply(slot) => (CanonicalStateOperator::TableLookup, slot),
         _ => return None,
     };
     Some((operator.family(), slot))

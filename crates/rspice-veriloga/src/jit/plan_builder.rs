@@ -690,7 +690,7 @@ fn lower_jacobian_program(
             mir,
             equation_id,
             axis,
-            // Jacobian bytecode carries TableDerivative rather than
+            // Jacobian bytecode carries table derivative actions rather than
             // TableLookup, so its table id comes from the stamp-value
             // program. Apply that mapping last: an otherwise-empty state
             // scan must not replace it with an empty table map.

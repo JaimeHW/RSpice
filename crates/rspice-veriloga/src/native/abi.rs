@@ -1176,6 +1176,43 @@ pub unsafe extern "C" fn rspice_table_derivative_native(
     tables[table_id].derivative(input)
 }
 
+/// Apply a table slope to a payload before final rounding.
+///
+/// # Safety
+/// `operands` must address two f64 values and `ctx` a valid evaluation context.
+#[unsafe(export_name = "rspice_table_derivative_apply_native")]
+pub unsafe extern "C" fn rspice_table_derivative_apply_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    table_id: usize,
+) -> f64 {
+    if ctx.is_null() || operands.is_null() {
+        set_native_context_error_ptr(
+            ctx,
+            "native table derivative action missing operands/context",
+        );
+        return 0.0;
+    }
+    let ctx = unsafe { &*ctx };
+    if ctx.lookup_tables.is_null() || table_id >= ctx.lookup_tables_len {
+        set_native_context_error(
+            ctx,
+            format!(
+                "native table derivative action table {table_id} outside storage length {}",
+                ctx.lookup_tables_len
+            ),
+        );
+        return 0.0;
+    }
+    let table = unsafe { &*ctx.lookup_tables.add(table_id) };
+    let result = table.apply_derivative(unsafe { *operands }, unsafe { *operands.add(1) });
+    if !result.is_finite() {
+        ctx.record_invalid_numeric_result("native table derivative action is not representable");
+        return 0.0;
+    }
+    result
+}
+
 /// External helper function for idtmod wrapping.
 #[unsafe(export_name = "rspice_idtmod_wrap")]
 pub extern "C" fn rspice_idtmod_wrap(raw: f64, modulus: f64, offset: f64) -> f64 {

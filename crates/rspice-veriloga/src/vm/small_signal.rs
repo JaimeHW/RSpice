@@ -1176,6 +1176,26 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                     .ok_or(VmError::InvalidInstruction("missing lookup table"))?;
                 self.stack.push(V::new(table.derivative(input), 0.0));
             }
+            Instruction::TableDerivativeApply(table_id) => {
+                let derivative = self.pop("TableDerivativeApply payload")?;
+                let input = self.pop_real("TableDerivativeApply input")?;
+                let table = self
+                    .context
+                    .lookup_tables
+                    .get(*table_id)
+                    .ok_or(VmError::InvalidInstruction("missing lookup table"))?;
+                let result = match table.derivative_segment(input) {
+                    Some([x0, x1, y0, y1]) if x0 != x1 => {
+                        let dx = V::new(x1, 0.0).subtract(V::new(x0, 0.0), &mut self.range_lost);
+                        let dy = V::new(y1, 0.0).subtract(V::new(y0, 0.0), &mut self.range_lost);
+                        derivative
+                            .multiply(dy, &mut self.range_lost)
+                            .divide(dx, &mut self.range_lost)
+                    }
+                    _ => V::new(0.0, 0.0),
+                };
+                self.stack.push(result);
+            }
             Instruction::LimitState(_) => {
                 let _step = self.pop_real("LimitState step")?;
                 let input = self.pop("LimitState input")?;
@@ -2016,6 +2036,40 @@ mod tests {
             .unwrap();
         assert!((result.re - 0.0).abs() <= 1.0e-14, "{result:?}");
         assert!((result.im + 1.0).abs() <= 1.0e-14, "{result:?}");
+    }
+
+    #[test]
+    fn table_derivative_action_preserves_small_signal_range_and_phase() {
+        for (width, height, payload, gain) in
+            [(1e-310, 1.0, 1e-310, 1.0), (1e308, 1e-310, 1e308, 1e-310)]
+        {
+            let mut context = ac_context();
+            context
+                .lookup_tables
+                .push(crate::codegen::LookupTable::from_data(
+                    vec![0.0, width],
+                    vec![0.0, height],
+                ));
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(0.5 * width),
+                    Instruction::PushConst(0.0),
+                    Instruction::PushConst(payload),
+                    Instruction::DdtDerivativeState(0),
+                    Instruction::TableDerivativeApply(0),
+                ],
+            };
+            let actual = SmallSignalVm::new(&context, 1.0)
+                .unwrap()
+                .execute(&program)
+                .unwrap();
+            assert_eq!(actual.re, 0.0);
+            let expected = core::f64::consts::TAU * gain;
+            assert!(
+                (actual.im / expected - 1.0).abs() < 1e-12,
+                "{actual:?} != j{expected}"
+            );
+        }
     }
 
     #[test]

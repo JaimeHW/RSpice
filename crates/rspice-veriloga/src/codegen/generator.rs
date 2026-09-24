@@ -1516,6 +1516,19 @@ impl CodeGenerator {
                         .instructions
                         .push(Instruction::TableDerivative(table_id));
                 }
+                Node::TableDerivativeApply {
+                    input,
+                    input_derivative,
+                    table,
+                } => {
+                    self.emit_expr(arena, input, emit_ctx, program)?;
+                    self.emit_expr(arena, input_derivative, emit_ctx, program)?;
+                    let (x_data, y_data) = arena.table(table);
+                    let table_id = self.register_lookup_table(x_data, y_data)?;
+                    program
+                        .instructions
+                        .push(Instruction::TableDerivativeApply(table_id));
+                }
                 Node::Ddx { .. } => {
                     return Err(CompileError::CodeGen(CodeGenError::new(
                         CodeGenErrorKind::Internal(

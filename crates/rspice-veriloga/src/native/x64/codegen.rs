@@ -1303,6 +1303,12 @@ impl FunctionCompiler {
                         NativeOp::TableDerivative(table_id) => {
                             self.emit_table_helper_call(table_id, rspice_table_derivative_native)?
                         }
+                        NativeOp::TableDerivativeApply(table_id) => self
+                            .emit_state_operand_helper(
+                                table_id,
+                                2,
+                                crate::native::abi::rspice_table_derivative_apply_native,
+                            )?,
                         NativeOp::LimitState(index) => self.emit_limit_state(index)?,
                         NativeOp::LimiterPrevious(index) => {
                             self.emit_limiter_state_helper(index, rspice_limiter_previous_native)?
