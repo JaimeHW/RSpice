@@ -2,6 +2,8 @@
 
 #[cfg(feature = "columnar")]
 pub mod columnar;
+#[cfg(feature = "hdf5")]
+pub mod hdf5;
 pub mod matlab;
 pub mod numeric;
 pub mod numpy;

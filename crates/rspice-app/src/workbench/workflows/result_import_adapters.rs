@@ -266,24 +266,6 @@ fn validate_coordinate(
     Ok(())
 }
 
-fn exact_signed_integer(
-    format: ResultImportFormat,
-    identity: &str,
-    value: i64,
-) -> Result<f64, String> {
-    rspice_formats::numeric::exact_signed_integer(identity, value)
-        .map_err(|detail| adapter_error(format, detail))
-}
-
-fn exact_unsigned_integer(
-    format: ResultImportFormat,
-    identity: &str,
-    value: u64,
-) -> Result<f64, String> {
-    rspice_formats::numeric::exact_unsigned_integer(identity, value)
-        .map_err(|detail| adapter_error(format, detail))
-}
-
 // -------------------------------------------------------------------------
 // Native RSpice bundles
 
@@ -481,368 +463,69 @@ pub(super) fn parse_hdf5(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
-    let file = rustyhdf5::File::from_bytes(bytes.to_vec())
-        .map_err(|error| adapter_error(format, format_args!("invalid HDF5 container: {error}")))?;
-    let root = file.root();
-    let groups = root.groups().map_err(|error| {
-        adapter_error(format, format_args!("could not enumerate groups: {error}"))
-    })?;
-    let supported = groups
-        .iter()
-        .filter_map(|name| hdf5_section_family(&file, name).map(|family| (name.clone(), family)))
-        .collect::<Vec<_>>();
-    if supported.len() > 1 {
-        return Err(adapter_error(
-            format,
-            format_args!(
-                "the file contains multiple waveform sections ({}); import one analysis per file",
-                supported
-                    .iter()
-                    .map(|(name, _)| name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        ));
-    }
-    if let Some((section, family)) = supported.first() {
-        return parse_rspice_hdf5_section(&file, section, *family, format);
-    }
-    parse_generic_hdf5_root(&file, format)
-}
-
-/// The analysis family one root group holds, or `None` when this reader has no
-/// section shape for it.
-///
-/// The layout contract in `rspice_core::io::hdf5` is explicit that a section
-/// group's *name* is the producer's choice and its `section_type` attribute is
-/// what names the family. The command line names its one section group after
-/// the analysis instance that produced it — `tran1`, not `transient` — so a
-/// reader keyed on the name alone read every identity-named file as an
-/// anonymous root, fell through to [`parse_generic_hdf5_root`], and refused a
-/// file this product had just written. The name is still consulted, because a
-/// file written before the attribute existed carries nothing else.
-///
-/// `operating_point`, `noise`, `distortion` and `fft` are families the layout
-/// defines and this reader has no domain for; they return `None` and are
-/// refused by name at the root, rather than imported under a heading that
-/// would make the result something it is not.
-fn hdf5_section_family(file: &rustyhdf5::File, group: &str) -> Option<Hdf5SectionFamily> {
-    let declared = file
-        .group(group)
-        .ok()
-        .and_then(|opened| opened.attrs().ok())
-        .and_then(|attrs| hdf_optional_string_attr(&attrs, "section_type"));
-    match declared.as_deref().unwrap_or(group) {
-        "transient" => Some(Hdf5SectionFamily::Transient),
-        "dc_sweep" => Some(Hdf5SectionFamily::DcSweep),
-        "ac" => Some(Hdf5SectionFamily::Ac),
-        _ => None,
-    }
-}
-
-/// One of the three analysis families this reader has a section shape for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Hdf5SectionFamily {
-    Transient,
-    DcSweep,
-    Ac,
+    let decoded = rspice_formats::hdf5::decode_hdf5(bytes, hdf5_limits(), format.canonical_id())?;
+    finish_hdf5(format, decoded)
 }
 
 pub(super) fn parse_matlab_v73(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
-    let file = rustyhdf5::File::from_bytes(bytes.to_vec()).map_err(|error| {
-        adapter_error(
-            format,
-            format_args!("invalid MATLAB 7.3/HDF5 container: {error}"),
-        )
-    })?;
-    parse_generic_hdf5_root(&file, format)
+    let decoded =
+        rspice_formats::hdf5::decode_matlab_v73(bytes, hdf5_limits(), format.canonical_id())?;
+    finish_hdf5(format, decoded)
 }
 
-fn parse_rspice_hdf5_section(
-    file: &rustyhdf5::File,
-    section: &str,
-    family: Hdf5SectionFamily,
+fn hdf5_limits() -> rspice_formats::hdf5::Hdf5Limits<'static> {
+    rspice_formats::hdf5::Hdf5Limits {
+        max_columns: MAX_RESULT_COLUMNS,
+        max_values: MAX_RESULT_VALUES,
+        coordinate_names: &RESULT_COORDINATE_NAMES,
+    }
+}
+
+fn finish_hdf5(
     format: ResultImportFormat,
+    decoded: rspice_formats::hdf5::DecodedHdf5,
 ) -> Result<ParsedResultDataset, String> {
-    let group = file.group(section).map_err(|error| {
-        adapter_error(format, format_args!("could not open /{section}: {error}"))
-    })?;
-    let attrs = group.attrs().map_err(|error| {
-        adapter_error(
-            format,
-            format_args!("could not read /{section} attributes: {error}"),
-        )
-    })?;
-    let signal_count = hdf_i64_attr(&attrs, "signal_count", format)?;
-    let signal_count = usize::try_from(signal_count).map_err(|_| {
-        adapter_error(
-            format,
-            format_args!("/{section} signal_count is negative or too large"),
-        )
-    })?;
-    if signal_count == 0 || signal_count + 1 > MAX_RESULT_COLUMNS {
-        return Err(adapter_error(
-            format,
-            format_args!("/{section} declares invalid signal_count {signal_count}"),
-        ));
-    }
-    if family == Hdf5SectionFamily::Ac {
-        let coordinate = hdf_f64_dataset(&group, "frequency", format)?;
-        ensure_table_value_limit(format, coordinate.len(), 1 + signal_count.saturating_mul(2))?;
-        let mut signals = Vec::with_capacity(signal_count);
-        for index in 0..signal_count {
-            let prefix = format!("signal_{index:04}");
-            let name = hdf_string_attr(&attrs, &format!("{prefix}_name"), format)?;
-            signals.push(ImportedSignal {
-                name,
-                real: hdf_f64_dataset(&group, &format!("{prefix}_real"), format)?,
-                imag: Some(hdf_f64_dataset(&group, &format!("{prefix}_imag"), format)?),
-                unit: hdf_stated_unit(&attrs, &format!("{prefix}_unit")),
-            });
+    match decoded {
+        rspice_formats::hdf5::DecodedHdf5::Section {
+            family,
+            coordinate_name,
+            coordinate,
+            signals,
+        } => {
+            let analysis = match family {
+                rspice_formats::hdf5::Hdf5SectionFamily::Transient => AnalysisType::Transient,
+                rspice_formats::hdf5::Hdf5SectionFamily::DcSweep => AnalysisType::DcSweep,
+                rspice_formats::hdf5::Hdf5SectionFamily::Ac => AnalysisType::Ac,
+            };
+            let signals = signals
+                .into_iter()
+                .map(|signal| ImportedSignal {
+                    name: signal.name,
+                    real: signal.real,
+                    imag: signal.imag,
+                    unit: signal.unit,
+                })
+                .collect();
+            finish_dataset(format, analysis, coordinate_name, coordinate, signals)
         }
-        return finish_dataset(format, AnalysisType::Ac, "frequency", coordinate, signals);
-    }
-
-    let coordinate_name = hdf_string_attr(&attrs, "independent_name", format)?;
-    let coordinate = hdf_f64_dataset(&group, "independent", format)?;
-    ensure_table_value_limit(format, coordinate.len(), 1 + signal_count)?;
-    let mut signals = Vec::with_capacity(signal_count);
-    for index in 0..signal_count {
-        let prefix = format!("signal_{index:04}");
-        signals.push(ImportedSignal {
-            name: hdf_string_attr(&attrs, &format!("{prefix}_name"), format)?,
-            real: hdf_f64_dataset(&group, &prefix, format)?,
-            imag: None,
-            unit: hdf_stated_unit(&attrs, &format!("{prefix}_unit")),
-        });
-    }
-    let analysis = if family == Hdf5SectionFamily::Transient {
-        AnalysisType::Transient
-    } else {
-        AnalysisType::DcSweep
-    };
-    finish_dataset(format, analysis, coordinate_name, coordinate, signals)
-}
-
-fn parse_generic_hdf5_root(
-    file: &rustyhdf5::File,
-    format: ResultImportFormat,
-) -> Result<ParsedResultDataset, String> {
-    let root = file.root();
-    let names = root.datasets().map_err(|error| {
-        adapter_error(
-            format,
-            format_args!("could not enumerate datasets: {error}"),
-        )
-    })?;
-    if names.len() > MAX_RESULT_COLUMNS.saturating_mul(2) {
-        return Err(adapter_error(format, "too many root datasets"));
-    }
-    let coordinate_name =
-        select_coordinate_name(names.iter().map(String::as_str)).ok_or_else(|| {
-            adapter_error(
+        rspice_formats::hdf5::DecodedHdf5::Root {
+            coordinate_name,
+            coordinate,
+            columns,
+        } => {
+            let signals = combine_real_imag_columns(format, columns)?;
+            finish_dataset(
                 format,
-                format_args!(
-                    "no unambiguous root coordinate dataset named {}",
-                    stated_coordinate_names()
-                ),
+                analysis_from_coordinate(&coordinate_name),
+                coordinate_name,
+                coordinate,
+                signals,
             )
-        })?;
-    let coordinate = hdf_f64_dataset(&root, &coordinate_name, format)?;
-    ensure_table_value_limit(format, coordinate.len(), names.len())?;
-    let mut columns = Vec::new();
-    for name in names {
-        if name.eq_ignore_ascii_case(&coordinate_name) || name.starts_with('#') {
-            continue;
-        }
-        let dataset = root.dataset(&name).map_err(|error| {
-            adapter_error(
-                format,
-                format_args!("could not open dataset '{name}': {error}"),
-            )
-        })?;
-        let shape = dataset.shape().map_err(|error| {
-            adapter_error(
-                format,
-                format_args!("could not inspect dataset '{name}': {error}"),
-            )
-        })?;
-        let count = shape
-            .iter()
-            .try_fold(1_u64, |count, dim| count.checked_mul(*dim))
-            .ok_or_else(|| {
-                adapter_error(format, format_args!("dataset '{name}' shape overflows"))
-            })?;
-        if count != coordinate.len() as u64 {
-            return Err(adapter_error(
-                format,
-                format_args!(
-                    "dataset '{name}' has {count} values; coordinate '{coordinate_name}' has {}",
-                    coordinate.len()
-                ),
-            ));
-        }
-        let values = hdf_dataset_values(&dataset, &name, format)?;
-        columns.push((name, values));
-    }
-    let signals = combine_real_imag_columns(format, columns)?;
-    finish_dataset(
-        format,
-        analysis_from_coordinate(&coordinate_name),
-        coordinate_name,
-        coordinate,
-        signals,
-    )
-}
-
-fn hdf_f64_dataset(
-    group: &rustyhdf5::Group<'_>,
-    name: &str,
-    format: ResultImportFormat,
-) -> Result<Vec<f64>, String> {
-    let dataset = group.dataset(name).map_err(|error| {
-        adapter_error(
-            format,
-            format_args!("could not open numeric dataset '{name}': {error}"),
-        )
-    })?;
-    hdf_dataset_values(&dataset, name, format)
-}
-
-fn hdf_dataset_values(
-    dataset: &rustyhdf5::Dataset<'_>,
-    name: &str,
-    format: ResultImportFormat,
-) -> Result<Vec<f64>, String> {
-    let count = dataset
-        .shape()
-        .map_err(|error| {
-            adapter_error(
-                format,
-                format_args!("could not inspect dataset '{name}' shape: {error}"),
-            )
-        })?
-        .into_iter()
-        .try_fold(1_u64, |count, dimension| count.checked_mul(dimension))
-        .ok_or_else(|| adapter_error(format, format_args!("dataset '{name}' shape overflows")))?;
-    if count > MAX_RESULT_VALUES as u64 {
-        return Err(adapter_error(
-            format,
-            format_args!(
-                "dataset '{name}' contains {count} values; the limit is {MAX_RESULT_VALUES}"
-            ),
-        ));
-    }
-    let dtype = dataset.dtype().map_err(|error| {
-        adapter_error(
-            format,
-            format_args!("could not inspect dataset '{name}': {error}"),
-        )
-    })?;
-    match dtype {
-        rustyhdf5::DType::I64 => dataset
-            .read_i64()
-            .map_err(|error| {
-                adapter_error(format, format_args!("could not read '{name}': {error}"))
-            })?
-            .into_iter()
-            .map(|value| exact_signed_integer(format, name, value))
-            .collect(),
-        rustyhdf5::DType::U64 => dataset
-            .read_u64()
-            .map_err(|error| {
-                adapter_error(format, format_args!("could not read '{name}': {error}"))
-            })?
-            .into_iter()
-            .map(|value| exact_unsigned_integer(format, name, value))
-            .collect(),
-        _ => dataset.read_f64().map_err(|error| {
-            adapter_error(
-                format,
-                format_args!("could not read numeric dataset '{name}': {error}"),
-            )
-        }),
-    }
-}
-
-fn hdf_string_attr(
-    attrs: &HashMap<String, rustyhdf5::AttrValue>,
-    name: &str,
-    format: ResultImportFormat,
-) -> Result<String, String> {
-    match attrs.get(name) {
-        Some(rustyhdf5::AttrValue::String(value)) if !value.trim().is_empty() => Ok(value.clone()),
-        Some(other) => Err(adapter_error(
-            format,
-            format_args!("attribute '{name}' must be a non-empty string, found {other:?}"),
-        )),
-        None => Err(adapter_error(
-            format,
-            format_args!("missing attribute '{name}'"),
-        )),
-    }
-}
-
-/// The unit a section states for one column, if it states one.
-///
-/// `rspice_core::io::hdf5` writes `signal_NNNN_unit` only when the producer
-/// had a unit to state, so an absent attribute means unstated rather than
-/// dimensionless, and it is never an import error. An empty or non-string
-/// value is read the same way: a waveform must not come back claiming "" as
-/// its unit.
-fn hdf_stated_unit(attrs: &HashMap<String, rustyhdf5::AttrValue>, name: &str) -> Option<String> {
-    hdf_optional_string_attr(attrs, name)
-}
-
-/// A text attribute the producer may or may not have written.
-///
-/// An absent attribute, a non-string one and an empty one are all "unstated":
-/// the reader is asking whether the file says something, and "" is not a
-/// statement.
-fn hdf_optional_string_attr(
-    attrs: &HashMap<String, rustyhdf5::AttrValue>,
-    name: &str,
-) -> Option<String> {
-    match attrs.get(name) {
-        Some(rustyhdf5::AttrValue::String(value)) if !value.trim().is_empty() => {
-            Some(value.clone())
-        }
-        _ => None,
-    }
-}
-
-fn hdf_i64_attr(
-    attrs: &HashMap<String, rustyhdf5::AttrValue>,
-    name: &str,
-    format: ResultImportFormat,
-) -> Result<i64, String> {
-    match attrs.get(name) {
-        Some(rustyhdf5::AttrValue::I64(value)) => Ok(*value),
-        Some(other) => Err(adapter_error(
-            format,
-            format_args!("attribute '{name}' must be an integer, found {other:?}"),
-        )),
-        None => Err(adapter_error(
-            format,
-            format_args!("missing attribute '{name}'"),
-        )),
-    }
-}
-
-fn select_coordinate_name<'a>(names: impl Iterator<Item = &'a str>) -> Option<String> {
-    let names = names.collect::<Vec<_>>();
-    for candidate in RESULT_COORDINATE_NAMES {
-        if let Some(name) = names
-            .iter()
-            .find(|name| name.eq_ignore_ascii_case(candidate))
-        {
-            return Some((*name).to_owned());
         }
     }
-    None
 }
 
 /// Whether `name` is one of the coordinate names a headerless source may use.
@@ -855,28 +538,7 @@ fn is_coordinate_name(name: &str) -> bool {
 /// [`RESULT_COORDINATE_NAMES`] as a refusal spells them, so the sentence a
 /// reader is shown cannot drift from the list the reader actually accepts.
 fn stated_coordinate_names() -> String {
-    let (last, rest) = RESULT_COORDINATE_NAMES
-        .split_last()
-        .expect("the coordinate-name list is never empty");
-    format!("{}, or {last}", rest.join(", "))
-}
-
-fn ensure_table_value_limit(
-    format: ResultImportFormat,
-    rows: usize,
-    columns: usize,
-) -> Result<(), String> {
-    let values = rows
-        .checked_mul(columns)
-        .ok_or_else(|| adapter_error(format, "table value count overflow"))?;
-    if values > MAX_RESULT_VALUES {
-        Err(adapter_error(
-            format,
-            format_args!("the table contains {values} values; the limit is {MAX_RESULT_VALUES}"),
-        ))
-    } else {
-        Ok(())
-    }
+    rspice_formats::hdf5::stated_coordinate_names(&RESULT_COORDINATE_NAMES)
 }
 
 // -------------------------------------------------------------------------
