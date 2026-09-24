@@ -45,6 +45,20 @@ pub struct QualificationSuite {
 }
 
 impl QualificationSuite {
+    /// Validate every vector against the exact retained model source.
+    pub fn validate_source_binding(
+        &self,
+        source: &ModelSourceEvidenceBinding,
+    ) -> QualificationResult<()> {
+        self.validate()?;
+        source.validate("execution.source")?;
+        source.require_project_bound("execution.source")?;
+        for (index, vector) in self.vectors.iter().enumerate() {
+            vector.validate_source_binding(source, &format!("suite.vectors[{index}].source"))?;
+        }
+        Ok(())
+    }
+
     pub fn try_new(
         id: impl Into<String>,
         name: impl Into<String>,
@@ -1121,22 +1135,6 @@ impl ModelQualificationState {
         Ok(())
     }
 
-    /// Execute and atomically retain the current platform's exact suite run.
-    /// Failed vectors are retained as real failing outcomes; cancellation or
-    /// invalid contracts leave state unchanged.
-    pub fn rerun_suite_current_platform_atomically(
-        &mut self,
-        suite_id: &str,
-        source: &ModelSourceEvidenceBinding,
-        abort: &dyn rspice_core::AbortSignal,
-    ) -> Result<QualificationPlatformRun, QualificationExecutionError> {
-        let suite = self.qualification_suite(suite_id)?.clone();
-        validate_execution_contract(&suite, source)?;
-        let run = QualificationExecutionService::execute_current_platform(&suite, source, abort)?;
-        self.upsert_platform_run_atomically(run.clone())?;
-        Ok(run)
-    }
-
     /// Retain the current runtime's complete run, replacing only the exact
     /// same suite/source/platform key. Validation occurs on a cloned aggregate
     /// so stale or tampered records cannot disturb previously retained runs.
@@ -1184,7 +1182,7 @@ impl ModelQualificationState {
                 format!("suite {suite_id:?} does not exist"),
             )
         })?;
-        validate_execution_contract(suite, source)?;
+        suite.validate_source_binding(source)?;
         let exact = |platform| {
             self.platform_runs.iter().find(|run| {
                 run.platform == platform
@@ -1233,7 +1231,7 @@ impl ModelQualificationState {
             (suite, vec![desktop.clone(), webassembly.clone()])
         };
         let evidence =
-            QualificationExecutionService::assemble_evidence(evidence_id, &suite, source, runs)?;
+            QualificationEvidence::assemble_platform_runs(evidence_id, &suite, source, runs)?;
         self.upsert_evidence_atomically(evidence.clone())?;
         Ok(evidence)
     }

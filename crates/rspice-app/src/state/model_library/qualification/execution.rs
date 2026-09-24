@@ -1,11 +1,8 @@
-//! Running a suite, and the rule that partial work never becomes evidence.
+//! Cooperative qualification execution on the current runtime.
 //!
-//! A run walks every vector on every requested platform, reporting progress as
-//! it goes.  Progress is observation only: cancellation or a failed vector
-//! discards the in-progress run rather than publishing what completed, so
-//! qualification evidence is always whole-suite or absent.  Nothing here
-//! mutates a release — it only produces the outcomes that
-//! [`super::promotion`] later gates on.
+//! Each step runs one vector. Cancellation discards partial work; solver and
+//! measurement failures are retained as failed outcomes in a complete run.
+//! Only the terminal step publishes a validated platform run.
 
 use super::*;
 
@@ -59,7 +56,7 @@ impl QualificationExecutionSession {
         suite: &QualificationSuite,
         source: &ModelSourceEvidenceBinding,
     ) -> Result<Self, QualificationExecutionError> {
-        validate_execution_contract(suite, source)?;
+        suite.validate_source_binding(source)?;
         Ok(Self {
             suite: suite.clone(),
             source: source.clone(),
@@ -160,134 +157,12 @@ impl QualificationExecutionSession {
     }
 }
 
-/// Deterministic, synchronous qualification executor shared by desktop and
-/// WebAssembly builds. It uses only `rspice-core` APIs available on both
-/// targets and publishes the runtime selected by the compilation target.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct QualificationExecutionService;
-
-impl QualificationExecutionService {
-    pub fn execute_current_platform(
-        suite: &QualificationSuite,
-        source: &ModelSourceEvidenceBinding,
-        abort: &dyn rspice_core::AbortSignal,
-    ) -> Result<QualificationPlatformRun, QualificationExecutionError> {
-        let mut ignore_progress = |_progress: &QualificationExecutionProgress| {};
-        Self::execute_current_platform_with_progress(suite, source, abort, &mut ignore_progress)
-    }
-
-    pub fn execute_current_platform_with_progress(
-        suite: &QualificationSuite,
-        source: &ModelSourceEvidenceBinding,
-        abort: &dyn rspice_core::AbortSignal,
-        progress: &mut dyn FnMut(&QualificationExecutionProgress),
-    ) -> Result<QualificationPlatformRun, QualificationExecutionError> {
-        let mut session = QualificationExecutionSession::try_new(suite, source)?;
-        progress(&session.progress());
-        loop {
-            match session.step(abort)? {
-                QualificationExecutionStep::InProgress(step_progress) => {
-                    progress(&step_progress);
-                }
-                QualificationExecutionStep::Complete {
-                    progress: step_progress,
-                    run,
-                } => {
-                    progress(&step_progress);
-                    return Ok(run);
-                }
-            }
-        }
-    }
-
-    /// Assemble immutable parity evidence only after independently produced
-    /// Desktop and WebAssembly runs provide exact coverage.
-    pub fn assemble_evidence(
-        evidence_id: impl Into<String>,
-        suite: &QualificationSuite,
-        source: &ModelSourceEvidenceBinding,
-        runs: Vec<QualificationPlatformRun>,
-    ) -> QualificationResult<QualificationEvidence> {
-        validate_execution_contract(suite, source)?;
-        if runs.len() != QualificationPlatform::REQUIRED.len() {
-            return Err(QualificationValidationError::new(
-                QualificationErrorCode::EvidenceCoverageMismatch,
-                "platform_runs",
-                "exactly one real Desktop run and one real WebAssembly run are required",
-            ));
-        }
-        let mut platforms = BTreeSet::new();
-        for (index, run) in runs.iter().enumerate() {
-            if !platforms.insert(run.platform) {
-                return Err(QualificationValidationError::new(
-                    QualificationErrorCode::DuplicateId,
-                    format!("platform_runs[{index}].platform"),
-                    "qualification platform run is duplicated",
-                ));
-            }
-            run.validate_bound(suite, source)?;
-        }
-        if !QualificationPlatform::REQUIRED
-            .iter()
-            .all(|platform| platforms.contains(platform))
-        {
-            return Err(QualificationValidationError::new(
-                QualificationErrorCode::EvidenceCoverageMismatch,
-                "platform_runs",
-                "Desktop and WebAssembly platform runs are both required",
-            ));
-        }
-
-        let mut vector_outcomes = Vec::with_capacity(suite.vectors.len());
-        for vector in &suite.vectors {
-            let mut outcomes = Vec::with_capacity(QualificationPlatform::REQUIRED.len());
-            for platform in QualificationPlatform::REQUIRED {
-                let run = runs
-                    .iter()
-                    .find(|value| value.platform == platform)
-                    .expect("required platform coverage checked above");
-                let platform_vector =
-                    find_ci(&run.vector_outcomes, &vector.id, |value| &value.vector_id)
-                        .expect("platform run coverage validated above");
-                outcomes.push(platform_vector.outcome.clone());
-            }
-            vector_outcomes.push(QualificationVectorOutcome::try_new(
-                vector.id.clone(),
-                vector.input_digest,
-                outcomes,
-            )?);
-        }
-        let evidence = QualificationEvidence::try_new(
-            evidence_id,
-            source.clone(),
-            suite.id.clone(),
-            suite.revision,
-            vector_outcomes,
-        )?;
-        evidence.validate_bound(suite, source)?;
-        Ok(evidence)
-    }
-}
-
 enum ExecutedQualificationAnalysis {
     OperatingPoint(rspice_core::SimulationResult),
     DcSweep(Vec<(f64, rspice_core::SimulationResult)>),
     AcSweep(Vec<rspice_core::analysis::AcResult>),
     Noise(Vec<rspice_core::analysis::NoiseResult>),
     Transient(rspice_core::engine::TransientResult),
-}
-
-pub(super) fn validate_execution_contract(
-    suite: &QualificationSuite,
-    source: &ModelSourceEvidenceBinding,
-) -> QualificationResult<()> {
-    suite.validate()?;
-    source.validate("execution.source")?;
-    source.require_project_bound("execution.source")?;
-    for (index, vector) in suite.vectors.iter().enumerate() {
-        vector.validate_source_binding(source, &format!("suite.vectors[{index}].source"))?;
-    }
-    Ok(())
 }
 
 fn execute_qualification_vector(

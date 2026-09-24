@@ -20,36 +20,6 @@ impl QualificationPlatform {
     pub const REQUIRED: [Self; 2] = [Self::Desktop, Self::WebAssembly];
 }
 
-/// Expected tolerance for one named reference quantity in a golden vector.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-#[cfg(test)]
-pub struct ReferenceTolerance {
-    pub quantity: String,
-    pub absolute: NonNegativeFinite,
-    pub relative: NonNegativeFinite,
-}
-
-#[cfg(test)]
-impl ReferenceTolerance {
-    #[cfg(test)]
-    pub fn try_new(
-        quantity: impl Into<String>,
-        absolute: f64,
-        relative: f64,
-    ) -> QualificationResult<Self> {
-        let value = Self {
-            quantity: quantity.into(),
-            absolute: NonNegativeFinite::new(absolute)
-                .map_err(|error| at_path(error, "reference_tolerance.absolute"))?,
-            relative: NonNegativeFinite::new(relative)
-                .map_err(|error| at_path(error, "reference_tolerance.relative"))?,
-        };
-        require_text("reference_tolerance.quantity", &value.quantity)?;
-        Ok(value)
-    }
-}
-
 /// Analysis that the qualification runner must execute for one vector.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
@@ -407,30 +377,6 @@ pub struct QualificationVector {
 }
 
 impl QualificationVector {
-    /// Legacy compatibility entry point. A caller that supplies no separate
-    /// candidate-source snapshot cannot create current qualification evidence.
-    /// Use [`Self::try_new_source_bound`] for all new authoring paths.
-    pub fn try_new(
-        id: impl Into<String>,
-        name: impl Into<String>,
-        source: ModelSourceEvidenceBinding,
-        executable_input: Vec<u8>,
-        analysis: QualificationAnalysis,
-        outputs: Vec<QualificationOutputDefinition>,
-        references: Vec<QualificationReference>,
-    ) -> QualificationResult<Self> {
-        Self::try_new_source_bound(
-            id,
-            name,
-            source,
-            Vec::new(),
-            executable_input,
-            analysis,
-            outputs,
-            references,
-        )
-    }
-
     /// Construct an executable vector from separately retained canonical model
     /// bytes and the complete testbench bytes. Validation proves that the
     /// canonical bytes match the exact project source identity, occur in the

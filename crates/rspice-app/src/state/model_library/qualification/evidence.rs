@@ -380,6 +380,74 @@ pub struct QualificationEvidence {
 }
 
 impl QualificationEvidence {
+    /// Assemble immutable parity evidence only after independently produced
+    /// Desktop and WebAssembly runs provide exact coverage.
+    pub fn assemble_platform_runs(
+        evidence_id: impl Into<String>,
+        suite: &QualificationSuite,
+        source: &ModelSourceEvidenceBinding,
+        runs: Vec<QualificationPlatformRun>,
+    ) -> QualificationResult<QualificationEvidence> {
+        suite.validate_source_binding(source)?;
+        if runs.len() != QualificationPlatform::REQUIRED.len() {
+            return Err(QualificationValidationError::new(
+                QualificationErrorCode::EvidenceCoverageMismatch,
+                "platform_runs",
+                "exactly one real Desktop run and one real WebAssembly run are required",
+            ));
+        }
+        let mut platforms = BTreeSet::new();
+        for (index, run) in runs.iter().enumerate() {
+            if !platforms.insert(run.platform) {
+                return Err(QualificationValidationError::new(
+                    QualificationErrorCode::DuplicateId,
+                    format!("platform_runs[{index}].platform"),
+                    "qualification platform run is duplicated",
+                ));
+            }
+            run.validate_bound(suite, source)?;
+        }
+        if !QualificationPlatform::REQUIRED
+            .iter()
+            .all(|platform| platforms.contains(platform))
+        {
+            return Err(QualificationValidationError::new(
+                QualificationErrorCode::EvidenceCoverageMismatch,
+                "platform_runs",
+                "Desktop and WebAssembly platform runs are both required",
+            ));
+        }
+
+        let mut vector_outcomes = Vec::with_capacity(suite.vectors.len());
+        for vector in &suite.vectors {
+            let mut outcomes = Vec::with_capacity(QualificationPlatform::REQUIRED.len());
+            for platform in QualificationPlatform::REQUIRED {
+                let run = runs
+                    .iter()
+                    .find(|value| value.platform == platform)
+                    .expect("required platform coverage checked above");
+                let platform_vector =
+                    find_ci(&run.vector_outcomes, &vector.id, |value| &value.vector_id)
+                        .expect("platform run coverage validated above");
+                outcomes.push(platform_vector.outcome.clone());
+            }
+            vector_outcomes.push(QualificationVectorOutcome::try_new(
+                vector.id.clone(),
+                vector.input_digest,
+                outcomes,
+            )?);
+        }
+        let evidence = QualificationEvidence::try_new(
+            evidence_id,
+            source.clone(),
+            suite.id.clone(),
+            suite.revision,
+            vector_outcomes,
+        )?;
+        evidence.validate_bound(suite, source)?;
+        Ok(evidence)
+    }
+
     pub(super) fn try_new(
         id: impl Into<String>,
         source: ModelSourceEvidenceBinding,

@@ -7,6 +7,20 @@
 
 use super::*;
 
+// Synchronous tests drive the same cooperative session used by the application.
+fn execute_current_platform(
+    suite: &QualificationSuite,
+    source: &ModelSourceEvidenceBinding,
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<QualificationPlatformRun, QualificationExecutionError> {
+    let mut session = QualificationExecutionSession::try_new(suite, source)?;
+    loop {
+        if let QualificationExecutionStep::Complete { run, .. } = session.step(abort)? {
+            return Ok(run);
+        }
+    }
+}
+
 fn digest(byte: u8) -> ContentDigest {
     ContentDigest::from_bytes([byte; 32])
 }
@@ -312,7 +326,6 @@ fn non_negative_finite_rejects_negative_nan_and_infinity() {
         NonNegativeFinite::new(-0.0).unwrap(),
         NonNegativeFinite::new(0.0).unwrap()
     );
-    assert!(ReferenceTolerance::try_new("gain", -0.1, 0.1).is_err());
     assert!(ReferenceErrorEvidence::try_new("gain", f64::NAN, 0.0, 0.1, 0.1).is_err());
     assert!(serde_json::from_str::<NonNegativeFinite>("-0.1").is_err());
 }
@@ -1012,9 +1025,7 @@ fn executable_vectors_require_the_exact_bound_candidate_source() {
     )
     .unwrap();
     assert_eq!(
-        validate_execution_contract(&suite(), &legacy)
-            .unwrap_err()
-            .code,
+        suite().validate_source_binding(&legacy).unwrap_err().code,
         QualificationErrorCode::SourceBindingMismatch
     );
 }
@@ -1038,12 +1049,7 @@ fn suites_cannot_mix_source_revisions() {
 fn native_execution_measures_outputs_and_applies_declared_tolerances() {
     let source = source(7);
     let passing_suite = suite();
-    let run = QualificationExecutionService::execute_current_platform(
-        &passing_suite,
-        &source,
-        &rspice_core::NoAbort,
-    )
-    .unwrap();
+    let run = execute_current_platform(&passing_suite, &source, &rspice_core::NoAbort).unwrap();
     assert_eq!(run.platform, QualificationPlatform::Desktop);
     assert!(run.passed);
     assert_eq!(run.vector_outcomes.len(), passing_suite.vectors.len());
@@ -1055,12 +1061,7 @@ fn native_execution_measures_outputs_and_applies_declared_tolerances() {
     for vector in &mut failing_suite.vectors {
         vector.references[0].expected = FiniteValue::new(2.0).unwrap();
     }
-    let run = QualificationExecutionService::execute_current_platform(
-        &failing_suite,
-        &source,
-        &rspice_core::NoAbort,
-    )
-    .unwrap();
+    let run = execute_current_platform(&failing_suite, &source, &rspice_core::NoAbort).unwrap();
     assert!(!run.passed);
     assert!(
         run.vector_outcomes
@@ -1151,12 +1152,7 @@ fn ac_cv_noise_and_transient_vectors_execute_real_solver_results() {
     )
     .unwrap();
 
-    let run = QualificationExecutionService::execute_current_platform(
-        &suite,
-        &source(7),
-        &rspice_core::NoAbort,
-    )
-    .unwrap();
+    let run = execute_current_platform(&suite, &source(7), &rspice_core::NoAbort).unwrap();
     assert!(run.passed, "{run:#?}");
     for outcome in &run.vector_outcomes {
         assert!(outcome.outcome.failure.is_none(), "{outcome:#?}");
@@ -1244,12 +1240,7 @@ fn execution_failures_are_retained_as_failing_platform_outcomes() {
     suite.vectors[0].outputs[0].probe = QualificationProbe::NodeVoltage {
         node: "missing-node".into(),
     };
-    let run = QualificationExecutionService::execute_current_platform(
-        &suite,
-        &source,
-        &rspice_core::NoAbort,
-    )
-    .unwrap();
+    let run = execute_current_platform(&suite, &source, &rspice_core::NoAbort).unwrap();
     let failed = run
         .vector_outcomes
         .iter()
@@ -1268,25 +1259,16 @@ fn execution_failures_are_retained_as_failing_platform_outcomes() {
 fn missing_runtime_parity_cannot_be_promoted_to_evidence() {
     let source = source(7);
     let suite = suite();
-    let desktop = QualificationExecutionService::execute_current_platform(
-        &suite,
-        &source,
-        &rspice_core::NoAbort,
-    )
-    .unwrap();
-    let error = QualificationExecutionService::assemble_evidence(
-        "evidence",
-        &suite,
-        &source,
-        vec![desktop],
-    )
-    .unwrap_err();
+    let desktop = execute_current_platform(&suite, &source, &rspice_core::NoAbort).unwrap();
+    let error =
+        QualificationEvidence::assemble_platform_runs("evidence", &suite, &source, vec![desktop])
+            .unwrap_err();
     assert_eq!(error.code, QualificationErrorCode::EvidenceCoverageMismatch);
 }
 
 #[test]
 fn cancellation_publishes_no_partial_platform_run() {
-    let result = QualificationExecutionService::execute_current_platform(
+    let result = execute_current_platform(
         &suite(),
         &source(7),
         &rspice_core::abort_signal::ImmediateAbort,
@@ -1343,12 +1325,7 @@ fn cooperative_session_publishes_only_the_terminal_validated_run() {
 fn assembled_evidence_is_deterministic_and_requires_real_run_records() {
     let source = source(7);
     let suite = suite();
-    let desktop = QualificationExecutionService::execute_current_platform(
-        &suite,
-        &source,
-        &rspice_core::NoAbort,
-    )
-    .unwrap();
+    let desktop = execute_current_platform(&suite, &source, &rspice_core::NoAbort).unwrap();
     let wasm_outcomes = desktop
         .vector_outcomes
         .iter()
@@ -1358,8 +1335,8 @@ fn assembled_evidence_is_deterministic_and_requires_real_run_records() {
             value
         })
         .collect();
-    // Imported platform runs use the same validator as locally-produced
-    // runs. Production code cannot relabel `execute_current_platform`.
+    // The session identifies its actual runtime; imported runs use the same
+    // bound-run validator.
     let wasm = QualificationPlatformRun::try_new(
         QualificationPlatform::WebAssembly,
         source.clone(),
@@ -1367,14 +1344,14 @@ fn assembled_evidence_is_deterministic_and_requires_real_run_records() {
         wasm_outcomes,
     )
     .unwrap();
-    let first = QualificationExecutionService::assemble_evidence(
+    let first = QualificationEvidence::assemble_platform_runs(
         "evidence",
         &suite,
         &source,
         vec![desktop.clone(), wasm.clone()],
     )
     .unwrap();
-    let second = QualificationExecutionService::assemble_evidence(
+    let second = QualificationEvidence::assemble_platform_runs(
         "evidence",
         &suite,
         &source,
@@ -1598,12 +1575,7 @@ fn atomic_promotion_commits_release_and_record_or_rolls_back_duplicates() {
 fn platform_runs_persist_and_exact_pair_assembles_evidence_atomically() {
     let suite = suite();
     let source = source(7);
-    let desktop = QualificationExecutionService::execute_current_platform(
-        &suite,
-        &source,
-        &rspice_core::NoAbort,
-    )
-    .unwrap();
+    let desktop = execute_current_platform(&suite, &source, &rspice_core::NoAbort).unwrap();
     let wasm = imported_platform_run(
         &desktop,
         QualificationPlatform::WebAssembly,
@@ -1645,12 +1617,7 @@ fn platform_runs_persist_and_exact_pair_assembles_evidence_atomically() {
 fn stale_tampered_or_incomplete_platform_runs_roll_back() {
     let suite = suite();
     let source = source(7);
-    let desktop = QualificationExecutionService::execute_current_platform(
-        &suite,
-        &source,
-        &rspice_core::NoAbort,
-    )
-    .unwrap();
+    let desktop = execute_current_platform(&suite, &source, &rspice_core::NoAbort).unwrap();
     let mut state = ModelQualificationState::try_new(
         vec![suite.clone()],
         Vec::new(),
@@ -1713,12 +1680,7 @@ fn stale_tampered_or_incomplete_platform_runs_roll_back() {
 fn suite_and_vector_lifecycle_is_atomic_revisioned_and_evidence_safe() {
     let suite = suite();
     let source = source(7);
-    let desktop = QualificationExecutionService::execute_current_platform(
-        &suite,
-        &source,
-        &rspice_core::NoAbort,
-    )
-    .unwrap();
+    let desktop = execute_current_platform(&suite, &source, &rspice_core::NoAbort).unwrap();
     let mut state = ModelQualificationState::try_new(
         vec![suite.clone()],
         vec![desktop],
@@ -1853,12 +1815,7 @@ fn failed_disposition_blocks_promotion_until_exact_cross_platform_rerun_passes()
     );
     assert_eq!(state, retained);
 
-    let desktop = QualificationExecutionService::execute_current_platform(
-        &suite,
-        &source,
-        &rspice_core::NoAbort,
-    )
-    .unwrap();
+    let desktop = execute_current_platform(&suite, &source, &rspice_core::NoAbort).unwrap();
     let wasm = imported_platform_run(
         &desktop,
         QualificationPlatform::WebAssembly,
