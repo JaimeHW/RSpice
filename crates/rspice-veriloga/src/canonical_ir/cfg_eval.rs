@@ -832,6 +832,7 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 delay,
                 delay_derivative,
                 max_delay,
+                order,
                 ..
             } => {
                 self.read(input)?;
@@ -840,7 +841,11 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 if let Some(max_delay) = max_delay {
                     self.read(max_delay)?;
                 }
-                self.read_lanes(input_derivative)?
+                let mut result = self.read_lanes(input_derivative)?;
+                if order == 2 {
+                    result.fill(S::from_f64(0.0));
+                }
+                result
             }
             // A rate limiter that has nothing to limit is the identity, so its
             // direct coefficient is one and the rate derivatives multiply a
@@ -1126,6 +1131,7 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 delay,
                 delay_derivative,
                 max_delay,
+                order,
                 ..
             } => {
                 self.read(input)?;
@@ -1134,7 +1140,8 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 if let Some(max_delay) = max_delay {
                     self.read(max_delay)?;
                 }
-                self.read(input_derivative)?
+                let result = self.read(input_derivative)?;
+                if order == 2 { S::from_f64(0.0) } else { result }
             }
             // Nothing to rate-limit in steady state, so the limiter is the
             // identity and its exact local coefficient is one.

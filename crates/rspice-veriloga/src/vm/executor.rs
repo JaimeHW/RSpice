@@ -1035,9 +1035,19 @@ impl<'a> Vm<'a> {
                 self.stack.push(result);
             }
             Instruction::AbsDelayStateDerivative(buffer_id)
-            | Instruction::AbsDelayStateDerivativeMax(buffer_id) => {
-                let max_delay = if matches!(instruction, Instruction::AbsDelayStateDerivativeMax(_))
-                {
+            | Instruction::AbsDelayStateDerivativeMax(buffer_id)
+            | Instruction::AbsDelayStateMixedDerivative(buffer_id)
+            | Instruction::AbsDelayStateMixedDerivativeMax(buffer_id) => {
+                let mixed = matches!(
+                    instruction,
+                    Instruction::AbsDelayStateMixedDerivative(_)
+                        | Instruction::AbsDelayStateMixedDerivativeMax(_)
+                );
+                let max_delay = if matches!(
+                    instruction,
+                    Instruction::AbsDelayStateDerivativeMax(_)
+                        | Instruction::AbsDelayStateMixedDerivativeMax(_)
+                ) {
                     Some(self.pop()?)
                 } else {
                     None
@@ -1046,6 +1056,19 @@ impl<'a> Vm<'a> {
                 let delay_time = self.pop()?;
                 let input_derivative = self.pop()?;
                 let input = self.pop()?;
+                let evaluate =
+                    |evaluation: rspice_veriloga_runtime::transport_delay::DelayEvaluation| {
+                        if mixed {
+                            evaluation
+                                .apply_mixed_derivative(input_derivative, delay_derivative)
+                                .map_err(VmError::InvalidNumericResult)
+                        } else {
+                            Ok(evaluation.delay_coefficient.mul_add(
+                                delay_derivative,
+                                evaluation.input_coefficient * input_derivative,
+                            ))
+                        }
+                    };
                 let current_time = self.context.time;
                 let is_transient = self.context.analysis_type == 2;
                 let buffer = self
@@ -1061,23 +1084,17 @@ impl<'a> Vm<'a> {
                     let evaluation = buffer
                         .static_dae_with_coefficients(current_time, input, delay_time, max_delay)
                         .map_err(VmError::InvalidRuntimeConfiguration)?;
-                    evaluation.delay_coefficient.mul_add(
-                        delay_derivative,
-                        evaluation.input_coefficient * input_derivative,
-                    )
+                    evaluate(evaluation)?
                 } else if is_transient {
                     let evaluation = buffer
                         .eval_with_coefficients(current_time, input, delay_time, max_delay)
                         .map_err(VmError::InvalidRuntimeConfiguration)?;
-                    evaluation.delay_coefficient.mul_add(
-                        delay_derivative,
-                        evaluation.input_coefficient * input_derivative,
-                    )
+                    evaluate(evaluation)?
                 } else {
                     buffer
                         .small_signal_delay(current_time, input, delay_time, max_delay)
                         .map_err(VmError::InvalidRuntimeConfiguration)?;
-                    input_derivative
+                    if mixed { 0.0 } else { input_derivative }
                 };
                 self.stack.push(result);
             }

@@ -6907,7 +6907,9 @@ endmodule
                     }
                     Instruction::AbsDelayState(idx)
                     | Instruction::AbsDelayStateMax(idx)
+                    | Instruction::AbsDelayStateMixedDerivative(idx)
                     | Instruction::AbsDelayStateDerivative(idx)
+                    | Instruction::AbsDelayStateMixedDerivativeMax(idx)
                     | Instruction::AbsDelayStateDerivativeMax(idx) => {
                         update_max_slot(&mut max_delay_buffer, *idx);
                     }

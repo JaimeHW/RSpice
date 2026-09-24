@@ -941,6 +941,12 @@ pub enum Instruction {
     /// reads back, returning what the limiter admitted.
     /// Stack: `[oriented proposed, candidate] -> [limited]`.
     NamedLimiterStore(usize),
+    /// Mixed input/timing action of an absolute-delay candidate.
+    /// Stack: `[expr, input_partial, delay_time, delay_partial]` -> `[mixed]`.
+    /// Appended to preserve preceding serialized discriminants.
+    AbsDelayStateMixedDerivative(usize),
+    /// Mixed action with an explicit maximum-delay operand after delay_partial.
+    AbsDelayStateMixedDerivativeMax(usize),
 }
 
 impl CompiledModel {

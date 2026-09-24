@@ -2849,7 +2849,7 @@ pub unsafe extern "C" fn rspice_absdelay_state_native(
     ctx: *const EvalContext,
     buffer_id: usize,
 ) -> f64 {
-    unsafe { rspice_absdelay_native_impl(operands, ctx, buffer_id, false, false) }
+    unsafe { rspice_absdelay_native_impl(operands, ctx, buffer_id, false, 0) }
 }
 
 #[unsafe(export_name = "rspice_absdelay_state_max_native")]
@@ -2858,7 +2858,7 @@ pub unsafe extern "C" fn rspice_absdelay_state_max_native(
     ctx: *const EvalContext,
     buffer_id: usize,
 ) -> f64 {
-    unsafe { rspice_absdelay_native_impl(operands, ctx, buffer_id, true, false) }
+    unsafe { rspice_absdelay_native_impl(operands, ctx, buffer_id, true, 0) }
 }
 
 #[unsafe(export_name = "rspice_absdelay_derivative_native")]
@@ -2867,7 +2867,7 @@ pub unsafe extern "C" fn rspice_absdelay_derivative_native(
     ctx: *const EvalContext,
     buffer_id: usize,
 ) -> f64 {
-    unsafe { rspice_absdelay_native_impl(operands, ctx, buffer_id, false, true) }
+    unsafe { rspice_absdelay_native_impl(operands, ctx, buffer_id, false, 1) }
 }
 
 #[unsafe(export_name = "rspice_absdelay_derivative_max_native")]
@@ -2876,7 +2876,34 @@ pub unsafe extern "C" fn rspice_absdelay_derivative_max_native(
     ctx: *const EvalContext,
     buffer_id: usize,
 ) -> f64 {
-    unsafe { rspice_absdelay_native_impl(operands, ctx, buffer_id, true, true) }
+    unsafe { rspice_absdelay_native_impl(operands, ctx, buffer_id, true, 1) }
+}
+
+/// Apply the input/timing mixed partial of an absolute-delay candidate.
+///
+/// # Safety
+/// `operands` must address four f64 values and `ctx` a valid evaluation context,
+/// as for the first-derivative helper.
+#[unsafe(export_name = "rspice_absdelay_mixed_derivative_native")]
+pub unsafe extern "C" fn rspice_absdelay_mixed_derivative_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    buffer_id: usize,
+) -> f64 {
+    unsafe { rspice_absdelay_native_impl(operands, ctx, buffer_id, false, 2) }
+}
+
+/// Apply the mixed partial with an explicit maximum-delay operand.
+///
+/// # Safety
+/// `operands` must address five f64 values and `ctx` a valid evaluation context.
+#[unsafe(export_name = "rspice_absdelay_mixed_derivative_max_native")]
+pub unsafe extern "C" fn rspice_absdelay_mixed_derivative_max_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    buffer_id: usize,
+) -> f64 {
+    unsafe { rspice_absdelay_native_impl(operands, ctx, buffer_id, true, 2) }
 }
 
 unsafe fn rspice_absdelay_native_impl(
@@ -2884,8 +2911,10 @@ unsafe fn rspice_absdelay_native_impl(
     ctx: *const EvalContext,
     buffer_id: usize,
     has_max_delay: bool,
-    derivative: bool,
+    action: u8,
 ) -> f64 {
+    let derivative = action != 0;
+    let mixed = action == 2;
     if ctx.is_null() {
         set_native_context_error_ptr(
             ctx,
@@ -2933,6 +2962,18 @@ unsafe fn rspice_absdelay_native_impl(
             },
         )
     };
+    let evaluate = |evaluation: rspice_veriloga_runtime::transport_delay::DelayEvaluation| {
+        if mixed {
+            evaluation.apply_mixed_derivative(input_derivative, delay_derivative)
+        } else if derivative {
+            Ok(evaluation.delay_coefficient.mul_add(
+                delay_derivative,
+                evaluation.input_coefficient * input_derivative,
+            ))
+        } else {
+            Ok(evaluation.output)
+        }
+    };
     if ctx.delay_buffers.is_null() {
         set_native_context_error(
             ctx,
@@ -2958,12 +2999,9 @@ unsafe fn rspice_absdelay_native_impl(
     if ctx.static_dae_probe != 0 {
         return match buffers[buffer_id]
             .static_dae_with_coefficients(ctx.time, input, delay_time, max_delay)
+            .and_then(evaluate)
         {
-            Ok(evaluation) if derivative => evaluation.delay_coefficient.mul_add(
-                delay_derivative,
-                evaluation.input_coefficient * input_derivative,
-            ),
-            Ok(evaluation) => evaluation.output,
+            Ok(value) => value,
             Err(error) => {
                 set_native_context_error(ctx, error);
                 0.0
@@ -2984,7 +3022,7 @@ unsafe fn rspice_absdelay_native_impl(
         let result = if derivative {
             buffers[buffer_id]
                 .small_signal_delay(ctx.time, input, delay_time, max_delay)
-                .map(|_| input_derivative)
+                .map(|_| if mixed { 0.0 } else { input_derivative })
         } else {
             buffers[buffer_id].eval_operating_point(ctx.time, input, delay_time, max_delay)
         };
@@ -2996,17 +3034,11 @@ unsafe fn rspice_absdelay_native_impl(
             }
         };
     }
-    match buffers[buffer_id].eval_with_coefficients(ctx.time, input, delay_time, max_delay) {
-        Ok(evaluation) => {
-            if derivative {
-                evaluation.delay_coefficient.mul_add(
-                    delay_derivative,
-                    evaluation.input_coefficient * input_derivative,
-                )
-            } else {
-                evaluation.output
-            }
-        }
+    match buffers[buffer_id]
+        .eval_with_coefficients(ctx.time, input, delay_time, max_delay)
+        .and_then(evaluate)
+    {
+        Ok(value) => value,
         Err(error) => {
             set_native_context_error(ctx, error);
             0.0

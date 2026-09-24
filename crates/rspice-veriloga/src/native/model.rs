@@ -219,7 +219,9 @@ impl NativeRequiredStorage {
                     }
                     Instruction::AbsDelayState(index)
                     | Instruction::AbsDelayStateMax(index)
+                    | Instruction::AbsDelayStateMixedDerivative(index)
                     | Instruction::AbsDelayStateDerivative(index)
+                    | Instruction::AbsDelayStateMixedDerivativeMax(index)
                     | Instruction::AbsDelayStateDerivativeMax(index) => {
                         update_max(&mut max_delay_buffer, *index)
                     }

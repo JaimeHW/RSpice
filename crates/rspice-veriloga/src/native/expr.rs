@@ -204,6 +204,8 @@ pub(crate) enum NativeOp {
     AbsDelayStateMax(usize),
     AbsDelayStateDerivative(usize),
     AbsDelayStateDerivativeMax(usize),
+    AbsDelayStateMixedDerivative(usize),
+    AbsDelayStateMixedDerivativeMax(usize),
     CrossState(usize),
     AboveState(usize),
     LastCrossingState(usize),
@@ -1958,6 +1960,28 @@ impl NativeProgram {
                     )?;
                     depth -= 4;
                     ops.push(NativeOp::AbsDelayStateDerivativeMax(*buffer_id));
+                }
+                Instruction::AbsDelayStateMixedDerivative(buffer_id) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        4,
+                    )?;
+                    depth -= 3;
+                    ops.push(NativeOp::AbsDelayStateMixedDerivative(*buffer_id));
+                }
+                Instruction::AbsDelayStateMixedDerivativeMax(buffer_id) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        5,
+                    )?;
+                    depth -= 4;
+                    ops.push(NativeOp::AbsDelayStateMixedDerivativeMax(*buffer_id));
                 }
                 Instruction::CrossState(detector_id) => {
                     require_stack(
@@ -6378,9 +6402,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         if axes.len() > 1 {
             for &axis in axes {
                 if !self.expr_derivative_is_zero(delay, axis)? {
-                    return Err(self.unsupported(format!(
-                        "absdelay higher-order derivatives with a signal-dependent delay at expression {expr_id}"
-                    )));
+                    return self.lower_absdelay_higher_derivative(expr_id, axes);
                 }
             }
         }
@@ -8248,6 +8270,8 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::AbsDelayStateMax(_) => "AbsDelayStateMax",
         NativeOp::AbsDelayStateDerivative(_) => "AbsDelayStateDerivative",
         NativeOp::AbsDelayStateDerivativeMax(_) => "AbsDelayStateDerivativeMax",
+        NativeOp::AbsDelayStateMixedDerivative(_) => "AbsDelayStateMixedDerivative",
+        NativeOp::AbsDelayStateMixedDerivativeMax(_) => "AbsDelayStateMixedDerivativeMax",
         NativeOp::CrossState(_) => "CrossState",
         NativeOp::AboveState(_) => "AboveState",
         NativeOp::LastCrossingState(_) => "LastCrossingState",
@@ -9239,11 +9263,13 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         NativeOp::TransitionState(_)
         | NativeOp::TimerState(_)
         | NativeOp::AboveState(_)
+        | NativeOp::AbsDelayStateMixedDerivative(_)
         | NativeOp::AbsDelayStateDerivative(_)
         | NativeOp::IdtModState(_)
         | NativeOp::ProductRatio => (4, 1),
         NativeOp::SumProductsDiv(terms) => (terms.saturating_mul(2).saturating_add(1), 1),
         NativeOp::TransitionStateDerivative(_)
+        | NativeOp::AbsDelayStateMixedDerivativeMax(_)
         | NativeOp::AbsDelayStateDerivativeMax(_)
         | NativeOp::CrossState(_) => (5, 1),
         NativeOp::SlewStateDerivative(_) | NativeOp::IdtModDerivativeState(_) => (6, 1),
@@ -9450,6 +9476,8 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::AbsDelayStateMax(_) => "AbsDelayStateMax",
         Instruction::AbsDelayStateDerivative(_) => "AbsDelayStateDerivative",
         Instruction::AbsDelayStateDerivativeMax(_) => "AbsDelayStateDerivativeMax",
+        Instruction::AbsDelayStateMixedDerivative(_) => "AbsDelayStateMixedDerivative",
+        Instruction::AbsDelayStateMixedDerivativeMax(_) => "AbsDelayStateMixedDerivativeMax",
         Instruction::TransitionState(_) => "TransitionState",
         Instruction::TransitionStateDerivative(_) => "TransitionStateDerivative",
         Instruction::SlewState(_) => "SlewState",

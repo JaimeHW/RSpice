@@ -2313,6 +2313,8 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
         NativeOp::AbsDelayStateMax(index) => set_index(&mut descriptor, 447, index)?,
         NativeOp::AbsDelayStateDerivative(index) => set_index(&mut descriptor, 448, index)?,
         NativeOp::AbsDelayStateDerivativeMax(index) => set_index(&mut descriptor, 449, index)?,
+        NativeOp::AbsDelayStateMixedDerivative(index) => set_index(&mut descriptor, 483, index)?,
+        NativeOp::AbsDelayStateMixedDerivativeMax(index) => set_index(&mut descriptor, 484, index)?,
         NativeOp::CrossState(index) => set_index(&mut descriptor, 426, index)?,
         NativeOp::AboveState(index) => set_index(&mut descriptor, 427, index)?,
         NativeOp::LastCrossingState(index) => set_index(&mut descriptor, 428, index)?,
@@ -2721,6 +2723,8 @@ mod tests {
             (NativeOp::AbsDelayStateMax(7), 447),
             (NativeOp::AbsDelayStateDerivative(7), 448),
             (NativeOp::AbsDelayStateDerivativeMax(7), 449),
+            (NativeOp::AbsDelayStateMixedDerivative(7), 483),
+            (NativeOp::AbsDelayStateMixedDerivativeMax(7), 484),
         ] {
             let descriptor = helper_descriptor(op).expect("encode absdelay helper descriptor");
             assert_eq!(descriptor.opcode, opcode);
@@ -4015,6 +4019,8 @@ endmodule
             NativeOp::AbsDelayStateMax(0),
             NativeOp::AbsDelayStateDerivative(0),
             NativeOp::AbsDelayStateDerivativeMax(0),
+            NativeOp::AbsDelayStateMixedDerivative(0),
+            NativeOp::AbsDelayStateMixedDerivativeMax(0),
             NativeOp::CrossState(0),
             NativeOp::AboveState(0),
             NativeOp::LastCrossingState(0),

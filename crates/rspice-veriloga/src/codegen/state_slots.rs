@@ -48,7 +48,9 @@ impl CanonicalStateOperator {
                 Self::Absdelay,
                 Instruction::AbsDelayState(slot)
                 | Instruction::AbsDelayStateMax(slot)
+                | Instruction::AbsDelayStateMixedDerivative(slot)
                 | Instruction::AbsDelayStateDerivative(slot)
+                | Instruction::AbsDelayStateMixedDerivativeMax(slot)
                 | Instruction::AbsDelayStateDerivativeMax(slot),
             ) => Some(*slot),
             (
@@ -98,7 +100,9 @@ impl CanonicalStateOperator {
                 Self::Absdelay,
                 Instruction::AbsDelayState(held)
                 | Instruction::AbsDelayStateMax(held)
+                | Instruction::AbsDelayStateMixedDerivative(held)
                 | Instruction::AbsDelayStateDerivative(held)
+                | Instruction::AbsDelayStateMixedDerivativeMax(held)
                 | Instruction::AbsDelayStateDerivativeMax(held),
             )
             | (

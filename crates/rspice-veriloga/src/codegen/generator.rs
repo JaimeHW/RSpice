@@ -64,16 +64,23 @@ mod absdelay_derivative_tests {
     }
 
     #[test]
-    fn absdelay_moving_delay_mixed_derivative_fails_closed() {
+    fn absdelay_moving_delay_mixed_derivative_shares_the_primal_slot() {
         let site = AbsDelaySiteId::from_span(crate::source::Span::dummy());
         let arena = &mut ExprArena::new();
         let primal = primal(arena, site, false);
         let first = autodiff::differentiate(arena, primal, &DerivativeWrt::Voltage(0));
         let second = autodiff::differentiate(arena, first, &DerivativeWrt::Voltage(1));
-        let error = CodeGenerator::new()
+        let generator = CodeGenerator::new();
+        let program = generator
             .compile_expr(arena, second, &empty_emit_context())
-            .expect_err("unsupported absdelay Hessian must fail compilation");
-        assert!(error.to_string().contains("higher-order derivatives"));
+            .expect("compile exact absdelay mixed action");
+        assert!(
+            program
+                .instructions
+                .iter()
+                .any(|op| matches!(op, Instruction::AbsDelayStateMixedDerivative(0)))
+        );
+        assert_eq!(generator.delay_buffer_count.get(), 1);
     }
 
     #[test]
@@ -1692,9 +1699,9 @@ impl CodeGenerator {
                 max_delay,
                 derivative_order,
             } => {
-                if *derivative_order != 1 {
+                if !matches!(derivative_order, 1 | 2) {
                     return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
-                        "absdelay higher-order derivatives are not implemented".into(),
+                        "invalid absdelay local derivative action".into(),
                     ))
                     .into());
                 }
@@ -1706,11 +1713,14 @@ impl CodeGenerator {
                     self.emit_expr(arena, *max_delay, emit_ctx, program)?;
                 }
                 let buffer_id = self.absdelay_site_slot(*site);
-                program.instructions.push(if max_delay.is_some() {
-                    Instruction::AbsDelayStateDerivativeMax(buffer_id)
-                } else {
-                    Instruction::AbsDelayStateDerivative(buffer_id)
-                });
+                program
+                    .instructions
+                    .push(match (*derivative_order, max_delay.is_some()) {
+                        (2, true) => Instruction::AbsDelayStateMixedDerivativeMax(buffer_id),
+                        (2, false) => Instruction::AbsDelayStateMixedDerivative(buffer_id),
+                        (_, true) => Instruction::AbsDelayStateDerivativeMax(buffer_id),
+                        (_, false) => Instruction::AbsDelayStateDerivative(buffer_id),
+                    });
             }
             Heavy::Transition {
                 site,

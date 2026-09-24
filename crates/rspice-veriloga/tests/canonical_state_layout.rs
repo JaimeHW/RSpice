@@ -33,6 +33,8 @@ fn bytecode_family(instruction: &Instruction) -> Option<(CanonicalStateFamily, u
         | Instruction::NamedLimiterStore(slot) => (CanonicalStateFamily::Integration, *slot),
         Instruction::AbsDelayState(slot)
         | Instruction::AbsDelayStateMax(slot)
+        | Instruction::AbsDelayStateMixedDerivative(slot)
+        | Instruction::AbsDelayStateMixedDerivativeMax(slot)
         | Instruction::AbsDelayStateDerivative(slot)
         | Instruction::AbsDelayStateDerivativeMax(slot) => {
             (CanonicalStateFamily::DelayBuffer, *slot)

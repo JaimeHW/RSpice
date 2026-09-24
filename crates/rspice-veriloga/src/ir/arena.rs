@@ -392,7 +392,7 @@ pub enum Heavy {
         /// Optional maximum delay.
         max_delay: Option<NodeId>,
     },
-    /// Local first-derivative action of one `absdelay` candidate.
+    /// Local derivative action of one `absdelay` candidate.
     AbsDelayDerivative {
         /// Site identity shared with the primal.
         site: AbsDelaySiteId,
@@ -406,8 +406,9 @@ pub enum Heavy {
         delay_derivative: NodeId,
         /// Optional maximum delay.
         max_delay: Option<NodeId>,
-        /// Action order. Repeated input derivatives with zero timing partials
-        /// still use order one; higher orders require mixed timing terms.
+        /// Action 1 is A*input_derivative + B*delay_derivative; action 2 is
+        /// C*input_derivative*delay_derivative, where C is the mixed partial.
+        /// Higher source derivatives compose these two actions.
         derivative_order: u8,
     },
     /// `transition` — piecewise-linear smoothing.

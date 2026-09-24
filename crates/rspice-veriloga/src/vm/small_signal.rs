@@ -812,6 +812,7 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
         buffer_id: usize,
         with_maximum: bool,
         derivative: bool,
+        mixed: bool,
     ) -> Result<(), VmError> {
         let max_delay = if with_maximum {
             Some(self.pop_real("absdelay maxdelay")?)
@@ -835,7 +836,10 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
         let effective_delay = buffer
             .small_signal_delay(self.context.time, input_real, delay, max_delay)
             .map_err(|error| VmError::InvalidNumericResult(format!("absdelay: {error}")))?;
-        let result = if derivative {
+        // VAMS 2023 4.5.7 holds td constant in small-signal analyses.
+        let result = if mixed {
+            V::new(0.0, 0.0)
+        } else if derivative {
             let phase = -self.omega * effective_delay;
             if !phase.is_finite() {
                 return Err(VmError::InvalidNumericResult(format!(
@@ -1196,16 +1200,22 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                 self.stack.push(V::new(table.interpolate(input), 0.0));
             }
             Instruction::AbsDelayState(buffer_id) => {
-                self.execute_absdelay(*buffer_id, false, false)?
+                self.execute_absdelay(*buffer_id, false, false, false)?
             }
             Instruction::AbsDelayStateMax(buffer_id) => {
-                self.execute_absdelay(*buffer_id, true, false)?
+                self.execute_absdelay(*buffer_id, true, false, false)?
             }
             Instruction::AbsDelayStateDerivative(buffer_id) => {
-                self.execute_absdelay(*buffer_id, false, true)?
+                self.execute_absdelay(*buffer_id, false, true, false)?
             }
             Instruction::AbsDelayStateDerivativeMax(buffer_id) => {
-                self.execute_absdelay(*buffer_id, true, true)?
+                self.execute_absdelay(*buffer_id, true, true, false)?
+            }
+            Instruction::AbsDelayStateMixedDerivative(buffer_id) => {
+                self.execute_absdelay(*buffer_id, false, true, true)?
+            }
+            Instruction::AbsDelayStateMixedDerivativeMax(buffer_id) => {
+                self.execute_absdelay(*buffer_id, true, true, true)?
             }
             Instruction::TransitionState(_) => {
                 let fall = self.pop_real("transition fall time")?;
@@ -2006,6 +2016,36 @@ mod tests {
             .unwrap();
         assert!((result.re - 0.0).abs() <= 1.0e-14, "{result:?}");
         assert!((result.im + 1.0).abs() <= 1.0e-14, "{result:?}");
+    }
+
+    #[test]
+    fn absdelay_moving_delay_mixed_action_is_zero_in_small_signal() {
+        let mut context = ac_context();
+        context.allocate_delay_buffers(1);
+        for bounded in [false, true] {
+            let mut instructions = vec![
+                Instruction::PushConst(3.0),
+                Instruction::PushConst(2.0),
+                Instruction::PushConst(0.25),
+                Instruction::PushConst(99.0),
+            ];
+            if bounded {
+                instructions.push(Instruction::PushConst(1.0));
+            }
+            instructions.push(if bounded {
+                Instruction::AbsDelayStateMixedDerivativeMax(0)
+            } else {
+                Instruction::AbsDelayStateMixedDerivative(0)
+            });
+            let program = BytecodeProgram { instructions };
+            assert_eq!(
+                SmallSignalVm::new(&context, 1.0)
+                    .unwrap()
+                    .execute(&program)
+                    .unwrap(),
+                Complex64::new(0.0, 0.0)
+            );
+        }
     }
 
     #[test]

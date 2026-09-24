@@ -468,10 +468,9 @@ pub enum CfgValueKind {
     /// through it: this is the one dynamic operator whose *timing* operand is
     /// not primal-only.
     ///
-    /// `order` mirrors the flat node's action order. Repeated differentiation
-    /// with zero timing partials still uses the first-order action on higher
-    /// input derivatives. Moving delays retain higher orders so consumers
-    /// refuse the missing mixed timing terms instead of silently omitting them.
+    /// `order` mirrors the flat node's local action: 1 evaluates A*p+B*q,
+    /// 2 evaluates C*p*q for the mixed input/timing partial. Higher source
+    /// derivatives compose these two actions within each interpolation segment.
     ///
     /// Shares [`Self::AbsDelay`]'s buffer — it reads the same history and
     /// allocates none of its own.

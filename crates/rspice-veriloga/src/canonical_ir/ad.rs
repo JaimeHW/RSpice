@@ -447,10 +447,17 @@ fn lane_liveness_with_control(
                         changed |= live.union_from(value.id, *delay);
                     }
                     CfgValueKind::AbsDelayDerivative {
+                        input,
+                        delay,
+                        order,
                         input_derivative,
                         delay_derivative,
                         ..
                     } => {
+                        if *order == 1 {
+                            changed |= live.union_from(value.id, *input);
+                            changed |= live.union_from(value.id, *delay);
+                        }
                         changed |= live.union_from(value.id, *input_derivative);
                         changed |= live.union_from(value.id, *delay_derivative);
                     }
@@ -866,10 +873,17 @@ fn ddx_direction_liveness(
                     changed |= needed.union_from(*delay, value.id);
                 }
                 CfgValueKind::AbsDelayDerivative {
+                    input,
+                    delay,
+                    order,
                     input_derivative,
                     delay_derivative,
                     ..
                 } => {
+                    if *order == 1 {
+                        changed |= needed.union_from(*input, value.id);
+                        changed |= needed.union_from(*delay, value.id);
+                    }
                     changed |= needed.union_from(*input_derivative, value.id);
                     changed |= needed.union_from(*delay_derivative, value.id);
                 }
@@ -1429,29 +1443,48 @@ impl<'a> ScalarDdxBuilder<'a> {
                 max_delay,
                 order,
             } => {
-                let order = if *order == 1
+                let d_delay = self.derivative(*delay, lane);
+                let fixed = *order == 1
+                    && d_delay.is_none()
                     && matches!(self.values[usize::from(*delay_derivative)].kind,
-                        CfgValueKind::RealConstant(v) if v == 0.0)
-                    && self.derivative(*delay, lane).is_none()
-                {
-                    1
-                } else {
-                    order.saturating_add(1)
+                        CfgValueKind::RealConstant(v) if v == 0.0);
+                let make = |this: &mut Self, p, q, order| {
+                    this.push(
+                        CfgValueType::Real,
+                        CfgValueKind::AbsDelayDerivative {
+                            operator: *operator,
+                            input: *input,
+                            delay: *delay,
+                            max_delay: *max_delay,
+                            input_derivative: p,
+                            delay_derivative: q,
+                            order,
+                        },
+                    )
                 };
-                let (input_derivative, delay_derivative) =
-                    self.delayed_derivatives(*input_derivative, *delay_derivative, lane)?;
-                Some(self.push(
-                    CfgValueType::Real,
-                    CfgValueKind::AbsDelayDerivative {
-                        operator: *operator,
-                        input: *input,
-                        input_derivative,
-                        delay: *delay,
-                        delay_derivative,
-                        max_delay: *max_delay,
-                        order,
-                    },
-                ))
+                if fixed {
+                    let (p, q) =
+                        self.delayed_derivatives(*input_derivative, *delay_derivative, lane)?;
+                    return Some(make(self, p, q, 1));
+                }
+                let p = self.derivative(*input_derivative, lane);
+                let q = self.derivative(*delay_derivative, lane);
+                let p = self.or_zero(p);
+                let q = self.or_zero(q);
+                if *order == 2 {
+                    let left = make(self, p, *delay_derivative, 2);
+                    let right = make(self, *input_derivative, q, 2);
+                    Some(self.push_binary(CfgBinaryOp::Add, left, right))
+                } else {
+                    let base = make(self, p, q, 1);
+                    let dx = self.derivative(*input, lane);
+                    let dx = self.or_zero(dx);
+                    let dt = self.or_zero(d_delay);
+                    let left = make(self, dx, *delay_derivative, 2);
+                    let right = make(self, *input_derivative, dt, 2);
+                    let mixed = self.push_binary(CfgBinaryOp::Add, left, right);
+                    Some(self.push_binary(CfgBinaryOp::Add, base, mixed))
+                }
             }
             CfgValueKind::Slew {
                 operator,
@@ -2717,29 +2750,61 @@ impl<'a> AdBuilder<'a> {
                 max_delay,
                 order,
             } => {
-                let order = if *order == 1
+                let d_delay = self.derivatives[usize::from(*delay)];
+                let fixed = *order == 1
+                    && d_delay.is_none()
                     && matches!(self.values[usize::from(*delay_derivative)].kind,
-                        CfgValueKind::RealConstant(v) | CfgValueKind::LaneSplat(v) if v == 0.0)
-                    && self.derivatives[usize::from(*delay)].is_none()
-                {
-                    1
-                } else {
-                    order.saturating_add(1)
+                        CfgValueKind::RealConstant(v) | CfgValueKind::LaneSplat(v) if v == 0.0);
+                let make = |this: &mut Self, p, q, order| {
+                    this.push(
+                        CfgValueType::Lanes(target),
+                        CfgValueKind::AbsDelayDerivative {
+                            operator: *operator,
+                            input: *input,
+                            delay: *delay,
+                            max_delay: *max_delay,
+                            input_derivative: p,
+                            delay_derivative: q,
+                            order,
+                        },
+                    )
                 };
-                let (input_derivative, delay_derivative) =
-                    self.delayed_lane_derivatives(*input_derivative, *delay_derivative, target)?;
-                Some(self.push(
-                    CfgValueType::Lanes(target),
-                    CfgValueKind::AbsDelayDerivative {
-                        operator: *operator,
-                        input: *input,
-                        input_derivative,
-                        delay: *delay,
-                        delay_derivative,
-                        max_delay: *max_delay,
-                        order,
-                    },
-                ))
+                if fixed {
+                    let (p, q) = self.delayed_lane_derivatives(
+                        *input_derivative,
+                        *delay_derivative,
+                        target,
+                    )?;
+                    return Some(make(self, p, q, 1));
+                }
+                let p = self.derivatives[usize::from(*input_derivative)];
+                let q = self.derivatives[usize::from(*delay_derivative)];
+                let p = self.or_zero_lanes(p, target);
+                let q = self.or_zero_lanes(q, target);
+                let broadcast = |this: &mut Self, value| {
+                    if this.shape_of(value).is_some() {
+                        this.widen(value, target)
+                    } else {
+                        let one = this.splat(1.0, target);
+                        this.scale(one, value)
+                    }
+                };
+                let old_p = broadcast(self, *input_derivative);
+                let old_q = broadcast(self, *delay_derivative);
+                if *order == 2 {
+                    let left = make(self, p, old_q, 2);
+                    let right = make(self, old_p, q, 2);
+                    Some(self.lane_binary(CfgBinaryOp::Add, left, right, target))
+                } else {
+                    let base = make(self, p, q, 1);
+                    let dx = self.derivatives[usize::from(*input)];
+                    let dx = self.or_zero_lanes(dx, target);
+                    let dt = self.or_zero_lanes(d_delay, target);
+                    let left = make(self, dx, old_q, 2);
+                    let right = make(self, old_p, dt, 2);
+                    let mixed = self.lane_binary(CfgBinaryOp::Add, left, right, target);
+                    Some(self.lane_binary(CfgBinaryOp::Add, base, mixed, target))
+                }
             }
             CfgValueKind::Slew {
                 operator,

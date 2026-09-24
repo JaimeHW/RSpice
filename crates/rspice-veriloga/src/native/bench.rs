@@ -1175,7 +1175,9 @@ fn preallocate_context(context: &mut VmContext, model: &CompiledModel) {
                 | Instruction::NamedLimiterStore(idx) => update_max_slot(&mut max_state, *idx),
                 Instruction::AbsDelayState(idx)
                 | Instruction::AbsDelayStateMax(idx)
+                | Instruction::AbsDelayStateMixedDerivative(idx)
                 | Instruction::AbsDelayStateDerivative(idx)
+                | Instruction::AbsDelayStateMixedDerivativeMax(idx)
                 | Instruction::AbsDelayStateDerivativeMax(idx) => {
                     update_max_slot(&mut max_delay_buffer, *idx)
                 }

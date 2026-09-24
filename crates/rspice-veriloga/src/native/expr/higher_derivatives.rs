@@ -1,15 +1,15 @@
 //! Higher derivatives of canonical expressions, using the shared algebra AD.
 //!
-//! Only pure expression structure is imported. Opaque leaves retain the MIR
+//! Algebraic structure and local delay actions are imported. Opaque leaves retain the MIR
 //! expression identity and ordered derivative axes; their loads and state
 //! actions are resolved by the same canonical lowerer as ordinary entries.
 //! No executable bytecode contributes an equation or an algebraic operand.
 
 use super::*;
 use crate::ast::{BinaryOp, UnaryOp};
-use crate::ir::IrFunction;
-use crate::ir::arena::{ExprArena, NameId, Node, NodeId as AlgebraId, visit};
+use crate::ir::arena::{ExprArena, Heavy, NameId, Node, NodeId as AlgebraId, visit};
 use crate::ir::autodiff::differentiate_with_variable_derivatives;
+use crate::ir::{AbsDelaySiteId, IrFunction};
 use std::collections::HashSet;
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -136,6 +136,31 @@ impl Algebra {
                 self.imported.insert(id, node);
                 return Ok(node);
             }
+            HirExprKind::Call { name, args } if normalize_intrinsic_name(name) == "absdelay" => {
+                lowerer.require_intrinsic_arity_range(name, args, 2, 3)?;
+                // This temporary arena uses the canonical expression ID as
+                // its site key. Emission resolves the original canonical slot.
+                let site = AbsDelaySiteId {
+                    source: 0,
+                    start: 0,
+                    end: 0,
+                    ordinal: id.index(),
+                };
+                let expr = self.import(lowerer, args[0])?;
+                let delay_time = self.import(lowerer, args[1])?;
+                let max_delay = args
+                    .get(2)
+                    .map(|&arg| self.import(lowerer, arg))
+                    .transpose()?;
+                let imported = self.arena.push_heavy(Heavy::AbsDelay {
+                    site,
+                    expr,
+                    delay_time,
+                    max_delay,
+                });
+                self.imported.insert(id, imported);
+                return Ok(imported);
+            }
             HirExprKind::Call { name, args } if normalize_intrinsic_name(name) == "limexp" => {
                 lowerer.require_intrinsic_arity(name, args, 1)?;
                 Node::Limexp(self.import(lowerer, args[0])?)
@@ -232,6 +257,51 @@ impl Algebra {
                 self.emit(lowerer, inner)?;
                 lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Limexp))
             }
+            Node::Heavy(_, payload) => match self.arena.heavy(payload) {
+                Heavy::AbsDelay { site, .. } => lowerer.lower(ExprId::new(site.ordinal)),
+                Heavy::AbsDelayDerivative {
+                    site,
+                    input,
+                    input_derivative,
+                    delay_time,
+                    delay_derivative,
+                    max_delay,
+                    derivative_order,
+                } => {
+                    let id = ExprId::new(site.ordinal);
+                    let slot = lowerer.limits.canonical_absdelay_slot(id).ok_or_else(|| {
+                        lowerer.unsupported(format!("absdelay mixed derivative slot {id}"))
+                    })?;
+                    self.emit(lowerer, *input)?;
+                    self.emit(lowerer, *input_derivative)?;
+                    self.emit(lowerer, *delay_time)?;
+                    self.emit(lowerer, *delay_derivative)?;
+                    if let Some(maximum) = max_delay {
+                        self.emit(lowerer, *maximum)?;
+                    }
+                    let count = if max_delay.is_some() { 5 } else { 4 };
+                    require_stack(
+                        lowerer.model.clone(),
+                        lowerer.entry_kind,
+                        "canonical mixed absdelay action",
+                        lowerer.depth,
+                        count,
+                    )?;
+                    lowerer.depth -= count - 1;
+                    let op = match (*derivative_order, max_delay.is_some()) {
+                        (1, false) => NativeOp::AbsDelayStateDerivative(slot),
+                        (1, true) => NativeOp::AbsDelayStateDerivativeMax(slot),
+                        (2, false) => NativeOp::AbsDelayStateMixedDerivative(slot),
+                        (2, true) => NativeOp::AbsDelayStateMixedDerivativeMax(slot),
+                        _ => return Err(lowerer.unsupported("invalid absdelay derivative action")),
+                    };
+                    lowerer.ops.push(op);
+                    Ok(())
+                }
+                other => Err(lowerer.unsupported(format!(
+                    "shared AD produced unsupported state action {other:?}"
+                ))),
+            },
             other => Err(lowerer.unsupported(format!(
                 "shared algebra produced non-algebraic node {other:?}"
             ))),
@@ -288,6 +358,17 @@ impl Algebra {
 }
 
 impl MirEquationLowerer<'_, '_> {
+    pub(super) fn lower_absdelay_higher_derivative(
+        &mut self,
+        expression: ExprId,
+        axes: &[CanonicalDerivativeAxis],
+    ) -> JitResult<()> {
+        let mut algebra = Algebra::default();
+        let root = algebra.import(self, expression)?;
+        let derivative = algebra.differentiate(self, root, axes)?;
+        algebra.emit(self, derivative)
+    }
+
     pub(super) fn lower_mixed_derivative(
         &mut self,
         expression: ExprId,

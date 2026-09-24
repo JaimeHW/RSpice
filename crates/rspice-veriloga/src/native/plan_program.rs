@@ -153,7 +153,9 @@ fn state_slot(op: NativeOp) -> Option<(CanonicalStateFamily, usize)> {
         }
         NativeOp::AbsDelayState(slot)
         | NativeOp::AbsDelayStateMax(slot)
+        | NativeOp::AbsDelayStateMixedDerivative(slot)
         | NativeOp::AbsDelayStateDerivative(slot)
+        | NativeOp::AbsDelayStateMixedDerivativeMax(slot)
         | NativeOp::AbsDelayStateDerivativeMax(slot) => (CanonicalStateOperator::Absdelay, slot),
         NativeOp::LaplaceState(slot) | NativeOp::LaplaceStateDerivative(slot) => {
             (CanonicalStateOperator::Laplace, slot)

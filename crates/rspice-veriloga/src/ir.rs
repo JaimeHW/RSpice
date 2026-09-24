@@ -3577,10 +3577,17 @@ pub mod autodiff {
                     collect!(delay_time);
                 }
                 Heavy::AbsDelayDerivative {
+                    input,
                     input_derivative,
+                    delay_time,
                     delay_derivative,
+                    derivative_order,
                     ..
                 } => {
+                    if derivative_order == 1 {
+                        collect!(input);
+                        collect!(delay_time);
+                    }
                     collect!(input_derivative);
                     collect!(delay_derivative);
                 }
@@ -4933,33 +4940,72 @@ pub mod autodiff {
                         max_delay,
                         derivative_order,
                     } => {
-                        let second_input = differentiate!(input_derivative);
-                        let second_delay = differentiate!(delay_derivative);
-                        let next_delay = differentiate!(delay_time);
-                        let next_delay = simplify(arena, next_delay);
-                        let prior_delay = simplify(arena, delay_derivative);
-                        // For a delay independent of every differentiation
-                        // axis, the interpolation coefficient is constant.
-                        // Reuse its first-order action on the higher input
-                        // derivative. A moving delay needs mixed terms and
-                        // must retain the unsupported-order marker.
-                        let derivative_order = if derivative_order == 1
-                            && matches!(arena.node(prior_delay), Node::Const(v) if *v == 0.0)
-                            && matches!(arena.node(next_delay), Node::Const(v) if *v == 0.0)
-                        {
-                            1
+                        let next_input = differentiate!(input_derivative);
+                        let next_delay = differentiate!(delay_derivative);
+                        if derivative_order == 2 {
+                            // C is constant within the selected interpolation
+                            // segment. Differentiate its two payload factors.
+                            let left = arena.push_heavy(Heavy::AbsDelayDerivative {
+                                site,
+                                input,
+                                input_derivative: next_input,
+                                delay_time,
+                                delay_derivative,
+                                max_delay,
+                                derivative_order: 2,
+                            });
+                            let right = arena.push_heavy(Heavy::AbsDelayDerivative {
+                                site,
+                                input,
+                                input_derivative,
+                                delay_time,
+                                delay_derivative: next_delay,
+                                max_delay,
+                                derivative_order: 2,
+                            });
+                            binary!(BinaryOp::Add, left, right)
                         } else {
-                            derivative_order.saturating_add(1)
-                        };
-                        arena.push_heavy(Heavy::AbsDelayDerivative {
-                            site,
-                            input,
-                            input_derivative: second_input,
-                            delay_time,
-                            delay_derivative: second_delay,
-                            max_delay,
-                            derivative_order,
-                        })
+                            let base = arena.push_heavy(Heavy::AbsDelayDerivative {
+                                site,
+                                input,
+                                input_derivative: next_input,
+                                delay_time,
+                                delay_derivative: next_delay,
+                                max_delay,
+                                derivative_order,
+                            });
+                            let new_input = differentiate!(input);
+                            let new_delay = differentiate!(delay_time);
+                            let new_delay = simplify(arena, new_delay);
+                            let prior_delay = simplify(arena, delay_derivative);
+                            if matches!(arena.node(prior_delay), Node::Const(v) if *v == 0.0)
+                                && matches!(arena.node(new_delay), Node::Const(v) if *v == 0.0)
+                            {
+                                base
+                            } else {
+                                // D(A*p+B*q) = A*Dp+B*Dq+C*(Dx*q+p*Dtd).
+                                let left = arena.push_heavy(Heavy::AbsDelayDerivative {
+                                    site,
+                                    input,
+                                    input_derivative: new_input,
+                                    delay_time,
+                                    delay_derivative,
+                                    max_delay,
+                                    derivative_order: 2,
+                                });
+                                let right = arena.push_heavy(Heavy::AbsDelayDerivative {
+                                    site,
+                                    input,
+                                    input_derivative,
+                                    delay_time,
+                                    delay_derivative: new_delay,
+                                    max_delay,
+                                    derivative_order: 2,
+                                });
+                                let mixed = binary!(BinaryOp::Add, left, right);
+                                binary!(BinaryOp::Add, base, mixed)
+                            }
+                        }
                     }
                     Heavy::Transition {
                         site,

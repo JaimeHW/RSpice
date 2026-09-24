@@ -364,6 +364,24 @@ fn evaluate_stateful_helper(
             )?;
             (Instruction::AbsDelayStateDerivativeMax(index), 5)
         }
+        483 => {
+            require_slot(
+                session,
+                index,
+                session.context.delay_buffers.len(),
+                "delay derivative buffer",
+            )?;
+            (Instruction::AbsDelayStateMixedDerivative(index), 4)
+        }
+        484 => {
+            require_slot(
+                session,
+                index,
+                session.context.delay_buffers.len(),
+                "delay derivative buffer",
+            )?;
+            (Instruction::AbsDelayStateMixedDerivativeMax(index), 5)
+        }
         426 => {
             require_slot(
                 session,
@@ -973,7 +991,7 @@ pub fn math2_v1(opcode: i32, left: f64, right: f64) -> f64 {
 fn is_stateful_opcode(opcode: i32) -> bool {
     matches!(
         opcode,
-        400..=429 | 432 | 440..=449 | 460..=462 | 470..=471 | 480..=482
+        400..=429 | 432 | 440..=449 | 460..=462 | 470..=471 | 480..=484
     )
 }
 
@@ -1187,7 +1205,8 @@ mod tests {
     fn emitted_stateful_helpers_require_the_active_runtime_session() {
         for opcode in [
             400, 401, 410, 411, 412, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 432, 440,
-            442, 443, 444, 445, 446, 447, 448, 449, 460, 461, 462, 470, 471, 480, 481, 482,
+            442, 443, 444, 445, 446, 447, 448, 449, 460, 461, 462, 470, 471, 480, 481, 482, 483,
+            484,
         ] {
             assert!(
                 is_stateful_opcode(opcode),

@@ -57,7 +57,8 @@ use wasmparser::{Encoding, ExternalKind, Imports, Operator, Parser, Payload, Typ
 /// companion Jacobian.
 /// Version 16 adds immutable procedural evaluation inputs to the frame header.
 /// Version 17 adds storage-independent checked array-index helper opcode 3.
-pub const WASM_JIT_ABI_VERSION: u32 = 17;
+/// Version 18 adds exact mixed input/timing transport-delay actions.
+pub const WASM_JIT_ABI_VERSION: u32 = 18;
 
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing
@@ -147,7 +148,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 17;
 /// Version 54 consumes guarded parameter-bounded derivative expansion (HIR 63).
 /// Version 55 differentiates higher-order canonical postfix expressions with shared AD.
 /// Version 56 reuses delay history for higher input derivatives with fixed timing.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 56;
+/// Version 57 emits mixed input/timing transport-delay actions.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 57;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -3294,6 +3296,77 @@ endmodule
                         );
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_absdelay_higher_moving_delay_derivatives_preserve_primal_history() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        use crate::vm::VerilogAEvaluationMode as Mode;
+        let source = include_str!("../../tests/fixtures/higher_moving_delay.va");
+        for postfix in [false, true] {
+            let mut harness =
+                FusedKernelHarness::for_source_with_plan(source, "higher_moving_delay", postfix);
+            harness.reset();
+            harness.write_f64(FusedKernelHarness::PARAMETERS as usize, 0.25);
+            let value = harness.stamp_value_export(0);
+            let jacobian = harness.jacobian_export(0, 0);
+            for time in [0.0, 1.0, 1.1] {
+                for voltage in [-0.2_f64, 0.3, -0.2] {
+                    let context = harness.store.data_mut().context_mut();
+                    context.analysis_type = 2;
+                    context.time = time;
+                    context.set_timestep(1.0);
+                    context.evaluation_mode = Mode::NewtonLimited;
+                    context.begin_stateful_evaluation();
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    // Independent derivatives of the interpolation polynomial.
+                    let d = 0.25 + 0.1 * voltage + 0.05 * voltage * voltage;
+                    let dp = 0.1 + 0.1 * voltage;
+                    let (third, fourth) = if time == 0.0 {
+                        (8.0, 16.0)
+                    } else if time == 1.0 {
+                        (
+                            8.0 * (1.0 - d) - 12.0 * dp - 0.6,
+                            16.0 * (1.0 - d) - 32.0 * dp - 2.4,
+                        )
+                    } else {
+                        (0.0, 0.0)
+                    };
+                    for (entry, gain) in [(&jacobian, fourth), (&value, third)] {
+                        assert_eq!(harness.call(entry), 0);
+                        let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                        let expected = gain * (2.0 * voltage).exp();
+                        assert!(
+                            (actual - expected).abs() < 1e-11,
+                            "postfix={postfix}, t={time}, v={voltage}: {actual} != {expected}"
+                        );
+                    }
+                    let context = harness.store.data_mut().context_mut();
+                    let before = format!("{:?}", context.delay_buffers);
+                    context.evaluation_mode = Mode::StaticDaeProbe;
+                    context.begin_stateful_evaluation();
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    for entry in [&jacobian, &value] {
+                        assert_eq!(harness.call(entry), 0);
+                        assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), 0.0);
+                    }
+                    let context = harness.store.data_mut().context_mut();
+                    assert_eq!(format!("{:?}", context.delay_buffers), before);
+                    context.evaluation_mode = Mode::NewtonLimited;
+                }
+                let context = harness.store.data_mut().context_mut();
+                context.advance_state().unwrap();
+                assert_eq!(context.delay_buffers.len(), 1);
+                assert_eq!(
+                    context.delay_buffers[0].checkpoint().samples.last(),
+                    Some(&(time, (-0.4_f64).exp()))
+                );
             }
         }
     }

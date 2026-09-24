@@ -1152,6 +1152,35 @@ fn nested_ddx_preserves_the_readback_and_its_jacobian() {
 }
 
 #[test]
+fn nested_ddx_moving_delay_preserves_dc_readback_and_jacobian() {
+    let artifact = artifact(
+        "module nested_delay(p,n); inout p,n; electrical p,n; analog I(p,n)<+ddx(ddx(absdelay(V(p,n)*V(p,n)*V(p,n),0.25+0.01*V(p,n)*V(p,n),1.0),V(p,n)),V(p,n)); endmodule",
+    );
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).unwrap();
+    let lanes: Vec<_> = (0..artifact.mir.nodes.len())
+        .map(|index| AdSeed::NodePotential(index.into()))
+        .collect();
+    let mut ad = differentiate(&cfg.function, &lanes).unwrap();
+    assert!(ad.function.values.iter().any(|v| matches!(
+        v.kind,
+        rspice_veriloga::canonical_ir::cfg::CfgValueKind::AbsDelayDerivative { order: 2, .. }
+    )));
+    let row = ad.derivative_row(cfg.residuals[0]);
+    let mut bias = bias_point(&artifact);
+    for voltage in [-0.8, 0.0, 1.3] {
+        bias.node_potentials[0] = voltage;
+        bias.node_potentials[1] = 0.2;
+        let snapshot = evaluate_cfg(&ad.function, &inputs(&bias)).unwrap();
+        let actual = snapshot.value(cfg.residuals[0]).unwrap();
+        assert!((actual - 6.0 * (voltage - 0.2)).abs() < 1e-11, "{actual}");
+        for (lane, expected) in [6.0, -6.0].into_iter().enumerate() {
+            let actual = row[lane].and_then(|v| snapshot.value(v)).unwrap_or(0.0);
+            assert!((actual - expected).abs() < 1e-11, "lane {lane}: {actual}");
+        }
+    }
+}
+
+#[test]
 fn recursive_ddx_reports_unbounded_derivative_order() {
     let artifact = artifact(
         "module recursive_ddx(p,n); inout p,n; electrical p,n; real x; integer k; analog begin x=exp(V(p,n)); for(k=0;k<V(p,n);k=k+1) x=ddx(x,V(p,n)); I(p,n)<+x; end endmodule",

@@ -16,6 +16,7 @@ use crate::native::abi::{
     INTEGER_CAST_DESCRIPTOR, integer_binary_const_descriptor, integer_binary_descriptor,
     integer_shift_const_descriptor, rspice_above_state_native,
     rspice_absdelay_derivative_max_native, rspice_absdelay_derivative_native,
+    rspice_absdelay_mixed_derivative_max_native, rspice_absdelay_mixed_derivative_native,
     rspice_absdelay_state_max_native, rspice_absdelay_state_native, rspice_acos, rspice_acosh,
     rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh,
     rspice_checked_array_index_native, rspice_cos, rspice_cosh, rspice_cross_state_native,
@@ -1856,6 +1857,19 @@ impl FunctionCompiler {
                 buffer_id,
                 rspice_absdelay_derivative_max_native as *const () as usize,
             )?,
+            NativeOp::AbsDelayStateMixedDerivative(buffer_id) => self.emit_operand_context_helper(
+                prepared,
+                4,
+                buffer_id,
+                rspice_absdelay_mixed_derivative_native as *const () as usize,
+            )?,
+            NativeOp::AbsDelayStateMixedDerivativeMax(buffer_id) => self
+                .emit_operand_context_helper(
+                    prepared,
+                    5,
+                    buffer_id,
+                    rspice_absdelay_mixed_derivative_max_native as *const () as usize,
+                )?,
             NativeOp::CrossState(detector_id) => self.emit_operand_context_helper(
                 prepared,
                 5,
