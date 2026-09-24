@@ -47,7 +47,7 @@ impl MonteCarloCheckpointLibrary {
             ResourceLimits::default().max_external_data_bytes,
         )
     }
-    fn insert_bounded(
+    pub(crate) fn insert_bounded(
         &mut self,
         name: String,
         checkpoint: MonteCarloCheckpointEvidence,
@@ -167,6 +167,3 @@ impl MonteCarloCheckpointEvidence {
         Ok(file.checkpoint)
     }
 }
-
-#[cfg(test)]
-mod tests;

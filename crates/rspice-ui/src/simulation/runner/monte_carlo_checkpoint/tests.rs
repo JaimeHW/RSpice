@@ -11,6 +11,8 @@ use crate::simulation::runner::worker_contract::*;
 use crate::simulation::runner::*;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+mod library_persistence;
+
 const DECK: &str = "Checkpoint dispatch\n.param r=1k\nV1 in 0 1\nR1 in out {r}\nR2 out 0 1k\n.mc 3 uniform 0.2 seed 37\n.end\n";
 fn fixture() -> (SimulationRequest, NetlistInput) {
     let config = crate::simulation::AnalysisConfig::dc_op();

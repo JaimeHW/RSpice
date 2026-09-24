@@ -1,11 +1,12 @@
-//! Checkpoint-library tests reject corrupt and oversized serialized trial files.
+//! A completed trial journal must survive portable import and project persistence.
 
 use super::*;
+use crate::product::ContentDigest;
+use crate::state::{MonteCarloCheckpointEvidence, MonteCarloCheckpointLibrary};
 
 #[test]
 fn monte_carlo_checkpoint_file_round_trip_rejects_corruption_and_bounds() {
-    let (_, bytes, _) =
-        crate::simulation::runner::monte_carlo_checkpoint::tests::completed_checkpoint_fixture();
+    let (_, bytes, _) = completed_checkpoint_fixture();
     let checkpoint = MonteCarloCheckpointEvidence::from_bytes(bytes.clone()).unwrap();
     let source = String::from_utf8(checkpoint.to_portable_file().unwrap()).unwrap();
     let restored = MonteCarloCheckpointEvidence::from_portable_file(&source).unwrap();
