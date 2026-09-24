@@ -169,7 +169,7 @@ generated device is the canonical implementation, and a hand-written native port
 of the same family serves the `LEVEL`-card decks that reach it.
 
 All 43 models reach every shipped target: desktop via
-`rspice-ui --features generated-veriloga-catalog`, WebAssembly with no native
+`rspice-app --features generated-veriloga-catalog`, WebAssembly with no native
 JIT dependency, and Android or iOS ARM64 via
 `rspice-core --no-default-features --features veriloga-builtins`.
 
@@ -274,7 +274,7 @@ model packs, governed Python automation, published figure and report bundles,
 organization-managed drawing sheets, and an optional cloud worker client.
 
 ```bash
-cargo run --release -p rspice-ui
+cargo run --release -p rspice-app
 ```
 
 ### Python
@@ -406,7 +406,7 @@ AC-family analyses are [faer](https://crates.io/crates/faer).
 | :--- | :--- |
 | `rspice-core` | Simulation engine: parser, device models, solvers, analyses, validation harnesses |
 | `rspice-cli` | Command-line interface for simulation, validation, conversion, and reporting |
-| `rspice-ui` | Desktop IDE for schematic capture, simulation setup, and result analysis |
+| `rspice-app` | Desktop IDE for schematic capture, simulation setup, and result analysis |
 | `rspice-veriloga` | Verilog-A parser, semantic pipeline, bytecode VM, native JIT, generated-Rust backend |
 | `rspice-python` | Python bindings built with PyO3 |
 | `rspice-wasm` | WebAssembly bindings for the engine |

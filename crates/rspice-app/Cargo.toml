@@ -1,5 +1,5 @@
 [package]
-name = "rspice-ui"
+name = "rspice-app"
 version.workspace = true
 edition.workspace = true
 description = "Modern circuit simulator GUI for RSpice - Commercial-grade egui application"
@@ -17,7 +17,7 @@ doctest = false
 
 # Desktop binary
 [[bin]]
-name = "rspice-ui"
+name = "rspice-app"
 path = "src/main.rs"
 test = false
 

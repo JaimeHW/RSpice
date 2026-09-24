@@ -18,8 +18,8 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use rspice_ui::state::schematic::SchematicState;
-//! use rspice_ui::app::simulation::netlist_gen::NetlistGenerator;
+//! use rspice_app::state::schematic::SchematicState;
+//! use rspice_app::app::simulation::netlist_gen::NetlistGenerator;
 //!
 //! let schematic = SchematicState::default();
 //! let generator = NetlistGenerator::new(&schematic);

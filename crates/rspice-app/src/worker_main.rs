@@ -8,19 +8,19 @@
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = rspiceUiWasmJitProbeModule)]
 pub fn rspice_ui_wasm_jit_probe_module() -> Result<Vec<u8>, wasm_bindgen::JsValue> {
-    rspice_ui::rspice_ui_wasm_jit_probe_module().map_err(Into::into)
+    rspice_app::rspice_ui_wasm_jit_probe_module().map_err(Into::into)
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = rspiceUiWasmJitAbiVersion)]
 pub fn rspice_ui_wasm_jit_abi_version() -> u32 {
-    rspice_ui::rspice_ui_wasm_jit_abi_version()
+    rspice_app::rspice_ui_wasm_jit_abi_version()
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = rspiceUiWasmJitEmitterVersion)]
 pub fn rspice_ui_wasm_jit_emitter_version() -> u32 {
-    rspice_ui::rspice_ui_wasm_jit_emitter_version()
+    rspice_app::rspice_ui_wasm_jit_emitter_version()
 }
 
 // Capability exports bound directly into every generated model module.
@@ -48,7 +48,7 @@ pub extern "C" fn rspice_ui_wasm_jit_eval_op_v1(
     operand3: f64,
     operand4: f64,
 ) -> f64 {
-    rspice_ui::rspice_ui_wasm_jit_eval_op_v1(
+    rspice_app::rspice_ui_wasm_jit_eval_op_v1(
         frame_offset,
         opcode,
         aux0,
@@ -72,7 +72,7 @@ pub extern "C" fn rspice_ui_wasm_jit_eval_op_slice_v1(
     aux2: i64,
     operand_count: i32,
 ) -> f64 {
-    rspice_ui::rspice_ui_wasm_jit_eval_op_slice_v1(
+    rspice_app::rspice_ui_wasm_jit_eval_op_slice_v1(
         frame_offset,
         opcode,
         aux0,
@@ -85,19 +85,19 @@ pub extern "C" fn rspice_ui_wasm_jit_eval_op_slice_v1(
 #[cfg(target_arch = "wasm32")]
 #[unsafe(no_mangle)]
 pub extern "C" fn rspice_ui_wasm_jit_math1_v1(opcode: i32, value: f64) -> f64 {
-    rspice_ui::rspice_ui_wasm_jit_math1_v1(opcode, value)
+    rspice_app::rspice_ui_wasm_jit_math1_v1(opcode, value)
 }
 
 #[cfg(target_arch = "wasm32")]
 #[unsafe(no_mangle)]
 pub extern "C" fn rspice_ui_wasm_jit_math2_v1(opcode: i32, left: f64, right: f64) -> f64 {
-    rspice_ui::rspice_ui_wasm_jit_math2_v1(opcode, left, right)
+    rspice_app::rspice_ui_wasm_jit_math2_v1(opcode, left, right)
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = prepareRspiceUiWasmJitProbe)]
 pub fn prepare_rspice_ui_wasm_jit_probe() -> Result<u32, wasm_bindgen::JsValue> {
-    rspice_ui::prepare_rspice_ui_wasm_jit_probe().map_err(Into::into)
+    rspice_app::prepare_rspice_ui_wasm_jit_probe().map_err(Into::into)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -106,34 +106,34 @@ pub fn finish_rspice_ui_wasm_jit_probe(
     frame_offset: u32,
     status: i32,
 ) -> Result<f64, wasm_bindgen::JsValue> {
-    rspice_ui::finish_rspice_ui_wasm_jit_probe(frame_offset, status).map_err(Into::into)
+    rspice_app::finish_rspice_ui_wasm_jit_probe(frame_offset, status).map_err(Into::into)
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = rspiceUiWasmJitSolverProbeArtifact)]
 pub fn rspice_ui_wasm_jit_solver_probe_artifact()
 -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    rspice_ui::rspice_ui_wasm_jit_solver_probe_artifact()
+    rspice_app::rspice_ui_wasm_jit_solver_probe_artifact()
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = rspiceUiWasmJitRunSolverProbe)]
 pub fn rspice_ui_wasm_jit_run_solver_probe() -> Result<f64, wasm_bindgen::JsValue> {
-    rspice_ui::rspice_ui_wasm_jit_run_solver_probe().map_err(Into::into)
+    rspice_app::rspice_ui_wasm_jit_run_solver_probe().map_err(Into::into)
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = rspiceUiWasmJitKernelProbeArtifact)]
 pub fn rspice_ui_wasm_jit_kernel_probe_artifact()
 -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    rspice_ui::rspice_ui_wasm_jit_kernel_probe_artifact()
+    rspice_app::rspice_ui_wasm_jit_kernel_probe_artifact()
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = rspiceUiWasmJitRunKernelProbe)]
 pub fn rspice_ui_wasm_jit_run_kernel_probe() -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue>
 {
-    rspice_ui::rspice_ui_wasm_jit_run_kernel_probe().map_err(Into::into)
+    rspice_app::rspice_ui_wasm_jit_run_kernel_probe().map_err(Into::into)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -141,7 +141,7 @@ pub fn rspice_ui_wasm_jit_run_kernel_probe() -> Result<wasm_bindgen::JsValue, wa
 pub fn run_rspice_ui_worker_request(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    rspice_ui::run_rspice_ui_worker_request(value)
+    rspice_app::run_rspice_ui_worker_request(value)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -149,13 +149,13 @@ pub fn run_rspice_ui_worker_request(
 pub fn prepare_rspice_ui_wasm_jit_request(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    rspice_ui::prepare_rspice_ui_wasm_jit_request(value)
+    rspice_app::prepare_rspice_ui_wasm_jit_request(value)
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = installRspiceUiWasmJitDispatcher)]
 pub fn install_rspice_ui_wasm_jit_dispatcher(dispatcher: js_sys::Function) {
-    rspice_ui::install_rspice_ui_wasm_jit_dispatcher(dispatcher);
+    rspice_app::install_rspice_ui_wasm_jit_dispatcher(dispatcher);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -163,7 +163,7 @@ pub fn install_rspice_ui_wasm_jit_dispatcher(dispatcher: js_sys::Function) {
 pub fn run_prepared_rspice_ui_wasm_jit_request(
     dispatch_token: u32,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    rspice_ui::run_prepared_rspice_ui_wasm_jit_request(dispatch_token)
+    rspice_app::run_prepared_rspice_ui_wasm_jit_request(dispatch_token)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -171,7 +171,7 @@ pub fn run_prepared_rspice_ui_wasm_jit_request(
 pub fn cancel_prepared_rspice_ui_wasm_jit_request(
     dispatch_token: u32,
 ) -> Result<(), wasm_bindgen::JsValue> {
-    rspice_ui::cancel_prepared_rspice_ui_wasm_jit_request(dispatch_token)
+    rspice_app::cancel_prepared_rspice_ui_wasm_jit_request(dispatch_token)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -179,7 +179,7 @@ pub fn cancel_prepared_rspice_ui_wasm_jit_request(
 pub fn run_rspice_ui_veriloga_compile_request(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    rspice_ui::run_rspice_ui_veriloga_compile_request(value)
+    rspice_app::run_rspice_ui_veriloga_compile_request(value)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -187,7 +187,7 @@ pub fn run_rspice_ui_veriloga_compile_request(
 pub fn run_rspice_ui_hardcopy_request(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    rspice_ui::run_rspice_ui_hardcopy_request(value)
+    rspice_app::run_rspice_ui_hardcopy_request(value)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -195,7 +195,7 @@ pub fn run_rspice_ui_hardcopy_request(
 pub fn run_rspice_ui_model_import_request(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    rspice_ui::run_rspice_ui_model_import_request(value)
+    rspice_app::run_rspice_ui_model_import_request(value)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -203,7 +203,7 @@ pub fn run_rspice_ui_model_import_request(
 pub fn run_rspice_ui_pdk_import_request(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    rspice_ui::run_rspice_ui_pdk_import_request(value)
+    rspice_app::run_rspice_ui_pdk_import_request(value)
 }
 
 fn main() {}

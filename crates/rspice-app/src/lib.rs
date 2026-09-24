@@ -1,16 +1,15 @@
-//! RSpice UI - Commercial-Grade Circuit Simulator Interface
+//! RSpice application composition and migration surface.
 //!
 //! A high-performance GUI for the RSpice circuit simulation engine,
 //! built with egui for GPU-accelerated desktop deployment.
 //!
 //! # Architecture
 //!
-//! This crate is the RSpice application, deliberately kept whole. The
-//! simulation engine lives in `rspice-core` and `rspice-veriloga`; everything
-//! the application itself owns — persisted design state, project I/O, run
-//! orchestration, viewer mathematics, and chrome — stays here. Modules that
-//! never mention `egui` are therefore expected, not misplaced: they are the
-//! application layer, not the presentation layer.
+//! This crate currently holds both application composition and modules being
+//! extracted to headless owners. The simulation engine lives in `rspice-core`
+//! and `rspice-veriloga`. Persisted design state, project I/O, run
+//! orchestration, viewer mathematics, and chrome remain here until each owner
+//! moves across a checked crate boundary.
 //!
 //! Because there is no crate boundary to lean on, the module layering is
 //! enforced by `tests/module_layering.rs` instead. A module may reference
@@ -198,7 +197,7 @@ mod fixture_root;
 // The crate's entire external surface
 // =============================================================================
 //
-// `rspice-ui` is an application, not a library. Its only consumers are the
+// `rspice-app` is an application, not a library. Its only consumers are the
 // desktop and browser binary in `main.rs` and the integration tests --
 // nothing in the workspace depends on it. Every
 // module above is therefore `pub(crate)`, and everything reachable from

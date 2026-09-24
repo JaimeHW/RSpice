@@ -197,10 +197,10 @@ debug = 0
 # tests do that thousands of times over — the studio's press sweep alone builds
 # three hundred of them. Unoptimized, egui's layout and its text stack
 # (harfrust shaping, skrifa outlines, vello_cpu rasterization) is where most of
-# `cargo test -p rspice-ui --lib` goes.
+# `cargo test -p rspice-app --lib` goes.
 #
 # Measured on a 28-core Windows box: the press-sweep module falls from 23s to
-# 7.6s and the whole rspice-ui library suite from 74s to 49s, for one dependency
+# 7.6s and the whole rspice-app library suite from 74s to 49s, for one dependency
 # rebuild of about fifteen minutes. Restricting this to the render and text
 # crates by name was measured too: it bought the same 7.6s on the sweep but only
 # 60s on the suite, and it is a list that goes stale the next time egui changes

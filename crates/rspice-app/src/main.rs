@@ -45,7 +45,7 @@ fn main() {
     // probe warnings from normal desktop stderr — and carry what the engine
     // logs during a run into that run's Console, which is the only place a
     // windowed application's reader can see it.
-    rspice_ui::install_studio_logger();
+    rspice_app::install_studio_logger();
 
     log::info!("Starting RSpice UI with egui (commercial-grade GPU rendering)...");
 
@@ -79,7 +79,7 @@ fn main() {
     if let Err(e) = eframe::run_native(
         "RSpice",
         options,
-        Box::new(|cc| Ok(Box::new(rspice_ui::RSpiceApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(rspice_app::RSpiceApp::new(cc)))),
     ) {
         log::error!("Failed to launch RSpice: {}", e);
         std::process::exit(1);
@@ -156,7 +156,7 @@ fn main() {
             .start(
                 canvas,
                 web_options,
-                Box::new(|cc| Ok(Box::new(rspice_ui::RSpiceApp::new(cc)))),
+                Box::new(|cc| Ok(Box::new(rspice_app::RSpiceApp::new(cc)))),
             )
             .await;
 

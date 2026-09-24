@@ -52,7 +52,7 @@ fn run(seed: u64, source: &str) -> serde_json::Value {
         "buffers": [], "byteBuffers": []
     });
     let value = js_sys::JSON::parse(&request.to_string()).unwrap();
-    let response = rspice_ui::run_rspice_ui_worker_request(value)
+    let response = rspice_app::run_rspice_ui_worker_request(value)
         .expect("worker must return valid Monte Carlo results");
     let response = structured_clone(&response);
     let response: serde_json::Value = serde_wasm_bindgen::from_value(response).unwrap();
@@ -121,7 +121,7 @@ fn transient_quality_survives_the_worker_and_structured_clone_before_output_crop
         "buffers": [], "byteBuffers": []
     });
     let response =
-        rspice_ui::run_rspice_ui_worker_request(js_sys::JSON::parse(&request.to_string()).unwrap())
+        rspice_app::run_rspice_ui_worker_request(js_sys::JSON::parse(&request.to_string()).unwrap())
             .unwrap();
     let response = structured_clone(&response);
     assert_eq!(
@@ -172,7 +172,7 @@ fn nested_dc_curves_and_exact_traversal_survive_the_worker_and_structured_clone(
         },"buffers":[], "byteBuffers":[]
     });
     let response =
-        rspice_ui::run_rspice_ui_worker_request(js_sys::JSON::parse(&request.to_string()).unwrap())
+        rspice_app::run_rspice_ui_worker_request(js_sys::JSON::parse(&request.to_string()).unwrap())
             .unwrap();
     let response = structured_clone(&response);
     assert_eq!(
@@ -257,7 +257,7 @@ fn scoped_soa_current_rules_reach_the_solver_and_transfer_complete_evidence() {
         }, "buffers": [], "byteBuffers": []
     });
     let response =
-        rspice_ui::run_rspice_ui_worker_request(js_sys::JSON::parse(&request.to_string()).unwrap())
+        rspice_app::run_rspice_ui_worker_request(js_sys::JSON::parse(&request.to_string()).unwrap())
             .unwrap();
     let response = structured_clone(&response);
     let buffers = js_sys::Reflect::get(&response, &"buffers".into())
@@ -319,7 +319,7 @@ fn optimization_expression_reaches_a_current_target_through_the_worker() {
         "buffers": [], "byteBuffers": []
     });
     let response =
-        rspice_ui::run_rspice_ui_worker_request(js_sys::JSON::parse(&request.to_string()).unwrap())
+        rspice_app::run_rspice_ui_worker_request(js_sys::JSON::parse(&request.to_string()).unwrap())
             .unwrap();
     let response = structured_clone(&response);
     let metadata: serde_json::Value = serde_wasm_bindgen::from_value(
@@ -359,7 +359,7 @@ fn envelope_initializer_settings_execute_and_pss_budget_survives_worker_transpor
             },
             "buffers": [], "byteBuffers": []
         });
-        let response = rspice_ui::run_rspice_ui_worker_request(
+        let response = rspice_app::run_rspice_ui_worker_request(
             js_sys::JSON::parse(&request.to_string()).unwrap(),
         )
         .unwrap();
@@ -421,7 +421,7 @@ fn optimization_rejects_failed_and_overflowed_costs_through_the_worker() {
                 "dependency_buffer_count": 0
             }, "buffers": [], "byteBuffers": []
         });
-        let response = rspice_ui::run_rspice_ui_worker_request(
+        let response = rspice_app::run_rspice_ui_worker_request(
             js_sys::JSON::parse(&request.to_string()).unwrap(),
         )
         .unwrap();

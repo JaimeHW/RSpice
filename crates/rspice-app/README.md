@@ -1,4 +1,4 @@
-# rspice-ui
+# rspice-app
 
 The graphical front end for RSpice: schematic capture, netlist editing,
 simulation setup and control, and result viewing in one egui/eframe
@@ -463,17 +463,17 @@ device catalog, through `generated-veriloga-catalog`.
 Run these commands from the workspace root:
 
 ```bash
-# Desktop application (binary name: rspice-ui)
-cargo run -p rspice-ui --release --features generated-veriloga-catalog
+# Desktop application (binary name: rspice-app)
+cargo run -p rspice-app --release --features generated-veriloga-catalog
 
 # Unit tests (inline #[cfg(test)] modules across the crate)
-cargo test -p rspice-ui
+cargo test -p rspice-app
 
 # Browser release images are deliberately built separately so Cargo feature
 # unification cannot pull worker execution paths back into the UI image.
-cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --features generated-veriloga-catalog --target wasm32-unknown-unknown
-cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui-worker --features browser-worker,generated-veriloga-catalog --target wasm32-unknown-unknown
-wasm-bindgen --target web --out-name rspice-ui --out-dir crates/rspice-app/web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
+cargo build --locked --profile web-release -p rspice-app --bin rspice-app --features generated-veriloga-catalog --target wasm32-unknown-unknown
+cargo build --locked --profile web-release -p rspice-app --bin rspice-ui-worker --features browser-worker,generated-veriloga-catalog --target wasm32-unknown-unknown
+wasm-bindgen --target web --out-name rspice-ui --out-dir crates/rspice-app/web/pkg target/wasm32-unknown-unknown/web-release/rspice-app.wasm
 wasm-bindgen --target web --out-name rspice-ui-worker --out-dir crates/rspice-app/web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui-worker.wasm
 python3 tools/ci/check_wasm_jit_browser.py
 ```
@@ -490,8 +490,8 @@ and a matching ChromeDriver are required; `--browser` and `--driver` select them
 when automatic discovery is unsuitable.
 
 ```bash
-cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --features browser-qualification,generated-veriloga-catalog --target wasm32-unknown-unknown
-wasm-bindgen --target web --out-name rspice-ui --out-dir crates/rspice-app/web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
+cargo build --locked --profile web-release -p rspice-app --bin rspice-app --features browser-qualification,generated-veriloga-catalog --target wasm32-unknown-unknown
+wasm-bindgen --target web --out-name rspice-ui --out-dir crates/rspice-app/web/pkg target/wasm32-unknown-unknown/web-release/rspice-app.wasm
 python3 tools/ci/check_browser_workbench.py --output target/workbench-qualification
 python3 tools/ci/check_browser_engine_recovery.py --web-root crates/rspice-app/web --output target/engine-recovery-qualification
 ```
@@ -567,7 +567,7 @@ explicitly, optionally pointing `RSPICE_MOCKUP_ROOT` at the checkout:
 
 ```bash
 RSPICE_MOCKUP_ROOT=/path/to/rspice-workbench-host \
-  cargo test -p rspice-ui --lib workbench::feature_availability_data::tests:: -- --ignored
+  cargo test -p rspice-app --lib workbench::feature_availability_data::tests:: -- --ignored
 ```
 
 Capability-resolver security tests do not depend on that external tree. Their
@@ -609,13 +609,13 @@ wire format changes, not routine tooling.
 # Regenerate a signed fixture (Ed25519 signing is deterministic, so the same
 # secret and parameters reproduce a byte-identical key)
 RSPICE_LICENSE_SECRET=<hex64> RSPICE_LICENSE_NAME="Name" \
-  cargo test -p rspice-ui --lib mint_signed_key -- --ignored --nocapture
+  cargo test -p rspice-app --lib mint_signed_key -- --ignored --nocapture
 ```
 
 ```bash
 # Rotate the development signer (key id 0x01); paste the printed Rust array
 # into DEVELOPMENT_VERIFYING_KEYS and never commit the secret
-cargo test -p rspice-ui --lib mint_development_signer -- --ignored --nocapture
+cargo test -p rspice-app --lib mint_development_signer -- --ignored --nocapture
 ```
 
 `mint_signed_key` accepts `RSPICE_LICENSE_{KEY_ID,TIER,SEATS,ISSUED_DAYS,

@@ -38,7 +38,7 @@ pub(crate) mod smith_chart;
 //
 // This is a whole class, not a quirk of this module, and rustc cannot separate
 // it from real dead imports: it reports both from the plain lib pass. The
-// discriminator is `cargo test -p rspice-ui --lib --no-run`, which compiles
+// discriminator is `cargo test -p rspice-app --lib --no-run`, which compiles
 // the lib *with* `cfg(test)`; an import still reported unused there is used by
 // nobody and is safe to delete. Cross-check `--target wasm32-unknown-unknown`
 // the same way before deleting anything a browser-only path might name.

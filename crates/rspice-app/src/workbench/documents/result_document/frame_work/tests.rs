@@ -821,7 +821,7 @@ fn corrupted_evidence_closes_the_gates_that_read_the_memo() {
 /// Not a gate: `--ignored` keeps it out of the ordinary run.
 ///
 /// ```text
-/// cargo test -p rspice-ui --lib report_idle_frame_work -- --ignored --nocapture
+/// cargo test -p rspice-app --lib report_idle_frame_work -- --ignored --nocapture
 /// ```
 // The crate denies `print_stdout` because the desktop build detaches from its
 // console and the browser build has no stderr, so a stray diagnostic reaches

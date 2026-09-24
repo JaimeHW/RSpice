@@ -29,7 +29,7 @@
 //! opening a `pub` hole in the crate root, and where `cfg(test)` keeps signing
 //! code out of every shipped binary. Production issuance is not done here at
 //! all: it belongs to the platform backend's cold-key flow. Run
-//! `cargo test -p rspice-ui --lib mint_signed_key -- --ignored --nocapture`
+//! `cargo test -p rspice-app --lib mint_signed_key -- --ignored --nocapture`
 //! to regenerate a fixture, or `mint_development_signer` to rotate key
 //! `0x01`.
 
@@ -956,7 +956,7 @@ mod tests {
     /// Mints a fresh signer. Run by hand only, on a key rotation:
     ///
     /// ```text
-    /// cargo test -p rspice-ui --lib mint_development_signer -- --ignored --nocapture
+    /// cargo test -p rspice-app --lib mint_development_signer -- --ignored --nocapture
     /// ```
     ///
     /// The secret is printed once and must never enter the repository; paste
@@ -986,7 +986,7 @@ mod tests {
     /// ```text
     /// RSPICE_LICENSE_SECRET=<hex64> \
     /// RSPICE_LICENSE_NAME="Jaime Whitfield" \
-    ///   cargo test -p rspice-ui --lib mint_signed_key -- --ignored --nocapture
+    ///   cargo test -p rspice-app --lib mint_signed_key -- --ignored --nocapture
     /// ```
     ///
     /// Ed25519 signing is deterministic, so the same secret and the same

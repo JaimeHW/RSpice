@@ -14,7 +14,7 @@
 //! # Usage
 //!
 //! ```rust
-//! use rspice_ui::state::pdk_config::{PdkConfig, DiscoveredFile};
+//! use rspice_app::state::pdk_config::{PdkConfig, DiscoveredFile};
 //!
 //! let mut config = PdkConfig::new();
 //! config.add_library_path("/path/to/pdk/models");

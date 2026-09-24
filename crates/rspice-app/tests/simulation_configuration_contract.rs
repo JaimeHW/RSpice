@@ -1,4 +1,4 @@
-use rspice_ui::{
+use rspice_app::{
     AnalysisInstanceId, CellViewRef, DesignVariable, DesignVariableNetlistContext,
     DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange, DesignVariableScope,
     DesignVariableSweepEligibility, ProjectWorkspace, SavedOutput, SavedOutputCompatibility,

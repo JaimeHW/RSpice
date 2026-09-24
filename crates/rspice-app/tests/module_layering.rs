@@ -1,11 +1,10 @@
-//! Architectural layering ratchet for the `rspice-ui` application crate.
+//! Architectural layering ratchet for the `rspice-app` application crate.
 //!
-//! `rspice-ui` is deliberately a single application crate: the simulation
-//! engine lives in `rspice-core` and `rspice-veriloga`, and everything the
-//! GUI application itself owns — state, project I/O, orchestration, viewer
-//! mathematics, chrome — stays here. That is a considered decision, but it
-//! costs the one thing a crate split would have given for free: the compiler
-//! no longer refuses an import that inverts the architecture.
+//! The application still contains modules awaiting extraction: state, project
+//! I/O, orchestration, viewer mathematics, and chrome currently share this
+//! crate. The engine already lives in `rspice-core` and `rspice-veriloga`.
+//! Until the remaining owners have crate boundaries, the compiler cannot
+//! reject every import that inverts this internal architecture.
 //!
 //! This test is the substitute. It declares the intended layer order and
 //! fails when a module reaches sideways or upward through `crate::`.
@@ -124,7 +123,7 @@ const LAYERS: &[(&str, u32)] = &[
 /// # Re-measured 2026-08-17
 ///
 /// Between 2026-08-01 and 2026-08-17 nothing ran this target. Every
-/// `rspice-ui` step in `ci.yml` was `--lib`, which does not build integration
+/// `rspice-app` step in `ci.yml` was `--lib`, which does not build integration
 /// tests, and the Coverage job that did run it had been red for months. Three
 /// top-level edges and eight inside the shell grew in that window with no
 /// build failing, which is the failure mode this table exists to prevent — a
@@ -1132,7 +1131,7 @@ fn workbench_references_respect_the_layer_order() {
 
 /// The crate has no `pub mod` declarations, and must not gain one.
 ///
-/// `rspice-ui` is an application, not a library: its only consumers are its
+/// `rspice-app` is an application, not a library: its only consumers are its
 /// own `main.rs`, the three wasm entry points in `lib.rs`, and the integration
 /// tests. Everything they need is re-exported from the crate root, so no
 /// module needs to be public at all.
