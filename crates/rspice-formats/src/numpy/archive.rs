@@ -2,17 +2,9 @@
 
 use std::collections::BTreeSet;
 
-use super::{MAX_COLUMNS, encode_complex_array, encode_real_array};
+use super::{MAX_COLUMNS, NamedArray, encode_complex_array, encode_real_array};
 use crate::zip::deterministic_stored_zip;
 use num_complex::Complex64;
-
-/// A named real or rectangular complex column borrowed from a result table.
-#[derive(Debug, Clone, Copy)]
-pub struct NamedArray<'a> {
-    pub name: &'a str,
-    pub real: &'a [f64],
-    pub imag: Option<&'a [f64]>,
-}
 
 /// A member name RSpice's own archive reader will accept.
 ///

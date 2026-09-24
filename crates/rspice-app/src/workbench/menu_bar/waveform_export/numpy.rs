@@ -35,9 +35,7 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
-use num_complex::Complex64;
-use rspice_formats::numpy::archive::NamedArray;
-use rspice_formats::numpy::{encode_complex_array, encode_real_array};
+use rspice_formats::numpy::NamedArray;
 
 /// `result_import_workflow::MAX_RESULT_COLUMNS`, and
 /// `result_import_adapters::MAX_ARCHIVE_MEMBERS`, which are the same number.
@@ -228,37 +226,8 @@ pub(super) fn prepare_numpy(
     Ok(export)
 }
 
-/// One 2-D array, C order, coordinate first.
-pub(super) fn encode_npy(export: &NumpyExport) -> Result<Vec<u8>, String> {
-    let rows = export.coordinate.len();
-    let columns = export.columns();
-    let shape = [rows as u64, columns as u64];
-    if export.is_complex() {
-        let mut values = Vec::with_capacity(rows * columns);
-        for row in 0..rows {
-            values.push(Complex64::new(export.coordinate[row], 0.0));
-            for signal in &export.signals {
-                values.push(Complex64::new(
-                    signal.real[row],
-                    signal.imag.as_ref().map_or(0.0, |imag| imag[row]),
-                ));
-            }
-        }
-        encode_complex_array(&shape, &values)
-    } else {
-        let mut values = Vec::with_capacity(rows * columns);
-        for row in 0..rows {
-            values.push(export.coordinate[row]);
-            for signal in &export.signals {
-                values.push(signal.real[row]);
-            }
-        }
-        encode_real_array(&shape, &values)
-    }
-}
-
-pub(super) fn encode_npz(export: &NumpyExport) -> Result<Vec<u8>, String> {
-    let signals = export
+fn borrowed_arrays(export: &NumpyExport) -> Vec<NamedArray<'_>> {
+    export
         .signals
         .iter()
         .map(|signal| NamedArray {
@@ -266,8 +235,20 @@ pub(super) fn encode_npz(export: &NumpyExport) -> Result<Vec<u8>, String> {
             real: &signal.real,
             imag: signal.imag.as_deref(),
         })
-        .collect::<Vec<_>>();
-    rspice_formats::numpy::archive::encode_npz(export.coordinate_name, &export.coordinate, &signals)
+        .collect()
+}
+
+/// One 2-D array, C order, coordinate first.
+pub(super) fn encode_npy(export: &NumpyExport) -> Result<Vec<u8>, String> {
+    rspice_formats::numpy::matrix::encode_npy(&export.coordinate, &borrowed_arrays(export))
+}
+
+pub(super) fn encode_npz(export: &NumpyExport) -> Result<Vec<u8>, String> {
+    rspice_formats::numpy::archive::encode_npz(
+        export.coordinate_name,
+        &export.coordinate,
+        &borrowed_arrays(export),
+    )
 }
 
 pub(super) fn export_numpy(
