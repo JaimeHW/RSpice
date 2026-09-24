@@ -986,110 +986,54 @@ pub fn xlsx_bytes(
     include_hidden_columns: bool,
     selected_rows: Option<&std::collections::BTreeSet<String>>,
 ) -> Result<Vec<u8>, String> {
-    use rust_xlsxwriter::{Color, Format, Workbook};
-
     let projection = dataset.project_selected(view, include_hidden_columns, selected_rows);
-    let mut workbook = Workbook::new();
-    let worksheet = workbook.add_worksheet();
-    worksheet
-        .set_name("Engineering table")
-        .map_err(|error| error.to_string())?;
-    let header_format = Format::new()
-        .set_bold()
-        .set_background_color(Color::RGB(0x20282d))
-        .set_font_color(Color::RGB(0xd7dbde));
-    let row_offset = u32::from(include_headers);
-    if include_headers {
-        for (column_index, column) in projection.columns.iter().enumerate() {
-            let header = if include_units {
-                column.unit.as_ref().map_or_else(
-                    || column.label.clone(),
-                    |unit| format!("{} [{}]", column.label, unit),
-                )
-            } else {
-                column.label.clone()
-            };
-            worksheet
-                .write_string_with_format(0, column_index as u16, &header, &header_format)
-                .map_err(|error| error.to_string())?;
-        }
-        if !projection.columns.is_empty() {
-            worksheet
-                .autofilter(
-                    0,
-                    0,
-                    projection.rows.len() as u32,
-                    projection.columns.len() as u16 - 1,
-                )
-                .map_err(|error| error.to_string())?;
-        }
-    }
-    for (row_index, row) in projection.rows.iter().enumerate() {
-        for (column_index, column) in projection.columns.iter().enumerate() {
-            let cell = row.cells.get(&column.id);
-            if let Some(number) = cell.and_then(|cell| cell.numeric) {
-                worksheet
-                    .write_number(row_index as u32 + row_offset, column_index as u16, number)
-                    .map_err(|error| error.to_string())?;
-            } else {
-                worksheet
-                    .write_string(
-                        row_index as u32 + row_offset,
-                        column_index as u16,
-                        cell.map(|cell| cell.display.as_str()).unwrap_or_default(),
-                    )
-                    .map_err(|error| error.to_string())?;
-            }
-        }
-    }
-    if include_headers {
-        let pinned = view
-            .columns
-            .iter()
-            .filter(|column| column.visible && column.pinned)
-            .count()
-            .min(projection.columns.len());
-        worksheet
-            .set_freeze_panes(1, pinned as u16)
-            .map_err(|error| error.to_string())?;
-    }
-    for (index, column) in projection.columns.iter().enumerate() {
-        let width = view
-            .columns
-            .iter()
-            .find(|candidate| candidate.column_id == column.id)
-            .map_or(120, |candidate| candidate.width);
-        worksheet
-            .set_column_width(index as u16, f64::from(width) / 7.0)
-            .map_err(|error| error.to_string())?;
-    }
-    if include_metadata {
-        let metadata = workbook.add_worksheet();
-        metadata
-            .set_name("RSpice provenance")
-            .map_err(|error| error.to_string())?;
-        for (row, (key, value)) in [
-            ("Grid", dataset.id.clone()),
-            ("Title", dataset.title.clone()),
-            ("Source revision", dataset.source_revision.to_string()),
-            ("Filter grammar", view.filter_grammar.label().to_owned()),
-            ("Virtualization", view.virtualization.label().to_owned()),
+    let pinned_columns = view
+        .columns
+        .iter()
+        .filter(|column| column.visible && column.pinned)
+        .count()
+        .min(projection.columns.len());
+    let column_widths = projection
+        .columns
+        .iter()
+        .map(|column| {
+            view.columns
+                .iter()
+                .find(|candidate| candidate.column_id == column.id)
+                .map_or(120, |candidate| candidate.width)
+        })
+        .collect();
+    let metadata = include_metadata.then(|| {
+        vec![
+            ("Grid".to_owned(), dataset.id.clone()),
+            ("Title".to_owned(), dataset.title.clone()),
+            (
+                "Source revision".to_owned(),
+                dataset.source_revision.to_string(),
+            ),
+            (
+                "Filter grammar".to_owned(),
+                view.filter_grammar.label().to_owned(),
+            ),
+            (
+                "Virtualization".to_owned(),
+                view.virtualization.label().to_owned(),
+            ),
         ]
-        .into_iter()
-        .enumerate()
-        {
-            metadata
-                .write_string(row as u32, 0, key)
-                .map_err(|error| error.to_string())?;
-            metadata
-                .write_string(row as u32, 1, &value)
-                .map_err(|error| error.to_string())?;
-        }
-    }
-    workbook.save_to_buffer().map_err(|error| error.to_string())
+    });
+    rspice_formats::xlsx::encode_xlsx_table(
+        &projection,
+        rspice_formats::xlsx::XlsxTableOptions {
+            include_headers,
+            include_units,
+            pinned_columns,
+            column_widths,
+            metadata,
+        },
+    )
 }
 
-impl rspice_formats::columnar::ParquetTableSource for EngineeringProjection {
+impl rspice_formats::table::EngineeringTableSource for EngineeringProjection {
     fn column_count(&self) -> usize {
         self.columns.len()
     }

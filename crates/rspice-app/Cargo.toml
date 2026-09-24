@@ -51,7 +51,7 @@ rspice-app-types.workspace = true
 rspice-results.workspace = true
 rspice-hardcopy-contract.workspace = true
 rspice-model-library.workspace = true
-rspice-formats = { workspace = true, features = ["columnar", "fst", "hdf5"] }
+rspice-formats = { workspace = true, features = ["columnar", "fst", "hdf5", "xlsx"] }
 rspice-simulation-contract.workspace = true
 
 # Verilog-A compiler (pure Rust, works on all platforms)
@@ -68,7 +68,6 @@ semver.workspace = true
 toml.workspace = true
 rspice-publication-contract.workspace = true
 csv.workspace = true
-rust_xlsxwriter = { version = "0.92", default-features = false }
 zip = { version = "7.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 thiserror.workspace = true
 sha2 = "0.10"

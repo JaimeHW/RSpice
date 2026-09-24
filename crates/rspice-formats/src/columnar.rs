@@ -4,21 +4,12 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
 
-/// A selected table view supplied to the Parquet byte writer.
-pub trait ParquetTableSource {
-    fn column_count(&self) -> usize;
-    fn row_count(&self) -> usize;
-    fn column_id(&self, column: usize) -> &str;
-    fn column_label(&self, column: usize) -> &str;
-    fn column_unit(&self, column: usize) -> Option<&str>;
-    fn numeric_value(&self, row: usize, column: usize) -> Option<f64>;
-    fn display_value(&self, row: usize, column: usize) -> Option<&str>;
-}
+use crate::table::EngineeringTableSource;
 
 /// Encode an already-selected table as Parquet, preserving nullable numeric
 /// and text columns and caller-supplied provenance metadata.
 pub fn encode_parquet_table(
-    source: &impl ParquetTableSource,
+    source: &impl EngineeringTableSource,
     metadata: Option<Vec<(String, Option<String>)>>,
 ) -> Result<Vec<u8>, String> {
     use arrow_array::{ArrayRef, Float64Array, RecordBatch, StringArray};
@@ -287,8 +278,8 @@ fn numeric_values(
     array: &dyn arrow_array::Array,
 ) -> Result<Vec<f64>, String> {
     use arrow_array::{
-        BooleanArray, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array, Int8Array,
-        UInt16Array, UInt32Array, UInt64Array, UInt8Array,
+        BooleanArray, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
+        UInt8Array, UInt16Array, UInt32Array, UInt64Array,
     };
     if array.null_count() != 0 {
         return Err(adapter_error(
@@ -366,7 +357,8 @@ fn numeric_values(
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_arrow_batches, encode_parquet_table, ColumnarLimits, ParquetTableSource};
+    use super::{ColumnarLimits, decode_arrow_batches, encode_parquet_table};
+    use crate::table::EngineeringTableSource;
     use arrow_array::{Array, ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray};
     use arrow_schema::{DataType, Field, Schema};
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -456,7 +448,7 @@ mod tests {
 
     struct SelectedTable;
 
-    impl ParquetTableSource for SelectedTable {
+    impl EngineeringTableSource for SelectedTable {
         fn column_count(&self) -> usize {
             2
         }

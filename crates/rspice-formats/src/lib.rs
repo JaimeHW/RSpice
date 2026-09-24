@@ -8,7 +8,10 @@ pub mod fst;
 pub mod matlab;
 pub mod numeric;
 pub mod numpy;
+pub mod table;
 pub mod waveform_io;
+#[cfg(feature = "xlsx")]
+pub mod xlsx;
 pub mod zip;
 
 pub use waveform_io::{
