@@ -14,8 +14,6 @@ const MAX_ARCHIVE_MEMBERS: usize = 1_024;
 const MAX_ARCHIVE_EXPANDED_BYTES: u64 = MAX_RESULT_DATASET_BYTES;
 const MAX_SIGNAL_NAME_BYTES: usize = 1_024;
 const MAX_RESULT_VALUES: usize = MAX_RESULT_DATASET_BYTES as usize / std::mem::size_of::<f64>();
-const MAX_FST_TOP_LEVEL_BLOCKS: usize = 1_024;
-const FST_HEADER_SECTION_BYTES: u64 = 329;
 
 #[derive(Debug)]
 struct ImportedSignal {
