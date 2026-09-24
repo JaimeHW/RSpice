@@ -11,5 +11,6 @@ pub mod drafts;
 pub mod numeric_override;
 pub mod options;
 pub mod output_policy;
+pub mod progress;
 pub mod run_set;
 pub mod spice_value;
