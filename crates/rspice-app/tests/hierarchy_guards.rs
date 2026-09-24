@@ -401,12 +401,12 @@ const PATH_GRAMMAR_PATTERNS: &[&str] = &[
 
 /// The module allowed to spell the grammar out, once.
 ///
-/// `state/hierarchy_path.rs` is the path type, and it holds the grammar: it
+/// `rspice-app-types::hierarchy_path` is the path type, and it holds the grammar: it
 /// parses every accepted spelling, emits the one canonical form, and owns the
 /// fold that decides when two paths name the same instance. It is exempt
 /// because a path type containing path syntax is the point of having one — the
 /// table below is the list of modules that have not yet been moved onto it.
-const PATH_GRAMMAR_OWNER: &str = "state/hierarchy_path.rs";
+const PATH_GRAMMAR_OWNER: &str = "rspice-app-types::hierarchy_path";
 
 /// Files spelling the path grammar inline, with their exact occurrence counts.
 ///
@@ -444,9 +444,6 @@ fn path_grammar_is_owned_by_one_module() {
     let mut measured: BTreeMap<String, usize> = BTreeMap::new();
     let mut root_literals = 0usize;
     for (path, file) in production_files(&root) {
-        if path == PATH_GRAMMAR_OWNER {
-            continue;
-        }
         let production = Source::read(&file).production;
         let count: usize = PATH_GRAMMAR_PATTERNS
             .iter()

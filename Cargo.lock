@@ -5248,6 +5248,7 @@ dependencies = [
  "rfd",
  "ron",
  "ropey",
+ "rspice-app-types",
  "rspice-automation-protocol",
  "rspice-automation-runtime",
  "rspice-cloud-client",
@@ -5291,6 +5292,17 @@ dependencies = [
  "winit",
  "winresource",
  "zip",
+]
+
+[[package]]
+name = "rspice-app-types"
+version = "0.1.0"
+dependencies = [
+ "rspice-design-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "uuid",
 ]
 
 [[package]]

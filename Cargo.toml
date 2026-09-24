@@ -25,6 +25,7 @@ members = [
     "tools/rspice-sheet-publisher",
     "crates/rspice-viewer",
     "crates/rspice-app",
+    "crates/rspice-app-types",
     "crates/rspice-veriloga",
     "crates/rspice-python",
     "crates/rspice-wasm",
@@ -142,6 +143,7 @@ web-sys = { version = "0.3", features = [
 ] }
 
 # Internal crates
+rspice-app-types = { path = "crates/rspice-app-types", version = "0.1.0" }
 rspice-cloud-client = { path = "crates/rspice-cloud-client", version = "0.1.0" }
 rspice-cloud-contract = { path = "crates/rspice-cloud-contract", version = "0.1.0" }
 rspice-cloud-domain = { path = "crates/rspice-cloud-domain", version = "0.1.0" }

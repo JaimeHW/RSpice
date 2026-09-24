@@ -7,12 +7,13 @@
 //!
 //! This crate currently holds both application composition and modules being
 //! extracted to headless owners. The simulation engine lives in `rspice-core`
-//! and `rspice-veriloga`. Persisted design state, project I/O, run
-//! orchestration, viewer mathematics, and chrome remain here until each owner
-//! moves across a checked crate boundary.
+//! and `rspice-veriloga`. Shared product identities, mutation revisions, and
+//! hierarchy paths now live in `rspice-app-types`. Persisted design state,
+//! project I/O, run orchestration, viewer mathematics, and chrome remain here
+//! until each owner moves across a checked crate boundary.
 //!
-//! Because there is no crate boundary to lean on, the module layering is
-//! enforced by `tests/module_layering.rs` instead. A module may reference
+//! The remaining internal module layering is enforced by
+//! `tests/module_layering.rs`. A module may reference
 //! any module below it and none at or above it. Lowest layer first:
 //!
 //! | Layer | Modules | Owns |

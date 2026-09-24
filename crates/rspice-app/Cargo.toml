@@ -47,6 +47,7 @@ rspice-automation-protocol = { path = "../rspice-automation-protocol", version =
 # contract. Shared with the offline `rspice-sheet-publisher` ceremony, which
 # links this crate rather than the GUI.
 rspice-design-model = { workspace = true }
+rspice-app-types.workspace = true
 
 # Verilog-A compiler (pure Rust, works on all platforms)
 rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }

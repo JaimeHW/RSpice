@@ -1,22 +1,15 @@
-//! Canonical commercial product contracts.
+//! Canonical product contracts shared across application layers.
 //!
-//! These types are deliberately independent of egui and simulator internals.
-//! They are the stable boundary shared by persistence, commands, services,
-//! automation, and presentation. UI code may render these contracts but must
-//! not invent alternate identities or readiness labels.
+//! Portable identities and object vocabulary live in `rspice-app-types`;
+//! command routing remains owned by the application.
 
-mod catalog;
 mod command;
-mod identity;
-mod process_corner;
 
-pub use catalog::ProductObjectKind;
 pub use command::CommandId;
-pub use identity::{
+pub use rspice_app_types::product::{
     AnalysisInstanceId, CaptureGroupId, ContentDigest, DatasetBinding, DatasetId,
     DerivedAnalysisIdentity, DesignVariableId, JobId, ModelSourceId, ObjectRef, ObjectRevision,
-    ProjectId, ResultDocumentId, RevisionError, RunId, SavedOutputId, SimulationCampaignId,
-    SimulationPlanId, SpecificationId, TransactionId, VerificationEvidenceId,
-    manual_deck_analysis_instance_id_from_tag, short_identity,
+    ProcessCorner, ProductObjectKind, ProjectId, ResultDocumentId, RevisionError, RunId,
+    SavedOutputId, SimulationCampaignId, SimulationPlanId, SpecificationId, TransactionId,
+    VerificationEvidenceId, manual_deck_analysis_instance_id_from_tag, short_identity,
 };
-pub use process_corner::ProcessCorner;
