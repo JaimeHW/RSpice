@@ -180,8 +180,8 @@ fn interval_statistics(
     name: &str,
     x: &[f64],
     y: &[f64],
-) -> Result<crate::analysis::measurements::IntervalStatistics, EvaluationError> {
-    crate::analysis::measurements::measure_interval(x, y, None)
+) -> Result<crate::measurements::IntervalStatistics, EvaluationError> {
+    crate::measurements::measure_interval(x, y, None)
         .map_err(|error| EvaluationError::MathError(format!("{name}: {error}")))
 }
 // --- Transformations (Waveform -> Waveform) ---

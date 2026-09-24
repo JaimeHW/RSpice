@@ -8,15 +8,12 @@
 //! - Vector arithmetic handling
 //! - Automatic interpolation for mismatched time bases
 
-pub(crate) mod ast;
-mod complex_functions;
-mod complex_ops;
-pub(crate) mod evaluator;
-pub(crate) mod functions;
+pub(crate) use rspice_results::calculator::{ast, evaluator, functions, value};
 pub(crate) use rspice_results::interpolation;
 pub(crate) mod parser;
 mod sample_projection;
-mod value;
+
+use rspice_results::calculator::{dispatch_function, finite_or_hole};
 
 pub use evaluator::{CalcValue, EvaluationContext, EvaluationError};
 pub use value::{ComplexValue, RealValue};
@@ -39,7 +36,7 @@ pub(crate) fn waveform_value(
             .real
             .iter()
             .zip(complex.imag.iter())
-            .map(|(&real, &imag)| value::hole(num_complex::Complex64::new(real, imag)))
+            .map(|(&real, &imag)| finite_or_hole(num_complex::Complex64::new(real, imag)))
             .collect();
         Ok(CalcValue::Complex(ComplexValue::Waveform(
             waveform.x.to_vec(),
@@ -66,7 +63,7 @@ pub(crate) fn magnitude_value(
         }
         value => value,
     }?;
-    complex_functions::dispatch("mag", vec![value])
+    dispatch_function("mag", vec![value])
 }
 
 fn reject_unbound_dataset(dataset: Option<&str>) -> Result<(), EvaluationError> {
@@ -355,7 +352,7 @@ impl<'a> EvaluationContext for WaveformsContext<'a> {
             ),
             value => value,
         }?;
-        complex_functions::dispatch("mag", vec![value])
+        dispatch_function("mag", vec![value])
     }
 
     fn get_waveform(
