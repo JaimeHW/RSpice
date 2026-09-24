@@ -156,9 +156,9 @@ pub use simulation::CurrentImpulseHistoryEvidence;
 pub(crate) use simulation::DcTraceView;
 pub(crate) use simulation::RunHistoryRevision;
 pub use simulation::{
-    AnalysisAvailability, AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload,
-    AnalysisResultProvenance, AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType,
-    CanonicalAnalysisKind, ComplexResultValue, ConvergenceAttribution, CrossProbeIndex,
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
+    AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType, CanonicalAnalysisKind,
+    ComplexResultValue, ConvergenceAttribution, CrossProbeIndex,
     DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult, DigitalBusEvidence,
     DigitalBusSourceEvidence, DigitalEventPointEvidence, DigitalEventTraceEvidence, EvidenceDomain,
     ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, ExecutionTarget,

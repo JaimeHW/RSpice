@@ -6,7 +6,6 @@
 //! its authority boundary.
 
 mod config;
-mod kind;
 mod model;
 mod numeric_override;
 
@@ -20,7 +19,6 @@ pub use config::{
     QpssDraft, QpxfSidebandSelection, QpxfSourceSelection, QuasiPeriodicAcDraft,
     QuasiPeriodicNoiseDraft, QuasiPeriodicTransferDraft, TransientNoiseDraft,
 };
-pub use kind::{AnalysisAvailability, AnalysisKind};
 pub use model::{
     AnalysisDependency, AnalysisInstance, AnalysisLifecycleCommand, AnalysisLifecycleReceipt,
     AnalysisLifecycleState, AnalysisPlanError, AnalysisPlanIssue, FrozenAnalysisInstance,
@@ -30,3 +28,4 @@ pub use numeric_override::{
     AnalysisNumericOverride, NumericOverrideOption, OverrideSection, OverrideValue,
     OverrideValueKind, SolverOwnership,
 };
+pub use rspice_simulation_contract::analysis_kind::{AnalysisAvailability, AnalysisKind};

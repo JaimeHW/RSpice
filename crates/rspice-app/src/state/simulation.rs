@@ -9,8 +9,6 @@ use std::collections::HashMap;
 
 mod ac_bode;
 mod analysis_result;
-mod analysis_tag;
-mod analysis_type;
 mod convergence_attribution;
 mod convergence_quality;
 mod dc_mismatch;
@@ -82,13 +80,13 @@ pub use analysis_result::{
     TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
     TransferFunctionScalarEvidence,
 };
-pub use analysis_tag::{AnalysisAvailability, CanonicalAnalysisKind};
-pub use analysis_type::AnalysisType;
 pub use convergence_attribution::ConvergenceAttribution;
 pub use convergence_quality::{
     ConvergenceReport, PeriodicConvergenceEvidence, PeriodicInitializationMethod,
     TransientConvergenceEvidence,
 };
+pub use rspice_results::analysis_type::AnalysisType;
+pub use rspice_simulation_contract::analysis_tag::CanonicalAnalysisKind;
 // Test-only alias: outside tests an attribution's vocabulary is only ever
 // named through the attribution's own fields.
 #[cfg(test)]

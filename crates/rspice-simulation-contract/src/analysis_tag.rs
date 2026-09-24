@@ -22,7 +22,7 @@
 //! dispatch then refused the receipt it had just authorized. This enum is the
 //! one place all four answers live, and every consumer derives from it.
 
-use super::AnalysisType;
+use rspice_results::analysis_type::AnalysisType;
 
 /// What a run of a given analysis kind may be cited for.
 ///
@@ -263,7 +263,7 @@ impl CanonicalAnalysisKind {
     /// This is the same answer the execution controller gives when it labels a
     /// finished result, because the controller derives it from here. The two
     /// are compared directly by
-    /// [`PreparedRunReceipt::validate_result_prefix`](super::PreparedRunReceipt::validate_result_prefix),
+    /// `PreparedRunReceipt::validate_result_prefix`,
     /// so a second opinion would reject correct runs.
     #[must_use]
     pub const fn result_analysis_type(self) -> AnalysisType {

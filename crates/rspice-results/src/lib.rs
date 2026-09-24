@@ -2,6 +2,7 @@
 //!
 //! Presentation and execution use these contracts without owning their data.
 
+pub mod analysis_type;
 pub mod calculator;
 pub mod fft;
 pub mod interpolation;
