@@ -7,7 +7,8 @@
 use super::*;
 use crate::state::model_library::{
     CorrelationDatasetClass, CorrelationDatasetRevision, CorrelationSimulationProvenance,
-    CorrelationSuite,
+    CorrelationSuite, FiniteF64, ModelDefinitionMetadata, ParameterDataType, ParameterDefinition,
+    ParameterSource, ParameterValue,
 };
 use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSuiteInput};
 use std::fs;
@@ -1802,7 +1803,8 @@ fn project_model_create_and_replace_publish_exact_retained_execution_bytes() {
             first_digest,
             &ProjectModelRevisionDefinition::new(
                 project_definition(0.51, "r2"),
-                reconcile_project_model_revision_metadata(&project_definition(0.51, "r2"), None)
+                project_definition(0.51, "r2")
+                    .reconcile_metadata(None)
                     .expect("candidate metadata"),
             ),
             &ModelQualificationState::default(),
@@ -1893,7 +1895,8 @@ fn project_model_replacement_is_guarded_and_atomic() {
 
 fn sectioned_project_revision(vth0: f64) -> ProjectModelRevisionDefinition {
     let base = project_definition(vth0, "r1");
-    let metadata = reconcile_project_model_revision_metadata(&base, None)
+    let metadata = base
+        .reconcile_metadata(None)
         .expect("synthesize typed project metadata");
     let mut definition = ProjectModelRevisionDefinition::new(base, metadata);
     definition

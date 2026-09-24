@@ -12,6 +12,9 @@ use std::fmt;
 use serde::{Deserialize, Deserializer, Serialize, de};
 use thiserror::Error;
 
+use crate::qualification::{ModelQualificationState, ModelSourceEvidenceBinding};
+use rspice_app_types::product::ContentDigest;
+
 /// Current persisted schema for [`ModelDefinitionMetadata`].
 pub const MODEL_DEFINITION_METADATA_SCHEMA_VERSION: u16 = 1;
 
@@ -373,6 +376,47 @@ impl Default for ModelDefinitionMetadata {
 }
 
 impl ModelDefinitionMetadata {
+    /// Require each qualified section to name exact retained evidence for this source.
+    pub fn validate_section_qualification_evidence(
+        &self,
+        qualification: &ModelQualificationState,
+        source: &ModelSourceEvidenceBinding,
+    ) -> Result<(), String> {
+        for (index, section) in self.sections.iter().enumerate() {
+            let evidence_digest = match &section.qualification {
+                ModelSectionQualification::Qualified {
+                    evidence_digest: Some(evidence_digest),
+                } => evidence_digest,
+                ModelSectionQualification::Qualified {
+                    evidence_digest: None,
+                } => {
+                    return Err(format!(
+                        "Model section {:?} is qualified without an evidence digest",
+                        section.name
+                    ));
+                }
+                ModelSectionQualification::Unqualified
+                | ModelSectionQualification::Pending
+                | ModelSectionQualification::Failed { .. } => continue,
+            };
+            let evidence_digest = evidence_digest.parse::<ContentDigest>().map_err(|error| {
+                format!(
+                    "Model section {:?} has an invalid qualification evidence digest: {error}",
+                    section.name
+                )
+            })?;
+            qualification
+                .validate_exact_section_evidence_digest(source, &section.name, evidence_digest)
+                .map_err(|error| {
+                    format!(
+                        "Model section {:?} qualification at sections[{index}] is not backed by exact retained evidence: {error}",
+                        section.name
+                    )
+                })?;
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub fn new() -> Self {
         Self::default()

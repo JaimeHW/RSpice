@@ -46,8 +46,7 @@ impl ModelLibraryManager {
                 )
             })?;
         let base = ProjectModelDefinition::editable_copy_from_device_model(source_model);
-        let mut metadata = reconcile_project_model_revision_metadata(
-            &base,
+        let mut metadata = base.reconcile_metadata(
             source_library
                 .model_definition_metadata
                 .get(source_model_name),
@@ -160,7 +159,7 @@ impl ModelLibraryManager {
                 "Model library '{library_name}' changed after this candidate was opened; reload or compare before saving"
             ));
         }
-        validate_project_owned_retained_closure(&before, root_digest)?;
+        before.validate_project_owned_retained_closure()?;
         let old_model = before.models.get(expected_model_name).ok_or_else(|| {
             format!("Model '{expected_model_name}' no longer exists in library '{library_name}'")
         })?;
@@ -285,11 +284,9 @@ impl ModelLibraryManager {
             .map_err(|error| {
                 format!("Project model qualification migration is invalid: {error}")
             })?;
-        validate_section_qualification_evidence(
-            &bound.metadata,
-            &retained_qualification,
-            &current_source,
-        )?;
+        bound
+            .metadata
+            .validate_section_qualification_evidence(&retained_qualification, &current_source)?;
         if bound.base.name != expected_model_name && before.models.contains_key(&bound.base.name) {
             return Err(format!(
                 "Model '{}' already exists in library '{library_name}'",
@@ -415,7 +412,7 @@ impl ModelLibraryManager {
         let ModelSourceAuthority::ProjectOwned {
             source_id,
             revision,
-            digest: root_digest,
+            ..
         } = before.source_authority
         else {
             return Err(format!(
@@ -427,7 +424,7 @@ impl ModelLibraryManager {
                 "Model library '{library_name}' changed after qualification began; rerun against the current source revision"
             ));
         }
-        validate_project_owned_retained_closure(&before, root_digest)?;
+        before.validate_project_owned_retained_closure()?;
         let Some(model) = before.models.get(model_name) else {
             return Err(format!(
                 "Model library '{library_name}' does not contain model '{model_name}'"
@@ -494,7 +491,7 @@ impl ModelLibraryManager {
             model_revision,
         )
         .map_err(|error| format!("Project model source identity is invalid: {error}"))?;
-        validate_section_qualification_evidence(metadata, qualification, &current_source)?;
+        metadata.validate_section_qualification_evidence(qualification, &current_source)?;
         let retained = before
             .model_qualification
             .get(model_name)
@@ -545,7 +542,7 @@ impl ModelLibraryManager {
         let ModelSourceAuthority::ProjectOwned {
             source_id,
             revision,
-            digest: root_digest,
+            ..
         } = before.source_authority
         else {
             return Err(format!(
@@ -557,7 +554,7 @@ impl ModelLibraryManager {
                 "Model library '{library_name}' changed after correlation review began; reload the current source revision"
             ));
         }
-        validate_project_owned_retained_closure(&before, root_digest)?;
+        before.validate_project_owned_retained_closure()?;
         let model = before.models.get(model_name).ok_or_else(|| {
             format!("Model library '{library_name}' does not contain model '{model_name}'")
         })?;
@@ -767,11 +764,9 @@ impl ModelLibraryManager {
             .map_err(|error| {
                 format!("Project model qualification migration is invalid: {error}")
             })?;
-        validate_section_qualification_evidence(
-            &bound.metadata,
-            &retained_qualification,
-            &current_source,
-        )?;
+        bound
+            .metadata
+            .validate_section_qualification_evidence(&retained_qualification, &current_source)?;
         let bytes = source.into_bytes();
 
         let mut parser =
@@ -870,8 +865,7 @@ impl ModelLibraryManager {
         library_name: &str,
         definition: &ProjectModelDefinition,
     ) -> Result<ProjectModelCommit, String> {
-        definition.validate()?;
-        let metadata = reconcile_project_model_revision_metadata(definition, None)?;
+        let metadata = definition.reconcile_metadata(None)?;
         self.create_project_model_revision(
             library_name,
             &ProjectModelRevisionDefinition::new(definition.clone(), metadata),

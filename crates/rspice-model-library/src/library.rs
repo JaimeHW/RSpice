@@ -8,6 +8,7 @@
 use crate::correlation::ModelCorrelationState;
 use crate::qualification::ModelQualificationState;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -357,6 +358,92 @@ pub struct ModelLibrary {
 }
 
 impl ModelLibrary {
+    /// Authenticate the complete retained source graph against this project revision.
+    pub fn validate_project_owned_retained_closure(&self) -> Result<(), String> {
+        let ModelSourceAuthority::ProjectOwned {
+            digest: root_digest,
+            ..
+        } = self.source_authority
+        else {
+            return Err(format!(
+                "Model library '{}' is not project-owned",
+                self.name
+            ));
+        };
+        let root = self.root_path.as_ref().ok_or_else(|| {
+            format!(
+                "Project-owned model library '{}' has no retained root identity",
+                self.name
+            )
+        })?;
+        if self.source_closure.is_empty() || self.source_closure.len() != self.source_contents.len()
+        {
+            return Err(format!(
+                "Project-owned model library '{}' has an incomplete retained source closure",
+                self.name
+            ));
+        }
+        let mut pins = BTreeMap::new();
+        for pin in &self.source_closure {
+            if pins.insert(pin.path.clone(), pin.digest).is_some() {
+                return Err(format!(
+                    "Project-owned model library '{}' repeats retained source '{}'",
+                    self.name,
+                    pin.path.display()
+                ));
+            }
+        }
+        let mut contents = BTreeMap::new();
+        for content in &self.source_contents {
+            if contents
+                .insert(content.path.clone(), &content.bytes)
+                .is_some()
+            {
+                return Err(format!(
+                    "Project-owned model library '{}' repeats retained bytes for '{}'",
+                    self.name,
+                    content.path.display()
+                ));
+            }
+        }
+        if pins.keys().ne(contents.keys()) {
+            return Err(format!(
+                "Project-owned model library '{}' retained pins and bytes do not describe the same closure",
+                self.name
+            ));
+        }
+        for (path, expected) in &pins {
+            let bytes = contents
+                .get(path)
+                .expect("pin/content key equality was checked above");
+            let actual = ContentDigest::from_bytes(Sha256::digest(bytes).into());
+            if actual != *expected {
+                return Err(format!(
+                    "Project-owned model source '{}' fails its retained content digest",
+                    path.display()
+                ));
+            }
+        }
+        if pins.get(root) != Some(&root_digest) {
+            return Err(format!(
+                "Project-owned model library '{}' root digest is inconsistent with its revision authority",
+                self.name
+            ));
+        }
+        if self
+            .source_edges
+            .iter()
+            .any(|edge| !pins.contains_key(&edge.owner) || !pins.contains_key(&edge.target))
+            || first_unreachable_source(root, &self.source_closure, &self.source_edges).is_some()
+        {
+            return Err(format!(
+                "Project-owned model library '{}' has an invalid retained include graph",
+                self.name
+            ));
+        }
+        Ok(())
+    }
+
     /// What this library is, in the words its own provenance justifies.
     ///
     /// This is the phrase every executed deck seals its model blocks under and
@@ -552,6 +639,71 @@ impl ModelLibrary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_closure_authenticates_authority_bytes_and_reachability() {
+        let mut library = ModelLibrary::new("owned");
+        assert!(
+            library
+                .validate_project_owned_retained_closure()
+                .expect_err("only project-owned sources can be edited")
+                .contains("not project-owned")
+        );
+        let source_id = ModelSourceId::new();
+        let root = project_owned_source_path(source_id);
+        let bytes = b".model nch NMOS (LEVEL=1)\n".to_vec();
+        let digest = ContentDigest::from_bytes(Sha256::digest(&bytes).into());
+        library.root_path = Some(root.clone());
+        library.source_authority = ModelSourceAuthority::ProjectOwned {
+            source_id,
+            revision: ObjectRevision::INITIAL,
+            digest,
+        };
+        library.source_closure.push(ModelSourcePin {
+            path: root.clone(),
+            digest,
+        });
+        library.source_contents.push(ModelSourceContent {
+            path: root.clone(),
+            bytes,
+        });
+        library
+            .validate_project_owned_retained_closure()
+            .expect("authenticated root");
+
+        let mut tampered = library.clone();
+        tampered.source_contents[0].bytes.push(b' ');
+        assert!(
+            tampered
+                .validate_project_owned_retained_closure()
+                .expect_err("retained bytes must match their pin")
+                .contains("fails its retained content digest")
+        );
+
+        let child = root.with_file_name("child.model");
+        library.source_closure.push(ModelSourcePin {
+            path: child.clone(),
+            digest,
+        });
+        library.source_contents.push(ModelSourceContent {
+            path: child.clone(),
+            bytes: library.source_contents[0].bytes.clone(),
+        });
+        assert!(
+            library
+                .validate_project_owned_retained_closure()
+                .expect_err("authenticated but disconnected members must fail")
+                .contains("invalid retained include graph")
+        );
+        library.source_edges.push(ModelSourceEdge {
+            owner: root,
+            requested_path: "child.model".to_owned(),
+            target: child,
+        });
+        library
+            .validate_project_owned_retained_closure()
+            .expect("connected closure");
+    }
 
     /// Both desktop path syntaxes are absolute identities on every host.
     ///

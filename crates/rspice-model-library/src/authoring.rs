@@ -6,7 +6,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::DeviceModel;
+use super::{
+    DeviceModel, FiniteF64, ModelDefinitionMetadata, ParameterDataType, ParameterDefinition,
+    ParameterSource, ParameterValue,
+};
 
 /// Complete editable definition for one project-owned SPICE `.model` card.
 ///
@@ -23,6 +26,85 @@ pub struct ProjectModelDefinition {
 }
 
 impl ProjectModelDefinition {
+    /// Reconcile typed parameter metadata while preserving existing schema annotations.
+    /// Invalid base definitions and implicit parameter type changes are rejected.
+    pub fn reconcile_metadata(
+        &self,
+        previous: Option<&ModelDefinitionMetadata>,
+    ) -> Result<ModelDefinitionMetadata, String> {
+        self.validate()?;
+        let mut metadata = previous.cloned().unwrap_or_default();
+        let previous_parameters = metadata.parameters;
+        let mut parameters =
+            Vec::with_capacity(self.numeric_parameters.len() + self.string_parameters.len());
+        for (name, value) in &self.numeric_parameters {
+            let mut parameter = previous_parameters
+                .iter()
+                .find(|parameter| parameter.name.eq_ignore_ascii_case(name))
+                .cloned()
+                .unwrap_or_else(|| ParameterDefinition {
+                    name: name.clone(),
+                    data_type: ParameterDataType::Numeric,
+                    value: ParameterValue::Numeric(
+                        FiniteF64::new(*value)
+                            .expect("project definitions reject non-finite values"),
+                    ),
+                    unit: None,
+                    bounds: None,
+                    source: ParameterSource::Declared {
+                        source: "project model source".to_owned(),
+                    },
+                    description: format!("Project-owned {name} model parameter"),
+                });
+            if parameter.data_type != ParameterDataType::Numeric {
+                return Err(format!(
+                    "Model parameter '{name}' cannot change from string to numeric without an explicit schema migration"
+                ));
+            }
+            parameter.name = name.clone();
+            parameter.value = ParameterValue::Numeric(
+                FiniteF64::new(*value).expect("project definitions reject non-finite values"),
+            );
+            parameters.push(parameter);
+        }
+        for (name, value) in &self.string_parameters {
+            let mut parameter = previous_parameters
+                .iter()
+                .find(|parameter| parameter.name.eq_ignore_ascii_case(name))
+                .cloned()
+                .unwrap_or_else(|| ParameterDefinition {
+                    name: name.clone(),
+                    data_type: ParameterDataType::String,
+                    value: ParameterValue::String(value.clone()),
+                    unit: None,
+                    bounds: None,
+                    source: ParameterSource::Declared {
+                        source: "project model source".to_owned(),
+                    },
+                    description: format!("Project-owned {name} model parameter"),
+                });
+            if parameter.data_type != ParameterDataType::String {
+                return Err(format!(
+                    "Model parameter '{name}' cannot change from numeric to string without an explicit schema migration"
+                ));
+            }
+            parameter.name = name.clone();
+            parameter.value = ParameterValue::String(value.clone());
+            parameters.push(parameter);
+        }
+        parameters.sort_by(|left, right| {
+            left.name
+                .to_ascii_lowercase()
+                .cmp(&right.name.to_ascii_lowercase())
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        metadata.parameters = parameters;
+        metadata
+            .validate()
+            .map_err(|error| format!("Project model metadata is invalid: {error}"))?;
+        Ok(metadata)
+    }
+
     #[must_use]
     pub fn from_device_model(model: &DeviceModel) -> Self {
         Self {
@@ -206,6 +288,25 @@ fn validate_parameter_name(value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metadata_reconciliation_rejects_nonfinite_catalog_parameters() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let definition = ProjectModelDefinition {
+                name: "nch".to_owned(),
+                spice_type: "NMOS".to_owned(),
+                description: String::new(),
+                numeric_parameters: BTreeMap::from([("vth0".to_owned(), value)]),
+                string_parameters: BTreeMap::new(),
+            };
+            assert!(
+                definition
+                    .reconcile_metadata(None)
+                    .expect_err("invalid catalog values must fail without panicking")
+                    .contains("must be finite")
+            );
+        }
+    }
 
     #[test]
     fn canonical_source_is_deterministic_and_rejects_case_collisions() {
