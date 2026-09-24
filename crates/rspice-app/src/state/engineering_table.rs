@@ -917,35 +917,12 @@ pub fn delimited_text_selected(
     selected_rows: Option<&std::collections::BTreeSet<String>>,
 ) -> Result<String, String> {
     let projection = dataset.project_selected(view, include_hidden_columns, selected_rows);
-    let mut writer = csv::WriterBuilder::new()
-        .delimiter(delimiter)
-        .from_writer(Vec::new());
-    if include_headers {
-        writer
-            .write_record(projection.columns.iter().map(|column| {
-                if include_units {
-                    column.unit.as_ref().map_or_else(
-                        || column.label.clone(),
-                        |unit| format!("{} [{}]", column.label, unit),
-                    )
-                } else {
-                    column.label.clone()
-                }
-            }))
-            .map_err(|error| error.to_string())?;
-    }
-    for row in projection.rows {
-        writer
-            .write_record(projection.columns.iter().map(|column| {
-                row.cells
-                    .get(&column.id)
-                    .map(|cell| cell.display.as_str())
-                    .unwrap_or_default()
-            }))
-            .map_err(|error| error.to_string())?;
-    }
-    let bytes = writer.into_inner().map_err(|error| error.to_string())?;
-    String::from_utf8(bytes).map_err(|error| error.to_string())
+    rspice_formats::table::encode_delimited_table(
+        &projection,
+        delimiter,
+        include_headers,
+        include_units,
+    )
 }
 
 pub fn schema_json(

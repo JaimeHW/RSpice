@@ -5515,6 +5515,7 @@ dependencies = [
  "arrow-ipc",
  "arrow-schema",
  "bytes",
+ "csv",
  "fst-reader",
  "fst-writer",
  "matfile",
