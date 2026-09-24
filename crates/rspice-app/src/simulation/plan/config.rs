@@ -22,7 +22,7 @@ use crate::simulation::dialog::{
     PssDialogState, PstbDialogState, PxfDialogState, PzDialogState, SensDialogState,
     SoaDialogState, SpDialogState, StbDialogState, TempDialogState, XfDialogState,
 };
-use crate::workbench::app_state::{AcSetup, DcSetup, TranSetup};
+use rspice_simulation_contract::drafts::{AcSetup, DcSetup, TranSetup};
 
 use super::AnalysisKind;
 
@@ -41,6 +41,7 @@ use quasi_periodic::validate_qpss;
 
 pub use periodic_network::PeriodicNetworkDraft;
 use periodic_network::{validate_periodic_network, validate_psp_network};
+pub use rspice_simulation_contract::drafts::DistoDraft;
 use rspice_simulation_contract::drafts::parse::{
     parse_i32_tuple, parse_nonnegative, parse_positive, parse_positive_usize,
 };
@@ -51,15 +52,6 @@ pub use rspice_simulation_contract::drafts::{
 /// AC sweep draft shared structurally by AC and DISTO, but never shared by
 /// identity. Each analysis instance owns a deep copy.
 pub type AcDraft = AcSetup;
-
-/// DISTO draft with its own AC sweep and optional second-tone ratio.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DistoDraft {
-    pub sweep: AcDraft,
-    /// Empty or `auto` selects single-tone harmonic distortion.
-    pub f2_over_f1: String,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
