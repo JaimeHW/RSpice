@@ -13,6 +13,42 @@ use super::*;
 /// the fixture's library name.
 type CatalogVariation = (&'static str, Box<dyn Fn(&mut ModelLibraryManager, &str)>);
 
+#[test]
+fn extracted_catalog_preserves_the_manager_wire_format_and_digest() {
+    #[derive(Serialize)]
+    struct PreviousManager<'a> {
+        libraries: HashMap<&'a str, &'a ModelLibrary>,
+        selected_library: &'a Option<String>,
+        filter_text: &'a str,
+        filter_type: Option<ModelType>,
+        resolution_records: &'a BTreeMap<String, ModelResolutionRecord>,
+        validation_receipt: &'a Option<ModelValidationReceipt>,
+    }
+    let (mut manager, name) = inspection_key_catalog();
+    manager.select_library(&name).unwrap();
+    manager.filter_text = "nch".to_owned();
+    manager.filter_type = Some(ModelType::Nmos);
+    let previous = PreviousManager {
+        libraries: HashMap::from([(name.as_str(), manager.get_library(&name).unwrap())]),
+        selected_library: &manager.selected_library,
+        filter_text: &manager.filter_text,
+        filter_type: manager.filter_type,
+        resolution_records: &manager.resolution_records,
+        validation_receipt: &manager.validation_receipt,
+    };
+    let previous_bytes = serde_json::to_vec(&previous).unwrap();
+    assert_eq!(serde_json::to_vec(&manager).unwrap(), previous_bytes);
+    let restored: ModelLibraryManager = serde_json::from_slice(&previous_bytes).unwrap();
+    assert_eq!(
+        restored.execution_catalog_digest(),
+        manager.execution_catalog_digest()
+    );
+    assert_eq!(
+        serde_json::to_value(&restored).unwrap(),
+        serde_json::from_slice::<serde_json::Value>(&previous_bytes).unwrap()
+    );
+}
+
 /// A catalogue holding one imported library with a model, a subcircuit, and a
 /// process corner.
 ///

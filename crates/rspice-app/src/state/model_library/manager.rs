@@ -30,11 +30,12 @@ use rspice_model_library::{
 #[cfg(not(target_arch = "wasm32"))]
 use super::is_foreign_platform_absolute_path;
 use super::{
-    DeviceModel, ModelCorrelationState, ModelLevel, ModelLibrary, ModelQualificationState,
-    ModelSectionQualification, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge,
-    ModelSourceEvidenceBinding, ModelSourcePin, ModelType, ProcessCorner, ProjectModelDefinition,
-    ProjectModelRevisionDefinition, first_unreachable_source,
+    DeviceModel, ModelCorrelationState, ModelLibrary, ModelQualificationState,
+    ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourcePin, ModelType,
+    ProcessCorner, ProjectModelRevisionDefinition, first_unreachable_source,
 };
+#[cfg(test)]
+use super::{ModelLevel, ModelSourceEvidenceBinding, ProjectModelDefinition};
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 use rspice_app_types::product::ProcessCorner as CornerProcess;
 use rspice_model_library::{
@@ -42,17 +43,7 @@ use rspice_model_library::{
     resolve_materialized_definition_namespace,
 };
 
-/// Published result of one atomic project-model definition transaction.
-#[derive(Debug, Clone)]
-pub struct ProjectModelCommit {
-    pub library_name: String,
-    pub model_name: String,
-    pub before: Option<ModelLibrary>,
-    pub after: ModelLibrary,
-    /// Definition/source changes invalidate downstream execution; evidence-
-    /// only commits do not alter the executable model closure.
-    pub affects_execution: bool,
-}
+pub use rspice_model_library::ProjectModelCommit;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ModelDefinitionProvider {
@@ -823,7 +814,8 @@ fn normalize_portable_path_text(path: &str) -> Result<String, String> {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ModelLibraryManager {
     /// All libraries
-    libraries: HashMap<String, ModelLibrary>,
+    #[serde(rename = "libraries")]
+    catalog: rspice_model_library::ModelCatalog,
     /// Currently selected library
     pub selected_library: Option<String>,
     /// Search filter
@@ -1260,22 +1252,22 @@ impl ModelLibraryManager {
 
     /// Add a library
     pub fn add_library(&mut self, library: ModelLibrary) {
-        self.libraries.insert(library.name.clone(), library);
+        self.catalog.add_library(library);
     }
 
     /// Remove a library
     pub fn remove_library(&mut self, name: &str) -> Option<ModelLibrary> {
-        self.libraries.remove(name)
+        self.catalog.remove_library(name)
     }
 
     /// Get a library
     pub fn get_library(&self, name: &str) -> Option<&ModelLibrary> {
-        self.libraries.get(name)
+        self.catalog.get_library(name)
     }
 
     /// Get mutable library
     pub fn get_library_mut(&mut self, name: &str) -> Option<&mut ModelLibrary> {
-        self.libraries.get_mut(name)
+        self.catalog.get_library_mut(name)
     }
 
     /// Select a library, refusing a name this project no longer holds.
@@ -1285,7 +1277,7 @@ impl ModelLibraryManager {
     /// that named a library that had since gone left the *previous* one showing
     /// and read as a route that worked. Refusing by name lets the caller say so.
     pub fn select_library(&mut self, name: &str) -> Result<(), String> {
-        if !self.libraries.contains_key(name) {
+        if !self.catalog.contains_library(name) {
             return Err(format!(
                 "Model library '{name}' is not loaded in this project, so the selection was not \
                  changed."
@@ -1315,7 +1307,7 @@ impl ModelLibraryManager {
     pub fn current_library(&self) -> Option<&ModelLibrary> {
         self.selected_library
             .as_ref()
-            .and_then(|name| self.libraries.get(name))
+            .and_then(|name| self.catalog.get_library(name))
     }
 
     /// Canonical identities of every project-owned model definition admitted
@@ -1328,77 +1320,7 @@ impl ModelLibraryManager {
     pub(crate) fn project_model_definition_identities(
         &self,
     ) -> Result<Vec<(ModelSourceId, String, ObjectRevision, ContentDigest)>, String> {
-        let mut identities = Vec::new();
-        for library in self
-            .libraries
-            .values()
-            .filter(|library| library.source_authority.is_project_owned())
-        {
-            let ModelSourceAuthority::ProjectOwned {
-                source_id,
-                revision: library_revision,
-                ..
-            } = library.source_authority
-            else {
-                continue;
-            };
-            for (model_name, model) in &library.models {
-                let metadata = library
-                    .model_definition_metadata
-                    .get(model_name)
-                    .cloned()
-                    .ok_or_else(|| {
-                        format!(
-                            "Project model '{}/{}' has no typed definition metadata",
-                            library.name, model_name
-                        )
-                    })?;
-                let definition = ProjectModelRevisionDefinition::new(
-                    ProjectModelDefinition::from_device_model(model),
-                    metadata,
-                );
-                let canonical = definition.canonical_source().map_err(|error| {
-                    format!(
-                        "Project model '{}/{}' cannot be authenticated for execution: {error}",
-                        library.name, model_name
-                    )
-                })?;
-                let definition_identity =
-                    definition.project_source_identity().map_err(|error| {
-                        format!(
-                            "Project model '{}/{}' has invalid source identity: {error}",
-                            library.name, model_name
-                        )
-                    })?;
-                let revision = definition_identity
-                    .as_ref()
-                    .map_or(library_revision, |identity| identity.revision);
-                let digest = ContentDigest::from_bytes(Sha256::digest(canonical.as_bytes()).into());
-                if let Some(identity) = definition_identity
-                    && (identity.source_id != source_id || identity.content_digest != digest)
-                {
-                    return Err(format!(
-                        "Project model '{}/{}' definition identity does not match its retained source",
-                        library.name, model_name
-                    ));
-                }
-                identities.push((source_id, model_name.clone(), revision, digest));
-            }
-        }
-        identities.sort_by(|left, right| {
-            left.0
-                .as_uuid()
-                .cmp(&right.0.as_uuid())
-                .then_with(|| {
-                    left.1
-                        .to_ascii_lowercase()
-                        .cmp(&right.1.to_ascii_lowercase())
-                })
-                .then_with(|| left.2.cmp(&right.2))
-                .then_with(|| left.3.cmp(&right.3))
-        });
-        identities.dedup();
-        Ok(identities)
+        self.catalog.project_model_definition_identities()
     }
 
     /// Search for models by name
@@ -1406,7 +1328,7 @@ impl ModelLibraryManager {
         let pattern_lower = pattern.to_lowercase();
         let mut results = Vec::new();
 
-        for lib in self.libraries.values() {
+        for lib in self.catalog.libraries() {
             for model in lib.models.values() {
                 if model.name.to_lowercase().contains(&pattern_lower)
                     || model.description.to_lowercase().contains(&pattern_lower)
@@ -1599,7 +1521,7 @@ impl ModelLibraryManager {
     ) -> Result<String, String> {
         let (library_name, mut library) =
             source_bundle::build(part_source, Some(part_source), files, None)?;
-        if let Some(existing) = self.libraries.get(&library_name) {
+        if let Some(existing) = self.catalog.get_library(&library_name) {
             // Different bytes under a name this project already uses is a
             // collision — unless the name is held by this same part of this
             // same pack, in which case it is the one thing it can honestly be:
@@ -1633,7 +1555,7 @@ impl ModelLibraryManager {
             }
         }
         let pack_id = pin.pack_id.clone();
-        self.libraries.insert(library_name.clone(), library);
+        self.catalog.add_library(library);
         self.retain_pack_library_pinned(&library_name, &pack_id, Some(pin))?;
         Ok(library_name)
     }
@@ -1648,7 +1570,7 @@ impl ModelLibraryManager {
         pack_id: &str,
         pin: Option<super::PackPartPin>,
     ) -> Result<(), String> {
-        let library = self.libraries.get_mut(library_name).ok_or_else(|| {
+        let library = self.catalog.get_library_mut(library_name).ok_or_else(|| {
             format!("Attached pack library '{library_name}' disappeared before publication")
         })?;
         let root = library.root_path.as_ref().ok_or_else(|| {
@@ -1703,8 +1625,8 @@ impl ModelLibraryManager {
             })?
         };
         let selected_corner = self
-            .libraries
-            .values()
+            .catalog
+            .libraries()
             .find(|library| library.pack_id.as_deref() == Some(pack_id))
             .and_then(|library| library.selected_corner.clone());
         let library_name = self.load_library_file(&entry, selected_corner.as_deref())?;
@@ -1783,16 +1705,14 @@ impl ModelLibraryManager {
 
     /// Get libraries sorted by name
     pub fn libraries_sorted(&self) -> Vec<&ModelLibrary> {
-        let mut libs: Vec<_> = self.libraries.values().collect();
-        libs.sort_by(|a, b| a.name.cmp(&b.name));
-        libs
+        self.catalog.libraries_sorted()
     }
 
     /// Stable owned snapshot used by guarded multi-library project
     /// transactions. Presentation filters and the shipped-pack index remain
     /// manager state and are intentionally excluded.
     pub(crate) fn library_snapshot(&self) -> Vec<ModelLibrary> {
-        self.libraries_sorted().into_iter().cloned().collect()
+        self.catalog.library_snapshot()
     }
 
     /// Replace the complete loaded-library set while preserving presentation
@@ -1801,29 +1721,11 @@ impl ModelLibraryManager {
         &mut self,
         libraries: Vec<ModelLibrary>,
     ) -> Result<(), String> {
-        let expanded = self
-            .libraries
-            .iter()
-            .map(|(name, library)| (name.clone(), library.expanded))
-            .collect::<HashMap<_, _>>();
-        let mut replacement = HashMap::with_capacity(libraries.len());
-        for mut library in libraries {
-            if replacement.contains_key(&library.name) {
-                return Err(format!(
-                    "Model-library snapshot repeats library '{}'",
-                    library.name
-                ));
-            }
-            if let Some(retained) = expanded.get(&library.name) {
-                library.expanded = *retained;
-            }
-            replacement.insert(library.name.clone(), library);
-        }
-        self.libraries = replacement;
+        self.catalog.replace_library_snapshot(libraries)?;
         if self
             .selected_library
             .as_ref()
-            .is_some_and(|name| !self.libraries.contains_key(name))
+            .is_some_and(|name| !self.catalog.contains_library(name))
         {
             self.selected_library = None;
         }
@@ -2004,18 +1906,18 @@ impl ModelLibraryManager {
 
     /// Total library count
     pub fn library_count(&self) -> usize {
-        self.libraries.len()
+        self.catalog.library_count()
     }
 
     /// Total model count across all libraries
     pub fn total_model_count(&self) -> usize {
-        self.libraries.values().map(|l| l.model_count()).sum()
+        self.catalog.libraries().map(|l| l.model_count()).sum()
     }
 
     /// Clear all
     #[cfg(test)]
     pub fn clear(&mut self) {
-        self.libraries.clear();
+        self.catalog.clear();
         self.resolution_records.clear();
         self.selected_library = None;
     }
@@ -2127,7 +2029,7 @@ impl ModelLibraryManager {
             ));
         }
 
-        if let Some(existing) = self.libraries.get(&lib_name)
+        if let Some(existing) = self.catalog.get_library(&lib_name)
             && existing.root_path.as_deref() != Some(path.as_path())
         {
             return Err(format!(
@@ -2141,8 +2043,8 @@ impl ModelLibraryManager {
         // and section check succeeds. A failed refresh never leaves a partly
         // updated model catalog behind.
         let mut library = self
-            .libraries
-            .get(&lib_name)
+            .catalog
+            .get_library(&lib_name)
             .cloned()
             .unwrap_or_else(|| ModelLibrary::new(&lib_name));
         library.root_path = Some(path.clone());
@@ -2153,7 +2055,7 @@ impl ModelLibraryManager {
         let library =
             library.with_parsed_catalog(&result, &path, section, &path.display().to_string())?;
 
-        self.libraries.insert(lib_name.clone(), library);
+        self.catalog.add_library(library);
         Ok(lib_name)
     }
 
@@ -2203,12 +2105,12 @@ impl ModelLibraryManager {
         section: Option<&str>,
     ) -> Result<String, String> {
         let (lib_name, library) = source_bundle::build(display_name, root_member, files, section)?;
-        if self.libraries.contains_key(&lib_name) {
+        if self.catalog.contains_library(&lib_name) {
             return Err(format!(
                 "Model library '{lib_name}' already exists; remove it before importing replacement bytes"
             ));
         }
-        self.libraries.insert(lib_name.clone(), library);
+        self.catalog.add_library(library);
         Ok(lib_name)
     }
 
@@ -2264,7 +2166,7 @@ impl ModelLibraryManager {
             );
         }
         let removed = candidate
-            .libraries
+            .catalog
             .iter()
             .filter(|&(_name, library)| {
                 (matches!(library.source_authority, ModelSourceAuthority::External)
@@ -2276,12 +2178,12 @@ impl ModelLibraryManager {
             .map(|(name, _library)| name.clone())
             .collect::<Vec<_>>();
         for name in removed {
-            candidate.libraries.remove(&name);
+            candidate.catalog.remove_library(&name);
         }
         if candidate
             .selected_library
             .as_ref()
-            .is_some_and(|name| !candidate.libraries.contains_key(name))
+            .is_some_and(|name| !candidate.catalog.contains_library(name))
         {
             candidate.selected_library = None;
         }
@@ -2342,88 +2244,8 @@ impl ModelLibraryManager {
     /// index has no type for — VDMOS and MESFET both — and, having a `Njfet`
     /// it could not spell, discarded JFETs as well.
     pub fn load_builtin_models(&mut self) {
-        let core_manager = rspice_core::library::LibraryManager::new();
-        let Some(content) = core_manager.get_library_content("foundation.lib") else {
-            return;
-        };
-        let parsed = rspice_core::library::LibParser::new(".").parse_string(content);
-        let library = self
-            .libraries
-            .entry("RSpice Foundation".to_owned())
-            .or_insert_with(|| ModelLibrary::new("RSpice Foundation"));
-        library.pack_id = Some("rspice-foundation".to_owned());
-
-        for model in &parsed.top_level_models {
-            let device_model = DeviceModel {
-                name: model.name.clone(),
-                // Built-in cards are compiled in at file scope; no `.lib`
-                // section owns them.
-                section: None,
-                model_type: ModelType::from_name(&model.spice_type),
-                spice_type: Some(model.spice_type.clone()),
-                level: ModelLevel::from_spice_card(model.level, &model.spice_type),
-                spice_level: model.level,
-                model_version: model.version,
-                description: model.description.clone().unwrap_or_default(),
-                l_min: model.lmin,
-                l_max: model.lmax,
-                w_min: model.wmin,
-                w_max: model.wmax,
-                vdd: None,
-                vth0: None,
-                // Compiled in: there is no file on disk to reveal, so there is
-                // no line in one either.
-                file_path: None,
-                parameters: model.parameters.clone(),
-                string_parameters: model.string_params.clone(),
-                source_line: None,
-            };
-            library.add_model(device_model);
-        }
-        for subcircuit in core_manager.subcircuits() {
-            library.subcircuits.insert(
-                subcircuit.name.clone(),
-                super::ModelSubcircuitInterface {
-                    name: subcircuit.name.clone(),
-                    ports: subcircuit.pins.clone(),
-                    parameter_defaults: BTreeMap::new(),
-                    description: subcircuit.description.clone(),
-                    file_path: None,
-                    source_line: None,
-                    section: None,
-                },
-            );
-        }
+        self.catalog.load_builtin_models()
     }
-}
-
-fn validate_project_library_name(name: &str) -> Result<(), String> {
-    if name.is_empty() || name.trim() != name || name.len() > 128 {
-        return Err(
-            "Project model library name must contain 1 to 128 characters without outer whitespace"
-                .to_owned(),
-        );
-    }
-    if name
-        .chars()
-        .any(|character| character.is_control() || matches!(character, '/' | '\\'))
-    {
-        return Err(format!(
-            "Project model library name '{name}' contains an invalid path or control character"
-        ));
-    }
-    Ok(())
-}
-
-fn exact_subslice_offsets(haystack: &[u8], needle: &[u8]) -> Vec<usize> {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return Vec::new();
-    }
-    haystack
-        .windows(needle.len())
-        .enumerate()
-        .filter_map(|(offset, candidate)| (candidate == needle).then_some(offset))
-        .collect()
 }
 
 #[cfg(test)]

@@ -54,8 +54,8 @@ impl ModelLibraryManager {
     pub fn seal_execution_sources(&self) -> Result<SealedModelExecutionSources, String> {
         self.validate_model_resolution_records_against_catalog()?;
         let mut libraries: Vec<_> = self
-            .libraries
-            .values()
+            .catalog
+            .libraries()
             .filter(|library| library.source_authority.has_execution_source())
             .map(|library| (library, library.selected_corner.clone()))
             .collect();
@@ -83,8 +83,8 @@ impl ModelLibraryManager {
     #[must_use]
     pub fn default_simulation_plan_bindings(&self) -> Vec<SimulationPlanModelBinding> {
         let mut libraries = self
-            .libraries
-            .values()
+            .catalog
+            .libraries()
             .filter(|library| library.source_authority.has_execution_source())
             .collect::<Vec<_>>();
         libraries.sort_by(|left, right| left.name.cmp(&right.name));
@@ -215,8 +215,8 @@ impl ModelLibraryManager {
         F: FnMut(&Path) -> Result<Vec<u8>, String>,
     {
         let mut libraries: Vec<&ModelLibrary> = self
-            .libraries
-            .values()
+            .catalog
+            .libraries()
             .filter(|library| library.source_authority.has_execution_source())
             .collect();
         libraries.sort_by(|left, right| left.name.cmp(&right.name));

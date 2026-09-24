@@ -5,6 +5,7 @@
 
 mod authoring;
 mod binding;
+mod catalog;
 mod corner;
 mod corner_expansion;
 pub mod correlation;
@@ -23,6 +24,7 @@ mod validation;
 
 pub use authoring::*;
 pub use binding::CornerModelBinding;
+pub use catalog::{ModelCatalog, ProjectModelCommit, ProjectModelTarget};
 pub use corner::*;
 pub use definition_metadata::*;
 pub use model::*;

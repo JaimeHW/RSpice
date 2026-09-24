@@ -51,7 +51,7 @@ impl ModelLibraryManager {
     /// [`Self::design_inspection_catalog_key`] for the answer that can be
     /// asked per frame.
     pub(crate) fn execution_catalog_digest(&self) -> ContentDigest {
-        let mut libraries = self.libraries.values().collect::<Vec<_>>();
+        let mut libraries = self.catalog.libraries().collect::<Vec<_>>();
         libraries.sort_by(|left, right| left.name.cmp(&right.name));
         let mut hasher = Sha256::new();
         hasher.update(b"rspice.model-execution-catalog/v4\0");
