@@ -3,7 +3,6 @@
 use super::*;
 use arrow_array::{ArrayRef, Float64Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
-use npyz::WriterBuilder as _;
 use std::io::Write as _;
 use std::sync::Arc;
 
@@ -345,16 +344,7 @@ fn parquet_imports_complex_columns_and_rejects_truncation() {
 }
 
 fn npy_f64(shape: &[u64], values: &[f64]) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    let mut writer = npyz::WriteOptions::new()
-        .default_dtype()
-        .shape(shape)
-        .writer(&mut bytes)
-        .begin_nd()
-        .expect("NPY writer");
-    writer.extend(values.iter().copied()).expect("NPY values");
-    writer.finish().expect("NPY finish");
-    bytes
+    rspice_formats::numpy::encode_real_array(shape, values).expect("NPY fixture")
 }
 
 #[test]

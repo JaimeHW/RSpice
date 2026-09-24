@@ -1,6 +1,7 @@
 //! Portable engineering-data codecs.
 
 pub mod matlab;
+pub mod numeric;
 pub mod numpy;
 pub mod waveform_io;
 pub mod zip;

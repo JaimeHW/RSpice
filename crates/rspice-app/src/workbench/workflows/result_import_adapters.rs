@@ -5,6 +5,7 @@
 //! inventing domain or signal identity.
 
 use super::*;
+use rspice_formats::numeric::MAX_EXACT_F64_INTEGER;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{BufReader, Cursor, Read};
@@ -12,7 +13,6 @@ use std::io::{BufReader, Cursor, Read};
 const MAX_ARCHIVE_MEMBERS: usize = 1_024;
 const MAX_ARCHIVE_EXPANDED_BYTES: u64 = MAX_RESULT_DATASET_BYTES;
 const MAX_SIGNAL_NAME_BYTES: usize = 1_024;
-const MAX_EXACT_F64_INTEGER: u64 = 1_u64 << 53;
 const MAX_RESULT_VALUES: usize = MAX_RESULT_DATASET_BYTES as usize / std::mem::size_of::<f64>();
 const MAX_FST_TOP_LEVEL_BLOCKS: usize = 1_024;
 const FST_HEADER_SECTION_BYTES: u64 = 329;
@@ -271,14 +271,8 @@ fn exact_signed_integer(
     identity: &str,
     value: i64,
 ) -> Result<f64, String> {
-    if value.unsigned_abs() > MAX_EXACT_F64_INTEGER {
-        Err(adapter_error(
-            format,
-            format_args!("'{identity}' integer {value} cannot be represented exactly as f64"),
-        ))
-    } else {
-        Ok(value as f64)
-    }
+    rspice_formats::numeric::exact_signed_integer(identity, value)
+        .map_err(|detail| adapter_error(format, detail))
 }
 
 fn exact_unsigned_integer(
@@ -286,14 +280,8 @@ fn exact_unsigned_integer(
     identity: &str,
     value: u64,
 ) -> Result<f64, String> {
-    if value > MAX_EXACT_F64_INTEGER {
-        Err(adapter_error(
-            format,
-            format_args!("'{identity}' integer {value} cannot be represented exactly as f64"),
-        ))
-    } else {
-        Ok(value as f64)
-    }
+    rspice_formats::numeric::exact_unsigned_integer(identity, value)
+        .map_err(|detail| adapter_error(format, detail))
 }
 
 // -------------------------------------------------------------------------
@@ -1190,20 +1178,27 @@ fn combine_real_imag_columns(
 // -------------------------------------------------------------------------
 // NumPy NPY and NPZ
 
-#[derive(Debug)]
-struct NpyArray {
-    shape: Vec<usize>,
-    fortran: bool,
-    real: Vec<f64>,
-    imag: Option<Vec<f64>>,
-}
-
 pub(super) fn parse_npy(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
-    let array = decode_npy(bytes, format)?;
-    let (coordinate, signals) = npy_matrix_to_dataset(array, format)?;
+    let array =
+        rspice_formats::numpy::reader::decode_npy(bytes, MAX_RESULT_VALUES, format.canonical_id())?;
+    let (coordinate, signals) = rspice_formats::numpy::reader::npy_matrix_to_dataset(
+        array,
+        MAX_RESULT_ROWS,
+        MAX_RESULT_COLUMNS,
+        format.canonical_id(),
+    )?;
+    let signals = signals
+        .into_iter()
+        .map(|signal| ImportedSignal {
+            name: signal.name,
+            real: signal.real,
+            imag: signal.imag,
+            unit: None,
+        })
+        .collect();
     finish_dataset(format, AnalysisType::DcSweep, "sample", coordinate, signals)
 }
 
@@ -1280,7 +1275,14 @@ pub(super) fn parse_npz(
                     format_args!("could not decode '{member_name}': {error}"),
                 )
             })?;
-        arrays.push((stem, decode_npy(&member_bytes, format)?));
+        arrays.push((
+            stem,
+            rspice_formats::numpy::reader::decode_npy(
+                &member_bytes,
+                MAX_RESULT_VALUES,
+                format.canonical_id(),
+            )?,
+        ));
     }
     let coordinate_index = arrays
         .iter()
@@ -1295,16 +1297,22 @@ pub(super) fn parse_npz(
             )
         })?;
     let (coordinate_name, coordinate_array) = arrays.remove(coordinate_index);
-    if coordinate_array.imag.is_some() {
+    if coordinate_array.is_complex() {
         return Err(adapter_error(
             format,
             "NPZ coordinate array cannot be complex",
         ));
     }
-    let coordinate = npy_vector(&coordinate_array, format, &coordinate_name)?.0;
+    let coordinate = rspice_formats::numpy::reader::npy_vector(
+        &coordinate_array,
+        format.canonical_id(),
+        &coordinate_name,
+    )?
+    .0;
     let mut signals = Vec::with_capacity(arrays.len());
     for (name, array) in arrays {
-        let (real, imag) = npy_vector(&array, format, &name)?;
+        let (real, imag) =
+            rspice_formats::numpy::reader::npy_vector(&array, format.canonical_id(), &name)?;
         signals.push(ImportedSignal {
             name,
             real,
@@ -1319,212 +1327,6 @@ pub(super) fn parse_npz(
         coordinate,
         signals,
     )
-}
-
-fn decode_npy(bytes: &[u8], format: ResultImportFormat) -> Result<NpyArray, String> {
-    use npyz::{DType, Order, TypeChar};
-    let file = npyz::NpyFile::new(Cursor::new(bytes))
-        .map_err(|error| adapter_error(format, format_args!("invalid NPY header: {error}")))?;
-    let shape = file
-        .shape()
-        .iter()
-        .map(|value| {
-            usize::try_from(*value)
-                .map_err(|_| adapter_error(format, "NPY dimension exceeds this platform"))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    if shape.is_empty() || shape.len() > 2 {
-        return Err(adapter_error(
-            format,
-            format_args!("NPY shape {shape:?} is not a one- or two-dimensional waveform table"),
-        ));
-    }
-    let count = shape
-        .iter()
-        .try_fold(1_usize, |count, dim| count.checked_mul(*dim))
-        .ok_or_else(|| adapter_error(format, "NPY shape product overflow"))?;
-    if count > MAX_RESULT_VALUES {
-        return Err(adapter_error(format, "NPY numeric-value limit exceeded"));
-    }
-    let fortran = file.order() == Order::Fortran;
-    let DType::Plain(type_string) = file.dtype() else {
-        return Err(adapter_error(
-            format,
-            "structured and nested NPY dtypes require an explicit mapping and are not accepted",
-        ));
-    };
-    macro_rules! real {
-        ($ty:ty) => {{
-            let values = file.into_vec::<$ty>().map_err(|error| {
-                adapter_error(format, format_args!("could not decode NPY values: {error}"))
-            })?;
-            NpyArray {
-                shape,
-                fortran,
-                real: values.into_iter().map(|value| value as f64).collect(),
-                imag: None,
-            }
-        }};
-    }
-    macro_rules! complex {
-        ($ty:ty) => {{
-            let values = file.into_vec::<$ty>().map_err(|error| {
-                adapter_error(format, format_args!("could not decode NPY values: {error}"))
-            })?;
-            NpyArray {
-                shape,
-                fortran,
-                real: values.iter().map(|value| value.re as f64).collect(),
-                imag: Some(values.iter().map(|value| value.im as f64).collect()),
-            }
-        }};
-    }
-    let array = match (type_string.type_char(), type_string.size_field()) {
-        (TypeChar::Float, 4) => real!(f32),
-        (TypeChar::Float, 8) => real!(f64),
-        (TypeChar::Int, 1) => real!(i8),
-        (TypeChar::Int, 2) => real!(i16),
-        (TypeChar::Int, 4) => real!(i32),
-        (TypeChar::Int, 8) => {
-            let values = file.into_vec::<i64>().map_err(|error| {
-                adapter_error(format, format_args!("could not decode NPY values: {error}"))
-            })?;
-            NpyArray {
-                shape,
-                fortran,
-                real: values
-                    .into_iter()
-                    .map(|value| exact_signed_integer(format, "NPY array", value))
-                    .collect::<Result<Vec<_>, _>>()?,
-                imag: None,
-            }
-        }
-        (TypeChar::Uint, 1) => real!(u8),
-        (TypeChar::Uint, 2) => real!(u16),
-        (TypeChar::Uint, 4) => real!(u32),
-        (TypeChar::Uint, 8) => {
-            let values = file.into_vec::<u64>().map_err(|error| {
-                adapter_error(format, format_args!("could not decode NPY values: {error}"))
-            })?;
-            NpyArray {
-                shape,
-                fortran,
-                real: values
-                    .into_iter()
-                    .map(|value| exact_unsigned_integer(format, "NPY array", value))
-                    .collect::<Result<Vec<_>, _>>()?,
-                imag: None,
-            }
-        }
-        (TypeChar::Bool, 1) => {
-            let values = file.into_vec::<bool>().map_err(|error| {
-                adapter_error(format, format_args!("could not decode NPY values: {error}"))
-            })?;
-            NpyArray {
-                shape,
-                fortran,
-                real: values
-                    .into_iter()
-                    .map(|value| if value { 1.0 } else { 0.0 })
-                    .collect(),
-                imag: None,
-            }
-        }
-        (TypeChar::Complex, 8) => complex!(num_complex::Complex32),
-        (TypeChar::Complex, 16) => complex!(num_complex::Complex64),
-        (kind, size) => {
-            return Err(adapter_error(
-                format,
-                format_args!("unsupported NPY dtype {kind:?}{size}"),
-            ));
-        }
-    };
-    Ok(array)
-}
-
-fn npy_vector(
-    array: &NpyArray,
-    format: ResultImportFormat,
-    name: &str,
-) -> Result<(Vec<f64>, Option<Vec<f64>>), String> {
-    let len = match array.shape.as_slice() {
-        [len] => *len,
-        [rows, 1] => *rows,
-        [1, columns] => *columns,
-        _ => {
-            return Err(adapter_error(
-                format,
-                format_args!("NPZ array '{name}' has non-vector shape {:?}", array.shape),
-            ));
-        }
-    };
-    if array.real.len() != len || array.imag.as_ref().is_some_and(|imag| imag.len() != len) {
-        return Err(adapter_error(
-            format,
-            format_args!("NPZ array '{name}' payload does not match its shape"),
-        ));
-    }
-    Ok((array.real.clone(), array.imag.clone()))
-}
-
-fn npy_matrix_to_dataset(
-    array: NpyArray,
-    format: ResultImportFormat,
-) -> Result<(Vec<f64>, Vec<ImportedSignal>), String> {
-    let (rows, columns) = match array.shape.as_slice() {
-        [rows] => (*rows, 1),
-        [rows, columns] => (*rows, *columns),
-        _ => unreachable!(),
-    };
-    if !(MIN_RESULT_ROWS..=MAX_RESULT_ROWS).contains(&rows)
-        || columns == 0
-        || columns > MAX_RESULT_COLUMNS
-    {
-        return Err(adapter_error(
-            format,
-            format_args!("NPY waveform shape {:?} exceeds import bounds", array.shape),
-        ));
-    }
-    let index = |row: usize, column: usize| {
-        if array.fortran {
-            column * rows + row
-        } else {
-            row * columns + column
-        }
-    };
-    if array.imag.is_none() && columns >= 2 {
-        let coordinate = (0..rows).map(|row| array.real[index(row, 0)]).collect();
-        let signals = (1..columns)
-            .map(|column| ImportedSignal {
-                name: format!("signal_{column}"),
-                real: (0..rows)
-                    .map(|row| array.real[index(row, column)])
-                    .collect(),
-                imag: None,
-                unit: None,
-            })
-            .collect();
-        return Ok((coordinate, signals));
-    }
-    let coordinate = (0..rows).map(|row| row as f64).collect();
-    let signals = (0..columns)
-        .map(|column| ImportedSignal {
-            name: if columns == 1 {
-                "value".to_owned()
-            } else {
-                format!("signal_{}", column + 1)
-            },
-            real: (0..rows)
-                .map(|row| array.real[index(row, column)])
-                .collect(),
-            imag: array
-                .imag
-                .as_ref()
-                .map(|imag| (0..rows).map(|row| imag[index(row, column)]).collect()),
-            unit: None,
-        })
-        .collect();
-    Ok((coordinate, signals))
 }
 
 // -------------------------------------------------------------------------

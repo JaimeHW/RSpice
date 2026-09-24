@@ -5236,7 +5236,6 @@ dependencies = [
  "log",
  "lopdf",
  "matfile",
- "npyz",
  "num-complex",
  "once_cell",
  "parquet",

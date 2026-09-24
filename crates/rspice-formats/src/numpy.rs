@@ -2,6 +2,7 @@
 
 pub mod archive;
 pub mod matrix;
+pub mod reader;
 
 use npyz::WriterBuilder as _;
 use num_complex::Complex64;
