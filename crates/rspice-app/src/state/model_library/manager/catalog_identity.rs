@@ -117,7 +117,7 @@ impl ModelLibraryManager {
     ///
     /// Retained bytes are named by this key rather than re-hashed into it.
     /// Sealing recomputes SHA-256 over every retained byte string and refuses
-    /// the whole deck unless it equals the [`ModelSourcePin`] digest folded in
+    /// the whole deck unless it equals the [`rspice_model_library::ModelSourcePin`] digest folded in
     /// here, so no deck the inspection can accept exists whose bytes are not
     /// the ones this key already names. Hashing them again would repeat the
     /// pass the guarded work performs, which is the cost this key exists to

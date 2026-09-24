@@ -24,7 +24,7 @@ mod validation;
 
 pub use authoring::*;
 pub use binding::CornerModelBinding;
-pub use catalog::{ModelCatalog, ProjectModelCommit, ProjectModelTarget};
+pub use catalog::{CapturedHdlSources, ModelCatalog, ProjectModelCommit, ProjectModelTarget};
 pub use corner::*;
 pub use definition_metadata::*;
 pub use model::*;

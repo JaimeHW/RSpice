@@ -31,11 +31,13 @@ use rspice_model_library::{
 use super::is_foreign_platform_absolute_path;
 use super::{
     DeviceModel, ModelCorrelationState, ModelLibrary, ModelQualificationState,
-    ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourcePin, ModelType,
-    ProcessCorner, ProjectModelRevisionDefinition, first_unreachable_source,
+    ModelSourceAuthority, ModelType, ProcessCorner, ProjectModelRevisionDefinition,
+    first_unreachable_source,
 };
 #[cfg(test)]
-use super::{ModelLevel, ModelSourceEvidenceBinding, ProjectModelDefinition};
+use super::{
+    ModelLevel, ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin, ProjectModelDefinition,
+};
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 use rspice_app_types::product::ProcessCorner as CornerProcess;
 use rspice_model_library::{
@@ -1732,178 +1734,6 @@ impl ModelLibraryManager {
         Ok(())
     }
 
-    /// Enforce the model-library dialect boundary before any parsed
-    /// projection is accepted. `.scs` sources admit the explicit
-    /// `simulator lang=spice` interoperability profile and the fail-closed
-    /// declarative Spectre model-library subset implemented by the core
-    /// adapter. Unsupported native statements are errors, never discarded.
-    pub(crate) fn validate_model_source_dialect(path: &Path, source: &str) -> Result<(), String> {
-        rspice_core::library::adapt_spectre_model_library(path, source)
-            .map(|_| ())
-            .map_err(|error| {
-                format!(
-                    "{}:{} cannot be imported as an executable model library: {}",
-                    path.display(),
-                    error.line,
-                    error.message
-                )
-            })
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn extend_native_veriloga_closure(
-        result: &mut rspice_core::library::LibParseResult,
-    ) -> Result<(), String> {
-        let mut roots = BTreeSet::<PathBuf>::new();
-        for resolved in &result.resolved_sources {
-            let projected = rspice_core::library::adapt_spectre_model_library(
-                &resolved.path,
-                &resolved.content,
-            )
-            .map_err(|error| {
-                format!(
-                    "{}:{} cannot authenticate AHDL dependencies: {}",
-                    resolved.path.display(),
-                    error.line,
-                    error.message
-                )
-            })?;
-            for line in projected.lines() {
-                let Some(include) = rspice_core::netlist::parse_veriloga_source_directive(line)
-                else {
-                    continue;
-                };
-                let requested = rspice_core::netlist::normalize_source_path_literal(
-                    &include.file_path.to_string_lossy(),
-                )
-                .map_err(|error| {
-                    format!(
-                        "{} has an invalid Verilog-A dependency: {error}",
-                        resolved.path.display()
-                    )
-                })?;
-                let matches = result
-                    .resolved_dependencies
-                    .iter()
-                    .filter(|dependency| {
-                        dependency.owner == resolved.path
-                            && rspice_core::netlist::normalize_source_path_literal(
-                                &dependency.requested_path,
-                            )
-                            .is_ok_and(|candidate| candidate == requested)
-                    })
-                    .collect::<Vec<_>>();
-                let [dependency] = matches.as_slice() else {
-                    return Err(format!(
-                        "{} Verilog-A dependency '{}' has {} resolution edges",
-                        resolved.path.display(),
-                        requested,
-                        matches.len()
-                    ));
-                };
-                roots.insert(dependency.target.clone());
-            }
-        }
-
-        let limits = rspice_veriloga::SourceProviderLimits {
-            max_dependencies: crate::state::MAX_PROJECT_SOURCE_FILES.saturating_add(64),
-            max_total_source_bytes: crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES.saturating_mul(2),
-            max_include_depth: crate::state::MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH,
-            max_expanded_bytes: crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES.saturating_mul(2),
-        };
-        for root in roots {
-            let mut preprocessor = rspice_veriloga::Preprocessor::new();
-            preprocessor
-                .preprocess_file_with_limits(&root, limits)
-                .map_err(|error| {
-                    format!(
-                        "Could not authenticate Verilog-A closure rooted at '{}': {error}",
-                        root.display()
-                    )
-                })?;
-            let documents = preprocessor.take_dependency_documents();
-            let provider_paths = documents
-                .iter()
-                .filter(|document| {
-                    document.origin == rspice_veriloga::SourceDocumentOrigin::Provider
-                })
-                .map(|document| document.logical_path.clone())
-                .collect::<HashSet<_>>();
-            for document in documents.into_iter().filter(|document| {
-                document.origin == rspice_veriloga::SourceDocumentOrigin::Provider
-            }) {
-                if let Some(existing) = result
-                    .resolved_sources
-                    .iter()
-                    .find(|source| source.path == document.logical_path)
-                {
-                    if existing.content.as_ref() != document.source.as_str() {
-                        return Err(format!(
-                            "Verilog-A dependency '{}' changed while its closure was captured",
-                            document.logical_path.display()
-                        ));
-                    }
-                    continue;
-                }
-                let bytes: Arc<[u8]> = Arc::from(document.source.as_bytes());
-                let content: Arc<str> = Arc::from(document.source);
-                result
-                    .resolved_sources
-                    .push(rspice_core::library::ResolvedLibSource {
-                        path: document.logical_path,
-                        bytes,
-                        content,
-                    });
-            }
-            for include in preprocessor.take_include_graph() {
-                if !provider_paths.contains(&include.included_path) {
-                    continue;
-                }
-                let dependency = rspice_core::library::ResolvedLibDependency {
-                    owner: include.including_path,
-                    requested_path: include.requested_path,
-                    target: include.included_path,
-                };
-                if let Some(existing) = result.resolved_dependencies.iter().find(|existing| {
-                    existing.owner == dependency.owner
-                        && existing.requested_path == dependency.requested_path
-                }) {
-                    if existing.target != dependency.target {
-                        return Err(format!(
-                            "Verilog-A dependency '{}' in '{}' resolved inconsistently",
-                            dependency.requested_path,
-                            dependency.owner.display()
-                        ));
-                    }
-                } else {
-                    result.resolved_dependencies.push(dependency);
-                }
-            }
-        }
-        result
-            .resolved_sources
-            .sort_by(|left, right| left.path.cmp(&right.path));
-        result.resolved_dependencies.sort();
-        result.resolved_dependencies.dedup();
-        let total_bytes = result
-            .resolved_sources
-            .iter()
-            .try_fold(0usize, |total, source| {
-                total.checked_add(source.bytes.len())
-            })
-            .ok_or_else(|| "Model source closure size overflowed".to_owned())?;
-        if result.resolved_sources.len() > crate::state::MAX_PROJECT_SOURCE_FILES
-            || total_bytes > crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES
-        {
-            return Err(format!(
-                "Model source closure including Verilog-A dependencies exceeds the project limit ({} files / {} bytes)",
-                crate::state::MAX_PROJECT_SOURCE_FILES,
-                crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES
-            ));
-        }
-        Ok(())
-    }
-
     /// Total library count
     pub fn library_count(&self) -> usize {
         self.catalog.library_count()
@@ -1940,12 +1770,6 @@ impl ModelLibraryManager {
             )
         })?;
         let base_dir = path.parent().unwrap_or(std::path::Path::new("."));
-        let lib_name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unnamed")
-            .to_string();
-
         // The parser captures the exact root-plus-include bytes it consumes.
         // Hash that captured closure so parsing and pinning cannot observe
         // different file versions during an explicit refresh.
@@ -1956,107 +1780,13 @@ impl ModelLibraryManager {
                 path.display()
             )
         })?;
-        if !result.is_ok() {
-            return Err(format!(
-                "Model library '{}' contains parse or dependency errors: {}",
-                path.display(),
-                result
-                    .errors
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            ));
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        let result = {
-            let mut result = result;
-            Self::extend_native_veriloga_closure(&mut result)?;
-            result
-        };
-        let mut source_closure = result
-            .resolved_sources
-            .iter()
-            .map(|source| ModelSourcePin {
-                path: source.path.clone(),
-                digest: crate::product::ContentDigest::from_bytes(
-                    Sha256::digest(source.bytes.as_ref()).into(),
-                ),
-            })
-            .collect::<Vec<_>>();
-        source_closure.sort_by(|left, right| left.path.cmp(&right.path));
-        let mut source_contents = result
-            .resolved_sources
-            .iter()
-            .map(|source| ModelSourceContent {
-                path: source.path.clone(),
-                bytes: source.bytes.as_ref().to_vec(),
-            })
-            .collect::<Vec<_>>();
-        source_contents.sort_by(|left, right| left.path.cmp(&right.path));
-        for content in &source_contents {
-            let source =
-                rspice_core::netlist::decode_source_bytes(&content.bytes).map_err(|error| {
-                    format!(
-                        "Model source '{}' cannot be decoded for dialect validation: {error}",
-                        content.path.display()
-                    )
-                })?;
-            Self::validate_model_source_dialect(&content.path, &source)?;
-        }
-        if source_closure.is_empty() {
-            return Err(format!(
-                "Model library '{}' produced an empty source dependency closure",
-                path.display()
-            ));
-        }
-        let mut source_edges = result
-            .resolved_dependencies
-            .iter()
-            .map(|edge| ModelSourceEdge {
-                owner: edge.owner.clone(),
-                requested_path: edge.requested_path.clone(),
-                target: edge.target.clone(),
-            })
-            .collect::<Vec<_>>();
-        source_edges.sort();
-        source_edges.dedup();
-        if let Some(unreachable) = first_unreachable_source(&path, &source_closure, &source_edges) {
-            return Err(format!(
-                "Model library '{}' captured dependency '{}' that is not reachable from its root by authenticated resolution edges",
-                path.display(),
-                unreachable.display()
-            ));
-        }
-
-        if let Some(existing) = self.catalog.get_library(&lib_name)
-            && existing.root_path.as_deref() != Some(path.as_path())
-        {
-            return Err(format!(
-                "Cannot load '{}': library name '{}' is already owned by a different model source",
-                path.display(),
-                lib_name
-            ));
-        }
-
-        // Build a complete replacement and publish it only after every parse
-        // and section check succeeds. A failed refresh never leaves a partly
-        // updated model catalog behind.
-        let mut library = self
-            .catalog
-            .get_library(&lib_name)
-            .cloned()
-            .unwrap_or_else(|| ModelLibrary::new(&lib_name));
-        library.root_path = Some(path.clone());
-        library.source_authority = ModelSourceAuthority::External;
-        library.source_closure = source_closure;
-        library.source_contents = source_contents;
-        library.source_edges = source_edges;
-        let library =
-            library.with_parsed_catalog(&result, &path, section, &path.display().to_string())?;
-
-        self.catalog.add_library(library);
-        Ok(lib_name)
+        self.catalog.import_external_library(
+            &path,
+            result,
+            section,
+            source_bundle::limits(),
+            source_bundle::capture_external_hdl_sources,
+        )
     }
 
     /// Import one self-contained model source from authenticated bytes.

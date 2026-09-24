@@ -12,10 +12,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, HashMap};
 
+mod external_import;
 mod project_models;
 #[cfg(test)]
 mod tests;
 
+pub use external_import::CapturedHdlSources;
 pub use project_models::{ProjectModelCommit, ProjectModelTarget};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

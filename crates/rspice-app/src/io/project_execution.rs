@@ -1817,7 +1817,7 @@ fn validate_retained_model_source_dialects(
                     content.path.display()
                 )
             })?;
-        ModelLibraryManager::validate_model_source_dialect(&content.path, &source)
+        rspice_model_library::ModelCatalog::validate_model_source_dialect(&content.path, &source)
             .map_err(|error| format!("{context} rejects source dialect: {error}"))?;
     }
     Ok(())
