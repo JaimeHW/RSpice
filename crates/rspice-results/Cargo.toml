@@ -1,0 +1,29 @@
+[package]
+name = "rspice-results"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+rspice-app-types.workspace = true
+base64.workspace = true
+png = "0.18"
+serde = { workspace = true, features = ["rc"] }
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+uuid = { workspace = true, features = ["v5"] }
+
+[build-dependencies]
+serde_json = { workspace = true, features = ["preserve_order"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+uuid = { workspace = true, features = ["js", "v5"] }

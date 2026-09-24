@@ -1,0 +1,10 @@
+//! Exact result documents and viewer-independent result rules.
+//!
+//! Presentation and execution use these contracts without owning their data.
+
+pub mod operating_point;
+pub mod report_document;
+pub mod stability;
+pub mod viewer_catalog;
+pub mod visualization_document;
+pub mod visualization_raster;

@@ -26,11 +26,11 @@ use serde::de::{IgnoredAny, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use crate::product::{
+use crate::viewer_catalog::{ViewerArt, viewer_document};
+use rspice_app_types::product::{
     AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId, ObjectRevision, ResultDocumentId,
     RevisionError, SimulationPlanId,
 };
-use crate::results::viewer_catalog::{ViewerArt, viewer_document};
 
 /// Maximum immutable result projections retained by one visualization document.
 pub const MAX_VISUALIZATION_DATASETS: usize = 32;

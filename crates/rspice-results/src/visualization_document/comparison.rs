@@ -237,7 +237,7 @@ impl NestedResourceCount for ComparisonReceipt {
 }
 
 impl ComparisonReceipt {
-    pub(crate) fn validate_structure(&self) -> Result<(), VisualizationError> {
+    pub fn validate_structure(&self) -> Result<(), VisualizationError> {
         self.policy.tolerance.validate()?;
         self.policy.execution.validate()?;
         if self.baseline.dataset_id == self.candidate.dataset_id {

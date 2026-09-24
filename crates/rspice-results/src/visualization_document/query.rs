@@ -493,7 +493,8 @@ pub(super) fn rows_have_exact_coordinates(
         })
 }
 
-pub(crate) fn compare_source_datasets(
+/// Compare two authenticated source datasets under a validated request.
+pub fn compare_source_datasets(
     baseline: &SourceDataset,
     candidate: &SourceDataset,
     request: &ComparisonRequest,

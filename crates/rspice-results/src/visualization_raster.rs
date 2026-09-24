@@ -15,7 +15,7 @@ use std::io::{self, Write};
 
 use serde::{Deserialize, Serialize};
 
-use crate::product::{ContentDigest, DatasetBinding, ObjectRevision, ResultDocumentId};
+use rspice_app_types::product::{ContentDigest, DatasetBinding, ObjectRevision, ResultDocumentId};
 
 use super::report_document::{
     FrozenReportArtifact, MAX_FROZEN_ARTIFACT_BYTES, ReportReferenceSnapshot, ReportSourceId,
@@ -408,7 +408,7 @@ pub enum VisualizationRasterError {
         actual: Vec<DatasetBinding>,
     },
     #[error("duplicate immutable binding for dataset {0}")]
-    DuplicateDatasetBinding(crate::product::DatasetId),
+    DuplicateDatasetBinding(rspice_app_types::product::DatasetId),
     #[error("page {0} is not present in the selected document revision")]
     PageNotFound(u64),
     #[error("pane {0} is not present in the selected document revision")]
@@ -446,12 +446,12 @@ pub enum VisualizationRasterError {
         value: i64,
     },
     #[error("dataset {0} is not attached to the selected document revision")]
-    DatasetNotFound(crate::product::DatasetId),
+    DatasetNotFound(rspice_app_types::product::DatasetId),
     #[error(
         "dataset {dataset_id} digest mismatch: trace binds {requested}, document contains {actual}"
     )]
     DatasetDigestMismatch {
-        dataset_id: crate::product::DatasetId,
+        dataset_id: rspice_app_types::product::DatasetId,
         requested: ContentDigest,
         actual: ContentDigest,
     },
@@ -1413,11 +1413,11 @@ mod tests {
     use sha2::{Digest as _, Sha256};
 
     use super::*;
-    use crate::product::{DatasetBinding, DatasetId};
-    use crate::results::report_document::ReportReferenceSnapshot;
-    use crate::results::visualization_document::{
+    use crate::report_document::ReportReferenceSnapshot;
+    use crate::visualization_document::{
         DocumentEdit, EntityRef, NewAxis, NewTrace, QueryCoordinate, SourceColumn, SourceRow,
     };
+    use rspice_app_types::product::{DatasetBinding, DatasetId};
 
     struct Fixture {
         document: VisualizationDocument,

@@ -20,7 +20,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
-use crate::product::{
+use rspice_app_types::product::{
     ContentDigest, DatasetBinding, DatasetId, ObjectRevision, ResultDocumentId, RevisionError,
     VerificationEvidenceId,
 };
@@ -1725,6 +1725,10 @@ impl ReportDocument {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "revision publication validates each independently authenticated input"
+    )]
     fn append_prepared_revision_record(
         &mut self,
         revision_identity: ReportRevisionId,
@@ -2399,6 +2403,10 @@ fn migrated_report_revision_id(identity_material: &[u8]) -> Result<ReportRevisio
     ))
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "persisted digest fields retain an explicit stable order"
+)]
 fn report_revision_record_digest(
     revision_identity: ReportRevisionId,
     document_id: ResultDocumentId,

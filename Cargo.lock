@@ -5256,6 +5256,7 @@ dependencies = [
  "rspice-design-model",
  "rspice-pack",
  "rspice-publication-contract",
+ "rspice-results",
  "rspice-veriloga",
  "rust_xlsxwriter",
  "rustfft",
@@ -5569,6 +5570,20 @@ dependencies = [
  "pyo3-build-config",
  "rspice-core",
  "rspice-output",
+]
+
+[[package]]
+name = "rspice-results"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "png",
+ "rspice-app-types",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.20",
+ "uuid",
 ]
 
 [[package]]

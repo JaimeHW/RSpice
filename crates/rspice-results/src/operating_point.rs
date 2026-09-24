@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::product::ContentDigest;
+use rspice_app_types::product::ContentDigest;
 
 /// Complete, identity-bound MNA state retained by an earlier accepted OP.
 /// Node order excludes ground and is followed by branch order in `solution`,
@@ -22,7 +22,7 @@ pub struct OpPreviousState {
 }
 
 impl OpPreviousState {
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), String> {
         let valid_identity = |name: &str| {
             !name.is_empty() && name.trim() == name && !name.chars().any(char::is_whitespace)
         };
