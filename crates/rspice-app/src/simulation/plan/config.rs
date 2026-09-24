@@ -25,7 +25,6 @@ use crate::workbench::app_state::{AcSetup, DcSetup, TranSetup};
 
 use super::AnalysisKind;
 
-mod frequency_table;
 mod periodic_network;
 mod qpac;
 mod qpnoise;
@@ -41,10 +40,7 @@ use quasi_periodic::validate_qpss;
 
 pub use periodic_network::PeriodicNetworkDraft;
 use periodic_network::{validate_periodic_network, validate_psp_network};
-mod recorded_fft;
-
-pub use frequency_table::AcDataDraft;
-pub use recorded_fft::FftDraft;
+pub use rspice_simulation_contract::drafts::{AcDataDraft, FftDraft};
 
 /// AC sweep draft shared structurally by AC and DISTO, but never shared by
 /// identity. Each analysis instance owns a deep copy.
@@ -1535,6 +1531,26 @@ fn validate_dc_mismatch(draft: &DcMismatchDraft) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_fft_specification_restores_from_the_wire_with_engine_defaults() {
+        use crate::simulation::multi_run::AnalysisSpec;
+
+        // The wire twin: an `AnalysisSpec::Fft` sealed before an optional
+        // qualifier was authorable restores with that qualifier unauthored,
+        // which is what the engine reads as its own default.
+        let wire = r#"{"Fft":{"request":{"output":"V(OUT)","points":256,"window":"RECT"}}}"#;
+        let spec: AnalysisSpec = serde_json::from_str(wire).expect("the sealed spec restores");
+        let AnalysisSpec::Fft { request } = &spec else {
+            panic!("an FFT specification");
+        };
+        assert_eq!(request.start, None);
+        assert_eq!(request.stop, None);
+        assert_eq!(request.format, None);
+        assert_eq!(request.alfa, None);
+        assert_eq!(request.to_card(), ".fft V(OUT) NP=256 WINDOW=RECT");
+        assert!(spec.validate().is_ok());
+    }
 
     #[test]
     fn all_kinds_have_exact_tagged_drafts_and_legacy_mapping() {

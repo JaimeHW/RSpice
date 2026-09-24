@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::simulation::config::{
+use crate::config::{
     AC_FREQUENCY_TABLE, AcDataAnalysisConfig, AcDataParameterColumn, parse_ac_frequency_list,
 };
 
@@ -85,7 +85,7 @@ impl AcDataDraft {
                             .split(|ch: char| ch == ',' || ch == ';' || ch.is_whitespace())
                             .filter(|value| !value.is_empty())
                             .map(|value| {
-                                crate::quantity::spice_value::parse_spice_value_checked(value)
+                                crate::spice_value::parse_spice_value_checked(value)
                                     .map_err(|error| format!("AC DATA {}: {error}", column.name))
                             })
                             .collect::<Result<Vec<_>, _>>()?;

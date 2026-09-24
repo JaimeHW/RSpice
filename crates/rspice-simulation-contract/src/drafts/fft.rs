@@ -10,7 +10,7 @@
 //!
 use serde::{Deserialize, Serialize};
 
-use crate::simulation::config::{FFT_DEFAULT_POINTS, FftFormatChoice, FftRequest, window_keyword};
+use crate::config::{FFT_DEFAULT_POINTS, FftFormatChoice, FftRequest, window_keyword};
 
 /// Raw form state for one `.fft` card.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,13 +62,13 @@ fn optional_quantity(field: &str, label: &str) -> Result<Option<f64>, String> {
     if trimmed.is_empty() {
         return Ok(None);
     }
-    crate::quantity::spice_value::parse_spice_value_checked(trimmed)
+    crate::spice_value::parse_spice_value_checked(trimmed)
         .map(Some)
         .map_err(|error| format!("{label}: {error}"))
 }
 
 impl FftDraft {
-    pub(crate) fn uses_shape_parameter(&self) -> bool {
+    pub fn uses_shape_parameter(&self) -> bool {
         matches!(
             self.window.trim().to_ascii_uppercase().as_str(),
             "GAUSS" | "KAISER"
@@ -119,7 +119,6 @@ impl FftDraft {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::multi_run::AnalysisSpec;
 
     #[test]
     fn an_fft_draft_saved_before_a_field_existed_restores_with_engine_defaults() {
@@ -145,24 +144,6 @@ mod tests {
         assert_eq!(partial.output, defaults.output);
         assert_eq!(partial.points, 256);
         assert_eq!(partial.window, "HANN");
-    }
-
-    #[test]
-    fn an_fft_specification_restores_from_the_wire_with_engine_defaults() {
-        // The wire twin: an `AnalysisSpec::Fft` sealed before an optional
-        // qualifier was authorable restores with that qualifier unauthored,
-        // which is what the engine reads as its own default.
-        let wire = r#"{"Fft":{"request":{"output":"V(OUT)","points":256,"window":"RECT"}}}"#;
-        let spec: AnalysisSpec = serde_json::from_str(wire).expect("the sealed spec restores");
-        let AnalysisSpec::Fft { request } = &spec else {
-            panic!("an FFT specification");
-        };
-        assert_eq!(request.start, None);
-        assert_eq!(request.stop, None);
-        assert_eq!(request.format, None);
-        assert_eq!(request.alfa, None);
-        assert_eq!(request.to_card(), ".fft V(OUT) NP=256 WINDOW=RECT");
-        assert!(spec.validate().is_ok());
     }
 
     #[test]
@@ -192,7 +173,7 @@ mod tests {
         assert!(request.engine_key().unwrap().contains("ALFA=6"));
         draft.alfa = "unfinished shape".into();
         assert!(draft.to_request().is_err());
-        for window in crate::simulation::config::FFT_WINDOWS {
+        for window in crate::config::FFT_WINDOWS {
             draft.window = window_keyword(window).to_ascii_lowercase();
             let json = serde_json::to_value(&draft).unwrap();
             let restored: FftDraft = serde_json::from_value(json.clone()).unwrap();

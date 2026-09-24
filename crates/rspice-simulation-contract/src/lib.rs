@@ -7,6 +7,7 @@ pub mod analysis_run_at;
 pub mod analysis_tag;
 pub mod config;
 pub mod dependency_contract;
+pub mod drafts;
 pub mod numeric_override;
 pub mod options;
 pub mod spice_value;
