@@ -68,7 +68,7 @@ semver.workspace = true
 toml.workspace = true
 rspice-publication-contract.workspace = true
 csv.workspace = true
-zip = { version = "7.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 thiserror.workspace = true
 sha2 = "0.10"
 regex = "1.12"
