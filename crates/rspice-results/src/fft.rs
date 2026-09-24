@@ -1,5 +1,7 @@
 //! Portable format shared by FFT requests and retained spectrum evidence.
 
+pub mod window;
+
 use serde::{Deserialize, Serialize};
 
 /// Effective `.FFT FORMAT`, as the engine resolved it for this spectrum.
