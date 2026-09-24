@@ -68,19 +68,6 @@ impl ModelLibrary {
     }
 }
 
-/// A digest, shortened for display.
-///
-/// One rendering, because a digest shown two ways in two panes reads as two
-/// digests. Head and tail are both kept so a shared prefix stays visible.
-#[must_use]
-pub fn short_digest(digest: &str) -> String {
-    if digest.len() <= 12 {
-        digest.to_owned()
-    } else {
-        format!("{}…{}", &digest[..8], &digest[digest.len() - 4..])
-    }
-}
-
 /// What the retained include closure is, over a set of libraries.
 ///
 /// `files` counts each source once however many libraries include it. Summing

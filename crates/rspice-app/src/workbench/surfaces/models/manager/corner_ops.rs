@@ -107,7 +107,7 @@ pub(super) fn add_corner(
     let select_after_insert = corner.is_default;
     library.corners.insert(name.to_owned(), corner);
     if select_after_insert {
-        library.select_corner(name);
+        library.activate_corner(name);
     }
     let result = publish_model_library_candidate(
         app.state,
@@ -276,7 +276,7 @@ pub(super) fn edit_corner(
     let executable = corner.validate_contract().is_ok();
     library.corners.insert(name.to_owned(), corner);
     if select_after_insert {
-        library.select_corner(name);
+        library.activate_corner(name);
     }
     let action = if duplicate { "duplicate" } else { "edit" };
     let result = publish_model_library_candidate(
@@ -440,7 +440,7 @@ pub(super) fn delete_corner(
             .find_map(|(name, corner)| corner.is_default.then(|| name.clone()))
             .or(replacement);
         if let Some(selected_corner) = selected_corner {
-            library.select_corner(&selected_corner);
+            library.activate_corner(&selected_corner);
         } else {
             library.selected_corner = None;
             library.refresh_effective_model_projection();

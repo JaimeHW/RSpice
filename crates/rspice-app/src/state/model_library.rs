@@ -11,20 +11,17 @@
 
 mod compatibility;
 pub(crate) mod compilation;
-mod corner_expansion;
 mod device_class;
-mod facts;
-mod library;
 mod manager;
-mod project_revision;
+mod source_label;
 
 pub(crate) use compatibility::{
     models_have_compatible_device_family, placement_component_for_model,
     validate_component_model_compatibility,
 };
-pub use corner_expansion::RetainedClosure;
 pub(crate) use device_class::{SUBCIRCUIT_CLASS, card_device};
 pub use rspice_model_library::ProjectModelDefinition;
+pub use rspice_model_library::RetainedClosure;
 pub use rspice_model_library::correlation::{
     CorrelationAggregation, CorrelationAlignmentEvidence, CorrelationAlignmentPolicy,
     CorrelationCalculation, CorrelationDatasetClass, CorrelationDatasetRevision,
@@ -38,33 +35,20 @@ pub use rspice_model_library::{
     CornerSectionBinding, CornerSectionDomain, ProcessCorner, stated_temperatures,
 };
 pub use rspice_model_library::{
-    CorrelationMatrix, DefinitionMetadataError, FiniteBounds, FiniteF64, LookupInterpolation,
-    ModelDefinitionMetadata, ModelFileIdentity, ModelSectionDefinition, ModelSectionQualification,
-    ParameterDataType, ParameterDefinition, ParameterSource, ParameterValue,
-    StatisticalDistribution, StatisticalHierarchyScope, TemperatureExtrapolationPolicy,
-    TemperatureLawDefinition, TemperatureLawRepresentation,
+    CorrelationMatrix, FiniteBounds, FiniteF64, LookupInterpolation, ModelDefinitionMetadata,
+    ModelFileIdentity, ModelSectionDefinition, ModelSectionQualification, ParameterDataType,
+    ParameterDefinition, ParameterSource, ParameterValue, StatisticalDistribution,
+    StatisticalHierarchyScope, TemperatureExtrapolationPolicy, TemperatureLawDefinition,
+    TemperatureLawRepresentation,
 };
 // Metadata fixtures used by application integration tests.
 #[cfg(test)]
-pub use rspice_model_library::{
-    MODEL_DEFINITION_METADATA_SCHEMA_VERSION, StatisticalDefinition, StatisticalVariableDefinition,
-};
+pub use rspice_model_library::{StatisticalDefinition, StatisticalVariableDefinition};
 // Test-only alias: the class table itself is read only by the test that holds
 // the workspace's class chips to it, which cannot live down here because
 // `state` may not reference `workbench`.
 #[cfg(test)]
 pub(crate) use device_class::DEVICE_CLASS;
-pub use facts::{ClosureFacts, closure_facts, envelope_is_invalid, short_digest};
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) use library::is_foreign_platform_absolute_path;
-pub use library::{
-    ModelLibrary, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourcePin,
-    ModelSubcircuitInterface, PackPartPin, SEALED_MODEL_SOURCE_MARKER, labelled_pack,
-};
-pub(crate) use library::{
-    first_unreachable_source, is_portable_absolute_path, project_owned_source_path,
-    subcircuit_interface_key,
-};
 #[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) use manager::normalize_browser_bundle_member_path;
 pub use manager::{
@@ -73,8 +57,10 @@ pub use manager::{
     ProjectModelCommit, SealedModelExecutionSources, SimulationPlanModelBinding,
 };
 pub(crate) use manager::{SealedModelLibraryVerilogAAuthority, model_library_source_digest};
-pub use project_revision::ProjectModelRevisionDefinition;
 pub use rspice_model_library::DeviceModel;
+pub use rspice_model_library::ProjectModelRevisionDefinition;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use rspice_model_library::is_foreign_platform_absolute_path;
 pub use rspice_model_library::qualification::{
     ApprovalDecision, CompatibilityAssessment, CompatibilityDisposition, ConsumerChange,
     ConsumerImpactAssessment, DocumentReference, DocumentationDeclaration, DocumentationSet,
@@ -92,4 +78,14 @@ pub use rspice_model_library::qualification::{
     MODEL_QUALIFICATION_SCHEMA_VERSION, PlatformQualificationOutcome,
     QualificationPlatformVectorOutcome,
 };
+pub use rspice_model_library::{ClosureFacts, closure_facts, envelope_is_invalid};
 pub use rspice_model_library::{ModelLevel, ModelType};
+pub use rspice_model_library::{
+    ModelLibrary, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourcePin,
+    ModelSubcircuitInterface, PackPartPin, SEALED_MODEL_SOURCE_MARKER, labelled_pack,
+};
+pub(crate) use rspice_model_library::{
+    first_unreachable_source, is_portable_absolute_path, project_owned_source_path,
+    subcircuit_interface_key,
+};
+pub use source_label::short_digest;

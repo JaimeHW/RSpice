@@ -16,7 +16,7 @@ use super::{
     DefinitionMetadataError, ModelDefinitionMetadata, ModelFileIdentity, ParameterDataType,
     ParameterValue, ProjectModelDefinition,
 };
-use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
+use rspice_app_types::product::{ContentDigest, ModelSourceId, ObjectRevision};
 
 /// A typed projection of the single retained source allowed to own a
 /// project-authored model revision.
@@ -762,7 +762,7 @@ fn round_trip<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::model_library::{
+    use crate::{
         FiniteF64, MODEL_DEFINITION_METADATA_SCHEMA_VERSION, ModelSectionDefinition,
         ModelSectionQualification, ParameterDefinition, ParameterSource, StatisticalDefinition,
     };

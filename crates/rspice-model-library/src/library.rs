@@ -5,15 +5,14 @@
 //! cannot seal a run. The authority is carried with the model rather than
 //! inferred from its path.
 
+use crate::correlation::ModelCorrelationState;
+use crate::qualification::ModelQualificationState;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use super::{
-    DeviceModel, ModelCorrelationState, ModelDefinitionMetadata, ModelQualificationState,
-    ModelType, ProcessCorner,
-};
-use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
+use super::{DeviceModel, ModelDefinitionMetadata, ModelType, ProcessCorner};
+use rspice_app_types::product::{ContentDigest, ModelSourceId, ObjectRevision};
 
 /// The comment every materialized model block is sealed under in a deck.
 ///
@@ -103,7 +102,7 @@ impl ModelSourceAuthority {
 /// source resolver. Project ownership is carried by `ModelSourceId`; this path
 /// is regenerated on restore so cross-platform projects never depend on the
 /// path syntax of the machine that saved them.
-pub(crate) fn project_owned_source_path(source_id: ModelSourceId) -> PathBuf {
+pub fn project_owned_source_path(source_id: ModelSourceId) -> PathBuf {
     #[cfg(windows)]
     {
         PathBuf::from(format!(
@@ -125,7 +124,7 @@ pub(crate) fn project_owned_source_path(source_id: ModelSourceId) -> PathBuf {
 #[serde(deny_unknown_fields)]
 pub struct ModelSourcePin {
     pub path: PathBuf,
-    pub digest: crate::product::ContentDigest,
+    pub digest: rspice_app_types::product::ContentDigest,
 }
 
 /// The published release a project part was taken from.
@@ -184,7 +183,7 @@ pub struct ModelSourceEdge {
 /// Projects are portable metadata. A Windows path restored on Unix (or a Unix
 /// path restored on Windows) must remain a valid, repairable binding even
 /// though it cannot be opened on the current host.
-pub(crate) fn is_portable_absolute_path(path: &Path) -> bool {
+pub fn is_portable_absolute_path(path: &Path) -> bool {
     if path.is_absolute() {
         return true;
     }
@@ -218,13 +217,13 @@ pub(crate) fn is_portable_absolute_path(path: &Path) -> bool {
 /// Whether an otherwise-valid absolute identity belongs to another host path
 /// syntax and therefore must never be probed by this process.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn is_foreign_platform_absolute_path(path: &Path) -> bool {
+pub fn is_foreign_platform_absolute_path(path: &Path) -> bool {
     is_portable_absolute_path(path) && !path.is_absolute()
 }
 
 /// Find the first pinned source that cannot be reached by following captured
 /// dependency edges from this library's root.
-pub(crate) fn first_unreachable_source<'a>(
+pub fn first_unreachable_source<'a>(
     root: &Path,
     sources: &'a [ModelSourcePin],
     edges: &[ModelSourceEdge],
@@ -250,7 +249,7 @@ pub(crate) fn first_unreachable_source<'a>(
         .find(|source| !reachable.contains(*source))
 }
 
-pub(crate) fn subcircuit_interface_key(section: Option<&str>, name: &str) -> String {
+pub fn subcircuit_interface_key(section: Option<&str>, name: &str) -> String {
     section.map_or_else(
         || name.to_owned(),
         |section| format!("{section}\u{1f}{name}"),
@@ -353,7 +352,7 @@ pub struct ModelLibrary {
     pub selected_corner: Option<String>,
     /// Version string
     pub version: String,
-    /// Is expanded in browser
+    /// Legacy catalog presentation state retained in serialized catalog identities.
     pub expanded: bool,
 }
 
@@ -449,12 +448,6 @@ impl ModelLibrary {
         }
     }
 
-    /// Backward-compatible spelling retained for internal callers that have
-    /// not yet been migrated to the explicit execution terminology.
-    pub fn select_corner(&mut self, name: &str) -> bool {
-        self.activate_corner(name)
-    }
-
     /// Rebuild the browsable definition set from the complete section-aware
     /// catalog. Legacy and synthetic libraries that predate the complete
     /// catalog keep their existing projection until they are explicitly
@@ -490,7 +483,7 @@ impl ModelLibrary {
     /// Exact source sections active for the execution corner, in
     /// overlay order. The same projection governs primitive models,
     /// subcircuit providers, symbol creation, and sealed execution.
-    pub(crate) fn active_section_names(&self) -> Vec<String> {
+    pub fn active_section_names(&self) -> Vec<String> {
         let selected = self.selected_corner.as_deref();
         let mut active_sections = selected
             .and_then(|name| self.corners.get(name))
@@ -517,7 +510,7 @@ impl ModelLibrary {
     /// is how an imported vendor library declares one, and an authored corner
     /// of that name, which is how a PDK does.
     #[must_use]
-    pub(crate) fn declares_process(&self, keyword: &str) -> bool {
+    pub fn declares_process(&self, keyword: &str) -> bool {
         self.corners
             .values()
             .any(|corner| corner.name.eq_ignore_ascii_case(keyword))
@@ -613,8 +606,8 @@ mod tests {
         );
 
         library.source_authority = ModelSourceAuthority::RetainedImport {
-            source_id: crate::product::ModelSourceId::new(),
-            digest: crate::product::ContentDigest::from_bytes([7; 32]),
+            source_id: rspice_app_types::product::ModelSourceId::new(),
+            digest: rspice_app_types::product::ContentDigest::from_bytes([7; 32]),
         };
         library.root_path = Some(PathBuf::from(
             "/rspice-browser/model-sources/9f2c/models/proving.lib",

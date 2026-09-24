@@ -304,7 +304,7 @@ fn active_model_section_provenance_round_trips_migrates_and_rejects_tampering() 
     let restored_library = restored_manager
         .get_library_mut("sectioned-cards")
         .expect("restored sectioned library");
-    assert!(restored_library.select_corner("FF"));
+    assert!(restored_library.activate_corner("FF"));
     assert_eq!(
         restored_library.models["nch"].parameters.get("kp"),
         Some(&2.0e-3)

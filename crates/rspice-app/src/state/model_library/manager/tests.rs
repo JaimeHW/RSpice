@@ -54,7 +54,7 @@ fn changing_corner_rebuilds_the_effective_model_catalog() {
     assert_eq!(tt.section.as_deref(), Some("TT"));
     assert_eq!(tt.parameters.get("kp"), Some(&1.0e-3));
     assert!(!library.models.contains_key("ss_only"));
-    assert!(library.select_corner("SS"));
+    assert!(library.activate_corner("SS"));
 
     let ss = library.models.get("shared").expect("SS shared model");
     assert_eq!(ss.section.as_deref(), Some("SS"));
@@ -683,7 +683,7 @@ fn nominal_execution_plan_honors_the_published_library_corner() {
         manager
             .get_library_mut(&name)
             .expect("library remains loaded")
-            .select_corner("FF")
+            .activate_corner("FF")
     );
     let ff_plan = manager
         .seal_execution_sources()

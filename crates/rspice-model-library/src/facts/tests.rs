@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::product::ContentDigest;
-use crate::state::model_library::{ModelSourceEdge, ModelSourcePin, ModelType};
+use crate::{ModelSourceEdge, ModelSourcePin, ModelType};
+use rspice_app_types::product::ContentDigest;
 
 fn binned(name: &str, l_min: f64, l_max: f64, w_min: f64, w_max: f64) -> DeviceModel {
     DeviceModel::new(name, ModelType::Nmos).with_geometry(l_min, l_max, w_min, w_max)
@@ -116,13 +116,4 @@ fn the_section_index_reads_what_parsing_produced_not_the_retained_bytes() {
         !library.defines_section("ff"),
         "a section nothing defines must not resolve"
     );
-}
-
-#[test]
-fn one_digest_rendering_keeps_the_head_and_the_tail() {
-    let digest = ContentDigest::from_bytes([0xab; 32]).to_string();
-    let short = short_digest(&digest);
-    assert!(short.starts_with(&digest[..8]));
-    assert!(short.ends_with(&digest[digest.len() - 4..]));
-    assert_eq!(short_digest("short"), "short");
 }
