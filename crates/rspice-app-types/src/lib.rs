@@ -5,4 +5,5 @@
 
 pub mod hierarchy_path;
 pub mod product;
+pub mod quantity;
 pub mod source_revision;

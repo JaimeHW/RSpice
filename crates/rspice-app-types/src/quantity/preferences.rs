@@ -267,14 +267,15 @@ impl UnitsPreferences {
         }
     }
 
-    pub(crate) fn contains_wire_key(&self, key: &str) -> bool {
+    /// Whether a saved wire key was explicitly present, including a default value.
+    pub fn contains_wire_key(&self, key: &str) -> bool {
         self.values.contains_key(key)
     }
 
     /// Transitional adapter for the existing Preferences renderer. Durable
     /// storage and runtime consumers remain typed; the renderer's ordinal is
     /// converted at this boundary only.
-    pub(crate) fn compatibility_index(&self, key: &str) -> Option<usize> {
+    pub fn compatibility_index(&self, key: &str) -> Option<usize> {
         Some(match key {
             UnitSystem::KEY => match self.unit_system() {
                 UnitSystem::MixedEngineering => 0,
@@ -319,7 +320,7 @@ impl UnitsPreferences {
         })
     }
 
-    pub(crate) fn set_compatibility_index(
+    pub fn set_compatibility_index(
         &mut self,
         key: &str,
         index: usize,

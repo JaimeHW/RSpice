@@ -172,7 +172,8 @@ impl Route {
 /// the same normalization, and each makes a different half of it reachable, so
 /// both are asked.
 fn policies() -> [crate::quantity::QuantityPresentationPolicy; 2] {
-    use crate::quantity::{QuantityPresentationPolicy, TimeFrequencyInput};
+    use crate::quantity::QuantityPresentationPolicy;
+    use rspice_app_types::quantity::TimeFrequencyInput;
     let strict = QuantityPresentationPolicy::default();
     let inferring = QuantityPresentationPolicy {
         time_frequency_input: TimeFrequencyInput::InferFromFieldQuantity,

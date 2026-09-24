@@ -179,12 +179,12 @@ fn parse_time_or_frequency(
 /// be the one place a value silently changed decade.
 ///
 /// These tables stay separate from
-/// [`rspice_core::netlist::lexer::spice_suffix_scale`] on purpose, and are not
+/// `rspice_core::netlist::lexer::spice_suffix_scale` on purpose, and are not
 /// routed through it: the strict policy is case-sensitive, so that `M` and `m`
 /// can be told apart in a field where a human is looking at the letter, while
 /// the engine's dialect folds case and reads both as milli. A field bound for
 /// a deck must use the engine's table instead — see
-/// `crate::quantity::spice_value`.
+/// the app-level deck parser.
 fn parse_prefix(
     prefix: &str,
     policy: EngineeringSuffixPolicy,

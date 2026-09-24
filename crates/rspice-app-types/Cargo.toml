@@ -14,11 +14,9 @@ workspace = true
 [dependencies]
 rspice-design-model.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 uuid = { workspace = true, features = ["v5"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 uuid = { workspace = true, features = ["js", "v5"] }
-
-[dev-dependencies]
-serde_json.workspace = true
