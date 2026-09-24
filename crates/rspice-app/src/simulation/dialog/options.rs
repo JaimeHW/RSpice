@@ -1,18 +1,11 @@
-//! Simulation Options - Spectre-Compatible Configuration
-//!
-//! Options control accuracy, convergence, algorithm selection, limits,
-//! temperature, and performance behavior for UI-driven simulations.
+//! Solver-option editor buffers backed by the portable authored policy.
 
-mod compatibility;
-mod enums;
-mod model;
-mod si;
 mod state;
-mod validation;
+#[cfg(test)]
+mod tests;
 
-pub use compatibility::SimulationCompatibility;
-pub use enums::{DampingStrategy, HbTimeDomainMode, IntegrationMethod, MatrixSolver};
-pub use model::SimulationOptions;
-pub use si::{format_si_value, parse_si_value};
+pub use rspice_simulation_contract::options::{
+    DampingStrategy, HbTimeDomainMode, IntegrationMethod, MatrixSolver, SimulationCompatibility,
+    SimulationOptions, format_si_value, parse_si_value,
+};
 pub use state::OptionsDialogState;
-pub use validation::ValidationError;

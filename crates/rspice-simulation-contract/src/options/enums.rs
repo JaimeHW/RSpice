@@ -323,3 +323,48 @@ impl HbTimeDomainMode {
         ]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    /// A deck `METHOD=` spelling means the same integrator to both readers.
+    ///
+    /// [`super::IntegrationMethod::from_spice_name`] is
+    /// this crate's copy of a table that lives in the engine, so it is held to
+    /// the engine's by running every spelling through the engine's own `.PSS`
+    /// parser. A spelling neither accepts is checked too: a table that said
+    /// yes to everything would pass the first half alone.
+    #[test]
+    fn a_deck_method_spelling_means_the_same_thing_to_both_readers() {
+        use super::IntegrationMethod;
+        use rspice_core::Netlist;
+        use rspice_core::netlist::AnalysisCommand;
+
+        const CIRCUIT: &str = "pss method\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n";
+        let engine_method = |spelling: &str| {
+            let deck = format!("{CIRCUIT}.pss fund=1Meg method={spelling}\n.end\n");
+            let netlist = Netlist::parse(&deck).ok()?;
+            match netlist.analyses.into_iter().next() {
+                Some(AnalysisCommand::Pss(card)) => card.integration_method,
+                other => panic!("expected a .PSS card, got {other:?}"),
+            }
+        };
+
+        for spelling in IntegrationMethod::spice_spellings() {
+            let reader = IntegrationMethod::from_spice_name(spelling)
+                .unwrap_or_else(|| panic!("this reader accepts {spelling}"));
+            assert_eq!(
+                engine_method(spelling),
+                Some(reader.core()),
+                "`method={spelling}` names a different integrator to each reader"
+            );
+        }
+        for refused in ["bdf2", "gear3", "spectre", ""] {
+            assert_eq!(
+                IntegrationMethod::from_spice_name(refused),
+                None,
+                "`method={refused}` is not a method the engine integrates under"
+            );
+            assert_eq!(engine_method(refused), None, "{refused}");
+        }
+    }
+}

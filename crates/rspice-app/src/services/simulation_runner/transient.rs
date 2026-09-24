@@ -196,7 +196,7 @@ pub fn run_simulation_with_abort(
 #[cfg(test)]
 pub fn run_simulation_with_options_and_source_path_and_abort(
     netlist_text: &str,
-    options: Option<&crate::simulation::dialog::SimulationOptions>,
+    options: Option<&rspice_simulation_contract::options::SimulationOptions>,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<SimulationResult> {

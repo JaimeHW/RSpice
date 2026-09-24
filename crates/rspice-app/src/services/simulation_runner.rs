@@ -183,7 +183,7 @@ const DEFAULT_MONTE_CARLO_SEED: u64 = 0x5EED_5EED;
 
 pub(crate) fn build_engine_config(
     netlist: &rspice_core::Netlist,
-    options: Option<&crate::simulation::dialog::SimulationOptions>,
+    options: Option<&rspice_simulation_contract::options::SimulationOptions>,
 ) -> SimulationConfig {
     match options {
         Some(opts) => opts.resolve_simulation_config(Some(&netlist.options)),

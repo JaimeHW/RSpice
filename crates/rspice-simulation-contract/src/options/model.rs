@@ -309,17 +309,13 @@ impl SimulationOptions {
         }
     }
 
-    fn core_integration_method(&self) -> rspice_core::numerics::integration::IntegrationMethod {
-        self.method.core()
-    }
-
     fn simulation_config_overrides(&self) -> rspice_core::SimulationConfigOverrides {
         rspice_core::SimulationConfigOverrides {
             temperature_kelvin: Some(self.temp_kelvin()),
             max_iterations: Some(self.itl1),
             min_timestep: Some(self.min_timestep),
             max_timestep: Some(self.max_timestep),
-            integration_method: Some(self.core_integration_method()),
+            integration_method: Some(self.method.core()),
             transient_trtol: Some(self.trtol),
             transient_event_flux_abstol: None,
             transient_lte_reltol: self.transient_lte_reltol,

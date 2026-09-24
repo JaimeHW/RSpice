@@ -3,4 +3,5 @@
 pub mod accuracy;
 pub mod config;
 pub mod dependency_contract;
+pub mod options;
 pub mod spice_value;
