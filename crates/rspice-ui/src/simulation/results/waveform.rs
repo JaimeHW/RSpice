@@ -85,6 +85,7 @@ impl WaveformData {
     /// Create a complex-valued time-domain waveform, such as an I/Q carrier
     /// envelope. Existing viewers can derive magnitude and phase without
     /// discarding either component.
+    #[cfg(test)]
     pub fn new_complex_time_domain(
         name: impl Into<String>,
         time: Vec<f64>,

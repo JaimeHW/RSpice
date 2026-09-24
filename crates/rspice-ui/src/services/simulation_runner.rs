@@ -52,7 +52,7 @@ pub use disto::{
 #[cfg(test)]
 pub(crate) use envelope_fourier::run_fourier_from_signal_with_abort;
 pub use envelope_fourier::{
-    EnvelopeMultirateConfig, EnvelopeInitializationConfig, EnvelopeRunConfig,
+    EnvelopeInitializationConfig, EnvelopeMultirateConfig, EnvelopeRunConfig,
     EnvelopeShootingIntegration, FourierData, FourierRunConfig,
     run_envelope_analysis_with_source_path_and_abort,
 };
@@ -160,7 +160,9 @@ pub use tf::{
     TfAccuracy, TfNormalization, TfQuantity, TfRunConfig, infer_tf_run_config,
     run_tf_analysis_with_config_and_source_path_and_abort,
 };
-pub use transient::{TransientData, run_transient_analysis_with_source_path_and_abort};
+pub use transient::TransientData;
+#[cfg(test)]
+pub use transient::run_transient_analysis_with_source_path_and_abort;
 
 // =============================================================================
 // Platform-agnostic timing utilities

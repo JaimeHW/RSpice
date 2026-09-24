@@ -5,9 +5,11 @@
 //! they do not skip RF cycles during transient integration.
 
 use super::error::{ensure_not_aborted, poll_periodically};
+#[cfg(test)]
+use super::run_transient_analysis_with_source_path_and_abort;
 use super::{
     ServiceRunError, ServiceRunResult, TransientData, build_engine_config,
-    parse_runner_netlist_with_abort, run_transient_analysis_with_source_path_and_abort,
+    parse_runner_netlist_with_abort,
 };
 use crate::simulation::multi_run::{
     EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
@@ -1728,7 +1730,9 @@ mod tests {
             assert_eq!(selected.time, all.time);
             assert!(!selected.time.is_empty());
             assert_eq!(selected.waveforms.len(), 1);
-            let EnvelopeWaveform { name, values, unit, .. } = &selected.waveforms[0];
+            let EnvelopeWaveform {
+                name, values, unit, ..
+            } = &selected.waveforms[0];
             assert_eq!(*unit, "V");
             assert!(name.eq_ignore_ascii_case(&format!("ENV(V({selection}))")));
             let reference = &all

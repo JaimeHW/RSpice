@@ -17,6 +17,7 @@ pub struct SoaSourceWaveform<S = Vec<f64>> {
     pub values: S,
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
 impl<S> SoaSourceHistory<S> {
     pub(crate) fn map_series<T, E>(
         self,
@@ -40,6 +41,7 @@ impl<S> SoaSourceHistory<S> {
 }
 
 impl SoaSourceHistory {
+    #[cfg(any(target_arch = "wasm32", test))]
     pub(crate) fn value_count(&self) -> usize {
         self.waveforms.iter().fold(self.time.len(), |count, wave| {
             count.saturating_add(wave.values.len())

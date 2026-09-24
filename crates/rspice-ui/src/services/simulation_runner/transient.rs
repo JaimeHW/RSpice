@@ -4,13 +4,16 @@
 //! voltage waveforms.
 
 use super::error::{ensure_not_aborted, poll_periodically};
-use super::{
-    ServiceRunError, ServiceRunResult, build_engine_config, parse_runner_netlist_with_abort,
-};
+use super::{ServiceRunError, ServiceRunResult};
+#[cfg(test)]
+use super::{build_engine_config, parse_runner_netlist_with_abort};
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
-use rspice_core::engine::{Engine, TransientResult};
+#[cfg(test)]
+use rspice_core::engine::Engine;
+use rspice_core::engine::TransientResult;
 use std::collections::HashSet;
+#[cfg(test)]
 use std::path::Path;
 
 // Reached only by the legacy `cfg(test)` whole-deck path; see [`SimulationResult`].
@@ -68,6 +71,7 @@ pub struct TransientData {
 impl TransientData {
     /// Validate and move retained engine voltage waveforms with cooperative
     /// cancellation. Empty vectors identify signals omitted by output selection.
+    #[cfg(test)]
     pub fn from_result_with_abort(
         result: TransientResult,
         node_names: &[String],
@@ -324,8 +328,7 @@ fn failed_simulation_result(error: String, stats: SimulationStats) -> Simulation
 /// Run transient analysis with explicit parameters and cooperative
 /// cancellation.
 ///
-/// Test-only. The shipping path is
-/// [`run_transient_analysis_with_source_path_and_abort`].
+/// Test-only whole-deck helper.
 #[cfg(test)]
 pub fn run_transient_analysis_with_abort(
     netlist_text: &str,
@@ -344,6 +347,7 @@ pub fn run_transient_analysis_with_abort(
 
 /// Run transient analysis with explicit parameters, source-path resolution,
 /// and cooperative cancellation.
+#[cfg(test)]
 pub fn run_transient_analysis_with_source_path_and_abort(
     netlist_text: &str,
     stop_time: Value,
@@ -377,6 +381,7 @@ pub fn run_transient_analysis_with_source_path_and_abort(
     Ok(data)
 }
 
+#[cfg(test)]
 fn validate_transient_parameters(stop_time: Value, step_time: Value) -> Result<(), String> {
     if !stop_time.is_finite() || stop_time <= 0.0 {
         return Err("Transient stop_time must be finite and > 0".to_string());
