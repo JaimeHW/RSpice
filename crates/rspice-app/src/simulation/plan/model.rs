@@ -12,7 +12,6 @@ mod participation;
 mod solver_ownership;
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +25,9 @@ use super::numeric_override::{AnalysisNumericOverride, NumericOverrideOption};
 use super::{AnalysisDraft, AnalysisKind};
 use crate::simulation::run_set::AnalysisRunAt;
 pub use diagnostics::{AnalysisPlanError, AnalysisPlanIssue};
+pub use rspice_simulation_contract::analysis_lifecycle::{
+    AnalysisLifecycleCommand, AnalysisLifecycleState,
+};
 
 /// Explicit, typed dependency from an analysis to one prerequisite instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -136,92 +138,6 @@ impl AnalysisDependencyRepair {
             .sort_by_key(|dependency| positions.get(&dependency.target).copied());
         self.removed
             .sort_by_key(|dependency| positions.get(&dependency.target).copied());
-    }
-}
-
-/// Editable-plan lifecycle of one analysis instance.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum AnalysisLifecycleState {
-    Absent,
-    Draft,
-    Invalid,
-    Ready,
-    PreflightReady,
-    Blocked,
-    Queued,
-    Running,
-    Paused,
-    Completed,
-    Failed,
-    Cancelled,
-    Disabled,
-    Removed,
-    SameState,
-}
-
-impl AnalysisLifecycleState {
-    const fn is_executing(self) -> bool {
-        matches!(self, Self::Queued | Self::Running | Self::Paused)
-    }
-}
-
-impl fmt::Display for AnalysisLifecycleState {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::Absent => "absent",
-            Self::Draft => "draft",
-            Self::Invalid => "invalid",
-            Self::Ready => "ready",
-            Self::PreflightReady => "preflight-ready",
-            Self::Blocked => "blocked",
-            Self::Queued => "queued",
-            Self::Running => "running",
-            Self::Paused => "paused",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-            Self::Disabled => "disabled",
-            Self::Removed => "removed",
-            Self::SameState => "same-state",
-        })
-    }
-}
-
-/// Stable command vocabulary recorded by plan mutation receipts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum AnalysisLifecycleCommand {
-    Insert,
-    Edit,
-    Rename,
-    Clone,
-    Enable,
-    Disable,
-    Reorder,
-    Dependency,
-    Validate,
-    Preflight,
-    Execute,
-    Remove,
-}
-
-impl fmt::Display for AnalysisLifecycleCommand {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::Insert => "insert",
-            Self::Edit => "edit",
-            Self::Rename => "rename",
-            Self::Clone => "clone",
-            Self::Enable => "enable",
-            Self::Disable => "disable",
-            Self::Reorder => "reorder",
-            Self::Dependency => "dependency",
-            Self::Validate => "validate",
-            Self::Preflight => "preflight",
-            Self::Execute => "execute",
-            Self::Remove => "remove",
-        })
     }
 }
 

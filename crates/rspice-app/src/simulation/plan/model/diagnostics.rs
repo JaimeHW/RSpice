@@ -12,6 +12,8 @@
 //! owning four hundred lines of formatting.
 
 use super::*;
+use std::fmt;
+
 /// Deterministic validation diagnostic for a plan or supplied migration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "code", rename_all = "snake_case")]

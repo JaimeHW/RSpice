@@ -615,55 +615,6 @@ fn invalid_bound_transient_is_reported_and_atomically_replaced_by_repair() {
 }
 
 #[test]
-fn lifecycle_vocabulary_matches_the_normative_mockup_ids() {
-    let states = [
-        (AnalysisLifecycleState::Absent, "absent"),
-        (AnalysisLifecycleState::Draft, "draft"),
-        (AnalysisLifecycleState::Invalid, "invalid"),
-        (AnalysisLifecycleState::Ready, "ready"),
-        (AnalysisLifecycleState::PreflightReady, "preflight-ready"),
-        (AnalysisLifecycleState::Blocked, "blocked"),
-        (AnalysisLifecycleState::Queued, "queued"),
-        (AnalysisLifecycleState::Running, "running"),
-        (AnalysisLifecycleState::Paused, "paused"),
-        (AnalysisLifecycleState::Completed, "completed"),
-        (AnalysisLifecycleState::Failed, "failed"),
-        (AnalysisLifecycleState::Cancelled, "cancelled"),
-        (AnalysisLifecycleState::Disabled, "disabled"),
-        (AnalysisLifecycleState::Removed, "removed"),
-        (AnalysisLifecycleState::SameState, "same-state"),
-    ];
-    for (state, stable_id) in states {
-        assert_eq!(
-            serde_json::to_string(&state).expect("state serializes"),
-            format!("\"{stable_id}\"")
-        );
-        assert_eq!(state.to_string(), stable_id);
-    }
-
-    let commands = [
-        (AnalysisLifecycleCommand::Insert, "insert"),
-        (AnalysisLifecycleCommand::Edit, "edit"),
-        (AnalysisLifecycleCommand::Clone, "clone"),
-        (AnalysisLifecycleCommand::Enable, "enable"),
-        (AnalysisLifecycleCommand::Disable, "disable"),
-        (AnalysisLifecycleCommand::Reorder, "reorder"),
-        (AnalysisLifecycleCommand::Dependency, "dependency"),
-        (AnalysisLifecycleCommand::Validate, "validate"),
-        (AnalysisLifecycleCommand::Preflight, "preflight"),
-        (AnalysisLifecycleCommand::Execute, "execute"),
-        (AnalysisLifecycleCommand::Remove, "remove"),
-    ];
-    for (command, stable_id) in commands {
-        assert_eq!(
-            serde_json::to_string(&command).expect("command serializes"),
-            format!("\"{stable_id}\"")
-        );
-        assert_eq!(command.to_string(), stable_id);
-    }
-}
-
-#[test]
 fn plan_diagnostics_render_as_concise_product_language() {
     let dependent = AnalysisInstanceId::new();
     let issue = AnalysisPlanIssue::MissingPrerequisite {
