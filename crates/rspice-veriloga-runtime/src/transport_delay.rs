@@ -127,7 +127,7 @@ struct DelayCandidate {
     configuration: DelayConfiguration,
 }
 
-/// A transport-delay candidate's exact local affine coefficients.
+/// A transport-delay candidate's exact local interpolation action.
 ///
 /// Accepted history and the frozen definition are constants. The two
 /// coefficients are with respect to the current `expr` and `td` arguments.
@@ -136,6 +136,42 @@ pub struct DelayEvaluation {
     pub output: f64,
     pub input_coefficient: f64,
     pub delay_coefficient: f64,
+    // Retain the interval until applying both operand derivatives: the mixed
+    // coefficient itself can overflow even when its action is representable.
+    mixed_input_delay_numerator: f64,
+    mixed_input_delay_denominator: f64,
+}
+
+impl DelayEvaluation {
+    /// Apply the mixed input/delay partial to two derivative operands.
+    ///
+    /// Within one interpolation segment the candidate is bilinear in its
+    /// current input and delay. Its pure second partials and all third partials
+    /// vanish. At knots this uses the same one-sided branch as the value and
+    /// first partials. Held history, fixed/clamped timing, static probes and
+    /// the time-zero anchor have no mixed action.
+    pub fn apply_mixed_derivative(
+        &self,
+        input_derivative: f64,
+        delay_derivative: f64,
+    ) -> Result<f64, String> {
+        if !input_derivative.is_finite() || !delay_derivative.is_finite() {
+            return Err("absdelay mixed derivative operands must be finite".into());
+        }
+        if self.mixed_input_delay_numerator == 0.0 {
+            return Ok(0.0);
+        }
+        let result = self.mixed_input_delay_numerator
+            * product_div(
+                input_derivative,
+                delay_derivative,
+                self.mixed_input_delay_denominator,
+            );
+        if !result.is_finite() {
+            return Err("absdelay mixed derivative is not representable".into());
+        }
+        Ok(result)
+    }
 }
 
 /// A directly evaluated delayed-minus-present signal. The current-input
@@ -341,6 +377,7 @@ impl DelayBuffer {
         // Even when interpolation uses the in-flight endpoint, its value is
         // retained history in this observation rather than the new input.
         evaluation.input_coefficient = 0.0;
+        evaluation.mixed_input_delay_numerator = 0.0;
         Ok(evaluation)
     }
 
@@ -674,6 +711,8 @@ impl DelayBuffer {
                 output: value,
                 input_coefficient: 1.0,
                 delay_coefficient: 0.0,
+                mixed_input_delay_numerator: 0.0,
+                mixed_input_delay_denominator: 1.0,
             });
         }
 
@@ -779,6 +818,9 @@ impl DelayBuffer {
                     output,
                     input_coefficient,
                     delay_coefficient,
+                    mixed_input_delay_numerator: target_delay_derivative
+                        * (right_input - left_input),
+                    mixed_input_delay_denominator: interval,
                 }
             }
             (Some((_, output, input_coefficient)), None)
@@ -786,6 +828,8 @@ impl DelayBuffer {
                 output,
                 input_coefficient,
                 delay_coefficient: 0.0,
+                mixed_input_delay_numerator: 0.0,
+                mixed_input_delay_denominator: 1.0,
             },
             (None, None) => {
                 return Err("absdelay has no time-zero anchor or candidate sample".into());
