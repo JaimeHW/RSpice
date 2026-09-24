@@ -1623,9 +1623,10 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     // `ALLOWED_WORKBENCH_VIOLATIONS`: that edge holds at 34). Each sheet's own
     // model, painter, register and tests are in its own file (`polar.rs`,
     // `scatter.rs`, `box_violin.rs`) and the population walk the two
-    // statistical sheets share is in `population.rs`; what is left here is
-    // exactly the registration that cannot be anywhere else.
-    ("workbench/documents/result_document.rs", 6_518),
+    // statistical sheets share is in `population.rs`. ResultsState's viewer
+    // interactions moved to `viewer_state.rs`; the ceiling now follows the
+    // remaining source exactly and may not grow during the crate split.
+    ("workbench/documents/result_document.rs", 5_375),
     ("workbench/documents/result_document/waves.rs", 4_229),
     ("workbench/documents/visualization_studio.rs", 4_695),
     ("workbench/documents/visualization_studio/dock.rs", 3_520),
