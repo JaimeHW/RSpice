@@ -1,7 +1,92 @@
-//! Bounded Arrow IPC and Parquet decoding into named numeric columns.
+//! Arrow IPC and Parquet codecs for numeric results and selected tables.
 
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::sync::Arc;
+
+/// A selected table view supplied to the Parquet byte writer.
+pub trait ParquetTableSource {
+    fn column_count(&self) -> usize;
+    fn row_count(&self) -> usize;
+    fn column_id(&self, column: usize) -> &str;
+    fn column_label(&self, column: usize) -> &str;
+    fn column_unit(&self, column: usize) -> Option<&str>;
+    fn numeric_value(&self, row: usize, column: usize) -> Option<f64>;
+    fn display_value(&self, row: usize, column: usize) -> Option<&str>;
+}
+
+/// Encode an already-selected table as Parquet, preserving nullable numeric
+/// and text columns and caller-supplied provenance metadata.
+pub fn encode_parquet_table(
+    source: &impl ParquetTableSource,
+    metadata: Option<Vec<(String, Option<String>)>>,
+) -> Result<Vec<u8>, String> {
+    use arrow_array::{ArrayRef, Float64Array, RecordBatch, StringArray};
+    use arrow_schema::{DataType, Field, Schema};
+    use parquet::arrow::ArrowWriter;
+    use parquet::file::metadata::KeyValue;
+    use parquet::file::properties::WriterProperties;
+
+    let fields = (0..source.column_count())
+        .map(|column| {
+            Field::new(
+                source.column_id(column),
+                if (0..source.row_count()).any(|row| source.numeric_value(row, column).is_some()) {
+                    DataType::Float64
+                } else {
+                    DataType::Utf8
+                },
+                true,
+            )
+            .with_metadata(
+                [
+                    ("label".to_owned(), source.column_label(column).to_owned()),
+                    (
+                        "unit".to_owned(),
+                        source.column_unit(column).unwrap_or_default().to_owned(),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let schema = Arc::new(Schema::new(fields));
+    let arrays = (0..source.column_count())
+        .map(|column| {
+            if schema
+                .field_with_name(source.column_id(column))
+                .is_ok_and(|field| field.data_type() == &DataType::Float64)
+            {
+                Arc::new(Float64Array::from(
+                    (0..source.row_count())
+                        .map(|row| source.numeric_value(row, column))
+                        .collect::<Vec<_>>(),
+                )) as ArrayRef
+            } else {
+                Arc::new(StringArray::from(
+                    (0..source.row_count())
+                        .map(|row| source.display_value(row, column))
+                        .collect::<Vec<_>>(),
+                )) as ArrayRef
+            }
+        })
+        .collect::<Vec<_>>();
+    let batch = RecordBatch::try_new(schema.clone(), arrays).map_err(|error| error.to_string())?;
+    let metadata = metadata.map(|items| {
+        items
+            .into_iter()
+            .map(|(key, value)| KeyValue { key, value })
+            .collect()
+    });
+    let properties = WriterProperties::builder()
+        .set_key_value_metadata(metadata)
+        .build();
+    let mut writer = ArrowWriter::try_new(Vec::new(), schema, Some(properties))
+        .map_err(|error| error.to_string())?;
+    writer.write(&batch).map_err(|error| error.to_string())?;
+    writer.into_inner().map_err(|error| error.to_string())
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct ColumnarLimits {
@@ -232,9 +317,10 @@ fn numeric_values(
 
 #[cfg(test)]
 mod tests {
-    use super::{ColumnarLimits, decode_arrow_batches};
-    use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch};
+    use super::{ColumnarLimits, ParquetTableSource, decode_arrow_batches, encode_parquet_table};
+    use arrow_array::{Array, ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray};
     use arrow_schema::{DataType, Field, Schema};
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -270,5 +356,62 @@ mod tests {
             .err()
             .expect("precision loss");
         assert!(error.contains("cannot be represented exactly as f64"));
+    }
+
+    struct SelectedTable;
+
+    impl ParquetTableSource for SelectedTable {
+        fn column_count(&self) -> usize {
+            2
+        }
+        fn row_count(&self) -> usize {
+            2
+        }
+        fn column_id(&self, column: usize) -> &str {
+            ["time", "label"][column]
+        }
+        fn column_label(&self, column: usize) -> &str {
+            ["Time", "Label"][column]
+        }
+        fn column_unit(&self, column: usize) -> Option<&str> {
+            (column == 0).then_some("s")
+        }
+        fn numeric_value(&self, row: usize, column: usize) -> Option<f64> {
+            (column == 0).then_some(row as f64)
+        }
+        fn display_value(&self, row: usize, column: usize) -> Option<&str> {
+            (column == 1 && row == 0).then_some("first")
+        }
+    }
+
+    #[test]
+    fn parquet_writer_preserves_numeric_text_and_null_columns() {
+        let bytes = encode_parquet_table(
+            &SelectedTable,
+            Some(vec![(
+                "rspice.grid_id".to_owned(),
+                Some("fixture".to_owned()),
+            )]),
+        )
+        .expect("Parquet bytes");
+        let mut reader = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(bytes))
+            .expect("Parquet metadata")
+            .build()
+            .expect("Parquet reader");
+        let batch = reader.next().expect("batch").expect("batch values");
+        assert_eq!(batch.schema().field(0).metadata().get("unit").unwrap(), "s");
+        let time = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<Float64Array>()
+            .unwrap();
+        assert_eq!(time.values(), &[0.0, 1.0]);
+        let label = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(label.value(0), "first");
+        assert!(label.is_null(1));
     }
 }

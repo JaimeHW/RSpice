@@ -12,11 +12,12 @@ rust-version.workspace = true
 workspace = true
 
 [features]
-columnar = ["dep:arrow-array", "dep:arrow-ipc", "dep:bytes", "dep:parquet"]
+columnar = ["dep:arrow-array", "dep:arrow-ipc", "dep:arrow-schema", "dep:bytes", "dep:parquet"]
 
 [dependencies]
 arrow-array = { version = "59", optional = true }
 arrow-ipc = { version = "59", optional = true }
+arrow-schema = { version = "59", optional = true }
 bytes = { version = "1", optional = true }
 matfile = "0.5"
 num-complex.workspace = true
@@ -27,6 +28,3 @@ parquet = { version = "59", default-features = false, features = ["arrow"], opti
 serde.workspace = true
 time.workspace = true
 zip = { version = "7.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
-
-[dev-dependencies]
-arrow-schema = "59"

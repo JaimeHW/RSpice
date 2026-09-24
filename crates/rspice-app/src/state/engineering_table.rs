@@ -1089,6 +1089,42 @@ pub fn xlsx_bytes(
     workbook.save_to_buffer().map_err(|error| error.to_string())
 }
 
+impl rspice_formats::columnar::ParquetTableSource for EngineeringProjection {
+    fn column_count(&self) -> usize {
+        self.columns.len()
+    }
+
+    fn row_count(&self) -> usize {
+        self.rows.len()
+    }
+
+    fn column_id(&self, column: usize) -> &str {
+        &self.columns[column].id
+    }
+
+    fn column_label(&self, column: usize) -> &str {
+        &self.columns[column].label
+    }
+
+    fn column_unit(&self, column: usize) -> Option<&str> {
+        self.columns[column].unit.as_deref()
+    }
+
+    fn numeric_value(&self, row: usize, column: usize) -> Option<f64> {
+        self.rows[row]
+            .cells
+            .get(&self.columns[column].id)
+            .and_then(|cell| cell.numeric)
+    }
+
+    fn display_value(&self, row: usize, column: usize) -> Option<&str> {
+        self.rows[row]
+            .cells
+            .get(&self.columns[column].id)
+            .map(|cell| cell.display.as_str())
+    }
+}
+
 pub fn parquet_bytes(
     dataset: &EngineeringDataset,
     view: &EngineeringTableView,
@@ -1096,93 +1132,18 @@ pub fn parquet_bytes(
     include_hidden_columns: bool,
     selected_rows: Option<&std::collections::BTreeSet<String>>,
 ) -> Result<Vec<u8>, String> {
-    use std::sync::Arc;
-
-    use arrow_array::{ArrayRef, Float64Array, RecordBatch, StringArray};
-    use arrow_schema::{DataType, Field, Schema};
-    use parquet::arrow::ArrowWriter;
-    use parquet::file::metadata::KeyValue;
-    use parquet::file::properties::WriterProperties;
-
     let projection = dataset.project_selected(view, include_hidden_columns, selected_rows);
-    let fields = projection
-        .columns
-        .iter()
-        .map(|column| {
-            Field::new(
-                &column.id,
-                if projection.rows.iter().any(|row| {
-                    row.cells
-                        .get(&column.id)
-                        .is_some_and(|cell| cell.numeric.is_some())
-                }) {
-                    DataType::Float64
-                } else {
-                    DataType::Utf8
-                },
-                true,
-            )
-            .with_metadata(
-                [
-                    ("label".to_owned(), column.label.clone()),
-                    ("unit".to_owned(), column.unit.clone().unwrap_or_default()),
-                ]
-                .into_iter()
-                .collect(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let schema = Arc::new(Schema::new(fields));
-    let arrays = projection
-        .columns
-        .iter()
-        .map(|column| {
-            if schema
-                .field_with_name(&column.id)
-                .is_ok_and(|field| field.data_type() == &DataType::Float64)
-            {
-                Arc::new(Float64Array::from(
-                    projection
-                        .rows
-                        .iter()
-                        .map(|row| row.cells.get(&column.id).and_then(|cell| cell.numeric))
-                        .collect::<Vec<_>>(),
-                )) as ArrayRef
-            } else {
-                Arc::new(StringArray::from(
-                    projection
-                        .rows
-                        .iter()
-                        .map(|row| row.cells.get(&column.id).map(|cell| cell.display.as_str()))
-                        .collect::<Vec<_>>(),
-                )) as ArrayRef
-            }
-        })
-        .collect::<Vec<_>>();
-    let batch = RecordBatch::try_new(schema.clone(), arrays).map_err(|error| error.to_string())?;
     let metadata = include_metadata.then(|| {
         vec![
-            KeyValue {
-                key: "rspice.grid_id".to_owned(),
-                value: Some(dataset.id.clone()),
-            },
-            KeyValue {
-                key: "rspice.source_revision".to_owned(),
-                value: Some(dataset.source_revision.to_string()),
-            },
-            KeyValue {
-                key: "rspice.view".to_owned(),
-                value: serde_json::to_string(view).ok(),
-            },
+            ("rspice.grid_id".to_owned(), Some(dataset.id.clone())),
+            (
+                "rspice.source_revision".to_owned(),
+                Some(dataset.source_revision.to_string()),
+            ),
+            ("rspice.view".to_owned(), serde_json::to_string(view).ok()),
         ]
     });
-    let properties = WriterProperties::builder()
-        .set_key_value_metadata(metadata)
-        .build();
-    let mut writer = ArrowWriter::try_new(Vec::new(), schema, Some(properties))
-        .map_err(|error| error.to_string())?;
-    writer.write(&batch).map_err(|error| error.to_string())?;
-    writer.into_inner().map_err(|error| error.to_string())
+    rspice_formats::columnar::encode_parquet_table(&projection, metadata)
 }
 
 #[cfg(test)]

@@ -69,10 +69,6 @@ toml.workspace = true
 rspice-publication-contract.workspace = true
 csv.workspace = true
 rust_xlsxwriter = { version = "0.92", default-features = false }
-arrow-array = "59"
-arrow-schema = "59"
-# Engineering-table Parquet export still uses the app-owned table projection.
-parquet = { version = "59", default-features = false, features = ["arrow"] }
 fst-reader = "0.17"
 rustyhdf5 = { version = "1.93", default-features = false }
 zip = { version = "7.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
@@ -127,8 +123,11 @@ rfd = { version = "0.17", features = ["file-handle-inner"] }
 dirs = "6.0"
 
 [dev-dependencies]
+arrow-array = "59"
 arrow-ipc = "59"
+arrow-schema = "59"
 matfile = "0.5"
+parquet = { version = "59", default-features = false, features = ["arrow"] }
 wat = "1"
 fst-writer = "0.3"
 
