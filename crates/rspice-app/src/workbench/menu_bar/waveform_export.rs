@@ -11,6 +11,7 @@ use crate::analysis::eye_diagram::EyeTimebaseProvenance;
 use crate::workbench::EngineeringExportFormat;
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+use rspice_formats::table::{csv_to_tsv, escape_csv_field as csv_text};
 use typed_csv::prepare_typed_result_csv;
 
 const NO_ACTIVE_ANALYSIS_MESSAGE: &str = "No active result analysis is selected for export.";
@@ -767,17 +768,6 @@ fn eye_measurements_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
     })
 }
 
-fn csv_text(value: &str) -> String {
-    if value
-        .chars()
-        .any(|character| matches!(character, ',' | '"' | '\r' | '\n'))
-    {
-        format!("\"{}\"", value.replace('"', "\"\""))
-    } else {
-        value.to_owned()
-    }
-}
-
 fn export_typed_result_csv(
     state: &mut AppState,
     io: &(impl ExportWorkflowIo + ?Sized),
@@ -880,25 +870,6 @@ fn publish_result_text(
             )));
         }
     }
-}
-
-fn csv_to_tsv(contents: &str) -> Result<String, String> {
-    let mut reader = csv::ReaderBuilder::new()
-        .has_headers(false)
-        .from_reader(contents.as_bytes());
-    let mut writer = csv::WriterBuilder::new()
-        .delimiter(b'\t')
-        .from_writer(Vec::new());
-    for record in reader.records() {
-        let record = record.map_err(|error| format!("could not parse staged CSV rows: {error}"))?;
-        writer
-            .write_record(&record)
-            .map_err(|error| format!("could not encode TSV row: {error}"))?;
-    }
-    let bytes = writer
-        .into_inner()
-        .map_err(|error| format!("could not finish TSV encoding: {}", error.error()))?;
-    String::from_utf8(bytes).map_err(|error| format!("TSV encoder returned invalid UTF-8: {error}"))
 }
 
 fn export_native_result_bundle(

@@ -48,9 +48,41 @@ pub fn encode_delimited_table(
     String::from_utf8(bytes).map_err(|error| error.to_string())
 }
 
+/// Escape one field for the existing typed-result CSV schema.
+pub fn escape_csv_field(value: &str) -> String {
+    if value
+        .chars()
+        .any(|character| matches!(character, ',' | '"' | '\r' | '\n'))
+    {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_owned()
+    }
+}
+
+/// Convert a validated typed-result CSV document into TSV without changing its cells.
+pub fn csv_to_tsv(contents: &str) -> Result<String, String> {
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .from_reader(contents.as_bytes());
+    let mut writer = csv::WriterBuilder::new()
+        .delimiter(b'\t')
+        .from_writer(Vec::new());
+    for record in reader.records() {
+        let record = record.map_err(|error| format!("could not parse staged CSV rows: {error}"))?;
+        writer
+            .write_record(&record)
+            .map_err(|error| format!("could not encode TSV row: {error}"))?;
+    }
+    let bytes = writer
+        .into_inner()
+        .map_err(|error| format!("could not finish TSV encoding: {}", error.error()))?;
+    String::from_utf8(bytes).map_err(|error| format!("TSV encoder returned invalid UTF-8: {error}"))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{EngineeringTableSource, encode_delimited_table};
+    use super::{EngineeringTableSource, csv_to_tsv, encode_delimited_table, escape_csv_field};
 
     struct SelectedTable;
 
@@ -83,6 +115,19 @@ mod tests {
         assert_eq!(
             encode_delimited_table(&SelectedTable, b',', true, true).unwrap(),
             "Time [s],Label\n1.5,\"a,b\"\n2.5,\"\"\"quoted\"\"\"\n"
+        );
+    }
+
+    #[test]
+    fn typed_csv_to_tsv_preserves_quoted_cells() {
+        let csv = format!(
+            "name,value\n{},{}\n",
+            escape_csv_field("a,b"),
+            escape_csv_field("one\"two\nthree")
+        );
+        assert_eq!(
+            csv_to_tsv(&csv).unwrap(),
+            "name\tvalue\na,b\t\"one\"\"two\nthree\"\n"
         );
     }
 }
