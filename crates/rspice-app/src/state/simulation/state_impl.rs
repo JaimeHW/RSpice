@@ -153,7 +153,7 @@ impl SimulationState {
         self.runs
             .iter()
             .find(|run| run.dataset_id == dataset_id)
-            .and_then(|run| self.yield_evidence.for_run(run))
+            .and_then(|run| self.yield_evidence.for_run_ids(run.run_id, run.dataset_id))
     }
 
     /// Yield evidence for the currently selected result dataset. Callers use
@@ -162,7 +162,7 @@ impl SimulationState {
     #[must_use]
     pub fn yield_results_for_active_dataset(&self) -> Option<&[YieldResult]> {
         self.active_run()
-            .and_then(|run| self.yield_evidence.for_run(run))
+            .and_then(|run| self.yield_evidence.for_run_ids(run.run_id, run.dataset_id))
     }
 
     pub fn request_simulate_run_set(&mut self) {

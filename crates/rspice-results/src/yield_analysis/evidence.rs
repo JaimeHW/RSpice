@@ -2,8 +2,9 @@
 
 use std::sync::Arc;
 
-use super::{SimulationRun, YieldAnalysisProvenance, YieldResult};
-use crate::source_revision::SourceRevision;
+use super::{YieldAnalysisProvenance, YieldResult};
+use rspice_app_types::product::{DatasetId, RunId};
+use rspice_app_types::source_revision::SourceRevision;
 
 #[derive(Debug, Clone, Default)]
 pub struct YieldEvidence {
@@ -13,7 +14,7 @@ pub struct YieldEvidence {
 }
 
 impl YieldEvidence {
-    pub(super) fn replace(
+    pub fn replace(
         &mut self,
         results: Vec<YieldResult>,
         provenance: Option<YieldAnalysisProvenance>,
@@ -23,23 +24,23 @@ impl YieldEvidence {
         self.results = results.into();
     }
 
-    pub(super) fn results(&self) -> &[YieldResult] {
+    pub fn results(&self) -> &[YieldResult] {
         &self.results
     }
 
-    pub(super) fn provenance(&self) -> Option<YieldAnalysisProvenance> {
+    pub fn provenance(&self) -> Option<YieldAnalysisProvenance> {
         self.provenance
     }
 
-    pub(super) fn for_run(&self, run: &SimulationRun) -> Option<&[YieldResult]> {
+    pub fn for_run_ids(&self, run_id: RunId, dataset_id: DatasetId) -> Option<&[YieldResult]> {
         self.provenance
             .is_some_and(|source| {
-                source.source_dataset_id == run.dataset_id && source.source_run_id == run.run_id
+                source.source_dataset_id == dataset_id && source.source_run_id == run_id
             })
             .then_some(self.results())
     }
 
-    pub(crate) fn revision(&self) -> SourceRevision {
+    pub fn revision(&self) -> SourceRevision {
         self.revision.clone()
     }
 }

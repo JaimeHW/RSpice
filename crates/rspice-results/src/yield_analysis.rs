@@ -321,3 +321,5 @@ fn distribution_stats_keep_finite_samples_and_capability_limits() {
 
 mod manager;
 pub use manager::{YieldAnalysisManager, YieldInput};
+mod evidence;
+pub use evidence::YieldEvidence;
