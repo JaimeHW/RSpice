@@ -67,6 +67,8 @@ impl SimulationController {
             AnalysisDraft::HarmonicBalance(draft) => self.build_harmonic_balance_spec(draft)?,
             AnalysisDraft::Stb(draft) => self.build_stb_spec(draft)?,
             AnalysisDraft::SParameter(draft) => self.build_sp_spec(state, draft)?,
+            AnalysisDraft::Envelope(draft) => self.build_envelope_spec(draft)?,
+            AnalysisDraft::Fourier(draft) => self.build_fourier_spec(draft)?,
             AnalysisDraft::Pac(draft) => {
                 let mut draft = draft.clone();
                 draft.ensure_initialized();
@@ -318,8 +320,6 @@ impl SimulationController {
             5 => self.build_pole_zero_spec(state),
             6 => self.build_sensitivity_spec(state),
             17 => self.build_tf_spec(state),
-            19 => self.build_envelope_spec(state),
-            20 => self.build_fourier_spec(state),
             21 => self.build_optimization_spec(state),
             22 => self.build_soa_spec(state),
             _ if crate::simulation::plan::AnalysisKind::from_legacy_index(idx).is_some() => {
@@ -668,8 +668,11 @@ impl SimulationController {
         })
     }
 
-    pub(super) fn build_envelope_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut envelope_state = state.sim_setup.envelope.clone();
+    pub(super) fn build_envelope_spec(
+        &self,
+        draft: &crate::simulation::dialog::envelope::EnvelopeDialogState,
+    ) -> Result<AnalysisSpec, String> {
+        let mut envelope_state = draft.clone();
         envelope_state.ensure_initialized();
         let envelope_cfg = envelope_state
             .to_config()
@@ -694,8 +697,11 @@ impl SimulationController {
         })
     }
 
-    pub(super) fn build_fourier_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut fourier_state = state.sim_setup.fourier.clone();
+    pub(super) fn build_fourier_spec(
+        &self,
+        draft: &crate::simulation::dialog::fourier::FourierDialogState,
+    ) -> Result<AnalysisSpec, String> {
+        let mut fourier_state = draft.clone();
         fourier_state.ensure_initialized();
         let fourier_cfg = fourier_state
             .to_config()
@@ -1455,28 +1461,38 @@ mod manifest_tests {
     }
 
     #[test]
-    fn fourier_draft_projects_thd_and_normalization_controls() {
+    fn fourier_spec_and_command_use_frozen_draft() {
         let controller = SimulationController::new();
         let mut state = AppState::default();
         state.sim_setup.fourier.ensure_initialized();
         state.sim_setup.fourier.compute_thd = false;
         state.sim_setup.fourier.normalize = true;
+        state.sim_setup.fourier.fundamental = "2k".into();
+        state.sim_setup.fourier.stop_time = "5m".into();
+        let draft = AnalysisDraft::Fourier(state.sim_setup.fourier.clone());
+        state.sim_setup.fourier.fundamental = "3k".into();
 
         let spec = controller
-            .build_fourier_spec(&state)
+            .analysis_draft_spec(&state, &draft)
             .expect("Fourier spec builds");
         assert!(matches!(
-            spec,
+            &spec,
             AnalysisSpec::Fourier {
                 compute_thd: false,
                 normalize: true,
                 ..
             }
         ));
+        assert!(
+            controller
+                .analysis_spec_to_spice_line(&state, &draft, &spec)
+                .unwrap()
+                .starts_with(".four 2000 ")
+        );
     }
 
     #[test]
-    fn envelope_draft_projects_every_mockup_owned_execution_field() {
+    fn envelope_spec_uses_frozen_draft_execution_fields() {
         let controller = SimulationController::new();
         let mut state = AppState::default();
         state.sim_setup.envelope.ensure_initialized();
@@ -1487,9 +1503,11 @@ mod manifest_tests {
         state.sim_setup.envelope.modulation_sources = "VIN_AM, VCTRL".to_owned();
         state.sim_setup.envelope.initial_periodic_solve_idx = 1;
         state.sim_setup.envelope.adaptive_mode_idx = 2;
+        let draft = AnalysisDraft::Envelope(Box::new(state.sim_setup.envelope.clone()));
+        state.sim_setup.envelope.carrier_tones = "not a frequency".into();
 
         let spec = controller
-            .build_envelope_spec(&state)
+            .analysis_draft_spec(&state, &draft)
             .expect("Envelope spec builds");
         assert_eq!(
             spec,
@@ -1506,6 +1524,12 @@ mod manifest_tests {
                 adaptive_mode: EnvelopeAdaptiveMode::EventAlignedOnly,
                 extraction_path: EnvelopeExtractionPath::Projection,
             }
+        );
+        assert!(
+            controller
+                .analysis_spec_to_spice_line(&state, &draft, &spec)
+                .unwrap()
+                .starts_with(".envlp carriers=[1Meg,2.5Meg] ")
         );
     }
 }

@@ -109,8 +109,18 @@ impl SimulationController {
                 };
                 self.build_sp_command(state, draft)
             }
-            AnalysisSpec::Envelope { .. } => self.build_envelope_command(state),
-            AnalysisSpec::Fourier { .. } => self.build_fourier_command(state),
+            AnalysisSpec::Envelope { .. } => {
+                let AnalysisDraft::Envelope(draft) = draft else {
+                    return Err("Envelope specification requires its authored draft".into());
+                };
+                self.build_envelope_command(draft)
+            }
+            AnalysisSpec::Fourier { .. } => {
+                let AnalysisDraft::Fourier(draft) = draft else {
+                    return Err("Fourier specification requires its authored draft".into());
+                };
+                self.build_fourier_command(draft)
+            }
             AnalysisSpec::Optimization { .. } => self.build_optimization_command(state),
             AnalysisSpec::Soa { .. } => self.build_soa_command(state),
             AnalysisSpec::Disto { .. } => Self::build_disto_command(spec),
@@ -338,8 +348,11 @@ impl SimulationController {
         Ok(sp_cfg.to_spice())
     }
 
-    pub(super) fn build_envelope_command(&self, state: &AppState) -> Result<String, String> {
-        let mut envelope_state = state.sim_setup.envelope.clone();
+    pub(super) fn build_envelope_command(
+        &self,
+        draft: &crate::simulation::dialog::envelope::EnvelopeDialogState,
+    ) -> Result<String, String> {
+        let mut envelope_state = draft.clone();
         envelope_state.ensure_initialized();
         let envelope_cfg = envelope_state
             .to_config()
@@ -347,8 +360,11 @@ impl SimulationController {
         Ok(envelope_cfg.to_spice())
     }
 
-    pub(super) fn build_fourier_command(&self, state: &AppState) -> Result<String, String> {
-        let mut fourier_state = state.sim_setup.fourier.clone();
+    pub(super) fn build_fourier_command(
+        &self,
+        draft: &crate::simulation::dialog::fourier::FourierDialogState,
+    ) -> Result<String, String> {
+        let mut fourier_state = draft.clone();
         fourier_state.ensure_initialized();
         let fourier_cfg = fourier_state
             .to_config()
