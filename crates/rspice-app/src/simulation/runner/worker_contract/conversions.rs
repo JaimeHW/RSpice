@@ -8,51 +8,6 @@
 
 use super::*;
 
-impl From<TransferFunctionQuantity> for WorkerTransferFunctionQuantity {
-    fn from(value: TransferFunctionQuantity) -> Self {
-        match value {
-            TransferFunctionQuantity::Voltage => Self::Voltage,
-            TransferFunctionQuantity::Current => Self::Current,
-        }
-    }
-}
-
-impl From<WorkerTransferFunctionQuantity> for TransferFunctionQuantity {
-    fn from(value: WorkerTransferFunctionQuantity) -> Self {
-        match value {
-            WorkerTransferFunctionQuantity::Voltage => Self::Voltage,
-            WorkerTransferFunctionQuantity::Current => Self::Current,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub(crate) enum WorkerTransferFunctionScalar {
-    Finite(f64),
-    PositiveInfinity,
-    NegativeInfinity,
-}
-
-impl From<TransferFunctionScalar> for WorkerTransferFunctionScalar {
-    fn from(value: TransferFunctionScalar) -> Self {
-        match value {
-            TransferFunctionScalar::Finite(value) => Self::Finite(value),
-            TransferFunctionScalar::PositiveInfinity => Self::PositiveInfinity,
-            TransferFunctionScalar::NegativeInfinity => Self::NegativeInfinity,
-        }
-    }
-}
-
-impl From<WorkerTransferFunctionScalar> for TransferFunctionScalar {
-    fn from(value: WorkerTransferFunctionScalar) -> Self {
-        match value {
-            WorkerTransferFunctionScalar::Finite(value) => Self::Finite(value),
-            WorkerTransferFunctionScalar::PositiveInfinity => Self::PositiveInfinity,
-            WorkerTransferFunctionScalar::NegativeInfinity => Self::NegativeInfinity,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerNoiseSummary {
     #[serde(default)]

@@ -48,6 +48,10 @@ pub(crate) use rspice_simulation_contract::worker_error::WorkerSimulationError;
 pub(crate) use rspice_simulation_contract::worker_protocol::{
     WORKER_REQUEST_TRANSPORT_PROTOCOL, WORKER_RESPONSE_TRANSPORT_PROTOCOL,
 };
+pub(crate) use rspice_simulation_contract::worker_result_values::{
+    WorkerPstbFloquetMode, WorkerPstbStabilityClassification, WorkerTransferFunctionQuantity,
+    WorkerTransferFunctionScalar,
+};
 pub(crate) use rspice_simulation_contract::worker_run_config::{
     WorkerCornerBaseMode, WorkerCornerModelBinding, WorkerCornerPoint, WorkerCornerProcess,
     WorkerCornerRunConfig, WorkerPacRunConfig, WorkerPeriodicCarrier, WorkerPnoiseReference,
@@ -863,63 +867,6 @@ pub(crate) enum WorkerSimulationResult {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct WorkerPstbFloquetMode {
-    multiplier: (f64, f64),
-    exponent: (f64, f64),
-    probe_participation: f64,
-    is_unstable: bool,
-    is_trivial: bool,
-    subharmonic_order: Option<usize>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum WorkerPstbStabilityClassification {
-    Stable,
-    UnstableReal,
-    UnstableComplex,
-    PeriodDoubling,
-    NeimarkSacker,
-    SaddleNode,
-    Marginal,
-    Indeterminate,
-}
-
-impl WorkerPstbStabilityClassification {
-    fn try_from_core(
-        value: rspice_core::analysis::pstb::StabilityType,
-    ) -> Result<Self, SimulationError> {
-        use rspice_core::analysis::pstb::StabilityType;
-        match value {
-            StabilityType::Stable => Ok(Self::Stable),
-            StabilityType::UnstableReal => Ok(Self::UnstableReal),
-            StabilityType::UnstableComplex => Ok(Self::UnstableComplex),
-            StabilityType::PeriodDoubling => Ok(Self::PeriodDoubling),
-            StabilityType::NeimarkSacker => Ok(Self::NeimarkSacker),
-            StabilityType::SaddleNode => Ok(Self::SaddleNode),
-            StabilityType::Marginal => Ok(Self::Marginal),
-            StabilityType::Indeterminate => Ok(Self::Indeterminate),
-            _ => Err(SimulationError::InvalidConfig(
-                "PSTB returned an unsupported stability classification".to_owned(),
-            )),
-        }
-    }
-
-    fn into_core(self) -> rspice_core::analysis::pstb::StabilityType {
-        use rspice_core::analysis::pstb::StabilityType;
-        match self {
-            Self::Stable => StabilityType::Stable,
-            Self::UnstableReal => StabilityType::UnstableReal,
-            Self::UnstableComplex => StabilityType::UnstableComplex,
-            Self::PeriodDoubling => StabilityType::PeriodDoubling,
-            Self::NeimarkSacker => StabilityType::NeimarkSacker,
-            Self::SaddleNode => StabilityType::SaddleNode,
-            Self::Marginal => StabilityType::Marginal,
-            Self::Indeterminate => StabilityType::Indeterminate,
-        }
-    }
-}
-
 fn validate_worker_pstb_result(result: &WorkerSimulationResult) -> Result<(), String> {
     let WorkerSimulationResult::Pstb {
         period,
@@ -1657,24 +1604,15 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                     stability_threshold,
                     probe_instance,
                     detect_subharmonics,
-                    modes: modes
-                        .into_iter()
-                        .map(|mode| WorkerPstbFloquetMode {
-                            multiplier: mode.multiplier,
-                            exponent: mode.exponent,
-                            probe_participation: mode.probe_participation,
-                            is_unstable: mode.is_unstable,
-                            is_trivial: mode.is_trivial,
-                            subharmonic_order: mode.subharmonic_order,
-                        })
-                        .collect(),
+                    modes: modes.into_iter().map(WorkerPstbFloquetMode::from).collect(),
                     floquet_evidence,
                     orbit_kind,
                     trivial_multiplier_index,
                     stability_verdict,
-                    stability_classification: WorkerPstbStabilityClassification::try_from_core(
+                    stability_classification: WorkerPstbStabilityClassification::try_from(
                         stability_classification,
-                    )?,
+                    )
+                    .map_err(SimulationError::InvalidConfig)?,
                     min_stability_margin_db,
                     max_multiplier_magnitude,
                     num_unstable,
@@ -2038,20 +1976,13 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 detect_subharmonics,
                 modes: modes
                     .into_iter()
-                    .map(|mode| crate::simulation::results::PstbFloquetMode {
-                        multiplier: mode.multiplier,
-                        exponent: mode.exponent,
-                        probe_participation: mode.probe_participation,
-                        is_unstable: mode.is_unstable,
-                        is_trivial: mode.is_trivial,
-                        subharmonic_order: mode.subharmonic_order,
-                    })
+                    .map(crate::simulation::results::PstbFloquetMode::from)
                     .collect(),
                 floquet_evidence,
                 orbit_kind,
                 trivial_multiplier_index,
                 stability_verdict,
-                stability_classification: stability_classification.into_core(),
+                stability_classification: stability_classification.into(),
                 min_stability_margin_db,
                 max_multiplier_magnitude,
                 num_unstable,
@@ -2264,12 +2195,6 @@ impl From<WorkerSimulationResult> for SimulationResult {
             }
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum WorkerTransferFunctionQuantity {
-    Voltage,
-    Current,
 }
 
 #[cfg(test)]
