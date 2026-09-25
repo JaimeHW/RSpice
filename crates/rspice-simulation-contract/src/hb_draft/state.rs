@@ -2,7 +2,7 @@
 
 use super::format::format_freq;
 use super::{HbConfig, HbSolverType, HbToneConfig};
-use crate::simulation::dialog::options::parse_si_value;
+use crate::options::parse_si_value;
 
 /// Dialog state with string buffers for SI-prefix input
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
