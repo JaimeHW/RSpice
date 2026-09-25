@@ -5,7 +5,7 @@
 //! accessor it reads through, both of which are questions about the run
 //! it is derived from.
 
-use crate::simulation::multi_run::AnalysisSpec;
+use crate::analysis_spec::AnalysisSpec;
 
 /// Validate one post-processing specification.
 pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
@@ -40,21 +40,14 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             if output_node.trim().is_empty() {
                 return Err("Fourier output_node is required".to_string());
             }
-            rspice_simulation_contract::fourier_output::validate_fourier_output_accessor(
-                output_node,
-                Some(output_ref),
-            )?;
+            crate::fourier_output::validate_fourier_output_accessor(output_node, Some(output_ref))?;
             // Every further output reads the same trajectory through the same
             // accessor grammar, so it is refused on the same terms.
             for (index, output) in additional_outputs.iter().enumerate() {
-                let (node, reference) =
-                    rspice_simulation_contract::fourier_output::split_fourier_output(output)
-                        .map_err(|error| format!("Fourier output {}: {error}", index + 2))?;
-                rspice_simulation_contract::fourier_output::validate_fourier_output_accessor(
-                    &node,
-                    Some(&reference),
-                )
-                .map_err(|error| format!("Fourier output {}: {error}", index + 2))?;
+                let (node, reference) = crate::fourier_output::split_fourier_output(output)
+                    .map_err(|error| format!("Fourier output {}: {error}", index + 2))?;
+                crate::fourier_output::validate_fourier_output_accessor(&node, Some(&reference))
+                    .map_err(|error| format!("Fourier output {}: {error}", index + 2))?;
             }
             if !start_time.is_finite() || *start_time < 0.0 {
                 return Err("Fourier start_time must be finite and >= 0".to_string());

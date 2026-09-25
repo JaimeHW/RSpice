@@ -6,7 +6,7 @@
 //! multi-tone spelling of the same sideband index, and the bounds it is
 //! refused on are this family's own.
 
-use crate::simulation::multi_run::{
+use crate::analysis_spec::{
     AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeInitialPeriodicSolve, HbToneSpec, PssMethod, SpPort,
 };
 
@@ -393,18 +393,18 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             contributor_ranking,
             ..
         } => {
-            rspice_simulation_contract::hbnoise_policy::validate_hbnoise_frequency_options(
+            crate::hbnoise_policy::validate_hbnoise_frequency_options(
                 *start_freq,
                 *stop_freq,
                 *points_per_unit,
-                *sweep == rspice_simulation_contract::config::FrequencySweep::Linear,
+                *sweep == crate::config::FrequencySweep::Linear,
                 *max_sideband,
                 *integrated_noise || *contributor_ranking,
             )?;
             if output_node.trim().is_empty() || input_source.trim().is_empty() {
                 return Err("HBNOISE requires an output node and input source".to_owned());
             }
-            rspice_simulation_contract::config::validate_noise_sidebands(
+            crate::config::validate_noise_sidebands(
                 *input_sideband,
                 *output_sideband,
                 *max_sideband,

@@ -1,14 +1,14 @@
 //! QPAC authoring, native-card interchange and active numerical controls.
 use super::types::AnalysisSpec;
+use crate::config::FrequencySweep;
 use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
 use rspice_core::engine::QpacRequest;
 use rspice_core::netlist::{FreqVariation, PeriodicSweep, QpacCard, QpacSweep};
-use rspice_simulation_contract::config::FrequencySweep;
 
-pub use rspice_simulation_contract::quasi_periodic_controls::QpacControls;
+pub use crate::quasi_periodic_controls::QpacControls;
 
 impl AnalysisSpec {
-    pub(crate) fn qpac_card(&self) -> Result<QpacCard, String> {
+    pub fn qpac_card(&self) -> Result<QpacCard, String> {
         let Self::Qpac {
             start_freq,
             stop_freq,
@@ -64,7 +64,7 @@ impl AnalysisSpec {
         Ok(card)
     }
 
-    pub(crate) fn from_qpac_card(card: &QpacCard) -> Result<Self, String> {
+    pub fn from_qpac_card(card: &QpacCard) -> Result<Self, String> {
         let request = QpacRequest::from_qpac_card(card).map_err(|e| e.to_string())?;
         let (start_freq, stop_freq, points_per_unit, sweep, explicit_offsets) = match &card.sweep {
             QpacSweep::Generated(s) => (

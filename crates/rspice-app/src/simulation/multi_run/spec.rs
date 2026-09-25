@@ -1,23 +1,7 @@
-//! Multi-run analysis specifications.
-//!
-//! The typed description of one analysis inside a multi-run job, its run
-//! type, and the validation that rejects a specification the engine could
-//! not execute.
+//! App-facing alias for the portable analysis specification contract.
 
-mod qpac;
-mod qpnoise;
-mod qpxf;
-pub use qpnoise::QpnoiseControls;
-pub use qpxf::QpxfControls;
-mod qpss;
-pub use qpac::QpacControls;
-mod run_type;
-mod types;
-pub use qpss::QpssControls;
-mod validation;
-
-pub use types::{
+pub use rspice_simulation_contract::analysis_spec::{
     AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
-    HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable, PssMethod, SpPort,
-    TfAccuracy, TfNormalization,
+    HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable, PssMethod,
+    QpacControls, QpnoiseControls, QpssControls, QpxfControls, SpPort, TfAccuracy, TfNormalization,
 };

@@ -5,9 +5,9 @@
 //! node initialization that have to be honourable together — which is a
 //! question about the first time point, not about a sweep axis.
 
-use crate::simulation::multi_run::AnalysisSpec;
-use rspice_simulation_contract::config::OpConfig;
-use rspice_simulation_contract::config::TransientAnalysisConfig;
+use crate::analysis_spec::AnalysisSpec;
+use crate::config::OpConfig;
+use crate::config::TransientAnalysisConfig;
 
 /// Validate one time domain specification.
 pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {

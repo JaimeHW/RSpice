@@ -6,7 +6,7 @@
 //! does not carry is a run that fails in the solver instead of at the
 //! form.
 
-use crate::simulation::multi_run::AnalysisSpec;
+use crate::analysis_spec::AnalysisSpec;
 
 /// Validate one frequency-domain specification.
 pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
@@ -45,8 +45,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             if !start_freq.is_finite()
                 || *start_freq < 0.0
                 || (*start_freq == 0.0
-                    && (*sweep != rspice_simulation_contract::config::FrequencySweep::Linear
-                        || *do_noise))
+                    && (*sweep != crate::config::FrequencySweep::Linear || *do_noise))
             {
                 return Err("SP start frequency must be nonnegative for LIN, and positive for logarithmic sweeps or noise".into());
             }

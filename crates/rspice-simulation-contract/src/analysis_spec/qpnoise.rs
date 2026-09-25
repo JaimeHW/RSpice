@@ -1,15 +1,15 @@
 //! Complete QPNOISE specification and native-card interchange with legacy defaults.
 use super::types::AnalysisSpec;
+use crate::config::FrequencySweep;
+pub use crate::quasi_periodic_controls::QpnoiseControls;
 use rspice_core::engine::{
     QpnoiseInput, QpnoiseIntegration, QpnoiseIntegrationMethod, QpnoiseLattices,
     QpnoiseObservation, QpnoiseOutput, QpnoiseRequest,
 };
 use rspice_core::netlist::{FreqVariation, PeriodicSweep, QpacSweep, QpnoiseCard};
-use rspice_simulation_contract::config::FrequencySweep;
-pub use rspice_simulation_contract::quasi_periodic_controls::QpnoiseControls;
 
 impl AnalysisSpec {
-    pub(crate) fn qpnoise_card(&self) -> Result<QpnoiseCard, String> {
+    pub fn qpnoise_card(&self) -> Result<QpnoiseCard, String> {
         let Self::Qpnoise {
             start_freq,
             stop_freq,
@@ -81,7 +81,7 @@ impl AnalysisSpec {
             .map_err(|e| e.to_string())?;
         Ok(card)
     }
-    pub(crate) fn from_qpnoise_card(card: &QpnoiseCard) -> Result<Self, String> {
+    pub fn from_qpnoise_card(card: &QpnoiseCard) -> Result<Self, String> {
         let mut request = QpnoiseRequest::from_qpnoise_card(card).map_err(|e| e.to_string())?;
         let (start_freq, stop_freq, points_per_unit, sweep, explicit_frequencies) =
             match &card.sweep {

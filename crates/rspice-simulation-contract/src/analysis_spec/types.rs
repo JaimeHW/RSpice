@@ -1,21 +1,19 @@
 //! Analysis specification types.
 
-use rspice_simulation_contract::config::FrequencySweep;
-use rspice_simulation_contract::config::{
-    NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType,
-};
-use rspice_simulation_contract::config::{
+use crate::config::FrequencySweep;
+use crate::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
+use crate::config::{
     OpAccuracy, OpAnnotation, OpDeviceDetail, OpHomotopy, OpInitialGuess, OpNodeInitialization,
     OpPreviousState, OpRunPointContext, OpSaveDevice, OpTemperatureMode,
 };
-use rspice_simulation_contract::options::IntegrationMethod;
+use crate::options::IntegrationMethod;
 use serde::{Deserialize, Serialize};
 
-use rspice_simulation_contract::config::SensitivitySweepSpec;
+use crate::config::SensitivitySweepSpec;
 
-pub use rspice_simulation_contract::analysis_spec_values::PssMethod;
+pub use crate::analysis_spec_values::PssMethod;
 
-pub use rspice_simulation_contract::envelope_policy::{
+pub use crate::envelope_policy::{
     EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
 };
 
@@ -80,11 +78,12 @@ fn default_noise_reference_node() -> String {
     "0".to_owned()
 }
 
-pub use rspice_simulation_contract::analysis_spec_values::{
-    OptimizationAlgorithm, OptimizationGoal, OptimizationVariable, SpPort,
+pub use crate::analysis_spec_values::{
+    OptimizationAlgorithm, OptimizationGoal, OptimizationVariable, SpPort, TfAccuracy,
+    TfNormalization,
 };
 
-pub use rspice_simulation_contract::quasi_periodic_controls::HbToneSpec;
+pub use crate::quasi_periodic_controls::HbToneSpec;
 
 /// Strongly-typed analysis request used by queue execution.
 ///
@@ -132,7 +131,7 @@ pub enum AnalysisSpec {
         #[serde(default)]
         hysteresis: bool,
         #[serde(default)]
-        modes: rspice_simulation_contract::config::DcSweepModes,
+        modes: crate::config::DcSweepModes,
     },
     /// AC analysis
     Ac {
@@ -146,7 +145,7 @@ pub enum AnalysisSpec {
         table_name: String,
         frequencies: Vec<f64>,
         #[serde(default)]
-        table_options: rspice_simulation_contract::config::AcDataTableOptions,
+        table_options: crate::config::AcDataTableOptions,
     },
     /// Distortion analysis
     Disto {
@@ -309,7 +308,7 @@ pub enum AnalysisSpec {
         /// the engine's default — every device and model parameter — and it
         /// is always serialized, because an absent filter means "saved before
         /// filters existed", which is a different statement.
-        #[serde(default = "rspice_simulation_contract::config::design_parameters_filter")]
+        #[serde(default = "crate::config::design_parameters_filter")]
         filter: String,
         /// The rest of the AC band, when the run asked for more than one
         /// point. Absent is a single frequency, which is what every plan
@@ -354,7 +353,7 @@ pub enum AnalysisSpec {
         /// the choice and were executed against the deck's eligible parameter
         /// values, so that is the serde default.
         #[serde(default)]
-        variation_source: rspice_simulation_contract::mc_draft::McVariationSource,
+        variation_source: crate::mc_draft::McVariationSource,
         /// The eligible parameters a trial may vary, in authored order. Empty
         /// is the card's absent `PARAMS` list: vary everything eligible, which
         /// is also what every specification sealed before the field existed
@@ -369,7 +368,7 @@ pub enum AnalysisSpec {
     /// Optimization analysis.
     Optimization {
         #[serde(default)]
-        search: rspice_simulation_contract::optimization_search::OptimizationSearchControls,
+        search: crate::optimization_search::OptimizationSearchControls,
         variables: Vec<OptimizationVariable>,
         #[serde(default, skip_serializing_if = "String::is_empty")]
         objective_unit: String,
@@ -391,9 +390,9 @@ pub enum AnalysisSpec {
         #[serde(default)]
         import_model_voltage_ratings: bool,
         #[serde(default)]
-        observation: rspice_simulation_contract::soa_observation::SoaObservationConfig,
+        observation: crate::soa_observation::SoaObservationConfig,
         #[serde(default)]
-        rules: Vec<rspice_simulation_contract::soa_rule::SoaRuleConfig>,
+        rules: Vec<crate::soa_rule::SoaRuleConfig>,
         stop_time: f64,
         step_time: f64,
         check_vgs_max: bool,
@@ -419,10 +418,9 @@ pub enum AnalysisSpec {
     /// Envelope transient analysis
     Envelope {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        multirate: Option<rspice_simulation_contract::envelope_multirate::EnvelopeMultirateConfig>,
+        multirate: Option<crate::envelope_multirate::EnvelopeMultirateConfig>,
         #[serde(default)]
-        initialization:
-            rspice_simulation_contract::envelope_initialization::EnvelopeInitializationConfig,
+        initialization: crate::envelope_initialization::EnvelopeInitializationConfig,
         /// First carrier frequency. Retained as a scalar for legacy payload
         /// compatibility; subsequent carriers are stored separately.
         fundamental_freq: f64,
@@ -445,7 +443,7 @@ pub enum AnalysisSpec {
     Fourier {
         fundamental_freq: f64,
         num_harmonics: usize,
-        #[serde(default = "rspice_simulation_contract::config::default_fourier_periods")]
+        #[serde(default = "crate::config::default_fourier_periods")]
         num_periods: usize,
         output_node: String,
         output_ref: String,
@@ -503,7 +501,7 @@ pub enum AnalysisSpec {
         #[serde(default)]
         output_sideband: i32,
         #[serde(default)]
-        noise_reference: Option<rspice_simulation_contract::hbnoise_policy::HbNoiseReference>,
+        noise_reference: Option<crate::hbnoise_policy::HbNoiseReference>,
         start_freq: f64,
         stop_freq: f64,
         points_per_unit: usize,
@@ -620,16 +618,14 @@ pub enum AnalysisSpec {
     /// The whole request is the card, because the engine evaluates the card
     /// inside the transient that carries it: this specification decides which
     /// spectrum of that solve is published, never how one is computed.
-    Fft {
-        request: rspice_simulation_contract::config::FftRequest,
-    },
+    Fft { request: crate::config::FftRequest },
 }
 
 impl AnalysisSpec {
     /// Canonical fresh operating-point request used by imported `.OP` decks.
     #[must_use]
     pub fn dc_op() -> Self {
-        let config = rspice_simulation_contract::config::OpConfig::default();
+        let config = crate::config::OpConfig::default();
         Self::DcOp {
             temperature_mode: config.temperature_mode,
             temperature_celsius: config.temperature_celsius,
@@ -659,7 +655,7 @@ mod operating_point_serde_tests {
         assert_eq!(legacy, AnalysisSpec::LegacyDcOp);
         assert_eq!(
             legacy.run_type(),
-            crate::simulation::multi_run::AnalysisRunType::DcOp
+            crate::analysis_run_type::AnalysisRunType::DcOp
         );
 
         let current = AnalysisSpec::dc_op();
@@ -701,5 +697,3 @@ mod operating_point_serde_tests {
         );
     }
 }
-
-pub use rspice_simulation_contract::analysis_spec_values::{TfAccuracy, TfNormalization};

@@ -1,5 +1,6 @@
 //! QPXF controls, legacy-compatible specifications and native-card interchange.
 use super::types::AnalysisSpec;
+use crate::config::FrequencySweep;
 use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
 use rspice_core::engine::{
     QpxfFrequencyAxis, QpxfInputLattices, QpxfOutput, QpxfRequest, QpxfSources,
@@ -8,12 +9,11 @@ use rspice_core::netlist::{
     FreqVariation, PeriodicSweep, QpacSweep, QpxfCard, QpxfCardLattices, QpxfCardOutput,
     QpxfCardSources,
 };
-use rspice_simulation_contract::config::FrequencySweep;
 
-pub use rspice_simulation_contract::quasi_periodic_controls::QpxfControls;
+pub use crate::quasi_periodic_controls::QpxfControls;
 
 impl AnalysisSpec {
-    pub(crate) fn qpxf_card(&self) -> Result<QpxfCard, String> {
+    pub fn qpxf_card(&self) -> Result<QpxfCard, String> {
         let Self::Qpxf {
             start_freq,
             stop_freq,
@@ -94,7 +94,7 @@ impl AnalysisSpec {
             .map_err(|e| e.to_string())?;
         Ok(card)
     }
-    pub(crate) fn from_qpxf_card(card: &QpxfCard) -> Result<Self, String> {
+    pub fn from_qpxf_card(card: &QpxfCard) -> Result<Self, String> {
         let request = QpxfRequest::from_qpxf_card(card).map_err(|e| e.to_string())?;
         let (start_freq, stop_freq, points_per_unit, sweep, explicit_frequencies) =
             match &card.sweep {

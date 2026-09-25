@@ -4,10 +4,9 @@
 //! dependency, an empty sweep, an output that names nothing — before a run
 //! starts rather than partway through.
 //!
-//! The refusals themselves live one file per family, in the same families
-//! `simulation/runner/spec/` dispatches by, because that is the grain at
-//! which they are edited: a kind that learns a parameter learns a bound on
-//! it, and the two belong in one place. What is left here is the routing.
+//! The refusals live one file per analysis family. A family that gains a
+//! parameter gains its bounds in the same place; this module only routes to
+//! those validators.
 
 mod config;
 mod device;
@@ -84,7 +83,7 @@ fn misrouted_specification(family: &str, spec: &AnalysisSpec) -> String {
 mod tests {
     use super::periodic::validate_periodic_mixed_mode_ports;
     use super::*;
-    use crate::simulation::multi_run::{
+    use crate::analysis_spec::{
         EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve, HbToneSpec,
         PssMethod, TfAccuracy, TfNormalization,
     };
@@ -221,7 +220,7 @@ mod tests {
 
     #[test]
     fn a_pss_spectrum_is_its_own_run_type_and_reads_as_a_coefficient_spectrum() {
-        use crate::simulation::multi_run::AnalysisRunType;
+        use crate::analysis_run_type::AnalysisRunType;
 
         let spectrum = AnalysisSpec::PssSpectrum { num_harmonics: 20 };
         // Its own run type, not the PSS one: the two are separate retained

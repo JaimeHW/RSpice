@@ -4,7 +4,7 @@
 //! variation analyses beside it: what a wear-out projection and a mismatch
 //! spread refuse on is a device population and a bound on it, not a sweep.
 
-use crate::simulation::multi_run::{AnalysisSpec, OptimizationGoal};
+use crate::analysis_spec::{AnalysisSpec, OptimizationGoal};
 
 /// Validate one device-level specification.
 pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
@@ -31,7 +31,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
                 return Err("Optimization variables must not be empty".to_string());
             }
             if let Some(expression) = objective_expression {
-                rspice_simulation_contract::optimization_expression::validate_optimization_expression(expression)?;
+                crate::optimization_expression::validate_optimization_expression(expression)?;
             } else {
                 if objective_node.trim().is_empty() {
                     return Err("Optimization objective_node is required".to_string());

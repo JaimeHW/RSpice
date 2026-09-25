@@ -1,6 +1,6 @@
 //! Resolving a specification to its run type.
 
-use crate::simulation::multi_run::AnalysisRunType;
+use crate::analysis_run_type::AnalysisRunType;
 
 use super::AnalysisSpec;
 

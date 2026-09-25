@@ -2,10 +2,10 @@
 use super::types::{AnalysisSpec, HbToneSpec};
 use rspice_core::engine::{QpssConfig, QpssOscillator};
 
-pub use rspice_simulation_contract::quasi_periodic_controls::QpssControls;
+pub use crate::quasi_periodic_controls::QpssControls;
 
 impl AnalysisSpec {
-    pub(crate) fn from_qpss_config(config: QpssConfig) -> Self {
+    pub fn from_qpss_config(config: QpssConfig) -> Self {
         let tones = config
             .grid
             .frequencies_hz
@@ -71,7 +71,6 @@ impl AnalysisSpec {
         controls.to_core_config(tones, *max_iterations, *relative_tolerance)
     }
 
-    #[cfg(test)]
     pub fn driven_qpss_config(&self) -> Result<QpssConfig, String> {
         let config = self.qpss_config()?;
         if config.oscillator.is_some() {
