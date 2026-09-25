@@ -49,6 +49,7 @@ pub mod pstb_draft;
 pub mod pxf_draft;
 pub mod pz_draft;
 pub mod quasi_periodic_controls;
+pub mod quasi_periodic_draft;
 pub mod regression_policy;
 pub mod run_set;
 pub mod saved_output;

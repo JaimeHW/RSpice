@@ -1,8 +1,11 @@
 //! Lossless QPXF editor buffers with active-only parsing and complete native controls.
-use super::*;
-use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, QpxfControls};
+use crate::analysis_spec::{AnalysisSpec, QpxfControls};
+use crate::config::FrequencySweep;
+use crate::drafts::FrequencySweepDraft;
+use crate::drafts::parse::{parse_i32_tuple, parse_positive_usize};
 use rspice_core::analysis::quasi_periodic::{QuasiPeriodicLinearConfig, QuasiPeriodicLinearMethod};
 use rspice_core::engine::{QpxfFrequencyAxis, QpxfInputLattices, QpxfSources};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum QpxfSourceSelection {
@@ -73,15 +76,15 @@ impl Default for QuasiPeriodicTransferDraft {
     }
 }
 fn value(text: &str, field: &str) -> Result<f64, String> {
-    let value = crate::simulation::dialog::options::parse_si_value(text)
-        .map_err(|e| format!("invalid {field}: {e}"))?;
+    let value =
+        crate::options::parse_si_value(text).map_err(|e| format!("invalid {field}: {e}"))?;
     if !value.is_finite() {
         return Err(format!("{field} must be finite"));
     }
     Ok(value)
 }
 impl QuasiPeriodicTransferDraft {
-    pub(crate) fn to_spec(&self) -> Result<AnalysisSpec, String> {
+    pub fn to_spec(&self) -> Result<AnalysisSpec, String> {
         let (start_freq, stop_freq, points_per_unit, sweep, explicit_frequencies) =
             if self.explicit_frequencies.trim().is_empty() {
                 (
@@ -221,7 +224,7 @@ impl QuasiPeriodicTransferDraft {
         spec.validate()?;
         Ok(spec)
     }
-    pub(crate) fn summary(&self) -> String {
+    pub fn summary(&self) -> String {
         let source = match self.source_selection {
             QpxfSourceSelection::Single => self.input_source.as_str(),
             QpxfSourceSelection::Named => "Selected sources",

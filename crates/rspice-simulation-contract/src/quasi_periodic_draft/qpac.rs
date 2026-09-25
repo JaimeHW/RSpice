@@ -1,9 +1,12 @@
 //! Lossless QPAC editor buffers and one validated specification boundary.
-use super::*;
-use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, QpacControls};
+use crate::analysis_spec::{AnalysisSpec, QpacControls};
+use crate::config::FrequencySweep;
+use crate::drafts::FrequencySweepDraft;
+use crate::drafts::parse::{parse_i32_tuple, parse_positive_usize};
 use rspice_core::analysis::quasi_periodic::{
     QuasiPeriodicAcConfig, QuasiPeriodicLinearConfig, QuasiPeriodicLinearMethod,
 };
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -48,8 +51,8 @@ impl Default for QuasiPeriodicAcDraft {
 }
 
 fn value(text: &str, field: &str) -> Result<f64, String> {
-    let value = crate::simulation::dialog::options::parse_si_value(text)
-        .map_err(|e| format!("invalid {field}: {e}"))?;
+    let value =
+        crate::options::parse_si_value(text).map_err(|e| format!("invalid {field}: {e}"))?;
     if !value.is_finite() {
         return Err(format!("{field} must be finite"));
     }
@@ -57,7 +60,7 @@ fn value(text: &str, field: &str) -> Result<f64, String> {
 }
 
 impl QuasiPeriodicAcDraft {
-    pub(crate) fn to_spec(&self) -> Result<AnalysisSpec, String> {
+    pub fn to_spec(&self) -> Result<AnalysisSpec, String> {
         let (start_freq, stop_freq, points_per_unit, sweep, explicit_offsets) =
             if self.explicit_offsets.trim().is_empty() {
                 (

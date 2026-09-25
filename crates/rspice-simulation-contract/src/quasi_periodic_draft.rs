@@ -1,10 +1,23 @@
-//! QPSS authoring with independent clocks and optional oscillator startup.
-use super::*;
-use crate::simulation::multi_run::{AnalysisSpec, HbToneSpec, QpssControls};
+//! Saved quasi-periodic analysis drafts and their validated specifications.
+
+mod qpac;
+mod qpnoise;
+mod qpxf;
+
+pub use qpac::QuasiPeriodicAcDraft;
+pub use qpnoise::{
+    QpnoiseLatticeSelection, QpnoiseOutputDraft, QpnoiseSourceSelection, QuasiPeriodicNoiseDraft,
+};
+pub use qpxf::{QpxfSidebandSelection, QpxfSourceSelection, QuasiPeriodicTransferDraft};
+
+use crate::analysis_spec::{AnalysisSpec, HbToneSpec, QpssControls};
+use crate::drafts::parse::{parse_positive, parse_positive_usize};
+use crate::spice_value::parse_spice_value_checked;
 use rspice_core::analysis::quasi_periodic::{
     QuasiPeriodicLinearConfig, QuasiPeriodicLinearMethod, QuasiPeriodicSampling,
 };
 use rspice_core::engine::{QpssInitialState, QpssOscillator, QpssOscillatorSeed, QpssSourceTone};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -75,7 +88,7 @@ fn counts(value: &str, label: &str) -> Result<Vec<usize>, String> {
 }
 
 impl QpssDraft {
-    pub(crate) fn to_spec(&self) -> Result<AnalysisSpec, String> {
+    pub fn to_spec(&self) -> Result<AnalysisSpec, String> {
         let frequencies = self
             .tones
             .split(',')
@@ -236,6 +249,6 @@ impl QpssDraft {
     }
 }
 
-pub(super) fn validate_qpss(draft: &QpssDraft) -> Option<String> {
+pub fn validate_qpss(draft: &QpssDraft) -> Option<String> {
     draft.to_spec().err()
 }
