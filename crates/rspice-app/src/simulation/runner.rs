@@ -14,6 +14,7 @@ use std::sync::{
 use std::thread::JoinHandle;
 
 pub use rspice_results::validation::ResultSchemaMismatch;
+pub(crate) use rspice_simulation_contract::worker_protocol::AnalysisExecutionEnvironment;
 
 use crate::diagnostics::engine_log::{EngineLogLine, EngineLogQueue, RunLogSink};
 
@@ -70,20 +71,6 @@ pub struct SpecExecutionOptions {
     pub pxf: Option<crate::services::simulation_runner::PxfRunConfig>,
     pub pnoise: Option<crate::services::simulation_runner::PnoiseRunConfig>,
     pub pstb: Option<crate::services::simulation_runner::PstbRunConfig>,
-}
-
-/// Per-task operating environment selected by the Studio Run Set.
-/// Process-model selection is already materialized into the prepared source;
-/// these values cover the two inputs that must be applied to the parsed deck
-/// immediately before any analysis is dispatched.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct AnalysisExecutionEnvironment {
-    pub temperature_celsius: f64,
-    pub supply_voltage: Option<f64>,
-    pub nominal_supply_voltage: Option<f64>,
-    #[serde(default)]
-    pub supply_source_names: Vec<String>,
 }
 
 /// One fully accepted transient point published by the engine while the
