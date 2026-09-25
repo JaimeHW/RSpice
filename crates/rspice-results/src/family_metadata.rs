@@ -11,11 +11,22 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use super::super::{FamilyMemberId, FamilyMemberMeasurements};
-use super::{
-    AnalysisType, PeriodicNoiseOutputQuantity, require_finite_values, require_non_empty,
-    strictly_increasing,
-};
+use crate::analysis_type::AnalysisType;
+use crate::family_measurements::{FamilyMemberId, FamilyMemberMeasurements};
+use crate::monte_carlo::MonteCarloMeanConfidence;
+use crate::validation::{require_finite_values, require_non_empty, strictly_increasing};
+
+/// Exact physical quantity retained for the primary periodic-noise trace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PeriodicNoiseOutputQuantity {
+    /// Output-referred voltage or current noise power spectral density.
+    OutputNoisePowerSpectralDensity,
+    /// Single-sideband phase noise L(f) in dBc/Hz.
+    PhaseNoiseDbcPerHz,
+    /// Crossing-time or edge-delay power spectral density in s²/Hz.
+    TimingNoisePowerSpectralDensity,
+}
 
 /// Exact per-variable evidence retained from a Monte Carlo execution.
 ///
@@ -28,7 +39,7 @@ use super::{
 pub struct MonteCarloVariableMetadata {
     /// Confidence in the mean, with estimator and successful-trial population.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mean_confidence: Option<crate::state::MonteCarloMeanConfidence>,
+    pub mean_confidence: Option<MonteCarloMeanConfidence>,
     pub name: String,
     pub samples: Vec<f64>,
     pub mean: f64,
@@ -82,9 +93,9 @@ pub enum AnalysisResultFamilyMetadata {
         best_cost: f64,
         best_variables: BTreeMap<String, f64>,
         #[serde(default)]
-        best_objectives: Vec<rspice_results::optimization::OptimizationObjectiveObservation>,
+        best_objectives: Vec<crate::optimization::OptimizationObjectiveObservation>,
         #[serde(default)]
-        best_constraints: Vec<rspice_results::optimization::OptimizationConstraintObservation>,
+        best_constraints: Vec<crate::optimization::OptimizationConstraintObservation>,
         converged: bool,
     },
     Soa {
@@ -271,11 +282,8 @@ impl AnalysisResultFamilyMetadata {
                 best_constraints,
                 converged,
             } => {
-                rspice_results::optimization::validate_optimization_objectives(
-                    best_objectives,
-                    *best_cost,
-                )?;
-                rspice_results::optimization::validate_optimization_constraint_result(
+                crate::optimization::validate_optimization_objectives(best_objectives, *best_cost)?;
+                crate::optimization::validate_optimization_constraint_result(
                     best_constraints,
                     *converged,
                 )?;
@@ -428,7 +436,7 @@ fn validate_member_measurements(metadata: &AnalysisResultFamilyMetadata) -> Resu
 #[cfg(test)]
 mod member_measurement_tests {
     use super::*;
-    use crate::state::FamilyMeasurementEvidence;
+    use crate::family_measurements::FamilyMeasurementEvidence;
 
     fn evidence(name: &str, value: f64) -> FamilyMeasurementEvidence {
         FamilyMeasurementEvidence {

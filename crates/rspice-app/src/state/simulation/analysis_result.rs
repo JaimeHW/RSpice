@@ -13,7 +13,6 @@ use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use std::collections::{BTreeMap, HashSet};
 
-mod family_metadata;
 mod native_scalar_units;
 mod qpac;
 mod qpnoise;
@@ -21,7 +20,9 @@ mod qpss;
 mod qpxf;
 mod quasi_periodic_display;
 
-pub use family_metadata::{AnalysisResultFamilyMetadata, MonteCarloVariableMetadata};
+pub use rspice_results::family_metadata::{
+    AnalysisResultFamilyMetadata, MonteCarloVariableMetadata, PeriodicNoiseOutputQuantity,
+};
 
 const LIVE_TRANSIENT_PARTIAL_MESSAGE: &str =
     "Transient analysis is running; displayed samples are provisional";
@@ -2399,11 +2400,11 @@ impl AnalysisResultPayload {
 
 mod result_payload;
 
+pub use result_payload::AnalysisResult;
 pub(crate) use result_payload::ScalarEvidenceCandidate;
-pub use result_payload::{AnalysisResult, PeriodicNoiseOutputQuantity};
 use result_payload::{
-    require_finite_values, require_non_empty, soa_evaluation_order, soa_rule_verdict,
-    soa_violation_order, soa_violation_severity, strictly_increasing, validate_complex_values,
-    validate_event_times, validate_pss_floquet_payload, validate_pstb_payload,
-    validate_transfer_function_output,
+    soa_evaluation_order, soa_rule_verdict, soa_violation_order, soa_violation_severity,
+    validate_complex_values, validate_event_times, validate_pss_floquet_payload,
+    validate_pstb_payload, validate_transfer_function_output,
 };
+use rspice_results::validation::require_non_empty;

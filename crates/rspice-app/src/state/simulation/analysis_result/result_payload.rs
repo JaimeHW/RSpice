@@ -1,6 +1,7 @@
 //! Validation rules for retained analysis payloads and their numerical evidence.
 
 use super::*;
+use rspice_results::validation::normalized_f64;
 mod soa_derating;
 mod soa_duration;
 mod soa_envelope;
@@ -589,44 +590,6 @@ pub(super) fn validate_complex_values(
         }
     }
     Ok(())
-}
-
-/// Exact physical quantity retained for the primary periodic-noise trace.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PeriodicNoiseOutputQuantity {
-    /// Output-referred voltage or current noise power spectral density.
-    OutputNoisePowerSpectralDensity,
-    /// Single-sideband phase noise L(f) in dBc/Hz.
-    PhaseNoiseDbcPerHz,
-    /// Crossing-time or edge-delay power spectral density in s²/Hz.
-    TimingNoisePowerSpectralDensity,
-}
-
-pub(super) fn require_non_empty(value: &str, label: &str) -> Result<(), String> {
-    if value.trim().is_empty() {
-        Err(format!("{label} is empty"))
-    } else {
-        Ok(())
-    }
-}
-
-pub(super) fn require_finite_values(values: &[f64], label: &str) -> Result<(), String> {
-    if values.iter().any(|value| !value.is_finite()) {
-        Err(format!("{label} contain a non-finite value"))
-    } else {
-        Ok(())
-    }
-}
-
-pub(super) fn strictly_increasing(values: &[f64]) -> bool {
-    values
-        .windows(2)
-        .all(|pair| normalized_f64(pair[0]) < normalized_f64(pair[1]))
-}
-
-fn normalized_f64(value: f64) -> f64 {
-    if value == 0.0 { 0.0 } else { value }
 }
 
 fn same_retained_float(left: f64, right: f64) -> bool {
