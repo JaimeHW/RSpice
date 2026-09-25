@@ -1,5 +1,5 @@
 //! App-facing aliases for the portable Monte Carlo checkpoint policy.
-pub use rspice_simulation_contract::mc_checkpoint::{McCheckpointConfig, McCheckpointDraft};
+pub use rspice_simulation_contract::mc_checkpoint::McCheckpointConfig;
 
 #[cfg(test)]
 use crate::product::ContentDigest;

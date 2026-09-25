@@ -1,12 +1,11 @@
 //! App-facing aliases for portable Monte Carlo statistical authoring.
 
-pub use rspice_simulation_contract::mc_statistics::{
-    McCorrelationDraft, McScope, McShape, McStatisticsConfig, McVariationDraft,
-};
+pub use rspice_simulation_contract::mc_statistics::{McScope, McShape, McStatisticsConfig};
 
 #[cfg(test)]
 pub use rspice_simulation_contract::mc_statistics::{
-    McParameterBounds, McParameterCorrelation, McParameterVariation,
+    McCorrelationDraft, McParameterBounds, McParameterCorrelation, McParameterVariation,
+    McVariationDraft,
 };
 
 #[cfg(test)]

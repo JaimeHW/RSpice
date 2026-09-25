@@ -76,3 +76,40 @@ pub fn validate_measurements(names: &[String]) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Split authored selectors without cutting semicolons inside lattice labels or spectra.
+pub(crate) fn parse_measurement_list(text: &str) -> Result<Vec<String>, String> {
+    let mut entries = Vec::new();
+    let mut closing = Vec::new();
+    let mut start = 0;
+    for (offset, ch) in text.char_indices() {
+        match ch {
+            '(' => closing.push(')'),
+            '[' => closing.push(']'),
+            '{' => closing.push('}'),
+            ')' | ']' | '}' => {
+                if closing.pop() != Some(ch) {
+                    return Err(
+                        "Study measurement contains mismatched parentheses or brackets".into(),
+                    );
+                }
+            }
+            ';' | '\n' if closing.is_empty() => {
+                let entry = text[start..offset].trim();
+                if !entry.is_empty() {
+                    entries.push(entry.to_owned());
+                }
+                start = offset + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    if !closing.is_empty() {
+        return Err("Study measurement contains an unclosed parenthesis or bracket".into());
+    }
+    let entry = text[start..].trim();
+    if !entry.is_empty() {
+        entries.push(entry.to_owned());
+    }
+    Ok(entries)
+}

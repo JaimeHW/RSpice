@@ -15,6 +15,7 @@ pub mod fourier_draft;
 pub mod fourier_output;
 pub mod hb_draft;
 pub mod mc_checkpoint;
+pub mod mc_draft;
 pub mod mc_statistics;
 pub mod numeric_override;
 pub mod op_draft;
