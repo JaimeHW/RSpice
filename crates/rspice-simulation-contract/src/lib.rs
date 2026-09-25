@@ -32,6 +32,7 @@ pub mod options;
 pub mod output_policy;
 pub mod pac_draft;
 pub mod periodic_carrier;
+pub mod periodic_network_draft;
 pub mod plan_catalog;
 pub mod plan_dependency;
 pub mod plan_diagnostics;

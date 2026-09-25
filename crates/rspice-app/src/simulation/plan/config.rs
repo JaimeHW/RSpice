@@ -48,28 +48,11 @@ use rspice_simulation_contract::drafts::parse::{
 pub use rspice_simulation_contract::drafts::{
     AcDataDraft, DcMismatchDraft, FftDraft, FrequencySweepDraft, NoiseDraft, TransientNoiseDraft,
 };
+pub use rspice_simulation_contract::periodic_network_draft::NetworkPortDraft;
 
 /// AC sweep draft shared structurally by AC and DISTO, but never shared by
 /// identity. Each analysis instance owns a deep copy.
 pub type AcDraft = AcSetup;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NetworkPortDraft {
-    pub node_pos: String,
-    pub node_neg: String,
-    pub z0: String,
-}
-
-impl Default for NetworkPortDraft {
-    fn default() -> Self {
-        Self {
-            node_pos: "in".to_owned(),
-            node_neg: "0".to_owned(),
-            z0: "50".to_owned(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
