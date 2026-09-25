@@ -703,32 +703,15 @@ impl From<WorkerSimulationError> for SimulationError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct WorkerProgressSnapshot {
-    pub id: u64,
-    pub status: WorkerProgressStatus,
-    pub progress: Option<f32>,
-    pub elapsed_ms: u64,
+pub(crate) use rspice_simulation_contract::progress::WorkerProgressSnapshot;
+
+pub(crate) fn apply_worker_progress_snapshot(
+    snapshot: WorkerProgressSnapshot,
+    progress: &mut SimulationProgress,
+) {
+    progress.elapsed = std::time::Duration::from_millis(snapshot.elapsed_ms);
+    progress.update_status(SimulationStatus::from(snapshot.status));
 }
-
-impl WorkerProgressSnapshot {
-    pub(crate) fn from_progress(id: u64, progress: &SimulationProgress) -> Self {
-        let elapsed_ms = progress.elapsed.as_millis().min(u128::from(u64::MAX)) as u64;
-        Self {
-            id,
-            status: WorkerProgressStatus::from(&progress.status),
-            progress: progress.status.progress(),
-            elapsed_ms,
-        }
-    }
-
-    pub(crate) fn apply_to(self, progress: &mut SimulationProgress) {
-        progress.elapsed = std::time::Duration::from_millis(self.elapsed_ms);
-        progress.update_status(SimulationStatus::from(self.status));
-    }
-}
-
-pub(crate) use rspice_simulation_contract::progress::WorkerProgressStatus;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum WorkerSimulationResult {

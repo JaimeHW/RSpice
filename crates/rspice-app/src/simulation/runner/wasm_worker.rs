@@ -52,8 +52,9 @@ mod browser {
     use crate::simulation::results::SimulationResult;
     use crate::simulation::runner::worker_contract::{
         WORKER_REQUEST_TRANSPORT_PROTOCOL, WorkerProgressSnapshot, WorkerRequest,
-        WorkerRequestTransportMetadata, take_worker_request_checkpoint,
-        take_worker_request_op_previous_state, validate_worker_request_checkpoint_lengths,
+        WorkerRequestTransportMetadata, apply_worker_progress_snapshot,
+        take_worker_request_checkpoint, take_worker_request_op_previous_state,
+        validate_worker_request_checkpoint_lengths,
         validate_worker_request_transfer_buffer_lengths, validate_worker_response_id,
         worker_response_from_value,
     };
@@ -480,7 +481,7 @@ mod browser {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        snapshot.apply_to(&mut progress);
+        apply_worker_progress_snapshot(snapshot, &mut progress);
     }
 
     fn handle_result_message(state: &Rc<RefCell<WorkerState>>, data: &JsValue) {

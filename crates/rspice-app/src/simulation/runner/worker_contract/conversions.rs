@@ -1171,7 +1171,7 @@ pub(super) fn emit_worker_progress_snapshot(progress: &SimulationProgress) {
         return;
     };
 
-    let snapshot = WorkerProgressSnapshot::from_progress(id, progress);
+    let snapshot = WorkerProgressSnapshot::from_status(id, &progress.status, progress.elapsed);
     let message = js_sys::Object::new();
     let _ = js_sys::Reflect::set(
         &message,

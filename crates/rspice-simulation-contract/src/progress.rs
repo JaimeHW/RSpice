@@ -182,3 +182,26 @@ impl From<WorkerProgressStatus> for SimulationStatus {
         }
     }
 }
+
+/// Progress message sent across the browser worker boundary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkerProgressSnapshot {
+    pub id: u64,
+    pub status: WorkerProgressStatus,
+    pub progress: Option<f32>,
+    pub elapsed_ms: u64,
+}
+
+impl WorkerProgressSnapshot {
+    /// Capture the portable status and elapsed duration without retaining a
+    /// host-specific live progress tracker in the wire contract.
+    pub fn from_status(id: u64, status: &SimulationStatus, elapsed: Duration) -> Self {
+        let elapsed_ms = elapsed.as_millis().min(u128::from(u64::MAX)) as u64;
+        Self {
+            id,
+            status: WorkerProgressStatus::from(status),
+            progress: status.progress(),
+            elapsed_ms,
+        }
+    }
+}

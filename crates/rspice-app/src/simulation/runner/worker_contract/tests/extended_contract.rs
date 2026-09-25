@@ -27,7 +27,7 @@ fn worker_progress_snapshot_applies_to_progress_state() {
         stop_time: 1.0e-6,
     });
 
-    let snapshot = WorkerProgressSnapshot::from_progress(22, &progress);
+    let snapshot = WorkerProgressSnapshot::from_status(22, &progress.status, progress.elapsed);
     let encoded = serde_json::to_string(&snapshot).expect("progress snapshot serializes");
     let decoded: WorkerProgressSnapshot =
         serde_json::from_str(&encoded).expect("progress snapshot deserializes");
@@ -35,7 +35,7 @@ fn worker_progress_snapshot_applies_to_progress_state() {
     assert_eq!(decoded.progress, Some(0.5));
 
     let mut applied = SimulationProgress::new();
-    decoded.apply_to(&mut applied);
+    apply_worker_progress_snapshot(decoded, &mut applied);
 
     assert!(matches!(
         applied.status,
