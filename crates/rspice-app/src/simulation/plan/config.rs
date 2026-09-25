@@ -40,10 +40,11 @@ pub use rspice_simulation_contract::quasi_periodic_draft::{
 pub use periodic_network::PeriodicNetworkDraft;
 use periodic_network::{validate_periodic_network, validate_psp_network};
 pub use rspice_simulation_contract::drafts::DistoDraft;
-use rspice_simulation_contract::drafts::parse::{parse_nonnegative, parse_positive};
+pub(crate) use rspice_simulation_contract::drafts::dc_mismatch_share_threshold;
 pub use rspice_simulation_contract::drafts::{
     AcDataDraft, DcMismatchDraft, FftDraft, FrequencySweepDraft, NoiseDraft, TransientNoiseDraft,
 };
+use rspice_simulation_contract::drafts::{validate_dc_mismatch, validate_transient_noise};
 pub use rspice_simulation_contract::hbnoise_draft::HbNoiseDraft;
 use rspice_simulation_contract::hbnoise_draft::validate_hbnoise;
 pub use rspice_simulation_contract::periodic_network_draft::NetworkPortDraft;
@@ -931,29 +932,6 @@ fn periodic_state_requirement(dependent: &AnalysisDraft) -> Result<(&'static str
     }
 }
 
-/// Read an authored DC mismatch share threshold, or `None` for the card's own
-/// default.
-///
-/// Two spellings mean the same card and are canonicalized to one: an empty
-/// field, and a threshold authored as exactly zero. The engine's default IS
-/// zero (`DcMatchCard::threshold`), so `THRESHOLD=0` is the unauthored card —
-/// and if the two specifications differed, one analysis would have two plan
-/// digests and a saved plan would re-run as a different request.
-///
-/// Both the plan draft and the specification builder read a threshold through
-/// here so there is one account of that identity.
-pub(crate) fn dc_mismatch_share_threshold(text: &str) -> Result<Option<f64>, String> {
-    if text.trim().is_empty() {
-        return Ok(None);
-    }
-    let value = crate::simulation::dialog::options::parse_si_value(text)
-        .map_err(|error| format!("invalid share threshold: {error}"))?;
-    if value == 0.0 {
-        return Ok(None);
-    }
-    Ok(Some(value))
-}
-
 fn validate_qpac(draft: &QuasiPeriodicAcDraft) -> Option<String> {
     draft.to_spec().err()
 }
@@ -964,74 +942,6 @@ fn validate_qpnoise(draft: &QuasiPeriodicNoiseDraft) -> Option<String> {
 
 fn validate_qpxf(draft: &QuasiPeriodicTransferDraft) -> Option<String> {
     draft.to_spec().err()
-}
-
-fn validate_transient_noise(draft: &TransientNoiseDraft) -> Option<String> {
-    (|| {
-        let stop = parse_positive(&draft.stop_time, "stop time")?;
-        let step = parse_positive(&draft.step_time, "step time")?;
-        let start = parse_nonnegative(&draft.start_time, "start time")?;
-        let max_step = parse_positive(&draft.max_step, "maximum step")?;
-        if start >= stop {
-            return Err("start time must be less than stop time".to_owned());
-        }
-        if step > stop || max_step > stop {
-            return Err("time steps must not exceed stop time".to_owned());
-        }
-        draft.parsed_seed()?;
-        let fmax = parse_positive(&draft.noise_fmax, "maximum noise frequency")?;
-        // An empty floor is the engine's `1/tstop` derivation, not a missing
-        // value, so it is not an error. An authored one has to sit inside the
-        // band the ceiling opens.
-        if !draft.noise_fmin.trim().is_empty() {
-            let fmin = parse_positive(&draft.noise_fmin, "minimum noise frequency")?;
-            if fmin >= fmax {
-                return Err(
-                    "minimum noise frequency must be below the maximum noise frequency".to_owned(),
-                );
-            }
-        }
-        parse_nonnegative(&draft.scale, "noise scale")?;
-        Ok(())
-    })()
-    .err()
-}
-
-/// What a DC mismatch draft refuses on, in the engine card's own words.
-///
-/// Text that is not a number at all is this layer's own to answer — the
-/// engine never sees a half-typed field — but every *range* belongs to the
-/// card, so the parsed draft is assembled into the specification the run
-/// would carry and that specification is asked. There is then exactly one
-/// account of what `.DCMATCH` refuses on, and the form and a hand-written
-/// deck are refused by the same sentence.
-///
-/// A contributor limit of zero is legal here because it is legal on the card:
-/// zero is how a deck asks for every contributor.
-fn validate_dc_mismatch(draft: &DcMismatchDraft) -> Option<String> {
-    (|| {
-        let sigma_multiplier =
-            crate::simulation::dialog::options::parse_si_value(&draft.sigma_multiplier)
-                .map_err(|error| format!("invalid sigma multiplier: {error}"))?;
-        let contributor_limit = draft
-            .contributor_limit
-            .trim()
-            .parse::<usize>()
-            .map_err(|_| "contributor limit must be a non-negative integer".to_owned())?;
-        let contribution_threshold = dc_mismatch_share_threshold(&draft.share_threshold)?;
-        crate::simulation::multi_run::AnalysisSpec::DcMismatch {
-            moment_options: draft.moment_options()?,
-            output_expression: draft.output_expression.trim().to_owned(),
-            sigma_multiplier,
-            contributor_limit,
-            include_process: draft.include_process,
-            include_mismatch: draft.include_mismatch,
-            normalized_contributions: draft.normalized_contributions,
-            contribution_threshold,
-        }
-        .validate()
-    })()
-    .err()
 }
 
 #[cfg(test)]

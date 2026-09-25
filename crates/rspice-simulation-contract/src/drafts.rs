@@ -13,4 +13,7 @@ pub use core::{AcSetup, DcSetup, DistoDraft, TranSetup};
 pub use fft::FftDraft;
 pub use frequency_sweep::FrequencySweepDraft;
 pub use noise::NoiseDraft;
-pub use statistical::{DcMismatchDraft, TransientNoiseDraft};
+pub use statistical::{
+    DcMismatchDraft, TransientNoiseDraft, dc_mismatch_share_threshold, validate_dc_mismatch,
+    validate_transient_noise,
+};
