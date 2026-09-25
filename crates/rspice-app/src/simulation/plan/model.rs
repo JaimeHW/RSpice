@@ -28,33 +28,7 @@ pub use rspice_simulation_contract::analysis_lifecycle::{
 };
 pub use rspice_simulation_contract::plan_diagnostics::{AnalysisPlanError, AnalysisPlanIssue};
 
-/// Explicit, typed dependency from an analysis to one prerequisite instance.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AnalysisDependency {
-    prerequisite: AnalysisKind,
-    target: AnalysisInstanceId,
-}
-
-impl AnalysisDependency {
-    #[must_use]
-    pub const fn new(prerequisite: AnalysisKind, target: AnalysisInstanceId) -> Self {
-        Self {
-            prerequisite,
-            target,
-        }
-    }
-
-    #[must_use]
-    pub const fn prerequisite(self) -> AnalysisKind {
-        self.prerequisite
-    }
-
-    #[must_use]
-    pub const fn target(self) -> AnalysisInstanceId {
-        self.target
-    }
-}
+pub use rspice_simulation_contract::plan_dependency::AnalysisDependency;
 
 /// Exact outcome of one atomic prerequisite-repair command.
 ///
@@ -134,9 +108,9 @@ impl AnalysisDependencyRepair {
         self.enabled.sort_by_key(|id| positions.get(id).copied());
         self.moved.sort_by_key(|id| positions.get(id).copied());
         self.bound
-            .sort_by_key(|dependency| positions.get(&dependency.target).copied());
+            .sort_by_key(|dependency| positions.get(&dependency.target()).copied());
         self.removed
-            .sort_by_key(|dependency| positions.get(&dependency.target).copied());
+            .sort_by_key(|dependency| positions.get(&dependency.target()).copied());
     }
 }
 
@@ -654,13 +628,13 @@ impl SimulationPlan {
                     .dependencies
                     .iter()
                     .map(|dependency| {
-                        let target = identity_map.get(&dependency.target).copied().ok_or(
+                        let target = identity_map.get(&dependency.target()).copied().ok_or(
                             AnalysisPlanError::DependencyTargetMissing {
                                 dependent: id,
-                                target: dependency.target,
+                                target: dependency.target(),
                             },
                         )?;
-                        Ok(AnalysisDependency::new(dependency.prerequisite, target))
+                        Ok(AnalysisDependency::new(dependency.prerequisite(), target))
                     })
                     .collect::<Result<Vec<_>, AnalysisPlanError>>()?;
                 let mut draft = source.draft.clone();
@@ -1001,7 +975,7 @@ impl SimulationPlan {
         let bound = instance
             .dependencies
             .iter()
-            .map(|dependency| dependency.prerequisite)
+            .map(|dependency| dependency.prerequisite())
             .find(|prerequisite| alternatives.contains(prerequisite));
         let nearest = instances[..index]
             .iter()
@@ -1100,7 +1074,7 @@ impl SimulationPlan {
             // untouched.
             instance
                 .dependencies
-                .retain(|dependency| required_roles.contains(&dependency.prerequisite));
+                .retain(|dependency| required_roles.contains(&dependency.prerequisite()));
             if instance.lifecycle.is_executing() {
                 instance.lifecycle = if instance.enabled {
                     AnalysisLifecycleState::Draft
@@ -1236,35 +1210,35 @@ impl SimulationPlan {
             let required_roles = Self::resolved_prerequisite_roles(&self.instances, index);
             let mut roles = HashSet::new();
             for dependency in &instance.dependencies {
-                if !required_roles.contains(&dependency.prerequisite) {
+                if !required_roles.contains(&dependency.prerequisite()) {
                     issues.push(AnalysisPlanIssue::UnexpectedDependencyRole {
                         dependent: instance.id,
-                        prerequisite: dependency.prerequisite,
+                        prerequisite: dependency.prerequisite(),
                     });
                 }
-                if !roles.insert(dependency.prerequisite) {
+                if !roles.insert(dependency.prerequisite()) {
                     issues.push(AnalysisPlanIssue::DuplicateDependencyRole {
                         dependent: instance.id,
-                        prerequisite: dependency.prerequisite,
+                        prerequisite: dependency.prerequisite(),
                     });
                 }
-                if dependency.target == instance.id {
+                if dependency.target() == instance.id {
                     issues.push(AnalysisPlanIssue::SelfDependency {
                         dependent: instance.id,
                     });
                     continue;
                 }
-                let Some(target) = by_id.get(&dependency.target) else {
+                let Some(target) = by_id.get(&dependency.target()) else {
                     issues.push(AnalysisPlanIssue::DanglingDependency {
                         dependent: instance.id,
-                        target: dependency.target,
+                        target: dependency.target(),
                     });
                     continue;
                 };
-                if target.kind != dependency.prerequisite {
+                if target.kind != dependency.prerequisite() {
                     issues.push(AnalysisPlanIssue::WrongDependencyKind {
                         dependent: instance.id,
-                        prerequisite: dependency.prerequisite,
+                        prerequisite: dependency.prerequisite(),
                         target: target.id,
                         actual: target.kind,
                     });
@@ -1274,7 +1248,7 @@ impl SimulationPlan {
                         | Some(DependencyConfigurationIssue::Incompatible(detail)) => {
                             issues.push(AnalysisPlanIssue::IncompatibleDependencyConfiguration {
                                 dependent: instance.id,
-                                prerequisite: dependency.prerequisite,
+                                prerequisite: dependency.prerequisite(),
                                 target: target.id,
                                 detail,
                             });
@@ -1481,10 +1455,10 @@ impl SimulationPlan {
         let mut outgoing: HashMap<AnalysisInstanceId, Vec<AnalysisInstanceId>> = HashMap::new();
         for dependent in &self.instances {
             for dependency in &dependent.dependencies {
-                if by_id.contains_key(&dependency.target) {
+                if by_id.contains_key(&dependency.target()) {
                     *indegree.entry(dependent.id).or_default() += 1;
                     outgoing
-                        .entry(dependency.target)
+                        .entry(dependency.target())
                         .or_default()
                         .push(dependent.id);
                 }
@@ -1566,7 +1540,7 @@ impl SimulationPlan {
                 instance
                     .dependencies
                     .iter()
-                    .any(|dependency| dependency.target == target)
+                    .any(|dependency| dependency.target() == target)
             })
             .map(|instance| instance.id)
             .collect()
@@ -1580,7 +1554,7 @@ impl SimulationPlan {
                     && instance
                         .dependencies
                         .iter()
-                        .any(|dependency| dependency.target == target)
+                        .any(|dependency| dependency.target() == target)
             })
             .map(|instance| instance.id)
             .collect()
@@ -1768,7 +1742,7 @@ impl SimulationPlan {
                 // history.
                 instance
                     .dependencies
-                    .retain(|dependency| required_roles.contains(&dependency.prerequisite));
+                    .retain(|dependency| required_roles.contains(&dependency.prerequisite()));
                 instance.modified_revision = revision;
                 instance.lifecycle = if instance.enabled {
                     AnalysisLifecycleState::Draft
@@ -1960,11 +1934,11 @@ impl SimulationPlan {
                             candidate.instances[index]
                                 .dependencies
                                 .iter()
-                                .find(|dependency| dependency.prerequisite == *prerequisite)
+                                .find(|dependency| dependency.prerequisite() == *prerequisite)
                                 .copied()
                                 .filter(|dependency| {
                                     candidate.instances[..index].iter().any(|target| {
-                                        target.id == dependency.target
+                                        target.id == dependency.target()
                                             && target.enabled
                                             && target.kind == *prerequisite
                                             && Self::dependency_candidate_compatibility(
@@ -2096,7 +2070,7 @@ impl SimulationPlan {
             .enumerate()
             .map(|(index, instance)| {
                 let mut dependencies = instance.dependencies.clone();
-                dependencies.sort_by_key(|dependency| dependency.prerequisite.legacy_index());
+                dependencies.sort_by_key(|dependency| dependency.prerequisite().legacy_index());
                 FrozenAnalysisInstance {
                     order: index + 1,
                     id: instance.id,

@@ -82,13 +82,13 @@ impl SimulationPlan {
                 let instance = &mut candidate.instances[dependent_index];
                 instance
                     .dependencies
-                    .retain(|dependency| dependency.prerequisite != prerequisite);
+                    .retain(|dependency| dependency.prerequisite() != prerequisite);
                 instance
                     .dependencies
                     .push(AnalysisDependency::new(prerequisite, target));
                 instance
                     .dependencies
-                    .sort_by_key(|dependency| dependency.prerequisite.legacy_index());
+                    .sort_by_key(|dependency| dependency.prerequisite().legacy_index());
                 instance.modified_revision = revision;
                 instance.lifecycle = if instance.enabled {
                     AnalysisLifecycleState::Draft
@@ -327,7 +327,7 @@ impl SimulationPlan {
                 let dependent_instance = &mut candidate.instances[dependent_index];
                 dependent_instance
                     .dependencies
-                    .retain(|dependency| dependency.prerequisite != prerequisite);
+                    .retain(|dependency| dependency.prerequisite() != prerequisite);
                 dependent_instance.modified_revision = revision;
                 dependent_instance.lifecycle = if dependent_instance.enabled {
                     AnalysisLifecycleState::Draft
@@ -372,13 +372,13 @@ impl SimulationPlan {
             .dependencies
             .iter()
             .copied()
-            .filter(|dependency| !prerequisites.contains(&dependency.prerequisite))
+            .filter(|dependency| !prerequisites.contains(&dependency.prerequisite()))
             .collect::<Vec<_>>();
         if !removed.is_empty() {
             let instance = &mut self.instances[dependent_index];
             instance
                 .dependencies
-                .retain(|dependency| prerequisites.contains(&dependency.prerequisite));
+                .retain(|dependency| prerequisites.contains(&dependency.prerequisite()));
             instance.modified_revision = revision;
             instance.lifecycle = if instance.enabled {
                 AnalysisLifecycleState::Draft
@@ -397,19 +397,19 @@ impl SimulationPlan {
             let role_bindings = self.instances[dependent_index]
                 .dependencies
                 .iter()
-                .filter(|dependency| dependency.prerequisite == prerequisite)
+                .filter(|dependency| dependency.prerequisite() == prerequisite)
                 .collect::<Vec<_>>();
-            let exactly_bound = role_bindings.len() == 1 && role_bindings[0].target == target;
+            let exactly_bound = role_bindings.len() == 1 && role_bindings[0].target() == target;
             if !exactly_bound {
                 let instance = &mut self.instances[dependent_index];
                 instance
                     .dependencies
-                    .retain(|dependency| dependency.prerequisite != prerequisite);
+                    .retain(|dependency| dependency.prerequisite() != prerequisite);
                 let dependency = AnalysisDependency::new(prerequisite, target);
                 instance.dependencies.push(dependency);
                 instance
                     .dependencies
-                    .sort_by_key(|dependency| dependency.prerequisite.legacy_index());
+                    .sort_by_key(|dependency| dependency.prerequisite().legacy_index());
                 instance.modified_revision = revision;
                 instance.lifecycle = if instance.enabled {
                     AnalysisLifecycleState::Draft
@@ -449,11 +449,13 @@ impl SimulationPlan {
         let explicit_target = self.instances[dependent_index]
             .dependencies
             .iter()
-            .find(|dependency| dependency.prerequisite == prerequisite)
+            .find(|dependency| dependency.prerequisite() == prerequisite)
             .and_then(|dependency| {
                 self.instances
                     .iter()
-                    .find(|candidate| candidate.id == dependency.target && is_compatible(candidate))
+                    .find(|candidate| {
+                        candidate.id == dependency.target() && is_compatible(candidate)
+                    })
                     .map(|candidate| candidate.id)
             });
         let target = explicit_target.or_else(|| {
@@ -534,7 +536,7 @@ impl SimulationPlan {
             .ok_or(AnalysisPlanError::InstanceNotFound(target))?
             .dependencies
             .iter()
-            .map(|dependency| dependency.target)
+            .map(|dependency| dependency.target())
             .collect::<Vec<_>>();
         for prerequisite in dependencies {
             self.move_dependency_closure_before(prerequisite, dependent, revision, repair)?;
