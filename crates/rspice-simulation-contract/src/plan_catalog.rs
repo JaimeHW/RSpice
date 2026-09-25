@@ -1,7 +1,9 @@
 //! Persisted names and clone lineage for the simulation-plan catalog.
 
+mod error;
 mod record;
 
+pub use error::SimulationPlanCatalogError;
 pub use record::{SimulationPlanImportDocument, StoredSimulationPlan, validate_model_binding_list};
 
 use std::fmt;

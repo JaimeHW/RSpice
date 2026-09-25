@@ -6,108 +6,18 @@
 //! of the setup and commit only after every name, identity, plan graph, and
 //! runner-ownership invariant has been checked.
 
-use std::collections::HashSet;
-use std::fmt;
-
 use crate::product::SimulationPlanId;
 use crate::simulation::dialog::SimulationOptions;
+use rspice_simulation_contract::plan_catalog::validate_model_binding_list;
 pub use rspice_simulation_contract::plan_catalog::{
-    SimulationPlanCloneOptions, SimulationPlanCloneOutcome, SimulationPlanImportDocument,
-    SimulationPlanLineage, SimulationPlanName, StoredSimulationPlan,
+    SimulationPlanCatalogError, SimulationPlanCloneOptions, SimulationPlanCloneOutcome,
+    SimulationPlanImportDocument, SimulationPlanLineage, SimulationPlanName, StoredSimulationPlan,
 };
-use rspice_simulation_contract::plan_catalog::{
-    SimulationPlanNameError, validate_model_binding_list,
-};
-use rspice_simulation_contract::plan_model::{AnalysisPlanError, SimulationPlan};
+use rspice_simulation_contract::plan_model::SimulationPlan;
 use rspice_simulation_contract::run_set::RunSetState;
+use std::collections::HashSet;
 
 use crate::workbench::app_state::{ReferencePvtPoint, SimSetupState};
-
-/// Atomic named-plan catalog operation failure.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SimulationPlanCatalogError {
-    InvalidName(String),
-    DuplicateName(String),
-    ActivePlanUnavailable,
-    PlanNotFound(SimulationPlanId),
-    PlanExecuting(SimulationPlanId),
-    ActivePlanCannotBeArchived(SimulationPlanId),
-    PlanArchived(SimulationPlanId),
-    PlanAlreadyArchived(SimulationPlanId),
-    PlanNotArchived(SimulationPlanId),
-    InvalidLineage(SimulationPlanId),
-    DuplicatePlanIdentity(SimulationPlanId),
-    InvalidModelBindings(String),
-    InvalidSavePolicy(String),
-    InvalidPlan(AnalysisPlanError),
-}
-
-impl fmt::Display for SimulationPlanCatalogError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidName(reason) => formatter.write_str(reason),
-            Self::DuplicateName(name) => {
-                write!(
-                    formatter,
-                    "A simulation plan named '{name}' already exists."
-                )
-            }
-            Self::ActivePlanUnavailable => formatter
-                .write_str("The active simulation plan has not been migrated to stable identity."),
-            Self::PlanNotFound(id) => write!(formatter, "Simulation plan {id} does not exist."),
-            Self::PlanExecuting(id) => write!(
-                formatter,
-                "Simulation plan {id} owns queued or executing work and cannot be replaced."
-            ),
-            Self::ActivePlanCannotBeArchived(id) => write!(
-                formatter,
-                "Active simulation plan {id} cannot be archived; activate another plan first."
-            ),
-            Self::PlanArchived(id) => write!(
-                formatter,
-                "Simulation plan {id} is archived and must be restored before activation."
-            ),
-            Self::PlanAlreadyArchived(id) => {
-                write!(formatter, "Simulation plan {id} is already archived.")
-            }
-            Self::PlanNotArchived(id) => {
-                write!(formatter, "Simulation plan {id} is not archived.")
-            }
-            Self::InvalidLineage(id) => write!(
-                formatter,
-                "Simulation plan {id} has incomplete clone-lineage metadata."
-            ),
-            Self::DuplicatePlanIdentity(id) => write!(
-                formatter,
-                "Simulation plan identity {id} appears more than once in the project."
-            ),
-            Self::InvalidModelBindings(error) => formatter.write_str(error),
-            Self::InvalidSavePolicy(error) => formatter.write_str(error),
-            Self::InvalidPlan(error) => error.fmt(formatter),
-        }
-    }
-}
-
-impl std::error::Error for SimulationPlanCatalogError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidPlan(error) => Some(error),
-            _ => None,
-        }
-    }
-}
-
-impl From<SimulationPlanNameError> for SimulationPlanCatalogError {
-    fn from(error: SimulationPlanNameError) -> Self {
-        Self::InvalidName(error.to_string())
-    }
-}
-
-impl From<AnalysisPlanError> for SimulationPlanCatalogError {
-    fn from(error: AnalysisPlanError) -> Self {
-        Self::InvalidPlan(error)
-    }
-}
 
 impl SimSetupState {
     #[must_use]
