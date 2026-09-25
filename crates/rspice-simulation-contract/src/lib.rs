@@ -42,6 +42,7 @@ pub mod regression_policy;
 pub mod run_set;
 pub mod saved_output;
 pub mod sens_draft;
+pub mod soa_draft;
 pub mod soa_observation;
 pub mod soa_rule;
 pub mod sp_config;

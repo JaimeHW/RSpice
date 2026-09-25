@@ -1,8 +1,8 @@
 //! Persisted authoring rows for scoped SOA voltage, current, power and temperature limits.
 
 use super::*;
-use crate::results::safety::{SoAParameter, SoaDurationMode};
-use crate::services::simulation_runner::SoaRuleConfig;
+use crate::soa_rule::SoaRuleConfig;
+use rspice_results::safety::{SoAParameter, SoaDurationMode};
 
 const PARAMETERS: [SoAParameter; 83] = [
     SoAParameter::Vgs,
@@ -144,7 +144,7 @@ impl Default for SoaRuleDraft {
 impl SoaRuleDraft {
     pub fn supports_current_envelope(&self) -> bool {
         PARAMETERS.get(self.parameter).is_some_and(|p| {
-            crate::results::safety::SoaCurrentEnvelope::voltage_parameter(*p).is_some()
+            rspice_results::safety::SoaCurrentEnvelope::voltage_parameter(*p).is_some()
         })
     }
     pub const PARAMETER_LABELS: [&'static str; 83] = [
@@ -281,7 +281,7 @@ impl SoaRuleDraft {
                 .map(|curve| curve.watts_per_kelvin.to_string())
                 .unwrap_or_else(default_derating_slope),
             intrinsic_voltage: config.voltage_basis
-                == crate::results::safety::SoaVoltageBasis::IntrinsicNodes,
+                == rspice_results::safety::SoaVoltageBasis::IntrinsicNodes,
             parameter: PARAMETERS
                 .iter()
                 .position(|parameter| *parameter == config.parameter)
@@ -341,7 +341,7 @@ impl SoaRuleDraft {
                 None
             },
             power_derating: if self.is_power() && self.derate_power {
-                Some(crate::results::safety::SoaPowerDerating {
+                Some(rspice_results::safety::SoaPowerDerating {
                     reference_temperature_kelvin: rspice_core::constants::celsius_to_kelvin(
                         parse_si_value(&self.derating_temperature_celsius).map_err(|e| {
                             format!("Invalid SOA derating reference temperature: {e}")
@@ -354,7 +354,7 @@ impl SoaRuleDraft {
                 None
             },
             voltage_basis: if self.is_voltage() && self.intrinsic_voltage {
-                crate::results::safety::SoaVoltageBasis::IntrinsicNodes
+                rspice_results::safety::SoaVoltageBasis::IntrinsicNodes
             } else {
                 Default::default()
             },
