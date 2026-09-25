@@ -3,6 +3,7 @@
 //! Presentation and execution use these contracts without owning their data.
 
 pub mod analysis_type;
+pub mod bode;
 pub mod calculator;
 pub mod convergence_attribution;
 pub mod dc_mismatch;
