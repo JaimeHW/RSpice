@@ -44,6 +44,7 @@ pub(crate) fn round_trip_response_for_test(result: SimulationResult) -> Simulati
 }
 
 pub(crate) use analysis::*;
+pub(crate) use rspice_simulation_contract::worker_error::WorkerSimulationError;
 pub(crate) use rspice_simulation_contract::worker_spec::{
     WorkerAnalysisConfig, WorkerAnalysisSpec, WorkerSweepType,
 };
@@ -54,9 +55,9 @@ use std::sync::{Arc, Mutex, atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
 
-use super::{
-    NetlistInput, ResultSchemaMismatch, SimulationError, SimulationRequest, SpecExecutionOptions,
-};
+#[cfg(test)]
+use super::ResultSchemaMismatch;
+use super::{NetlistInput, SimulationError, SimulationRequest, SpecExecutionOptions};
 use crate::results::safety::{
     SoAEvaluation, SoAParameter, SoARuleVerdict, SoAViolation, ViolationSeverity,
 };
@@ -489,57 +490,6 @@ fn worker_payload_limit_error(payload_bytes: usize, limit_bytes: usize) -> Worke
         crate::simulation::run_set::format_bytes(payload_bytes as u64),
         crate::simulation::run_set::format_bytes(limit_bytes as u64)
     ))
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) enum WorkerSimulationError {
-    ParseError(String),
-    BehavioralReference {
-        owner_name: String,
-        canonical_owner_name: String,
-        dependency_name: String,
-        canonical_dependency_name: String,
-        reason: String,
-    },
-    CircuitError(String),
-    /// A Verilog-A or mixed elaboration refusal, still typed on the far side
-    /// of the browser worker boundary: a schematic on this side has the same
-    /// right to mark the instance the engine named.
-    Elaboration {
-        instance: Option<String>,
-        module: Option<String>,
-        kind: String,
-        location: Option<String>,
-        message: String,
-    },
-    SolverError(String),
-    RequestedSignalUnavailable {
-        signal: String,
-        analysis: String,
-        coordinate: Option<String>,
-    },
-    ResultSchemaMismatch(Box<ResultSchemaMismatch>),
-    ConvergenceFailed {
-        iterations: usize,
-        message: String,
-    },
-    /// A failure the engine attributed to named design objects. The objects
-    /// cross the worker boundary with the error because a browser run's
-    /// schematic is on this side of it and has the same right to mark them.
-    Attributed {
-        message: String,
-        attribution: crate::state::ConvergenceAttribution,
-    },
-    Aborted,
-    AlreadyRunning,
-    ThreadPanic,
-    InvalidConfig(String),
-    UnsupportedOutcome(String),
-    ResourceLimit {
-        resource: String,
-        requested: usize,
-        limit: usize,
-    },
 }
 
 impl From<SimulationError> for WorkerSimulationError {

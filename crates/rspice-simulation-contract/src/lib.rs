@@ -67,5 +67,6 @@ pub mod spice_value;
 pub mod stb_draft;
 pub mod study_measurement;
 pub mod temp_draft;
+pub mod worker_error;
 pub mod worker_spec;
 pub mod xf_draft;
