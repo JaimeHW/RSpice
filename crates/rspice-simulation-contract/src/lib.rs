@@ -12,6 +12,7 @@ pub mod design_variable;
 pub mod design_variable_quantity;
 pub mod drafts;
 pub mod numeric_override;
+pub mod op_draft;
 pub mod optimization_search;
 pub mod options;
 pub mod output_policy;
