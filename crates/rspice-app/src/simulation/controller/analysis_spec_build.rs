@@ -65,6 +65,8 @@ impl SimulationController {
             }
             AnalysisDraft::Pss(draft) => self.build_pss_spec(draft)?,
             AnalysisDraft::HarmonicBalance(draft) => self.build_harmonic_balance_spec(draft)?,
+            AnalysisDraft::Stb(draft) => self.build_stb_spec(draft)?,
+            AnalysisDraft::SParameter(draft) => self.build_sp_spec(state, draft)?,
             AnalysisDraft::Pac(draft) => {
                 let mut draft = draft.clone();
                 draft.ensure_initialized();
@@ -315,8 +317,6 @@ impl SimulationController {
             }
             5 => self.build_pole_zero_spec(state),
             6 => self.build_sensitivity_spec(state),
-            9 => self.build_stb_spec(state),
-            12 => self.build_sp_spec(state),
             17 => self.build_tf_spec(state),
             19 => self.build_envelope_spec(state),
             20 => self.build_fourier_spec(state),
@@ -544,8 +544,11 @@ impl SimulationController {
         })
     }
 
-    pub(super) fn build_stb_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut stb_state = state.sim_setup.stb.clone();
+    pub(super) fn build_stb_spec(
+        &self,
+        draft: &crate::simulation::dialog::stb::StbDialogState,
+    ) -> Result<AnalysisSpec, String> {
+        let mut stb_state = draft.clone();
         stb_state.ensure_initialized();
         let stb_cfg = stb_state
             .to_config()
@@ -631,8 +634,12 @@ impl SimulationController {
     /// Validate the form's port source and prepare its configured fallback.
     /// Circuit elaboration resolves authored ports, including hierarchy, and
     /// the resulting scattering data carries the references used by the solver.
-    pub(super) fn build_sp_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut sp_state = state.sim_setup.sp.clone();
+    pub(super) fn build_sp_spec(
+        &self,
+        state: &AppState,
+        draft: &crate::simulation::dialog::sp::SpDialogState,
+    ) -> Result<AnalysisSpec, String> {
+        let mut sp_state = draft.clone();
         sp_state.ensure_initialized();
         let placed = crate::simulation::placed_sources::placed_rf_ports(&state.schematic, None);
         let sp_cfg = crate::simulation::dialog::sp::to_config(&sp_state, Some(&placed))
@@ -1026,7 +1033,7 @@ mod manifest_tests {
                     .build_manifest_preview_spec(&state, &AnalysisDraft::Disto(disto))
                     .unwrap()
                     .unwrap(),
-                controller.build_stb_spec(&state).unwrap(),
+                controller.build_stb_spec(&state.sim_setup.stb).unwrap(),
             ];
             for spec in specs {
                 spec.validate().unwrap();
@@ -1293,11 +1300,18 @@ mod manifest_tests {
         let mut state = AppState::default();
         state.sim_setup.sp.port_source_idx = Some(1);
         for requested in [false, true] {
-            state.sim_setup.sp.do_noise = requested;
-            let spec = controller.build_sp_spec(&state).unwrap();
+            let mut draft = state.sim_setup.sp.clone();
+            draft.do_noise = requested;
+            state.sim_setup.sp.do_noise = !requested;
+            let draft = AnalysisDraft::SParameter(draft);
+            let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
             assert!(
-                matches!(spec, AnalysisSpec::SParameter { do_noise, .. } if do_noise == requested)
+                matches!(&spec, AnalysisSpec::SParameter { do_noise, .. } if *do_noise == requested)
             );
+            let line = controller
+                .analysis_spec_to_spice_line(&state, &draft, &spec)
+                .unwrap();
+            assert_eq!(line.split_whitespace().nth(5) == Some("1"), requested);
         }
     }
 

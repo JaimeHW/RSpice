@@ -91,14 +91,24 @@ impl SimulationController {
                 };
                 self.build_pss_command(draft)
             }
-            AnalysisSpec::Stb { .. } => self.build_stb_command(state),
+            AnalysisSpec::Stb { .. } => {
+                let AnalysisDraft::Stb(draft) = draft else {
+                    return Err("STB specification requires its authored draft".into());
+                };
+                self.build_stb_command(state, draft)
+            }
             AnalysisSpec::HarmonicBalance { .. } => {
                 let AnalysisDraft::HarmonicBalance(draft) = draft else {
                     return Err("Harmonic balance specification requires its authored draft".into());
                 };
                 self.build_harmonic_balance_command(draft)
             }
-            AnalysisSpec::SParameter { .. } => self.build_sp_command(state),
+            AnalysisSpec::SParameter { .. } => {
+                let AnalysisDraft::SParameter(draft) = draft else {
+                    return Err("S-parameter specification requires its authored draft".into());
+                };
+                self.build_sp_command(state, draft)
+            }
             AnalysisSpec::Envelope { .. } => self.build_envelope_command(state),
             AnalysisSpec::Fourier { .. } => self.build_fourier_command(state),
             AnalysisSpec::Optimization { .. } => self.build_optimization_command(state),
@@ -282,8 +292,12 @@ impl SimulationController {
         Ok(pss_cfg.to_spice())
     }
 
-    pub(super) fn build_stb_command(&self, state: &AppState) -> Result<String, String> {
-        let mut stb_state = state.sim_setup.stb.clone();
+    pub(super) fn build_stb_command(
+        &self,
+        state: &AppState,
+        draft: &crate::simulation::dialog::stb::StbDialogState,
+    ) -> Result<String, String> {
+        let mut stb_state = draft.clone();
         stb_state.ensure_initialized();
         let stb_cfg = stb_state
             .to_config()
@@ -311,8 +325,12 @@ impl SimulationController {
         Ok(hb_cfg.to_spice())
     }
 
-    pub(super) fn build_sp_command(&self, state: &AppState) -> Result<String, String> {
-        let mut sp_state = state.sim_setup.sp.clone();
+    pub(super) fn build_sp_command(
+        &self,
+        state: &AppState,
+        draft: &crate::simulation::dialog::sp::SpDialogState,
+    ) -> Result<String, String> {
+        let mut sp_state = draft.clone();
         sp_state.ensure_initialized();
         let placed = crate::simulation::placed_sources::placed_rf_ports(&state.schematic, None);
         let sp_cfg = crate::simulation::dialog::sp::to_config(&sp_state, Some(&placed))
@@ -941,7 +959,7 @@ mod tests {
         );
 
         let error = SimulationController::new()
-            .build_stb_command(&state)
+            .build_stb_command(&state, &state.sim_setup.stb)
             .expect_err("a probe that is not on the schematic is refused");
 
         assert!(error.contains("VLOOP1"), "{error}");
@@ -964,7 +982,7 @@ mod tests {
         );
 
         let directive = SimulationController::new()
-            .build_stb_command(&state)
+            .build_stb_command(&state, &state.sim_setup.stb)
             .expect("a placed probe reaches the deck");
 
         assert!(directive.contains("probe=VLOOP1"), "{directive}");
