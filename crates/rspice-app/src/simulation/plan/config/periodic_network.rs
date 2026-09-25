@@ -1,8 +1,8 @@
 //! App-level persistence checks for portable periodic-network drafts.
 
-pub use rspice_simulation_contract::periodic_network_draft::{
-    PeriodicNetworkDraft, validate_periodic_network, validate_psp_network,
-};
+pub use rspice_simulation_contract::periodic_network_draft::PeriodicNetworkDraft;
+#[cfg(test)]
+use rspice_simulation_contract::periodic_network_draft::validate_periodic_network;
 
 #[cfg(test)]
 mod tests {

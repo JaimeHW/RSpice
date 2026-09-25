@@ -3,7 +3,9 @@
 use super::*;
 use crate::simulation::dialog::EnvelopeDialogState;
 use crate::simulation::plan::AnalysisDraft;
-use crate::simulation::runner::worker_contract::{WorkerAnalysisSpec, round_trip_response_for_test};
+use crate::simulation::runner::worker_contract::{
+    WorkerAnalysisSpec, round_trip_response_for_test,
+};
 
 fn draft() -> EnvelopeDialogState {
     let mut draft = EnvelopeDialogState::default();
@@ -32,8 +34,13 @@ fn draft() -> EnvelopeDialogState {
 
 fn spec(draft: &EnvelopeDialogState) -> AnalysisSpec {
     let saved = serde_json::to_value(draft).unwrap();
-    let mut restored = AnalysisDraft::Envelope(serde_json::from_value(saved.clone()).unwrap());
+    let mut restored =
+        AnalysisDraft::Envelope(Box::new(serde_json::from_value(saved.clone()).unwrap()));
     restored.prepare_after_restore();
+    assert_eq!(
+        serde_json::to_value(&restored).unwrap(),
+        serde_json::json!({"kind": "envelope", "draft": saved.clone()})
+    );
     let AnalysisDraft::Envelope(restored_draft) = &restored else {
         unreachable!()
     };

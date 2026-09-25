@@ -1,6 +1,7 @@
 //! Portable authored analysis configuration and numerical dependency contracts.
 
 pub mod accuracy;
+pub mod analysis_draft;
 pub mod analysis_kind;
 pub mod analysis_lifecycle;
 pub mod analysis_run_at;

@@ -90,11 +90,9 @@ pub use sens::SensDialogState;
 pub use stb::{StbDialogState, StbProbeReference};
 
 // Re-exports - Statistical/Parametric
-pub use corner::CornerDialogState;
 pub use mc::{McDialogState, McVariationSource};
 
 // Re-exports - Temperature
-pub use temp::TempDialogState;
 
 // Re-exports - Envelope/Fourier
 pub use envelope::EnvelopeDialogState;
