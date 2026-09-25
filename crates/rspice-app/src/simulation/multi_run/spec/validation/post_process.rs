@@ -40,7 +40,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             if output_node.trim().is_empty() {
                 return Err("Fourier output_node is required".to_string());
             }
-            crate::services::simulation_runner::validate_fourier_output_accessor(
+            rspice_simulation_contract::fourier_output::validate_fourier_output_accessor(
                 output_node,
                 Some(output_ref),
             )?;
@@ -48,9 +48,9 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             // accessor grammar, so it is refused on the same terms.
             for (index, output) in additional_outputs.iter().enumerate() {
                 let (node, reference) =
-                    crate::services::simulation_runner::split_fourier_output(output)
+                    rspice_simulation_contract::fourier_output::split_fourier_output(output)
                         .map_err(|error| format!("Fourier output {}: {error}", index + 2))?;
-                crate::services::simulation_runner::validate_fourier_output_accessor(
+                rspice_simulation_contract::fourier_output::validate_fourier_output_accessor(
                     &node,
                     Some(&reference),
                 )

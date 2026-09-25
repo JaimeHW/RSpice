@@ -1,11 +1,14 @@
 //! Analysis specification types.
 
-use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
-use crate::simulation::dialog::{
-    IntegrationMethod, OpAccuracy, OpAnnotation, OpDeviceDetail, OpHomotopy, OpInitialGuess,
-    OpNodeInitialization, OpPreviousState, OpRunPointContext, OpSaveDevice, OpTemperatureMode,
+use rspice_simulation_contract::config::FrequencySweep;
+use rspice_simulation_contract::config::{
+    NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType,
 };
-use crate::simulation::multi_run::FrequencySweep;
+use rspice_simulation_contract::config::{
+    OpAccuracy, OpAnnotation, OpDeviceDetail, OpHomotopy, OpInitialGuess, OpNodeInitialization,
+    OpPreviousState, OpRunPointContext, OpSaveDevice, OpTemperatureMode,
+};
+use rspice_simulation_contract::options::IntegrationMethod;
 use serde::{Deserialize, Serialize};
 
 use rspice_simulation_contract::config::SensitivitySweepSpec;
@@ -108,7 +111,7 @@ pub enum AnalysisSpec {
         selected_devices: Vec<String>,
         previous_state: Option<OpPreviousState>,
         violation_devices: Vec<String>,
-        violation_source_content_digest: Option<crate::product::ContentDigest>,
+        violation_source_content_digest: Option<rspice_app_types::product::ContentDigest>,
         run_point: OpRunPointContext,
     },
     /// DC sweep
@@ -129,7 +132,7 @@ pub enum AnalysisSpec {
         #[serde(default)]
         hysteresis: bool,
         #[serde(default)]
-        modes: crate::simulation::config::DcSweepModes,
+        modes: rspice_simulation_contract::config::DcSweepModes,
     },
     /// AC analysis
     Ac {
@@ -143,7 +146,7 @@ pub enum AnalysisSpec {
         table_name: String,
         frequencies: Vec<f64>,
         #[serde(default)]
-        table_options: crate::simulation::config::AcDataTableOptions,
+        table_options: rspice_simulation_contract::config::AcDataTableOptions,
     },
     /// Distortion analysis
     Disto {
@@ -306,7 +309,7 @@ pub enum AnalysisSpec {
         /// the engine's default — every device and model parameter — and it
         /// is always serialized, because an absent filter means "saved before
         /// filters existed", which is a different statement.
-        #[serde(default = "crate::simulation::config::design_parameters_filter")]
+        #[serde(default = "rspice_simulation_contract::config::design_parameters_filter")]
         filter: String,
         /// The rest of the AC band, when the run asked for more than one
         /// point. Absent is a single frequency, which is what every plan
@@ -351,7 +354,7 @@ pub enum AnalysisSpec {
         /// the choice and were executed against the deck's eligible parameter
         /// values, so that is the serde default.
         #[serde(default)]
-        variation_source: crate::simulation::dialog::McVariationSource,
+        variation_source: rspice_simulation_contract::mc_draft::McVariationSource,
         /// The eligible parameters a trial may vary, in authored order. Empty
         /// is the card's absent `PARAMS` list: vary everything eligible, which
         /// is also what every specification sealed before the field existed
@@ -388,9 +391,9 @@ pub enum AnalysisSpec {
         #[serde(default)]
         import_model_voltage_ratings: bool,
         #[serde(default)]
-        observation: crate::services::simulation_runner::SoaObservationConfig,
+        observation: rspice_simulation_contract::soa_observation::SoaObservationConfig,
         #[serde(default)]
-        rules: Vec<crate::services::simulation_runner::SoaRuleConfig>,
+        rules: Vec<rspice_simulation_contract::soa_rule::SoaRuleConfig>,
         stop_time: f64,
         step_time: f64,
         check_vgs_max: bool,
@@ -416,9 +419,10 @@ pub enum AnalysisSpec {
     /// Envelope transient analysis
     Envelope {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        multirate: Option<crate::services::simulation_runner::EnvelopeMultirateConfig>,
+        multirate: Option<rspice_simulation_contract::envelope_multirate::EnvelopeMultirateConfig>,
         #[serde(default)]
-        initialization: crate::services::simulation_runner::EnvelopeInitializationConfig,
+        initialization:
+            rspice_simulation_contract::envelope_initialization::EnvelopeInitializationConfig,
         /// First carrier frequency. Retained as a scalar for legacy payload
         /// compatibility; subsequent carriers are stored separately.
         fundamental_freq: f64,
@@ -441,7 +445,7 @@ pub enum AnalysisSpec {
     Fourier {
         fundamental_freq: f64,
         num_harmonics: usize,
-        #[serde(default = "crate::simulation::config::default_fourier_periods")]
+        #[serde(default = "rspice_simulation_contract::config::default_fourier_periods")]
         num_periods: usize,
         output_node: String,
         output_ref: String,
@@ -499,7 +503,7 @@ pub enum AnalysisSpec {
         #[serde(default)]
         output_sideband: i32,
         #[serde(default)]
-        noise_reference: Option<crate::services::simulation_runner::HbNoiseReference>,
+        noise_reference: Option<rspice_simulation_contract::hbnoise_policy::HbNoiseReference>,
         start_freq: f64,
         stop_freq: f64,
         points_per_unit: usize,
@@ -617,7 +621,7 @@ pub enum AnalysisSpec {
     /// inside the transient that carries it: this specification decides which
     /// spectrum of that solve is published, never how one is computed.
     Fft {
-        request: crate::simulation::config::FftRequest,
+        request: rspice_simulation_contract::config::FftRequest,
     },
 }
 
@@ -625,7 +629,7 @@ impl AnalysisSpec {
     /// Canonical fresh operating-point request used by imported `.OP` decks.
     #[must_use]
     pub fn dc_op() -> Self {
-        let config = crate::simulation::dialog::OpConfig::default();
+        let config = rspice_simulation_contract::config::OpConfig::default();
         Self::DcOp {
             temperature_mode: config.temperature_mode,
             temperature_celsius: config.temperature_celsius,

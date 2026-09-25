@@ -1,11 +1,11 @@
 //! Complete QPNOISE specification and native-card interchange with legacy defaults.
 use super::types::AnalysisSpec;
-use crate::simulation::multi_run::FrequencySweep;
 use rspice_core::engine::{
     QpnoiseInput, QpnoiseIntegration, QpnoiseIntegrationMethod, QpnoiseLattices,
     QpnoiseObservation, QpnoiseOutput, QpnoiseRequest,
 };
 use rspice_core::netlist::{FreqVariation, PeriodicSweep, QpacSweep, QpnoiseCard};
+use rspice_simulation_contract::config::FrequencySweep;
 pub use rspice_simulation_contract::quasi_periodic_controls::QpnoiseControls;
 
 impl AnalysisSpec {

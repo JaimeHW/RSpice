@@ -292,7 +292,7 @@ pub(crate) enum WorkerAnalysisSpec {
     },
     Envelope {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        multirate: Option<crate::services::simulation_runner::EnvelopeMultirateConfig>,
+        multirate: Option<rspice_simulation_contract::envelope_multirate::EnvelopeMultirateConfig>,
         #[serde(default)]
         initialization: crate::services::simulation_runner::EnvelopeInitializationConfig,
         fundamental_freq: f64,

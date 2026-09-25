@@ -54,12 +54,11 @@ pub use envelope_fourier::EnvelopeShootingIntegration;
 #[cfg(test)]
 pub(crate) use envelope_fourier::run_fourier_from_signal_with_abort;
 pub use envelope_fourier::{
-    EnvelopeInitializationConfig, EnvelopeMultirateConfig, EnvelopeRunConfig, FourierData,
-    FourierRunConfig, run_envelope_analysis_with_source_path_and_abort,
+    EnvelopeInitializationConfig, EnvelopeRunConfig, FourierData, FourierRunConfig,
+    run_envelope_analysis_with_source_path_and_abort,
 };
 pub(crate) use envelope_fourier::{
     fourier_output_is_current, run_fourier_from_observation_with_abort, split_fourier_output,
-    validate_fourier_output_accessor,
 };
 pub use error::{ServiceRunError, ServiceRunResult};
 #[cfg(test)]
@@ -69,7 +68,6 @@ pub(crate) use hb::{
     run_hb_analysis_with_dc_seed_on_materialized_with_abort,
 };
 pub use hb::{HbRunConfig, HbToneRunConfig};
-pub(crate) use hbnoise::validate_hbnoise_frequency_options;
 pub use hbnoise::{HbNoiseReference, HbnoiseFrequencySweep, HbnoiseRunConfig};
 pub(crate) use hbnoise::{integrate_psd, run_hbnoise_analysis_from_hb_on_materialized_with_abort};
 #[cfg(test)]

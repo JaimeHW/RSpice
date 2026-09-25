@@ -45,7 +45,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             if !start_freq.is_finite()
                 || *start_freq < 0.0
                 || (*start_freq == 0.0
-                    && (*sweep != crate::simulation::multi_run::FrequencySweep::Linear
+                    && (*sweep != rspice_simulation_contract::config::FrequencySweep::Linear
                         || *do_noise))
             {
                 return Err("SP start frequency must be nonnegative for LIN, and positive for logarithmic sweeps or noise".into());

@@ -1,6 +1,5 @@
 //! QPXF controls, legacy-compatible specifications and native-card interchange.
 use super::types::AnalysisSpec;
-use crate::simulation::multi_run::FrequencySweep;
 use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
 use rspice_core::engine::{
     QpxfFrequencyAxis, QpxfInputLattices, QpxfOutput, QpxfRequest, QpxfSources,
@@ -9,6 +8,7 @@ use rspice_core::netlist::{
     FreqVariation, PeriodicSweep, QpacSweep, QpxfCard, QpxfCardLattices, QpxfCardOutput,
     QpxfCardSources,
 };
+use rspice_simulation_contract::config::FrequencySweep;
 
 pub use rspice_simulation_contract::quasi_periodic_controls::QpxfControls;
 

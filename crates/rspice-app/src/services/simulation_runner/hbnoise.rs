@@ -13,7 +13,7 @@ use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::HbOperatingPoint;
 use rspice_simulation_contract::config::validate_noise_sidebands;
 pub use rspice_simulation_contract::hbnoise_policy::HbNoiseReference;
-pub(crate) use rspice_simulation_contract::hbnoise_policy::validate_hbnoise_frequency_options;
+use rspice_simulation_contract::hbnoise_policy::validate_hbnoise_frequency_options;
 
 use super::error::{ensure_not_aborted, poll_periodically};
 #[cfg(test)]

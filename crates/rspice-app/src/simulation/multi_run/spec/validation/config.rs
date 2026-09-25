@@ -5,8 +5,8 @@
 //! request is an `AnalysisConfig`, so what there is to refuse is the sweep
 //! axis and the probe names, and nothing about a solve that precedes it.
 
-use crate::simulation::config::{AcSweepType, NoiseAnalysisConfig, NoiseSweepType};
 use crate::simulation::multi_run::AnalysisSpec;
+use rspice_simulation_contract::config::{AcSweepType, NoiseAnalysisConfig, NoiseSweepType};
 
 /// Validate one configured specification.
 pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
@@ -22,7 +22,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             step2,
             hysteresis,
             modes,
-        } => crate::simulation::config::DcSweepConfig {
+        } => rspice_simulation_contract::config::DcSweepConfig {
             source: source_name.clone(),
             start: *start,
             stop: *stop,
@@ -42,8 +42,8 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             points_per_unit,
             sweep,
         } => {
-            use crate::simulation::multi_run::FrequencySweep;
-            crate::simulation::config::AcAnalysisConfig {
+            use rspice_simulation_contract::config::FrequencySweep;
+            rspice_simulation_contract::config::AcAnalysisConfig {
                 start_freq: *start_freq,
                 stop_freq: *stop_freq,
                 num_points: *points_per_unit,
@@ -114,12 +114,12 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
             filter,
             sweep,
         } => {
-            let config = crate::simulation::config::SensitivityConfig {
+            let config = rspice_simulation_contract::config::SensitivityConfig {
                 output_var: output_var.clone(),
                 ac_mode: *ac_mode,
                 frequency: *frequency,
                 filter: filter.clone(),
-                sweep: sweep.map(crate::simulation::config::SensitivitySweep::from_spec),
+                sweep: sweep.map(rspice_simulation_contract::config::SensitivitySweep::from_spec),
             };
             config.validate().map_err(|errors| errors.join("; "))?;
             // The band is checked by building it with the engine's own grid

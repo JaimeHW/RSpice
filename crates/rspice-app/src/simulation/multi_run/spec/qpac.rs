@@ -1,9 +1,9 @@
 //! QPAC authoring, native-card interchange and active numerical controls.
 use super::types::AnalysisSpec;
-use crate::simulation::multi_run::FrequencySweep;
 use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
 use rspice_core::engine::QpacRequest;
 use rspice_core::netlist::{FreqVariation, PeriodicSweep, QpacCard, QpacSweep};
+use rspice_simulation_contract::config::FrequencySweep;
 
 pub use rspice_simulation_contract::quasi_periodic_controls::QpacControls;
 

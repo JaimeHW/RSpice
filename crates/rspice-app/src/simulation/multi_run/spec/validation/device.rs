@@ -31,7 +31,7 @@ pub(super) fn validate(spec: &AnalysisSpec) -> Result<(), String> {
                 return Err("Optimization variables must not be empty".to_string());
             }
             if let Some(expression) = objective_expression {
-                crate::services::simulation_runner::validate_optimization_expression(expression)?;
+                rspice_simulation_contract::optimization_expression::validate_optimization_expression(expression)?;
             } else {
                 if objective_node.trim().is_empty() {
                     return Err("Optimization objective_node is required".to_string());
