@@ -1,14 +1,14 @@
 //! Waveform expression values, evaluation, and mathematical functions.
 //!
-//! Parsing source text and binding live application waveforms remain with
-//! their callers; this module evaluates a typed expression against a supplied
-//! result context.
+//! Expression syntax, typed evaluation and mathematical functions live here.
+//! Callers supply their numeric literal policy and bind live waveforms.
 
 pub mod ast;
 mod complex_functions;
 mod complex_ops;
 pub mod evaluator;
 pub mod functions;
+pub mod parser;
 pub mod value;
 
 use crate::interpolation;
