@@ -4,6 +4,54 @@ use super::*;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 
 #[test]
+fn study_execution_options_read_the_exact_authored_draft() {
+    use crate::services::simulation_runner::CornerBaseMode;
+
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+    let sealed = state
+        .model_library_manager
+        .seal_execution_sources()
+        .unwrap();
+
+    let mut mc = state.sim_setup.mc.clone();
+    mc.ensure_initialized();
+    mc.histogram_bins = "31".into();
+    state.sim_setup.mc.histogram_bins = "99".into();
+    let draft = AnalysisDraft::MonteCarlo(mc);
+    let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+    let options = controller
+        .analysis_spec_execution_options(&state, &draft, &spec, &sealed)
+        .unwrap();
+    assert_eq!(options.mc_histogram_bins, Some(31));
+
+    let mut temp = state.sim_setup.temp.clone();
+    temp.ensure_initialized();
+    temp.specific_temps = "11, 22".into();
+    state.sim_setup.temp.specific_temps = "not a temperature".into();
+    let draft = AnalysisDraft::Temperature(temp);
+    let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+    let options = controller
+        .analysis_spec_execution_options(&state, &draft, &spec, &sealed)
+        .unwrap();
+    assert_eq!(options.temp.unwrap().temperatures_c, vec![11.0, 22.0]);
+
+    let mut corner = state.sim_setup.corner.clone();
+    corner.ensure_initialized();
+    corner.base_analysis_idx = 3;
+    state.sim_setup.corner.base_analysis_idx = 0;
+    let draft = AnalysisDraft::Corner(corner);
+    let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+    let options = controller
+        .analysis_spec_execution_options(&state, &draft, &spec, &sealed)
+        .unwrap();
+    assert!(matches!(
+        options.corner.unwrap().base_mode,
+        CornerBaseMode::Op
+    ));
+}
+
+#[test]
 fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
     use crate::services::simulation_runner::CornerBaseMode;
     use crate::simulation::plan::{

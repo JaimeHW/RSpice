@@ -52,6 +52,36 @@ impl SimulationController {
                     modes: config.modes,
                 }
             }
+            AnalysisDraft::MonteCarlo(draft) => {
+                let mut draft = draft.clone();
+                draft.ensure_initialized();
+                let config = draft
+                    .to_config()
+                    .map_err(|error| format!("invalid Monte Carlo settings: {error}"))?;
+                AnalysisSpec::MonteCarlo {
+                    variation_source: config.variation_source,
+                    params: config.params,
+                }
+            }
+            AnalysisDraft::Temperature(draft) => {
+                let mut draft = draft.clone();
+                draft.ensure_initialized();
+                draft
+                    .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
+                    .map_err(|error| format!("invalid temperature sweep settings: {error}"))?;
+                AnalysisSpec::Parametric
+            }
+            AnalysisDraft::Corner(draft) => {
+                let mut draft = draft.clone();
+                draft.ensure_initialized();
+                crate::simulation::dialog::corner::to_config(
+                    &draft,
+                    &state.sim_setup.run_set,
+                    state.sim_setup.reference_pvt,
+                )
+                .map_err(|error| format!("invalid corner settings: {error}"))?;
+                AnalysisSpec::Corner
+            }
             AnalysisDraft::Disto(draft) => AnalysisSpec::Disto {
                 start_freq: parse_spice_value_checked(&draft.sweep.fstart)
                     .map_err(|e| format!("invalid DISTO start frequency: {e}"))?,
@@ -251,10 +281,8 @@ impl SimulationController {
             }
             5 => self.build_pole_zero_spec(state),
             6 => self.build_sensitivity_spec(state),
-            7 => self.build_monte_carlo_spec(state),
             8 => self.build_pss_spec(state),
             9 => self.build_stb_spec(state),
-            10 => self.build_temperature_sweep_spec(state),
             11 => self.build_harmonic_balance_spec(state),
             12 => self.build_sp_spec(state),
             13 => self.build_pac_spec(state),
@@ -262,7 +290,6 @@ impl SimulationController {
             15 => self.build_pxf_spec(state),
             16 => self.build_pstb_spec(state),
             17 => self.build_tf_spec(state),
-            18 => self.build_corner_sweep_spec(state),
             19 => self.build_envelope_spec(state),
             20 => self.build_fourier_spec(state),
             21 => self.build_optimization_spec(state),
@@ -454,42 +481,6 @@ impl SimulationController {
                 spec.run_type().display_name()
             )),
         }
-    }
-
-    pub(super) fn build_monte_carlo_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut mc_state = state.sim_setup.mc.clone();
-        mc_state.ensure_initialized();
-        let mc_cfg = mc_state
-            .to_config()
-            .map_err(|e| format!("invalid Monte Carlo settings: {}", e))?;
-        Ok(AnalysisSpec::MonteCarlo {
-            variation_source: mc_cfg.variation_source,
-            params: mc_cfg.params,
-        })
-    }
-
-    pub(super) fn build_temperature_sweep_spec(
-        &self,
-        state: &AppState,
-    ) -> Result<AnalysisSpec, String> {
-        let mut temp_state = state.sim_setup.temp.clone();
-        temp_state.ensure_initialized();
-        temp_state
-            .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
-            .map_err(|e| format!("invalid temperature sweep settings: {}", e))?;
-        Ok(AnalysisSpec::Parametric)
-    }
-
-    pub(super) fn build_corner_sweep_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut corner_state = state.sim_setup.corner.clone();
-        corner_state.ensure_initialized();
-        crate::simulation::dialog::corner::to_config(
-            &corner_state,
-            &state.sim_setup.run_set,
-            state.sim_setup.reference_pvt,
-        )
-        .map_err(|e| format!("invalid corner settings: {}", e))?;
-        Ok(AnalysisSpec::Corner)
     }
 
     pub(super) fn build_pss_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {

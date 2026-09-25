@@ -147,6 +147,7 @@ impl SimulationController {
             };
             let mut spec_options = match self.analysis_spec_execution_options(
                 &projected_state,
+                instance.draft(),
                 &spec,
                 sealed_model_sources,
             ) {
@@ -793,12 +794,18 @@ impl SimulationController {
     pub(super) fn analysis_spec_execution_options(
         &self,
         state: &AppState,
+        draft: &crate::simulation::plan::AnalysisDraft,
         spec: &AnalysisSpec,
         sealed_model_sources: &crate::state::model_library::SealedModelExecutionSources,
     ) -> Result<SpecExecutionOptions, String> {
+        use crate::simulation::plan::AnalysisDraft;
+
         match spec {
             AnalysisSpec::MonteCarlo { .. } => {
-                let mut draft = state.sim_setup.mc.clone();
+                let AnalysisDraft::MonteCarlo(draft) = draft else {
+                    return Err("Monte Carlo specification requires its authored draft".into());
+                };
+                let mut draft = draft.clone();
                 draft.ensure_initialized();
                 let config = draft.to_config()?;
                 Ok(SpecExecutionOptions {
@@ -814,8 +821,16 @@ impl SimulationController {
                 })
             }
             AnalysisSpec::Parametric => {
-                let mut temp_state = state.sim_setup.temp.clone();
+                let AnalysisDraft::Temperature(temp_state) = draft else {
+                    return Err("Temperature specification requires its authored draft".into());
+                };
+                let mut temp_state = temp_state.clone();
                 temp_state.ensure_initialized();
+                if temp_state.base_analysis.is_some() {
+                    // The frozen projection resolved the bound instance's kind.
+                    // The authored index is only a legacy fallback and may be stale.
+                    temp_state.base_idx = state.sim_setup.temp.base_idx;
+                }
                 let temp_cfg = temp_state
                     .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
                     .map_err(|e| format!("invalid temperature sweep settings: {}", e))?;
@@ -834,8 +849,15 @@ impl SimulationController {
                 })
             }
             AnalysisSpec::Corner => {
-                let mut corner_state = state.sim_setup.corner.clone();
+                let AnalysisDraft::Corner(corner_state) = draft else {
+                    return Err("Corner specification requires its authored draft".into());
+                };
+                let mut corner_state = corner_state.clone();
                 corner_state.ensure_initialized();
+                if corner_state.base_analysis.is_some() {
+                    // The bound base, not the legacy index, selects the run mode.
+                    corner_state.base_analysis_idx = state.sim_setup.corner.base_analysis_idx;
+                }
                 let corner_cfg = crate::simulation::dialog::corner::to_config(
                     &corner_state,
                     &state.sim_setup.run_set,
