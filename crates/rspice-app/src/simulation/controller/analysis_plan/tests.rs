@@ -222,6 +222,9 @@ fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
             state.sim_setup.tran.stop = "invalid".into();
             state.sim_setup.ac.fstop = "invalid".into();
             state.sim_setup.dc.source = "Vwrong".into();
+            if kind == AnalysisKind::OperatingPoint {
+                state.sim_setup.op.initial_guess_idx = usize::MAX;
+            }
             state
                 .sim_setup
                 .analysis_plan

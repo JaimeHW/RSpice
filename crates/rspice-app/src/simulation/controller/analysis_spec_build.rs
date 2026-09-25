@@ -7,17 +7,18 @@
 use super::*;
 
 impl SimulationController {
-    pub(super) fn build_manifest_preview_spec(
+    pub(super) fn analysis_draft_spec(
         &self,
         state: &AppState,
         draft: &crate::simulation::plan::AnalysisDraft,
-    ) -> Result<Option<AnalysisSpec>, String> {
+    ) -> Result<AnalysisSpec, String> {
         use crate::simulation::plan::AnalysisDraft;
 
         if let Some(error) = draft.manifest_configuration_error() {
             return Err(error);
         }
         let spec = match draft {
+            AnalysisDraft::OperatingPoint(draft) => self.build_op_spec(state, draft)?,
             AnalysisDraft::Transient(draft) => AnalysisSpec::Transient {
                 stop_time: parse_spice_value_checked(&draft.stop)
                     .map_err(|e| format!("invalid stop time: {}", e))?,
@@ -263,74 +264,69 @@ impl SimulationController {
                     &draft.share_threshold,
                 )?,
             },
-            _ => return Ok(None),
         };
         spec.validate()?;
-        Ok(Some(spec))
+        Ok(spec)
     }
 
-    pub(super) fn build_legacy_analysis_spec_for_index(
+    pub(super) fn build_op_spec(
         &self,
         state: &AppState,
-        idx: usize,
+        draft: &crate::simulation::dialog::op::OpDialogState,
     ) -> Result<AnalysisSpec, String> {
-        match idx {
-            0 => {
-                let mut config = state.sim_setup.op.to_config()?;
-                config.selected_devices = state
-                    .schematic
-                    .components
-                    .iter()
-                    .filter(|component| state.schematic.selection.has_component(component.id))
-                    .map(|component| component.name.clone())
-                    .collect();
-                config.selected_devices.sort();
-                config.selected_devices.dedup();
-                if config.initial_guess.uses_previous_state() {
-                    config.previous_state = state.simulation.newest_retained_op_state(
-                        state.workspace.project.revision(),
-                        config.initial_guess
-                            == crate::simulation::dialog::OpInitialGuess::PreviousCompatible,
-                    );
-                }
-                if matches!(
-                    config.device_detail,
-                    crate::simulation::dialog::OpDeviceDetail::SelectedAndViolations
-                        | crate::simulation::dialog::OpDeviceDetail::ViolationsOnly
-                ) && let Some((source_digest, devices)) = state
-                    .simulation
-                    .active_soa_violation_context(state.workspace.project.revision())
-                {
-                    config.violation_devices = devices;
-                    config.violation_source_content_digest = Some(source_digest);
-                }
-                config.validate_for_execution()?;
-                Ok(AnalysisSpec::DcOp {
-                    temperature_mode: config.temperature_mode,
-                    temperature_celsius: config.temperature_celsius,
-                    initial_guess: config.initial_guess,
-                    node_initialization: config.node_initialization,
-                    homotopy: config.homotopy,
-                    annotation: config.annotation,
-                    device_detail: config.device_detail,
-                    save_device_op: config.save_device_op,
-                    accuracy: config.accuracy,
-                    selected_devices: config.selected_devices,
-                    previous_state: config.previous_state,
-                    violation_devices: config.violation_devices,
-                    violation_source_content_digest: config.violation_source_content_digest,
-                    run_point: config.run_point,
-                })
-            }
-            _ if crate::simulation::plan::AnalysisKind::from_legacy_index(idx).is_some() => {
-                Err(format!(
-                    "analysis index {idx} has an exact draft specification, not a legacy fallback"
-                ))
-            }
-            _ => Err(format!(
-                "analysis index {idx} is outside the canonical Simulation Studio catalog"
-            )),
+        let mut op = draft.clone();
+        if matches!(op.temperature_mode_idx, 0 | 3) {
+            op.temperature = state
+                .sim_setup
+                .reference_pvt
+                .temperature_celsius
+                .to_string();
         }
+        let mut config = op.to_config()?;
+        config.selected_devices = state
+            .schematic
+            .components
+            .iter()
+            .filter(|component| state.schematic.selection.has_component(component.id))
+            .map(|component| component.name.clone())
+            .collect();
+        config.selected_devices.sort();
+        config.selected_devices.dedup();
+        if config.initial_guess.uses_previous_state() {
+            config.previous_state = state.simulation.newest_retained_op_state(
+                state.workspace.project.revision(),
+                config.initial_guess
+                    == crate::simulation::dialog::OpInitialGuess::PreviousCompatible,
+            );
+        }
+        if matches!(
+            config.device_detail,
+            crate::simulation::dialog::OpDeviceDetail::SelectedAndViolations
+                | crate::simulation::dialog::OpDeviceDetail::ViolationsOnly
+        ) && let Some((source_digest, devices)) = state
+            .simulation
+            .active_soa_violation_context(state.workspace.project.revision())
+        {
+            config.violation_devices = devices;
+            config.violation_source_content_digest = Some(source_digest);
+        }
+        config.validate_for_execution()?;
+        Ok(AnalysisSpec::DcOp {
+            temperature_mode: config.temperature_mode,
+            temperature_celsius: config.temperature_celsius,
+            initial_guess: config.initial_guess,
+            node_initialization: config.node_initialization,
+            homotopy: config.homotopy,
+            annotation: config.annotation,
+            device_detail: config.device_detail,
+            save_device_op: config.save_device_op,
+            accuracy: config.accuracy,
+            selected_devices: config.selected_devices,
+            previous_state: config.previous_state,
+            violation_devices: config.violation_devices,
+            violation_source_content_digest: config.violation_source_content_digest,
+            run_point: config.run_point,
+        })
     }
 
     pub(super) fn analysis_spec_to_config(
@@ -1048,12 +1044,10 @@ mod manifest_tests {
 
             let specs = [
                 controller
-                    .build_manifest_preview_spec(&state, &AnalysisDraft::Noise(noise))
-                    .unwrap()
+                    .analysis_draft_spec(&state, &AnalysisDraft::Noise(noise))
                     .unwrap(),
                 controller
-                    .build_manifest_preview_spec(&state, &AnalysisDraft::Disto(disto))
-                    .unwrap()
+                    .analysis_draft_spec(&state, &AnalysisDraft::Disto(disto))
                     .unwrap(),
                 controller.build_stb_spec(&state.sim_setup.stb).unwrap(),
             ];
@@ -1101,9 +1095,8 @@ mod manifest_tests {
         draft.integration_mode = crate::simulation::config::NoiseIntegrationMode::OutputNoiseOnly;
 
         let spec = controller
-            .build_manifest_preview_spec(&state, &AnalysisDraft::Noise(draft))
-            .expect("exact noise draft parses")
-            .expect("noise draft has an exact spec");
+            .analysis_draft_spec(&state, &AnalysisDraft::Noise(draft))
+            .expect("exact noise draft parses");
         assert!(matches!(
             spec,
             AnalysisSpec::Noise {
@@ -1143,9 +1136,8 @@ mod manifest_tests {
         draft.f2_over_f1 = "0.8".to_owned();
 
         let spec = controller
-            .build_manifest_preview_spec(&state, &AnalysisDraft::Disto(draft))
-            .expect("exact DISTO draft parses")
-            .expect("DISTO draft has an exact spec");
+            .analysis_draft_spec(&state, &AnalysisDraft::Disto(draft))
+            .expect("exact DISTO draft parses");
         assert!(matches!(
             spec,
             AnalysisSpec::Disto {
@@ -1363,9 +1355,8 @@ mod manifest_tests {
         ] {
             let draft = AnalysisDraft::for_kind(kind);
             let spec = controller
-                .build_manifest_preview_spec(&AppState::default(), &draft)
-                .expect("default draft parses")
-                .expect("manifest draft has a typed spec");
+                .analysis_draft_spec(&AppState::default(), &draft)
+                .expect("default draft parses");
             assert!(matches!(
                 (kind, &spec),
                 (AnalysisKind::Qpss, AnalysisSpec::Qpss { .. })
@@ -1397,9 +1388,8 @@ mod manifest_tests {
             network.reltol = "2.5e-6".into();
             network.abstol = "7e-13".into();
             let spec = controller
-                .build_manifest_preview_spec(&AppState::default(), &draft)
-                .expect("periodic network draft parses")
-                .expect("periodic network draft has a typed spec");
+                .analysis_draft_spec(&AppState::default(), &draft)
+                .expect("periodic network draft parses");
             match spec {
                 AnalysisSpec::Hbsp { reltol, abstol, .. }
                 | AnalysisSpec::Psp { reltol, abstol, .. } => {
@@ -1638,5 +1628,38 @@ mod manifest_tests {
                 .unwrap()
                 .contains("VTF")
         );
+    }
+
+    #[test]
+    fn operating_point_uses_frozen_draft_and_live_reference_temperature() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.sim_setup.reference_pvt.temperature_celsius = 42.0;
+        let mut authored = state.sim_setup.op.clone();
+        authored.temperature_mode_idx = 0;
+        authored.temperature = "unfinished edit".into();
+        state.sim_setup.op.temperature_mode_idx = usize::MAX;
+        let draft = AnalysisDraft::OperatingPoint(authored.clone());
+        let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+        assert!(matches!(
+            spec,
+            AnalysisSpec::DcOp {
+                temperature_celsius: 42.0,
+                ..
+            }
+        ));
+
+        authored.temperature_mode_idx = 2;
+        authored.temperature = "-15".into();
+        let spec = controller
+            .analysis_draft_spec(&state, &AnalysisDraft::OperatingPoint(authored))
+            .unwrap();
+        assert!(matches!(
+            spec,
+            AnalysisSpec::DcOp {
+                temperature_celsius: -15.0,
+                ..
+            }
+        ));
     }
 }

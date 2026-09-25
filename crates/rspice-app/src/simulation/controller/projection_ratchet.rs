@@ -218,17 +218,11 @@ pub(super) fn fixture_draft(kind: AnalysisKind) -> AnalysisDraft {
     }
 }
 
-fn projection(kind: AnalysisKind, draft: &AnalysisDraft) -> String {
+fn projection(draft: &AnalysisDraft) -> String {
     let controller = SimulationController::new();
     let state = engine_facing_state(draft);
 
-    let spec = match controller.build_manifest_preview_spec(&state, draft) {
-        Ok(Some(spec)) => Ok(spec),
-        Ok(None) => controller.build_legacy_analysis_spec_for_index(&state, kind.legacy_index()),
-        Err(error) => Err(error),
-    };
-
-    let spec = match spec {
+    let spec = match controller.analysis_draft_spec(&state, draft) {
         Ok(spec) => spec,
         Err(error) => return format!("spec-error: {error}"),
     };
@@ -467,7 +461,7 @@ fn judge(
     let Some(baseline_draft) = rebuild(draft, body.clone()) else {
         return FieldOutcome::Unperturbable;
     };
-    let baseline = projection(kind, &baseline_draft);
+    let baseline = projection(&baseline_draft);
 
     let mut any_deserialized = false;
     for candidate in perturbations(kind, path, current) {
@@ -475,7 +469,7 @@ fn judge(
             continue;
         };
         any_deserialized = true;
-        if projection(kind, &mutated) != baseline {
+        if projection(&mutated) != baseline {
             return FieldOutcome::Moved;
         }
     }
@@ -1049,7 +1043,7 @@ fn envelope_initializer_fields_reach_the_execution_spec() {
         let mut configured = body.clone();
         configured.insert("initial_periodic_solve_idx".into(), Value::from(method));
         let ready = rebuild(&draft, configured.clone()).unwrap();
-        let baseline = projection(kind, &ready);
+        let baseline = projection(&ready);
         assert!(!baseline.starts_with("spec-error"), "{method}: {baseline}");
         for path in paths
             .iter()
@@ -1073,7 +1067,7 @@ fn hbnoise_reference_fields_reach_the_execution_spec() {
     let mut body = draft_body(&draft).unwrap();
     body.insert("noise_figure".into(), Value::from(true));
     let ready = rebuild(&draft, body.clone()).unwrap();
-    let baseline = projection(kind, &ready);
+    let baseline = projection(&ready);
     assert!(!baseline.starts_with("spec-error"), "{baseline}");
     for path in [
         "source_resistor",
@@ -1118,8 +1112,7 @@ fn hbnoise_spot_and_zero_sideband_authoring_reach_a_valid_spec() {
         assert_eq!(draft.manifest_configuration_error(), None);
         let controller = SimulationController::new();
         let spec = controller
-            .build_manifest_preview_spec(&engine_facing_state(&draft), &draft)
-            .unwrap()
+            .analysis_draft_spec(&engine_facing_state(&draft), &draft)
             .unwrap();
         spec.validate().unwrap();
         assert!(matches!(

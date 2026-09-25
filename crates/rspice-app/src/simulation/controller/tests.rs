@@ -38,8 +38,7 @@ fn studio_ac_data_authored_columns_and_netlist_tables_reach_results() {
         let restored: AcDataDraft = serde_json::from_value(json.clone()).unwrap();
         assert_eq!(serde_json::to_value(&restored).unwrap(), json);
         let spec = controller
-            .build_manifest_preview_spec(&state, &AnalysisDraft::AcData(restored))
-            .unwrap()
+            .analysis_draft_spec(&state, &AnalysisDraft::AcData(restored))
             .unwrap();
         spec.validate().unwrap();
         let worker = WorkerAnalysisSpec::try_from(&spec).unwrap();
@@ -200,10 +199,7 @@ fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
             unreachable!()
         };
         assert_eq!(serde_json::to_value(settings).unwrap(), json);
-        let spec = controller
-            .build_manifest_preview_spec(&state, &restored)
-            .unwrap()
-            .unwrap();
+        let spec = controller.analysis_draft_spec(&state, &restored).unwrap();
         spec.validate().unwrap();
         let wire = WorkerAnalysisSpec::try_from(&spec).unwrap();
         let wire: WorkerAnalysisSpec =
@@ -286,20 +282,14 @@ fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
     for seed in ["", "0", "18446744073709551615"] {
         assert!(
             controller
-                .build_manifest_preview_spec(
-                    &state,
-                    &AnalysisDraft::TransientNoise(draft(seed, "0"))
-                )
+                .analysis_draft_spec(&state, &AnalysisDraft::TransientNoise(draft(seed, "0")))
                 .is_ok()
         );
     }
     for seed in ["-1", "1.5", "18446744073709551616", "unfinished"] {
         assert!(
             controller
-                .build_manifest_preview_spec(
-                    &state,
-                    &AnalysisDraft::TransientNoise(draft(seed, "1"))
-                )
+                .analysis_draft_spec(&state, &AnalysisDraft::TransientNoise(draft(seed, "1")))
                 .is_err(),
             "{seed}"
         );
@@ -307,10 +297,7 @@ fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
     for scale in ["-1", "NaN", "inf"] {
         assert!(
             controller
-                .build_manifest_preview_spec(
-                    &state,
-                    &AnalysisDraft::TransientNoise(draft("0", scale))
-                )
+                .analysis_draft_spec(&state, &AnalysisDraft::TransientNoise(draft("0", scale)))
                 .is_err(),
             "{scale}"
         );

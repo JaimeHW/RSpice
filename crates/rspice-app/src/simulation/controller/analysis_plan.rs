@@ -120,17 +120,9 @@ impl SimulationController {
                 .map(|dependency| dependency.target())
                 .collect();
 
-            // Projected, like every other builder below it, and resolved
-            // through the one owner. The three steps a directive is built from
-            // — preview spec, legacy-index fallback, spice line — are one
-            // derivation, and this loop wrote the first two out a second time:
-            // the queue and the statement the plan displays beside it were two
-            // spellings of the same thing. `analysis_draft_spec` is that pair,
-            // and `analysis_draft_directive` is it plus the line. Exact preview
-            // builders read the draft; the remaining fallback builders read
-            // the projection. Handing a fallback the unprojected state made
-            // the queue capable of dispatching a directive the plan never
-            // displayed and the parse ratchet never read.
+            // Resolve the same exact draft and contextual prerequisite closure
+            // used by the displayed directive. The queue and preview must
+            // agree on the spec that reaches the engine.
             let spec = match self.analysis_draft_spec(&projected_state, instance.draft()) {
                 Ok(spec) => spec,
                 Err(error) => {
@@ -179,8 +171,29 @@ impl SimulationController {
                             .map(|config| &mut config.base_mode)
                     });
                 if let Some(mode @ crate::services::simulation_runner::CornerBaseMode::Op) = mode {
-                    let config = self
-                        .build_legacy_analysis_spec_for_index(&projected_state, 0)
+                    let config = instance
+                        .draft()
+                        .pvt_base_analysis()
+                        .and_then(|base_id| {
+                            plan.instances()
+                                .iter()
+                                .find(|candidate| candidate.id() == base_id)
+                        })
+                        .ok_or_else(|| {
+                            format!(
+                                "{} has no bound operating-point base",
+                                instance.display_name()
+                            )
+                        })
+                        .and_then(|base| match base.draft() {
+                            crate::simulation::plan::AnalysisDraft::OperatingPoint(draft) => {
+                                self.build_op_spec(&projected_state, draft)
+                            }
+                            _ => Err(format!(
+                                "{} has a non-operating-point base while OP mode is selected",
+                                instance.display_name()
+                            )),
+                        })
                         .and_then(|spec| self.analysis_spec_to_config(&projected_state, &spec));
                     match config {
                         Ok(AnalysisConfig::DcOp(config)) => {

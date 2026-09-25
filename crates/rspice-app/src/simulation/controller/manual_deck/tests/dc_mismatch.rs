@@ -22,8 +22,7 @@ fn dc_mismatch_moment_controls_survive_authoring_storage_decks_and_workers() {
     let restored: DcMismatchDraft = serde_json::from_value(saved.clone()).unwrap();
     assert_eq!(restored.moment_relative_tolerance, "2m");
     let spec = SimulationController::new()
-        .build_manifest_preview_spec(&AppState::default(), &AnalysisDraft::DcMismatch(restored))
-        .unwrap()
+        .analysis_draft_spec(&AppState::default(), &AnalysisDraft::DcMismatch(restored))
         .unwrap();
     let AnalysisSpec::DcMismatch { moment_options, .. } = &spec else {
         panic!("DC mismatch specification expected");
@@ -176,9 +175,8 @@ fn a_bare_dcmatch_card_reads_as_the_engine_defaults() {
         crate::simulation::plan::AnalysisKind::DcMismatch,
     );
     let authored = SimulationController::new()
-        .build_manifest_preview_spec(&state, &draft)
-        .expect("a default DC mismatch draft builds a specification")
-        .expect("DC mismatch is a manifest kind");
+        .analysis_draft_spec(&state, &draft)
+        .expect("a default DC mismatch draft builds a specification");
     let AnalysisSpec::DcMismatch {
         sigma_multiplier: draft_sigma,
         contributor_limit: draft_limit,

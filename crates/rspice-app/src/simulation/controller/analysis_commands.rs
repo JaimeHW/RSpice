@@ -10,21 +10,8 @@ use crate::services::simulation_runner::splice_before_terminal_end_card;
 use crate::simulation::plan::AnalysisDraft;
 
 impl SimulationController {
-    /// The engine directive one draft emits, against an already-projected
-    /// state.
-    ///
-    /// The three-step dance — preview spec, legacy-index fallback, spice line —
-    /// was written out twice: once in the queue builder that produces the
-    /// executable deck, once in the ratchet that proves those directives parse.
-    /// A surface that wanted to *show* an operator the statement their analysis
-    /// emits would have written it a third time, and a displayed statement that
-    /// is a re-spelling of the emitted one is worse than showing nothing: it
-    /// reads as the deck and is not the deck.
-    ///
-    /// `state` must carry the projected prerequisite closure for the remaining
-    /// legacy builders. Exact preview builders read `draft` directly, while
-    /// fallback builders still read the projection. Callers that price many
-    /// drafts project once and re-project per draft.
+    /// The engine directive one frozen draft emits. `state` supplies live
+    /// circuit context and the projected prerequisite closure where needed.
     pub(crate) fn analysis_draft_directive(
         &self,
         state: &AppState,
@@ -32,32 +19,6 @@ impl SimulationController {
     ) -> Result<String, String> {
         let spec = self.analysis_draft_spec(state, draft)?;
         self.analysis_spec_to_spice_line(state, draft, &spec)
-    }
-
-    /// The analysis specification one draft resolves to, against an
-    /// already-projected state.
-    ///
-    /// Two of the three steps above: the manifest preview spec, and the
-    /// legacy-index fallback for the kinds that have no preview. It is a
-    /// function of its own because the queue builder needs the spec as well as
-    /// the line — the execution options a task carries are read off the spec —
-    /// and so could not simply call [`Self::analysis_draft_directive`]. What it
-    /// did instead was write the fallback out a second time, and one derivation
-    /// in two places is exactly the drift this pair exists to stop: the queue
-    /// and the statement an operator is shown have to resolve the same spec, or
-    /// the studio is displaying a deck it will not dispatch.
-    pub(super) fn analysis_draft_spec(
-        &self,
-        state: &AppState,
-        draft: &crate::simulation::plan::AnalysisDraft,
-    ) -> Result<AnalysisSpec, String> {
-        match self.build_manifest_preview_spec(state, draft) {
-            Ok(Some(spec)) => Ok(spec),
-            Ok(None) => {
-                self.build_legacy_analysis_spec_for_index(state, draft.kind().legacy_index())
-            }
-            Err(error) => Err(error),
-        }
     }
 
     pub(super) fn analysis_spec_to_spice_line(
