@@ -1109,8 +1109,7 @@ impl FourierRunConfig {
 }
 
 pub(crate) use rspice_simulation_contract::fourier_output::{
-    fourier_card_output, fourier_output_is_current, split_fourier_output,
-    validate_fourier_output_accessor,
+    fourier_output_is_current, split_fourier_output, validate_fourier_output_accessor,
 };
 
 /// Fourier analysis output.
