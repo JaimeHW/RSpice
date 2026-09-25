@@ -16,6 +16,7 @@ pub mod options;
 pub mod output_policy;
 pub mod plan_catalog;
 pub mod progress;
+pub mod regression_policy;
 pub mod run_set;
 pub mod saved_output;
 pub mod spice_value;

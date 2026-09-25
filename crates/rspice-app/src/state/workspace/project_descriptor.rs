@@ -5,6 +5,7 @@
 //! receipts remain a provider concern and are never inferred from local state.
 
 use super::*;
+use unicode_segmentation::UnicodeSegmentation;
 
 pub const PROJECT_SIGNED_TECHNOLOGY_PIN_SCHEMA_VERSION: u16 = 1;
 pub const PROJECT_TECHNOLOGY_CHANGE_RECEIPT_SCHEMA_VERSION: u16 = 1;
