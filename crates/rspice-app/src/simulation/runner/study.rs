@@ -80,35 +80,7 @@ pub(crate) fn supports_kind(kind: AnalysisKind) -> bool {
     )
 }
 
-pub(crate) fn validate_measurements(names: &[String]) -> Result<(), String> {
-    if names.is_empty() {
-        return Err("Select at least one study measurement".into());
-    }
-    let mut seen = std::collections::HashSet::new();
-    for name in names {
-        let (mode, key) = name.split_once(':').unwrap_or(("meas", name));
-        if key.trim().is_empty()
-            || name.chars().any(char::is_control)
-            || !["meas", "scalar", "last", "bin", "tuple"]
-                .iter()
-                .any(|value| mode.eq_ignore_ascii_case(value))
-        {
-            return Err(format!(
-                "Invalid study measurement {name:?}; use a .MEAS name, scalar:name, last:signal, bin:index:quantity[:signal], or tuple:k1,k2:quantity:signal"
-            ));
-        }
-        if mode.eq_ignore_ascii_case("bin") {
-            crate::simulation::results::parse_study_bin(key)?;
-        }
-        if mode.eq_ignore_ascii_case("tuple") {
-            crate::simulation::results::parse_study_tuple(key)?;
-        }
-        if !seen.insert(name.to_ascii_lowercase()) {
-            return Err(format!("Repeated study measurement {name:?}"));
-        }
-    }
-    Ok(())
-}
+pub(crate) use rspice_simulation_contract::study_measurement::validate_measurements;
 
 struct StudyAbort<'a> {
     parent: &'a dyn AbortSignal,

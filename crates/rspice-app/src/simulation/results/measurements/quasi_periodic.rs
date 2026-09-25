@@ -1,29 +1,6 @@
 //! Stable lattice selection and native integrated-noise observations for studies.
 use super::*;
 
-pub(crate) fn parse_study_tuple(key: &str) -> Result<(Vec<i32>, &str, &str), String> {
-    let mut parts = key.splitn(3, ':');
-    let tuple = parts
-        .next()
-        .unwrap_or_default()
-        .split(',')
-        .map(|part| part.trim().parse::<i32>())
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| "Lattice coordinates must be comma-separated signed integers")?;
-    let quantity = parts.next().unwrap_or_default();
-    if !["real", "imag", "magnitude", "phase"]
-        .iter()
-        .any(|name| quantity.eq_ignore_ascii_case(name))
-    {
-        return Err("Lattice quantity must be real, imag, magnitude, or phase (degrees)".into());
-    }
-    let signal = parts
-        .next()
-        .filter(|signal| !signal.trim().is_empty())
-        .ok_or("Lattice observations require an explicit signal")?;
-    Ok((tuple, quantity, signal))
-}
-
 impl SimulationResult {
     pub(super) fn qpss_tuple_measurement(
         &self,

@@ -7,7 +7,9 @@
 use super::*;
 mod quasi_periodic;
 mod units;
-pub(crate) use quasi_periodic::parse_study_tuple;
+pub(crate) use rspice_simulation_contract::study_measurement::{
+    parse_study_bin, parse_study_tuple,
+};
 use units::unit;
 
 impl SimulationResult {
@@ -783,28 +785,6 @@ fn last_waveform_by_name<'a>(
         })
         .or_else(|| last(&format!("V({key})")))
         .or_else(|| last(&format!("I({key})")))
-}
-
-/// Explicit zero-based retained spectral bin, with no implicit complex reduction.
-pub(crate) fn parse_study_bin(key: &str) -> Result<(usize, &str, Option<&str>), String> {
-    let mut parts = key.splitn(3, ':');
-    let index = parts
-        .next()
-        .unwrap_or_default()
-        .parse::<usize>()
-        .map_err(|_| "Spectral bin index must be a nonnegative integer")?;
-    let quantity = parts.next().unwrap_or_default();
-    if !["real", "imag", "magnitude", "phase"]
-        .iter()
-        .any(|name| quantity.eq_ignore_ascii_case(name))
-    {
-        return Err("Spectral quantity must be real, imag, magnitude, or phase (degrees)".into());
-    }
-    let signal = parts.next();
-    if signal.is_some_and(|name| name.trim().is_empty()) {
-        return Err("Spectral signal name is empty".into());
-    }
-    Ok((index, quantity, signal))
 }
 
 #[cfg(test)]
