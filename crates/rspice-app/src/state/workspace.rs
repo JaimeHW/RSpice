@@ -57,15 +57,13 @@ pub(crate) use materialize::{
     metadata_value, project_veriloga_binding_for_view, same_terminal_contract,
 };
 
-use rspice_simulation_contract::design_variable_quantity::parse_design_quantity;
 pub use rspice_simulation_contract::saved_output::{
     ComplexExpressionPolicy, OutputSelectionMode, SavedOutput, SavedOutputCompatibility,
     SavedOutputDisplayIntent, SavedOutputKind, SavedOutputOrigin, SavedOutputPolicy,
     SavedOutputPrecision, SavedOutputStreaming,
 };
 use rspice_simulation_contract::saved_output::{
-    deserialize_or_migrate_identity, missing_identity_sentinel, validate_bounded_text,
-    validate_parameter_name, validate_single_line_expression,
+    validate_bounded_text, validate_parameter_name, validate_single_line_expression,
 };
 
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};

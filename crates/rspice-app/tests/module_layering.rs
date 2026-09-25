@@ -206,7 +206,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("state", "services", 9),
     ("state", "io", 5),
     ("state", "schematic", 2),
-    ("state", "analysis", 1),
     // Editors and orchestration referencing each other sideways; retired by
     // the granularity folds and the `properties`/`panels` merge.
     // Project I/O now imports the lower-owned analysis kind directly; its

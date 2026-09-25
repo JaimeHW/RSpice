@@ -224,24 +224,6 @@ fn legacy_projection_edit_does_not_flatten_unchanged_equality_semantics() {
 }
 
 #[test]
-fn typed_design_variable_enforces_units_range_and_canonical_netlist_value() {
-    let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
-    assert_eq!(variable.resolved_value_si().unwrap(), 10_000.0);
-    assert_eq!(
-        variable.netlist_statement(),
-        ".param RLOAD=1.00000000000000000e4"
-    );
-
-    let mut wrong_unit = variable.clone();
-    wrong_unit.expression = "10 V".to_owned();
-    assert!(wrong_unit.validate().unwrap_err().contains("resistance"));
-
-    let mut outside = variable;
-    outside.expression = "2 Mohm".to_owned();
-    assert!(outside.validate().unwrap_err().contains("outside"));
-}
-
-#[test]
 fn design_variable_expression_update_preserves_identity_and_metadata() {
     let plan_id = SimulationPlanId::new();
     let mut workspace = ProjectWorkspace::default();
@@ -534,27 +516,6 @@ fn saved_output_validation_is_kind_specific() {
     )
     .expect("calculator expression is valid");
     assert_eq!(derived.inferred_unit(), "resolved from expression");
-}
-
-#[test]
-fn missing_row_identity_migrates_deterministically_and_null_is_rejected() {
-    let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
-    let mut value = serde_json::to_value(variable).unwrap();
-    value.as_object_mut().unwrap().remove("id");
-    let first: DesignVariable = serde_json::from_value(value.clone()).unwrap();
-    let second: DesignVariable = serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(first.id, second.id);
-
-    value
-        .as_object_mut()
-        .unwrap()
-        .insert("id".to_owned(), serde_json::Value::Null);
-    assert!(
-        serde_json::from_value::<DesignVariable>(value)
-            .unwrap_err()
-            .to_string()
-            .contains("must not be null")
-    );
 }
 
 #[test]
