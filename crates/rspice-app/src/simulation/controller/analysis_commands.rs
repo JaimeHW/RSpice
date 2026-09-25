@@ -85,9 +85,19 @@ impl SimulationController {
                 };
                 self.build_corner_temp_command(state, draft)
             }
-            AnalysisSpec::Pss { .. } => self.build_pss_command(state),
+            AnalysisSpec::Pss { .. } => {
+                let AnalysisDraft::Pss(draft) = draft else {
+                    return Err("PSS specification requires its authored draft".into());
+                };
+                self.build_pss_command(draft)
+            }
             AnalysisSpec::Stb { .. } => self.build_stb_command(state),
-            AnalysisSpec::HarmonicBalance { .. } => self.build_harmonic_balance_command(state),
+            AnalysisSpec::HarmonicBalance { .. } => {
+                let AnalysisDraft::HarmonicBalance(draft) = draft else {
+                    return Err("Harmonic balance specification requires its authored draft".into());
+                };
+                self.build_harmonic_balance_command(draft)
+            }
             AnalysisSpec::SParameter { .. } => self.build_sp_command(state),
             AnalysisSpec::Envelope { .. } => self.build_envelope_command(state),
             AnalysisSpec::Fourier { .. } => self.build_fourier_command(state),
@@ -240,8 +250,11 @@ impl SimulationController {
         Ok(format!(".temp {}", temps.join(" ")))
     }
 
-    pub(super) fn build_pss_command(&self, state: &AppState) -> Result<String, String> {
-        let mut pss_state = state.sim_setup.pss.clone();
+    pub(super) fn build_pss_command(
+        &self,
+        draft: &crate::simulation::dialog::pss::PssDialogState,
+    ) -> Result<String, String> {
+        let mut pss_state = draft.clone();
         pss_state.ensure_initialized();
         let pss_cfg = pss_state
             .to_config()
@@ -268,9 +281,9 @@ impl SimulationController {
 
     pub(super) fn build_harmonic_balance_command(
         &self,
-        state: &AppState,
+        draft: &crate::simulation::dialog::hb::HbDialogState,
     ) -> Result<String, String> {
-        let mut hb_state = state.sim_setup.hb.clone();
+        let mut hb_state = draft.clone();
         hb_state.ensure_initialized();
         let hb_cfg = hb_state
             .to_config()

@@ -75,6 +75,41 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
         .analysis_spec_execution_options(&state, &draft, None, &AnalysisSpec::Pac, &sealed)
         .unwrap();
     assert_eq!(options.pac.unwrap().pac_magnitude, 2.5);
+
+    let mut pss = state.sim_setup.pss.clone();
+    pss.ensure_initialized();
+    pss.tone_sources = "VIN".into();
+    pss.fund_freq = "1k".into();
+    state.sim_setup.pss = pss.clone();
+    state.sim_setup.pss.fund_freq = "2k".into();
+    let draft = AnalysisDraft::Pss(pss);
+    let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+    assert!(
+        matches!(&spec, AnalysisSpec::Pss { fundamental_freq, .. } if *fundamental_freq == 1e3)
+    );
+    assert!(
+        controller
+            .analysis_spec_to_spice_line(&state, &draft, &spec)
+            .unwrap()
+            .starts_with(".pss fund=1k ")
+    );
+
+    let mut hb = state.sim_setup.hb.clone();
+    hb.ensure_initialized();
+    hb.fundamental = "1meg".into();
+    state.sim_setup.hb = hb.clone();
+    state.sim_setup.hb.fundamental = "2meg".into();
+    let draft = AnalysisDraft::HarmonicBalance(hb);
+    let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+    assert!(
+        matches!(&spec, AnalysisSpec::HarmonicBalance { tones, .. } if tones[0].frequency == 1e6)
+    );
+    assert!(
+        controller
+            .analysis_spec_to_spice_line(&state, &draft, &spec)
+            .unwrap()
+            .starts_with(".hb 1000000 ")
+    );
 }
 
 #[test]

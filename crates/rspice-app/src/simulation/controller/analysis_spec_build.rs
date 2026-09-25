@@ -63,6 +63,8 @@ impl SimulationController {
                     params: config.params,
                 }
             }
+            AnalysisDraft::Pss(draft) => self.build_pss_spec(draft)?,
+            AnalysisDraft::HarmonicBalance(draft) => self.build_harmonic_balance_spec(draft)?,
             AnalysisDraft::Temperature(draft) => {
                 let mut draft = draft.clone();
                 draft.ensure_initialized();
@@ -281,9 +283,7 @@ impl SimulationController {
             }
             5 => self.build_pole_zero_spec(state),
             6 => self.build_sensitivity_spec(state),
-            8 => self.build_pss_spec(state),
             9 => self.build_stb_spec(state),
-            11 => self.build_harmonic_balance_spec(state),
             12 => self.build_sp_spec(state),
             13 => self.build_pac_spec(state),
             14 => self.build_pnoise_spec(state),
@@ -483,8 +483,11 @@ impl SimulationController {
         }
     }
 
-    pub(super) fn build_pss_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut pss_state = state.sim_setup.pss.clone();
+    pub(super) fn build_pss_spec(
+        &self,
+        draft: &crate::simulation::dialog::pss::PssDialogState,
+    ) -> Result<AnalysisSpec, String> {
+        let mut pss_state = draft.clone();
         pss_state.ensure_initialized();
         let pss_cfg = pss_state
             .to_config()
@@ -535,9 +538,9 @@ impl SimulationController {
 
     pub(super) fn build_harmonic_balance_spec(
         &self,
-        state: &AppState,
+        draft: &crate::simulation::dialog::hb::HbDialogState,
     ) -> Result<AnalysisSpec, String> {
-        let mut hb_state = state.sim_setup.hb.clone();
+        let mut hb_state = draft.clone();
         hb_state.ensure_initialized();
         let hb_cfg = hb_state
             .to_config()
@@ -1390,7 +1393,9 @@ mod manifest_tests {
         state.sim_setup.pss.osc_mode = false;
         state.sim_setup.pss.osc_node = "osc_out".to_owned();
 
-        let spec = controller.build_pss_spec(&state).expect("PSS spec builds");
+        let spec = controller
+            .build_pss_spec(&state.sim_setup.pss)
+            .expect("PSS spec builds");
         assert_eq!(
             spec,
             AnalysisSpec::Pss {
@@ -1426,7 +1431,9 @@ mod manifest_tests {
         state.sim_setup.pss.osc_mode = true;
         state.sim_setup.pss.osc_node = "osc_out".to_owned();
 
-        let spec = controller.build_pss_spec(&state).expect("PSS spec builds");
+        let spec = controller
+            .build_pss_spec(&state.sim_setup.pss)
+            .expect("PSS spec builds");
         assert!(
             matches!(
                 spec,
