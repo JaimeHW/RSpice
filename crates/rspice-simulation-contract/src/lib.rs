@@ -16,6 +16,7 @@ pub mod optimization_search;
 pub mod options;
 pub mod output_policy;
 pub mod plan_catalog;
+pub mod plan_diagnostics;
 pub mod plan_payload;
 pub mod progress;
 pub mod regression_policy;

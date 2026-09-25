@@ -5,6 +5,7 @@
 //! deterministic and excludes disabled positions.
 
 use super::*;
+use crate::product::RevisionError;
 
 fn snapshot(plan: &SimulationPlan) -> String {
     serde_json::to_string(plan).expect("plan serializes")

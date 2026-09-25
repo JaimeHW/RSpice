@@ -5,7 +5,6 @@
 //! plan it executed.
 
 mod dependencies;
-mod diagnostics;
 mod digest;
 mod naming;
 mod participation;
@@ -15,7 +14,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
-use crate::product::{AnalysisInstanceId, ObjectRevision, RevisionError, RunId, SimulationPlanId};
+use crate::product::{AnalysisInstanceId, ObjectRevision, RunId, SimulationPlanId};
 
 use super::config::{
     AnalysisDependencyRepairContext, DependencyConfigurationIssue,
@@ -24,10 +23,10 @@ use super::config::{
 use super::numeric_override::{AnalysisNumericOverride, NumericOverrideOption};
 use super::{AnalysisDraft, AnalysisKind};
 use crate::simulation::run_set::AnalysisRunAt;
-pub use diagnostics::{AnalysisPlanError, AnalysisPlanIssue};
 pub use rspice_simulation_contract::analysis_lifecycle::{
     AnalysisLifecycleCommand, AnalysisLifecycleState,
 };
+pub use rspice_simulation_contract::plan_diagnostics::{AnalysisPlanError, AnalysisPlanIssue};
 
 /// Explicit, typed dependency from an analysis to one prerequisite instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

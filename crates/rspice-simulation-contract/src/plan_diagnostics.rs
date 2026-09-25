@@ -11,8 +11,14 @@
 //! that owns identity, dependency edges and lifecycle transactions from also
 //! owning four hundred lines of formatting.
 
-use super::*;
 use std::fmt;
+
+use rspice_app_types::product::{AnalysisInstanceId, RevisionError};
+use serde::{Deserialize, Serialize};
+
+use crate::analysis_kind::AnalysisKind;
+use crate::analysis_lifecycle::AnalysisLifecycleState;
+use crate::numeric_override::NumericOverrideOption;
 
 /// Deterministic validation diagnostic for a plan or supplied migration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,7 +127,7 @@ impl AnalysisPlanIssue {
     /// Whether this finding is about the plan's *shape* rather than about what
     /// it has been configured to do. Visible to the plan because that is what
     /// separates a diagnostic a save must refuse from one a page may show.
-    pub(super) const fn is_structural(&self) -> bool {
+    pub const fn is_structural(&self) -> bool {
         !matches!(
             self,
             Self::NoEnabledInstances
