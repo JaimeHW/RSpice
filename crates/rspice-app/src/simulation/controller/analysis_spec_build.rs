@@ -65,6 +65,38 @@ impl SimulationController {
             }
             AnalysisDraft::Pss(draft) => self.build_pss_spec(draft)?,
             AnalysisDraft::HarmonicBalance(draft) => self.build_harmonic_balance_spec(draft)?,
+            AnalysisDraft::Pac(draft) => {
+                let mut draft = draft.clone();
+                draft.ensure_initialized();
+                draft
+                    .to_config()
+                    .map_err(|error| format!("invalid PAC settings: {error}"))?;
+                AnalysisSpec::Pac
+            }
+            AnalysisDraft::Pnoise(draft) => {
+                let mut draft = draft.clone();
+                draft.ensure_initialized();
+                draft
+                    .to_config()
+                    .map_err(|error| format!("invalid PNOISE settings: {error}"))?;
+                AnalysisSpec::Pnoise
+            }
+            AnalysisDraft::Pxf(draft) => {
+                let mut draft = draft.clone();
+                draft.ensure_initialized();
+                draft
+                    .to_config()
+                    .map_err(|error| format!("invalid PXF settings: {error}"))?;
+                AnalysisSpec::Pxf
+            }
+            AnalysisDraft::Pstb(draft) => {
+                let mut draft = draft.clone();
+                draft.ensure_initialized();
+                draft
+                    .to_config()
+                    .map_err(|error| format!("invalid PSTB settings: {error}"))?;
+                AnalysisSpec::Pstb
+            }
             AnalysisDraft::Temperature(draft) => {
                 let mut draft = draft.clone();
                 draft.ensure_initialized();
@@ -285,10 +317,6 @@ impl SimulationController {
             6 => self.build_sensitivity_spec(state),
             9 => self.build_stb_spec(state),
             12 => self.build_sp_spec(state),
-            13 => self.build_pac_spec(state),
-            14 => self.build_pnoise_spec(state),
-            15 => self.build_pxf_spec(state),
-            16 => self.build_pstb_spec(state),
             17 => self.build_tf_spec(state),
             19 => self.build_envelope_spec(state),
             20 => self.build_fourier_spec(state),
@@ -805,42 +833,6 @@ impl SimulationController {
             check_vce_max: cfg.check_vce_max,
             max_vce: cfg.max_vce,
         })
-    }
-
-    pub(super) fn build_pac_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut pac_state = state.sim_setup.pac.clone();
-        pac_state.ensure_initialized();
-        pac_state
-            .to_config()
-            .map_err(|e| format!("invalid PAC settings: {}", e))?;
-        Ok(AnalysisSpec::Pac)
-    }
-
-    pub(super) fn build_pnoise_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut pnoise_state = state.sim_setup.pnoise.clone();
-        pnoise_state.ensure_initialized();
-        pnoise_state
-            .to_config()
-            .map_err(|e| format!("invalid PNOISE settings: {}", e))?;
-        Ok(AnalysisSpec::Pnoise)
-    }
-
-    pub(super) fn build_pxf_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut pxf_state = state.sim_setup.pxf.clone();
-        pxf_state.ensure_initialized();
-        pxf_state
-            .to_config()
-            .map_err(|e| format!("invalid PXF settings: {}", e))?;
-        Ok(AnalysisSpec::Pxf)
-    }
-
-    pub(super) fn build_pstb_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut pstb_state = state.sim_setup.pstb.clone();
-        pstb_state.ensure_initialized();
-        pstb_state
-            .to_config()
-            .map_err(|e| format!("invalid PSTB settings: {}", e))?;
-        Ok(AnalysisSpec::Pstb)
     }
 
     pub(super) fn build_tf_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {

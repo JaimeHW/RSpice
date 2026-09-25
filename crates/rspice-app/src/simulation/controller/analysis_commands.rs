@@ -104,10 +104,30 @@ impl SimulationController {
             AnalysisSpec::Optimization { .. } => self.build_optimization_command(state),
             AnalysisSpec::Soa { .. } => self.build_soa_command(state),
             AnalysisSpec::Disto { .. } => Self::build_disto_command(spec),
-            AnalysisSpec::Pac => self.build_pac_command(state),
-            AnalysisSpec::Pnoise => self.build_pnoise_command(state),
-            AnalysisSpec::Pxf => self.build_pxf_command(state),
-            AnalysisSpec::Pstb => self.build_pstb_command(state),
+            AnalysisSpec::Pac => {
+                let AnalysisDraft::Pac(draft) = draft else {
+                    return Err("PAC specification requires its authored draft".into());
+                };
+                self.build_pac_command(draft)
+            }
+            AnalysisSpec::Pnoise => {
+                let AnalysisDraft::Pnoise(draft) = draft else {
+                    return Err("PNOISE specification requires its authored draft".into());
+                };
+                self.build_pnoise_command(draft)
+            }
+            AnalysisSpec::Pxf => {
+                let AnalysisDraft::Pxf(draft) = draft else {
+                    return Err("PXF specification requires its authored draft".into());
+                };
+                self.build_pxf_command(draft)
+            }
+            AnalysisSpec::Pstb => {
+                let AnalysisDraft::Pstb(draft) = draft else {
+                    return Err("PSTB specification requires its authored draft".into());
+                };
+                self.build_pstb_command(state, draft)
+            }
             AnalysisSpec::Psp { .. } => Self::build_psp_command(spec),
             AnalysisSpec::Hbsp { .. } => Self::build_hbsp_command(spec),
             AnalysisSpec::Hbnoise { .. } => Self::build_hbnoise_command(spec),
@@ -336,8 +356,11 @@ impl SimulationController {
         Ok(soa_cfg.to_spice())
     }
 
-    pub(super) fn build_pac_command(&self, state: &AppState) -> Result<String, String> {
-        let mut pac_state = state.sim_setup.pac.clone();
+    pub(super) fn build_pac_command(
+        &self,
+        draft: &crate::simulation::dialog::pac::PacDialogState,
+    ) -> Result<String, String> {
+        let mut pac_state = draft.clone();
         pac_state.ensure_initialized();
         let pac_cfg = pac_state
             .to_config()
@@ -345,8 +368,11 @@ impl SimulationController {
         Ok(pac_cfg.to_spice())
     }
 
-    pub(super) fn build_pnoise_command(&self, state: &AppState) -> Result<String, String> {
-        let mut pnoise_state = state.sim_setup.pnoise.clone();
+    pub(super) fn build_pnoise_command(
+        &self,
+        draft: &crate::simulation::dialog::pnoise::PnoiseDialogState,
+    ) -> Result<String, String> {
+        let mut pnoise_state = draft.clone();
         pnoise_state.ensure_initialized();
         let pnoise_cfg = pnoise_state
             .to_config()
@@ -354,8 +380,11 @@ impl SimulationController {
         Ok(pnoise_cfg.to_spice())
     }
 
-    pub(super) fn build_pxf_command(&self, state: &AppState) -> Result<String, String> {
-        let mut pxf_state = state.sim_setup.pxf.clone();
+    pub(super) fn build_pxf_command(
+        &self,
+        draft: &crate::simulation::dialog::pxf::PxfDialogState,
+    ) -> Result<String, String> {
+        let mut pxf_state = draft.clone();
         pxf_state.ensure_initialized();
         let pxf_cfg = pxf_state
             .to_config()
@@ -363,8 +392,12 @@ impl SimulationController {
         Ok(pxf_cfg.to_spice())
     }
 
-    pub(super) fn build_pstb_command(&self, state: &AppState) -> Result<String, String> {
-        let mut pstb_state = state.sim_setup.pstb.clone();
+    pub(super) fn build_pstb_command(
+        &self,
+        state: &AppState,
+        draft: &crate::simulation::dialog::pstb::PstbDialogState,
+    ) -> Result<String, String> {
+        let mut pstb_state = draft.clone();
         pstb_state.ensure_initialized();
         let pstb_cfg = pstb_state
             .to_config()
@@ -960,21 +993,21 @@ mod tests {
         );
 
         let error = SimulationController::new()
-            .build_pstb_command(&state)
+            .build_pstb_command(&state, &state.sim_setup.pstb)
             .expect_err("a probe that is not on the schematic is refused");
         assert!(error.contains("VLOOP1"), "{error}");
         assert!(error.contains("VLOOP2"), "{error}");
 
         state.sim_setup.pstb.probe_reference = StbProbeReference::Entered;
         let directive = SimulationController::new()
-            .build_pstb_command(&state)
+            .build_pstb_command(&state, &state.sim_setup.pstb)
             .expect("a name entered by hand is the deck's claim, not this design's");
         assert!(directive.contains("probe=VLOOP1"), "{directive}");
 
         state.sim_setup.pstb.probe = "VLOOP2".to_owned();
         state.sim_setup.pstb.probe_reference = StbProbeReference::Placed;
         let directive = SimulationController::new()
-            .build_pstb_command(&state)
+            .build_pstb_command(&state, &state.sim_setup.pstb)
             .expect("a placed probe reaches the deck");
         assert!(directive.contains("probe=VLOOP2"), "{directive}");
     }

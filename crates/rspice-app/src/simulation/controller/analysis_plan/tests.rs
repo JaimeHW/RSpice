@@ -75,6 +75,15 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
         .analysis_spec_execution_options(&state, &draft, None, &AnalysisSpec::Pac, &sealed)
         .unwrap();
     assert_eq!(options.pac.unwrap().pac_magnitude, 2.5);
+    state.sim_setup.pac.pac_magnitude = "unfinished(".into();
+    let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+    assert_eq!(spec, AnalysisSpec::Pac);
+    assert!(
+        controller
+            .analysis_spec_to_spice_line(&state, &draft, &spec)
+            .unwrap()
+            .contains("pacmag=2.5")
+    );
 
     let mut pss = state.sim_setup.pss.clone();
     pss.ensure_initialized();
