@@ -63,6 +63,18 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
         options.corner.unwrap().base_mode,
         CornerBaseMode::Op
     ));
+
+    state.sim_setup.pss.ensure_initialized();
+    state.sim_setup.pss.tone_sources = "VIN".into();
+    let mut pac = state.sim_setup.pac.clone();
+    pac.ensure_initialized();
+    pac.pac_magnitude = "2.5".into();
+    state.sim_setup.pac.pac_magnitude = "9".into();
+    let draft = AnalysisDraft::Pac(pac);
+    let options = controller
+        .analysis_spec_execution_options(&state, &draft, &AnalysisSpec::Pac, &sealed)
+        .unwrap();
+    assert_eq!(options.pac.unwrap().pac_magnitude, 2.5);
 }
 
 #[test]

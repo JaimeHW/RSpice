@@ -656,18 +656,18 @@ impl SimulationController {
             .map_err(|error| error.to_string())?;
         let spec = self.analysis_draft_spec(&projected, base.draft())?;
         use crate::simulation::runner::study::StudyPeriodicOptions;
-        let periodic_options = match &spec {
-            AnalysisSpec::Pac => Some(StudyPeriodicOptions::Pac(Self::pac_run_config_from_dialog(
-                &projected,
-            )?)),
-            AnalysisSpec::Pxf => Some(StudyPeriodicOptions::Pxf(Self::pxf_run_config_from_dialog(
-                &projected,
-            )?)),
-            AnalysisSpec::Pnoise => Some(StudyPeriodicOptions::Pnoise(
-                Self::pnoise_run_config_from_dialog(&projected)?,
+        let periodic_options = match base.draft() {
+            AnalysisDraft::Pac(draft) => Some(StudyPeriodicOptions::Pac(
+                Self::pac_run_config_from_dialog(&projected, draft)?,
             )),
-            AnalysisSpec::Pstb => Some(StudyPeriodicOptions::Pstb(
-                Self::pstb_run_config_from_dialog(&projected)?,
+            AnalysisDraft::Pxf(draft) => Some(StudyPeriodicOptions::Pxf(
+                Self::pxf_run_config_from_dialog(&projected, draft)?,
+            )),
+            AnalysisDraft::Pnoise(draft) => Some(StudyPeriodicOptions::Pnoise(
+                Self::pnoise_run_config_from_dialog(&projected, draft)?,
+            )),
+            AnalysisDraft::Pstb(draft) => Some(StudyPeriodicOptions::Pstb(
+                Self::pstb_run_config_from_dialog(&projected, draft)?,
             )),
             _ => None,
         };
@@ -886,59 +886,43 @@ impl SimulationController {
                     pstb: None,
                 })
             }
-            AnalysisSpec::Pac => Ok(SpecExecutionOptions {
-                mc_histogram_bins: None,
-                mc_statistics: None,
-                mc_checkpoint: None,
-                study_base: None,
-                temp: None,
-                parametric_base: None,
-                corner: None,
-                pac: Some(Self::pac_run_config_from_dialog(state)?),
-                pxf: None,
-                pnoise: None,
-                pstb: None,
-            }),
-            AnalysisSpec::Pxf => Ok(SpecExecutionOptions {
-                mc_histogram_bins: None,
-                mc_statistics: None,
-                mc_checkpoint: None,
-                study_base: None,
-                temp: None,
-                parametric_base: None,
-                corner: None,
-                pac: None,
-                pxf: Some(Self::pxf_run_config_from_dialog(state)?),
-                pnoise: None,
-                pstb: None,
-            }),
+            AnalysisSpec::Pac => {
+                let AnalysisDraft::Pac(draft) = draft else {
+                    return Err("PAC specification requires its authored draft".into());
+                };
+                Ok(SpecExecutionOptions {
+                    pac: Some(Self::pac_run_config_from_dialog(state, draft)?),
+                    ..Default::default()
+                })
+            }
+            AnalysisSpec::Pxf => {
+                let AnalysisDraft::Pxf(draft) = draft else {
+                    return Err("PXF specification requires its authored draft".into());
+                };
+                Ok(SpecExecutionOptions {
+                    pxf: Some(Self::pxf_run_config_from_dialog(state, draft)?),
+                    ..Default::default()
+                })
+            }
             AnalysisSpec::Tf { .. } => Ok(SpecExecutionOptions::default()),
-            AnalysisSpec::Pnoise => Ok(SpecExecutionOptions {
-                mc_histogram_bins: None,
-                mc_statistics: None,
-                mc_checkpoint: None,
-                study_base: None,
-                temp: None,
-                parametric_base: None,
-                corner: None,
-                pac: None,
-                pxf: None,
-                pnoise: Some(Self::pnoise_run_config_from_dialog(state)?),
-                pstb: None,
-            }),
-            AnalysisSpec::Pstb => Ok(SpecExecutionOptions {
-                mc_histogram_bins: None,
-                mc_statistics: None,
-                mc_checkpoint: None,
-                study_base: None,
-                temp: None,
-                parametric_base: None,
-                corner: None,
-                pac: None,
-                pxf: None,
-                pnoise: None,
-                pstb: Some(Self::pstb_run_config_from_dialog(state)?),
-            }),
+            AnalysisSpec::Pnoise => {
+                let AnalysisDraft::Pnoise(draft) = draft else {
+                    return Err("PNOISE specification requires its authored draft".into());
+                };
+                Ok(SpecExecutionOptions {
+                    pnoise: Some(Self::pnoise_run_config_from_dialog(state, draft)?),
+                    ..Default::default()
+                })
+            }
+            AnalysisSpec::Pstb => {
+                let AnalysisDraft::Pstb(draft) = draft else {
+                    return Err("PSTB specification requires its authored draft".into());
+                };
+                Ok(SpecExecutionOptions {
+                    pstb: Some(Self::pstb_run_config_from_dialog(state, draft)?),
+                    ..Default::default()
+                })
+            }
             AnalysisSpec::Psp { .. } => Ok(SpecExecutionOptions::default()),
             _ => Ok(SpecExecutionOptions {
                 mc_histogram_bins: None,

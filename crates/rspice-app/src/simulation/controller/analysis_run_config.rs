@@ -62,10 +62,11 @@ impl PeriodicCarrierBasis {
 impl SimulationController {
     pub(super) fn pac_run_config_from_dialog(
         state: &AppState,
+        draft: &crate::simulation::dialog::pac::PacDialogState,
     ) -> Result<crate::services::simulation_runner::PacRunConfig, String> {
         use crate::services::simulation_runner::{PacFrequencySweep, PacRunConfig};
 
-        let mut pac_state = state.sim_setup.pac.clone();
+        let mut pac_state = draft.clone();
         pac_state.ensure_initialized();
         let pac_cfg = pac_state
             .to_config()
@@ -108,12 +109,13 @@ impl SimulationController {
 
     pub(super) fn pnoise_run_config_from_dialog(
         state: &AppState,
+        draft: &crate::simulation::dialog::pnoise::PnoiseDialogState,
     ) -> Result<crate::services::simulation_runner::PnoiseRunConfig, String> {
         use crate::services::simulation_runner::{
             PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
         };
 
-        let mut pnoise_state = state.sim_setup.pnoise.clone();
+        let mut pnoise_state = draft.clone();
         pnoise_state.ensure_initialized();
         let pnoise_cfg = pnoise_state
             .to_config()
@@ -171,10 +173,11 @@ impl SimulationController {
 
     pub(super) fn pxf_run_config_from_dialog(
         state: &AppState,
+        draft: &crate::simulation::dialog::pxf::PxfDialogState,
     ) -> Result<crate::services::simulation_runner::PxfRunConfig, String> {
         use crate::services::simulation_runner::{PxfFrequencySweep, PxfRunConfig};
 
-        let mut pxf_state = state.sim_setup.pxf.clone();
+        let mut pxf_state = draft.clone();
         pxf_state.ensure_initialized();
         let pxf_cfg = pxf_state
             .to_config()
@@ -215,10 +218,11 @@ impl SimulationController {
 
     pub(super) fn pstb_run_config_from_dialog(
         state: &AppState,
+        draft: &crate::simulation::dialog::pstb::PstbDialogState,
     ) -> Result<crate::services::simulation_runner::PstbRunConfig, String> {
         use crate::services::simulation_runner::PstbRunConfig;
 
-        let mut pstb_state = state.sim_setup.pstb.clone();
+        let mut pstb_state = draft.clone();
         pstb_state.ensure_initialized();
         let pstb_cfg = pstb_state
             .to_config()
