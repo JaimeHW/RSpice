@@ -422,7 +422,7 @@ fn authored_plan_measurements_editor_commits_the_active_plan_definition() {
 
 #[test]
 fn governed_editor_preserves_identity_source_waiver_producer_and_equality_kind() {
-    use crate::state::workspace::{SpecificationSource, SpecificationWaiver};
+    use rspice_simulation_contract::specification::{SpecificationSource, SpecificationWaiver};
 
     let mut state = crate::workbench::AppState::default();
     let plan = state

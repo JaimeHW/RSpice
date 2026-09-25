@@ -5,7 +5,7 @@
 //! mismatched slot rather than accepting stale evidence for it.
 
 use super::*;
-use crate::state::{AnalysisResultSourceDomain, Point, ProjectSourceRole};
+use crate::state::{AnalysisResultPvtPoint, AnalysisResultSourceDomain, Point, ProjectSourceRole};
 
 fn reference(cell: &str) -> CellViewRef {
     CellViewRef::new("work", cell, "schematic")

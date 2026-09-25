@@ -9,6 +9,7 @@
 //! as sign-off evidence, which is the one thing the stamp exists to prevent.
 
 use super::*;
+use rspice_simulation_contract::specification::{SpecificationSource, SpecificationWaiver};
 
 #[test]
 fn prepared_run_receipt_round_trip_retains_exact_project_model_sources() {
@@ -45,13 +46,13 @@ fn prepared_run_receipt_round_trip_retains_exact_project_model_sources() {
     definition.requirement_name = "Closed-loop gain".to_owned();
     definition.producing_analysis = Some(analysis_id);
     definition.role = crate::state::SpecificationRole::Review;
-    definition.source = Some(crate::state::workspace::SpecificationSource {
+    definition.source = Some(SpecificationSource {
         logical_path: "requirements/amplifier.csv".to_owned(),
         row: 18,
         imported_revision: "rev-c".to_owned(),
         source_digest: ContentDigest::from_bytes([0x56; 32]),
     });
-    definition.waiver = Some(crate::state::workspace::SpecificationWaiver {
+    definition.waiver = Some(SpecificationWaiver {
         reference: "WAIVER-9".to_owned(),
         owner: "Analog signoff".to_owned(),
         rationale: "Characterization-only review row".to_owned(),

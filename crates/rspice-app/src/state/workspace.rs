@@ -62,10 +62,6 @@ pub use rspice_simulation_contract::saved_output::{
     SavedOutputDisplayIntent, SavedOutputKind, SavedOutputOrigin, SavedOutputPolicy,
     SavedOutputPrecision, SavedOutputStreaming,
 };
-use rspice_simulation_contract::saved_output::{
-    validate_bounded_text, validate_parameter_name, validate_single_line_expression,
-};
-
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use sha2::Digest as _;
 use uuid::Uuid;
@@ -75,8 +71,8 @@ use crate::product::{
     ResultDocumentId, RevisionError, RunId, SavedOutputId, SimulationPlanId, SpecificationId,
 };
 use crate::state::{
-    AnalysisResultPvtPoint, Cell, ComponentType, InstancePath, Library, LibraryCellInstance,
-    LibraryManager, SchematicState, View, ViewType, validate_builtin_xspice_binding,
+    Cell, ComponentType, InstancePath, Library, LibraryCellInstance, LibraryManager,
+    SchematicState, View, ViewType, validate_builtin_xspice_binding,
     validate_generated_veriloga_binding,
 };
 
