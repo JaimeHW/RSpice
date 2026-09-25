@@ -15,8 +15,7 @@ use std::collections::HashMap;
 
 mod algorithms;
 mod design_var;
-mod domain;
-pub use domain::OptimizationVariableDomain;
+pub use rspice_simulation_contract::optimization_search::OptimizationVariableDomain;
 mod engine_core;
 mod lifecycle;
 // Runtime callers use these exact result-owned types until R11 extracts execution.

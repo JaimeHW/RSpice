@@ -88,8 +88,7 @@ pub(crate) use monte_carlo::{
     run_statistical_monte_carlo_with_environment_and_source_path_and_abort,
 };
 pub use optimization::{
-    OptimizationAlgorithmMode, OptimizationGoalMode, OptimizationRunConfig,
-    OptimizationSearchControls, OptimizationVariable,
+    OptimizationAlgorithmMode, OptimizationGoalMode, OptimizationRunConfig, OptimizationVariable,
     run_optimization_analysis_with_config_and_source_path_and_abort,
     validate_optimization_expression,
 };

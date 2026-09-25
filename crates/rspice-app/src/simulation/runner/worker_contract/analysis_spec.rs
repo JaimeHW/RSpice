@@ -172,7 +172,7 @@ pub(crate) enum WorkerAnalysisSpec {
     },
     Optimization {
         #[serde(default)]
-        search: crate::services::simulation_runner::OptimizationSearchControls,
+        search: rspice_simulation_contract::optimization_search::OptimizationSearchControls,
         variables: Vec<OptimizationVariable>,
         #[serde(default, skip_serializing_if = "String::is_empty")]
         objective_unit: String,

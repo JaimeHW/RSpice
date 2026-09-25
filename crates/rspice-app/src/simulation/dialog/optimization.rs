@@ -3,8 +3,8 @@
 //! Provides a typed UI surface for closed-loop parameter optimization.
 
 use super::options::parse_si_value;
-use crate::services::simulation_runner::OptimizationSearchControls;
 use crate::simulation::optimizer::{OptimizationObjectiveGoal, OptimizationObjectiveTerm};
+use rspice_simulation_contract::optimization_search::OptimizationSearchControls;
 
 /// Optimization objective strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

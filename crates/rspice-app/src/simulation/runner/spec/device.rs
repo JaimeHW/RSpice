@@ -186,7 +186,7 @@ fn run_dc_mismatch(
 
 fn run_optimization(
     netlist: &str,
-    search: svc_runner::OptimizationSearchControls,
+    search: rspice_simulation_contract::optimization_search::OptimizationSearchControls,
     variables: Vec<crate::simulation::multi_run::OptimizationVariable>,
     objective_unit: String,
     objective_expression: Option<String>,

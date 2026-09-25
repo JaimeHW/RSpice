@@ -52,22 +52,25 @@ pub struct OptimizerConfig {
 }
 
 fn default_random_seed() -> u64 {
-    0xDEAD_BEEF_CAFE_BABE
+    rspice_simulation_contract::optimization_search::OptimizationSearchControls::default()
+        .random_seed
 }
 
 impl Default for OptimizerConfig {
     fn default() -> Self {
+        let search =
+            rspice_simulation_contract::optimization_search::OptimizationSearchControls::default();
         Self {
-            random_seed: default_random_seed(),
+            random_seed: search.random_seed,
             algorithm: OptimizerAlgo::GradientDescent,
             max_iterations: 100,
             cost_tolerance: 1e-8,
-            var_tolerance: 1e-6,
+            var_tolerance: search.var_tolerance,
             fd_step: 1e-4,     // Spectre-standard: 0.01% perturbation
             initial_step: 0.1, // 10% of range initial step
             min_step: 1e-8,
-            sa_initial_temp: 100.0,
-            sa_cooling_rate: 0.95,
+            sa_initial_temp: search.sa_initial_temp,
+            sa_cooling_rate: search.sa_cooling_rate,
         }
     }
 }

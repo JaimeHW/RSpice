@@ -16,7 +16,7 @@ pub enum OptimizationVariableDomain {
     },
 }
 
-pub(crate) struct OptimizationCoordinates {
+pub struct OptimizationCoordinates {
     domain: OptimizationVariableDomain,
     physical_min: f64,
     physical_max: f64,
@@ -26,10 +26,10 @@ pub(crate) struct OptimizationCoordinates {
     pub initial: f64,
 }
 impl OptimizationVariableDomain {
-    pub(crate) fn is_discrete(&self) -> bool {
+    pub fn is_discrete(&self) -> bool {
         matches!(self, Self::Quantized { .. } | Self::Discrete { .. })
     }
-    pub(crate) fn coordinates(
+    pub fn coordinates(
         &self,
         min: f64,
         max: f64,

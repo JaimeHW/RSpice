@@ -366,13 +366,14 @@ mod tests {
             ),
         ] {
             let spec = AnalysisSpec::Optimization {
-                search: services::OptimizationSearchControls {
-                    variable_domains: std::collections::BTreeMap::from([(
-                        "RLOAD".into(),
-                        crate::simulation::optimizer::OptimizationVariableDomain::Logarithmic,
-                    )]),
-                    ..Default::default()
-                },
+                search:
+                    rspice_simulation_contract::optimization_search::OptimizationSearchControls {
+                        variable_domains: std::collections::BTreeMap::from([(
+                            "RLOAD".into(),
+                            crate::simulation::optimizer::OptimizationVariableDomain::Logarithmic,
+                        )]),
+                        ..Default::default()
+                    },
                 variables: vec![OptimizationVariable {
                     name: "RLOAD".into(),
                     min: 500.0,
@@ -751,7 +752,7 @@ mod tests {
                     weight: 1e30,
                 });
             }
-            let mut search = services::OptimizationSearchControls::default();
+            let mut search = rspice_simulation_contract::optimization_search::OptimizationSearchControls::default();
             if algorithm == OptimizationAlgorithm::SimulatedAnnealing {
                 search
                     .variable_domains

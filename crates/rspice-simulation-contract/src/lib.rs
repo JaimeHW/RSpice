@@ -9,6 +9,7 @@ pub mod config;
 pub mod dependency_contract;
 pub mod drafts;
 pub mod numeric_override;
+pub mod optimization_search;
 pub mod options;
 pub mod output_policy;
 pub mod plan_catalog;
