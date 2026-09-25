@@ -1,6 +1,11 @@
 //! Persisted typed dependency between analysis instances in a plan.
 
+mod repair;
 mod validation;
+
+pub use repair::{
+    PlanDependencySourceContext, dependency_candidate_context_issue, prerequisite_draft_for,
+};
 
 pub use validation::{
     DependencyConfigurationIssue, dependency_configuration_issue, fourier_requirement,
