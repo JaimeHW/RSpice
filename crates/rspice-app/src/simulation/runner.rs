@@ -13,7 +13,7 @@ use std::sync::{
 };
 use std::thread::JoinHandle;
 
-use serde::{Deserialize, Serialize};
+pub use rspice_results::validation::ResultSchemaMismatch;
 
 use crate::diagnostics::engine_log::{EngineLogLine, EngineLogQueue, RunLogSink};
 
@@ -1519,45 +1519,6 @@ impl SimulationError {
 }
 
 impl std::error::Error for SimulationError {}
-
-/// The detail behind [`SimulationError::ResultSchemaMismatch`].
-///
-/// Serialized rather than mirrored into a separate worker-side type: a result
-/// that fails its own schema is the same report on both sides of the browser
-/// worker boundary, and the two registries are what a report consists of.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ResultSchemaMismatch {
-    /// The analysis whose result failed its schema.
-    pub analysis: String,
-    /// The sweep, frequency, or time point, where the failure has one.
-    pub coordinate: Option<String>,
-    /// The family of signals whose registry and payload disagree.
-    pub signal_family: String,
-    /// Both registries in their original order, because the order is part of
-    /// the contract that was broken.
-    pub expected_names: Vec<String>,
-    pub actual_names: Vec<String>,
-    pub expected_value_count: usize,
-    pub actual_value_count: usize,
-}
-
-impl std::fmt::Display for ResultSchemaMismatch {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Result schema mismatch for {} analysis", self.analysis)?;
-        if let Some(coordinate) = &self.coordinate {
-            write!(f, " at {coordinate}")?;
-        }
-        write!(
-            f,
-            " in {}: expected names {:?} with {} value(s), got names {:?} with {} value(s)",
-            self.signal_family,
-            self.expected_names,
-            self.expected_value_count,
-            self.actual_names,
-            self.actual_value_count
-        )
-    }
-}
 
 //=============================================================================
 // Tests
