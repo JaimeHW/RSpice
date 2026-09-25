@@ -10,8 +10,8 @@ mod parse;
 mod preferences;
 
 pub use engineering::{
-    EngineeringPrecision, format_engineering_value, format_engineering_value_with,
-    parse_engineering_value,
+    EngineeringPrecision, format_engineering_display, format_engineering_display_with,
+    format_engineering_value, format_engineering_value_with, parse_engineering_value,
 };
 pub use layout::LayoutDatabaseUnit;
 pub use parse::{QuantityInputKind, UiNumberLocale, parse_ui_quantity};

@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashSet};
 impl FamilyMemberMeasurements {
     /// Legacy independent-trial records may contain only a partial roster.
     /// Sequence records require a complete population with exact sample attribution.
-    pub(crate) fn validate_monte_carlo_sequence<'a>(
+    pub fn validate_monte_carlo_sequence<'a>(
         members: &[Self],
         seed: u64,
         requested: usize,
@@ -128,7 +128,7 @@ impl FamilyMemberMeasurements {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::FamilyMeasurementEvidence;
+    use crate::family_measurements::FamilyMeasurementEvidence;
 
     fn population() -> Vec<FamilyMemberMeasurements> {
         [Some(0.9), None, Some(1.1)]

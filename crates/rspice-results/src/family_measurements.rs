@@ -8,8 +8,8 @@
 //!
 //! The point-family route already avoids that: it dispatches one authorized
 //! task per declared point, so each point arrives as its own
-//! [`AnalysisResult`](super::AnalysisResult) carrying its own `.MEAS` evaluation
-//! and its own PVT attribution, and the ordinary worst-of join answers a limit
+//! analysis result carrying its own `.MEAS` evaluation and PVT attribution,
+//! and the ordinary worst-of join answers a limit
 //! correctly without knowing a sweep happened. An in-analysis family cannot do
 //! that — it is one task, and its members never become separate results — so it
 //! states its members' measurements here instead, and the same join reads them.
@@ -96,9 +96,9 @@ impl FamilyMemberId {
             }
             Self::SweepPoint { value, .. } => format!(
                 "Point {}",
-                crate::state::property_types::format_engineering_display_with(
+                rspice_app_types::quantity::format_engineering_display_with(
                     *value,
-                    crate::quantity::EngineeringPrecision::UpTo(9),
+                    rspice_app_types::quantity::EngineeringPrecision::UpTo(9),
                 )
             ),
             Self::Corner { label, .. } => label.clone(),
@@ -108,7 +108,7 @@ impl FamilyMemberId {
 
 /// One measurement one family member produced.
 ///
-/// A retained projection of [`rspice_core::MeasureResult`] rather than the type
+/// A retained projection of the engine's `MeasureResult` rather than the type
 /// itself, because this is immutable persisted evidence and the engine's result
 /// type is not serializable. Only the fields a verdict actually consults are
 /// kept: the value, whether the member's own measurement succeeded, and why it
@@ -118,7 +118,7 @@ impl FamilyMemberId {
 pub struct FamilyMeasurementEvidence {
     /// Physical unit of the recorded value; absent on historical evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub unit: Option<rspice_core::analysis::MeasurementUnit>,
+    pub unit: Option<rspice_units::MeasurementUnit>,
     pub name: String,
     /// The measured value, when the member produced a finite one.
     ///
@@ -132,7 +132,7 @@ pub struct FamilyMeasurementEvidence {
 }
 
 impl FamilyMeasurementEvidence {
-    pub(crate) fn value_in_unit(&self, requested: &str) -> Result<Option<f64>, String> {
+    pub fn value_in_unit(&self, requested: &str) -> Result<Option<f64>, String> {
         match (&self.unit, self.value) {
             (Some(unit), Some(value)) if !requested.trim().is_empty() => {
                 unit.convert_value(value, requested).map(Some)

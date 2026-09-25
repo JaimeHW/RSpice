@@ -522,59 +522,7 @@ pub fn format_engineering(value: f64) -> String {
     crate::quantity::format_engineering_value_with(value, EngineeringPrecision::Fixed(3))
 }
 
-/// The magnitude [`format_engineering`] produces, spelled for a reader rather
-/// than for a parser.
-///
-/// Two suffixes differ, and both differences are the point.
-///
-/// `Meg` is SPICE's unambiguous spelling of 10^6, and in a deck it has to be:
-/// `M` there means *milli*, so a megahertz written back as `1M` is a
-/// thousandth of what it was. That constraint belongs to the deck. Beside a
-/// unit on a surface it is worse than noise — `≥ 1.000 Meg Hz` is not how a
-/// limit of one megahertz is written anywhere in the field, and a reader has
-/// to translate it before they can hold it against a datasheet.
-///
-/// `u` is the ASCII stand-in the SPICE input grammar requires for micro; `µ`
-/// is the prefix itself, and the bundled face carries that glyph — the plot
-/// axes and the layout formatter already paint it.
-///
-/// So deck text keeps [`format_engineering`] and display text beside a unit
-/// takes this. The digits are the other function's, derived rather than
-/// recomputed: two formatters rounding independently would eventually print
-/// two different numbers for one value on two surfaces, which is the failure a
-/// shared spelling exists to prevent.
-#[must_use]
-pub fn format_engineering_display(value: f64) -> String {
-    display_spelling(format_engineering(value))
-}
-
-/// [`format_engineering_display`] under a chosen decimal policy.
-///
-/// The three-decimal default lines a column up, which is what a field wants
-/// and what a name does not: a swept point named "Point 27.500" pads a value
-/// the operator typed as 27.5, and four significant digits cannot tell two
-/// neighbouring points of a fine sweep apart. A name takes the digits it needs
-/// and drops the trailing zeros it does not.
-#[must_use]
-pub fn format_engineering_display_with(
-    value: f64,
-    precision: crate::quantity::EngineeringPrecision,
-) -> String {
-    display_spelling(crate::quantity::format_engineering_value_with(
-        value, precision,
-    ))
-}
-
-/// Retype a deck magnitude's suffix for a reader.
-fn display_spelling(spice: String) -> String {
-    // Longest suffix first, so `Meg` is never read as something shorter.
-    for (deck, display) in [("Meg", "M"), ("u", "µ")] {
-        if let Some(digits) = spice.strip_suffix(deck) {
-            return format!("{digits}{display}");
-        }
-    }
-    spice
-}
+pub use rspice_app_types::quantity::{format_engineering_display, format_engineering_display_with};
 
 // =============================================================================
 // Tests

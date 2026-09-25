@@ -7,6 +7,7 @@ pub mod calculator;
 pub mod convergence_attribution;
 pub mod dc_mismatch;
 pub mod dc_sweep;
+pub mod family_measurements;
 pub mod fft;
 pub mod interpolation;
 pub mod measurements;

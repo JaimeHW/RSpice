@@ -20,7 +20,6 @@ pub use rspice_results::dc_sweep::{
 };
 mod cross_probe;
 mod executed_deck;
-mod family_measurements;
 mod noise_figure;
 mod result_digest;
 pub use noise_figure::{NoiseFigureEvidence, PeriodicNoiseConversionEvidence};
@@ -91,11 +90,11 @@ pub use cross_probe::{CrossProbeIndex, CrossProbeMapping, OccurrenceProbeSpellin
 pub use executed_deck::{
     ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, absent_deck_reason, sealed_model_sources,
 };
-pub use family_measurements::{
-    FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements,
-};
 #[cfg(test)]
 pub use rspice_results::convergence_attribution::ConvergenceFailureClass;
+pub use rspice_results::family_measurements::{
+    FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements,
+};
 pub use run::{
     ExecutionTarget, RunRetention, SimulationCampaignMembership, SimulationExecutionIdentity,
     SimulationRun, SimulationRunLifecycle,

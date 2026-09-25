@@ -164,6 +164,28 @@ pub fn format_engineering_value(value: f64) -> String {
     format_engineering_value_with(value, EngineeringPrecision::Adaptive)
 }
 
+/// Format an engineering value for a reader rather than a SPICE parser.
+///
+/// Display uses `M` for mega and `µ` for micro; authored deck text keeps
+/// the parser-safe `Meg` and `u` spellings. Both use the same rounded digits.
+#[must_use]
+pub fn format_engineering_display_with(value: f64, precision: EngineeringPrecision) -> String {
+    let spice = format_engineering_value_with(value, precision);
+    // Longest suffix first, so `Meg` is never read as something shorter.
+    for (deck, display) in [("Meg", "M"), ("u", "µ")] {
+        if let Some(digits) = spice.strip_suffix(deck) {
+            return format!("{digits}{display}");
+        }
+    }
+    spice
+}
+
+/// Format an engineering value for display with fixed three-decimal policy.
+#[must_use]
+pub fn format_engineering_display(value: f64) -> String {
+    format_engineering_display_with(value, EngineeringPrecision::Fixed(3))
+}
+
 /// Format a value with engineering notation under a chosen decimal policy.
 pub fn format_engineering_value_with(value: f64, precision: EngineeringPrecision) -> String {
     let abs_value = value.abs();
