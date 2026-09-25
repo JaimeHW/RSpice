@@ -5,6 +5,7 @@
 //! so a run configuration can be built without an egui context.
 
 use super::*;
+use crate::simulation::plan::AnalysisDraft;
 
 /// The large-signal basis a periodic small-signal request states, read from
 /// the carrier family that request names.
@@ -29,24 +30,57 @@ struct PeriodicCarrierBasis {
 impl PeriodicCarrierBasis {
     fn read(
         state: &AppState,
+        producer: Option<&AnalysisDraft>,
         carrier: crate::services::simulation_runner::PeriodicCarrier,
         consumer: &str,
     ) -> Result<Self, String> {
         use crate::services::simulation_runner::PeriodicCarrier;
 
-        if matches!(carrier, PeriodicCarrier::Hb) {
-            let mut hb_state = state.sim_setup.hb.clone();
-            hb_state.ensure_initialized();
-            let hb_cfg = hb_state
-                .to_config()
-                .map_err(|error| format!("invalid HB settings required for {consumer}: {error}"))?;
-            return Ok(Self {
-                fundamental_freq: hb_cfg.fundamental_freq,
-                num_harmonics: hb_cfg.num_harmonics as usize,
-                tolerance: hb_cfg.reltol,
-            });
+        match producer {
+            Some(AnalysisDraft::HarmonicBalance(draft))
+                if !matches!(carrier, PeriodicCarrier::Pss) =>
+            {
+                return Self::from_hb(draft, consumer);
+            }
+            Some(AnalysisDraft::Pss(draft)) if !matches!(carrier, PeriodicCarrier::Hb) => {
+                return Self::from_pss(draft, consumer);
+            }
+            Some(_) => {
+                return Err(format!(
+                    "{consumer} bound periodic producer does not match its selected carrier"
+                ));
+            }
+            None => {}
         }
-        let mut pss_state = state.sim_setup.pss.clone();
+        // Standalone draft previews have no frozen plan. Executable queue and
+        // nested study paths always supply their exact bound producer above.
+        if matches!(carrier, PeriodicCarrier::Hb) {
+            return Self::from_hb(&state.sim_setup.hb, consumer);
+        }
+        Self::from_pss(&state.sim_setup.pss, consumer)
+    }
+
+    fn from_hb(
+        draft: &crate::simulation::dialog::hb::HbDialogState,
+        consumer: &str,
+    ) -> Result<Self, String> {
+        let mut hb_state = draft.clone();
+        hb_state.ensure_initialized();
+        let hb_cfg = hb_state
+            .to_config()
+            .map_err(|error| format!("invalid HB settings required for {consumer}: {error}"))?;
+        Ok(Self {
+            fundamental_freq: hb_cfg.fundamental_freq,
+            num_harmonics: hb_cfg.num_harmonics as usize,
+            tolerance: hb_cfg.reltol,
+        })
+    }
+
+    fn from_pss(
+        draft: &crate::simulation::dialog::pss::PssDialogState,
+        consumer: &str,
+    ) -> Result<Self, String> {
+        let mut pss_state = draft.clone();
         pss_state.ensure_initialized();
         let pss_cfg = pss_state
             .to_config()
@@ -63,6 +97,7 @@ impl SimulationController {
     pub(super) fn pac_run_config_from_dialog(
         state: &AppState,
         draft: &crate::simulation::dialog::pac::PacDialogState,
+        producer: Option<&AnalysisDraft>,
     ) -> Result<crate::services::simulation_runner::PacRunConfig, String> {
         use crate::services::simulation_runner::{PacFrequencySweep, PacRunConfig};
 
@@ -72,7 +107,7 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid PAC settings: {}", e))?;
 
-        let basis = PeriodicCarrierBasis::read(state, pac_cfg.carrier, "PAC")?;
+        let basis = PeriodicCarrierBasis::read(state, producer, pac_cfg.carrier, "PAC")?;
 
         let sweep = match pac_cfg.sweep_type {
             crate::simulation::dialog::pac::PacSweepType::Decade => PacFrequencySweep::Decade,
@@ -110,6 +145,7 @@ impl SimulationController {
     pub(super) fn pnoise_run_config_from_dialog(
         state: &AppState,
         draft: &crate::simulation::dialog::pnoise::PnoiseDialogState,
+        producer: Option<&AnalysisDraft>,
     ) -> Result<crate::services::simulation_runner::PnoiseRunConfig, String> {
         use crate::services::simulation_runner::{
             PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
@@ -121,7 +157,7 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid PNOISE settings: {}", e))?;
 
-        let basis = PeriodicCarrierBasis::read(state, pnoise_cfg.carrier, "PNOISE")?;
+        let basis = PeriodicCarrierBasis::read(state, producer, pnoise_cfg.carrier, "PNOISE")?;
 
         let sweep = match pnoise_cfg.sweep_type {
             crate::simulation::dialog::pnoise::PnoiseSweepType::Decade => {
@@ -174,6 +210,7 @@ impl SimulationController {
     pub(super) fn pxf_run_config_from_dialog(
         state: &AppState,
         draft: &crate::simulation::dialog::pxf::PxfDialogState,
+        producer: Option<&AnalysisDraft>,
     ) -> Result<crate::services::simulation_runner::PxfRunConfig, String> {
         use crate::services::simulation_runner::{PxfFrequencySweep, PxfRunConfig};
 
@@ -183,7 +220,7 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid PXF settings: {}", e))?;
 
-        let basis = PeriodicCarrierBasis::read(state, pxf_cfg.carrier, "PXF")?;
+        let basis = PeriodicCarrierBasis::read(state, producer, pxf_cfg.carrier, "PXF")?;
 
         let sweep = match pxf_cfg.sweep_type {
             crate::simulation::dialog::pxf::PxfSweepType::Decade => PxfFrequencySweep::Decade,
@@ -219,6 +256,7 @@ impl SimulationController {
     pub(super) fn pstb_run_config_from_dialog(
         state: &AppState,
         draft: &crate::simulation::dialog::pstb::PstbDialogState,
+        producer: Option<&AnalysisDraft>,
     ) -> Result<crate::services::simulation_runner::PstbRunConfig, String> {
         use crate::services::simulation_runner::PstbRunConfig;
 
@@ -228,16 +266,17 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid PSTB settings: {}", e))?;
 
-        let mut pss_state = state.sim_setup.pss.clone();
-        pss_state.ensure_initialized();
-        let pss_cfg = pss_state
-            .to_config()
-            .map_err(|e| format!("invalid PSS settings required for PSTB: {}", e))?;
+        let basis = PeriodicCarrierBasis::read(
+            state,
+            producer,
+            crate::services::simulation_runner::PeriodicCarrier::Pss,
+            "PSTB",
+        )?;
 
         Ok(PstbRunConfig {
-            pss_fundamental_freq: pss_cfg.fund_freq,
-            pss_num_harmonics: pss_cfg.num_harmonics,
-            pss_tolerance: pss_cfg.tolerance,
+            pss_fundamental_freq: basis.fundamental_freq,
+            pss_num_harmonics: basis.num_harmonics,
+            pss_tolerance: basis.tolerance,
             probe_instance: pstb_cfg.probe,
             max_harmonics: pstb_cfg.max_harmonics as usize,
             num_multipliers: pstb_cfg.num_multipliers as usize,

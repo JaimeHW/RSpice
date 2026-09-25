@@ -29,7 +29,7 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
             .starts_with(".mc 17 ")
     );
     let options = controller
-        .analysis_spec_execution_options(&state, &draft, &spec, &sealed)
+        .analysis_spec_execution_options(&state, &draft, None, &spec, &sealed)
         .unwrap();
     assert_eq!(options.mc_histogram_bins, Some(31));
 
@@ -46,7 +46,7 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
         ".step temp list 11 22"
     );
     let options = controller
-        .analysis_spec_execution_options(&state, &draft, &spec, &sealed)
+        .analysis_spec_execution_options(&state, &draft, None, &spec, &sealed)
         .unwrap();
     assert_eq!(options.temp.unwrap().temperatures_c, vec![11.0, 22.0]);
 
@@ -57,7 +57,7 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     let draft = AnalysisDraft::Corner(corner);
     let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
     let options = controller
-        .analysis_spec_execution_options(&state, &draft, &spec, &sealed)
+        .analysis_spec_execution_options(&state, &draft, None, &spec, &sealed)
         .unwrap();
     assert!(matches!(
         options.corner.unwrap().base_mode,
@@ -72,7 +72,7 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     state.sim_setup.pac.pac_magnitude = "9".into();
     let draft = AnalysisDraft::Pac(pac);
     let options = controller
-        .analysis_spec_execution_options(&state, &draft, &AnalysisSpec::Pac, &sealed)
+        .analysis_spec_execution_options(&state, &draft, None, &AnalysisSpec::Pac, &sealed)
         .unwrap();
     assert_eq!(options.pac.unwrap().pac_magnitude, 2.5);
 }
@@ -692,6 +692,80 @@ fn periodic_rf_study_freezes_all_consumer_options_and_exact_pss_op_chain() {
             PreparedTask::new(mc, task.source_revision(), vec![], "MC", changed).config_digest()
         );
     }
+}
+
+#[test]
+fn preceding_pac_basis_uses_its_exact_frozen_hb_producer() {
+    use crate::simulation::dialog::{McDialogState, mc::McConfig};
+    use crate::simulation::runner::study::StudyPeriodicOptions;
+
+    let mut state = AppState::default();
+    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
+    let (first, _) = plan.insert(AnalysisKind::HarmonicBalance).unwrap();
+    let (second, _) = plan.insert(AnalysisKind::HarmonicBalance).unwrap();
+    for (id, frequency) in [(first, "1meg"), (second, "2meg")] {
+        plan.bind_dependency(id, AnalysisKind::OperatingPoint, op)
+            .unwrap();
+        plan.edit(id, |draft| {
+            let AnalysisDraft::HarmonicBalance(draft) = draft else {
+                unreachable!()
+            };
+            draft.fundamental = frequency.into();
+        })
+        .unwrap();
+    }
+    let (pac, _) = plan.insert(AnalysisKind::Pac).unwrap();
+    plan.bind_dependency(pac, AnalysisKind::HarmonicBalance, first)
+        .unwrap();
+    let (mc, _) = plan.insert(AnalysisKind::MonteCarlo).unwrap();
+    plan.edit(mc, |draft| {
+        *draft = AnalysisDraft::MonteCarlo(McDialogState::from_config(&McConfig {
+            base_analysis: Some(pac),
+            measurements: vec!["bin:0:real:result".into()],
+            ..Default::default()
+        }));
+    })
+    .unwrap();
+    let frozen = plan.freeze().unwrap();
+    plan.edit(first, |draft| {
+        let AnalysisDraft::HarmonicBalance(draft) = draft else {
+            unreachable!()
+        };
+        draft.fundamental = "3meg".into();
+    })
+    .unwrap();
+
+    let sealed = state
+        .model_library_manager
+        .seal_execution_sources()
+        .unwrap();
+    let queue = SimulationController::new()
+        .build_queue_from_plan(&state, &frozen, &sealed)
+        .unwrap();
+    let pac_task = queue.iter().find(|task| task.instance_id() == pac).unwrap();
+    let pac_options = pac_task
+        .queued_analysis()
+        .spec_options
+        .pac
+        .as_ref()
+        .unwrap();
+    assert_eq!(pac_options.pss_fundamental_freq, 1e6);
+    let study = queue
+        .iter()
+        .find(|task| task.instance_id() == mc)
+        .unwrap()
+        .queued_analysis()
+        .spec_options
+        .study_base
+        .as_ref()
+        .unwrap();
+    let post = study.postprocess.as_ref().unwrap();
+    assert_eq!(post.producer_instance_id, first);
+    let Some(StudyPeriodicOptions::Pac(study_options)) = &post.periodic_options else {
+        panic!("PAC study options")
+    };
+    assert_eq!(study_options, pac_options);
 }
 
 #[test]

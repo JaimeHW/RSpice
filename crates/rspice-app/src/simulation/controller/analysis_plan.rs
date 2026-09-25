@@ -8,7 +8,7 @@ use super::*;
 use std::collections::HashMap;
 
 use crate::simulation::execution::{PreparedDependencyBinding, PreparedTask, bound_cards};
-use crate::simulation::plan::{AnalysisKind, FrozenSimulationPlan};
+use crate::simulation::plan::{AnalysisKind, FrozenAnalysisInstance, FrozenSimulationPlan};
 
 impl SimulationController {
     /// Compile a candidate saved output through the same frozen-plan and
@@ -146,9 +146,17 @@ impl SimulationController {
                         continue;
                     }
                 };
+            let periodic_producer = match bound_periodic_producer(plan, instance) {
+                Ok(producer) => producer,
+                Err(error) => {
+                    errors.push(error);
+                    continue;
+                }
+            };
             let mut spec_options = match self.analysis_spec_execution_options(
                 &projected_state,
                 instance.draft(),
+                periodic_producer.map(|producer| producer.draft()),
                 &spec,
                 sealed_model_sources,
             ) {
@@ -248,29 +256,7 @@ impl SimulationController {
             // being resolved here: snapshot preparation owns the seam where a
             // task's deck is written, and it is the only place that can splice
             // them after per-point expansion has chosen that deck.
-            let numeric_override = if instance.kind().inherits_periodic_solver_options() {
-                let carriers = instance
-                    .dependencies()
-                    .iter()
-                    .filter_map(|edge| {
-                        plan.instances().iter().find(|producer| {
-                            producer.id() == edge.target()
-                                && matches!(
-                                    producer.kind(),
-                                    AnalysisKind::Pss
-                                        | AnalysisKind::HarmonicBalance
-                                        | AnalysisKind::Qpss
-                                )
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                let [carrier] = carriers.as_slice() else {
-                    errors.push(format!(
-                        "{} requires exactly one bound periodic producer for its solver options",
-                        instance.display_name()
-                    ));
-                    continue;
-                };
+            let numeric_override = if let Some(carrier) = periodic_producer {
                 // Reusing an orbit requires its authenticated numerical
                 // circuit, including every producer-local .OPTIONS package.
                 // Consumer response controls travel separately in its spec.
@@ -655,19 +641,36 @@ impl SimulationController {
             .frozen_instance_projection(plan, base)
             .map_err(|error| error.to_string())?;
         let spec = self.analysis_draft_spec(&projected, base.draft())?;
+        let periodic_producer = bound_periodic_producer(plan, base)?;
         use crate::simulation::runner::study::StudyPeriodicOptions;
         let periodic_options = match base.draft() {
-            AnalysisDraft::Pac(draft) => Some(StudyPeriodicOptions::Pac(
-                Self::pac_run_config_from_dialog(&projected, draft)?,
-            )),
-            AnalysisDraft::Pxf(draft) => Some(StudyPeriodicOptions::Pxf(
-                Self::pxf_run_config_from_dialog(&projected, draft)?,
-            )),
+            AnalysisDraft::Pac(draft) => {
+                Some(StudyPeriodicOptions::Pac(Self::pac_run_config_from_dialog(
+                    &projected,
+                    draft,
+                    periodic_producer.map(|producer| producer.draft()),
+                )?))
+            }
+            AnalysisDraft::Pxf(draft) => {
+                Some(StudyPeriodicOptions::Pxf(Self::pxf_run_config_from_dialog(
+                    &projected,
+                    draft,
+                    periodic_producer.map(|producer| producer.draft()),
+                )?))
+            }
             AnalysisDraft::Pnoise(draft) => Some(StudyPeriodicOptions::Pnoise(
-                Self::pnoise_run_config_from_dialog(&projected, draft)?,
+                Self::pnoise_run_config_from_dialog(
+                    &projected,
+                    draft,
+                    periodic_producer.map(|producer| producer.draft()),
+                )?,
             )),
             AnalysisDraft::Pstb(draft) => Some(StudyPeriodicOptions::Pstb(
-                Self::pstb_run_config_from_dialog(&projected, draft)?,
+                Self::pstb_run_config_from_dialog(
+                    &projected,
+                    draft,
+                    periodic_producer.map(|producer| producer.draft()),
+                )?,
             )),
             _ => None,
         };
@@ -799,6 +802,7 @@ impl SimulationController {
         &self,
         state: &AppState,
         draft: &crate::simulation::plan::AnalysisDraft,
+        periodic_producer: Option<&crate::simulation::plan::AnalysisDraft>,
         spec: &AnalysisSpec,
         sealed_model_sources: &crate::state::model_library::SealedModelExecutionSources,
     ) -> Result<SpecExecutionOptions, String> {
@@ -891,7 +895,11 @@ impl SimulationController {
                     return Err("PAC specification requires its authored draft".into());
                 };
                 Ok(SpecExecutionOptions {
-                    pac: Some(Self::pac_run_config_from_dialog(state, draft)?),
+                    pac: Some(Self::pac_run_config_from_dialog(
+                        state,
+                        draft,
+                        periodic_producer,
+                    )?),
                     ..Default::default()
                 })
             }
@@ -900,7 +908,11 @@ impl SimulationController {
                     return Err("PXF specification requires its authored draft".into());
                 };
                 Ok(SpecExecutionOptions {
-                    pxf: Some(Self::pxf_run_config_from_dialog(state, draft)?),
+                    pxf: Some(Self::pxf_run_config_from_dialog(
+                        state,
+                        draft,
+                        periodic_producer,
+                    )?),
                     ..Default::default()
                 })
             }
@@ -910,7 +922,11 @@ impl SimulationController {
                     return Err("PNOISE specification requires its authored draft".into());
                 };
                 Ok(SpecExecutionOptions {
-                    pnoise: Some(Self::pnoise_run_config_from_dialog(state, draft)?),
+                    pnoise: Some(Self::pnoise_run_config_from_dialog(
+                        state,
+                        draft,
+                        periodic_producer,
+                    )?),
                     ..Default::default()
                 })
             }
@@ -919,7 +935,11 @@ impl SimulationController {
                     return Err("PSTB specification requires its authored draft".into());
                 };
                 Ok(SpecExecutionOptions {
-                    pstb: Some(Self::pstb_run_config_from_dialog(state, draft)?),
+                    pstb: Some(Self::pstb_run_config_from_dialog(
+                        state,
+                        draft,
+                        periodic_producer,
+                    )?),
                     ..Default::default()
                 })
             }
@@ -939,6 +959,37 @@ impl SimulationController {
             }),
         }
     }
+}
+
+/// Select the same frozen carrier for solver options and periodic consumer
+/// basis. The projection remains for legacy builders, not producer identity.
+fn bound_periodic_producer<'a>(
+    plan: &'a FrozenSimulationPlan,
+    instance: &FrozenAnalysisInstance,
+) -> Result<Option<&'a FrozenAnalysisInstance>, String> {
+    if !instance.kind().inherits_periodic_solver_options() {
+        return Ok(None);
+    }
+    let carriers = instance
+        .dependencies()
+        .iter()
+        .filter_map(|edge| {
+            plan.instances().iter().find(|producer| {
+                producer.id() == edge.target()
+                    && matches!(
+                        producer.kind(),
+                        AnalysisKind::Pss | AnalysisKind::HarmonicBalance | AnalysisKind::Qpss
+                    )
+            })
+        })
+        .collect::<Vec<_>>();
+    let [carrier] = carriers.as_slice() else {
+        return Err(format!(
+            "{} requires exactly one bound periodic producer for its solver options",
+            instance.display_name()
+        ));
+    };
+    Ok(Some(carrier))
 }
 
 fn invalid_saved_output_reports(
