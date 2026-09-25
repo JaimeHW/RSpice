@@ -11,6 +11,7 @@ use std::path::Path;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::HbOperatingPoint;
+use rspice_simulation_contract::config::validate_noise_sidebands;
 
 use super::error::{ensure_not_aborted, poll_periodically};
 #[cfg(test)]
@@ -100,22 +101,6 @@ pub(crate) fn validate_hbnoise_frequency_options(
     }
     if band_evidence && (start == stop || (linear && points == 1)) {
         return Err("HBNOISE integrated noise and contributor ranking require at least two distinct frequencies; disable both for a spot spectrum".into());
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_noise_sidebands(
-    input: i32,
-    output: i32,
-    maximum: usize,
-) -> Result<(), String> {
-    if maximum > i32::MAX as usize
-        || input.unsigned_abs() as usize > maximum
-        || output.unsigned_abs() as usize > maximum
-    {
-        return Err(
-            "Input and output sidebands must lie within the configured folding window".into(),
-        );
     }
     Ok(())
 }

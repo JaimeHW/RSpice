@@ -68,9 +68,9 @@ pub(crate) use hb::{
     run_hb_analysis_with_dc_seed_on_materialized_with_abort,
 };
 pub use hb::{HbRunConfig, HbToneRunConfig};
+pub(crate) use hbnoise::validate_hbnoise_frequency_options;
 pub use hbnoise::{HbNoiseReference, HbnoiseFrequencySweep, HbnoiseRunConfig};
 pub(crate) use hbnoise::{integrate_psd, run_hbnoise_analysis_from_hb_on_materialized_with_abort};
-pub(crate) use hbnoise::{validate_hbnoise_frequency_options, validate_noise_sidebands};
 #[cfg(test)]
 use helpers::parse_runner_netlist_with_statistical_sampling_and_abort;
 use helpers::{
@@ -128,6 +128,7 @@ pub(crate) use pstb::{PstbData, run_pstb_analysis_on_materialized_with_abort};
 pub use qpss::qpss_data_from_operating_point_with_abort;
 #[cfg(test)]
 pub use qpss::run_qpss_analysis_with_source_path_and_abort;
+pub(crate) use rspice_simulation_contract::config::validate_noise_sidebands;
 // DC sweep, noise, pole-zero, and sensitivity have no entry here, and that is
 // the module boundary rather than an omission. The seven fundamental analyses
 // -- DC op, DC sweep, transient, AC, noise, pole-zero, sensitivity -- ship

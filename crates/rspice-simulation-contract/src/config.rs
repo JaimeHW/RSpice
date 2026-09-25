@@ -23,6 +23,7 @@ pub use frequency_table::{
 };
 pub use noise::{
     NoiseAnalysisConfig, NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType,
+    validate_noise_sidebands,
 };
 pub use pole_zero::{PoleZeroConfig, PzAnalysisType};
 pub use sensitivity::{

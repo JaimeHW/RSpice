@@ -4,6 +4,19 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use super::AcSweepType;
 
+/// Check that conversion sidebands fit the configured noise-folding window.
+pub fn validate_noise_sidebands(input: i32, output: i32, maximum: usize) -> Result<(), String> {
+    if maximum > i32::MAX as usize
+        || input.unsigned_abs() as usize > maximum
+        || output.unsigned_abs() as usize > maximum
+    {
+        return Err(
+            "Input and output sidebands must lie within the configured folding window".into(),
+        );
+    }
+    Ok(())
+}
+
 /// Sweep mode exposed by the Simulation Studio noise form.
 ///
 /// `Unsupported` exists only to retain an invalid legacy numeric index long
