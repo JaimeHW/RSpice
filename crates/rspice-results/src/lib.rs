@@ -20,6 +20,7 @@ pub mod report_document;
 pub mod result_import;
 pub mod safety;
 pub mod sampling;
+pub mod soa_evidence;
 pub mod stability;
 pub mod validation;
 pub mod viewer_catalog;

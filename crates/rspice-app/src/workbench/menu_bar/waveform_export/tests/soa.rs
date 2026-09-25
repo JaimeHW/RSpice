@@ -4,7 +4,8 @@ use super::*;
 
 #[test]
 fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
-    use crate::results::safety::{SoaPowerDerating, SoaPowerDeratingEvidence};
+    use crate::results::safety::SoaPowerDerating;
+    use rspice_results::safety::SoaPowerDeratingEvidence;
     let mut traces = Vec::new();
     for (name, unit, values) in [
         ("SOA_PDISS(Q1)", "W", vec![0.8, 0.5, 0.2]),
@@ -168,7 +169,7 @@ fn soa_derating_csv_preserves_each_sample_temperature_and_limit() {
 
 #[test]
 fn soa_current_envelope_csv_retains_voltage_limits_and_authored_curves() {
-    use crate::results::safety::SoaCurrentEnvelopeEvidence;
+    use rspice_results::safety::SoaCurrentEnvelopeEvidence;
     let curve = crate::results::safety::soa_current_envelope_test_fixture();
     let mut traces = Vec::new();
     for (name, unit, values) in [

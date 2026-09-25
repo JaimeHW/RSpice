@@ -946,7 +946,7 @@ fn soa_evidence_are_field_sensitive_v4_content_identity() {
     };
     evaluations[0].parameter = SoaParameterEvidence::PowerDissipation;
     evaluations[0].unit = "W".into();
-    evaluations[0].derating = Some(crate::results::safety::SoaPowerDeratingEvidence {
+    evaluations[0].derating = Some(rspice_results::safety::SoaPowerDeratingEvidence {
         rated_power_w: 1.0,
         curve: crate::results::safety::SoaPowerDerating {
             reference_temperature_kelvin: 300.0,
@@ -972,7 +972,7 @@ fn soa_evidence_are_field_sensitive_v4_content_identity() {
     else {
         unreachable!()
     };
-    evaluations[0].envelope = Some(crate::results::safety::SoaCurrentEnvelopeEvidence {
+    evaluations[0].envelope = Some(rspice_results::safety::SoaCurrentEnvelopeEvidence {
         maximum_current_a: 1.0,
         curve: crate::results::safety::soa_current_envelope_test_fixture(),
     });

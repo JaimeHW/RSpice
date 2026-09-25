@@ -70,6 +70,7 @@ fn soa_reporting_worker_detaches_source_and_rejects_changed_reports() {
 #[test]
 fn soa_current_envelope_worker_buffers_preserve_curve_metadata() {
     use crate::results::safety::*;
+    use rspice_results::safety::SoaCurrentEnvelopeEvidence;
     let curve = crate::results::safety::soa_current_envelope_test_fixture();
     let result = SimulationResult::Soa {
         source_history: None,
