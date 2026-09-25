@@ -8,6 +8,7 @@
 use serde::{Deserialize, Deserializer};
 pub(crate) mod checkpoint;
 pub(crate) mod statistics;
+use rspice_simulation_contract::mc_statistics::is_parameter_name;
 use statistics::{McCorrelationDraft, McStatisticsConfig, McVariationDraft};
 
 /// Random distribution type
@@ -151,19 +152,6 @@ impl McConfig {
         }
         Ok(())
     }
-}
-
-/// One `PARAMS` entry as the card's token stream spells it: an identifier of
-/// ASCII letters, digits and underscores that does not begin with a digit.
-fn is_parameter_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !(first.is_ascii_alphabetic() || first == '_') {
-        return false;
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Read the "Vary only" field as the `PARAMS` list it writes.
