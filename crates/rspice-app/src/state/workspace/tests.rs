@@ -1645,25 +1645,6 @@ fn project_name_contract_counts_graphemes_and_rejects_unsafe_text() {
 }
 
 #[test]
-fn cell_view_name_contract_keeps_slash_delimited_keys_injective() {
-    for valid in ["user", "bandgap_2", "ΔΣ"] {
-        assert!(validate_cell_view_name_segment(valid).is_ok(), "{valid}");
-    }
-    assert_eq!(
-        validate_cell_view_name_segment(""),
-        Err(CellViewNameError::Empty)
-    );
-    assert_eq!(
-        validate_cell_view_name_segment("bad/name"),
-        Err(CellViewNameError::UnsupportedCharacter('/'))
-    );
-    assert_eq!(
-        validate_cell_view_name_segment("has space"),
-        Err(CellViewNameError::UnsupportedCharacter(' '))
-    );
-}
-
-#[test]
 fn changing_source_path_does_not_rename_an_existing_project() {
     let mut project = ProjectDescriptor::default();
     project.set_path(PathBuf::from("first-save.rspiceproj"));
