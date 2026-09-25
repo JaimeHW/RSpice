@@ -9,7 +9,6 @@
 mod analysis;
 mod monte_carlo_checkpoint;
 pub(crate) use monte_carlo_checkpoint::*;
-mod analysis_spec;
 mod conversions;
 mod qpac;
 mod qpnoise;
@@ -45,7 +44,7 @@ pub(crate) fn round_trip_response_for_test(result: SimulationResult) -> Simulati
 }
 
 pub(crate) use analysis::*;
-pub(crate) use analysis_spec::*;
+pub(crate) use rspice_simulation_contract::worker_spec::{WorkerAnalysisSpec, WorkerSweepType};
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -66,7 +65,7 @@ use crate::simulation::config::{
     NoiseContributionDetail, NoiseIntegrationMode, PoleZeroConfig, PzAnalysisType,
     SensitivityConfig, SensitivitySweep, TransientAnalysisConfig,
 };
-use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, TfAccuracy, TfNormalization};
+use crate::simulation::multi_run::{AnalysisSpec, TfAccuracy, TfNormalization};
 
 use crate::simulation::results::{
     DcOpResult, DigitalEventPoint, EventNodeHistory, MonteCarloVariableResult, RealEventPoint,
