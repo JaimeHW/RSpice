@@ -109,10 +109,7 @@ impl SimulationPlan {
         &mut self,
         dependent: AnalysisInstanceId,
     ) -> Result<AnalysisLifecycleReceipt, AnalysisPlanError> {
-        self.auto_bind_dependencies_with_context(
-            dependent,
-            &AnalysisDependencyRepairContext::default(),
-        )
+        self.auto_bind_dependencies_with_context(dependent, &NoCircuitSourceContext)
     }
 
     /// Bind every role to the latest compatible earlier instance while also
@@ -120,7 +117,7 @@ impl SimulationPlan {
     pub fn auto_bind_dependencies_with_context(
         &mut self,
         dependent: AnalysisInstanceId,
-        context: &AnalysisDependencyRepairContext,
+        context: &impl PlanDependencySourceContext,
     ) -> Result<AnalysisLifecycleReceipt, AnalysisPlanError> {
         let dependent_instance = self
             .instance(dependent)
@@ -144,7 +141,6 @@ impl SimulationPlan {
         } else {
             AnalysisLifecycleState::Disabled
         };
-        let context = context.clone();
         let ((), receipt) = self.transact(
             AnalysisLifecycleCommand::Dependency,
             dependent,
@@ -177,7 +173,7 @@ impl SimulationPlan {
                                     && dependency_candidate_context_issue(
                                         prerequisite,
                                         &instance.draft,
-                                        &context,
+                                        context,
                                     )
                                     .is_none()
                             })
@@ -212,10 +208,7 @@ impl SimulationPlan {
         &mut self,
         dependent: AnalysisInstanceId,
     ) -> Result<(AnalysisDependencyRepair, AnalysisLifecycleReceipt), AnalysisPlanError> {
-        self.repair_dependencies_with_context(
-            dependent,
-            &AnalysisDependencyRepairContext::default(),
-        )
+        self.repair_dependencies_with_context(dependent, &NoCircuitSourceContext)
     }
 
     /// Repair a complete prerequisite closure using an authenticated circuit
@@ -223,7 +216,7 @@ impl SimulationPlan {
     pub fn repair_dependencies_with_context(
         &mut self,
         dependent: AnalysisInstanceId,
-        context: &AnalysisDependencyRepairContext,
+        context: &impl PlanDependencySourceContext,
     ) -> Result<(AnalysisDependencyRepair, AnalysisLifecycleReceipt), AnalysisPlanError> {
         let dependent_instance = self
             .instance(dependent)
@@ -234,7 +227,6 @@ impl SimulationPlan {
         } else {
             AnalysisLifecycleState::Disabled
         };
-        let context = context.clone();
         self.transact(
             AnalysisLifecycleCommand::Dependency,
             dependent,
@@ -253,7 +245,7 @@ impl SimulationPlan {
                     revision,
                     &mut repair,
                     &mut visiting,
-                    &context,
+                    context,
                 )?;
                 repair.sort_in_final_order(&candidate.instances);
                 Ok(repair)
@@ -274,7 +266,7 @@ impl SimulationPlan {
         dependent: AnalysisInstanceId,
         prerequisite: AnalysisKind,
         draft: AnalysisDraft,
-        context: &AnalysisDependencyRepairContext,
+        context: &impl PlanDependencySourceContext,
     ) -> Result<(AnalysisInstanceId, AnalysisLifecycleReceipt), AnalysisPlanError> {
         let actual = draft.kind();
         if actual != prerequisite {
@@ -296,7 +288,6 @@ impl SimulationPlan {
             });
         }
         let id = self.fresh_identity();
-        let context = context.clone();
         let ((), receipt) = self.transact(
             AnalysisLifecycleCommand::Insert,
             id,
@@ -314,13 +305,15 @@ impl SimulationPlan {
                     dependent_index,
                     AnalysisInstance::fresh(
                         id,
-                        None,
                         draft,
-                        false,
-                        Vec::new(),
-                        None,
-                        AnalysisRunAt::default(),
-                        revision,
+                        FreshAnalysisInstance {
+                            name: None,
+                            enabled: false,
+                            dependencies: Vec::new(),
+                            numeric_override: None,
+                            run_at: AnalysisRunAt::default(),
+                            revision,
+                        },
                     ),
                 );
                 let dependent_index = candidate.index_of(dependent)?;
@@ -341,7 +334,7 @@ impl SimulationPlan {
                     revision,
                     &mut repair,
                     &mut visiting,
-                    &context,
+                    context,
                 )?;
                 Ok(())
             },
@@ -355,7 +348,7 @@ impl SimulationPlan {
         revision: ObjectRevision,
         repair: &mut AnalysisDependencyRepair,
         visiting: &mut Vec<AnalysisInstanceId>,
-        context: &AnalysisDependencyRepairContext,
+        context: &impl PlanDependencySourceContext,
     ) -> Result<(), AnalysisPlanError> {
         if let Some(cycle_start) = visiting.iter().position(|id| *id == dependent) {
             let mut members = visiting[cycle_start..].to_vec();
@@ -429,7 +422,7 @@ impl SimulationPlan {
         prerequisite: AnalysisKind,
         revision: ObjectRevision,
         repair: &mut AnalysisDependencyRepair,
-        context: &AnalysisDependencyRepairContext,
+        context: &impl PlanDependencySourceContext,
     ) -> Result<AnalysisInstanceId, AnalysisPlanError> {
         let dependent_index = self.index_of(dependent)?;
         let dependent_draft = self.instances[dependent_index].draft.clone();
@@ -496,13 +489,15 @@ impl SimulationPlan {
                     dependent_index,
                     AnalysisInstance::fresh(
                         target,
-                        None,
                         draft,
-                        true,
-                        Vec::new(),
-                        None,
-                        AnalysisRunAt::default(),
-                        revision,
+                        FreshAnalysisInstance {
+                            name: None,
+                            enabled: true,
+                            dependencies: Vec::new(),
+                            numeric_override: None,
+                            run_at: AnalysisRunAt::default(),
+                            revision,
+                        },
                     ),
                 );
                 repair.inserted.push(target);

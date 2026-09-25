@@ -1,7 +1,7 @@
 //! Solver defaults for the actual stages of a configured study.
 use super::*;
-use crate::simulation::dialog::HbTimeDomainMode;
-use crate::simulation::plan::{OverrideValue, SolverOwnership};
+use crate::numeric_override::{OverrideValue, SolverOwnership};
+use crate::options::HbTimeDomainMode;
 
 impl SimulationPlan {
     pub fn solver_ownership(&self, id: AnalysisInstanceId) -> SolverOwnership {

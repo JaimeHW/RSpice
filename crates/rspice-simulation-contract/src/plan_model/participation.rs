@@ -3,7 +3,7 @@
 //! It sits beside the other lifecycle edits rather than among them because the
 //! value it writes is run-set vocabulary, not plan vocabulary: the plan stores
 //! which points an instance visits, but what a point *is* belongs to
-//! [`crate::simulation::run_set`], and this file is the only part of the plan
+//! [`crate::run_set`], and this file is the only part of the plan
 //! model that has to name it.
 //!
 //! Like every other edit here it goes through `transact`, so a participation

@@ -6,7 +6,8 @@
 //! its authority boundary.
 
 mod config;
-mod model;
+#[cfg(test)]
+mod model_app_tests;
 mod numeric_override;
 
 /// One account of the share threshold's two equivalent spellings, read by the
@@ -19,13 +20,13 @@ pub use config::{
     QpssDraft, QpxfSidebandSelection, QpxfSourceSelection, QuasiPeriodicAcDraft,
     QuasiPeriodicNoiseDraft, QuasiPeriodicTransferDraft, TransientNoiseDraft,
 };
-pub use model::{
-    AnalysisDependency, AnalysisInstance, AnalysisLifecycleCommand, AnalysisLifecycleReceipt,
-    AnalysisLifecycleState, AnalysisPlanError, AnalysisPlanIssue, FrozenAnalysisInstance,
-    FrozenSimulationPlan, SimulationPlan, SimulationPlanConfigurationReceipt,
-};
 pub use numeric_override::{
     AnalysisNumericOverride, NumericOverrideOption, OverrideSection, OverrideValue,
     OverrideValueKind, SolverOwnership,
 };
 pub use rspice_simulation_contract::analysis_kind::{AnalysisAvailability, AnalysisKind};
+pub use rspice_simulation_contract::plan_model::{
+    AnalysisDependency, AnalysisInstance, AnalysisLifecycleCommand, AnalysisLifecycleReceipt,
+    AnalysisLifecycleState, AnalysisPlanError, AnalysisPlanIssue, FrozenAnalysisInstance,
+    FrozenSimulationPlan, SimulationPlan, SimulationPlanConfigurationReceipt,
+};

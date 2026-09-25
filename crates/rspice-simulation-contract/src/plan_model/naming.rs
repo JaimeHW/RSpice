@@ -10,7 +10,7 @@
 
 use std::collections::HashSet;
 
-use crate::product::AnalysisInstanceId;
+use rspice_app_types::product::AnalysisInstanceId;
 
 use super::{
     AnalysisInstance, AnalysisLifecycleCommand, AnalysisLifecycleReceipt, AnalysisLifecycleState,
@@ -80,9 +80,9 @@ impl SimulationPlan {
     /// [`AnalysisInstance::display_name`] says what an analysis *is* called.
     /// This says what it has to be called to be told apart from the rest of
     /// the same list, and the two differ in exactly one case — the case the
-    /// naming rules deliberately leave open. [`Self::checked_instance_name`]
+    /// naming rules deliberately leave open. `checked_instance_name`
     /// refuses an explicit name another instance already answers to, so no two
-    /// named analyses can collide; [`Self::checked_instance_name_clear`]
+    /// named analyses can collide; `checked_instance_name_clear`
     /// allows two *unnamed* instances of one kind to share their kind label,
     /// because that ambiguity is older than naming and refusing to load it
     /// would cost projects. Those, and only those, keep a `#N` position prefix
@@ -339,7 +339,7 @@ fn truncate_to(name: &str, limit: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::plan::AnalysisKind;
+    use crate::analysis_kind::AnalysisKind;
 
     /// A plan holding exactly these kinds, in order, none of them named.
     fn plan_with(kinds: &[AnalysisKind]) -> SimulationPlan {

@@ -32,7 +32,7 @@ const PRIME: u64 = 0x0000_0100_0000_01b3;
 /// The tag comes from [`CanonicalAnalysisKind`], never a spelled-out literal,
 /// so a kind cannot be renamed in prose and silently keep its digest.
 ///
-/// [`CanonicalAnalysisKind`]: crate::state::simulation::CanonicalAnalysisKind
+/// [`CanonicalAnalysisKind`]: crate::analysis_tag::CanonicalAnalysisKind
 pub(super) fn adopted_plan_digest(plan: &SimulationPlan) -> String {
     let mut record = format!("plan|{}|{}", plan.id, plan.revision.get());
     for (position, instance) in plan.instances.iter().enumerate() {
@@ -70,7 +70,8 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+    use crate::analysis_draft::AnalysisDraft;
+    use crate::analysis_kind::AnalysisKind;
 
     fn transient_plan() -> SimulationPlan {
         let mut plan = SimulationPlan::empty();

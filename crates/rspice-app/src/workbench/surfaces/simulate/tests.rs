@@ -509,7 +509,12 @@ fn fourier_dependency_cta_requires_a_valid_compatible_transient() {
         dependent: fourier,
         prerequisite: AnalysisKind::Transient,
     };
-    assert!(!plan.dependency_candidate_is_compatible(fourier, AnalysisKind::Transient, coarse));
+    assert!(!plan.dependency_candidate_is_compatible_with_context(
+        fourier,
+        AnalysisKind::Transient,
+        coarse,
+        &crate::simulation::plan::AnalysisDependencyRepairContext::default(),
+    ));
     assert_eq!(
         dependency_repair_cta(&plan, std::slice::from_ref(&missing), &[]).as_deref(),
         Some("Add compatible Transient")

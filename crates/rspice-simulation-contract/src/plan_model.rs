@@ -14,21 +14,41 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
-use crate::product::{AnalysisInstanceId, ObjectRevision, RunId, SimulationPlanId};
+use rspice_app_types::product::{AnalysisInstanceId, ObjectRevision, RunId, SimulationPlanId};
 
-use super::config::{
-    AnalysisDependencyRepairContext, DependencyConfigurationIssue,
-    dependency_candidate_context_issue, dependency_configuration_issue, prerequisite_draft_for,
+use crate::analysis_draft::AnalysisDraft;
+use crate::analysis_kind::AnalysisKind;
+pub use crate::analysis_lifecycle::{AnalysisLifecycleCommand, AnalysisLifecycleState};
+use crate::analysis_run_at::AnalysisRunAt;
+use crate::numeric_override::{AnalysisNumericOverride, NumericOverrideOption};
+use crate::plan_dependency::{
+    DependencyConfigurationIssue, PlanDependencySourceContext, dependency_candidate_context_issue,
+    dependency_configuration_issue, prerequisite_draft_for,
 };
-use super::numeric_override::{AnalysisNumericOverride, NumericOverrideOption};
-use super::{AnalysisDraft, AnalysisKind};
-use crate::simulation::run_set::AnalysisRunAt;
-pub use rspice_simulation_contract::analysis_lifecycle::{
-    AnalysisLifecycleCommand, AnalysisLifecycleState,
-};
-pub use rspice_simulation_contract::plan_diagnostics::{AnalysisPlanError, AnalysisPlanIssue};
+pub use crate::plan_diagnostics::{AnalysisPlanError, AnalysisPlanIssue};
+#[cfg(test)]
+use crate::pss_draft::PssDialogState;
 
-pub use rspice_simulation_contract::plan_dependency::AnalysisDependency;
+pub use crate::plan_dependency::AnalysisDependency;
+
+#[cfg(test)]
+#[derive(Default)]
+struct NoCircuitSourceContext;
+
+#[cfg(test)]
+impl PlanDependencySourceContext for NoCircuitSourceContext {
+    fn periodic_sources(&self) -> Result<&[String], String> {
+        Err("the exact elaborated periodic-source catalog is unavailable".to_owned())
+    }
+
+    fn availability_error(&self) -> Option<&str> {
+        Some("the exact elaborated periodic-source catalog is unavailable")
+    }
+
+    fn validate_pss_sources(&self, _draft: &PssDialogState) -> Result<(), String> {
+        Err("the exact elaborated periodic-source catalog is unavailable".to_owned())
+    }
+}
 
 /// Exact outcome of one atomic prerequisite-repair command.
 ///
@@ -58,7 +78,6 @@ impl AnalysisDependencyRepair {
     }
 
     #[must_use]
-    #[cfg(test)]
     pub const fn dependent(&self) -> AnalysisInstanceId {
         self.dependent
     }
@@ -275,17 +294,25 @@ pub struct AnalysisInstance {
     run_at: AnalysisRunAt,
 }
 
+struct FreshAnalysisInstance {
+    name: Option<String>,
+    enabled: bool,
+    dependencies: Vec<AnalysisDependency>,
+    numeric_override: Option<AnalysisNumericOverride>,
+    run_at: AnalysisRunAt,
+    revision: ObjectRevision,
+}
+
 impl AnalysisInstance {
-    fn fresh(
-        id: AnalysisInstanceId,
-        name: Option<String>,
-        draft: AnalysisDraft,
-        enabled: bool,
-        dependencies: Vec<AnalysisDependency>,
-        numeric_override: Option<AnalysisNumericOverride>,
-        run_at: AnalysisRunAt,
-        revision: ObjectRevision,
-    ) -> Self {
+    fn fresh(id: AnalysisInstanceId, draft: AnalysisDraft, initial: FreshAnalysisInstance) -> Self {
+        let FreshAnalysisInstance {
+            name,
+            enabled,
+            dependencies,
+            numeric_override,
+            run_at,
+            revision,
+        } = initial;
         Self {
             id,
             kind: draft.kind(),
@@ -575,13 +602,15 @@ impl SimulationPlan {
             revision,
             instances: vec![AnalysisInstance::fresh(
                 AnalysisInstanceId::new(),
-                None,
                 AnalysisDraft::for_kind(AnalysisKind::Transient),
-                true,
-                Vec::new(),
-                None,
-                AnalysisRunAt::default(),
-                revision,
+                FreshAnalysisInstance {
+                    name: None,
+                    enabled: true,
+                    dependencies: Vec::new(),
+                    numeric_override: None,
+                    run_at: AnalysisRunAt::default(),
+                    revision,
+                },
             )],
             tombstones: Vec::new(),
             receipts: Vec::new(),
@@ -655,18 +684,20 @@ impl SimulationPlan {
                 }
                 Ok(AnalysisInstance::fresh(
                     id,
-                    // Every instance is copied, so the names stay exactly as
-                    // unique as they already were in the source plan.
-                    source.name.clone(),
                     draft,
-                    source.enabled,
-                    dependencies,
-                    source.numeric_override.clone(),
-                    // The clone declares the same space, so it visits the same
-                    // points of it. A copy that silently widened to the whole
-                    // matrix would price differently than the plan it came from.
-                    source.run_at.clone(),
-                    revision,
+                    FreshAnalysisInstance {
+                        // Every instance is copied, so the names stay exactly as
+                        // unique as they already were in the source plan.
+                        name: source.name.clone(),
+                        enabled: source.enabled,
+                        dependencies,
+                        numeric_override: source.numeric_override.clone(),
+                        // The clone declares the same space, so it visits the same
+                        // points of it. A copy that silently widened to the whole
+                        // matrix would price differently than the plan it came from.
+                        run_at: source.run_at.clone(),
+                        revision,
+                    },
                 ))
             })
             .collect::<Result<Vec<_>, AnalysisPlanError>>()?;
@@ -888,7 +919,7 @@ impl SimulationPlan {
         dependent: AnalysisInstanceId,
         prerequisite: AnalysisKind,
         target: AnalysisInstanceId,
-        context: &AnalysisDependencyRepairContext,
+        context: &impl PlanDependencySourceContext,
     ) -> bool {
         let roles = self.required_prerequisite_roles(dependent);
         let (Some(dependent), Some(target)) = (self.instance(dependent), self.instance(target))
@@ -912,7 +943,7 @@ impl SimulationPlan {
         self.dependency_prerequisite_is_repairable_with_context(
             dependent,
             prerequisite,
-            &AnalysisDependencyRepairContext::default(),
+            &NoCircuitSourceContext,
         )
     }
 
@@ -923,7 +954,7 @@ impl SimulationPlan {
         &self,
         dependent: AnalysisInstanceId,
         prerequisite: AnalysisKind,
-        context: &AnalysisDependencyRepairContext,
+        context: &impl PlanDependencySourceContext,
     ) -> bool {
         let Some(instance) = self.instance(dependent) else {
             return false;
@@ -1097,12 +1128,9 @@ impl SimulationPlan {
     /// space cannot tell which one when the plan holds two.
     pub fn adopt_legacy_corner_run_sets(
         &mut self,
-        global: &mut crate::simulation::run_set::RunSetState,
-    ) -> Vec<(
-        String,
-        crate::simulation::dialog::corner::CornerRunSetMigration,
-    )> {
-        use crate::simulation::dialog::corner::CornerRunSetMigration;
+        global: &mut crate::run_set::RunSetState,
+    ) -> Vec<(String, crate::corner_draft::CornerRunSetMigration)> {
+        use crate::corner_draft::CornerRunSetMigration;
 
         let mut migrations = Vec::new();
         for instance in &mut self.instances {
@@ -1667,13 +1695,15 @@ impl SimulationPlan {
                     position,
                     AnalysisInstance::fresh(
                         id,
-                        None,
                         draft,
-                        enabled,
-                        Vec::new(),
-                        None,
-                        AnalysisRunAt::default(),
-                        revision,
+                        FreshAnalysisInstance {
+                            name: None,
+                            enabled,
+                            dependencies: Vec::new(),
+                            numeric_override: None,
+                            run_at: AnalysisRunAt::default(),
+                            revision,
+                        },
                     ),
                 );
                 debug_assert_eq!(candidate.instances[position].kind, kind);
@@ -1870,16 +1900,18 @@ impl SimulationPlan {
                     source_index + 1,
                     AnalysisInstance::fresh(
                         id,
-                        name,
                         source_instance.draft,
-                        source_instance.enabled,
-                        source_instance.dependencies,
-                        // A clone is an independent copy of the same analysis,
-                        // and its numerics are part of what makes it that
-                        // analysis rather than a fresh one of the same kind.
-                        source_instance.numeric_override,
-                        source_instance.run_at,
-                        revision,
+                        FreshAnalysisInstance {
+                            name,
+                            enabled: source_instance.enabled,
+                            dependencies: source_instance.dependencies,
+                            // A clone is an independent copy of the same analysis,
+                            // and its numerics are part of what makes it that
+                            // analysis rather than a fresh one of the same kind.
+                            numeric_override: source_instance.numeric_override,
+                            run_at: source_instance.run_at,
+                            revision,
+                        },
                     ),
                 );
                 Ok(())

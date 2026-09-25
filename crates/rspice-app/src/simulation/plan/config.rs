@@ -10,10 +10,6 @@ use crate::simulation::config::{
 };
 use crate::simulation::dialog::PssDialogState;
 use rspice_simulation_contract::plan_dependency::PlanDependencySourceContext;
-pub(super) use rspice_simulation_contract::plan_dependency::{
-    DependencyConfigurationIssue, dependency_candidate_context_issue,
-    dependency_configuration_issue, prerequisite_draft_for,
-};
 
 #[cfg(test)]
 use super::AnalysisKind;

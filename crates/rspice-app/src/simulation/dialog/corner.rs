@@ -3,7 +3,7 @@
 pub use rspice_simulation_contract::corner_config::{
     CornerBaseAnalysis, CornerConfig, CornerPointSpec,
 };
-pub use rspice_simulation_contract::corner_draft::{CornerDialogState, CornerRunSetMigration};
+pub use rspice_simulation_contract::corner_draft::CornerDialogState;
 
 use crate::simulation::run_set::{ReferencePoint, RunSetCornerProjection, RunSetState};
 
