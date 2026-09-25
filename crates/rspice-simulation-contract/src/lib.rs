@@ -50,6 +50,7 @@ pub mod soa_draft;
 pub mod soa_observation;
 pub mod soa_rule;
 pub mod sp_config;
+pub mod sp_draft;
 pub mod specification;
 pub mod spice_value;
 pub mod stb_draft;

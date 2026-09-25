@@ -2139,12 +2139,14 @@ pub(super) fn touchstone_export_policy_for_dialog(
 ) -> Result<TouchstoneExportPolicy, PreparationError> {
     let mut dialog = dialog.clone();
     dialog.ensure_initialized();
-    let config = dialog.to_config(Some(placed_rf_ports)).map_err(|error| {
-        PreparationError::new(
-            PreparationStage::AnalysisPlan,
-            format!("Invalid Touchstone export settings: {error}"),
-        )
-    })?;
+    let config = crate::simulation::dialog::sp::to_config(&dialog, Some(placed_rf_ports)).map_err(
+        |error| {
+            PreparationError::new(
+                PreparationStage::AnalysisPlan,
+                format!("Invalid Touchstone export settings: {error}"),
+            )
+        },
+    )?;
     if !config.touchstone_export {
         return Ok(TouchstoneExportPolicy::disabled());
     }

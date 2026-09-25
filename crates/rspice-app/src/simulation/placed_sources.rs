@@ -862,17 +862,9 @@ pub fn placed_rf_ports(
 /// surface has one set to state it about.
 #[must_use]
 pub fn duplicate_port_numbers(ports: &[PlacedRfPort]) -> Vec<u32> {
-    let mut claims: HashMap<u32, usize> = HashMap::new();
-    for port in ports {
-        *claims.entry(port.port_number).or_default() += 1;
-    }
-    let mut duplicates: Vec<u32> = claims
-        .into_iter()
-        .filter(|(_, claimed)| *claimed > 1)
-        .map(|(number, _)| number)
-        .collect();
-    duplicates.sort_unstable();
-    duplicates
+    rspice_simulation_contract::sp_draft::duplicate_port_numbers(
+        ports.iter().map(|port| port.port_number),
+    )
 }
 
 /// The one walk of the plan both consumer derivations are built on.

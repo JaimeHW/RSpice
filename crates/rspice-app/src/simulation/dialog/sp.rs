@@ -5,10 +5,13 @@
 //! in terms of incident and reflected waves.
 
 mod config;
-mod format;
 mod state;
 
-pub use config::{SpConfig, SpPortConfig, SpSweepType};
+#[cfg(test)]
+pub use config::SpPortConfig;
+pub use config::{SpConfig, SpSweepType};
 #[cfg(test)]
 pub use state::TOUCHSTONE_VERSIONS;
-pub use state::{SpDialogState, SpPortSource, TOUCHSTONE_VERSION_LABELS};
+pub use state::{
+    SpDialogState, SpPortSource, TOUCHSTONE_VERSION_LABELS, port_roster_error, to_config,
+};

@@ -1115,8 +1115,7 @@ fn a_placed_roster_that_cannot_run_says_so_on_the_form() {
         (Vec::new(), "the sheet places none"),
     ] {
         let placed = placed_ports(&ports);
-        let reason = setup
-            .port_roster_error(&placed)
+        let reason = crate::simulation::dialog::sp::port_roster_error(&setup, &placed)
             .expect("this roster cannot run");
         assert!(reason.contains(expected), "{reason}");
 
@@ -1141,8 +1140,7 @@ fn ad_hoc_mode_beside_placed_ports_states_that_the_table_is_not_what_runs() {
     setup.port_source_idx = Some(crate::simulation::dialog::SpPortSource::AdHoc.index());
     let bench = placed_ports(&[("P1", "port=1"), ("P2", "port=2")]);
 
-    let reason = setup
-        .port_roster_error(&bench)
+    let reason = crate::simulation::dialog::sp::port_roster_error(&setup, &bench)
         .expect("two declarations of one thing is no run");
     assert!(reason.contains("would not be used"), "{reason}");
 

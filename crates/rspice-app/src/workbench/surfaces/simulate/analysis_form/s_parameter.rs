@@ -83,7 +83,7 @@ pub(super) fn sp_port_fields(
 
     // The same resolution dispatch performs, stated here so the reason a run
     // will be refused is visible beside the ports it is about.
-    if let Some(reason) = setup.port_roster_error(placed) {
+    if let Some(reason) = crate::simulation::dialog::sp::port_roster_error(setup, placed) {
         field_advisory(ui, &reason);
     }
 }
