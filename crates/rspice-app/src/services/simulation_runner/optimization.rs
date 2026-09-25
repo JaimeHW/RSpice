@@ -9,12 +9,12 @@ pub use objective::validate_optimization_expression;
 
 use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use super::{build_engine_config, is_ground_like, parse_runner_netlist_with_abort};
-use crate::simulation::optimizer::{
-    DesignVar, OptimizationScore, OptimizerAlgo, OptimizerConfig, OptimizerEngine,
-};
+use crate::simulation::optimizer::{DesignVar, OptimizerEngine};
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::Engine;
+use rspice_results::optimization::OptimizationScore;
+use rspice_simulation_contract::optimization_search::{OptimizerAlgo, OptimizerConfig};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;

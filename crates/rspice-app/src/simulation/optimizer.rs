@@ -15,9 +15,9 @@ use std::collections::HashMap;
 
 mod algorithms;
 mod design_var;
-pub use rspice_simulation_contract::optimization_search::OptimizationVariableDomain;
 mod engine_core;
 mod lifecycle;
+pub use design_var::DesignVar;
 // Runtime callers use these exact result-owned types until R11 extracts execution.
 pub use rspice_results::optimization::{
     OptimizationConstraint, OptimizationConstraintObservation, OptimizationObjectiveGoal,
@@ -25,10 +25,10 @@ pub use rspice_results::optimization::{
     validate_optimization_constraint_result, validate_optimization_constraints,
     validate_optimization_objectives,
 };
-mod types;
+pub use rspice_simulation_contract::optimization_search::{
+    OptimizationVariableDomain, OptimizerAlgo, OptimizerConfig,
+};
 
-pub use design_var::DesignVar;
-pub use types::{OptimizerAlgo, OptimizerConfig};
 /// Core engine for executing optimization runs
 ///
 /// Implements Spectre-compatible optimization algorithms:

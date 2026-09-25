@@ -6,6 +6,8 @@ use rspice_core::Value;
 
 mod domain;
 pub use domain::{OptimizationCoordinates, OptimizationVariableDomain};
+mod types;
+pub use types::{OptimizerAlgo, OptimizerConfig};
 
 /// Stopping and stochastic-search controls shared by drafts, workers and runs.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
