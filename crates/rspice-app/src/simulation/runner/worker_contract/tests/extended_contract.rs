@@ -800,8 +800,8 @@ fn sampled_pnoise_studio_worker_preserves_sampling_controls() {
         }),
         ..Default::default()
     };
-    let worker = super::super::analysis::WorkerPnoiseRunConfig::from(&config);
-    let decoded: super::super::analysis::WorkerPnoiseRunConfig =
+    let worker = super::super::WorkerPnoiseRunConfig::from(&config);
+    let decoded: super::super::WorkerPnoiseRunConfig =
         serde_json::from_str(&serde_json::to_string(&worker).unwrap()).unwrap();
     let restored = crate::services::simulation_runner::PnoiseRunConfig::from(decoded);
     assert_eq!(restored, config);

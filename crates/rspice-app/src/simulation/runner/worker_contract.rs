@@ -48,6 +48,11 @@ pub(crate) use rspice_simulation_contract::worker_error::WorkerSimulationError;
 pub(crate) use rspice_simulation_contract::worker_protocol::{
     WORKER_REQUEST_TRANSPORT_PROTOCOL, WORKER_RESPONSE_TRANSPORT_PROTOCOL,
 };
+pub(crate) use rspice_simulation_contract::worker_run_config::{
+    WorkerCornerBaseMode, WorkerCornerModelBinding, WorkerCornerPoint, WorkerCornerProcess,
+    WorkerCornerRunConfig, WorkerPacRunConfig, WorkerPeriodicCarrier, WorkerPnoiseReference,
+    WorkerPnoiseRunConfig, WorkerPstbRunConfig, WorkerPxfRunConfig, WorkerTempRunConfig,
+};
 pub(crate) use rspice_simulation_contract::worker_spec::{
     WorkerAnalysisConfig, WorkerAnalysisSpec, WorkerSweepType,
 };

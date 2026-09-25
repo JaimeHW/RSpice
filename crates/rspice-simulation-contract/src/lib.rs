@@ -70,5 +70,6 @@ pub mod study_measurement;
 pub mod temp_draft;
 pub mod worker_error;
 pub mod worker_protocol;
+pub mod worker_run_config;
 pub mod worker_spec;
 pub mod xf_draft;
