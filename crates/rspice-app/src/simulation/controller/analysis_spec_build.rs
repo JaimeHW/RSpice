@@ -69,6 +69,8 @@ impl SimulationController {
             AnalysisDraft::SParameter(draft) => self.build_sp_spec(state, draft)?,
             AnalysisDraft::Envelope(draft) => self.build_envelope_spec(draft)?,
             AnalysisDraft::Fourier(draft) => self.build_fourier_spec(draft)?,
+            AnalysisDraft::Optimization(draft) => self.build_optimization_spec(state, draft)?,
+            AnalysisDraft::Soa(draft) => self.build_soa_spec(draft)?,
             AnalysisDraft::Pac(draft) => {
                 let mut draft = draft.clone();
                 draft.ensure_initialized();
@@ -320,8 +322,6 @@ impl SimulationController {
             5 => self.build_pole_zero_spec(state),
             6 => self.build_sensitivity_spec(state),
             17 => self.build_tf_spec(state),
-            21 => self.build_optimization_spec(state),
-            22 => self.build_soa_spec(state),
             _ if crate::simulation::plan::AnalysisKind::from_legacy_index(idx).is_some() => {
                 Err(format!(
                     "analysis index {idx} has an exact draft specification, not a legacy fallback"
@@ -720,8 +720,12 @@ impl SimulationController {
         })
     }
 
-    pub(super) fn build_optimization_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut optimization_state = state.sim_setup.optimization.clone();
+    pub(super) fn build_optimization_spec(
+        &self,
+        state: &AppState,
+        draft: &crate::simulation::dialog::optimization::OptimizationDialogState,
+    ) -> Result<AnalysisSpec, String> {
+        let mut optimization_state = draft.clone();
         optimization_state.ensure_initialized();
         let cfg = optimization_state
             .to_config()
@@ -825,8 +829,11 @@ impl SimulationController {
         ))
     }
 
-    pub(super) fn build_soa_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut soa_state = state.sim_setup.soa.clone();
+    pub(super) fn build_soa_spec(
+        &self,
+        draft: &crate::simulation::dialog::soa::SoaDialogState,
+    ) -> Result<AnalysisSpec, String> {
+        let mut soa_state = draft.clone();
         soa_state.ensure_initialized();
         let cfg = soa_state
             .to_config()
@@ -1262,11 +1269,16 @@ mod manifest_tests {
         state.sim_setup.optimization.fd_step = "2.5e-3".to_owned();
         state.sim_setup.optimization.initial_step = "0.25".to_owned();
         state.sim_setup.optimization.min_step = "1e-6".to_owned();
+        let draft = AnalysisDraft::Optimization(state.sim_setup.optimization.clone());
+        state.sim_setup.optimization.fd_step = "not a number".to_owned();
 
-        let index = AnalysisKind::Optimization.legacy_index();
         let spec = controller
-            .build_legacy_analysis_spec_for_index(&state, index)
+            .analysis_draft_spec(&state, &draft)
             .expect("an authored optimization draft builds its spec");
+        let line = controller
+            .analysis_spec_to_spice_line(&state, &draft, &spec)
+            .expect("the authored optimization draft builds its card");
+        assert!(line.contains("fd=2.500000e-3"), "{line}");
         let AnalysisSpec::Optimization {
             fd_step,
             initial_step,
@@ -1274,7 +1286,7 @@ mod manifest_tests {
             ..
         } = spec
         else {
-            panic!("the optimization index builds an optimization spec");
+            panic!("the optimization draft builds an optimization spec");
         };
 
         assert_eq!(fd_step, 2.5e-3);
@@ -1290,9 +1302,13 @@ mod manifest_tests {
 
         // The engine's own bound, refused at the boundary rather than clamped:
         // a first step smaller than the smallest one describes no search.
-        state.sim_setup.optimization.min_step = "0.5".to_owned();
+        let mut invalid_draft = draft;
+        let AnalysisDraft::Optimization(invalid) = &mut invalid_draft else {
+            unreachable!()
+        };
+        invalid.min_step = "0.5".to_owned();
         let error = controller
-            .build_legacy_analysis_spec_for_index(&state, index)
+            .analysis_draft_spec(&state, &invalid_draft)
             .expect_err("a smallest step above the first step is not a search");
         assert!(
             error.contains("min_step"),
@@ -1530,6 +1546,33 @@ mod manifest_tests {
                 .analysis_spec_to_spice_line(&state, &draft, &spec)
                 .unwrap()
                 .starts_with(".envlp carriers=[1Meg,2.5Meg] ")
+        );
+    }
+
+    #[test]
+    fn soa_spec_and_command_use_frozen_draft() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.sim_setup.soa.ensure_initialized();
+        state.sim_setup.soa.stop_time = "2m".into();
+        state.sim_setup.soa.step_time = "2u".into();
+        let draft = AnalysisDraft::Soa(state.sim_setup.soa.clone());
+        state.sim_setup.soa.stop_time = "not a time".into();
+
+        let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+        assert!(matches!(
+            &spec,
+            AnalysisSpec::Soa {
+                stop_time,
+                step_time,
+                ..
+            } if *stop_time == 2e-3 && *step_time == 2e-6
+        ));
+        assert!(
+            controller
+                .analysis_spec_to_spice_line(&state, &draft, &spec)
+                .unwrap()
+                .starts_with(".soa stop=0.002 step=0.000002 ")
         );
     }
 }

@@ -121,8 +121,18 @@ impl SimulationController {
                 };
                 self.build_fourier_command(draft)
             }
-            AnalysisSpec::Optimization { .. } => self.build_optimization_command(state),
-            AnalysisSpec::Soa { .. } => self.build_soa_command(state),
+            AnalysisSpec::Optimization { .. } => {
+                let AnalysisDraft::Optimization(draft) = draft else {
+                    return Err("Optimization specification requires its authored draft".into());
+                };
+                self.build_optimization_command(draft)
+            }
+            AnalysisSpec::Soa { .. } => {
+                let AnalysisDraft::Soa(draft) = draft else {
+                    return Err("SOA specification requires its authored draft".into());
+                };
+                self.build_soa_command(draft)
+            }
             AnalysisSpec::Disto { .. } => Self::build_disto_command(spec),
             AnalysisSpec::Pac => {
                 let AnalysisDraft::Pac(draft) = draft else {
@@ -372,8 +382,11 @@ impl SimulationController {
         Ok(fourier_cfg.to_spice())
     }
 
-    pub(super) fn build_optimization_command(&self, state: &AppState) -> Result<String, String> {
-        let mut optimization_state = state.sim_setup.optimization.clone();
+    pub(super) fn build_optimization_command(
+        &self,
+        draft: &crate::simulation::dialog::optimization::OptimizationDialogState,
+    ) -> Result<String, String> {
+        let mut optimization_state = draft.clone();
         optimization_state.ensure_initialized();
         let optimization_cfg = optimization_state
             .to_config()
@@ -381,8 +394,11 @@ impl SimulationController {
         Ok(optimization_cfg.to_spice())
     }
 
-    pub(super) fn build_soa_command(&self, state: &AppState) -> Result<String, String> {
-        let mut soa_state = state.sim_setup.soa.clone();
+    pub(super) fn build_soa_command(
+        &self,
+        draft: &crate::simulation::dialog::soa::SoaDialogState,
+    ) -> Result<String, String> {
+        let mut soa_state = draft.clone();
         soa_state.ensure_initialized();
         let soa_cfg = soa_state
             .to_config()
