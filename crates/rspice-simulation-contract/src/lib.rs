@@ -25,6 +25,7 @@ pub mod plan_catalog;
 pub mod plan_dependency;
 pub mod plan_diagnostics;
 pub mod plan_payload;
+pub mod pnoise_draft;
 pub mod progress;
 pub mod pss_draft;
 pub mod pstb_draft;

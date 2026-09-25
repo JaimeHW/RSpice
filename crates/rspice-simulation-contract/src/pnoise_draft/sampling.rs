@@ -190,7 +190,7 @@ pub(super) fn spice_options(sampling: &PeriodicNoiseSampling) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::dialog::pnoise::{PnoiseConfig, PnoiseDialogState};
+    use crate::pnoise_draft::{PnoiseConfig, PnoiseDialogState};
 
     #[test]
     fn sampled_pnoise_studio_draft_and_deck_preserve_all_active_settings() {
