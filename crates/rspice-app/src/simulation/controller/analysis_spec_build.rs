@@ -71,6 +71,9 @@ impl SimulationController {
             AnalysisDraft::Fourier(draft) => self.build_fourier_spec(draft)?,
             AnalysisDraft::Optimization(draft) => self.build_optimization_spec(state, draft)?,
             AnalysisDraft::Soa(draft) => self.build_soa_spec(draft)?,
+            AnalysisDraft::PoleZero(draft) => self.build_pole_zero_spec(draft)?,
+            AnalysisDraft::Sensitivity(draft) => self.build_sensitivity_spec(draft)?,
+            AnalysisDraft::TransferFunction(draft) => self.build_tf_spec(draft)?,
             AnalysisDraft::Pac(draft) => {
                 let mut draft = draft.clone();
                 draft.ensure_initialized();
@@ -319,9 +322,6 @@ impl SimulationController {
                     run_point: config.run_point,
                 })
             }
-            5 => self.build_pole_zero_spec(state),
-            6 => self.build_sensitivity_spec(state),
-            17 => self.build_tf_spec(state),
             _ if crate::simulation::plan::AnalysisKind::from_legacy_index(idx).is_some() => {
                 Err(format!(
                     "analysis index {idx} has an exact draft specification, not a legacy fallback"
@@ -855,8 +855,11 @@ impl SimulationController {
         })
     }
 
-    pub(super) fn build_tf_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut xf_state = state.sim_setup.xf.clone();
+    pub(super) fn build_tf_spec(
+        &self,
+        draft: &crate::simulation::dialog::xf::XfDialogState,
+    ) -> Result<AnalysisSpec, String> {
+        let mut xf_state = draft.clone();
         xf_state.ensure_initialized();
         let config = xf_state
             .to_config()
@@ -884,8 +887,11 @@ impl SimulationController {
         })
     }
 
-    pub(super) fn build_pole_zero_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut pz_state = state.sim_setup.pz.clone();
+    pub(super) fn build_pole_zero_spec(
+        &self,
+        draft: &crate::simulation::dialog::pz::PzDialogState,
+    ) -> Result<AnalysisSpec, String> {
+        let mut pz_state = draft.clone();
         pz_state.ensure_initialized();
         let pz_cfg = pz_state
             .to_config()
@@ -918,8 +924,11 @@ impl SimulationController {
         })
     }
 
-    pub(super) fn build_sensitivity_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut sens_state = state.sim_setup.sens.clone();
+    pub(super) fn build_sensitivity_spec(
+        &self,
+        draft: &crate::simulation::dialog::sens::SensDialogState,
+    ) -> Result<AnalysisSpec, String> {
+        let mut sens_state = draft.clone();
         sens_state.ensure_initialized();
         let sens_cfg = sens_state
             .to_config()
@@ -1573,6 +1582,61 @@ mod manifest_tests {
                 .analysis_spec_to_spice_line(&state, &draft, &spec)
                 .unwrap()
                 .starts_with(".soa stop=0.002 step=0.000002 ")
+        );
+    }
+
+    #[test]
+    fn pole_zero_sensitivity_and_transfer_function_use_frozen_drafts() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+
+        state.sim_setup.pz.ensure_initialized();
+        state.sim_setup.pz.input_pos = "PZ_IN".into();
+        let pz_draft = AnalysisDraft::PoleZero(state.sim_setup.pz.clone());
+        state.sim_setup.pz.input_pos.clear();
+        let pz_spec = controller.analysis_draft_spec(&state, &pz_draft).unwrap();
+        assert!(matches!(
+            &pz_spec,
+            AnalysisSpec::PoleZero { input_node, .. } if input_node == "PZ_IN"
+        ));
+        assert!(
+            controller
+                .analysis_spec_to_spice_line(&state, &pz_draft, &pz_spec)
+                .unwrap()
+                .contains("PZ_IN")
+        );
+
+        state.sim_setup.sens.ensure_initialized();
+        state.sim_setup.sens.output_expr = "V(SENS_OUT)".into();
+        let sens_draft = AnalysisDraft::Sensitivity(state.sim_setup.sens.clone());
+        state.sim_setup.sens.output_expr.clear();
+        let sens_spec = controller.analysis_draft_spec(&state, &sens_draft).unwrap();
+        assert!(matches!(
+            &sens_spec,
+            AnalysisSpec::Sensitivity { output_var, .. } if output_var == "V(SENS_OUT)"
+        ));
+        assert!(
+            controller
+                .analysis_spec_to_spice_line(&state, &sens_draft, &sens_spec)
+                .unwrap()
+                .contains("V(SENS_OUT)")
+        );
+
+        state.sim_setup.xf.ensure_initialized();
+        state.sim_setup.xf.input_source = "VTF".into();
+        state.sim_setup.xf.output_expression = "V(TF_OUT)".into();
+        let tf_draft = AnalysisDraft::TransferFunction(state.sim_setup.xf.clone());
+        state.sim_setup.xf.input_source.clear();
+        let tf_spec = controller.analysis_draft_spec(&state, &tf_draft).unwrap();
+        assert!(matches!(
+            &tf_spec,
+            AnalysisSpec::Tf { input_source, .. } if input_source == "VTF"
+        ));
+        assert!(
+            controller
+                .analysis_spec_to_spice_line(&state, &tf_draft, &tf_spec)
+                .unwrap()
+                .contains("VTF")
         );
     }
 }

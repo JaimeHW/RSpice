@@ -356,7 +356,7 @@ fn sensitivity_dc_limit_and_disabled_ac_fields_reach_the_solver_and_results() {
         restored.prepare_after_restore();
         let mut state = AppState::default();
         state.sim_setup.apply_analysis_draft_projection(&restored);
-        let spec = controller.build_sensitivity_spec(&state).unwrap();
+        let spec = controller.analysis_draft_spec(&state, &restored).unwrap();
         spec.validate().unwrap();
         assert_eq!(serde_json::to_value(&state.sim_setup.sens).unwrap(), json);
         let wire = WorkerAnalysisSpec::try_from(&spec).unwrap();

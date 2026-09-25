@@ -667,7 +667,9 @@ fn sensitivity_spec_projects_frequency_only_in_ac_mode() {
     );
     state.sim_setup.sens.ac_freq = "invalid".to_owned();
     assert!(matches!(
-        controller.build_sensitivity_spec(&state).unwrap(),
+        controller
+            .build_sensitivity_spec(&state.sim_setup.sens)
+            .unwrap(),
         crate::simulation::multi_run::AnalysisSpec::Sensitivity {
             ac_mode: false,
             frequency: None,
@@ -675,12 +677,18 @@ fn sensitivity_spec_projects_frequency_only_in_ac_mode() {
         }
     ));
     state.sim_setup.sens.sens_type_idx = 1;
-    assert!(controller.build_sensitivity_spec(&state).is_err());
+    assert!(
+        controller
+            .build_sensitivity_spec(&state.sim_setup.sens)
+            .is_err()
+    );
     for (text, expected) in [("2k", 2_000.0), ("3Meg", 3_000_000.0)] {
         state.sim_setup.sens.ac_freq = text.to_owned();
         let crate::simulation::multi_run::AnalysisSpec::Sensitivity {
             ac_mode, frequency, ..
-        } = controller.build_sensitivity_spec(&state).unwrap()
+        } = controller
+            .build_sensitivity_spec(&state.sim_setup.sens)
+            .unwrap()
         else {
             panic!("sensitivity spec")
         };
