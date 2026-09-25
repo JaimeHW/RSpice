@@ -1332,7 +1332,7 @@ mod failure_site_control_tests {
             kind: core::ConvergenceSiteKind::Node,
             residual: Some(residual),
         };
-        ConvergenceAttribution::from(&core::ConvergenceDiagnostic {
+        crate::state::convergence_attribution_from_core(&core::ConvergenceDiagnostic {
             class: core::ConvergenceFailureClass::NewtonNonConvergence,
             sites: vec![site("OUT", 4.0), site("MID", 2.0)],
             elided_sites: elided,

@@ -1665,7 +1665,7 @@ fn a_wholesale_catalogue_replacement_cannot_reuse_an_inspection_key_it_did_not_e
 #[test]
 fn a_failed_run_anchors_its_console_row_to_the_objects_the_engine_named() {
     let mut state = AppState::default();
-    let attribution = crate::state::ConvergenceAttribution::from(
+    let attribution = crate::state::convergence_attribution_from_core(
         &rspice_core::diagnostics::ConvergenceDiagnostic {
             class: rspice_core::diagnostics::ConvergenceFailureClass::NewtonNonConvergence,
             sites: vec![

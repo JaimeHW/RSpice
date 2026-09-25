@@ -3,8 +3,9 @@
 //! Source indices belong to the engine trajectory. Source times are captured
 //! before output cropping or envelope projection changes the displayed axis.
 
-use super::convergence_attribution::ConvergenceAttribution;
+use super::convergence_attribution::from_core as convergence_attribution_from_core;
 use rspice_core::abort_signal::AbortSignal;
+use rspice_results::convergence_attribution::ConvergenceAttribution;
 use serde::{Deserialize, Serialize};
 
 /// Existing result and artifact writers keep their own framing and accounting.
@@ -237,7 +238,9 @@ impl ConvergenceReport {
         writer.f64(*avg_iterations_per_solve);
         writer.tag(u8::from(failure_diagnostic.is_some()));
         if let Some(diagnostic) = failure_diagnostic {
-            use super::convergence_attribution::{ConvergenceFailureClass, ConvergenceSiteKind};
+            use rspice_results::convergence_attribution::{
+                ConvergenceFailureClass, ConvergenceSiteKind,
+            };
             writer.tag(match diagnostic.class {
                 ConvergenceFailureClass::NoDcPathToGround => 0,
                 ConvergenceFailureClass::ConditioningDependentBias => 1,
@@ -331,7 +334,7 @@ impl ConvergenceReport {
             bypassed_device_evaluations,
             failure_diagnostic: failure_diagnostic
                 .as_ref()
-                .map(ConvergenceAttribution::from),
+                .map(convergence_attribution_from_core),
             time_basis: time.map(|time| ConvergenceTimeBasis {
                 sample_count: time.len() as u64,
                 start_s: time[0],

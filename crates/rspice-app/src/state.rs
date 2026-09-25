@@ -151,6 +151,7 @@ pub use schematic::*;
 pub(crate) use simulation::ConvergenceEncoder;
 #[cfg(test)]
 pub use simulation::ConvergenceFailureClass;
+pub(crate) use simulation::convergence_attribution_from_core;
 
 pub use simulation::CurrentImpulseHistoryEvidence;
 pub(crate) use simulation::DcTraceView;

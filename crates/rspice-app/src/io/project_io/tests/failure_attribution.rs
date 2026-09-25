@@ -20,7 +20,7 @@ fn a_result_written_without_an_attribution_still_loads() {
     assert!(without.failure_attribution.is_none());
 
     let with = ProjectAnalysisResult {
-        failure_attribution: Some(crate::state::ConvergenceAttribution::from(
+        failure_attribution: Some(crate::state::convergence_attribution_from_core(
             &rspice_core::diagnostics::ConvergenceDiagnostic {
                 class: rspice_core::diagnostics::ConvergenceFailureClass::SingularSystem,
                 sites: vec![rspice_core::diagnostics::ConvergenceSite {

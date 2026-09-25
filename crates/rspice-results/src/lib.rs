@@ -4,6 +4,7 @@
 
 pub mod analysis_type;
 pub mod calculator;
+pub mod convergence_attribution;
 pub mod dc_mismatch;
 pub mod dc_sweep;
 pub mod fft;

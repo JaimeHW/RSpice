@@ -77,17 +77,16 @@ pub use analysis_result::{
     TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
     TransferFunctionScalarEvidence,
 };
-pub use convergence_attribution::ConvergenceAttribution;
+pub(crate) use convergence_attribution::from_core as convergence_attribution_from_core;
 pub use convergence_quality::{
     ConvergenceReport, PeriodicConvergenceEvidence, PeriodicInitializationMethod,
     TransientConvergenceEvidence,
 };
 pub use rspice_results::analysis_type::AnalysisType;
+pub use rspice_results::convergence_attribution::ConvergenceAttribution;
 pub use rspice_simulation_contract::analysis_tag::CanonicalAnalysisKind;
 // Test-only alias: outside tests an attribution's vocabulary is only ever
 // named through the attribution's own fields.
-#[cfg(test)]
-pub use convergence_attribution::ConvergenceFailureClass;
 pub use cross_probe::{CrossProbeIndex, CrossProbeMapping, OccurrenceProbeSpelling};
 pub use executed_deck::{
     ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, absent_deck_reason, sealed_model_sources,
@@ -95,6 +94,8 @@ pub use executed_deck::{
 pub use family_measurements::{
     FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements,
 };
+#[cfg(test)]
+pub use rspice_results::convergence_attribution::ConvergenceFailureClass;
 pub use run::{
     ExecutionTarget, RunRetention, SimulationCampaignMembership, SimulationExecutionIdentity,
     SimulationRun, SimulationRunLifecycle,
