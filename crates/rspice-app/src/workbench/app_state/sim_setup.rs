@@ -10,15 +10,9 @@
 pub(in crate::workbench) mod analysis_drafts;
 pub(in crate::workbench) mod plan_catalog;
 
-use std::collections::HashSet;
-
 pub use rspice_simulation_contract::legacy_plan_migration::NoiseSetup;
-use rspice_simulation_contract::legacy_plan_migration::{
-    default_global_run_set, deserialize_analysis_set,
-};
-use rspice_simulation_contract::plan_catalog::StoredSimulationPlan;
-use rspice_simulation_contract::plan_model::SimulationPlan;
-use rspice_simulation_contract::run_set::{ReferencePoint, RunSetDimensionKind, RunSetState};
+use rspice_simulation_contract::legacy_plan_migration::default_global_run_set;
+use rspice_simulation_contract::run_set::{ReferencePoint, RunSetDimensionKind};
 
 /// The nominal/reference operating point selected in the workbench chrome.
 ///
@@ -47,139 +41,40 @@ pub struct SimSetupEditorSession {
     pub palette_scroll_to_active: bool,
 }
 
-/// All analysis configuration plus the engine options, in one place.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+/// Workbench setup: a portable project document plus transient editor state.
+#[derive(Debug, Clone, Default)]
 pub struct SimSetupState {
-    /// Authoritative reference PVT point used by nominal analyses.
-    pub reference_pvt: ReferencePvtPoint,
-    /// Global process, supply, and temperature space applied to every
-    /// executable analysis in the active plan.
-    ///
-    /// This is deliberately independent of the legacy Corner analysis draft:
-    /// the Run Set page configures where the whole plan executes, while a
-    /// Corner analysis remains an analysis instance with its own base mode.
-    #[serde(default = "default_global_run_set")]
-    pub run_set: RunSetState,
-    /// Ordered, content-pinned model libraries consumed by this plan.
-    /// Absence is an explicit empty closure; execution never falls back to
-    /// every library currently loaded in the project manager.
-    #[serde(default)]
-    pub model_bindings: Vec<crate::state::model_library::SimulationPlanModelBinding>,
-    /// Result storage, live delivery, and per-plan history policy.
-    #[serde(default)]
-    pub save_policy: SimulationSavePolicy,
-    /// Validated project-unique name of the active simulation plan.
-    #[serde(default)]
-    pub active_plan_name: crate::workbench::app_state::SimulationPlanName,
-    /// Immutable source identity and revision when the active plan is a clone.
-    #[serde(default)]
-    pub active_plan_lineage: crate::workbench::app_state::SimulationPlanLineage,
-    /// Complete inactive plans retained in deterministic catalog order.
-    #[serde(default)]
-    pub inactive_plans: Vec<StoredSimulationPlan>,
-    /// Stable, revisioned analysis-instance plan. `None` is accepted only
-    /// while reading schema-3 projects/sessions and must be deterministically
-    /// migrated before validation, editing, or execution.
-    #[serde(default)]
-    pub analysis_plan: Option<SimulationPlan>,
-    /// Enabled analysis indices.
-    #[serde(
-        default,
-        skip_serializing,
-        deserialize_with = "deserialize_analysis_set"
-    )]
-    pub enabled: HashSet<usize>,
-    /// Stable execution order. Enabled analyses absent from this vector are
-    /// appended deterministically; disabled entries are ignored and removed
-    /// from the persisted normalized plan.
-    #[serde(default, skip_serializing)]
-    pub analysis_order: Vec<usize>,
-    /// Transient sweep.
-    #[serde(default, skip_serializing)]
-    pub tran: TranSetup,
-    /// AC sweep.
-    #[serde(default, skip_serializing)]
-    pub ac: AcSetup,
-    /// DISTO secondary tone ratio f2/f1 (empty = single-tone HD).
-    #[serde(default, skip_serializing)]
-    pub disto_f2_over_f1: String,
-    /// DC transfer sweep.
-    #[serde(default, skip_serializing)]
-    pub dc: DcSetup,
-    /// Noise analysis.
-    #[serde(default, skip_serializing)]
-    pub noise: NoiseSetup,
-    /// DC operating point.
-    #[serde(default, skip_serializing)]
-    pub op: crate::simulation::dialog::op::OpDialogState,
-    /// Pole-zero extraction.
-    #[serde(default, skip_serializing)]
-    pub pz: crate::simulation::dialog::pz::PzDialogState,
-    /// Sensitivity.
-    #[serde(default, skip_serializing)]
-    pub sens: crate::simulation::dialog::sens::SensDialogState,
-    /// Monte Carlo.
-    #[serde(default, skip_serializing)]
-    pub mc: crate::simulation::dialog::mc::McDialogState,
-    /// Periodic steady state.
-    #[serde(default, skip_serializing)]
-    pub pss: crate::simulation::dialog::pss::PssDialogState,
-    /// Loop stability.
-    #[serde(default, skip_serializing)]
-    pub stb: crate::simulation::dialog::stb::StbDialogState,
-    /// Temperature sweep.
-    #[serde(default, skip_serializing)]
-    pub temp: crate::simulation::dialog::temp::TempDialogState,
-    /// Harmonic balance.
-    #[serde(default, skip_serializing)]
-    pub hb: crate::simulation::dialog::hb::HbDialogState,
-    /// S-parameters.
-    #[serde(default, skip_serializing)]
-    pub sp: crate::simulation::dialog::sp::SpDialogState,
-    /// Periodic AC.
-    #[serde(default, skip_serializing)]
-    pub pac: crate::simulation::dialog::pac::PacDialogState,
-    /// Periodic noise.
-    #[serde(default, skip_serializing)]
-    pub pnoise: crate::simulation::dialog::pnoise::PnoiseDialogState,
-    /// Periodic transfer.
-    #[serde(default, skip_serializing)]
-    pub pxf: crate::simulation::dialog::pxf::PxfDialogState,
-    /// Periodic stability.
-    #[serde(default, skip_serializing)]
-    pub pstb: crate::simulation::dialog::pstb::PstbDialogState,
-    /// Transfer function.
-    #[serde(default, skip_serializing)]
-    pub xf: crate::simulation::dialog::xf::XfDialogState,
-    /// Process corners.
-    #[serde(default, skip_serializing)]
-    pub corner: crate::simulation::dialog::corner::CornerDialogState,
-    /// Envelope transient.
-    #[serde(default, skip_serializing)]
-    pub envelope: crate::simulation::dialog::envelope::EnvelopeDialogState,
-    /// Fourier.
-    #[serde(default, skip_serializing)]
-    pub fourier: crate::simulation::dialog::fourier::FourierDialogState,
-    /// Optimization.
-    #[serde(default, skip_serializing)]
-    pub optimization: crate::simulation::dialog::optimization::OptimizationDialogState,
-    /// Safe operating area.
-    #[serde(default, skip_serializing)]
-    pub soa: crate::simulation::dialog::soa::SoaDialogState,
-    /// Effective engine options (validated).
-    pub options: crate::simulation::dialog::SimulationOptions,
-    /// Analyses listed in the run-set card beyond the always-listed core —
-    /// exotics stay listed (dimmed) when unticked, until removed.
-    #[serde(
-        default,
-        skip_serializing,
-        deserialize_with = "deserialize_analysis_set"
-    )]
-    pub listed: HashSet<usize>,
-    /// Transient editor state is excluded as one unit from the project wire.
-    #[serde(skip)]
+    document: rspice_simulation_contract::setup_document::SimulationSetupDocument,
     pub session: SimSetupEditorSession,
+}
+
+impl std::ops::Deref for SimSetupState {
+    type Target = rspice_simulation_contract::setup_document::SimulationSetupDocument;
+
+    fn deref(&self) -> &Self::Target {
+        &self.document
+    }
+}
+
+impl std::ops::DerefMut for SimSetupState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.document
+    }
+}
+
+impl serde::Serialize for SimSetupState {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serde::Serialize::serialize(&self.document, serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SimSetupState {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            document: serde::Deserialize::deserialize(deserializer)?,
+            session: SimSetupEditorSession::default(),
+        })
+    }
 }
 
 impl SimSetupState {
@@ -187,11 +82,9 @@ impl SimSetupState {
     /// so a new project's Run button works out of the box (the engine no
     /// longer falls back to the selected row on an empty set).
     pub fn new() -> Self {
-        let mut setup = Self {
-            analysis_plan: Some(crate::simulation::plan::SimulationPlan::new()),
-            run_set: default_global_run_set(),
-            ..Self::default()
-        };
+        let mut setup = Self::default();
+        setup.document.analysis_plan = Some(crate::simulation::plan::SimulationPlan::new());
+        setup.document.run_set = default_global_run_set();
         setup
             .set_reference_pvt(crate::product::ProcessCorner::TT, 27.0)
             .expect("the built-in reference PVT point is valid");
@@ -736,6 +629,43 @@ mod tests {
 
         assert_eq!(migrated.run_set.point_count(), 1);
         assert!(migrated.run_set.enabled_dimensions().next().is_none());
+    }
+
+    #[test]
+    fn setup_document_keeps_flat_project_wire_and_legacy_read_behavior() {
+        let mut setup = SimSetupState::new();
+        setup.session.palette_open = true;
+        setup.tran.stop = "7m".to_owned();
+
+        let mut wire = serde_json::to_value(&setup).expect("setup serializes");
+        let fields = wire.as_object_mut().expect("setup is a flat object");
+        assert!(fields.contains_key("analysis_plan"));
+        assert!(fields.contains_key("run_set"));
+        assert!(fields.contains_key("options"));
+        assert!(!fields.contains_key("document"));
+        assert!(!fields.contains_key("session"));
+        assert!(!fields.contains_key("tran"));
+
+        fields.insert(
+            "tran".to_owned(),
+            serde_json::to_value(&setup.tran).unwrap(),
+        );
+        let restored: SimSetupState =
+            serde_json::from_value(wire.clone()).expect("schema-3 draft remains readable");
+        assert_eq!(restored.tran.stop, "7m");
+        assert!(!restored.session.palette_open);
+        assert!(
+            !serde_json::to_value(&restored)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .contains_key("tran")
+        );
+
+        wire.as_object_mut()
+            .unwrap()
+            .insert("unexpected".to_owned(), serde_json::json!(true));
+        assert!(serde_json::from_value::<SimSetupState>(wire).is_err());
     }
 
     #[test]

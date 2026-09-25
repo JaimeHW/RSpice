@@ -59,14 +59,17 @@ impl SimSetupState {
         let mut notes = Vec::new();
 
         if let Some(note) = self
+            .document
             .corner
-            .adopt_legacy_run_set(&mut self.run_set)
+            .adopt_legacy_run_set(&mut self.document.run_set)
             .dropped_declaration_note()
         {
             notes.push(note);
         }
-        if let Some(plan) = &mut self.analysis_plan {
-            for (shown_as, migration) in plan.adopt_legacy_corner_run_sets(&mut self.run_set) {
+        if let Some(plan) = &mut self.document.analysis_plan {
+            for (shown_as, migration) in
+                plan.adopt_legacy_corner_run_sets(&mut self.document.run_set)
+            {
                 if let Some(note) = migration.dropped_declaration_note() {
                     notes.push(format!("{shown_as}: {note}"));
                 }

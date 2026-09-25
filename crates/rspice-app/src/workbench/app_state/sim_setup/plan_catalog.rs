@@ -1,7 +1,7 @@
 //! Persisted simulation-plan catalog and clone/switch transactions.
 //!
-//! `SimSetupState` retains the active plan in its historical fields so all
-//! existing execution consumers remain source-compatible. Inactive plans are
+//! `SimSetupState` exposes the active plan through its portable setup document
+//! so existing execution consumers remain source-compatible. Inactive plans are
 //! stored as complete, typed records. Catalog mutations are staged on a clone
 //! of the setup and commit only after every name, identity, plan graph, and
 //! runner-ownership invariant has been checked.
@@ -27,7 +27,7 @@ impl SimSetupState {
 
     #[must_use]
     pub const fn active_plan_lineage(&self) -> SimulationPlanLineage {
-        self.active_plan_lineage
+        self.document.active_plan_lineage
     }
 
     #[must_use]
