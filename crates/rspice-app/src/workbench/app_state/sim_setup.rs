@@ -12,6 +12,10 @@ pub(in crate::workbench) mod plan_catalog;
 
 use std::collections::HashSet;
 
+pub use rspice_simulation_contract::legacy_plan_migration::NoiseSetup;
+use rspice_simulation_contract::legacy_plan_migration::{
+    default_global_run_set, deserialize_analysis_set,
+};
 use rspice_simulation_contract::plan_catalog::StoredSimulationPlan;
 use rspice_simulation_contract::plan_model::SimulationPlan;
 use rspice_simulation_contract::run_set::{ReferencePoint, RunSetDimensionKind, RunSetState};
@@ -27,34 +31,6 @@ pub type ReferencePvtPoint = ReferencePoint;
 pub use rspice_simulation_contract::output_policy::SimulationSavePolicy;
 
 pub use rspice_simulation_contract::drafts::{AcSetup, DcSetup, TranSetup};
-
-/// `.noise` draft.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NoiseSetup {
-    /// Output node.
-    pub output: String,
-    /// Reference node (0 = ground).
-    pub reference: String,
-    /// Input source.
-    pub input: String,
-    /// Start frequency.
-    pub fstart: String,
-    /// Stop frequency.
-    pub fstop: String,
-}
-
-impl Default for NoiseSetup {
-    fn default() -> Self {
-        Self {
-            output: "out".to_owned(),
-            reference: "0".to_owned(),
-            input: "V1".to_owned(),
-            fstart: "1".to_owned(),
-            fstop: "100Meg".to_owned(),
-        }
-    }
-}
 
 /// Editor state that belongs to the current workbench session, never to a
 /// persisted simulation plan.
@@ -652,29 +628,6 @@ impl SimSetupState {
         self.optimization.ensure_initialized();
         self.soa.ensure_initialized();
     }
-}
-
-/// Missing global Run Set data belongs to a project from before the Studio
-/// owned this declaration. Migrating it to a one-point reference run avoids
-/// inventing 27 PVT tasks and new technology requirements on first open.
-fn default_global_run_set() -> RunSetState {
-    RunSetState::reference_only()
-}
-
-fn deserialize_analysis_set<'de, D>(deserializer: D) -> Result<HashSet<usize>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let indices = <Vec<usize> as serde::Deserialize>::deserialize(deserializer)?;
-    let mut unique = HashSet::with_capacity(indices.len());
-    for index in indices {
-        if !unique.insert(index) {
-            return Err(serde::de::Error::custom(format!(
-                "duplicate analysis index {index}"
-            )));
-        }
-    }
-    Ok(unique)
 }
 
 #[cfg(test)]

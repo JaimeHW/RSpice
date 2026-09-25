@@ -11,6 +11,58 @@ use uuid::Uuid;
 use crate::analysis_draft::AnalysisDraft;
 use crate::analysis_kind::AnalysisKind;
 use crate::plan_model::{AnalysisDependency, AnalysisInstance, SimulationPlan};
+use crate::run_set::RunSetState;
+
+/// The schema-3 singleton noise draft, retained only for project migration.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NoiseSetup {
+    /// Output node.
+    pub output: String,
+    /// Reference node (0 = ground).
+    pub reference: String,
+    /// Input source.
+    pub input: String,
+    /// Start frequency.
+    pub fstart: String,
+    /// Stop frequency.
+    pub fstop: String,
+}
+
+impl Default for NoiseSetup {
+    fn default() -> Self {
+        Self {
+            output: "out".to_owned(),
+            reference: "0".to_owned(),
+            input: "V1".to_owned(),
+            fstart: "1".to_owned(),
+            fstop: "100Meg".to_owned(),
+        }
+    }
+}
+
+/// A missing global run set predates the Studio declaration and means one
+/// reference run, without inventing PVT tasks or technology requirements.
+pub fn default_global_run_set() -> RunSetState {
+    RunSetState::reference_only()
+}
+
+/// Decode a schema-3 analysis-index set without hiding duplicate entries.
+pub fn deserialize_analysis_set<'de, D>(deserializer: D) -> Result<HashSet<usize>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let indices = <Vec<usize> as serde::Deserialize>::deserialize(deserializer)?;
+    let mut unique = HashSet::with_capacity(indices.len());
+    for index in indices {
+        if !unique.insert(index) {
+            return Err(serde::de::Error::custom(format!(
+                "duplicate analysis index {index}"
+            )));
+        }
+    }
+    Ok(unique)
+}
 
 const LEGACY_ANALYSIS_PLAN_NAMESPACE: Uuid =
     Uuid::from_u128(0x4fca_8534_7bd6_52fb_a3f9_5ca4_d8e3_b127);
