@@ -385,7 +385,7 @@ pub(in crate::workbench) fn show_workflow_dialogs(ctx: &egui::Context, app: &mut
 /// would be the worse answer: the reader pressed a control, and an insert
 /// against a broken plan refuses in its own words rather than in silence.
 fn analysis_catalog(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.sim_setup.palette_open {
+    if !app.state.sim_setup.session.palette_open {
         return;
     }
     let participation = participation::PlanParticipation::resolve(&app.state);

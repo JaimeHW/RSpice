@@ -299,7 +299,7 @@ fn analysis_catalogue_code_rows(viewport_width: f32) -> Vec<Vec<PaintedLine>> {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
-    app.state.sim_setup.palette_open = true;
+    app.state.sim_setup.session.palette_open = true;
     let mut run = || {
         ctx.run_ui(
             egui::RawInput {

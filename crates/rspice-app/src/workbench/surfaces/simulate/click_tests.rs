@@ -646,7 +646,7 @@ fn adding_an_analysis_from_another_route_opens_the_catalogue_and_lands_on_the_ne
 
     studio.click(|label| label == Command::AddAnalysis.spec().label);
     assert!(
-        studio.app.state.sim_setup.palette_open,
+        studio.app.state.sim_setup.session.palette_open,
         "the press arms the catalogue"
     );
     assert!(
@@ -682,7 +682,7 @@ fn adding_an_analysis_from_another_route_opens_the_catalogue_and_lands_on_the_ne
         "the reader lands on the one route that can configure it"
     );
     assert!(
-        !studio.app.state.sim_setup.palette_open,
+        !studio.app.state.sim_setup.session.palette_open,
         "the catalogue closes behind the choice"
     );
     assert!(

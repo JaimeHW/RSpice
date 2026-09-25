@@ -73,7 +73,7 @@ impl SimSetupState {
             }
         }
 
-        self.legacy_run_set_notes = notes;
+        self.session.legacy_run_set_notes = notes;
     }
 
     /// Deterministically migrate the schema-3 singleton layout into stable,

@@ -503,7 +503,7 @@ fn apply_new_plan_configuration(
 ) -> Result<(), String> {
     if new_plan.inherit_solver_options {
         setup.options = inherited.options;
-        setup.options_draft =
+        setup.session.options_draft =
             crate::simulation::dialog::OptionsDialogState::from_options(&setup.options);
     }
     if new_plan.inherit_model_closure {

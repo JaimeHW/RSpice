@@ -505,12 +505,12 @@ impl SimSetupState {
     }
 
     fn reset_plan_editor_transients(&mut self) {
-        self.options_draft =
+        self.session.options_draft =
             crate::simulation::dialog::OptionsDialogState::from_options(&self.options);
-        self.palette_open = false;
-        self.palette_query.clear();
-        self.palette_active = 0;
-        self.palette_scroll_to_active = false;
+        self.session.palette_open = false;
+        self.session.palette_query.clear();
+        self.session.palette_active = 0;
+        self.session.palette_scroll_to_active = false;
     }
 }
 

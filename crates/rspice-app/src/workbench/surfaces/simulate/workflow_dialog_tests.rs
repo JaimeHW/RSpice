@@ -122,7 +122,7 @@ fn the_analysis_catalogue_opens_over_a_plan_that_does_not_resolve() {
         app.state.sim_setup.stable_analysis_plan().is_err(),
         "the fixture is a project whose plan has no stable analysis identity"
     );
-    app.state.sim_setup.palette_open = true;
+    app.state.sim_setup.session.palette_open = true;
 
     let mut run = || {
         ctx.run_ui(

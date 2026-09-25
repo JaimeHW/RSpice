@@ -264,7 +264,7 @@ fn the_model_reference_temperature_commits_without_moving_the_run_temperature() 
     let mut app = RSpiceApp::test_instance();
     let run_temperature = app.state.sim_setup.options.temp;
 
-    app.state.sim_setup.options_draft.tnom = "40.0".to_owned();
+    app.state.sim_setup.session.options_draft.tnom = "40.0".to_owned();
     super::page_solver::commit_draft(&mut app);
 
     assert_eq!(app.state.sim_setup.options.tnom, 40.0);
@@ -282,8 +282,8 @@ fn the_model_reference_temperature_commits_without_moving_the_run_temperature() 
 fn the_bypass_voltage_floor_commits_through_the_pages_own_channel() {
     let mut app = RSpiceApp::test_instance();
 
-    app.state.sim_setup.options_draft.bypass_enabled = true;
-    app.state.sim_setup.options_draft.bypass_abstol = "4e-9".to_owned();
+    app.state.sim_setup.session.options_draft.bypass_enabled = true;
+    app.state.sim_setup.session.options_draft.bypass_abstol = "4e-9".to_owned();
     super::page_solver::commit_draft(&mut app);
 
     assert!(app.state.sim_setup.options.bypass_enabled);
@@ -1602,7 +1602,7 @@ fn specification_policy_commits_atomically_and_rejects_an_invalid_yield_gate() {
 fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
     let mut app = RSpiceApp::test_instance();
     let committed = app.state.workbench.analysis_lifecycle_status.sequence();
-    app.state.sim_setup.options_draft.reltol = "not a number".to_owned();
+    app.state.sim_setup.session.options_draft.reltol = "not a number".to_owned();
 
     super::page_solver::commit_draft(&mut app);
 
@@ -1624,7 +1624,7 @@ fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
     );
 
     // Repairing the value applies it, and the channel carries the receipt.
-    app.state.sim_setup.options_draft.reltol = "2e-3".to_owned();
+    app.state.sim_setup.session.options_draft.reltol = "2e-3".to_owned();
     super::page_solver::commit_draft(&mut app);
     let outcome = &app.state.workbench.analysis_lifecycle_status;
     assert!(!outcome.is_refusal(), "{}", outcome.message());

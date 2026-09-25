@@ -2097,9 +2097,9 @@ mod tests {
         assert!(state.application_modal_open());
         state.dialogs.preferences_open = false;
 
-        state.sim_setup.palette_open = true;
+        state.sim_setup.session.palette_open = true;
         assert!(state.application_modal_open());
-        state.sim_setup.palette_open = false;
+        state.sim_setup.session.palette_open = false;
 
         state.tabbed_property_dialog.open = true;
         assert!(state.application_modal_open());

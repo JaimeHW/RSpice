@@ -28,11 +28,11 @@ pub(super) fn analysis_catalog_window(
     setup: &mut SimSetupState,
     rows: &[AnalysisStackRow],
 ) -> Option<AnalysisKind> {
-    let mut query = setup.palette_query.clone();
-    let mut active = setup.palette_active;
+    let mut query = setup.session.palette_query.clone();
+    let mut active = setup.session.palette_active;
     let mut chosen = None;
     let mut request_close = false;
-    let mut scroll_to_active = setup.palette_scroll_to_active;
+    let mut scroll_to_active = setup.session.palette_scroll_to_active;
     let choice = Dialog::new("Simulation Studio", "Add analysis or workflow", "Close")
         .description(
             "Search and add an explicitly classified solver, run-set controller, measurement, check, or optimization workflow.",
@@ -255,11 +255,11 @@ pub(super) fn analysis_catalog_window(
         request_close = true;
     }
     if request_close {
-        setup.palette_open = false;
+        setup.session.palette_open = false;
     }
-    setup.palette_query = query;
-    setup.palette_active = active;
-    setup.palette_scroll_to_active = false;
+    setup.session.palette_query = query;
+    setup.session.palette_active = active;
+    setup.session.palette_scroll_to_active = false;
     chosen
 }
 
@@ -1155,18 +1155,18 @@ mod tests {
     #[test]
     fn the_catalogue_leaves_left_and_right_to_the_search_caret() {
         let mut catalogue = Catalogue::open(1_400.0);
-        assert_eq!(catalogue.setup.palette_active, 0);
+        assert_eq!(catalogue.setup.session.palette_active, 0);
 
         catalogue.press(egui::Key::ArrowRight);
         assert_eq!(
-            catalogue.setup.palette_active, 0,
+            catalogue.setup.session.palette_active, 0,
             "the field has the keyboard, so Right moved a caret and nothing else"
         );
 
         catalogue.leave_the_search_field();
         catalogue.press(egui::Key::ArrowRight);
         assert_eq!(
-            catalogue.setup.palette_active, 1,
+            catalogue.setup.session.palette_active, 1,
             "off the field, Right crosses to the second column"
         );
     }
@@ -1181,9 +1181,9 @@ mod tests {
     fn the_catalogue_steps_rows_while_the_reader_is_still_typing() {
         let mut catalogue = Catalogue::open(1_400.0);
         catalogue.press(egui::Key::ArrowDown);
-        assert_eq!(catalogue.setup.palette_active, 2);
+        assert_eq!(catalogue.setup.session.palette_active, 2);
         catalogue.press(egui::Key::ArrowUp);
-        assert_eq!(catalogue.setup.palette_active, 0);
+        assert_eq!(catalogue.setup.session.palette_active, 0);
     }
 
     /// A step that moves the selection brings it into view; one that cannot
@@ -1204,7 +1204,7 @@ mod tests {
         );
 
         catalogue.press(egui::Key::ArrowUp);
-        assert_eq!(catalogue.setup.palette_active, 0);
+        assert_eq!(catalogue.setup.session.palette_active, 0);
         assert_eq!(
             catalogue.visible_codes(),
             opened,
@@ -1214,7 +1214,7 @@ mod tests {
         for _ in 0..14 {
             catalogue.press(egui::Key::ArrowDown);
         }
-        assert_eq!(catalogue.setup.palette_active, 14);
+        assert_eq!(catalogue.setup.session.palette_active, 14);
         let active_code = filtered_catalog_kinds("")[14].code();
         let travelled = catalogue.visible_codes();
         assert!(

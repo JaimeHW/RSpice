@@ -56,6 +56,21 @@ impl Default for NoiseSetup {
     }
 }
 
+/// Editor state that belongs to the current workbench session, never to a
+/// persisted simulation plan.
+#[derive(Debug, Clone, Default)]
+pub struct SimSetupEditorSession {
+    /// One-shot migration evidence shown beside a project load.
+    pub legacy_run_set_notes: Vec<String>,
+    /// Draft buffers edited before effective solver options are committed.
+    pub options_draft: crate::simulation::dialog::OptionsDialogState,
+    /// Add-analysis palette visibility and keyboard interaction state.
+    pub palette_open: bool,
+    pub palette_query: String,
+    pub palette_active: usize,
+    pub palette_scroll_to_active: bool,
+}
+
 /// All analysis configuration plus the engine options, in one place.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -70,20 +85,6 @@ pub struct SimSetupState {
     /// Corner analysis remains an analysis instance with its own base mode.
     #[serde(default = "default_global_run_set")]
     pub run_set: RunSetState,
-    /// What folding a pre-unification Corner run space into [`Self::run_set`]
-    /// had to drop, one sentence per instance that carried one.
-    ///
-    /// Session evidence rather than plan state, and so deliberately outside the
-    /// wire form: it records what this load did, not what the project is. A
-    /// saved project has one declaration and nothing left to report.
-    ///
-    /// Read once, by the project-open path, which drains it into the console
-    /// beside the load's other losses. It is a hand-off between the migration —
-    /// the only place the dropped axes can still be named — and the surface a
-    /// reader is actually looking at, never a second place to ask what the plan
-    /// declares.
-    #[serde(skip)]
-    pub legacy_run_set_notes: Vec<String>,
     /// Ordered, content-pinned model libraries consumed by this plan.
     /// Absence is an explicit empty closure; execution never falls back to
     /// every library currently loaded in the project manager.
@@ -192,12 +193,6 @@ pub struct SimSetupState {
     pub soa: crate::simulation::dialog::soa::SoaDialogState,
     /// Effective engine options (validated).
     pub options: crate::simulation::dialog::SimulationOptions,
-    /// Draft buffers the Solver & convergence page edits before a commit.
-    ///
-    /// Never persisted: a project stores the effective options, and a draft
-    /// that outlived the session would reopen a plan on a value no run used.
-    #[serde(skip)]
-    pub options_draft: crate::simulation::dialog::OptionsDialogState,
     /// Analyses listed in the run-set card beyond the always-listed core —
     /// exotics stay listed (dimmed) when unticked, until removed.
     #[serde(
@@ -206,21 +201,9 @@ pub struct SimSetupState {
         deserialize_with = "deserialize_analysis_set"
     )]
     pub listed: HashSet<usize>,
-    /// Add-analysis palette open (anchored to the card action).
+    /// Transient editor state is excluded as one unit from the project wire.
     #[serde(skip)]
-    pub palette_open: bool,
-    /// Palette filter query.
-    #[serde(skip)]
-    pub palette_query: String,
-    /// Keyboard-active row in the palette's filtered list.
-    #[serde(skip)]
-    pub palette_active: usize,
-    /// One-shot request to reveal the keyboard-active catalog row after open.
-    ///
-    /// The scroll area's retained viewport must not reopen halfway through the
-    /// catalog after a previous browse session.
-    #[serde(skip)]
-    pub palette_scroll_to_active: bool,
+    pub session: SimSetupEditorSession,
 }
 
 impl SimSetupState {
@@ -260,7 +243,7 @@ impl SimSetupState {
         };
         options.temp = setup.reference_pvt.temperature_celsius;
         setup.options = options;
-        setup.options_draft =
+        setup.session.options_draft =
             crate::simulation::dialog::OptionsDialogState::from_options(&setup.options);
         setup
     }
@@ -290,12 +273,12 @@ impl SimSetupState {
         self.fourier.initialized = true;
         self.optimization.initialized = true;
         self.soa.initialized = true;
-        self.options_draft =
+        self.session.options_draft =
             crate::simulation::dialog::OptionsDialogState::from_options(&self.options);
-        self.palette_open = false;
-        self.palette_query.clear();
-        self.palette_active = 0;
-        self.palette_scroll_to_active = false;
+        self.session.palette_open = false;
+        self.session.palette_query.clear();
+        self.session.palette_active = 0;
+        self.session.palette_scroll_to_active = false;
         self.refresh_legacy_analysis_projections();
     }
 
@@ -317,7 +300,7 @@ impl SimSetupState {
             temperature_celsius,
         };
         self.options.temp = temperature_celsius;
-        self.options_draft.temp = temperature_celsius.to_string();
+        self.session.options_draft.temp = temperature_celsius.to_string();
         self.op.ensure_initialized();
         self.op.temperature = temperature_celsius.to_string();
         Ok(())
@@ -741,7 +724,13 @@ mod tests {
             );
             assert_eq!(setup.options.temp.to_bits(), temperature.to_bits());
             assert_eq!(
-                setup.options_draft.temp.parse::<f64>().unwrap().to_bits(),
+                setup
+                    .session
+                    .options_draft
+                    .temp
+                    .parse::<f64>()
+                    .unwrap()
+                    .to_bits(),
                 temperature.to_bits()
             );
             assert_eq!(
@@ -762,7 +751,7 @@ mod tests {
         assert_eq!(setup.reference_pvt.process, ProcessCorner::FF);
         assert_eq!(setup.reference_pvt.temperature_celsius, -40.0);
         assert_eq!(setup.options.temp, -40.0);
-        assert_eq!(setup.options_draft.temp, "-40");
+        assert_eq!(setup.session.options_draft.temp, "-40");
         assert_eq!(setup.op.temperature, "-40");
     }
 

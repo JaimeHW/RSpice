@@ -840,7 +840,7 @@ fn project_import_restores_plan_order_solver_options_and_model_catalog() {
         instance.enabled() && instance.lifecycle() == AnalysisLifecycleState::Draft
     }));
     assert_eq!(
-        target.sim_setup.options_draft.reltol,
+        target.sim_setup.session.options_draft.reltol,
         crate::simulation::dialog::options::format_si_value(2e-4)
     );
     assert_eq!(target.model_library_manager.library_count(), 1);
@@ -1656,7 +1656,7 @@ fn a_disagreeing_legacy_corner_run_space_is_reported_on_load() {
         "the dropped declaration must reach the console the load reports through"
     );
     assert!(
-        state.sim_setup.legacy_run_set_notes.is_empty(),
+        state.sim_setup.session.legacy_run_set_notes.is_empty(),
         "the record is drained once it has been reported"
     );
 }

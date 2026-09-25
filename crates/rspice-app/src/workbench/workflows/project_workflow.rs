@@ -1236,7 +1236,7 @@ fn apply_loaded_project_authorized(
 /// Drained rather than read, so a second load of the same session cannot repeat
 /// a loss that was already announced.
 fn report_legacy_run_set_notes(state: &mut AppState) {
-    for note in std::mem::take(&mut state.sim_setup.legacy_run_set_notes) {
+    for note in std::mem::take(&mut state.sim_setup.session.legacy_run_set_notes) {
         state.push_user_message(ConsoleMessage::warning(note));
     }
 }

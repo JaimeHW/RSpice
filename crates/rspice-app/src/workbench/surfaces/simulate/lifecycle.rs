@@ -273,10 +273,10 @@ pub(super) fn insert_analysis_instance(
     app: &mut RSpiceApp,
     kind: AnalysisKind,
 ) -> Option<AnalysisInstanceId> {
-    app.state.sim_setup.palette_open = false;
-    app.state.sim_setup.palette_query.clear();
-    app.state.sim_setup.palette_active = 0;
-    app.state.sim_setup.palette_scroll_to_active = false;
+    app.state.sim_setup.session.palette_open = false;
+    app.state.sim_setup.session.palette_query.clear();
+    app.state.sim_setup.session.palette_active = 0;
+    app.state.sim_setup.session.palette_scroll_to_active = false;
     if let Some(reason) = kind.execution_blocker() {
         record_failure(&mut app.state, "Insert", reason);
         return None;

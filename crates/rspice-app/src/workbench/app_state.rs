@@ -979,7 +979,7 @@ impl AppState {
             || self.dialogs.application_modal_open()
             || (self.workbench.workspace == crate::workbench::state::Workspace::Netlist
                 && self.ui.netlist.application_modal_open())
-            || self.sim_setup.palette_open
+            || self.sim_setup.session.palette_open
             || self.tabbed_property_dialog.open
             || self.pdk_settings_dialog.open
             || self.model_browser_state.open
@@ -999,10 +999,10 @@ impl AppState {
         // drawer. Close that transient layer first, so the modal is never
         // obscured by its own invoker.
         self.workbench.close_drawer();
-        self.sim_setup.palette_open = true;
-        self.sim_setup.palette_query.clear();
-        self.sim_setup.palette_active = 0;
-        self.sim_setup.palette_scroll_to_active = true;
+        self.sim_setup.session.palette_open = true;
+        self.sim_setup.session.palette_query.clear();
+        self.sim_setup.session.palette_active = 0;
+        self.sim_setup.session.palette_scroll_to_active = true;
     }
 
     /// Whether static authored state permits a run. Interactive Run commands

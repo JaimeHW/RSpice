@@ -102,6 +102,7 @@ fn compatibility_policy(ui: &mut Ui, app: &mut RSpiceApp) {
             let current = app
                 .state
                 .sim_setup
+                .session
                 .options_draft
                 .compatibility
                 .label()
@@ -125,7 +126,7 @@ fn compatibility_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                 None,
             );
             if let Some(index) = picked {
-                app.state.sim_setup.options_draft.compatibility =
+                app.state.sim_setup.session.options_draft.compatibility =
                     SimulationCompatibility::ALL[index];
                 commit_draft(app);
             }
@@ -220,14 +221,14 @@ fn policy_strip(ui: &mut Ui, app: &mut RSpiceApp) {
     {
         let mut options = build();
         options.compatibility = app.state.sim_setup.options.compatibility;
-        app.state.sim_setup.options_draft = OptionsDialogState::from_options(&options);
+        app.state.sim_setup.session.options_draft = OptionsDialogState::from_options(&options);
         apply_options(app, &options);
     }
     if apply && let PendingChange::Ready(options) = pending {
         apply_options(app, &options);
     }
     if revert {
-        app.state.sim_setup.options_draft =
+        app.state.sim_setup.session.options_draft =
             OptionsDialogState::from_options(&app.state.sim_setup.options);
     }
 }
@@ -303,7 +304,7 @@ enum PendingChange {
 }
 
 fn pending_change(app: &RSpiceApp) -> PendingChange {
-    let options = match app.state.sim_setup.options_draft.to_options() {
+    let options = match app.state.sim_setup.session.options_draft.to_options() {
         Ok(options) => options,
         Err(errors) => return PendingChange::Invalid(errors),
     };
@@ -328,7 +329,7 @@ fn pending_change(app: &RSpiceApp) -> PendingChange {
 fn apply_options(app: &mut RSpiceApp, options: &SimulationOptions) {
     match commit_options_transaction(app, options) {
         Ok(_) => {
-            app.state.sim_setup.options_draft = OptionsDialogState::from_options(options);
+            app.state.sim_setup.session.options_draft = OptionsDialogState::from_options(options);
         }
         Err(error) => {
             app.state
@@ -364,7 +365,7 @@ pub(super) fn commit_options_transaction(
     }
     let mut candidate = app.state.sim_setup.clone();
     candidate.commit_options(options);
-    candidate.options_draft = OptionsDialogState::from_options(options);
+    candidate.session.options_draft = OptionsDialogState::from_options(options);
     let receipt = candidate
         .commit_active_plan_configuration_change("Updated simulation solver options.")
         .map_err(|error| error.to_string())?;
@@ -439,7 +440,7 @@ fn criterion_row(
     let response = mono_input(
         &mut cell,
         meaning,
-        field(&mut app.state.sim_setup.options_draft),
+        field(&mut app.state.sim_setup.session.options_draft),
         width,
     );
     commit_on_release(app, &response);
@@ -544,7 +545,7 @@ fn budget_row(
     let response = mono_input(
         &mut cell,
         meaning,
-        field(&mut app.state.sim_setup.options_draft),
+        field(&mut app.state.sim_setup.session.options_draft),
         width,
     );
     commit_on_release(app, &response);
@@ -588,10 +589,10 @@ fn continuation_ladder(ui: &mut Ui, app: &mut RSpiceApp) {
         ),
     ];
     let enabled_rungs = 1
-        + usize::from(app.state.sim_setup.options_draft.gmin_stepping)
-        + usize::from(app.state.sim_setup.options_draft.source_stepping)
-        + usize::from(app.state.sim_setup.options_draft.pseudo_transient)
-        + usize::from(app.state.sim_setup.options_draft.arc_length);
+        + usize::from(app.state.sim_setup.session.options_draft.gmin_stepping)
+        + usize::from(app.state.sim_setup.session.options_draft.source_stepping)
+        + usize::from(app.state.sim_setup.session.options_draft.pseudo_transient)
+        + usize::from(app.state.sim_setup.session.options_draft.arc_length);
     let status = format!("{enabled_rungs} of 5 rungs enabled");
     card(
         ui,
@@ -695,7 +696,7 @@ fn ladder_stage(
                 .iter()
                 .map(|strategy| strategy.display_name().to_owned())
                 .collect();
-            let current = app.state.sim_setup.options_draft.damping;
+            let current = app.state.sim_setup.session.options_draft.damping;
             let selected = options
                 .get(current)
                 .cloned()
@@ -708,16 +709,18 @@ fn ladder_stage(
                 &options,
                 LADDER_CONTROL_WIDTH,
             ) {
-                app.state.sim_setup.options_draft.damping = picked;
+                app.state.sim_setup.session.options_draft.damping = picked;
                 commit_draft(app);
             }
         }
         LadderControl::Toggle(stage) => {
             let value = match stage {
-                Stage::Gmin => &mut app.state.sim_setup.options_draft.gmin_stepping,
-                Stage::Source => &mut app.state.sim_setup.options_draft.source_stepping,
-                Stage::PseudoTransient => &mut app.state.sim_setup.options_draft.pseudo_transient,
-                Stage::ArcLength => &mut app.state.sim_setup.options_draft.arc_length,
+                Stage::Gmin => &mut app.state.sim_setup.session.options_draft.gmin_stepping,
+                Stage::Source => &mut app.state.sim_setup.session.options_draft.source_stepping,
+                Stage::PseudoTransient => {
+                    &mut app.state.sim_setup.session.options_draft.pseudo_transient
+                }
+                Stage::ArcLength => &mut app.state.sim_setup.session.options_draft.arc_length,
             };
             let selected = if *value { "Enabled" } else { "Skipped" }.to_owned();
             let options = vec!["Enabled".to_owned(), "Skipped".to_owned()];
@@ -756,7 +759,7 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                     .iter()
                     .map(|method| method.display_name().to_owned())
                     .collect();
-                let method_index = app.state.sim_setup.options_draft.method;
+                let method_index = app.state.sim_setup.session.options_draft.method;
                 let method_selected = methods
                     .get(method_index)
                     .cloned()
@@ -777,7 +780,7 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                     None,
                 );
                 if let Some(index) = picked_method {
-                    app.state.sim_setup.options_draft.method = index;
+                    app.state.sim_setup.session.options_draft.method = index;
                     commit_draft(app);
                 }
 
@@ -789,7 +792,7 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                         min_response = Some(mono_input(
                             ui,
                             "Minimum timestep",
-                            &mut app.state.sim_setup.options_draft.min_timestep,
+                            &mut app.state.sim_setup.session.options_draft.min_timestep,
                             width,
                         ));
                     }),
@@ -797,7 +800,7 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                         max_response = Some(mono_input(
                             ui,
                             "Maximum timestep",
-                            &mut app.state.sim_setup.options_draft.max_timestep,
+                            &mut app.state.sim_setup.session.options_draft.max_timestep,
                             width,
                         ));
                     })),
@@ -807,7 +810,7 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
 
                 let mut bypass_picked = None;
-                let bypass_on = app.state.sim_setup.options_draft.bypass_enabled;
+                let bypass_on = app.state.sim_setup.session.options_draft.bypass_enabled;
                 let bypass_options = vec!["Enabled".to_owned(), "Disabled".to_owned()];
                 let bypass_selected = if bypass_on { "Enabled" } else { "Disabled" }.to_owned();
                 field_pair(
@@ -825,7 +828,7 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                     None,
                 );
                 if let Some(index) = bypass_picked {
-                    app.state.sim_setup.options_draft.bypass_enabled = index == 0;
+                    app.state.sim_setup.session.options_draft.bypass_enabled = index == 0;
                     commit_draft(app);
                 }
 
@@ -837,7 +840,7 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                         bypass_reltol = Some(mono_input(
                             ui,
                             "Bypass relative bound",
-                            &mut app.state.sim_setup.options_draft.bypass_reltol,
+                            &mut app.state.sim_setup.session.options_draft.bypass_reltol,
                             width,
                         ));
                     }),
@@ -845,7 +848,7 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                         bypass_abstol = Some(mono_input(
                             ui,
                             "Bypass voltage floor",
-                            &mut app.state.sim_setup.options_draft.bypass_abstol,
+                            &mut app.state.sim_setup.session.options_draft.bypass_abstol,
                             width,
                         ));
                     })),
@@ -893,6 +896,7 @@ fn matrix_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                 let index = app
                     .state
                     .sim_setup
+                    .session
                     .options_draft
                     .solver
                     .min(solvers.len() - 1);
@@ -915,13 +919,13 @@ fn matrix_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                         gmin_response = Some(mono_input(
                             ui,
                             "GMIN floor",
-                            &mut app.state.sim_setup.options_draft.gmin,
+                            &mut app.state.sim_setup.session.options_draft.gmin,
                             width,
                         ));
                     })),
                 );
                 if let Some(index) = picked {
-                    app.state.sim_setup.options_draft.solver = index;
+                    app.state.sim_setup.session.options_draft.solver = index;
                     commit_draft(app);
                 }
                 if let Some(response) = gmin_response {
@@ -938,7 +942,7 @@ fn matrix_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                             pivrel_response = Some(mono_input(
                                 ui,
                                 "Relative pivot \u{b7} PIVREL",
-                                &mut app.state.sim_setup.options_draft.pivrel,
+                                &mut app.state.sim_setup.session.options_draft.pivrel,
                                 width,
                             ));
                         },
@@ -949,7 +953,7 @@ fn matrix_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                             pivtol_response = Some(mono_input(
                                 ui,
                                 "Absolute pivot \u{b7} PIVTOL",
-                                &mut app.state.sim_setup.options_draft.pivtol,
+                                &mut app.state.sim_setup.session.options_draft.pivtol,
                                 width,
                             ));
                         },
@@ -1001,7 +1005,7 @@ fn temperature_reference(ui: &mut Ui, setup: &mut SimSetupState) -> bool {
                             tnom = Some(mono_input(
                                 ui,
                                 "Model reference temperature \u{b7} TNOM",
-                                &mut setup.options_draft.tnom,
+                                &mut setup.session.options_draft.tnom,
                                 width,
                             ));
                         },

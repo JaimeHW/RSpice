@@ -55,7 +55,7 @@ fn solver_options_iteration_edit_preserves_precise_temperatures() {
     };
     page_solver::commit_options_transaction(&mut app, &options)
         .expect("valid temperatures commit through the plan transaction");
-    app.state.sim_setup.options_draft.itl1 = "73".to_owned();
+    app.state.sim_setup.session.options_draft.itl1 = "73".to_owned();
     page_solver::commit_draft(&mut app);
 
     let mut expected = options;
@@ -123,7 +123,7 @@ fn solver_options_invalid_drafts_cannot_replace_effective_policy() {
         for value in values {
             let mut app = RSpiceApp::test_instance();
             let before = serde_json::to_value(&app.state.sim_setup.options).unwrap();
-            edit(&mut app.state.sim_setup.options_draft, value);
+            edit(&mut app.state.sim_setup.session.options_draft, value);
             page_solver::commit_draft(&mut app);
             assert!(
                 app.state.workbench.analysis_lifecycle_status.is_refusal(),
@@ -170,7 +170,7 @@ fn solver_options_transaction_rejects_invalid_policy_before_mutation() {
 fn simulation_compatibility_commits_through_the_solver_transaction() {
     use crate::simulation::dialog::SimulationCompatibility;
     let mut app = RSpiceApp::test_instance();
-    app.state.sim_setup.options_draft.compatibility = SimulationCompatibility::Xyce;
+    app.state.sim_setup.session.options_draft.compatibility = SimulationCompatibility::Xyce;
     page_solver::commit_draft(&mut app);
     assert!(!app.state.workbench.analysis_lifecycle_status.is_refusal());
     assert_eq!(
@@ -186,7 +186,7 @@ fn simulation_compatibility_commits_through_the_solver_transaction() {
         crate::services::simulation_runner::build_engine_config(&parsed, None).spice_dialect,
         rspice_core::SpiceDialect::Xyce
     );
-    app.state.sim_setup.options_draft.itl1 = "81".into();
+    app.state.sim_setup.session.options_draft.itl1 = "81".into();
     page_solver::commit_draft(&mut app);
     assert_eq!(
         app.state.sim_setup.options.compatibility,

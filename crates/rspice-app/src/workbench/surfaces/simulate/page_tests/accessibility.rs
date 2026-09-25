@@ -416,7 +416,7 @@ fn analysis_catalogue_fixtures() -> Vec<(String, RSpiceApp)> {
         .into_iter()
         .map(|page| {
             let mut app = studio_route(page, None);
-            app.state.sim_setup.palette_open = true;
+            app.state.sim_setup.session.palette_open = true;
             (format!("analysis catalogue · {page:?}"), app)
         })
         .collect::<Vec<_>>();
@@ -425,7 +425,7 @@ fn analysis_catalogue_fixtures() -> Vec<(String, RSpiceApp)> {
     // route — which is the whole claim, and the one the command makes true.
     let mut app = studio_route(SimulationPage::Solver, None);
     app.state.workbench.activate(Workspace::Results);
-    app.state.sim_setup.palette_open = true;
+    app.state.sim_setup.session.palette_open = true;
     fixtures.push(("analysis catalogue · Results workspace".to_owned(), app));
     fixtures
 }

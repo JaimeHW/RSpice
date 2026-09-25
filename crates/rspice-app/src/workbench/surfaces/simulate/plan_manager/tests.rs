@@ -1439,13 +1439,13 @@ fn a_created_plan_inherits_exactly_what_its_route_committed() {
     // format a temperature differently — "-40" against "-40.0" — and pinning
     // either spelling here would assert a formatter instead of the invariant.
     assert_eq!(
-        setup.options_draft.temp.parse::<f64>(),
+        setup.session.options_draft.temp.parse::<f64>(),
         Ok(-40.0),
         "the draft states the plan's reference temperature"
     );
     let rebuilt = crate::simulation::dialog::OptionsDialogState::from_options(&setup.options);
     assert_eq!(
-        setup.options_draft.reltol, rebuilt.reltol,
+        setup.session.options_draft.reltol, rebuilt.reltol,
         "the draft states the inherited options, not the defaults create_plan minted"
     );
     assert_ne!(
