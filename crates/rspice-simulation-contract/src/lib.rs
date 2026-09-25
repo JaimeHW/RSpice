@@ -4,6 +4,7 @@ pub mod accuracy;
 pub mod analysis_kind;
 pub mod analysis_lifecycle;
 pub mod analysis_run_at;
+pub mod analysis_run_type;
 pub mod analysis_spec_values;
 pub mod analysis_tag;
 pub mod capture_group;
