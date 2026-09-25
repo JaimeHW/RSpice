@@ -18,6 +18,40 @@ impl SimulationController {
             return Err(error);
         }
         let spec = match draft {
+            AnalysisDraft::Transient(draft) => AnalysisSpec::Transient {
+                stop_time: parse_spice_value_checked(&draft.stop)
+                    .map_err(|e| format!("invalid stop time: {}", e))?,
+                step_time: parse_spice_value_checked(&draft.step)
+                    .map_err(|e| format!("invalid step time: {}", e))?,
+                start_time: parse_spice_value_checked(&draft.start)
+                    .map_err(|e| format!("invalid start time: {}", e))?,
+                max_timestep: Self::parse_optional_spice_value(&draft.max_step)
+                    .map_err(|e| format!("invalid max step: {}", e))?,
+                uic: draft.uic,
+            },
+            AnalysisDraft::Ac(draft) => AnalysisSpec::Ac {
+                start_freq: parse_spice_value_checked(&draft.fstart)
+                    .map_err(|e| format!("invalid start frequency: {}", e))?,
+                stop_freq: parse_spice_value_checked(&draft.fstop)
+                    .map_err(|e| format!("invalid stop frequency: {}", e))?,
+                points_per_unit: Self::parse_positive_points(&draft.points, "ac_points")?,
+                sweep: Self::map_frequency_sweep(draft.sweep),
+            },
+            AnalysisDraft::DcSweep(draft) => {
+                let config = draft.to_config()?;
+                AnalysisSpec::DcSweep {
+                    source_name: config.source,
+                    start: config.start,
+                    stop: config.stop,
+                    step: config.step,
+                    source2: config.source2,
+                    start2: config.start2,
+                    stop2: config.stop2,
+                    step2: config.step2,
+                    hysteresis: config.hysteresis,
+                    modes: config.modes,
+                }
+            }
             AnalysisDraft::Disto(draft) => AnalysisSpec::Disto {
                 start_freq: parse_spice_value_checked(&draft.sweep.fstart)
                     .map_err(|e| format!("invalid DISTO start frequency: {e}"))?,
@@ -162,7 +196,7 @@ impl SimulationController {
         Ok(Some(spec))
     }
 
-    pub(super) fn build_analysis_spec_for_index(
+    pub(super) fn build_legacy_analysis_spec_for_index(
         &self,
         state: &AppState,
         idx: usize,
@@ -215,53 +249,6 @@ impl SimulationController {
                     run_point: config.run_point,
                 })
             }
-            1 => Ok(AnalysisSpec::Transient {
-                stop_time: parse_spice_value_checked(&state.sim_setup.tran.stop)
-                    .map_err(|e| format!("invalid stop time: {}", e))?,
-                step_time: parse_spice_value_checked(&state.sim_setup.tran.step)
-                    .map_err(|e| format!("invalid step time: {}", e))?,
-                start_time: parse_spice_value_checked(&state.sim_setup.tran.start)
-                    .map_err(|e| format!("invalid start time: {}", e))?,
-                max_timestep: Self::parse_optional_spice_value(&state.sim_setup.tran.max_step)
-                    .map_err(|e| format!("invalid max step: {}", e))?,
-                uic: state.sim_setup.tran.uic,
-            }),
-            2 => Ok(AnalysisSpec::Ac {
-                start_freq: parse_spice_value_checked(&state.sim_setup.ac.fstart)
-                    .map_err(|e| format!("invalid start frequency: {}", e))?,
-                stop_freq: parse_spice_value_checked(&state.sim_setup.ac.fstop)
-                    .map_err(|e| format!("invalid stop frequency: {}", e))?,
-                points_per_unit: Self::parse_positive_points(
-                    &state.sim_setup.ac.points,
-                    "ac_points",
-                )?,
-                sweep: Self::map_frequency_sweep(state.sim_setup.ac.sweep),
-            }),
-            23 => self.build_disto_spec(state),
-            3 => {
-                let config = state.sim_setup.dc.to_config()?;
-                Ok(AnalysisSpec::DcSweep {
-                    source_name: config.source,
-                    start: config.start,
-                    stop: config.stop,
-                    step: config.step,
-                    source2: config.source2,
-                    start2: config.start2,
-                    stop2: config.stop2,
-                    step2: config.step2,
-                    hysteresis: config.hysteresis,
-                    modes: config.modes,
-                })
-            }
-            4 => match self.build_manifest_preview_spec(
-                state,
-                &state
-                    .sim_setup
-                    .legacy_analysis_draft(crate::simulation::plan::AnalysisKind::Noise),
-            )? {
-                Some(spec @ AnalysisSpec::Noise { .. }) => Ok(spec),
-                _ => Err("noise draft did not produce an exact noise spec".to_owned()),
-            },
             5 => self.build_pole_zero_spec(state),
             6 => self.build_sensitivity_spec(state),
             7 => self.build_monte_carlo_spec(state),
@@ -280,6 +267,11 @@ impl SimulationController {
             20 => self.build_fourier_spec(state),
             21 => self.build_optimization_spec(state),
             22 => self.build_soa_spec(state),
+            _ if crate::simulation::plan::AnalysisKind::from_legacy_index(idx).is_some() => {
+                Err(format!(
+                    "analysis index {idx} has an exact draft specification, not a legacy fallback"
+                ))
+            }
             _ => Err(format!(
                 "analysis index {idx} is outside the canonical Simulation Studio catalog"
             )),
@@ -886,19 +878,6 @@ impl SimulationController {
         })
     }
 
-    pub(super) fn build_disto_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        Ok(AnalysisSpec::Disto {
-            start_freq: parse_spice_value_checked(&state.sim_setup.ac.fstart)
-                .map_err(|e| format!("invalid DISTO start frequency: {}", e))?,
-            stop_freq: parse_spice_value_checked(&state.sim_setup.ac.fstop)
-                .map_err(|e| format!("invalid DISTO stop frequency: {}", e))?,
-            points_per_unit: Self::parse_positive_points(&state.sim_setup.ac.points, "ac_points")?,
-            sweep: Self::map_frequency_sweep(state.sim_setup.ac.sweep),
-            f2_over_f1: Self::parse_optional_spice_value(&state.sim_setup.disto_f2_over_f1)
-                .map_err(|e| format!("invalid DISTO f2/f1 ratio: {}", e))?,
-        })
-    }
-
     pub(super) fn build_pole_zero_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
         let mut pz_state = state.sim_setup.pz.clone();
         pz_state.ensure_initialized();
@@ -1188,13 +1167,15 @@ mod manifest_tests {
             ("1mil", 25.4e-6),
         ] {
             let mut state = AppState::default();
-            state.sim_setup.tran.stop = typed.to_owned();
+            let mut draft = state.sim_setup.tran.clone();
+            draft.stop = typed.to_owned();
+            state.sim_setup.tran.stop = "stale singleton".to_owned();
 
             let spec = controller
-                .build_analysis_spec_for_index(&state, 1)
+                .analysis_draft_spec(&state, &AnalysisDraft::Transient(draft))
                 .unwrap_or_else(|error| panic!("a stop time of {typed} must be accepted: {error}"));
             let AnalysisSpec::Transient { stop_time, .. } = spec else {
-                panic!("index 1 is the transient analysis");
+                panic!("the authored transient draft builds a transient analysis");
             };
             assert!(
                 (stop_time - expected).abs() <= expected * 1e-12,
@@ -1205,13 +1186,56 @@ mod manifest_tests {
         // The spellings no deck reader has stay refused, rather than reaching a
         // run at a decade the engine would not have agreed with.
         for typed in ["1micro", "1wat", "1k5"] {
-            let mut state = AppState::default();
-            state.sim_setup.tran.stop = typed.to_owned();
+            let state = AppState::default();
+            let mut draft = state.sim_setup.tran.clone();
+            draft.stop = typed.to_owned();
             assert!(
-                controller.build_analysis_spec_for_index(&state, 1).is_err(),
+                controller
+                    .analysis_draft_spec(&state, &AnalysisDraft::Transient(draft))
+                    .is_err(),
                 "a stop time of {typed} must not reach a run"
             );
         }
+    }
+
+    #[test]
+    fn ac_and_dc_specs_read_exact_authored_drafts() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        let mut ac = state.sim_setup.ac.clone();
+        ac.fstart = "3k".to_owned();
+        ac.fstop = "30k".to_owned();
+        ac.points = "41".to_owned();
+        ac.sweep = 2;
+        state.sim_setup.ac.fstart = "stale singleton".to_owned();
+        let spec = controller
+            .analysis_draft_spec(&state, &AnalysisDraft::Ac(ac))
+            .expect("the authored AC draft builds its spec");
+        assert!(matches!(
+            spec,
+            AnalysisSpec::Ac {
+                start_freq: 3_000.0,
+                stop_freq: 30_000.0,
+                points_per_unit: 41,
+                sweep: FrequencySweep::Linear,
+            }
+        ));
+
+        let mut dc = state.sim_setup.dc.clone();
+        dc.source = "VEXACT".to_owned();
+        dc.stop = "3".to_owned();
+        state.sim_setup.dc.source = "stale singleton".to_owned();
+        let spec = controller
+            .analysis_draft_spec(&state, &AnalysisDraft::DcSweep(dc))
+            .expect("the authored DC draft builds its spec");
+        assert!(matches!(
+            spec,
+            AnalysisSpec::DcSweep {
+                source_name,
+                stop: 3.0,
+                ..
+            } if source_name == "VEXACT"
+        ));
     }
 
     /// The three step sizes the search actually uses are authored, not
@@ -1242,7 +1266,7 @@ mod manifest_tests {
 
         let index = AnalysisKind::Optimization.legacy_index();
         let spec = controller
-            .build_analysis_spec_for_index(&state, index)
+            .build_legacy_analysis_spec_for_index(&state, index)
             .expect("an authored optimization draft builds its spec");
         let AnalysisSpec::Optimization {
             fd_step,
@@ -1269,7 +1293,7 @@ mod manifest_tests {
         // a first step smaller than the smallest one describes no search.
         state.sim_setup.optimization.min_step = "0.5".to_owned();
         let error = controller
-            .build_analysis_spec_for_index(&state, index)
+            .build_legacy_analysis_spec_for_index(&state, index)
             .expect_err("a smallest step above the first step is not a search");
         assert!(
             error.contains("min_step"),

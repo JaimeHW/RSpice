@@ -20,10 +20,10 @@ impl SimulationController {
     /// is a re-spelling of the emitted one is worse than showing nothing: it
     /// reads as the deck and is not the deck.
     ///
-    /// `state` must already carry `draft` in its legacy singleton slots — the
-    /// builders read the projection, not the draft — because projecting here
-    /// would mean cloning the whole application state per call. Callers that
-    /// price many drafts project once and re-project per draft.
+    /// `state` must carry the projected prerequisite closure for the remaining
+    /// legacy builders. Exact preview builders read `draft` directly, while
+    /// fallback builders still read the projection. Callers that price many
+    /// drafts project once and re-project per draft.
     pub(crate) fn analysis_draft_directive(
         &self,
         state: &AppState,
@@ -52,7 +52,9 @@ impl SimulationController {
     ) -> Result<AnalysisSpec, String> {
         match self.build_manifest_preview_spec(state, draft) {
             Ok(Some(spec)) => Ok(spec),
-            Ok(None) => self.build_analysis_spec_for_index(state, draft.kind().legacy_index()),
+            Ok(None) => {
+                self.build_legacy_analysis_spec_for_index(state, draft.kind().legacy_index())
+            }
             Err(error) => Err(error),
         }
     }

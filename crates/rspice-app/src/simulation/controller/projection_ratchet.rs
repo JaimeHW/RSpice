@@ -224,7 +224,7 @@ fn projection(kind: AnalysisKind, draft: &AnalysisDraft) -> String {
 
     let spec = match controller.build_manifest_preview_spec(&state, draft) {
         Ok(Some(spec)) => Ok(spec),
-        Ok(None) => controller.build_analysis_spec_for_index(&state, kind.legacy_index()),
+        Ok(None) => controller.build_legacy_analysis_spec_for_index(&state, kind.legacy_index()),
         Err(error) => Err(error),
     };
 
@@ -833,12 +833,7 @@ fn the_step_ceiling_a_transient_cannot_carry_is_judged_through_a_kind_that_can()
     let baseline = digest_of(&state);
     let mut record = AnalysisNumericOverride::default();
     record
-        .set_for_instance(
-            AnalysisKind::Soa,
-            SolverOwnership::NONE,
-            CEILING,
-            "700p",
-        )
+        .set_for_instance(AnalysisKind::Soa, SolverOwnership::NONE, CEILING, "700p")
         .expect("SOA may author a step ceiling");
     state
         .sim_setup

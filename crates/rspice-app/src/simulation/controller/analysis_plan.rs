@@ -95,9 +95,9 @@ impl SimulationController {
     ) -> Result<Vec<PreparedTask>, Vec<String>> {
         let mut queue = Vec::with_capacity(plan.instances().len());
         let mut errors = Vec::new();
-        // The existing engine configuration builders still read the retired
-        // singleton setup view. Clone once, then project each frozen instance
-        // (and its exact bound prerequisites) into that short-lived view.
+        // Remaining legacy engine builders still read the retired singleton
+        // setup view. Clone once, then project each frozen instance (and its
+        // exact bound prerequisites) into that short-lived view.
         // The live state and frozen plan remain untouched.
         let mut projected_state = state.clone();
 
@@ -126,9 +126,9 @@ impl SimulationController {
             // derivation, and this loop wrote the first two out a second time:
             // the queue and the statement the plan displays beside it were two
             // spellings of the same thing. `analysis_draft_spec` is that pair,
-            // and `analysis_draft_directive` is it plus the line. Both state
-            // the contract they share: the builders read the projection, never
-            // the draft. Handing the first of them the unprojected state made
+            // and `analysis_draft_directive` is it plus the line. Exact preview
+            // builders read the draft; the remaining fallback builders read
+            // the projection. Handing a fallback the unprojected state made
             // the queue capable of dispatching a directive the plan never
             // displayed and the parse ratchet never read.
             let spec = match self.analysis_draft_spec(&projected_state, instance.draft()) {
@@ -170,7 +170,7 @@ impl SimulationController {
                     });
                 if let Some(mode @ crate::services::simulation_runner::CornerBaseMode::Op) = mode {
                     let config = self
-                        .build_analysis_spec_for_index(&projected_state, 0)
+                        .build_legacy_analysis_spec_for_index(&projected_state, 0)
                         .and_then(|spec| self.analysis_spec_to_config(&projected_state, &spec));
                     match config {
                         Ok(AnalysisConfig::DcOp(config)) => {
