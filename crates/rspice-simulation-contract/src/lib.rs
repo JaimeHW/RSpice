@@ -8,6 +8,7 @@ pub mod analysis_tag;
 pub mod capture_group;
 pub mod config;
 pub mod corner_config;
+pub mod corner_draft;
 pub mod dependency_contract;
 pub mod design_variable;
 pub mod design_variable_quantity;

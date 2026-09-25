@@ -590,10 +590,12 @@ impl SimSetupState {
             15 => self.pxf.to_config().err(),
             16 => self.pstb.to_config().err(),
             17 => self.xf.to_config().err(),
-            18 => self
-                .corner
-                .to_config(&self.run_set, self.reference_pvt)
-                .err(),
+            18 => crate::simulation::dialog::corner::to_config(
+                &self.corner,
+                &self.run_set,
+                self.reference_pvt,
+            )
+            .err(),
             19 => self.envelope.to_config().err(),
             20 => self.fourier.to_config().err(),
             21 => self.optimization.to_config().err(),

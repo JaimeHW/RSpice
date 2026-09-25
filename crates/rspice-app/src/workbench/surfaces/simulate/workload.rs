@@ -418,8 +418,7 @@ fn task_rate(
         AnalysisDraft::Corner(state) if !global_axes_active => {
             let mut state = state.clone();
             state.ensure_initialized();
-            let config = state
-                .to_config(run_set, reference)
+            let config = crate::simulation::dialog::corner::to_config(&state, run_set, reference)
                 .map_err(|error| format!("Corner workload is invalid: {error}"))?;
             config
                 .validate()

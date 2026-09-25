@@ -1364,14 +1364,12 @@ pub(crate) fn automation_task_count(app: &RSpiceApp) -> Result<usize, String> {
         .iter()
         .any(|instance| instance.enabled() && instance.kind() == AnalysisKind::Corner);
     let pvt_points = if corner_enabled {
-        app.state
-            .sim_setup
-            .corner
-            .to_config(
-                &app.state.sim_setup.run_set,
-                app.state.sim_setup.reference_pvt,
-            )
-            .map_or(0, |config| config.num_corners())
+        crate::simulation::dialog::corner::to_config(
+            &app.state.sim_setup.corner,
+            &app.state.sim_setup.run_set,
+            app.state.sim_setup.reference_pvt,
+        )
+        .map_or(0, |config| config.num_corners())
     } else {
         1
     };
@@ -2000,15 +1998,13 @@ fn require_corner_matrix(app: &RSpiceApp) -> Result<(), String> {
                 .to_owned(),
         );
     }
-    app.state
-        .sim_setup
-        .corner
-        .to_config(
-            &app.state.sim_setup.run_set,
-            app.state.sim_setup.reference_pvt,
-        )
-        .map(|_| ())
-        .map_err(|error| format!("The configured PVT matrix is invalid: {error}"))
+    crate::simulation::dialog::corner::to_config(
+        &app.state.sim_setup.corner,
+        &app.state.sim_setup.run_set,
+        app.state.sim_setup.reference_pvt,
+    )
+    .map(|_| ())
+    .map_err(|error| format!("The configured PVT matrix is invalid: {error}"))
 }
 
 fn baseline_run(app: &RSpiceApp, plan_id: SimulationPlanId) -> Result<SimulationRun, String> {

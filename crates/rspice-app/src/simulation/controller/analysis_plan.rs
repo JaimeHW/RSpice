@@ -836,9 +836,12 @@ impl SimulationController {
             AnalysisSpec::Corner => {
                 let mut corner_state = state.sim_setup.corner.clone();
                 corner_state.ensure_initialized();
-                let corner_cfg = corner_state
-                    .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
-                    .map_err(|e| format!("invalid corner settings: {}", e))?;
+                let corner_cfg = crate::simulation::dialog::corner::to_config(
+                    &corner_state,
+                    &state.sim_setup.run_set,
+                    state.sim_setup.reference_pvt,
+                )
+                .map_err(|e| format!("invalid corner settings: {}", e))?;
                 Ok(SpecExecutionOptions {
                     mc_histogram_bins: None,
                     mc_statistics: None,

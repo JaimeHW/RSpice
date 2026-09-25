@@ -188,9 +188,12 @@ impl SimulationController {
     pub(super) fn build_corner_temp_command(&self, state: &AppState) -> Result<String, String> {
         let mut corner_state = state.sim_setup.corner.clone();
         corner_state.ensure_initialized();
-        let corner_cfg = corner_state
-            .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
-            .map_err(|e| format!("invalid corner settings: {}", e))?;
+        let corner_cfg = crate::simulation::dialog::corner::to_config(
+            &corner_state,
+            &state.sim_setup.run_set,
+            state.sim_setup.reference_pvt,
+        )
+        .map_err(|e| format!("invalid corner settings: {}", e))?;
 
         if corner_cfg.temperatures.is_empty() {
             return Err("corner analysis requires at least one temperature".to_string());
