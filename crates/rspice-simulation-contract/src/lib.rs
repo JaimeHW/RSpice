@@ -13,6 +13,7 @@ pub mod dependency_contract;
 pub mod design_variable;
 pub mod design_variable_quantity;
 pub mod drafts;
+pub mod envelope_policy;
 pub mod fourier_draft;
 pub mod fourier_output;
 pub mod hb_draft;
