@@ -119,7 +119,7 @@ pub struct NyquistMargin {
     /// Unwrapped `∠L` at this crossing, in degrees.
     ///
     /// For a phase margin it is the angle
-    /// [`crate::results::stability::phase_margin_deg`] folded into one turn to
+    /// [`crate::stability::phase_margin_deg`] folded into one turn to
     /// produce `value`, and the two differ exactly when the loop's phase had
     /// left that turn before crossover. For a gain margin it is the inversion
     /// the crossing sits on — `-180° - 360k` — which names *which* inversion
@@ -142,7 +142,7 @@ const SETTLED_HIGH_FREQUENCY_MAGNITUDE: f64 = 0.1;
 /// closure stops depending on where exactly the sweep began.
 const SETTLED_LOW_FREQUENCY_AXIS_RATIO: f64 = 1.0e-2;
 
-use crate::results::stability::GAIN_MARGIN_TIE_DECIBELS;
+use crate::stability::GAIN_MARGIN_TIE_DECIBELS;
 
 // =============================================================================
 // Nyquist Data
@@ -230,7 +230,7 @@ impl NyquistData {
     /// Encirclements of −1 + j0 by the closed contour, clockwise-positive.
     ///
     /// Reported only for a sweep whose ends settle the closure — see
-    /// [`Self::ends_settle_the_closure`]. One that does not is `Unresolved`
+    /// `ends_settle_the_closure`. One that does not is `Unresolved`
     /// rather than counted, because the number would be the chords' and not
     /// the loop's.
     pub fn count_encirclements(&self) -> EncirclementCount {
@@ -346,7 +346,7 @@ impl NyquistData {
     /// −180° reports a negative margin instead of a wrapped positive one. The
     /// angle is measured from the negative real axis: PM = 180° + ∠L, folded
     /// into `(-180°, 180°]` by
-    /// [`crate::results::stability::phase_margin_deg`] — the same fold, from
+    /// [`crate::stability::phase_margin_deg`] — the same fold, from
     /// the same function, the Bode card applies.
     ///
     /// A loop that crosses unity more than once reports the crossing that
@@ -506,7 +506,7 @@ impl MeasuredBranch {
     /// The margin is measured from the negative real axis, PM = 180° + ∠L, on
     /// the *unwrapped* phase, so a loop past −180° reports a negative margin
     /// instead of a wrapped positive one, and then folded into one turn by
-    /// [`crate::results::stability::phase_margin_deg`]. A loop that crosses
+    /// [`crate::stability::phase_margin_deg`]. A loop that crosses
     /// unity more than once binds at the smallest margin in magnitude — and
     /// that crossing's frequency is the unity-gain frequency the gain margin's
     /// tie-break is measured against.
@@ -521,7 +521,7 @@ impl MeasuredBranch {
                 continue;
             }
             let loop_phase = phase.to_degrees();
-            let margin = crate::results::stability::phase_margin_deg(loop_phase);
+            let margin = crate::stability::phase_margin_deg(loop_phase);
             if best.is_none_or(|(_, current, _)| margin.abs() < current.abs()) {
                 best = Some((crossing, margin, loop_phase));
             }

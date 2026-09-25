@@ -12,7 +12,7 @@
 //! stability queries that used to live here were a controls row and a
 //! stability readout that were never built.
 
-use super::data::NyquistData;
+use super::NyquistData;
 
 /// Complete Nyquist plot viewer state
 #[derive(Debug, Clone, Default)]

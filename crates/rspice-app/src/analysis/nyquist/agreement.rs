@@ -6,7 +6,7 @@
 //! - the Bode card, [`crate::state::ac_bode_summary_for_analysis`],
 //!   which unwraps the retained `(-180°, 180°]` phase trace and locates every
 //!   crossing by linear interpolation in log-frequency;
-//! - the Nyquist card, [`super::data::NyquistData`], which works on the complex
+//! - the Nyquist card, [`super::NyquistData`], which works on the complex
 //!   locus and solves for each crossing by bisection on a Lagrange cubic over
 //!   `(log f, log|L|, unwrapped ∠L)`.
 //!
@@ -47,7 +47,7 @@ use num_complex::Complex64;
 
 use crate::state::{AnalysisResult, AnalysisType, WaveformData, ac_bode_summary_for_analysis};
 
-use super::data::NyquistData;
+use super::NyquistData;
 
 // -----------------------------------------------------------------------
 // Agreement budget
