@@ -1,6 +1,7 @@
 //! Shared distribution ordinates for the interactive sheet and publication.
 
-use super::{HistogramDisplayMode, data::Histogram};
+use super::HistogramDisplayMode;
+use rspice_results::histogram::Histogram;
 
 /// A right-continuous empirical CDF. Each distinct observation has a vertical
 /// jump from the preceding population fraction to the inclusive fraction.

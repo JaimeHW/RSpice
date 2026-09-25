@@ -7,7 +7,6 @@ mod source_tests;
 use egui::Ui;
 use std::sync::Arc;
 
-use crate::analysis::histogram::data::Histogram;
 use crate::analysis::histogram::display::{HistogramDisplay, hist_axis};
 use crate::analysis::{HistogramBuilder, HistogramDisplayMode};
 use crate::product::DatasetId;
@@ -19,6 +18,7 @@ use crate::ui::plot::{self, Axis, PlotSpec, XScale, fmt_si};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
+use rspice_results::histogram::Histogram;
 use rspice_results::yield_analysis::{SpecLimitType, YieldResult};
 
 use super::frame_work::{self, DatasetWalk};
@@ -519,7 +519,7 @@ fn yield_label(result: &YieldResult, authority: Option<MonteCarloAuthority<'_>>)
 /// A collapsed distribution states that it is one: "1 retained bins" reads as
 /// a count that happens to be small, when what the reader needs to know is
 /// that the bin has no width because the measurement never moved.
-fn binning_label(histogram: &crate::analysis::histogram::data::Histogram) -> String {
+fn binning_label(histogram: &rspice_results::histogram::Histogram) -> String {
     if hist_axis(histogram).degenerate_at.is_some() {
         return "1 display bin · zero width, every sample at one value".to_owned();
     }
@@ -1191,10 +1191,10 @@ mod tests {
     fn zero_variation_histogram(
         value: f64,
         samples: usize,
-    ) -> crate::analysis::histogram::data::Histogram {
-        crate::analysis::histogram::data::Histogram {
+    ) -> rspice_results::histogram::Histogram {
+        rspice_results::histogram::Histogram {
             name: "V(out)".to_owned(),
-            bins: vec![crate::analysis::histogram::data::HistogramBin {
+            bins: vec![rspice_results::histogram::HistogramBin {
                 lower: value,
                 upper: value,
                 count: samples,
@@ -1279,13 +1279,13 @@ mod tests {
     fn an_ordinary_distribution_keeps_its_padded_data_window() {
         let mut histogram = zero_variation_histogram(0.0, 0);
         histogram.bins = vec![
-            crate::analysis::histogram::data::HistogramBin {
+            rspice_results::histogram::HistogramBin {
                 lower: 1.0,
                 upper: 2.0,
                 count: 3,
                 weight: 3.0,
             },
-            crate::analysis::histogram::data::HistogramBin {
+            rspice_results::histogram::HistogramBin {
                 lower: 2.0,
                 upper: 3.0,
                 count: 1,

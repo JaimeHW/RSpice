@@ -2319,7 +2319,7 @@ pub(crate) fn histogram_is_available(state: &AppState) -> bool {
 /// Shared bins for the sheet and exact CSV export.
 pub(crate) fn active_histogram(
     state: &AppState,
-) -> Option<std::sync::Arc<crate::analysis::histogram::data::Histogram>> {
+) -> Option<std::sync::Arc<rspice_results::histogram::Histogram>> {
     hist::active_histogram(state)
 }
 

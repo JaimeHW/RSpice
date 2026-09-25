@@ -11,6 +11,7 @@ pub mod dc_sweep;
 pub mod family_measurements;
 pub mod family_metadata;
 pub mod fft;
+pub mod histogram;
 pub mod interpolation;
 pub mod measurements;
 pub mod monte_carlo;
