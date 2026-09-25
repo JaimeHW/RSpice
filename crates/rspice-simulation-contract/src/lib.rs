@@ -31,4 +31,5 @@ pub mod saved_output;
 pub mod specification;
 pub mod spice_value;
 pub mod stb_draft;
+pub mod temp_draft;
 pub mod xf_draft;
