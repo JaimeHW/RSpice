@@ -19,6 +19,7 @@ pub mod op_draft;
 pub mod optimization_search;
 pub mod options;
 pub mod output_policy;
+pub mod pac_draft;
 pub mod periodic_carrier;
 pub mod plan_catalog;
 pub mod plan_dependency;
