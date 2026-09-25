@@ -1,51 +1,13 @@
 //! Complete QPNOISE specification and native-card interchange with legacy defaults.
 use super::types::AnalysisSpec;
 use crate::simulation::multi_run::FrequencySweep;
-use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearConfig;
 use rspice_core::engine::{
-    QpnoiseFrequencyAxis, QpnoiseInput, QpnoiseIntegration, QpnoiseIntegrationMethod,
-    QpnoiseLattices, QpnoiseNoiseFigure, QpnoiseObservation, QpnoiseOutput, QpnoiseRequest,
-    QpnoiseSources,
+    QpnoiseInput, QpnoiseIntegration, QpnoiseIntegrationMethod, QpnoiseLattices,
+    QpnoiseObservation, QpnoiseOutput, QpnoiseRequest,
 };
 use rspice_core::netlist::{FreqVariation, PeriodicSweep, QpacSweep, QpnoiseCard};
-use serde::{Deserialize, Serialize};
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct QpnoiseControls {
-    pub frequency_axis: QpnoiseFrequencyAxis,
-    pub explicit_frequencies: Option<Vec<f64>>,
-    pub input_referral: bool,
-    pub input_lattice: Vec<i32>,
-    pub output_lattice: Vec<i32>,
-    pub branch_current: Option<String>,
-    pub additional_outputs: Vec<QpnoiseOutput>,
-    /// None activates the legacy min/max bounds; Some selects any tone window.
-    pub noise_lattices: Option<QpnoiseLattices>,
-    pub sources: QpnoiseSources,
-    pub integration_band: Option<[f64; 2]>,
-    pub integration_method: QpnoiseIntegrationMethod,
-    pub noise_figure: Option<QpnoiseNoiseFigure>,
-    pub solver: QuasiPeriodicLinearConfig,
-}
-impl Default for QpnoiseControls {
-    fn default() -> Self {
-        Self {
-            frequency_axis: QpnoiseFrequencyAxis::Output,
-            explicit_frequencies: None,
-            input_referral: true,
-            input_lattice: vec![0, 0],
-            output_lattice: vec![0, 0],
-            branch_current: None,
-            additional_outputs: Vec::new(),
-            noise_lattices: None,
-            sources: QpnoiseSources::All,
-            integration_band: None,
-            integration_method: QpnoiseIntegrationMethod::Linear,
-            noise_figure: None,
-            solver: Default::default(),
-        }
-    }
-}
+pub use rspice_simulation_contract::quasi_periodic_controls::QpnoiseControls;
+
 impl AnalysisSpec {
     pub(crate) fn qpnoise_card(&self) -> Result<QpnoiseCard, String> {
         let Self::Qpnoise {

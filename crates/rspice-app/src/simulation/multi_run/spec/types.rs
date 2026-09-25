@@ -131,49 +131,7 @@ pub struct SpPort {
     pub z0: Option<f64>,
 }
 
-/// Harmonic balance tone request used by pipeline execution.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct HbToneSpec {
-    /// Tone frequency in Hz.
-    pub frequency: f64,
-    /// Number of harmonics requested for this tone.
-    pub harmonics: usize,
-    /// Optional independent source name this tone should drive.
-    pub source: Option<String>,
-    /// Optional label for display/debug.
-    pub name: Option<String>,
-}
-
-impl HbToneSpec {
-    pub fn new(frequency: f64, harmonics: usize) -> Self {
-        Self {
-            frequency,
-            harmonics,
-            source: None,
-            name: None,
-        }
-    }
-
-    pub fn with_source(mut self, source: impl Into<String>) -> Self {
-        let source = source.into();
-        self.source = if source.trim().is_empty() {
-            None
-        } else {
-            Some(source)
-        };
-        self
-    }
-
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        let name = name.into();
-        self.name = if name.trim().is_empty() {
-            None
-        } else {
-            Some(name)
-        };
-        self
-    }
-}
+pub use rspice_simulation_contract::quasi_periodic_controls::HbToneSpec;
 
 /// Strongly-typed analysis request used by queue execution.
 ///

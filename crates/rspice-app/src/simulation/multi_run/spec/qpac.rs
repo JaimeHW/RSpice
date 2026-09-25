@@ -1,31 +1,11 @@
 //! QPAC authoring, native-card interchange and active numerical controls.
 use super::types::AnalysisSpec;
 use crate::simulation::multi_run::FrequencySweep;
-use rspice_core::analysis::quasi_periodic::{QuasiPeriodicAcConfig, QuasiPeriodicLinearMethod};
+use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
 use rspice_core::engine::QpacRequest;
 use rspice_core::netlist::{FreqVariation, PeriodicSweep, QpacCard, QpacSweep};
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct QpacControls {
-    pub magnitude: f64,
-    pub phase_degrees: f64,
-    pub solver: QuasiPeriodicAcConfig,
-    /// Overrides generated-sweep settings; ordering is meaningful.
-    pub explicit_offsets: Option<Vec<f64>>,
-}
-
-impl Default for QpacControls {
-    fn default() -> Self {
-        Self {
-            magnitude: 1.0,
-            phase_degrees: 0.0,
-            solver: QuasiPeriodicAcConfig::default(),
-            explicit_offsets: None,
-        }
-    }
-}
+pub use rspice_simulation_contract::quasi_periodic_controls::QpacControls;
 
 impl AnalysisSpec {
     pub(crate) fn qpac_card(&self) -> Result<QpacCard, String> {

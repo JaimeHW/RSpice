@@ -1,7 +1,7 @@
 //! QPXF controls, legacy-compatible specifications and native-card interchange.
 use super::types::AnalysisSpec;
 use crate::simulation::multi_run::FrequencySweep;
-use rspice_core::analysis::quasi_periodic::{QuasiPeriodicLinearConfig, QuasiPeriodicLinearMethod};
+use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
 use rspice_core::engine::{
     QpxfFrequencyAxis, QpxfInputLattices, QpxfOutput, QpxfRequest, QpxfSources,
 };
@@ -9,35 +9,9 @@ use rspice_core::netlist::{
     FreqVariation, PeriodicSweep, QpacSweep, QpxfCard, QpxfCardLattices, QpxfCardOutput,
     QpxfCardSources,
 };
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct QpxfControls {
-    pub frequency_axis: QpxfFrequencyAxis,
-    pub explicit_frequencies: Option<Vec<f64>>,
-    /// None keeps the original single-source field active.
-    pub input_sources: Option<QpxfSources>,
-    /// None keeps the original single-input-tuple field active.
-    pub input_lattices: Option<QpxfInputLattices>,
-    /// Some selects a retained MNA branch current instead of node voltage.
-    pub branch_current: Option<String>,
-    pub solver: QuasiPeriodicLinearConfig,
-    pub group_delay_magnitude_floor: f64,
-}
-impl Default for QpxfControls {
-    fn default() -> Self {
-        Self {
-            frequency_axis: QpxfFrequencyAxis::Output,
-            explicit_frequencies: None,
-            input_sources: None,
-            input_lattices: None,
-            branch_current: None,
-            solver: Default::default(),
-            group_delay_magnitude_floor: 0.0,
-        }
-    }
-}
+pub use rspice_simulation_contract::quasi_periodic_controls::QpxfControls;
+
 impl AnalysisSpec {
     pub(crate) fn qpxf_card(&self) -> Result<QpxfCard, String> {
         let Self::Qpxf {
