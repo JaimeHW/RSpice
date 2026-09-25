@@ -5658,6 +5658,7 @@ dependencies = [
  "rspice-results",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]

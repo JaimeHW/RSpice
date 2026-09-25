@@ -17,3 +17,4 @@ rspice-results.workspace = true
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
+uuid.workspace = true

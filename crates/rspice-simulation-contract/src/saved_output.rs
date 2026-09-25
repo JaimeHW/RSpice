@@ -2,10 +2,8 @@
 //!
 //! A saved output names a signal, how precisely to keep it, whether it may
 //! stream, and what makes a retained result compatible with the request.
-//! It also owns the bounded-text, parameter-name and design-quantity
-//! validators that the rest of the project model reuses. These are project
-//! data with no dependency on `ProjectWorkspace` itself,
-//! so they live beside it rather than inside it.
+//! It also owns the bounded-text and parameter-name validators reused by
+//! authored plan records, independently of a live project workspace.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -13,11 +11,11 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
-use crate::analysis::calculator::{ast::CalculatorExpr, parser::Parser};
-use crate::product::{AnalysisInstanceId, ObjectRevision, SavedOutputId};
-use crate::state::ProbeTarget;
+use rspice_app_types::hierarchy_path::ProbeTarget;
+use rspice_app_types::product::{AnalysisInstanceId, ObjectRevision, SavedOutputId};
+use rspice_results::calculator::{ast::CalculatorExpr, parser::Parser};
 
-pub use rspice_simulation_contract::output_policy::OutputSelectionMode;
+pub use crate::output_policy::OutputSelectionMode;
 
 /// Authored authority for a saved output. Probe-owned rows remain in the plan
 /// so undo can restore their exact identity, but execution includes them only
@@ -287,7 +285,7 @@ impl SavedOutput {
         }
     }
 
-    pub(super) fn cloned_for_new_plan(
+    pub fn cloned_for_new_plan(
         &self,
         analysis_identity_map: &HashMap<AnalysisInstanceId, AnalysisInstanceId>,
     ) -> Result<Self, AnalysisInstanceId> {
@@ -375,11 +373,11 @@ impl<'de> Deserialize<'de> for SavedOutput {
 
 const MISSING_IDENTITY_SENTINEL: &str = "__rspice_missing_stable_identity__";
 
-pub(super) fn missing_identity_sentinel() -> serde_json::Value {
+pub fn missing_identity_sentinel() -> serde_json::Value {
     serde_json::Value::String(MISSING_IDENTITY_SENTINEL.to_owned())
 }
 
-pub(super) fn deserialize_or_migrate_identity<I, E>(
+pub fn deserialize_or_migrate_identity<I, E>(
     value: serde_json::Value,
     namespace: Uuid,
     identity: &[u8],
@@ -397,8 +395,6 @@ where
         serde_json::from_value(value).map_err(E::custom)
     }
 }
-
-pub(super) use rspice_simulation_contract::design_variable_quantity::parse_design_quantity;
 
 fn validate_saved_output_expression(kind: SavedOutputKind, expression: &str) -> Result<(), String> {
     let expression = expression.trim();
@@ -427,7 +423,7 @@ fn validate_saved_output_expression(kind: SavedOutputKind, expression: &str) -> 
 
 /// A shared reference grammar for preparation and persisted receipt validation.
 /// Keys preserve literal node punctuation and numeric spellings.
-pub(crate) fn saved_output_references(
+pub fn saved_output_references(
     kind: SavedOutputKind,
     expression: &str,
 ) -> Result<Option<BTreeSet<String>>, String> {
@@ -448,7 +444,7 @@ pub(crate) fn saved_output_references(
             }
         }
         SavedOutputKind::DerivedExpression => {
-            let parsed = Parser::new(expression)
+            let parsed = Parser::new(expression, crate::spice_value::parse_spice_value_checked)
                 .try_parse()
                 .map_err(|error| error.to_string())?;
             let mut pending = vec![&parsed];
@@ -476,7 +472,7 @@ pub(crate) fn saved_output_references(
 }
 
 fn parse_calculator_expression(expression: &str) -> Result<(), String> {
-    Parser::new(expression)
+    Parser::new(expression, crate::spice_value::parse_spice_value_checked)
         .try_parse()
         .map(|_| ())
         .map_err(|error| format!("expression is invalid: {error}"))
@@ -484,7 +480,7 @@ fn parse_calculator_expression(expression: &str) -> Result<(), String> {
 
 /// Quantity identity for a raw probe, including accepted function whitespace.
 /// This is a unit projection; argument validation remains in validate_raw_probe.
-pub(crate) fn raw_probe_unit(expression: &str) -> Option<&'static str> {
+pub fn raw_probe_unit(expression: &str) -> Option<&'static str> {
     if device_current_probe(expression).is_some() {
         return Some("A");
     }
@@ -496,7 +492,7 @@ pub(crate) fn raw_probe_unit(expression: &str) -> Option<&'static str> {
     }
 }
 
-pub(crate) fn validate_raw_probe(expression: &str) -> Result<(), String> {
+pub fn validate_raw_probe(expression: &str) -> Result<(), String> {
     let expression = expression.trim();
     if expression.starts_with('@') {
         return device_current_probe(expression).map(|_| ()).ok_or_else(|| {
@@ -527,7 +523,7 @@ pub(crate) fn validate_raw_probe(expression: &str) -> Result<(), String> {
 }
 
 /// A terminal-current trace, distinct from a scalar operating-point parameter.
-pub(crate) fn device_current_probe(expression: &str) -> Option<(&str, &str)> {
+pub fn device_current_probe(expression: &str) -> Option<(&str, &str)> {
     let body = expression.trim().strip_prefix('@')?;
     let (device, quantity) = body.strip_suffix(']')?.split_once('[')?;
     parse_probe_target(device).ok()?;
@@ -571,7 +567,7 @@ fn parse_probe_target(value: &str) -> Result<ProbeTarget, String> {
     ProbeTarget::parse_legacy(value).map_err(|error| error.to_string())
 }
 
-pub(super) fn validate_parameter_name(value: &str) -> Result<(), String> {
+pub fn validate_parameter_name(value: &str) -> Result<(), String> {
     if value.is_empty() {
         return Err("name is required".to_owned());
     }
@@ -593,7 +589,7 @@ pub(super) fn validate_parameter_name(value: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn validate_single_line_expression(label: &str, value: &str) -> Result<(), String> {
+pub fn validate_single_line_expression(label: &str, value: &str) -> Result<(), String> {
     validate_bounded_text(label, value, 8_192, false)?;
     if value
         .chars()
@@ -604,7 +600,7 @@ pub(super) fn validate_single_line_expression(label: &str, value: &str) -> Resul
     Ok(())
 }
 
-pub(super) fn validate_bounded_text(
+pub fn validate_bounded_text(
     label: &str,
     value: &str,
     maximum_bytes: usize,

@@ -25,7 +25,6 @@ mod project_descriptor;
 mod project_library_publication;
 mod reference_changes;
 mod reference_preparation;
-mod saved_output;
 
 // The two functions are renamed on export: bare `normalize` and
 // `collation_key` say nothing about what they normalize outside their module,
@@ -46,7 +45,7 @@ pub use project_descriptor::*;
 pub use project_library_publication::*;
 pub(crate) use reference_changes::{PreparedReferences, ReferenceChanges};
 pub(crate) use reference_preparation::{SchematicReferenceTransaction, reference_from_key};
-pub(crate) use saved_output::{
+pub(crate) use rspice_simulation_contract::saved_output::{
     device_current_probe, raw_probe_unit, saved_output_references, validate_raw_probe,
 };
 // The glob is crate-private: `materialize` is `pub(super)` throughout except
@@ -58,14 +57,15 @@ pub(crate) use materialize::{
     metadata_value, project_veriloga_binding_for_view, same_terminal_contract,
 };
 
-pub use saved_output::{
+use rspice_simulation_contract::design_variable_quantity::parse_design_quantity;
+pub use rspice_simulation_contract::saved_output::{
     ComplexExpressionPolicy, OutputSelectionMode, SavedOutput, SavedOutputCompatibility,
     SavedOutputDisplayIntent, SavedOutputKind, SavedOutputOrigin, SavedOutputPolicy,
     SavedOutputPrecision, SavedOutputStreaming,
 };
-use saved_output::{
-    deserialize_or_migrate_identity, missing_identity_sentinel, parse_design_quantity,
-    validate_bounded_text, validate_parameter_name, validate_single_line_expression,
+use rspice_simulation_contract::saved_output::{
+    deserialize_or_migrate_identity, missing_identity_sentinel, validate_bounded_text,
+    validate_parameter_name, validate_single_line_expression,
 };
 
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
