@@ -4,7 +4,7 @@ use super::*;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 
 #[test]
-fn study_execution_options_read_the_exact_authored_draft() {
+fn study_options_and_commands_read_the_exact_authored_draft() {
     use crate::services::simulation_runner::CornerBaseMode;
 
     let controller = SimulationController::new();
@@ -17,9 +17,17 @@ fn study_execution_options_read_the_exact_authored_draft() {
     let mut mc = state.sim_setup.mc.clone();
     mc.ensure_initialized();
     mc.histogram_bins = "31".into();
+    mc.num_runs = "17".into();
     state.sim_setup.mc.histogram_bins = "99".into();
+    state.sim_setup.mc.num_runs = "99".into();
     let draft = AnalysisDraft::MonteCarlo(mc);
     let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+    assert!(
+        controller
+            .analysis_spec_to_spice_line(&state, &draft, &spec)
+            .unwrap()
+            .starts_with(".mc 17 ")
+    );
     let options = controller
         .analysis_spec_execution_options(&state, &draft, &spec, &sealed)
         .unwrap();
@@ -31,6 +39,12 @@ fn study_execution_options_read_the_exact_authored_draft() {
     state.sim_setup.temp.specific_temps = "not a temperature".into();
     let draft = AnalysisDraft::Temperature(temp);
     let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+    assert_eq!(
+        controller
+            .analysis_spec_to_spice_line(&state, &draft, &spec)
+            .unwrap(),
+        ".step temp list 11 22"
+    );
     let options = controller
         .analysis_spec_execution_options(&state, &draft, &spec, &sealed)
         .unwrap();

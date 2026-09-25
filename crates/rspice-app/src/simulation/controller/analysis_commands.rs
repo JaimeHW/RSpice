@@ -7,6 +7,7 @@
 use super::*;
 
 use crate::services::simulation_runner::splice_before_terminal_end_card;
+use crate::simulation::plan::AnalysisDraft;
 
 impl SimulationController {
     /// The engine directive one draft emits, against an already-projected
@@ -30,7 +31,7 @@ impl SimulationController {
         draft: &crate::simulation::plan::AnalysisDraft,
     ) -> Result<String, String> {
         let spec = self.analysis_draft_spec(state, draft)?;
-        self.analysis_spec_to_spice_line(state, &spec)
+        self.analysis_spec_to_spice_line(state, draft, &spec)
     }
 
     /// The analysis specification one draft resolves to, against an
@@ -62,12 +63,28 @@ impl SimulationController {
     pub(super) fn analysis_spec_to_spice_line(
         &self,
         state: &AppState,
+        draft: &AnalysisDraft,
         spec: &AnalysisSpec,
     ) -> Result<String, String> {
         match spec {
-            AnalysisSpec::MonteCarlo { .. } => self.build_monte_carlo_command(state),
-            AnalysisSpec::Parametric => self.build_temperature_step_command(state),
-            AnalysisSpec::Corner => self.build_corner_temp_command(state),
+            AnalysisSpec::MonteCarlo { .. } => {
+                let AnalysisDraft::MonteCarlo(draft) = draft else {
+                    return Err("Monte Carlo specification requires its authored draft".into());
+                };
+                self.build_monte_carlo_command(draft)
+            }
+            AnalysisSpec::Parametric => {
+                let AnalysisDraft::Temperature(draft) = draft else {
+                    return Err("Temperature specification requires its authored draft".into());
+                };
+                self.build_temperature_step_command(state, draft)
+            }
+            AnalysisSpec::Corner => {
+                let AnalysisDraft::Corner(draft) = draft else {
+                    return Err("Corner specification requires its authored draft".into());
+                };
+                self.build_corner_temp_command(state, draft)
+            }
             AnalysisSpec::Pss { .. } => self.build_pss_command(state),
             AnalysisSpec::Stb { .. } => self.build_stb_command(state),
             AnalysisSpec::HarmonicBalance { .. } => self.build_harmonic_balance_command(state),
@@ -104,8 +121,11 @@ impl SimulationController {
         }
     }
 
-    pub(super) fn build_monte_carlo_command(&self, state: &AppState) -> Result<String, String> {
-        let mut mc_state = state.sim_setup.mc.clone();
+    pub(super) fn build_monte_carlo_command(
+        &self,
+        draft: &crate::simulation::dialog::mc::McDialogState,
+    ) -> Result<String, String> {
+        let mut mc_state = draft.clone();
         mc_state.ensure_initialized();
         let mc_cfg = mc_state
             .to_config()
@@ -162,9 +182,13 @@ impl SimulationController {
     pub(super) fn build_temperature_step_command(
         &self,
         state: &AppState,
+        draft: &crate::simulation::dialog::temp::TempDialogState,
     ) -> Result<String, String> {
-        let mut temp_state = state.sim_setup.temp.clone();
+        let mut temp_state = draft.clone();
         temp_state.ensure_initialized();
+        if temp_state.base_analysis.is_some() {
+            temp_state.base_idx = state.sim_setup.temp.base_idx;
+        }
         let temp_cfg = temp_state
             .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
             .map_err(|e| format!("invalid temperature sweep settings: {}", e))?;
@@ -187,9 +211,16 @@ impl SimulationController {
         }
     }
 
-    pub(super) fn build_corner_temp_command(&self, state: &AppState) -> Result<String, String> {
-        let mut corner_state = state.sim_setup.corner.clone();
+    pub(super) fn build_corner_temp_command(
+        &self,
+        state: &AppState,
+        draft: &crate::simulation::dialog::corner::CornerDialogState,
+    ) -> Result<String, String> {
+        let mut corner_state = draft.clone();
         corner_state.ensure_initialized();
+        if corner_state.base_analysis.is_some() {
+            corner_state.base_analysis_idx = state.sim_setup.corner.base_analysis_idx;
+        }
         let corner_cfg = crate::simulation::dialog::corner::to_config(
             &corner_state,
             &state.sim_setup.run_set,
@@ -713,7 +744,7 @@ mod tests {
             assert_eq!(restored.to_config().unwrap().first_trial, 37);
         }
         let command = SimulationController::new()
-            .build_monte_carlo_command(&state)
+            .build_monte_carlo_command(&state.sim_setup.mc)
             .unwrap();
         let parsed = rspice_core::Netlist::parse(&format!("range\n{command}\n.end\n")).unwrap();
         let rspice_core::netlist::AnalysisCommand::MonteCarlo(card) = &parsed.analyses[0] else {
@@ -739,7 +770,7 @@ mod tests {
             state.sim_setup.mc.ensure_initialized();
             state.sim_setup.mc.seed = seed.to_string();
             let command = SimulationController::default()
-                .build_monte_carlo_command(&state)
+                .build_monte_carlo_command(&state.sim_setup.mc)
                 .expect("all u64 seeds are authorable");
             let netlist =
                 rspice_core::netlist::Netlist::parse(&format!("MC seed\n{command}\n.end\n"))
@@ -771,7 +802,7 @@ mod tests {
                 ..Default::default()
             });
             let command = SimulationController::new()
-                .build_monte_carlo_command(&state)
+                .build_monte_carlo_command(&state.sim_setup.mc)
                 .unwrap();
             let parsed =
                 rspice_core::Netlist::parse(&format!("MC confidence\n{command}\n.end\n")).unwrap();
@@ -807,7 +838,7 @@ mod tests {
         state.sim_setup.mc.ensure_initialized();
         state.sim_setup.mc.variation_pct = "1.234567891234567".to_owned();
         let command = SimulationController::default()
-            .build_monte_carlo_command(&state)
+            .build_monte_carlo_command(&state.sim_setup.mc)
             .unwrap();
         let netlist =
             rspice_core::netlist::Netlist::parse(&format!("MC spread\n{command}\n.end\n")).unwrap();
@@ -829,7 +860,7 @@ mod tests {
         state.sim_setup.mc.variation_pct = "unfinished(".to_owned();
         state.sim_setup.mc.distribution_idx = usize::MAX;
         let command = SimulationController::default()
-            .build_monte_carlo_command(&state)
+            .build_monte_carlo_command(&state.sim_setup.mc)
             .unwrap();
         assert!(!command.contains("DIST"), "{command}");
         assert!(!command.contains("SPREAD"), "{command}");
@@ -839,7 +870,7 @@ mod tests {
         state.sim_setup.mc.variation_source_idx = 0;
         assert!(
             SimulationController::default()
-                .build_monte_carlo_command(&state)
+                .build_monte_carlo_command(&state.sim_setup.mc)
                 .is_err()
         );
     }

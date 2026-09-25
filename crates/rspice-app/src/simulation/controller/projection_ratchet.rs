@@ -233,7 +233,7 @@ fn projection(kind: AnalysisKind, draft: &AnalysisDraft) -> String {
         Err(error) => return format!("spec-error: {error}"),
     };
 
-    let command = controller.analysis_spec_to_spice_line(&state, &spec);
+    let command = controller.analysis_spec_to_spice_line(&state, draft, &spec);
     let options = with_sealed_process_library(|sealed| {
         controller.analysis_spec_execution_options(&state, draft, &spec, sealed)
     });

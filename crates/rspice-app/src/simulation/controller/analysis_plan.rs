@@ -138,13 +138,14 @@ impl SimulationController {
                     continue;
                 }
             };
-            let analysis_line = match self.analysis_spec_to_spice_line(&projected_state, &spec) {
-                Ok(line) => line,
-                Err(e) => {
-                    errors.push(format!("{}: {}", instance.display_name(), e));
-                    continue;
-                }
-            };
+            let analysis_line =
+                match self.analysis_spec_to_spice_line(&projected_state, instance.draft(), &spec) {
+                    Ok(line) => line,
+                    Err(e) => {
+                        errors.push(format!("{}: {}", instance.display_name(), e));
+                        continue;
+                    }
+                };
             let mut spec_options = match self.analysis_spec_execution_options(
                 &projected_state,
                 instance.draft(),
@@ -747,8 +748,11 @@ impl SimulationController {
                 Some(crate::simulation::runner::study::StudyPostprocess {
                     producer_instance_id: producer.id(),
                     producer_source_revision: plan.revision(),
-                    producer_analysis_line: self
-                        .analysis_spec_to_spice_line(&producer_state, &producer_spec)?,
+                    producer_analysis_line: self.analysis_spec_to_spice_line(
+                        &producer_state,
+                        producer.draft(),
+                        &producer_spec,
+                    )?,
                     producer_numeric_options: producer
                         .numeric_override()
                         .map(|options| options.to_spice_options())
@@ -779,7 +783,7 @@ impl SimulationController {
             instance_id: id,
             source_revision: plan.revision(),
             analysis,
-            analysis_line: self.analysis_spec_to_spice_line(&projected, &spec)?,
+            analysis_line: self.analysis_spec_to_spice_line(&projected, base.draft(), &spec)?,
             numeric_options: base
                 .numeric_override()
                 .map(|options| options.to_spice_options())
