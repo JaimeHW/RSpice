@@ -45,6 +45,7 @@ pub(crate) fn round_trip_response_for_test(result: SimulationResult) -> Simulati
 
 pub(crate) use analysis::*;
 pub(crate) use rspice_simulation_contract::worker_error::WorkerSimulationError;
+pub(crate) use rspice_simulation_contract::worker_measurement::WorkerMeasurement;
 pub(crate) use rspice_simulation_contract::worker_protocol::{
     WORKER_REQUEST_TRANSPORT_PROTOCOL, WORKER_RESPONSE_TRANSPORT_PROTOCOL,
 };
