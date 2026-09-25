@@ -43,6 +43,7 @@ pub mod run_set;
 pub mod saved_output;
 pub mod sens_draft;
 pub mod soa_observation;
+pub mod soa_rule;
 pub mod sp_config;
 pub mod specification;
 pub mod spice_value;
