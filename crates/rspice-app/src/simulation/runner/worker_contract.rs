@@ -44,7 +44,9 @@ pub(crate) fn round_trip_response_for_test(result: SimulationResult) -> Simulati
 }
 
 pub(crate) use analysis::*;
-pub(crate) use rspice_simulation_contract::worker_spec::{WorkerAnalysisSpec, WorkerSweepType};
+pub(crate) use rspice_simulation_contract::worker_spec::{
+    WorkerAnalysisConfig, WorkerAnalysisSpec, WorkerSweepType,
+};
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -58,13 +60,9 @@ use super::{
 use crate::results::safety::{
     SoAEvaluation, SoAParameter, SoARuleVerdict, SoAViolation, ViolationSeverity,
 };
+use crate::simulation::config::AnalysisConfig;
 #[cfg(test)]
-use crate::simulation::config::NoiseSweepType;
-use crate::simulation::config::{
-    AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig,
-    NoiseContributionDetail, NoiseIntegrationMode, PoleZeroConfig, PzAnalysisType,
-    SensitivityConfig, SensitivitySweep, TransientAnalysisConfig,
-};
+use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
 use crate::simulation::multi_run::{AnalysisSpec, TfAccuracy, TfNormalization};
 
 use crate::simulation::results::{
@@ -372,14 +370,6 @@ pub(crate) enum WorkerSimulationRequest {
         spec: Box<WorkerAnalysisSpec>,
         options: Box<WorkerSpecExecutionOptions>,
     },
-}
-
-/// The reference temperature a noise request defaults to.
-///
-/// Named by a `serde(default)` in two modules — the specification enum and
-/// the noise run configuration — so it stays where both can see it.
-const fn worker_default_noise_temperature() -> f64 {
-    rspice_core::constants::TEMP_REFERENCE
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
