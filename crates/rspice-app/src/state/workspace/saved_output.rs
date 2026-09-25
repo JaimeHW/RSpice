@@ -13,8 +13,6 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
-use super::DesignVariableQuantity;
-
 use crate::analysis::calculator::{ast::CalculatorExpr, parser::Parser};
 use crate::product::{AnalysisInstanceId, ObjectRevision, SavedOutputId};
 use crate::state::ProbeTarget;
@@ -400,75 +398,7 @@ where
     }
 }
 
-pub(super) fn parse_design_quantity(
-    expression: &str,
-    quantity: DesignVariableQuantity,
-) -> Result<f64, String> {
-    use crate::quantity::{
-        QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
-    };
-
-    let text = expression.trim();
-    let (numeric, kind) = match quantity {
-        DesignVariableQuantity::Resistance => (
-            strip_required_unit(text, &["ohm", "Ω"])
-                .ok_or_else(|| "explicit resistance unit required (ohm or Ω)".to_owned())?,
-            QuantityInputKind::EngineeringScalar,
-        ),
-        DesignVariableQuantity::Capacitance => (
-            text.strip_suffix('F')
-                .ok_or_else(|| "explicit capacitance unit required (F)".to_owned())?,
-            QuantityInputKind::EngineeringScalar,
-        ),
-        DesignVariableQuantity::Voltage => (
-            text.strip_suffix('V')
-                .ok_or_else(|| "explicit voltage unit required (V)".to_owned())?,
-            QuantityInputKind::EngineeringScalar,
-        ),
-        DesignVariableQuantity::Current => (
-            text.strip_suffix('A')
-                .ok_or_else(|| "explicit current unit required (A)".to_owned())?,
-            QuantityInputKind::EngineeringScalar,
-        ),
-        DesignVariableQuantity::Temperature => (text, QuantityInputKind::Temperature),
-        DesignVariableQuantity::Dimensionless => (text, QuantityInputKind::EngineeringScalar),
-    };
-    let numeric = if quantity == DesignVariableQuantity::Dimensionless
-        || quantity == DesignVariableQuantity::Temperature
-    {
-        numeric.trim().to_owned()
-    } else {
-        normalize_explicit_unit_scalar(numeric.trim())
-    };
-    parse_ui_quantity(
-        &numeric,
-        kind,
-        QuantityPresentationPolicy::default(),
-        UiNumberLocale::default(),
-    )
-    .map_err(|error| error.to_string())
-}
-
-fn normalize_explicit_unit_scalar(value: &str) -> String {
-    if let Some(prefix) = value.strip_suffix('M') {
-        format!("{}Meg", prefix.trim_end())
-    } else {
-        value.to_owned()
-    }
-}
-
-fn strip_required_unit<'a>(value: &'a str, units: &[&str]) -> Option<&'a str> {
-    units.iter().find_map(|unit| {
-        if unit.is_ascii() {
-            value
-                .get(value.len().saturating_sub(unit.len())..)
-                .filter(|suffix| suffix.eq_ignore_ascii_case(unit))
-                .map(|_| &value[..value.len() - unit.len()])
-        } else {
-            value.strip_suffix(unit)
-        }
-    })
-}
+pub(super) use rspice_simulation_contract::design_variable_quantity::parse_design_quantity;
 
 fn validate_saved_output_expression(kind: SavedOutputKind, expression: &str) -> Result<(), String> {
     let expression = expression.trim();

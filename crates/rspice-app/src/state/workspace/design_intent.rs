@@ -722,41 +722,7 @@ impl SpecEntry {
     }
 }
 
-/// Physical quantity carried by a design variable. The quantity is retained
-/// independently from the expression so editors can validate units without
-/// coercing the user's exact engineering input.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DesignVariableQuantity {
-    Resistance,
-    Capacitance,
-    Voltage,
-    Current,
-    Temperature,
-    Dimensionless,
-}
-
-impl DesignVariableQuantity {
-    pub const ALL: [Self; 6] = [
-        Self::Resistance,
-        Self::Capacitance,
-        Self::Voltage,
-        Self::Current,
-        Self::Temperature,
-        Self::Dimensionless,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Resistance => "Resistance",
-            Self::Capacitance => "Capacitance",
-            Self::Voltage => "Voltage",
-            Self::Current => "Current",
-            Self::Temperature => "Temperature",
-            Self::Dimensionless => "Dimensionless",
-        }
-    }
-}
+pub use rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity;
 
 /// Exact ownership boundary for a design variable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
