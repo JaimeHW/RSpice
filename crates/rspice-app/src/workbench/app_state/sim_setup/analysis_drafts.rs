@@ -10,9 +10,11 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::product::{AnalysisInstanceId, ObjectRevision, ProjectId, SimulationPlanId};
-use crate::simulation::plan::{
-    AnalysisDependency, AnalysisDraft, AnalysisInstance, AnalysisKind, DistoDraft, NoiseDraft,
-    SimulationPlan,
+use rspice_simulation_contract::analysis_draft::AnalysisDraft;
+use rspice_simulation_contract::analysis_kind::AnalysisKind;
+use rspice_simulation_contract::drafts::{DistoDraft, NoiseDraft};
+use rspice_simulation_contract::plan_model::{
+    AnalysisDependency, AnalysisInstance, SimulationPlan,
 };
 
 use crate::workbench::app_state::{NoiseSetup, SimSetupState};

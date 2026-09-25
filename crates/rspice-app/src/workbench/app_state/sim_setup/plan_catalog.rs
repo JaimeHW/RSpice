@@ -14,12 +14,12 @@ pub use rspice_simulation_contract::plan_catalog::{
     SimulationPlanCloneOptions, SimulationPlanCloneOutcome, SimulationPlanLineage,
     SimulationPlanName,
 };
+use rspice_simulation_contract::plan_model::{AnalysisPlanError, SimulationPlan};
 use rspice_simulation_contract::run_set::RunSetState;
 use serde::{Deserialize, Serialize};
 
 use crate::product::{ObjectRevision, SimulationPlanId};
 use crate::simulation::dialog::SimulationOptions;
-use crate::simulation::plan::{AnalysisPlanError, SimulationPlan};
 
 use crate::workbench::app_state::{ReferencePvtPoint, SimSetupState};
 

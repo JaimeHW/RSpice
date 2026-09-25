@@ -12,6 +12,7 @@ pub(in crate::workbench) mod plan_catalog;
 
 use std::collections::HashSet;
 
+use rspice_simulation_contract::plan_model::SimulationPlan;
 use rspice_simulation_contract::run_set::{ReferencePoint, RunSetDimensionKind, RunSetState};
 
 /// The nominal/reference operating point selected in the workbench chrome.
@@ -103,7 +104,7 @@ pub struct SimSetupState {
     /// while reading schema-3 projects/sessions and must be deterministically
     /// migrated before validation, editing, or execution.
     #[serde(default)]
-    pub analysis_plan: Option<crate::simulation::plan::SimulationPlan>,
+    pub analysis_plan: Option<SimulationPlan>,
     /// Enabled analysis indices.
     #[serde(
         default,
