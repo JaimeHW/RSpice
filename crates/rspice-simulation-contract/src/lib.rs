@@ -5,6 +5,7 @@ pub mod analysis_kind;
 pub mod analysis_lifecycle;
 pub mod analysis_run_at;
 pub mod analysis_tag;
+pub mod capture_group;
 pub mod config;
 pub mod dependency_contract;
 pub mod design_variable;
