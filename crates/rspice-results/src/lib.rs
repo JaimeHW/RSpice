@@ -15,6 +15,7 @@ pub mod measurements;
 pub mod monte_carlo;
 pub mod operating_point;
 pub mod optimization;
+pub mod provenance;
 pub mod report_document;
 pub mod result_import;
 pub mod safety;
