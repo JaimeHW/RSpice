@@ -53,7 +53,7 @@ impl SimSetupState {
     /// project keeps running the space it was saved with. Where both declare a
     /// space and they differ, the plan-global one wins — it is the one the Run
     /// Set page edits and every other analysis already crosses — and the
-    /// declaration that lost is written to [`SimSetupState::legacy_run_set_notes`]
+    /// declaration that lost is written to [`SimSetupState::session`]
     /// rather than vanishing.
     fn adopt_legacy_corner_run_sets(&mut self) {
         let mut notes = Vec::new();

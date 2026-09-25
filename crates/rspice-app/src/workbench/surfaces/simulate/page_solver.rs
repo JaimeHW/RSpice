@@ -7,7 +7,7 @@
 //! of the value each analysis actually resolves to.
 //!
 //! This page is the only editor of the plan's engine options. Its cards edit
-//! [`SimSetupState::options_draft`] and are applied through the
+//! the `options_draft` in [`SimSetupState::session`] and are applied through the
 //! plan-configuration transaction, so a numerical change produces a
 //! configuration receipt and invalidates preflight.
 //! Every field reaches the engine through one channel and only one: the
