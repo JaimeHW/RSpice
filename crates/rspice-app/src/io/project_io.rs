@@ -647,7 +647,7 @@ impl ProjectFile {
                             .inactive_plans()
                             .iter()
                             .find(|plan| plan.id() == plan_id)
-                            .map(crate::workbench::app_state::StoredSimulationPlan::analysis_plan)
+                            .map(rspice_simulation_contract::plan_catalog::StoredSimulationPlan::analysis_plan)
                     })
             })
         };

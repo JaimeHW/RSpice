@@ -1,5 +1,9 @@
 //! Persisted names and clone lineage for the simulation-plan catalog.
 
+mod record;
+
+pub use record::{SimulationPlanImportDocument, StoredSimulationPlan, validate_model_binding_list};
+
 use std::fmt;
 
 use rspice_app_types::product::{AnalysisInstanceId, ObjectRevision, SimulationPlanId};

@@ -5656,6 +5656,7 @@ dependencies = [
  "rspice-app-types",
  "rspice-core",
  "rspice-design-model",
+ "rspice-model-library",
  "rspice-results",
  "serde",
  "serde_json",

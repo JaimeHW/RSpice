@@ -9,119 +9,19 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use rspice_simulation_contract::plan_catalog::SimulationPlanNameError;
+use crate::product::SimulationPlanId;
+use crate::simulation::dialog::SimulationOptions;
 pub use rspice_simulation_contract::plan_catalog::{
-    SimulationPlanCloneOptions, SimulationPlanCloneOutcome, SimulationPlanLineage,
-    SimulationPlanName,
+    SimulationPlanCloneOptions, SimulationPlanCloneOutcome, SimulationPlanImportDocument,
+    SimulationPlanLineage, SimulationPlanName, StoredSimulationPlan,
+};
+use rspice_simulation_contract::plan_catalog::{
+    SimulationPlanNameError, validate_model_binding_list,
 };
 use rspice_simulation_contract::plan_model::{AnalysisPlanError, SimulationPlan};
 use rspice_simulation_contract::run_set::RunSetState;
-use serde::{Deserialize, Serialize};
-
-use crate::product::{ObjectRevision, SimulationPlanId};
-use crate::simulation::dialog::SimulationOptions;
 
 use crate::workbench::app_state::{ReferencePvtPoint, SimSetupState};
-
-/// Complete persisted state for an inactive named plan.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StoredSimulationPlan {
-    name: SimulationPlanName,
-    lineage: SimulationPlanLineage,
-    analysis_plan: SimulationPlan,
-    reference_pvt: ReferencePvtPoint,
-    /// Complete run-space declaration owned by this plan. Older inactive-plan
-    /// records did not persist one; migration restores a review-required
-    /// reference-only declaration rather than copying the active plan's axes.
-    #[serde(default = "legacy_inactive_run_set")]
-    run_set: RunSetState,
-    /// Ordered model closure and per-library nominal section owned by this
-    /// inactive plan.
-    #[serde(default)]
-    model_bindings: Vec<crate::state::model_library::SimulationPlanModelBinding>,
-    #[serde(default)]
-    save_policy: crate::workbench::app_state::SimulationSavePolicy,
-    /// Recoverable retirement state. Archived plans retain their complete
-    /// configuration and all result references.
-    #[serde(default)]
-    archived: bool,
-    options: SimulationOptions,
-}
-
-fn legacy_inactive_run_set() -> RunSetState {
-    RunSetState::reference_only()
-}
-
-impl StoredSimulationPlan {
-    #[must_use]
-    pub fn name(&self) -> &SimulationPlanName {
-        &self.name
-    }
-
-    #[must_use]
-    pub const fn id(&self) -> SimulationPlanId {
-        self.analysis_plan.id()
-    }
-
-    #[must_use]
-    pub const fn revision(&self) -> ObjectRevision {
-        self.analysis_plan.revision()
-    }
-
-    #[must_use]
-    pub const fn lineage(&self) -> SimulationPlanLineage {
-        self.lineage
-    }
-
-    #[must_use]
-    pub const fn analysis_plan(&self) -> &SimulationPlan {
-        &self.analysis_plan
-    }
-
-    /// The corner and temperature this plan resolves an undeclared axis to.
-    ///
-    /// Every stored plan carries one, so a catalog projection that could not
-    /// read it reported the corner as unknown for every inactive plan — a fact
-    /// the record holds, rendered as though it did not exist.
-    #[must_use]
-    pub const fn reference_pvt(&self) -> ReferencePvtPoint {
-        self.reference_pvt
-    }
-
-    #[must_use]
-    pub const fn run_set(&self) -> &RunSetState {
-        &self.run_set
-    }
-
-    #[must_use]
-    pub fn model_bindings(&self) -> &[crate::state::model_library::SimulationPlanModelBinding] {
-        &self.model_bindings
-    }
-
-    #[must_use]
-    pub const fn archived(&self) -> bool {
-        self.archived
-    }
-}
-
-/// Portable, payload-independent simulation-plan document. The workspace
-/// payload travels beside this record so import can remap every analysis
-/// reference to the fresh destination identities.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SimulationPlanImportDocument {
-    pub source_plan_id: SimulationPlanId,
-    pub source_revision: ObjectRevision,
-    pub name: SimulationPlanName,
-    pub analysis_plan: SimulationPlan,
-    pub reference_pvt: ReferencePvtPoint,
-    pub run_set: RunSetState,
-    pub model_bindings: Vec<crate::state::model_library::SimulationPlanModelBinding>,
-    #[serde(default)]
-    pub save_policy: crate::workbench::app_state::SimulationSavePolicy,
-    pub options: SimulationOptions,
-}
 
 /// Atomic named-plan catalog operation failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -255,17 +155,7 @@ impl SimSetupState {
             .iter()
             .find(|plan| plan.id() == id)
             .ok_or(SimulationPlanCatalogError::PlanNotFound(id))?;
-        Ok(SimulationPlanImportDocument {
-            source_plan_id: stored.id(),
-            source_revision: stored.revision(),
-            name: stored.name.clone(),
-            analysis_plan: stored.analysis_plan.clone(),
-            reference_pvt: stored.reference_pvt,
-            run_set: stored.run_set.clone(),
-            model_bindings: stored.model_bindings.clone(),
-            save_policy: stored.save_policy,
-            options: stored.options.clone(),
-        })
+        Ok(stored.to_document())
     }
 
     /// Create and activate a fresh root plan while retaining the current plan
@@ -286,20 +176,8 @@ impl SimSetupState {
         }
 
         let mut candidate = self.clone();
-        candidate.inactive_plans.push(StoredSimulationPlan {
-            name: candidate.active_plan_name.clone(),
-            lineage: candidate.active_plan_lineage,
-            analysis_plan: candidate
-                .analysis_plan
-                .take()
-                .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?,
-            reference_pvt: candidate.reference_pvt,
-            run_set: candidate.run_set.clone(),
-            model_bindings: candidate.model_bindings.clone(),
-            save_policy: candidate.save_policy,
-            archived: false,
-            options: candidate.options.clone(),
-        });
+        let stored = take_active_plan_for_storage(&mut candidate)?;
+        candidate.inactive_plans.push(stored);
         let plan = SimulationPlan::new();
         let id = plan.id();
         candidate.active_plan_name = name;
@@ -343,10 +221,10 @@ impl SimSetupState {
             .iter_mut()
             .find(|plan| plan.id() == id)
             .ok_or(SimulationPlanCatalogError::PlanNotFound(id))?;
-        if plan.analysis_plan.has_executing_instances() {
+        if plan.analysis_plan().has_executing_instances() {
             return Err(SimulationPlanCatalogError::PlanExecuting(id));
         }
-        plan.name = name;
+        plan.rename(name);
         Ok(())
     }
 
@@ -365,13 +243,13 @@ impl SimSetupState {
             .iter_mut()
             .find(|plan| plan.id() == id)
             .ok_or(SimulationPlanCatalogError::PlanNotFound(id))?;
-        if plan.archived {
+        if plan.archived() {
             return Err(SimulationPlanCatalogError::PlanAlreadyArchived(id));
         }
-        if plan.analysis_plan.has_executing_instances() {
+        if plan.analysis_plan().has_executing_instances() {
             return Err(SimulationPlanCatalogError::PlanExecuting(id));
         }
-        plan.archived = true;
+        plan.set_archived(true);
         Ok(())
     }
 
@@ -383,10 +261,10 @@ impl SimSetupState {
             .iter_mut()
             .find(|plan| plan.id() == id)
             .ok_or(SimulationPlanCatalogError::PlanNotFound(id))?;
-        if !plan.archived {
+        if !plan.archived() {
             return Err(SimulationPlanCatalogError::PlanNotArchived(id));
         }
-        plan.archived = false;
+        plan.set_archived(false);
         Ok(())
     }
 
@@ -421,20 +299,8 @@ impl SimSetupState {
         let imported_id = imported.id();
 
         let mut candidate = self.clone();
-        candidate.inactive_plans.push(StoredSimulationPlan {
-            name: candidate.active_plan_name.clone(),
-            lineage: candidate.active_plan_lineage,
-            analysis_plan: candidate
-                .analysis_plan
-                .take()
-                .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?,
-            reference_pvt: candidate.reference_pvt,
-            run_set: candidate.run_set.clone(),
-            model_bindings: candidate.model_bindings.clone(),
-            save_policy: candidate.save_policy,
-            archived: false,
-            options: candidate.options.clone(),
-        });
+        let stored = take_active_plan_for_storage(&mut candidate)?;
+        candidate.inactive_plans.push(stored);
         candidate.active_plan_name = document.name;
         candidate.active_plan_lineage = SimulationPlanLineage::cloned_from_with_contents(
             document.source_plan_id,
@@ -535,21 +401,8 @@ impl SimSetupState {
         cloned_options.temp = cloned_reference_pvt.temperature_celsius;
 
         let mut candidate = self.clone();
-        let source_plan = candidate
-            .analysis_plan
-            .take()
-            .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?;
-        candidate.inactive_plans.push(StoredSimulationPlan {
-            name: candidate.active_plan_name.clone(),
-            lineage: candidate.active_plan_lineage,
-            analysis_plan: source_plan,
-            reference_pvt: candidate.reference_pvt,
-            run_set: candidate.run_set.clone(),
-            model_bindings: candidate.model_bindings.clone(),
-            save_policy: candidate.save_policy,
-            archived: false,
-            options: candidate.options.clone(),
-        });
+        let stored = take_active_plan_for_storage(&mut candidate)?;
+        candidate.inactive_plans.push(stored);
         candidate.active_plan_name = new_name;
         candidate.active_plan_lineage = cloned_lineage;
         candidate.analysis_plan = Some(cloned_plan);
@@ -595,34 +448,22 @@ impl SimSetupState {
             .position(|plan| plan.id() == id)
             .ok_or(SimulationPlanCatalogError::PlanNotFound(id))?;
         if self.inactive_plans[index]
-            .analysis_plan
+            .analysis_plan()
             .has_executing_instances()
         {
             return Err(SimulationPlanCatalogError::PlanExecuting(id));
         }
-        if self.inactive_plans[index].archived {
+        if self.inactive_plans[index].archived() {
             return Err(SimulationPlanCatalogError::PlanArchived(id));
         }
 
         let mut candidate = self.clone();
         let target = candidate.inactive_plans.remove(index);
-        let current = StoredSimulationPlan {
-            name: candidate.active_plan_name.clone(),
-            lineage: candidate.active_plan_lineage,
-            analysis_plan: candidate
-                .analysis_plan
-                .take()
-                .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?,
-            reference_pvt: candidate.reference_pvt,
-            run_set: candidate.run_set.clone(),
-            model_bindings: candidate.model_bindings.clone(),
-            save_policy: candidate.save_policy,
-            archived: false,
-            options: candidate.options.clone(),
-        };
+        let current = take_active_plan_for_storage(&mut candidate)?;
         candidate.inactive_plans.insert(index, current);
+        candidate.active_plan_lineage = target.lineage();
+        let target = target.into_document();
         candidate.active_plan_name = target.name;
-        candidate.active_plan_lineage = target.lineage;
         candidate.analysis_plan = Some(target.analysis_plan);
         candidate.reference_pvt = target.reference_pvt;
         candidate.run_set = target.run_set;
@@ -680,9 +521,9 @@ impl SimSetupState {
             .map_err(SimulationPlanCatalogError::InvalidSavePolicy)?;
 
         for stored in &self.inactive_plans {
-            if !names.insert(stored.name.uniqueness_key()) {
+            if !names.insert(stored.name().uniqueness_key()) {
                 return Err(SimulationPlanCatalogError::DuplicateName(
-                    stored.name.to_string(),
+                    stored.name().to_string(),
                 ));
             }
             if !ids.insert(stored.id()) {
@@ -690,23 +531,23 @@ impl SimSetupState {
                     stored.id(),
                 ));
             }
-            if !stored.lineage.is_valid() {
+            if !stored.lineage().is_valid() {
                 return Err(SimulationPlanCatalogError::InvalidLineage(stored.id()));
             }
-            validate_model_binding_list(&stored.model_bindings)
+            validate_model_binding_list(stored.model_bindings())
                 .map_err(SimulationPlanCatalogError::InvalidModelBindings)?;
             stored
-                .save_policy
+                .save_policy()
                 .validate()
                 .map_err(SimulationPlanCatalogError::InvalidSavePolicy)?;
-            stored.analysis_plan.validate_structure()?;
+            stored.analysis_plan().validate_structure()?;
         }
         Ok(())
     }
 
     pub(crate) fn prepare_plan_catalog_after_restore(&mut self) {
         for plan in &mut self.inactive_plans {
-            plan.analysis_plan.prepare_after_restore();
+            plan.prepare_after_restore();
         }
     }
 
@@ -719,7 +560,7 @@ impl SimSetupState {
     ) {
         self.model_bindings = bindings.to_vec();
         for plan in &mut self.inactive_plans {
-            plan.model_bindings = bindings.to_vec();
+            plan.replace_model_bindings(bindings.to_vec());
         }
     }
 
@@ -745,7 +586,7 @@ impl SimSetupState {
         let inactive_conflicts = self
             .inactive_plans
             .iter()
-            .any(|plan| Some(plan.id()) != except_id && plan.name.uniqueness_key() == key);
+            .any(|plan| Some(plan.id()) != except_id && plan.name().uniqueness_key() == key);
         if active_conflicts || inactive_conflicts {
             Err(SimulationPlanCatalogError::DuplicateName(name.to_string()))
         } else {
@@ -763,32 +604,28 @@ impl SimSetupState {
     }
 }
 
-fn validate_model_binding_list(
-    bindings: &[crate::state::model_library::SimulationPlanModelBinding],
-) -> Result<(), String> {
-    let mut names = HashSet::with_capacity(bindings.len());
-    for binding in bindings {
-        let name = binding.library_name.as_str();
-        if name.is_empty() || name != name.trim() || name.chars().any(char::is_control) {
-            return Err(
-                "model binding library names must be nonempty, trimmed, and control-free"
-                    .to_owned(),
-            );
-        }
-        if !names.insert(name.to_ascii_lowercase()) {
-            return Err(format!("model library '{name}' is bound more than once"));
-        }
-        if let Some(section) = binding.selected_corner.as_deref()
-            && (section.is_empty()
-                || section != section.trim()
-                || section.chars().any(char::is_control))
-        {
-            return Err(format!(
-                "model binding '{name}' has an invalid corner section"
-            ));
-        }
-    }
-    Ok(())
+fn take_active_plan_for_storage(
+    setup: &mut SimSetupState,
+) -> Result<StoredSimulationPlan, SimulationPlanCatalogError> {
+    let plan = setup
+        .analysis_plan
+        .take()
+        .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?;
+    let document = SimulationPlanImportDocument {
+        source_plan_id: plan.id(),
+        source_revision: plan.revision(),
+        name: setup.active_plan_name.clone(),
+        analysis_plan: plan,
+        reference_pvt: setup.reference_pvt,
+        run_set: setup.run_set.clone(),
+        model_bindings: setup.model_bindings.clone(),
+        save_policy: setup.save_policy,
+        options: setup.options.clone(),
+    };
+    Ok(StoredSimulationPlan::from_document(
+        document,
+        setup.active_plan_lineage,
+    ))
 }
 
 #[cfg(test)]
@@ -970,7 +807,9 @@ mod tests {
             "the clone retains its independently edited model section"
         );
         assert_eq!(
-            setup.inactive_plans()[0].save_policy.retained_dataset_limit,
+            setup.inactive_plans()[0]
+                .save_policy()
+                .retained_dataset_limit,
             3
         );
     }

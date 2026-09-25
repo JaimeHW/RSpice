@@ -793,7 +793,7 @@ fn validate_simulation_plan(plan: &SimSetupState) -> Result<(), String> {
     let inactive_ids = plan
         .inactive_plans()
         .iter()
-        .map(crate::workbench::app_state::StoredSimulationPlan::id)
+        .map(rspice_simulation_contract::plan_catalog::StoredSimulationPlan::id)
         .collect::<Vec<_>>();
     for id in inactive_ids {
         let mut projection = plan.clone();

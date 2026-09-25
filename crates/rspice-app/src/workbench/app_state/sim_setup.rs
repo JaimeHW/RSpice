@@ -12,6 +12,7 @@ pub(in crate::workbench) mod plan_catalog;
 
 use std::collections::HashSet;
 
+use rspice_simulation_contract::plan_catalog::StoredSimulationPlan;
 use rspice_simulation_contract::plan_model::SimulationPlan;
 use rspice_simulation_contract::run_set::{ReferencePoint, RunSetDimensionKind, RunSetState};
 
@@ -99,7 +100,7 @@ pub struct SimSetupState {
     pub active_plan_lineage: crate::workbench::app_state::SimulationPlanLineage,
     /// Complete inactive plans retained in deterministic catalog order.
     #[serde(default)]
-    pub inactive_plans: Vec<crate::workbench::app_state::StoredSimulationPlan>,
+    pub inactive_plans: Vec<StoredSimulationPlan>,
     /// Stable, revisioned analysis-instance plan. `None` is accepted only
     /// while reading schema-3 projects/sessions and must be deterministically
     /// migrated before validation, editing, or execution.
