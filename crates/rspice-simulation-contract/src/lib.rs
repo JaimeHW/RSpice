@@ -72,4 +72,5 @@ pub mod worker_error;
 pub mod worker_protocol;
 pub mod worker_run_config;
 pub mod worker_spec;
+pub mod worker_transport;
 pub mod xf_draft;
