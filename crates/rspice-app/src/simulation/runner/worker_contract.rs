@@ -48,9 +48,13 @@ pub(crate) use rspice_simulation_contract::worker_error::WorkerSimulationError;
 pub(crate) use rspice_simulation_contract::worker_protocol::{
     WORKER_REQUEST_TRANSPORT_PROTOCOL, WORKER_RESPONSE_TRANSPORT_PROTOCOL,
 };
+#[cfg(test)]
 pub(crate) use rspice_simulation_contract::worker_result_values::{
-    WorkerPstbFloquetMode, WorkerPstbStabilityClassification, WorkerTransferFunctionQuantity,
-    WorkerTransferFunctionScalar,
+    WorkerDigitalEventPoint, WorkerRealEventPoint,
+};
+pub(crate) use rspice_simulation_contract::worker_result_values::{
+    WorkerDigitalEventTrace, WorkerPstbFloquetMode, WorkerPstbStabilityClassification,
+    WorkerRealEventTrace, WorkerTransferFunctionQuantity, WorkerTransferFunctionScalar,
 };
 pub(crate) use rspice_simulation_contract::worker_run_config::{
     WorkerCornerBaseMode, WorkerCornerModelBinding, WorkerCornerPoint, WorkerCornerProcess,
@@ -79,9 +83,8 @@ use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, N
 use crate::simulation::multi_run::{AnalysisSpec, TfAccuracy, TfNormalization};
 
 use crate::simulation::results::{
-    DcOpResult, DigitalEventPoint, EventNodeHistory, MonteCarloVariableResult, RealEventPoint,
-    SimulationResult, TransferFunctionQuantity, TransferFunctionScalar, TransientEventHistory,
-    WaveformData,
+    DcOpResult, MonteCarloVariableResult, SimulationResult, TransferFunctionQuantity,
+    TransferFunctionScalar, TransientEventHistory, WaveformData,
 };
 use crate::simulation::status::{SimulationProgress, SimulationStatus};
 use crate::state::{NoiseContributorRow, NoiseSummary};

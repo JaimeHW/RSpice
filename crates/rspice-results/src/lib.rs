@@ -30,4 +30,5 @@ pub mod validation;
 pub mod viewer_catalog;
 pub mod visualization_document;
 pub mod visualization_raster;
+pub mod waveform;
 pub mod yield_analysis;

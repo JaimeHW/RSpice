@@ -81,24 +81,4 @@ impl WaveformData {
             y_imag: Some(imag),
         }
     }
-
-    /// Create a complex-valued time-domain waveform, such as an I/Q carrier
-    /// envelope. Existing viewers can derive magnitude and phase without
-    /// discarding either component.
-    #[cfg(test)]
-    pub fn new_complex_time_domain(
-        name: impl Into<String>,
-        time: Vec<f64>,
-        real: Vec<f64>,
-        imag: Vec<f64>,
-    ) -> Self {
-        Self {
-            name: name.into(),
-            x_values: time,
-            y_values: real,
-            y_unit: "V".to_string(),
-            is_complex: true,
-            y_imag: Some(imag),
-        }
-    }
 }

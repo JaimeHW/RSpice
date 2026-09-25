@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use rspice_results::simulation_values::{
-    PstbFloquetMode, TransferFunctionQuantity, TransferFunctionScalar,
+    DigitalEventPoint, EventNodeHistory, PstbFloquetMode, RealEventPoint, TransferFunctionQuantity,
+    TransferFunctionScalar,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -135,6 +136,107 @@ impl From<WorkerTransferFunctionScalar> for TransferFunctionScalar {
             WorkerTransferFunctionScalar::Finite(value) => Self::Finite(value),
             WorkerTransferFunctionScalar::PositiveInfinity => Self::PositiveInfinity,
             WorkerTransferFunctionScalar::NegativeInfinity => Self::NegativeInfinity,
+        }
+    }
+}
+
+/// One committed digital event, as it crosses the worker edge.
+///
+/// Points are transported whole rather than as parallel time/value arrays:
+/// an event history is short enough that the buffer split buys nothing, and
+/// paired arrays can arrive with different lengths.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WorkerDigitalEventPoint {
+    pub time_s: f64,
+    pub value_code: u8,
+}
+
+impl From<DigitalEventPoint> for WorkerDigitalEventPoint {
+    fn from(value: DigitalEventPoint) -> Self {
+        Self {
+            time_s: value.time_s,
+            value_code: value.value_code,
+        }
+    }
+}
+
+impl From<WorkerDigitalEventPoint> for DigitalEventPoint {
+    fn from(value: WorkerDigitalEventPoint) -> Self {
+        Self {
+            time_s: value.time_s,
+            value_code: value.value_code,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WorkerRealEventPoint {
+    pub time_s: f64,
+    pub value: f64,
+}
+
+impl From<RealEventPoint> for WorkerRealEventPoint {
+    fn from(value: RealEventPoint) -> Self {
+        Self {
+            time_s: value.time_s,
+            value: value.value,
+        }
+    }
+}
+
+impl From<WorkerRealEventPoint> for RealEventPoint {
+    fn from(value: WorkerRealEventPoint) -> Self {
+        Self {
+            time_s: value.time_s,
+            value: value.value,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkerDigitalEventTrace {
+    pub node_name: String,
+    pub points: Vec<WorkerDigitalEventPoint>,
+}
+
+impl From<EventNodeHistory<DigitalEventPoint>> for WorkerDigitalEventTrace {
+    fn from(value: EventNodeHistory<DigitalEventPoint>) -> Self {
+        Self {
+            node_name: value.node_name,
+            points: value.points.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<WorkerDigitalEventTrace> for EventNodeHistory<DigitalEventPoint> {
+    fn from(value: WorkerDigitalEventTrace) -> Self {
+        Self {
+            node_name: value.node_name,
+            points: value.points.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkerRealEventTrace {
+    pub node_name: String,
+    pub points: Vec<WorkerRealEventPoint>,
+}
+
+impl From<EventNodeHistory<RealEventPoint>> for WorkerRealEventTrace {
+    fn from(value: EventNodeHistory<RealEventPoint>) -> Self {
+        Self {
+            node_name: value.node_name,
+            points: value.points.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<WorkerRealEventTrace> for EventNodeHistory<RealEventPoint> {
+    fn from(value: WorkerRealEventTrace) -> Self {
+        Self {
+            node_name: value.node_name,
+            points: value.points.into_iter().map(Into::into).collect(),
         }
     }
 }

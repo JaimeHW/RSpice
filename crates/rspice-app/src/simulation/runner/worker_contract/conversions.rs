@@ -645,35 +645,6 @@ impl From<WorkerViolationSeverity> for ViolationSeverity {
     }
 }
 
-/// One committed digital event, as it crosses the worker edge.
-///
-/// Points are transported whole rather than as parallel time/value arrays:
-/// an event history is short enough that the buffer split buys nothing, and
-/// paired arrays can arrive with different lengths.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub(crate) struct WorkerDigitalEventPoint {
-    pub time_s: f64,
-    pub value_code: u8,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub(crate) struct WorkerRealEventPoint {
-    pub time_s: f64,
-    pub value: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct WorkerDigitalEventTrace {
-    pub node_name: String,
-    pub points: Vec<WorkerDigitalEventPoint>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct WorkerRealEventTrace {
-    pub node_name: String,
-    pub points: Vec<WorkerRealEventPoint>,
-}
-
 /// One digital bus declared over the digital traces beside it, on the wire.
 ///
 /// The declaration crosses; the word does not. Reassembling a bus is
@@ -710,36 +681,8 @@ impl From<TransientEventHistory> for WorkerEventHistory {
     fn from(value: TransientEventHistory) -> Self {
         Self {
             current_impulses: value.current_impulses,
-            digital: value
-                .digital
-                .into_iter()
-                .map(|trace| WorkerDigitalEventTrace {
-                    node_name: trace.node_name,
-                    points: trace
-                        .points
-                        .into_iter()
-                        .map(|point| WorkerDigitalEventPoint {
-                            time_s: point.time_s,
-                            value_code: point.value_code,
-                        })
-                        .collect(),
-                })
-                .collect(),
-            real: value
-                .real
-                .into_iter()
-                .map(|trace| WorkerRealEventTrace {
-                    node_name: trace.node_name,
-                    points: trace
-                        .points
-                        .into_iter()
-                        .map(|point| WorkerRealEventPoint {
-                            time_s: point.time_s,
-                            value: point.value,
-                        })
-                        .collect(),
-                })
-                .collect(),
+            digital: value.digital.into_iter().map(Into::into).collect(),
+            real: value.real.into_iter().map(Into::into).collect(),
             buses: value
                 .digital_buses
                 .into_iter()
@@ -759,36 +702,8 @@ impl From<WorkerEventHistory> for TransientEventHistory {
     fn from(value: WorkerEventHistory) -> Self {
         Self {
             current_impulses: value.current_impulses,
-            digital: value
-                .digital
-                .into_iter()
-                .map(|trace| EventNodeHistory {
-                    node_name: trace.node_name,
-                    points: trace
-                        .points
-                        .into_iter()
-                        .map(|point| DigitalEventPoint {
-                            time_s: point.time_s,
-                            value_code: point.value_code,
-                        })
-                        .collect(),
-                })
-                .collect(),
-            real: value
-                .real
-                .into_iter()
-                .map(|trace| EventNodeHistory {
-                    node_name: trace.node_name,
-                    points: trace
-                        .points
-                        .into_iter()
-                        .map(|point| RealEventPoint {
-                            time_s: point.time_s,
-                            value: point.value,
-                        })
-                        .collect(),
-                })
-                .collect(),
+            digital: value.digital.into_iter().map(Into::into).collect(),
+            real: value.real.into_iter().map(Into::into).collect(),
             digital_buses: value
                 .buses
                 .into_iter()

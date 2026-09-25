@@ -2246,11 +2246,12 @@ mod waveform_unit_conversion_tests {
 
     #[test]
     fn a_complex_time_domain_waveform_retains_both_components_and_phase() {
-        let waveform = crate::simulation::results::WaveformData::new_complex_time_domain(
+        let waveform = crate::simulation::results::WaveformData::new_complex_in_unit(
             "V(env)",
             vec![0.0, 1.0],
             vec![3.0, 0.0],
             vec![4.0, 1.0],
+            "V",
         );
         let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
             crate::simulation::SimulationResult::Transient {
