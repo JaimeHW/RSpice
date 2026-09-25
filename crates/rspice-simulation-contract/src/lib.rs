@@ -20,6 +20,7 @@ pub mod mc_draft;
 pub mod mc_statistics;
 pub mod numeric_override;
 pub mod op_draft;
+pub mod optimization_draft;
 pub mod optimization_expression;
 pub mod optimization_search;
 pub mod options;
