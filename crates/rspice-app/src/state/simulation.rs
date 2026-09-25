@@ -12,11 +12,10 @@ mod analysis_result;
 mod convergence_attribution;
 mod convergence_quality;
 mod dc_mismatch;
-mod dc_sweep;
 pub(crate) use convergence_quality::ConvergenceEncoder;
 pub use dc_mismatch::{DcMismatchContributorEvidence, DcMismatchEvidence, DcMismatchScopeEvidence};
-pub(crate) use dc_sweep::DcTraceView;
-pub use dc_sweep::{
+pub(crate) use rspice_results::dc_sweep::DcTraceView;
+pub use rspice_results::dc_sweep::{
     DcCurveSelection, DcSweepDirection, DcSweepEvidence, DcSweepFamily, DcSweepQuantity,
 };
 mod cross_probe;

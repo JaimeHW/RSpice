@@ -100,7 +100,7 @@ pub enum DcCurveSelection {
 }
 
 /// Borrowed shape/quantity information at native, project, and worker boundaries.
-pub(crate) struct DcTraceView<'a> {
+pub struct DcTraceView<'a> {
     pub name: &'a str,
     pub unit: Option<&'a str>,
     pub x: &'a [f64],
@@ -109,7 +109,7 @@ pub(crate) struct DcTraceView<'a> {
 }
 
 impl DcSweepEvidence {
-    pub(crate) fn curve_indices(&self) -> impl Iterator<Item = DcCurveIndex> + '_ {
+    pub fn curve_indices(&self) -> impl Iterator<Item = DcCurveIndex> + '_ {
         let members = if matches!(self.selection, DcCurveSelection::All) {
             self.member_count()
         } else {
@@ -126,7 +126,7 @@ impl DcSweepEvidence {
             .chain(saved.iter().copied())
     }
 
-    pub(crate) fn retain_curves(&mut self, names: &HashSet<String>) {
+    pub fn retain_curves(&mut self, names: &HashSet<String>) {
         let retained = self
             .curve_indices()
             .filter(|curve| {
@@ -181,7 +181,7 @@ impl DcSweepEvidence {
         }
     }
 
-    pub(crate) fn validate_axis(&self, axis: &[f64]) -> Result<(), String> {
+    pub fn validate_axis(&self, axis: &[f64]) -> Result<(), String> {
         if self.direction == DcSweepDirection::AsAuthored {
             if axis.is_empty() || axis.iter().any(|value| !value.is_finite()) {
                 return Err("DC list coordinates must be finite and nonempty".into());
@@ -244,7 +244,7 @@ impl DcSweepEvidence {
         Ok(())
     }
 
-    pub(crate) fn validate_traces<'a>(
+    pub fn validate_traces<'a>(
         &self,
         primary_axis: &'a [f64],
         traces: impl IntoIterator<Item = DcTraceView<'a>>,
@@ -252,7 +252,7 @@ impl DcSweepEvidence {
         self.validate_trace_coverage(traces, Some(primary_axis))
     }
 
-    pub(crate) fn validate_retained_traces<'a>(
+    pub fn validate_retained_traces<'a>(
         &self,
         traces: impl IntoIterator<Item = DcTraceView<'a>>,
     ) -> Result<(), String> {
