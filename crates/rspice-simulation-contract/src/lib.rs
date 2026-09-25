@@ -28,6 +28,7 @@ pub mod plan_payload;
 pub mod progress;
 pub mod pss_draft;
 pub mod pstb_draft;
+pub mod pxf_draft;
 pub mod pz_draft;
 pub mod regression_policy;
 pub mod run_set;
