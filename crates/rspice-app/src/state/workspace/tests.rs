@@ -5,6 +5,7 @@
 //! mismatched slot rather than accepting stale evidence for it.
 
 use super::*;
+use crate::product::RunId;
 use crate::state::{AnalysisResultPvtPoint, AnalysisResultSourceDomain, Point, ProjectSourceRole};
 
 fn reference(cell: &str) -> CellViewRef {
