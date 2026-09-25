@@ -25,7 +25,9 @@ mod multirate;
 pub use multirate::EnvelopeMultirateConfig;
 mod reporting;
 mod trajectory;
-pub use initialization::{EnvelopeInitializationConfig, EnvelopeShootingIntegration};
+pub use initialization::EnvelopeInitializationConfig;
+#[cfg(test)]
+pub use initialization::EnvelopeShootingIntegration;
 use rspice_core::engine::Engine;
 use std::path::Path;
 use trajectory::EnvelopeTrajectory;

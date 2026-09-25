@@ -2,9 +2,9 @@
 
 #[cfg(test)]
 use rspice_core::analysis::{HbConfig, pss::PssConfig};
-pub use rspice_simulation_contract::envelope_initialization::{
-    EnvelopeInitializationConfig, EnvelopeShootingIntegration,
-};
+pub use rspice_simulation_contract::envelope_initialization::EnvelopeInitializationConfig;
+#[cfg(test)]
+pub use rspice_simulation_contract::envelope_initialization::EnvelopeShootingIntegration;
 
 #[cfg(test)]
 mod tests {

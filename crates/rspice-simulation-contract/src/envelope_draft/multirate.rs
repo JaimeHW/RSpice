@@ -1,7 +1,7 @@
 //! Editable multirate-envelope controls and their validated solver conversion.
 
 use super::*;
-use crate::services::simulation_runner::EnvelopeMultirateConfig;
+use crate::envelope_multirate::EnvelopeMultirateConfig;
 use rspice_core::analysis::quasi_periodic::{QuasiPeriodicLinearMethod, SpectralEnvelopeMethod};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -124,15 +124,17 @@ impl EnvelopeMultirateState {
             }
             text.split(',').map(|v| count(v, label)).collect()
         };
-        let mut c = EnvelopeMultirateConfig::default();
-        c.adaptive = self.adaptive;
-        c.method = if self.bdf2 {
-            SpectralEnvelopeMethod::Bdf2
-        } else {
-            SpectralEnvelopeMethod::BackwardEuler
+        let mut c = EnvelopeMultirateConfig {
+            adaptive: self.adaptive,
+            method: if self.bdf2 {
+                SpectralEnvelopeMethod::Bdf2
+            } else {
+                SpectralEnvelopeMethod::BackwardEuler
+            },
+            maximum_step: optional(&self.maximum_step, "maximum step")?,
+            maximum_steps: count(&self.maximum_steps, "step limit")?,
+            ..Default::default()
         };
-        c.maximum_step = optional(&self.maximum_step, "maximum step")?;
-        c.maximum_steps = count(&self.maximum_steps, "step limit")?;
         if self.adaptive {
             c.minimum_step = number(&self.minimum_step, "minimum step")?;
             c.relative_tolerance = number(&self.relative_tolerance, "relative error tolerance")?;

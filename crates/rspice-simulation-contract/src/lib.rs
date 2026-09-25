@@ -13,6 +13,7 @@ pub mod dependency_contract;
 pub mod design_variable;
 pub mod design_variable_quantity;
 pub mod drafts;
+pub mod envelope_draft;
 pub mod envelope_initialization;
 pub mod envelope_multirate;
 pub mod envelope_policy;

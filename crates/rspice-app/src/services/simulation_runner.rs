@@ -50,11 +50,12 @@ pub use disto::{
     DistoFrequencySweep, DistoRunConfig, run_disto_analysis_with_source_path_and_abort,
 };
 #[cfg(test)]
+pub use envelope_fourier::EnvelopeShootingIntegration;
+#[cfg(test)]
 pub(crate) use envelope_fourier::run_fourier_from_signal_with_abort;
 pub use envelope_fourier::{
-    EnvelopeInitializationConfig, EnvelopeMultirateConfig, EnvelopeRunConfig,
-    EnvelopeShootingIntegration, FourierData, FourierRunConfig,
-    run_envelope_analysis_with_source_path_and_abort,
+    EnvelopeInitializationConfig, EnvelopeMultirateConfig, EnvelopeRunConfig, FourierData,
+    FourierRunConfig, run_envelope_analysis_with_source_path_and_abort,
 };
 pub(crate) use envelope_fourier::{
     fourier_output_is_current, run_fourier_from_observation_with_abort, split_fourier_output,
