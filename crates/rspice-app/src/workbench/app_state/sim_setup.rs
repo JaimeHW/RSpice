@@ -10,6 +10,8 @@
 pub(in crate::workbench) mod analysis_drafts;
 pub(in crate::workbench) mod plan_catalog;
 
+use std::collections::HashSet;
+
 pub use rspice_simulation_contract::legacy_plan_migration::NoiseSetup;
 use rspice_simulation_contract::legacy_plan_migration::default_global_run_set;
 use rspice_simulation_contract::run_set::{ReferencePoint, RunSetDimensionKind};
@@ -45,6 +47,63 @@ pub struct SimSetupEditorSession {
 #[derive(Debug, Clone, Default)]
 pub struct SimSetupState {
     document: rspice_simulation_contract::setup_document::SimulationSetupDocument,
+    /// Enabled analysis indices.
+    pub enabled: HashSet<usize>,
+    /// Stable execution order. Enabled analyses absent from this vector are
+    /// appended deterministically; disabled entries are ignored and removed
+    /// from the persisted normalized plan.
+    pub analysis_order: Vec<usize>,
+    /// Transient sweep.
+    pub tran: TranSetup,
+    /// AC sweep.
+    pub ac: AcSetup,
+    /// DISTO secondary tone ratio f2/f1 (empty = single-tone HD).
+    pub disto_f2_over_f1: String,
+    /// DC transfer sweep.
+    pub dc: DcSetup,
+    /// Noise analysis.
+    pub noise: NoiseSetup,
+    /// DC operating point.
+    pub op: rspice_simulation_contract::op_draft::OpDialogState,
+    /// Pole-zero extraction.
+    pub pz: rspice_simulation_contract::pz_draft::PzDialogState,
+    /// Sensitivity.
+    pub sens: rspice_simulation_contract::sens_draft::SensDialogState,
+    /// Monte Carlo.
+    pub mc: rspice_simulation_contract::mc_draft::McDialogState,
+    /// Periodic steady state.
+    pub pss: rspice_simulation_contract::pss_draft::PssDialogState,
+    /// Loop stability.
+    pub stb: rspice_simulation_contract::stb_draft::StbDialogState,
+    /// Temperature sweep.
+    pub temp: rspice_simulation_contract::temp_draft::TempDialogState,
+    /// Harmonic balance.
+    pub hb: rspice_simulation_contract::hb_draft::HbDialogState,
+    /// S-parameters.
+    pub sp: rspice_simulation_contract::sp_draft::SpDialogState,
+    /// Periodic AC.
+    pub pac: rspice_simulation_contract::pac_draft::PacDialogState,
+    /// Periodic noise.
+    pub pnoise: rspice_simulation_contract::pnoise_draft::PnoiseDialogState,
+    /// Periodic transfer.
+    pub pxf: rspice_simulation_contract::pxf_draft::PxfDialogState,
+    /// Periodic stability.
+    pub pstb: rspice_simulation_contract::pstb_draft::PstbDialogState,
+    /// Transfer function.
+    pub xf: rspice_simulation_contract::xf_draft::XfDialogState,
+    /// Process corners.
+    pub corner: rspice_simulation_contract::corner_draft::CornerDialogState,
+    /// Envelope transient.
+    pub envelope: rspice_simulation_contract::envelope_draft::EnvelopeDialogState,
+    /// Fourier.
+    pub fourier: rspice_simulation_contract::fourier_draft::FourierDialogState,
+    /// Optimization.
+    pub optimization: rspice_simulation_contract::optimization_draft::OptimizationDialogState,
+    /// Safe operating area.
+    pub soa: rspice_simulation_contract::soa_draft::SoaDialogState,
+    /// Analyses listed in the run-set card beyond the always-listed core —
+    /// exotics stay listed (dimmed) when unticked, until removed.
+    pub listed: HashSet<usize>,
     pub session: SimSetupEditorSession,
 }
 
@@ -70,8 +129,84 @@ impl serde::Serialize for SimSetupState {
 
 impl<'de> serde::Deserialize<'de> for SimSetupState {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let read = <rspice_simulation_contract::setup_document::legacy_read::LegacySimulationSetupRead as serde::Deserialize>::deserialize(deserializer)?;
+        let rspice_simulation_contract::setup_document::legacy_read::LegacySimulationSetupRead {
+            reference_pvt,
+            run_set,
+            model_bindings,
+            save_policy,
+            active_plan_name,
+            active_plan_lineage,
+            inactive_plans,
+            analysis_plan,
+            options,
+            enabled,
+            analysis_order,
+            tran,
+            ac,
+            disto_f2_over_f1,
+            dc,
+            noise,
+            op,
+            pz,
+            sens,
+            mc,
+            pss,
+            stb,
+            temp,
+            hb,
+            sp,
+            pac,
+            pnoise,
+            pxf,
+            pstb,
+            xf,
+            corner,
+            envelope,
+            fourier,
+            optimization,
+            soa,
+            listed,
+        } = read;
         Ok(Self {
-            document: serde::Deserialize::deserialize(deserializer)?,
+            document: rspice_simulation_contract::setup_document::SimulationSetupDocument {
+                reference_pvt,
+                run_set,
+                model_bindings,
+                save_policy,
+                active_plan_name,
+                active_plan_lineage,
+                inactive_plans,
+                analysis_plan,
+                options,
+            },
+            enabled,
+            analysis_order,
+            tran,
+            ac,
+            disto_f2_over_f1,
+            dc,
+            noise,
+            op,
+            pz,
+            sens,
+            mc,
+            pss,
+            stb,
+            temp,
+            hb,
+            sp,
+            pac,
+            pnoise,
+            pxf,
+            pstb,
+            xf,
+            corner,
+            envelope,
+            fourier,
+            optimization,
+            soa,
+            listed,
             session: SimSetupEditorSession::default(),
         })
     }

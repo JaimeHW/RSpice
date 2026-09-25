@@ -59,7 +59,6 @@ impl SimSetupState {
         let mut notes = Vec::new();
 
         if let Some(note) = self
-            .document
             .corner
             .adopt_legacy_run_set(&mut self.document.run_set)
             .dropped_declaration_note()
