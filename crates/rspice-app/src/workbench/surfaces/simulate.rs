@@ -2332,7 +2332,7 @@ fn analysis_form_body(
                             ) {
                                 instance.kind().supports_pvt_base()
                             } else {
-                                crate::simulation::runner::study::supports_kind(instance.kind())
+                                instance.kind().supports_study_base()
                             }
                     })
                     .map(|instance| (instance.id(), instance.display_name().to_owned()))

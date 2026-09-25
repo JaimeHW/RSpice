@@ -99,6 +99,35 @@ pub struct AnalysisCategory {
 }
 
 impl AnalysisKind {
+    /// Whether a study can execute this kind as its selected base analysis.
+    pub const fn supports_study_base(self) -> bool {
+        matches!(
+            self,
+            Self::OperatingPoint
+                | Self::DcSweep
+                | Self::Transient
+                | Self::Ac
+                | Self::Noise
+                | Self::PoleZero
+                | Self::Sensitivity
+                | Self::Fourier
+                | Self::Fft
+                | Self::HarmonicBalance
+                | Self::Hbsp
+                | Self::Hbnoise
+                | Self::Pss
+                | Self::Pac
+                | Self::Pxf
+                | Self::Pnoise
+                | Self::Pstb
+                | Self::Psp
+                | Self::Qpss
+                | Self::Qpac
+                | Self::Qpxf
+                | Self::Qpnoise
+        )
+    }
+
     pub fn supports_pvt_base(self) -> bool {
         matches!(
             self,

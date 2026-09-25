@@ -35,7 +35,7 @@ impl SimulationPlan {
         if draft.pvt_base_analysis().is_some() && !base.kind().supports_pvt_base() {
             return None;
         }
-        if !crate::simulation::runner::study::supports_kind(base.kind()) {
+        if !base.kind().supports_study_base() {
             return None;
         }
         // Match compile_study_base: ordinary AC/noise/DC studies run their

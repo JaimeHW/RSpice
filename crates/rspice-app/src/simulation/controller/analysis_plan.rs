@@ -641,7 +641,7 @@ impl SimulationController {
             .iter()
             .find(|instance| instance.id() == id)
             .ok_or_else(|| format!("Study base analysis {id} is missing or disabled"))?;
-        if !crate::simulation::runner::study::supports_kind(base.kind()) {
+        if !base.kind().supports_study_base() {
             return Err(format!(
                 "{} cannot yet be used as a study base",
                 base.display_name()

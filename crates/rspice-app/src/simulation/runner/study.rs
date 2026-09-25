@@ -22,7 +22,7 @@ use super::{AnalysisExecutionEnvironment, SimulationError};
 use crate::product::{AnalysisInstanceId, ObjectRevision};
 use crate::services::simulation_runner as services;
 use crate::simulation::dialog::McVariationSource;
-use crate::simulation::{config::AnalysisConfig, engine_bridge::EngineBridge, plan::AnalysisKind};
+use crate::simulation::{config::AnalysisConfig, engine_bridge::EngineBridge};
 use rspice_core::abort_signal::{AbortReason, AbortSignal, ModelRunControl};
 #[cfg(test)]
 use rspice_core::analysis::monte_carlo::Distribution;
@@ -50,34 +50,6 @@ pub struct StudyRunConfig {
     pub numeric_options: String,
     pub measurements: Vec<String>,
     pub histogram_bins: usize,
-}
-
-pub(crate) fn supports_kind(kind: AnalysisKind) -> bool {
-    matches!(
-        kind,
-        AnalysisKind::OperatingPoint
-            | AnalysisKind::DcSweep
-            | AnalysisKind::Transient
-            | AnalysisKind::Ac
-            | AnalysisKind::Noise
-            | AnalysisKind::PoleZero
-            | AnalysisKind::Sensitivity
-            | AnalysisKind::Fourier
-            | AnalysisKind::Fft
-            | AnalysisKind::HarmonicBalance
-            | AnalysisKind::Hbsp
-            | AnalysisKind::Hbnoise
-            | AnalysisKind::Pss
-            | AnalysisKind::Pac
-            | AnalysisKind::Pxf
-            | AnalysisKind::Pnoise
-            | AnalysisKind::Pstb
-            | AnalysisKind::Psp
-            | AnalysisKind::Qpss
-            | AnalysisKind::Qpac
-            | AnalysisKind::Qpxf
-            | AnalysisKind::Qpnoise
-    )
 }
 
 pub(crate) use rspice_simulation_contract::study_measurement::validate_measurements;
