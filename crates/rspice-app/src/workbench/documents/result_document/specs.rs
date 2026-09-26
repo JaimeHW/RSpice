@@ -696,7 +696,7 @@ fn run_judgment(run: &SimulationRun) -> Option<RunSpecificationJudgment<'_>> {
     Some(RunSpecificationJudgment {
         verdicts: Cow::Owned(SpecificationVerdict::evaluate(
             receipt.specifications(),
-            &run.analyses,
+            run.analyses.iter().map(|analysis| &analysis.data),
         )),
         provisional: true,
     })

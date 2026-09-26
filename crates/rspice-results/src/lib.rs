@@ -56,6 +56,8 @@ pub mod soa_source;
 #[cfg(feature = "engine-evidence")]
 pub mod specification;
 #[cfg(feature = "engine-evidence")]
+pub mod specification_verdict;
+#[cfg(feature = "engine-evidence")]
 pub mod spice_value;
 pub mod stability;
 pub mod transfer_function;

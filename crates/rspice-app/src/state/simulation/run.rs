@@ -356,9 +356,9 @@ impl SimulationRun {
             return Err(format!("{terminal:?} is not a terminal run lifecycle"));
         }
         let verdicts = match self.prepared_receipt() {
-            Some(receipt) => Some(super::specification_verdict::evaluate_specifications(
+            Some(receipt) => Some(SpecificationVerdict::evaluate(
                 receipt.specifications(),
-                &self.analyses,
+                self.analyses.iter().map(|analysis| &analysis.data),
             )),
             None => None,
         };
@@ -494,11 +494,11 @@ impl SimulationRun {
         let Some(verdicts) = self.specification_verdicts() else {
             return !receipt.specifications().is_empty();
         };
-        super::specification_verdict::acceptance_is_blocked(
+        rspice_results::specification_verdict::acceptance_is_blocked(
             receipt.specifications(),
             receipt.specification_policy().policy(),
             verdicts,
-            &self.analyses,
+            self.analyses.iter().map(|analysis| &analysis.data),
         )
     }
 
@@ -534,9 +534,9 @@ impl SimulationRun {
             self.specification_verdicts = None;
             return Ok(());
         }
-        let expected = super::specification_verdict::evaluate_specifications(
+        let expected = SpecificationVerdict::evaluate(
             receipt.specifications(),
-            &self.analyses,
+            self.analyses.iter().map(|analysis| &analysis.data),
         );
         let verdicts = verdicts.ok_or_else(|| {
             format!(
@@ -572,9 +572,9 @@ impl SimulationRun {
                 self.id
             )
         })?;
-        self.specification_verdicts = Some(super::specification_verdict::evaluate_specifications(
+        self.specification_verdicts = Some(SpecificationVerdict::evaluate(
             receipt.specifications(),
-            &self.analyses,
+            self.analyses.iter().map(|analysis| &analysis.data),
         ));
         Ok(())
     }

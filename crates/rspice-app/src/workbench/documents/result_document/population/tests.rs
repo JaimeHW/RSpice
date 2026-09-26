@@ -413,7 +413,7 @@ fn population_contract_uses_the_frozen_requirement_and_ignores_later_drafts() {
     let run = simulation.active_run().unwrap();
     let verdict = crate::state::SpecificationVerdict::evaluate(
         run.prepared_receipt().unwrap().specifications(),
-        &run.analyses,
+        run.analyses.iter().map(|analysis| &analysis.data),
     );
     assert_eq!(
         verdict[0].passing_evidence_count() as usize,

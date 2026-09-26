@@ -2,6 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+mod prepared;
+pub use prepared::{PreparedSpecification, PreparedSpecificationPolicy};
+
 use crate::provenance::AnalysisResultPvtPoint;
 use rspice_app_types::product::{
     AnalysisInstanceId, ContentDigest, SimulationPlanId, SpecificationId,

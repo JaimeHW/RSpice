@@ -24,7 +24,6 @@ mod run;
 mod run_history;
 pub use rspice_results::result_import::{ResultImportFormat, ResultImportSource};
 mod run_receipt;
-mod specification_verdict;
 mod state_impl;
 mod state_model;
 mod waveform;
@@ -112,6 +111,8 @@ pub use rspice_results::saved_output::{
     SavedOutputAxis, SavedOutputBoundSource, SavedOutputDcMember, SavedOutputMaterializationStatus,
     SavedOutputReceipt, SavedOutputSourceBindings,
 };
+pub use rspice_results::specification::{PreparedSpecification, PreparedSpecificationPolicy};
+pub use rspice_results::specification_verdict::{SpecificationVerdict, SpecificationVerdictStatus};
 pub use rspice_results::waveform::SharedWaveformValues;
 pub use run::{
     ExecutionTarget, RunRetention, SimulationCampaignMembership, SimulationExecutionIdentity,
@@ -121,10 +122,8 @@ pub use run_history::RunHistory;
 pub(crate) use run_history::RunHistoryRevision;
 pub use run_receipt::{
     HierarchyMapRow, PreparedModelQualification, PreparedModelSourceIdentity, PreparedRunReceipt,
-    PreparedRunTaskReceipt, PreparedSourceCheckReceipt, PreparedSpecification,
-    PreparedSpecificationPolicy, SignOffStanding, SimulationRunProvenance,
+    PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SignOffStanding, SimulationRunProvenance,
 };
-pub use specification_verdict::{SpecificationVerdict, SpecificationVerdictStatus};
 pub use state_impl::EvidenceDomain;
 pub use state_model::{SimulationRunIntent, SimulationState};
 pub use waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, WaveformData};
