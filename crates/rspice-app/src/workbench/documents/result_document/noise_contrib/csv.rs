@@ -183,7 +183,7 @@ mod tests {
                 .lines()
                 .map(|line| line.split(',').collect())
                 .collect();
-            assert!(rows.iter().all(|row| row.len() == 31));
+            assert!(rows.iter().all(|row| row.len() == 34));
             assert_eq!(rows[1][column].parse::<f64>().unwrap(), 3e-9);
             for other in [12, 28, 29].into_iter().filter(|index| *index != column) {
                 assert!(rows[1][other].is_empty());

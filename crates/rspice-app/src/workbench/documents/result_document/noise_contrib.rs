@@ -457,7 +457,7 @@ mod tests {
             .map(|line| line.split(',').collect())
             .collect();
         assert_eq!(lines.len(), 7);
-        assert!(lines.iter().all(|row| row.len() == 31), "{:?}", lines);
+        assert!(lines.iter().all(|row| row.len() == 34), "{:?}", lines);
         let figure_rows: Vec<_> = lines
             .iter()
             .filter(|row| row[0] == "noise_figure")
