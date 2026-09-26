@@ -8,6 +8,7 @@
 pub mod analysis_payload;
 #[cfg(feature = "engine-evidence")]
 pub mod analysis_result;
+pub mod analysis_tag;
 pub mod analysis_type;
 pub mod bode;
 pub mod calculator;
@@ -52,6 +53,8 @@ pub mod simulation_values;
 pub mod soa_evidence;
 #[cfg(feature = "engine-evidence")]
 pub mod soa_source;
+#[cfg(feature = "engine-evidence")]
+pub mod specification;
 #[cfg(feature = "engine-evidence")]
 pub mod spice_value;
 pub mod stability;

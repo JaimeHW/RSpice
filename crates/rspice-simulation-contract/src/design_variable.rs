@@ -8,9 +8,9 @@ use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use uuid::Uuid;
 
 use crate::design_variable_quantity::{DesignVariableQuantity, parse_design_quantity};
-use crate::saved_output::{
-    deserialize_or_migrate_identity, missing_identity_sentinel, validate_bounded_text,
-    validate_parameter_name, validate_single_line_expression,
+use crate::saved_output::{deserialize_or_migrate_identity, missing_identity_sentinel};
+use rspice_app_types::text_validation::{
+    validate_bounded_text, validate_parameter_name, validate_single_line_expression,
 };
 
 /// Exact ownership boundary for a design variable.

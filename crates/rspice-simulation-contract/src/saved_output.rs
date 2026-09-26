@@ -2,9 +2,10 @@
 //!
 //! A saved output names a signal, how precisely to keep it, whether it may
 //! stream, and what makes a retained result compatible with the request.
-//! It also owns the bounded-text and parameter-name validators reused by
-//! authored plan records, independently of a live project workspace.
+//! Shared lexical validation comes from `rspice-app-types`, independently
+//! of a live project workspace.
 
+use rspice_app_types::text_validation::{validate_bounded_text, validate_parameter_name};
 use std::collections::HashMap;
 
 use serde::de::Error as _;
@@ -313,60 +314,6 @@ fn validate_device_op_probe(expression: &str) -> Result<(), String> {
     parse_probe_target(&body[..open])?;
     validate_parameter_name(&body[open + 1..body.len() - 1])
         .map_err(|error| format!("device quantity is invalid: {error}"))
-}
-
-pub fn validate_parameter_name(value: &str) -> Result<(), String> {
-    if value.is_empty() {
-        return Err("name is required".to_owned());
-    }
-    if value.len() > 128 {
-        return Err("name exceeds 128 bytes".to_owned());
-    }
-    let mut characters = value.chars();
-    let first = characters.next().expect("empty handled above");
-    if !first.is_ascii_alphabetic() && first != '_' {
-        return Err("name must begin with an ASCII letter or underscore".to_owned());
-    }
-    if let Some(character) =
-        characters.find(|character| !character.is_ascii_alphanumeric() && *character != '_')
-    {
-        return Err(format!(
-            "name contains unsupported character {character:?}; use ASCII letters, digits, and underscores"
-        ));
-    }
-    Ok(())
-}
-
-pub fn validate_single_line_expression(label: &str, value: &str) -> Result<(), String> {
-    validate_bounded_text(label, value, 8_192, false)?;
-    if value
-        .chars()
-        .any(|character| matches!(character, '\r' | '\n'))
-    {
-        return Err(format!("{label} must be a single line"));
-    }
-    Ok(())
-}
-
-pub fn validate_bounded_text(
-    label: &str,
-    value: &str,
-    maximum_bytes: usize,
-    allow_empty: bool,
-) -> Result<(), String> {
-    if !allow_empty && value.trim().is_empty() {
-        return Err(format!("{label} is required"));
-    }
-    if value.len() > maximum_bytes {
-        return Err(format!("{label} exceeds {maximum_bytes} bytes"));
-    }
-    if let Some(character) = value
-        .chars()
-        .find(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
-    {
-        return Err(format!("{label} contains control character {character:?}"));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

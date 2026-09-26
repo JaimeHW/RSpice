@@ -9,7 +9,7 @@
 //! as sign-off evidence, which is the one thing the stamp exists to prevent.
 
 use super::*;
-use rspice_simulation_contract::specification::{SpecificationSource, SpecificationWaiver};
+use rspice_results::specification::{SpecificationSource, SpecificationWaiver};
 
 #[test]
 fn prepared_run_receipt_round_trip_retains_exact_project_model_sources() {

@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 /// Re-exported so the plan layer keeps naming the tier it reads, while the tier
 /// itself lives beside the execution tag that a sealed receipt retains.
-pub use crate::analysis_tag::AnalysisAvailability;
-use crate::analysis_tag::CanonicalAnalysisKind;
+pub use rspice_results::analysis_tag::AnalysisAvailability;
+use rspice_results::analysis_tag::CanonicalAnalysisKind;
 
 /// Canonical identity of an analysis kind supported by the current engine.
 ///

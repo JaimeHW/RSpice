@@ -64,6 +64,7 @@ pub use ac_bode::{
 };
 pub use analysis_result::AnalysisResult;
 pub use rspice_results::analysis_payload::AnalysisResultPayload;
+pub use rspice_results::analysis_tag::CanonicalAnalysisKind;
 pub use rspice_results::analysis_type::AnalysisType;
 pub use rspice_results::convergence_attribution::ConvergenceAttribution;
 pub use rspice_results::convergence_quality::{
@@ -96,7 +97,6 @@ pub use rspice_results::transfer_function::{
     TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
 };
-pub use rspice_simulation_contract::analysis_tag::CanonicalAnalysisKind;
 // Test-only alias: outside tests an attribution's vocabulary is only ever
 // named through the attribution's own fields.
 pub use cross_probe::{CrossProbeIndex, CrossProbeMapping, OccurrenceProbeSpelling};

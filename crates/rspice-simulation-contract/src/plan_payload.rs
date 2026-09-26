@@ -7,7 +7,7 @@ use crate::capture_group::CaptureGroup;
 use crate::design_variable::DesignVariable;
 use crate::regression_policy::RegressionToleranceRule;
 use crate::saved_output::SavedOutput;
-use crate::specification::{SpecEntry, SpecificationDefinition, SpecificationPolicy};
+use rspice_results::specification::{SpecEntry, SpecificationDefinition, SpecificationPolicy};
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

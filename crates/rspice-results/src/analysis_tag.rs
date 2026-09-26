@@ -22,7 +22,7 @@
 //! dispatch then refused the receipt it had just authorized. This enum is the
 //! one place all four answers live, and every consumer derives from it.
 
-use rspice_results::analysis_type::AnalysisType;
+use crate::analysis_type::AnalysisType;
 
 /// What a run of a given analysis kind may be cited for.
 ///

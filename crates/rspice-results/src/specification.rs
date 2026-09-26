@@ -1,15 +1,15 @@
-//! Authored specification records, compatibility projections, and plan policy.
+//! Canonical requirement definitions and policy shared by plans and retained evidence.
 
 use std::collections::{HashMap, HashSet};
 
+use crate::provenance::AnalysisResultPvtPoint;
 use rspice_app_types::product::{
     AnalysisInstanceId, ContentDigest, SimulationPlanId, SpecificationId,
 };
 use rspice_app_types::quantity::format_engineering_display;
-use rspice_results::provenance::AnalysisResultPvtPoint;
 use serde::{Deserialize, Serialize};
 
-use crate::saved_output::{
+use rspice_app_types::text_validation::{
     validate_bounded_text, validate_parameter_name, validate_single_line_expression,
 };
 
