@@ -391,15 +391,18 @@ fn seal_prepared_run(
             .expect("prepared task receipt")
         })
         .collect::<Vec<_>>();
-    let receipt = PreparedRunReceipt::new(
+    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
         source_domain,
         simulation_plan_id,
         project_revision,
         prepared_snapshot_digest,
         source_content_digest,
         source_check_receipt,
+        project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
         tasks,
-    )
+    })
     .expect("prepared run receipt");
     run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))
         .expect("prepared fixture seals explicitly");
@@ -417,15 +420,17 @@ fn project_run_round_trip_recomputes_and_rejects_tampered_specification_verdicts
         ContentDigest::from_bytes([0x62; 32]),
     )
     .unwrap();
-    let receipt = PreparedRunReceipt::new_with_project_model_sources_and_specifications(
-        AnalysisResultSourceDomain::SimulationPlan,
-        Some(SimulationPlanId::new()),
-        ObjectRevision::INITIAL,
-        snapshot,
-        ContentDigest::from_bytes([0x63; 32]),
-        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x64; 32])),
-        Vec::new(),
-        vec![
+    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(SimulationPlanId::new()),
+        project_revision: ObjectRevision::INITIAL,
+        prepared_snapshot_digest: snapshot,
+        source_content_digest: ContentDigest::from_bytes([0x63; 32]),
+        source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes(
+            [0x64; 32],
+        )),
+        project_model_sources: Vec::new(),
+        specifications: vec![
             crate::state::PreparedSpecification::new(crate::state::SpecEntry {
                 measurement: "gain".to_owned(),
                 expression: "param='gain'".to_owned(),
@@ -436,8 +441,9 @@ fn project_run_round_trip_recomputes_and_rejects_tampered_specification_verdicts
             })
             .unwrap(),
         ],
-        vec![task],
-    )
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
+        tasks: vec![task],
+    })
     .unwrap();
     let mut run = SimulationRun::new_prepared(1, receipt);
     run.add_analysis(

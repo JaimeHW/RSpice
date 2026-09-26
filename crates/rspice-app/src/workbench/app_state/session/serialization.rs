@@ -1342,18 +1342,23 @@ mod tests {
             crate::product::ContentDigest::from_bytes([0x74; 32]),
         )
         .expect("prepared transient task receipt");
-        let run_receipt = crate::state::PreparedRunReceipt::new(
-            crate::state::AnalysisResultSourceDomain::SimulationPlan,
-            Some(plan_id),
-            project_revision,
-            prepared_snapshot_digest,
-            crate::product::ContentDigest::from_bytes([0x75; 32]),
-            crate::state::PreparedSourceCheckReceipt::SchematicDrc(
-                crate::product::ContentDigest::from_bytes([0x76; 32]),
-            ),
-            vec![task_receipt],
-        )
-        .expect("prepared plan run receipt");
+        let run_receipt =
+            crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+                source_domain: crate::state::AnalysisResultSourceDomain::SimulationPlan,
+                simulation_plan_id: Some(plan_id),
+                project_revision,
+                prepared_snapshot_digest,
+                source_content_digest: crate::product::ContentDigest::from_bytes([0x75; 32]),
+                source_check_receipt: crate::state::PreparedSourceCheckReceipt::SchematicDrc(
+                    crate::product::ContentDigest::from_bytes([0x76; 32]),
+                ),
+                project_model_sources: Vec::new(),
+                specifications: Vec::new(),
+                specification_policy:
+                    rspice_results::specification::PreparedSpecificationPolicy::default(),
+                tasks: vec![task_receipt],
+            })
+            .expect("prepared plan run receipt");
         run.restore_provenance(crate::state::SimulationRunProvenance::Prepared(Box::new(
             run_receipt,
         )))

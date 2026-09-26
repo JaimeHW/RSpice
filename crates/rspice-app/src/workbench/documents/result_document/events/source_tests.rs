@@ -123,14 +123,17 @@ fn event_source_native_receipt_keeps_the_retained_drive_strength() {
     let id = AnalysisInstanceId::new();
     let digest = ContentDigest::from_bytes([0x41; 32]);
     let revision = ObjectRevision::INITIAL;
-    let receipt = PreparedRunReceipt::new(
-        AnalysisResultSourceDomain::SimulationPlan,
-        Some(SimulationPlanId::new()),
-        revision,
-        digest,
-        digest,
-        PreparedSourceCheckReceipt::SchematicDrc(digest),
-        vec![
+    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(SimulationPlanId::new()),
+        project_revision: revision,
+        prepared_snapshot_digest: digest,
+        source_content_digest: digest,
+        source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest),
+        project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
+        tasks: vec![
             PreparedRunTaskReceipt::new(
                 id,
                 revision,
@@ -140,7 +143,7 @@ fn event_source_native_receipt_keeps_the_retained_drive_strength() {
             )
             .unwrap(),
         ],
-    )
+    })
     .unwrap();
     let mut state = AppState::default();
     let run = state.simulation.start_run();

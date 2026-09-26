@@ -122,7 +122,8 @@ pub use run_history::RunHistory;
 pub(crate) use run_history::RunHistoryRevision;
 pub use run_receipt::{
     HierarchyMapRow, PreparedModelQualification, PreparedModelSourceIdentity, PreparedRunReceipt,
-    PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SignOffStanding, SimulationRunProvenance,
+    PreparedRunReceiptInput, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SignOffStanding,
+    SimulationRunProvenance,
 };
 pub use state_impl::EvidenceDomain;
 pub use state_model::{SimulationRunIntent, SimulationState};

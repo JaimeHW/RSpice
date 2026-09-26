@@ -422,14 +422,18 @@ mod tests {
     fn run_referencing(id: SimulationPlanId) -> SimulationRun {
         let revision = ObjectRevision::INITIAL;
         let digest = |byte: u8| ContentDigest::from_bytes([byte; 32]);
-        let receipt = PreparedRunReceipt::new(
-            AnalysisResultSourceDomain::SimulationPlan,
-            Some(id),
-            revision,
-            digest(1),
-            digest(2),
-            PreparedSourceCheckReceipt::SchematicDrc(digest(3)),
-            vec![
+        let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+            source_domain: AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(id),
+            project_revision: revision,
+            prepared_snapshot_digest: digest(1),
+            source_content_digest: digest(2),
+            source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(3)),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy:
+                rspice_results::specification::PreparedSpecificationPolicy::default(),
+            tasks: vec![
                 PreparedRunTaskReceipt::new(
                     AnalysisInstanceId::new(),
                     revision,
@@ -439,7 +443,7 @@ mod tests {
                 )
                 .expect("a valid prepared task receipt"),
             ],
-        )
+        })
         .expect("a valid prepared run receipt");
         SimulationRun::new_prepared(1, receipt)
     }

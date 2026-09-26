@@ -770,14 +770,20 @@ mod tests {
         byte: u8,
     ) -> crate::state::PreparedRunReceipt {
         let digest = |value: u8| crate::product::ContentDigest::from_bytes([value; 32]);
-        crate::state::PreparedRunReceipt::new(
-            crate::state::AnalysisResultSourceDomain::SimulationPlan,
-            Some(plan_id),
-            crate::product::ObjectRevision::INITIAL,
-            digest(byte),
-            digest(byte.wrapping_add(1)),
-            crate::state::PreparedSourceCheckReceipt::SchematicDrc(digest(byte.wrapping_add(2))),
-            vec![
+        crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+            source_domain: crate::state::AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(plan_id),
+            project_revision: crate::product::ObjectRevision::INITIAL,
+            prepared_snapshot_digest: digest(byte),
+            source_content_digest: digest(byte.wrapping_add(1)),
+            source_check_receipt: crate::state::PreparedSourceCheckReceipt::SchematicDrc(digest(
+                byte.wrapping_add(2),
+            )),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy:
+                rspice_results::specification::PreparedSpecificationPolicy::default(),
+            tasks: vec![
                 crate::state::PreparedRunTaskReceipt::new(
                     crate::product::AnalysisInstanceId::new(),
                     crate::product::ObjectRevision::INITIAL,
@@ -787,7 +793,7 @@ mod tests {
                 )
                 .expect("task receipt"),
             ],
-        )
+        })
         .expect("plan receipt")
     }
 

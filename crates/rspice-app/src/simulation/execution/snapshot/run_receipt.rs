@@ -83,18 +83,18 @@ fn seal_prepared_run_receipt<'a>(
             .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    PreparedRunReceipt::new_with_project_model_sources_specifications_and_policy(
-        run.source_domain,
-        run.simulation_plan_id,
+    PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: run.source_domain,
+        simulation_plan_id: run.simulation_plan_id,
         project_revision,
-        run.snapshot_digest,
-        run.source_digest,
-        run.source_receipt.durable(),
-        run.project_model_sources.to_vec(),
-        run.specifications.to_vec(),
-        run.specification_policy.clone(),
+        prepared_snapshot_digest: run.snapshot_digest,
+        source_content_digest: run.source_digest,
+        source_check_receipt: run.source_receipt.durable(),
+        project_model_sources: run.project_model_sources.to_vec(),
+        specifications: run.specifications.to_vec(),
+        specification_policy: run.specification_policy.clone(),
         tasks,
-    )
+    })
     .and_then(|receipt| receipt.with_hierarchy_map(hierarchy_map))
     .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))
 }

@@ -795,22 +795,25 @@ fn prepared_run(definitions: Vec<SpecificationDefinition>) -> (SimulationRun, An
         ContentDigest::from_bytes([0x72; 32]),
     )
     .expect("task receipt");
-    let receipt = PreparedRunReceipt::new_with_project_model_sources_and_specifications(
-        AnalysisResultSourceDomain::SimulationPlan,
-        Some(SimulationPlanId::new()),
-        ObjectRevision::INITIAL,
-        ContentDigest::from_bytes([0x71; 32]),
-        ContentDigest::from_bytes([0x73; 32]),
-        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x74; 32])),
-        Vec::new(),
-        definitions
+    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(SimulationPlanId::new()),
+        project_revision: ObjectRevision::INITIAL,
+        prepared_snapshot_digest: ContentDigest::from_bytes([0x71; 32]),
+        source_content_digest: ContentDigest::from_bytes([0x73; 32]),
+        source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes(
+            [0x74; 32],
+        )),
+        project_model_sources: Vec::new(),
+        specifications: definitions
             .into_iter()
             .map(|definition| {
                 PreparedSpecification::from_definition(definition).expect("prepared requirement")
             })
             .collect(),
-        vec![task],
-    )
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
+        tasks: vec![task],
+    })
     .expect("prepared receipt");
     (SimulationRun::new_prepared(1, receipt), task_id)
 }

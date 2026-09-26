@@ -67,14 +67,17 @@ fn app_with_prepared_run(origin: RunOrigin) -> RSpiceApp {
             PreparedSourceCheckReceipt::ManualSourceCheck(ContentDigest::from_bytes([0x33; 32])),
         ),
     };
-    let receipt = PreparedRunReceipt::new(
-        domain,
-        plan_id,
+    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: domain,
+        simulation_plan_id: plan_id,
         project_revision,
-        ContentDigest::from_bytes([0x11; 32]),
-        ContentDigest::from_bytes([0x22; 32]),
-        source_check,
-        vec![
+        prepared_snapshot_digest: ContentDigest::from_bytes([0x11; 32]),
+        source_content_digest: ContentDigest::from_bytes([0x22; 32]),
+        source_check_receipt: source_check,
+        project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
+        tasks: vec![
             PreparedRunTaskReceipt::new(
                 analysis_id,
                 project_revision,
@@ -84,7 +87,7 @@ fn app_with_prepared_run(origin: RunOrigin) -> RSpiceApp {
             )
             .expect("valid prepared task"),
         ],
-    )
+    })
     .expect("valid prepared run receipt");
     app.state
         .simulation

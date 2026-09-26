@@ -75,15 +75,20 @@ fn sealed_rf_results(retained: usize) -> ProjectSimulationResults {
         }
     }
 
-    let receipt = PreparedRunReceipt::new(
-        AnalysisResultSourceDomain::SimulationPlan,
-        Some(SimulationPlanId::new()),
-        ObjectRevision::INITIAL,
-        snapshot,
-        ContentDigest::from_bytes([0xd1; 32]),
-        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0xd2; 32])),
+    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(SimulationPlanId::new()),
+        project_revision: ObjectRevision::INITIAL,
+        prepared_snapshot_digest: snapshot,
+        source_content_digest: ContentDigest::from_bytes([0xd1; 32]),
+        source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes(
+            [0xd2; 32],
+        )),
+        project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
         tasks,
-    )
+    })
     .expect("the RF run seals a receipt");
     run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))
         .expect("the fixture run seals explicitly");

@@ -365,18 +365,18 @@ impl ProjectPreparedRunReceipt {
                 return Err("prepared-run receipt specification_policy cannot be null".to_owned());
             }
         };
-        PreparedRunReceipt::new_with_project_model_sources_specifications_and_policy(
-            self.source_domain,
-            self.simulation_plan_id,
-            self.project_revision,
-            self.prepared_snapshot_digest,
-            self.source_content_digest,
-            self.source_check_receipt.into(),
+        PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+            source_domain: self.source_domain,
+            simulation_plan_id: self.simulation_plan_id,
+            project_revision: self.project_revision,
+            prepared_snapshot_digest: self.prepared_snapshot_digest,
+            source_content_digest: self.source_content_digest,
+            source_check_receipt: self.source_check_receipt.into(),
             project_model_sources,
             specifications,
             specification_policy,
             tasks,
-        )
+        })
         .and_then(|receipt| receipt.with_hierarchy_map(hierarchy_map))
     }
 

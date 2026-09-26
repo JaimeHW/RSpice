@@ -1518,14 +1518,18 @@ mod tests {
         let revision = ObjectRevision::INITIAL;
         let snapshot = digest(0x51);
         let envelope_tag = crate::state::CanonicalAnalysisKind::Envelope.tag();
-        let receipt = PreparedRunReceipt::new(
-            AnalysisResultSourceDomain::SimulationPlan,
-            Some(SimulationPlanId::new()),
-            revision,
-            snapshot,
-            digest(0x52),
-            PreparedSourceCheckReceipt::SchematicDrc(digest(0x53)),
-            vec![
+        let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+            source_domain: AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(SimulationPlanId::new()),
+            project_revision: revision,
+            prepared_snapshot_digest: snapshot,
+            source_content_digest: digest(0x52),
+            source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(0x53)),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy:
+                rspice_results::specification::PreparedSpecificationPolicy::default(),
+            tasks: vec![
                 PreparedRunTaskReceipt::new(
                     instance_id,
                     revision,
@@ -1535,7 +1539,7 @@ mod tests {
                 )
                 .expect("valid task"),
             ],
-        )
+        })
         .expect("valid receipt");
         let blocker = receipt
             .sign_off_blocker()
@@ -1577,18 +1581,22 @@ mod tests {
         let instance_id = AnalysisInstanceId::new();
         let revision = ObjectRevision::INITIAL;
         let snapshot = digest(0x41);
-        let receipt = PreparedRunReceipt::new(
-            AnalysisResultSourceDomain::SimulationPlan,
-            Some(SimulationPlanId::new()),
-            revision,
-            snapshot,
-            digest(0x42),
-            PreparedSourceCheckReceipt::SchematicDrc(digest(0x43)),
-            vec![
+        let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+            source_domain: AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(SimulationPlanId::new()),
+            project_revision: revision,
+            prepared_snapshot_digest: snapshot,
+            source_content_digest: digest(0x42),
+            source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(0x43)),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy:
+                rspice_results::specification::PreparedSpecificationPolicy::default(),
+            tasks: vec![
                 PreparedRunTaskReceipt::new(instance_id, revision, Vec::new(), 5, digest(0x44))
                     .expect("valid task"),
             ],
-        )
+        })
         .expect("valid receipt");
         let provenance = AnalysisResultProvenance::new(instance_id, revision, snapshot, Vec::new())
             .expect("valid provenance");

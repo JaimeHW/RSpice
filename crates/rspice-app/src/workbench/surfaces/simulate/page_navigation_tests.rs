@@ -113,14 +113,19 @@ fn start_prepared_run_for_active_plan(state: &mut AppState, analysis: Option<Ana
         .expect("the default plan holds one instance")
         .id();
     let project_revision = state.workspace.project.revision();
-    let receipt = PreparedRunReceipt::new(
-        AnalysisResultSourceDomain::SimulationPlan,
-        Some(plan_id),
+    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(plan_id),
         project_revision,
-        ContentDigest::from_bytes([0x11; 32]),
-        ContentDigest::from_bytes([0x22; 32]),
-        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x33; 32])),
-        vec![
+        prepared_snapshot_digest: ContentDigest::from_bytes([0x11; 32]),
+        source_content_digest: ContentDigest::from_bytes([0x22; 32]),
+        source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes(
+            [0x33; 32],
+        )),
+        project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
+        tasks: vec![
             PreparedRunTaskReceipt::new(
                 analysis_id,
                 project_revision,
@@ -130,7 +135,7 @@ fn start_prepared_run_for_active_plan(state: &mut AppState, analysis: Option<Ana
             )
             .expect("valid prepared task"),
         ],
-    )
+    })
     .expect("valid prepared run receipt");
     let analysis = analysis.map(|analysis| {
         analysis.with_provenance(

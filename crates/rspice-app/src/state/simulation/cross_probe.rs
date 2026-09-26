@@ -316,14 +316,18 @@ mod tests {
 
     /// One sealed receipt whose hierarchy map names `rows`.
     fn receipt_with(rows: Vec<HierarchyMapRow>) -> PreparedRunReceipt {
-        PreparedRunReceipt::new(
-            AnalysisResultSourceDomain::SimulationPlan,
-            Some(SimulationPlanId::new()),
-            ObjectRevision::INITIAL,
-            digest(0x31),
-            digest(0x32),
-            PreparedSourceCheckReceipt::SchematicDrc(digest(0x33)),
-            vec![
+        PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+            source_domain: AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(SimulationPlanId::new()),
+            project_revision: ObjectRevision::INITIAL,
+            prepared_snapshot_digest: digest(0x31),
+            source_content_digest: digest(0x32),
+            source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(0x33)),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy:
+                rspice_results::specification::PreparedSpecificationPolicy::default(),
+            tasks: vec![
                 PreparedRunTaskReceipt::new(
                     AnalysisInstanceId::new(),
                     ObjectRevision::INITIAL,
@@ -333,7 +337,7 @@ mod tests {
                 )
                 .expect("valid task receipt"),
             ],
-        )
+        })
         .expect("valid plan receipt")
         .with_hierarchy_map(rows)
         .expect("distinct occurrences seal")

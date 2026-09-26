@@ -107,15 +107,18 @@ fn prepared_run(
     let snapshot_digest = digest(0x31);
     let task = PreparedRunTaskReceipt::new(instance_id, plan_revision, Vec::new(), 5, digest(0x32))
         .expect("valid task");
-    let receipt = PreparedRunReceipt::new(
-        AnalysisResultSourceDomain::SimulationPlan,
-        Some(plan_id),
+    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(plan_id),
         project_revision,
-        snapshot_digest,
-        digest(0x33),
-        PreparedSourceCheckReceipt::SchematicDrc(digest(0x34)),
-        vec![task],
-    )
+        prepared_snapshot_digest: snapshot_digest,
+        source_content_digest: digest(0x33),
+        source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(0x34)),
+        project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
+        tasks: vec![task],
+    })
     .expect("valid receipt");
     let provenance =
         AnalysisResultProvenance::new(instance_id, plan_revision, snapshot_digest, Vec::new())

@@ -334,16 +334,19 @@ fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
     app.state.workbench.activate(Workspace::Results);
     let project_revision = app.state.workspace.project.revision();
     let analysis_id = crate::product::AnalysisInstanceId::new();
-    let receipt = crate::state::PreparedRunReceipt::new(
-        crate::state::AnalysisResultSourceDomain::SimulationPlan,
-        Some(crate::product::SimulationPlanId::new()),
+    let receipt = crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: crate::state::AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(crate::product::SimulationPlanId::new()),
         project_revision,
-        crate::product::ContentDigest::from_bytes([0x11; 32]),
-        crate::product::ContentDigest::from_bytes([0x22; 32]),
-        crate::state::PreparedSourceCheckReceipt::SchematicDrc(
+        prepared_snapshot_digest: crate::product::ContentDigest::from_bytes([0x11; 32]),
+        source_content_digest: crate::product::ContentDigest::from_bytes([0x22; 32]),
+        source_check_receipt: crate::state::PreparedSourceCheckReceipt::SchematicDrc(
             crate::product::ContentDigest::from_bytes([0x33; 32]),
         ),
-        vec![
+        project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
+        tasks: vec![
             crate::state::PreparedRunTaskReceipt::new(
                 analysis_id,
                 project_revision,
@@ -353,7 +356,7 @@ fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
             )
             .expect("valid prepared task"),
         ],
-    )
+    })
     .expect("valid prepared run receipt");
     app.state
         .simulation
@@ -551,16 +554,19 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
         .provenance()
         .expect("prepared analysis provenance")
         .source_instance_id();
-    let receipt = crate::state::PreparedRunReceipt::new(
-        crate::state::AnalysisResultSourceDomain::SimulationPlan,
-        Some(crate::product::SimulationPlanId::new()),
-        stale_revision,
-        crate::product::ContentDigest::from_bytes([0x51; 32]),
-        crate::product::ContentDigest::from_bytes([0x52; 32]),
-        crate::state::PreparedSourceCheckReceipt::SchematicDrc(
+    let receipt = crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: crate::state::AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(crate::product::SimulationPlanId::new()),
+        project_revision: stale_revision,
+        prepared_snapshot_digest: crate::product::ContentDigest::from_bytes([0x51; 32]),
+        source_content_digest: crate::product::ContentDigest::from_bytes([0x52; 32]),
+        source_check_receipt: crate::state::PreparedSourceCheckReceipt::SchematicDrc(
             crate::product::ContentDigest::from_bytes([0x53; 32]),
         ),
-        vec![
+        project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
+        tasks: vec![
             crate::state::PreparedRunTaskReceipt::new(
                 analysis_id,
                 stale_revision,
@@ -570,7 +576,7 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
             )
             .expect("valid prepared task"),
         ],
-    )
+    })
     .expect("valid stale receipt");
     let mut stale_run = crate::state::SimulationRun::new_prepared(1, receipt);
     stale_run.add_analysis(

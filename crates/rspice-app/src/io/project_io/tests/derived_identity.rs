@@ -150,15 +150,20 @@ fn attach_run(
             .expect("prepared task receipt")
         })
         .collect::<Vec<_>>();
-    let receipt = PreparedRunReceipt::new(
-        AnalysisResultSourceDomain::SimulationPlan,
-        Some(plan_id),
-        project.workspace.project.revision(),
-        snapshot,
-        ContentDigest::from_bytes([0x5b; 32]),
-        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x5a; 32])),
-        receipts,
-    )
+    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(plan_id),
+        project_revision: project.workspace.project.revision(),
+        prepared_snapshot_digest: snapshot,
+        source_content_digest: ContentDigest::from_bytes([0x5b; 32]),
+        source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes(
+            [0x5a; 32],
+        )),
+        project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
+        tasks: receipts,
+    })
     .expect("prepared run receipt");
     run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))
         .expect("prepared fixture seals explicitly");

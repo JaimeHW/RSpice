@@ -12,14 +12,19 @@ fn controller_fixture(request: SimulationRequest) -> (SimulationController, AppS
         panic!("MC spec")
     };
     let provenance = synthetic_result_provenance();
-    let receipt = PreparedRunReceipt::new(
-        AnalysisResultSourceDomain::SimulationPlan,
-        Some(SimulationPlanId::new()),
-        ObjectRevision::INITIAL,
-        provenance.prepared_snapshot_digest(),
-        ContentDigest::from_bytes([21; 32]),
-        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([22; 32])),
-        vec![
+    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(SimulationPlanId::new()),
+        project_revision: ObjectRevision::INITIAL,
+        prepared_snapshot_digest: provenance.prepared_snapshot_digest(),
+        source_content_digest: ContentDigest::from_bytes([21; 32]),
+        source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes(
+            [22; 32],
+        )),
+        project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
+        tasks: vec![
             PreparedRunTaskReceipt::new(
                 provenance.source_instance_id(),
                 provenance.source_revision(),
@@ -29,7 +34,7 @@ fn controller_fixture(request: SimulationRequest) -> (SimulationController, AppS
             )
             .unwrap(),
         ],
-    )
+    })
     .unwrap();
     let mut state = AppState::default();
     let run = state.simulation.start_run();

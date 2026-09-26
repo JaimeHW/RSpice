@@ -397,91 +397,36 @@ pub struct PreparedRunReceipt {
     hierarchy_map: Vec<HierarchyMapRow>,
 }
 
+/// Input facts admitted by the validated prepared-run receipt constructor.
+/// This input is not itself a receipt and grants no execution authority.
+#[derive(Debug)]
+pub struct PreparedRunReceiptInput {
+    pub source_domain: AnalysisResultSourceDomain,
+    pub simulation_plan_id: Option<SimulationPlanId>,
+    pub project_revision: ObjectRevision,
+    pub prepared_snapshot_digest: ContentDigest,
+    pub source_content_digest: ContentDigest,
+    pub source_check_receipt: PreparedSourceCheckReceipt,
+    pub project_model_sources: Vec<PreparedModelSourceIdentity>,
+    pub specifications: Vec<PreparedSpecification>,
+    pub specification_policy: PreparedSpecificationPolicy,
+    pub tasks: Vec<PreparedRunTaskReceipt>,
+}
+
 impl PreparedRunReceipt {
-    #[cfg(test)]
-    pub(crate) fn new(
-        source_domain: AnalysisResultSourceDomain,
-        simulation_plan_id: Option<SimulationPlanId>,
-        project_revision: ObjectRevision,
-        prepared_snapshot_digest: ContentDigest,
-        source_content_digest: ContentDigest,
-        source_check_receipt: PreparedSourceCheckReceipt,
-        tasks: Vec<PreparedRunTaskReceipt>,
-    ) -> Result<Self, String> {
-        Self::new_with_project_model_sources(
+    pub(crate) fn new(input: PreparedRunReceiptInput) -> Result<Self, String> {
+        let PreparedRunReceiptInput {
             source_domain,
             simulation_plan_id,
             project_revision,
             prepared_snapshot_digest,
             source_content_digest,
             source_check_receipt,
-            Vec::new(),
-            tasks,
-        )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn new_with_project_model_sources(
-        source_domain: AnalysisResultSourceDomain,
-        simulation_plan_id: Option<SimulationPlanId>,
-        project_revision: ObjectRevision,
-        prepared_snapshot_digest: ContentDigest,
-        source_content_digest: ContentDigest,
-        source_check_receipt: PreparedSourceCheckReceipt,
-        project_model_sources: Vec<PreparedModelSourceIdentity>,
-        tasks: Vec<PreparedRunTaskReceipt>,
-    ) -> Result<Self, String> {
-        Self::new_with_project_model_sources_and_specifications(
-            source_domain,
-            simulation_plan_id,
-            project_revision,
-            prepared_snapshot_digest,
-            source_content_digest,
-            source_check_receipt,
-            project_model_sources,
-            Vec::new(),
-            tasks,
-        )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn new_with_project_model_sources_and_specifications(
-        source_domain: AnalysisResultSourceDomain,
-        simulation_plan_id: Option<SimulationPlanId>,
-        project_revision: ObjectRevision,
-        prepared_snapshot_digest: ContentDigest,
-        source_content_digest: ContentDigest,
-        source_check_receipt: PreparedSourceCheckReceipt,
-        project_model_sources: Vec<PreparedModelSourceIdentity>,
-        specifications: Vec<PreparedSpecification>,
-        tasks: Vec<PreparedRunTaskReceipt>,
-    ) -> Result<Self, String> {
-        Self::new_with_project_model_sources_specifications_and_policy(
-            source_domain,
-            simulation_plan_id,
-            project_revision,
-            prepared_snapshot_digest,
-            source_content_digest,
-            source_check_receipt,
-            project_model_sources,
+            mut project_model_sources,
             specifications,
-            PreparedSpecificationPolicy::default(),
+            specification_policy,
             tasks,
-        )
-    }
-
-    pub(crate) fn new_with_project_model_sources_specifications_and_policy(
-        source_domain: AnalysisResultSourceDomain,
-        simulation_plan_id: Option<SimulationPlanId>,
-        project_revision: ObjectRevision,
-        prepared_snapshot_digest: ContentDigest,
-        source_content_digest: ContentDigest,
-        source_check_receipt: PreparedSourceCheckReceipt,
-        mut project_model_sources: Vec<PreparedModelSourceIdentity>,
-        specifications: Vec<PreparedSpecification>,
-        specification_policy: PreparedSpecificationPolicy,
-        tasks: Vec<PreparedRunTaskReceipt>,
-    ) -> Result<Self, String> {
+        } = input;
         match (source_domain, simulation_plan_id, source_check_receipt) {
             (
                 AnalysisResultSourceDomain::SimulationPlan,
@@ -914,15 +859,19 @@ mod tests {
     }
 
     fn plan_receipt(tasks: Vec<PreparedRunTaskReceipt>) -> PreparedRunReceipt {
-        PreparedRunReceipt::new(
-            AnalysisResultSourceDomain::SimulationPlan,
-            Some(SimulationPlanId::new()),
-            ObjectRevision::INITIAL,
-            digest(0x31),
-            digest(0x32),
-            PreparedSourceCheckReceipt::SchematicDrc(digest(0x33)),
+        PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+            source_domain: AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(SimulationPlanId::new()),
+            project_revision: ObjectRevision::INITIAL,
+            prepared_snapshot_digest: digest(0x31),
+            source_content_digest: digest(0x32),
+            source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(0x33)),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy:
+                rspice_results::specification::PreparedSpecificationPolicy::default(),
             tasks,
-        )
+        })
         .expect("valid plan receipt")
     }
 
@@ -937,22 +886,25 @@ mod tests {
             PreparedModelQualification::Released,
         )
         .expect("valid project model identity");
-        let receipt = PreparedRunReceipt::new_with_project_model_sources(
-            AnalysisResultSourceDomain::SimulationPlan,
-            Some(SimulationPlanId::new()),
-            ObjectRevision::INITIAL,
-            digest(0x31),
-            digest(0x32),
-            PreparedSourceCheckReceipt::SchematicDrc(digest(0x33)),
-            vec![identity],
-            vec![task(
+        let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+            source_domain: AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(SimulationPlanId::new()),
+            project_revision: ObjectRevision::INITIAL,
+            prepared_snapshot_digest: digest(0x31),
+            source_content_digest: digest(0x32),
+            source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(0x33)),
+            project_model_sources: vec![identity],
+            specifications: Vec::new(),
+            specification_policy:
+                rspice_results::specification::PreparedSpecificationPolicy::default(),
+            tasks: vec![task(
                 AnalysisInstanceId::new(),
                 ObjectRevision::INITIAL,
                 Vec::new(),
                 0,
                 0x45,
             )],
-        )
+        })
         .expect("model-bound prepared receipt");
 
         let retained = &receipt.project_model_sources()[0];
@@ -1119,15 +1071,19 @@ mod tests {
             ),
         ];
 
-        let error = PreparedRunReceipt::new(
-            AnalysisResultSourceDomain::SimulationPlan,
-            Some(SimulationPlanId::new()),
-            ObjectRevision::INITIAL,
-            digest(3),
-            digest(4),
-            PreparedSourceCheckReceipt::SchematicDrc(digest(5)),
+        let error = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+            source_domain: AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(SimulationPlanId::new()),
+            project_revision: ObjectRevision::INITIAL,
+            prepared_snapshot_digest: digest(3),
+            source_content_digest: digest(4),
+            source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(5)),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy:
+                rspice_results::specification::PreparedSpecificationPolicy::default(),
             tasks,
-        )
+        })
         .expect_err("mixed task revisions must fail");
 
         assert!(error.contains("mix task source revisions"));
@@ -1146,15 +1102,19 @@ mod tests {
         };
         let plan_id = SimulationPlanId::new();
         let build = |domain, plan, check, tasks| {
-            PreparedRunReceipt::new(
-                domain,
-                plan,
-                ObjectRevision::INITIAL,
-                digest(6),
-                digest(7),
-                check,
+            PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+                source_domain: domain,
+                simulation_plan_id: plan,
+                project_revision: ObjectRevision::INITIAL,
+                prepared_snapshot_digest: digest(6),
+                source_content_digest: digest(7),
+                source_check_receipt: check,
+                project_model_sources: Vec::new(),
+                specifications: Vec::new(),
+                specification_policy:
+                    rspice_results::specification::PreparedSpecificationPolicy::default(),
                 tasks,
-            )
+            })
         };
 
         assert!(

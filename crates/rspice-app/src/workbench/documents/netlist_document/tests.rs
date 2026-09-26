@@ -1092,18 +1092,22 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
         }
     };
     let seal = |state: &mut AppState, source: &str| {
-        let receipt = PreparedRunReceipt::new(
-            AnalysisResultSourceDomain::SimulationPlan,
-            Some(crate::product::SimulationPlanId::new()),
-            ObjectRevision::INITIAL,
-            digest(0xa0),
-            crate::simulation::execution::sealed_executable_source_digest(
+        let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+            source_domain: AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(crate::product::SimulationPlanId::new()),
+            project_revision: ObjectRevision::INITIAL,
+            prepared_snapshot_digest: digest(0xa0),
+            source_content_digest: crate::simulation::execution::sealed_executable_source_digest(
                 AnalysisResultSourceDomain::SimulationPlan,
                 source,
             )
             .expect("a plan run seals its executable source"),
-            PreparedSourceCheckReceipt::SchematicDrc(digest(0xa2)),
-            vec![
+            source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(0xa2)),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy:
+                rspice_results::specification::PreparedSpecificationPolicy::default(),
+            tasks: vec![
                 PreparedRunTaskReceipt::new(
                     crate::product::AnalysisInstanceId::new(),
                     ObjectRevision::INITIAL,
@@ -1113,7 +1117,7 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
                 )
                 .expect("task receipt"),
             ],
-        )
+        })
         .expect("prepared run receipt");
         let run = state.simulation.start_prepared_run(receipt).unwrap();
         run.id

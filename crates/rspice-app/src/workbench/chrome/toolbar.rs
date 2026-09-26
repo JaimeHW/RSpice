@@ -2000,15 +2000,19 @@ mod tests {
             digest(0x64),
         )
         .expect("task receipt");
-        let receipt = PreparedRunReceipt::new(
-            AnalysisResultSourceDomain::SimulationPlan,
-            Some(SimulationPlanId::new()),
+        let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+            source_domain: AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(SimulationPlanId::new()),
             project_revision,
-            digest(0x61),
-            source_digest,
-            PreparedSourceCheckReceipt::SchematicDrc(digest(0x63)),
-            vec![task],
-        )
+            prepared_snapshot_digest: digest(0x61),
+            source_content_digest: source_digest,
+            source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(0x63)),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy:
+                rspice_results::specification::PreparedSpecificationPolicy::default(),
+            tasks: vec![task],
+        })
         .expect("run receipt");
         let mut run = SimulationRun::new(1);
         run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))

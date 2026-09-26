@@ -607,18 +607,22 @@ mod tests {
         hierarchy: Vec<crate::state::HierarchyMapRow>,
     ) -> SimulationRun {
         let instance = AnalysisInstanceId::new();
-        let receipt = PreparedRunReceipt::new(
-            AnalysisResultSourceDomain::SimulationPlan,
-            Some(SimulationPlanId::new()),
-            revision,
-            digest(1),
-            digest(2),
-            PreparedSourceCheckReceipt::SchematicDrc(digest(3)),
-            vec![
+        let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+            source_domain: AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(SimulationPlanId::new()),
+            project_revision: revision,
+            prepared_snapshot_digest: digest(1),
+            source_content_digest: digest(2),
+            source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(3)),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy:
+                rspice_results::specification::PreparedSpecificationPolicy::default(),
+            tasks: vec![
                 PreparedRunTaskReceipt::new(instance, revision, Vec::new(), 5, digest(4))
                     .expect("valid task"),
             ],
-        )
+        })
         .expect("valid receipt")
         .with_hierarchy_map(hierarchy)
         .expect("distinct occurrences seal");

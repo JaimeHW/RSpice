@@ -1335,18 +1335,23 @@ mod tests {
             crate::product::ContentDigest::from_bytes([0x11; 32]),
         )
         .expect("valid task receipt");
-        let receipt = crate::state::PreparedRunReceipt::new(
-            crate::state::AnalysisResultSourceDomain::ManualDeck,
-            None,
-            project_revision,
-            crate::product::ContentDigest::from_bytes([0x22; 32]),
-            crate::product::ContentDigest::from_bytes([deck_digest; 32]),
-            crate::state::PreparedSourceCheckReceipt::ManualSourceCheck(
-                crate::product::ContentDigest::from_bytes([0x33; 32]),
-            ),
-            vec![task],
-        )
-        .expect("valid manual deck receipt");
+        let receipt =
+            crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+                source_domain: crate::state::AnalysisResultSourceDomain::ManualDeck,
+                simulation_plan_id: None,
+                project_revision,
+                prepared_snapshot_digest: crate::product::ContentDigest::from_bytes([0x22; 32]),
+                source_content_digest: crate::product::ContentDigest::from_bytes([deck_digest; 32]),
+                source_check_receipt: crate::state::PreparedSourceCheckReceipt::ManualSourceCheck(
+                    crate::product::ContentDigest::from_bytes([0x33; 32]),
+                ),
+                project_model_sources: Vec::new(),
+                specifications: Vec::new(),
+                specification_policy:
+                    rspice_results::specification::PreparedSpecificationPolicy::default(),
+                tasks: vec![task],
+            })
+            .expect("valid manual deck receipt");
         let mut run = crate::state::SimulationRun::new(run_number);
         run.restore_provenance(crate::state::SimulationRunProvenance::Prepared(Box::new(
             receipt,

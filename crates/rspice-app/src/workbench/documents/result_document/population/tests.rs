@@ -302,20 +302,23 @@ fn prepared_population_contract(
         SpecificationDefinition::from_legacy(SimulationPlanId::new(), 0, &workspace.specs[0]);
     requirement.producing_analysis = Some(producer);
     let retain_requirement = configure(&mut requirement);
-    let receipt = PreparedRunReceipt::new_with_project_model_sources_and_specifications(
-        AnalysisResultSourceDomain::SimulationPlan,
-        Some(SimulationPlanId::new()),
-        ObjectRevision::INITIAL,
-        ContentDigest::from_bytes([1; 32]),
-        ContentDigest::from_bytes([2; 32]),
-        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([3; 32])),
-        Vec::new(),
-        if retain_requirement {
+    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(SimulationPlanId::new()),
+        project_revision: ObjectRevision::INITIAL,
+        prepared_snapshot_digest: ContentDigest::from_bytes([1; 32]),
+        source_content_digest: ContentDigest::from_bytes([2; 32]),
+        source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes(
+            [3; 32],
+        )),
+        project_model_sources: Vec::new(),
+        specifications: if retain_requirement {
             vec![PreparedSpecification::from_definition(requirement).unwrap()]
         } else {
             Vec::new()
         },
-        vec![
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
+        tasks: vec![
             PreparedRunTaskReceipt::new(
                 producer,
                 ObjectRevision::INITIAL,
@@ -325,7 +328,7 @@ fn prepared_population_contract(
             )
             .unwrap(),
         ],
-    )
+    })
     .unwrap();
     let analysis = monte_carlo(
         values

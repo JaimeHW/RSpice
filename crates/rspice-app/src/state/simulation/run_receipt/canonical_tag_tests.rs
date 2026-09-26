@@ -35,15 +35,18 @@ fn task_receipt(
 }
 
 fn plan_receipt(tasks: Vec<PreparedRunTaskReceipt>) -> PreparedRunReceipt {
-    PreparedRunReceipt::new(
-        AnalysisResultSourceDomain::SimulationPlan,
-        Some(SimulationPlanId::new()),
-        ObjectRevision::INITIAL,
-        digest(0x71),
-        digest(0x72),
-        PreparedSourceCheckReceipt::SchematicDrc(digest(0x73)),
+    PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(SimulationPlanId::new()),
+        project_revision: ObjectRevision::INITIAL,
+        prepared_snapshot_digest: digest(0x71),
+        source_content_digest: digest(0x72),
+        source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(0x73)),
+        project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
         tasks,
-    )
+    })
     .expect("a fixture plan receipt is well formed")
 }
 

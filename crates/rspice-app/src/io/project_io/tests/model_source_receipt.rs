@@ -65,18 +65,22 @@ fn prepared_run_receipt_round_trip_retains_exact_project_model_sources() {
             missing_measurement: crate::state::MissingMeasurementPolicy::ReportUnmapped,
         })
         .unwrap();
-    let receipt = PreparedRunReceipt::new_with_project_model_sources_specifications_and_policy(
-        AnalysisResultSourceDomain::SimulationPlan,
-        Some(plan_id),
-        ObjectRevision::INITIAL,
-        ContentDigest::from_bytes([0x53; 32]),
-        ContentDigest::from_bytes([0x54; 32]),
-        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x55; 32])),
-        vec![identity],
-        vec![crate::state::PreparedSpecification::from_definition(definition.clone()).unwrap()],
-        policy,
-        vec![task],
-    )
+    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(plan_id),
+        project_revision: ObjectRevision::INITIAL,
+        prepared_snapshot_digest: ContentDigest::from_bytes([0x53; 32]),
+        source_content_digest: ContentDigest::from_bytes([0x54; 32]),
+        source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes(
+            [0x55; 32],
+        )),
+        project_model_sources: vec![identity],
+        specifications: vec![
+            crate::state::PreparedSpecification::from_definition(definition.clone()).unwrap(),
+        ],
+        specification_policy: policy,
+        tasks: vec![task],
+    })
     .unwrap();
 
     let wire = ProjectPreparedRunReceipt::from(&receipt);

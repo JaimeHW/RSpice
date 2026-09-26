@@ -704,15 +704,18 @@ fn completed_prepared_run(
         digest(0x44),
     )
     .expect("task receipt");
-    let receipt = PreparedRunReceipt::new(
-        AnalysisResultSourceDomain::SimulationPlan,
-        Some(plan_id),
+    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(plan_id),
         project_revision,
-        digest(0x41),
-        source_digest,
-        PreparedSourceCheckReceipt::SchematicDrc(digest(0x43)),
-        vec![task],
-    )
+        prepared_snapshot_digest: digest(0x41),
+        source_content_digest: source_digest,
+        source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(0x43)),
+        project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
+        tasks: vec![task],
+    })
     .expect("run receipt");
     let mut run = SimulationRun::new(1);
     run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))

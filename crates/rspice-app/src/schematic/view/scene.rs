@@ -1929,14 +1929,18 @@ mod tests {
         };
 
         let digest = |byte: u8| ContentDigest::from_bytes([byte; 32]);
-        PreparedRunReceipt::new(
-            AnalysisResultSourceDomain::SimulationPlan,
-            Some(SimulationPlanId::new()),
-            ObjectRevision::INITIAL,
-            digest(0x31),
-            digest(0x32),
-            PreparedSourceCheckReceipt::SchematicDrc(digest(0x33)),
-            vec![
+        PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+            source_domain: AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(SimulationPlanId::new()),
+            project_revision: ObjectRevision::INITIAL,
+            prepared_snapshot_digest: digest(0x31),
+            source_content_digest: digest(0x32),
+            source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(0x33)),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy:
+                rspice_results::specification::PreparedSpecificationPolicy::default(),
+            tasks: vec![
                 PreparedRunTaskReceipt::new(
                     AnalysisInstanceId::new(),
                     ObjectRevision::INITIAL,
@@ -1946,7 +1950,7 @@ mod tests {
                 )
                 .expect("valid task receipt"),
             ],
-        )
+        })
         .expect("valid plan receipt")
         .with_hierarchy_map(vec![
             HierarchyMapRow::new("/X1", "amp_1", "X1", master.clone()).expect("first instance"),

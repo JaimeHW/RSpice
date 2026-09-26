@@ -55,17 +55,20 @@ fn sealed_run(
         ContentDigest::from_bytes([analysis_kind_tag; 32]),
     )
     .unwrap();
-    let receipt = crate::state::PreparedRunReceipt::new(
-        crate::state::AnalysisResultSourceDomain::SimulationPlan,
-        Some(plan_id),
-        ObjectRevision::INITIAL,
-        snapshot,
-        ContentDigest::from_bytes([0x41; 32]),
-        crate::state::PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes(
-            [0x42; 32],
-        )),
-        vec![task],
-    )
+    let receipt = crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: crate::state::AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(plan_id),
+        project_revision: ObjectRevision::INITIAL,
+        prepared_snapshot_digest: snapshot,
+        source_content_digest: ContentDigest::from_bytes([0x41; 32]),
+        source_check_receipt: crate::state::PreparedSourceCheckReceipt::SchematicDrc(
+            ContentDigest::from_bytes([0x42; 32]),
+        ),
+        project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
+        tasks: vec![task],
+    })
     .unwrap();
     let mut run = SimulationRun::new_prepared(run_number, receipt);
     run.add_analysis(attributed_with_id(analysis, source_instance_id));

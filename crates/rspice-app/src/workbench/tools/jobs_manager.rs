@@ -1745,16 +1745,22 @@ mod tests {
     };
 
     fn plan_receipt(plan_id: crate::product::SimulationPlanId, byte: u8) -> PreparedRunReceipt {
-        PreparedRunReceipt::new(
-            AnalysisResultSourceDomain::SimulationPlan,
-            Some(plan_id),
-            crate::product::ObjectRevision::INITIAL,
-            crate::product::ContentDigest::from_bytes([byte; 32]),
-            crate::product::ContentDigest::from_bytes([byte.wrapping_add(1); 32]),
-            PreparedSourceCheckReceipt::SchematicDrc(crate::product::ContentDigest::from_bytes(
-                [byte.wrapping_add(2); 32],
-            )),
-            vec![
+        PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+            source_domain: AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(plan_id),
+            project_revision: crate::product::ObjectRevision::INITIAL,
+            prepared_snapshot_digest: crate::product::ContentDigest::from_bytes([byte; 32]),
+            source_content_digest: crate::product::ContentDigest::from_bytes(
+                [byte.wrapping_add(1); 32],
+            ),
+            source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(
+                crate::product::ContentDigest::from_bytes([byte.wrapping_add(2); 32]),
+            ),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy:
+                rspice_results::specification::PreparedSpecificationPolicy::default(),
+            tasks: vec![
                 PreparedRunTaskReceipt::new(
                     crate::product::AnalysisInstanceId::new(),
                     crate::product::ObjectRevision::INITIAL,
@@ -1764,7 +1770,7 @@ mod tests {
                 )
                 .expect("task receipt"),
             ],
-        )
+        })
         .expect("plan receipt")
     }
 
