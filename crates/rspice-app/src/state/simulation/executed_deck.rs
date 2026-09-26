@@ -47,7 +47,8 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use crate::state::model_library::SEALED_MODEL_SOURCE_MARKER;
+#[cfg(test)]
+use rspice_model_library::sealed_model_sources;
 
 /// How many runs' decks one session keeps.
 ///
@@ -262,14 +263,6 @@ impl ExecutedDeckArchive {
     }
 }
 
-/// The sealed model sources one deck's own comments name.
-pub fn sealed_model_sources(deck: &str) -> Vec<String> {
-    deck.lines()
-        .filter_map(|line| line.trim_start().strip_prefix(SEALED_MODEL_SOURCE_MARKER))
-        .map(|label| label.trim().to_owned())
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,26 +283,6 @@ mod tests {
                 .map(|index| point(&format!("point {index}"), &deck))
                 .collect(),
         }
-    }
-
-    #[test]
-    fn the_sealed_comments_name_the_model_sources_the_engine_was_given() {
-        let deck = format!(
-            "run deck\n{SEALED_MODEL_SOURCE_MARKER}pack rspice-opamps 2.1.0\n.model X D\n\
-             * an ordinary comment\n  {SEALED_MODEL_SOURCE_MARKER}built into RSpice · foundation \n\
-             .end\n"
-        );
-        assert_eq!(
-            sealed_model_sources(&deck),
-            vec![
-                "pack rspice-opamps 2.1.0".to_owned(),
-                "built into RSpice · foundation".to_owned(),
-            ]
-        );
-        assert!(
-            sealed_model_sources("deck\n.end\n").is_empty(),
-            "a deck with no sealed block names no model source"
-        );
     }
 
     #[test]

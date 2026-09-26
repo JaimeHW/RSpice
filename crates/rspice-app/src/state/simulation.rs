@@ -101,9 +101,7 @@ pub use rspice_results::transfer_function::{
 // Test-only alias: outside tests an attribution's vocabulary is only ever
 // named through the attribution's own fields.
 pub use cross_probe::{CrossProbeIndex, CrossProbeMapping, OccurrenceProbeSpelling};
-pub use executed_deck::{
-    ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, absent_deck_reason, sealed_model_sources,
-};
+pub use executed_deck::{ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, absent_deck_reason};
 #[cfg(test)]
 pub use rspice_results::convergence_attribution::ConvergenceFailureClass;
 pub use rspice_results::family_measurements::{

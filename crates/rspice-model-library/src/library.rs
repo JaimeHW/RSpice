@@ -29,6 +29,14 @@ use rspice_app_types::product::{ContentDigest, ModelSourceId, ObjectRevision};
 /// across a layer for it.
 pub const SEALED_MODEL_SOURCE_MARKER: &str = "* RSpice sealed model source: ";
 
+/// The sealed model sources one deck's own comments name.
+pub fn sealed_model_sources(deck: &str) -> Vec<String> {
+    deck.lines()
+        .filter_map(|line| line.trim_start().strip_prefix(SEALED_MODEL_SOURCE_MARKER))
+        .map(|label| label.trim().to_owned())
+        .collect()
+}
+
 /// The pack a provenance label names, as `(pack id, release)`.
 ///
 /// The inverse of [`ModelLibrary::provenance_label`], and tested against it. A
@@ -639,6 +647,26 @@ impl ModelLibrary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_sealed_comments_name_the_model_sources_the_engine_was_given() {
+        let deck = format!(
+            "run deck\n{SEALED_MODEL_SOURCE_MARKER}pack rspice-opamps 2.1.0\n.model X D\n\
+             * an ordinary comment\n  {SEALED_MODEL_SOURCE_MARKER}built into RSpice · foundation \n\
+             .end\n"
+        );
+        assert_eq!(
+            sealed_model_sources(&deck),
+            vec![
+                "pack rspice-opamps 2.1.0".to_owned(),
+                "built into RSpice · foundation".to_owned(),
+            ]
+        );
+        assert!(
+            sealed_model_sources("deck\n.end\n").is_empty(),
+            "a deck with no sealed block names no model source"
+        );
+    }
 
     #[test]
     fn project_closure_authenticates_authority_bytes_and_reachability() {

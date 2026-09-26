@@ -151,6 +151,7 @@ pub use schematic::*;
 #[cfg(test)]
 pub use simulation::ConvergenceFailureClass;
 
+pub use rspice_model_library::sealed_model_sources;
 pub use simulation::CurrentImpulseHistoryEvidence;
 pub(crate) use simulation::DcTraceView;
 pub(crate) use simulation::RunHistoryRevision;
@@ -187,7 +188,7 @@ pub use simulation::{
     TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence, WaveformData,
     absent_deck_reason, ac_bode_shape_for_analysis, ac_bode_shape_for_selection,
-    ac_bode_summary_for_analysis, ac_bode_summary_for_selection, sealed_model_sources,
+    ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
 };
 pub use simulation::{
     ConvergenceReport, PeriodicConvergenceEvidence, PeriodicInitializationMethod,
