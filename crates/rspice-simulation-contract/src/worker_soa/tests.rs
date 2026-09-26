@@ -1,8 +1,7 @@
 //! SOA evidence crosses the worker boundary without losing duration or derating data.
 
 use super::*;
-use crate::results::safety::{SoaDurationEvidence, SoaPowerDerating};
-use rspice_results::safety::SoaPowerDeratingEvidence;
+use rspice_results::safety::{SoaDurationEvidence, SoaPowerDerating, SoaPowerDeratingEvidence};
 
 #[test]
 fn soa_duration_and_derating_evidence_survive_worker_json() {

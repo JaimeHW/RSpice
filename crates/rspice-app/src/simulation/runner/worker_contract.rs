@@ -62,6 +62,9 @@ pub(crate) use rspice_simulation_contract::worker_run_config::{
     WorkerCornerRunConfig, WorkerPacRunConfig, WorkerPeriodicCarrier, WorkerPnoiseReference,
     WorkerPnoiseRunConfig, WorkerPstbRunConfig, WorkerPxfRunConfig, WorkerTempRunConfig,
 };
+#[cfg(test)]
+pub(crate) use rspice_simulation_contract::worker_soa::WorkerSoAParameter;
+pub(crate) use rspice_simulation_contract::worker_soa::{WorkerSoAEvaluation, WorkerSoAViolation};
 pub(crate) use rspice_simulation_contract::worker_spec::{
     WorkerAnalysisConfig, WorkerAnalysisSpec, WorkerSweepType,
 };
@@ -76,9 +79,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use super::ResultSchemaMismatch;
 use super::{NetlistInput, SimulationError, SimulationRequest, SpecExecutionOptions};
-use crate::results::safety::{
-    SoAEvaluation, SoAParameter, SoARuleVerdict, SoAViolation, ViolationSeverity,
-};
+use crate::results::safety::{SoAEvaluation, SoAViolation};
 use crate::simulation::config::AnalysisConfig;
 #[cfg(test)]
 use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};

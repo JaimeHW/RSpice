@@ -73,6 +73,7 @@ pub mod worker_measurement;
 pub mod worker_protocol;
 pub mod worker_result_values;
 pub mod worker_run_config;
+pub mod worker_soa;
 pub mod worker_spec;
 pub mod worker_transport;
 pub mod worker_waveform;
