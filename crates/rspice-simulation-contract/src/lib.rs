@@ -72,6 +72,7 @@ pub mod temp_draft;
 pub mod worker_error;
 pub mod worker_events;
 pub mod worker_measurement;
+pub mod worker_noise;
 pub mod worker_protocol;
 pub mod worker_recorded_fft;
 pub mod worker_result_values;

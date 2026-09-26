@@ -17,9 +17,10 @@ pub use rspice_results::dc_sweep::{
 };
 mod cross_probe;
 mod executed_deck;
-mod noise_figure;
 mod result_digest;
-pub use noise_figure::{NoiseFigureEvidence, PeriodicNoiseConversionEvidence};
+pub use rspice_results::noise::{
+    NoiseContributorRow, NoiseFigureEvidence, NoiseSummary, PeriodicNoiseConversionEvidence,
+};
 mod run;
 mod run_history;
 pub use rspice_results::result_import::{ResultImportFormat, ResultImportSource};
@@ -63,19 +64,18 @@ pub use analysis_result::{
     DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
     DigitalEventTraceEvidence, FloquetOrbitKindEvidence, FloquetSpectrumCertificateEvidence,
     FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence, MonteCarloVariableMetadata,
-    NoiseContributorRow, NoiseSummary, OperatingPointAccuracyEvidence,
-    OperatingPointAnnotationEvidence, OperatingPointDeviceDetailEvidence,
-    OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,
-    OperatingPointNodeInitializationEvidence, OperatingPointPreviousStateEvidence,
-    OperatingPointProcessEvidence, OperatingPointSaveDeviceEvidence,
-    OperatingPointTemperatureEvidence, OperatingPointValue, PeriodicNoiseOutputQuantity,
-    PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate, PssFloquetMultiplierEvidence,
-    PstbFloquetModeEvidence, PstbStabilityClassificationEvidence, RealEventPointEvidence,
-    RealEventTraceEvidence, SensitivityResultMode, SensitivityResultRow, SoaEvaluationEvidence,
-    SoaParameterEvidence, SoaRuleVerdictEvidence, SoaSourceHistory, SoaSourceWaveform,
-    SoaViolationEvidence, SoaViolationSeverityEvidence, TransferFunctionAccuracyEvidence,
-    TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
-    TransferFunctionScalarEvidence,
+    OperatingPointAccuracyEvidence, OperatingPointAnnotationEvidence,
+    OperatingPointDeviceDetailEvidence, OperatingPointHomotopyEvidence,
+    OperatingPointInitialGuessEvidence, OperatingPointNodeInitializationEvidence,
+    OperatingPointPreviousStateEvidence, OperatingPointProcessEvidence,
+    OperatingPointSaveDeviceEvidence, OperatingPointTemperatureEvidence, OperatingPointValue,
+    PeriodicNoiseOutputQuantity, PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate,
+    PssFloquetMultiplierEvidence, PstbFloquetModeEvidence, PstbStabilityClassificationEvidence,
+    RealEventPointEvidence, RealEventTraceEvidence, SensitivityResultMode, SensitivityResultRow,
+    SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaSourceHistory,
+    SoaSourceWaveform, SoaViolationEvidence, SoaViolationSeverityEvidence,
+    TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
+    TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
 };
 pub use rspice_results::analysis_type::AnalysisType;
 pub use rspice_results::convergence_attribution::ConvergenceAttribution;

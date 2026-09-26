@@ -1,4 +1,4 @@
-//! Retained single-sideband noise figure and its physical source reference.
+//! Retained noise summaries, source references, and frequency conversion evidence.
 
 /// Selected-channel signal gain with noise from the configured folding window.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -95,6 +95,59 @@ impl NoiseFigureEvidence {
             return Err("Noise figure has an invalid frequency or decibel series".into());
         }
         Ok(())
+    }
+}
+
+/// One row of the ranked noise-contributor table (band-integrated).
+#[derive(Debug, Clone, PartialEq)]
+pub struct NoiseContributorRow {
+    /// Device instance name.
+    pub device: String,
+    /// Noise mechanism label ("thermal", "flicker", "shot", "burst").
+    pub mechanism: String,
+    /// Output-referred noise power integrated over the band (V²).
+    pub power: f64,
+    /// Share of the total integrated output noise (percent).
+    pub share_pct: f64,
+}
+
+impl NoiseSummary {
+    pub fn is_timing(&self) -> bool {
+        self.conversion
+            .as_ref()
+            .and_then(|conversion| conversion.sampling.as_ref())
+            .is_some_and(|sampling| sampling.request.is_timing())
+    }
+    pub fn power_unit(&self) -> &'static str {
+        if self.is_timing() { "s²" } else { "V²" }
+    }
+}
+
+/// Ranked noise summary for a noise analysis: per-device/mechanism
+/// contributions plus the band total — the table analog designers read
+/// first.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct NoiseSummary {
+    pub input_quantity: Option<rspice_core::analysis::noise::NoiseInputQuantity>,
+    pub conversion: Option<PeriodicNoiseConversionEvidence>,
+    pub noise_figure: Option<std::sync::Arc<NoiseFigureEvidence>>,
+    /// Contributors, ranked by integrated power, descending.
+    pub rows: Vec<NoiseContributorRow>,
+    /// Total integrated output noise over the band (V rms). `None` means the
+    /// selected execution policy intentionally omitted this evidence.
+    pub total_rms: Option<f64>,
+    /// Total integrated input-referred noise, in the resolved source quantity, retained when the
+    /// named-source normalization was validated and the policy requested it.
+    pub input_rms: Option<f64>,
+    /// Analysis band, for the panel header (Hz).
+    pub band: (f64, f64),
+}
+
+impl NoiseSummary {
+    /// Legacy results may lack the source quantity; do not invent a voltage unit for them.
+    pub fn input_rms_unit(&self) -> &'static str {
+        self.input_quantity
+            .map_or("RMS (unit not retained)", |quantity| quantity.rms_unit())
     }
 }
 

@@ -8,116 +8,27 @@
 
 use super::*;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct WorkerNoiseSummary {
-    #[serde(default)]
-    pub input_quantity: Option<rspice_core::analysis::noise::NoiseInputQuantity>,
-    #[serde(default)]
-    pub conversion: Option<crate::state::PeriodicNoiseConversionEvidence>,
-    #[serde(default)]
-    pub noise_figure: Option<std::sync::Arc<crate::state::NoiseFigureEvidence>>,
-    pub rows: Vec<WorkerNoiseContributorRow>,
-    #[serde(default)]
-    pub total_rms: Option<f64>,
-    #[serde(default)]
-    pub input_rms: Option<f64>,
-    pub band: (f64, f64),
-}
-
 #[cfg(test)]
-impl WorkerNoiseSummary {
-    pub(super) fn estimated_numeric_payload_bytes(&self) -> usize {
-        sum_payload_bytes([
-            self.rows
-                .iter()
-                .map(WorkerNoiseContributorRow::estimated_numeric_payload_bytes)
-                .fold(0usize, |total, bytes| total.saturating_add(bytes)),
-            f64_payload_bytes(3),
-            self.conversion
-                .as_ref()
-                .map_or(0, |_| f64_payload_bytes(1).saturating_add(12)),
-            self.noise_figure.as_ref().map_or(0, |figure| {
-                f64_payload_bytes(
-                    3usize
-                        .saturating_add(figure.frequencies.len())
-                        .saturating_add(figure.decibels.len()),
-                )
-            }),
-        ])
-    }
-}
-
-impl From<NoiseSummary> for WorkerNoiseSummary {
-    fn from(value: NoiseSummary) -> Self {
-        Self {
-            input_quantity: value.input_quantity,
-            conversion: value.conversion,
-            noise_figure: value.noise_figure,
-            rows: value
-                .rows
-                .into_iter()
-                .map(WorkerNoiseContributorRow::from)
-                .collect(),
-            total_rms: value.total_rms,
-            input_rms: value.input_rms,
-            band: value.band,
-        }
-    }
-}
-
-impl From<WorkerNoiseSummary> for NoiseSummary {
-    fn from(value: WorkerNoiseSummary) -> Self {
-        Self {
-            input_quantity: value.input_quantity,
-            conversion: value.conversion,
-            noise_figure: value.noise_figure,
-            rows: value
-                .rows
-                .into_iter()
-                .map(NoiseContributorRow::from)
-                .collect(),
-            total_rms: value.total_rms,
-            input_rms: value.input_rms,
-            band: value.band,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct WorkerNoiseContributorRow {
-    pub device: String,
-    pub mechanism: String,
-    pub power: f64,
-    pub share_pct: f64,
-}
-
-#[cfg(test)]
-impl WorkerNoiseContributorRow {
-    pub(super) fn estimated_numeric_payload_bytes(&self) -> usize {
-        f64_payload_bytes(2)
-    }
-}
-
-impl From<NoiseContributorRow> for WorkerNoiseContributorRow {
-    fn from(value: NoiseContributorRow) -> Self {
-        Self {
-            device: value.device,
-            mechanism: value.mechanism.to_string(),
-            power: value.power,
-            share_pct: value.share_pct,
-        }
-    }
-}
-
-impl From<WorkerNoiseContributorRow> for NoiseContributorRow {
-    fn from(value: WorkerNoiseContributorRow) -> Self {
-        Self {
-            device: value.device,
-            mechanism: value.mechanism,
-            power: value.power,
-            share_pct: value.share_pct,
-        }
-    }
+pub(super) fn noise_summary_payload_bytes(summary: &WorkerNoiseSummary) -> usize {
+    sum_payload_bytes([
+        summary
+            .rows
+            .iter()
+            .map(|_| f64_payload_bytes(2))
+            .fold(0usize, |total, bytes| total.saturating_add(bytes)),
+        f64_payload_bytes(3),
+        summary
+            .conversion
+            .as_ref()
+            .map_or(0, |_| f64_payload_bytes(1).saturating_add(12)),
+        summary.noise_figure.as_ref().map_or(0, |figure| {
+            f64_payload_bytes(
+                3usize
+                    .saturating_add(figure.frequencies.len())
+                    .saturating_add(figure.decibels.len()),
+            )
+        }),
+    ])
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

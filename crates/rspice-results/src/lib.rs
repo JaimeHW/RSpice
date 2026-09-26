@@ -23,6 +23,8 @@ pub mod histogram;
 pub mod interpolation;
 pub mod measurements;
 pub mod monte_carlo;
+#[cfg(feature = "engine-evidence")]
+pub mod noise;
 pub mod nyquist;
 pub mod operating_point;
 pub mod optimization;

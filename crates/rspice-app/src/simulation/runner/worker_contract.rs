@@ -46,6 +46,7 @@ pub(crate) use analysis::*;
 pub(crate) use rspice_simulation_contract::worker_error::WorkerSimulationError;
 pub(crate) use rspice_simulation_contract::worker_events::WorkerEventHistory;
 pub(crate) use rspice_simulation_contract::worker_measurement::WorkerMeasurement;
+use rspice_simulation_contract::worker_noise::WorkerNoiseSummary;
 pub(crate) use rspice_simulation_contract::worker_protocol::{
     WORKER_REQUEST_TRANSPORT_PROTOCOL, WORKER_RESPONSE_TRANSPORT_PROTOCOL,
 };
@@ -90,7 +91,7 @@ use crate::simulation::results::{
     TransferFunctionScalar, TransientEventHistory, WaveformData,
 };
 use crate::simulation::status::{SimulationProgress, SimulationStatus};
-use crate::state::{NoiseContributorRow, NoiseSummary};
+use rspice_results::noise::NoiseSummary;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerRequest {
@@ -1357,9 +1358,7 @@ impl WorkerSimulationResult {
                     .as_ref()
                     .map_or(0, |values| f64_payload_bytes(values.len())),
                 vec_map_payload_bytes(contributors),
-                summary
-                    .as_ref()
-                    .map_or(0, WorkerNoiseSummary::estimated_numeric_payload_bytes),
+                summary.as_ref().map_or(0, noise_summary_payload_bytes),
                 measurements_payload_bytes(measurements),
             ]),
             WorkerSimulationResult::PoleZero { poles, zeros, .. } => sum_payload_bytes([
