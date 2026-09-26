@@ -34,7 +34,7 @@ rustyhdf5 = { version = "1.93", default-features = false, optional = true }
 rust_xlsxwriter = { version = "0.92", default-features = false, optional = true }
 serde.workspace = true
 time.workspace = true
-zip = { version = "7.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 fst-writer = "0.3"
