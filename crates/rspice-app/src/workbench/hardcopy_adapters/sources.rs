@@ -853,8 +853,9 @@ fn prepared_simulation_for_panes(
             .filter(|run| dataset_ids.contains(&run.dataset_id))
             .cloned()
             .map(|mut run| {
-                run.analyses
-                    .retain(|analysis| analysis_ids.contains(&(run.dataset_id, analysis.id)));
+                run.data
+                    .analyses
+                    .retain(|analysis| analysis_ids.contains(&(run.data.dataset_id, analysis.id)));
                 run
             })
             .collect(),

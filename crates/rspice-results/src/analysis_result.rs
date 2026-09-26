@@ -83,6 +83,18 @@ pub struct AnalysisResult<W = RetainedWaveform> {
     pub import_source: Option<ResultImportSource>,
 }
 
+impl<W> AsRef<AnalysisResult<W>> for AnalysisResult<W> {
+    fn as_ref(&self) -> &AnalysisResult<W> {
+        self
+    }
+}
+
+impl<W> AsMut<AnalysisResult<W>> for AnalysisResult<W> {
+    fn as_mut(&mut self) -> &mut AnalysisResult<W> {
+        self
+    }
+}
+
 impl<'a, W> From<&'a AnalysisResult<W>>
     for crate::monte_carlo_checkpoint::MonteCarloCheckpointValidationRef<'a>
 {

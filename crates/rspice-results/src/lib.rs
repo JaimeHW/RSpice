@@ -45,6 +45,10 @@ pub mod report_document;
 pub mod result_digest;
 pub mod result_import;
 #[cfg(feature = "engine-evidence")]
+pub mod run;
+#[cfg(feature = "engine-evidence")]
+pub mod run_history;
+#[cfg(feature = "engine-evidence")]
 pub mod run_receipt;
 pub mod safety;
 pub mod sampling;

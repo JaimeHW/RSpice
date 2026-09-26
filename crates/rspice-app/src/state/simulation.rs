@@ -21,6 +21,7 @@ pub use rspice_results::noise::{
     NoiseContributorRow, NoiseFigureEvidence, NoiseSummary, PeriodicNoiseConversionEvidence,
 };
 mod run;
+#[cfg(test)]
 mod run_history;
 pub use rspice_results::result_import::{ResultImportFormat, ResultImportSource};
 #[cfg(test)]
@@ -108,6 +109,10 @@ pub use rspice_results::convergence_attribution::ConvergenceFailureClass;
 pub use rspice_results::family_measurements::{
     FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements,
 };
+pub use rspice_results::run::{
+    ExecutionTarget, RunRetention, SimulationCampaignMembership, SimulationExecutionIdentity,
+    SimulationRunLifecycle,
+};
 pub use rspice_results::run_receipt::{
     HierarchyMapRow, PreparedModelQualification, PreparedModelSourceIdentity, PreparedRunReceipt,
     PreparedRunReceiptInput, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SignOffStanding,
@@ -120,12 +125,9 @@ pub use rspice_results::saved_output::{
 pub use rspice_results::specification::{PreparedSpecification, PreparedSpecificationPolicy};
 pub use rspice_results::specification_verdict::{SpecificationVerdict, SpecificationVerdictStatus};
 pub use rspice_results::waveform::SharedWaveformValues;
-pub use run::{
-    ExecutionTarget, RunRetention, SimulationCampaignMembership, SimulationExecutionIdentity,
-    SimulationRun, SimulationRunLifecycle,
-};
-pub use run_history::RunHistory;
-pub(crate) use run_history::RunHistoryRevision;
+pub use run::SimulationRun;
+pub type RunHistory = rspice_results::run_history::RunHistory<SimulationRun>;
+pub(crate) use rspice_results::run_history::RunHistoryRevision;
 pub use state_impl::EvidenceDomain;
 pub use state_model::{SimulationRunIntent, SimulationState};
 pub use waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, WaveformData};

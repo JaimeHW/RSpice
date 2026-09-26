@@ -20,6 +20,17 @@ pub struct AnalysisResult {
     pub data: RetainedAnalysisResult<WaveformData>,
 }
 
+impl AsRef<RetainedAnalysisResult<WaveformData>> for AnalysisResult {
+    fn as_ref(&self) -> &RetainedAnalysisResult<WaveformData> {
+        &self.data
+    }
+}
+impl AsMut<RetainedAnalysisResult<WaveformData>> for AnalysisResult {
+    fn as_mut(&mut self) -> &mut RetainedAnalysisResult<WaveformData> {
+        &mut self.data
+    }
+}
+
 impl Deref for AnalysisResult {
     type Target = RetainedAnalysisResult<WaveformData>;
     fn deref(&self) -> &Self::Target {
