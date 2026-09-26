@@ -23,7 +23,10 @@ impl<'a, I> SavedOutputValidationRef<'a, I>
 where
     I: Iterator<Item = DcTraceView<'a>> + Clone,
 {
-    pub fn validate(&self, quasi_periodic_basis: Option<I>) -> Result<(), String> {
+    pub fn validate<J>(&self, quasi_periodic_basis: Option<J>) -> Result<(), String>
+    where
+        J: Iterator<Item = DcTraceView<'a>> + Clone,
+    {
         if self.saved_output_receipts.is_empty() {
             return Ok(());
         }

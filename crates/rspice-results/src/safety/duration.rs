@@ -153,6 +153,24 @@ pub enum SoaDurationScanError {
     Aborted,
 }
 
+#[cfg(feature = "engine-evidence")]
+impl From<SoaDurationScanError> for rspice_core::SimulationError {
+    fn from(error: SoaDurationScanError) -> Self {
+        match error {
+            SoaDurationScanError::InvalidMinimumDuration(value) => {
+                rspice_core::config::SimulationConfigError::InvalidValue {
+                    field: "soa.minimum_duration_s",
+                    value,
+                    requirement: "finite and positive",
+                }
+                .into()
+            }
+            SoaDurationScanError::InvalidInput(message) => Self::Circuit(message),
+            SoaDurationScanError::Aborted => Self::Aborted,
+        }
+    }
+}
+
 /// Accumulated exposure starts at zero at the observation-window boundary.
 /// It increases with above-limit time, optionally decays exponentially in gaps,
 /// and qualifies each whole excursion using its exposure at that excursion's end.

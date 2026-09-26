@@ -10,14 +10,15 @@ use crate::saved_output::{
 };
 
 impl SavedOutputSourceBindings {
-    pub(in crate::saved_output) fn validate<'a, I>(
+    pub(in crate::saved_output) fn validate<'a, I, J>(
         &self,
         receipt: &SavedOutputReceipt,
         analysis: &SavedOutputValidationRef<'a, I>,
-        basis: Option<&I>,
+        basis: Option<&J>,
     ) -> Result<(), String>
     where
         I: Iterator<Item = DcTraceView<'a>> + Clone,
+        J: Iterator<Item = DcTraceView<'a>> + Clone,
     {
         let expected = saved_output_references(receipt.output_kind, &receipt.source_expression)?
             .ok_or_else(|| "this saved-output kind cannot carry source bindings".to_owned())?;
@@ -36,10 +37,10 @@ impl SavedOutputSourceBindings {
         let retained = |name: &str| {
             analysis.dc_op.as_ref().map_or_else(
                 || {
-                    basis
-                        .cloned()
-                        .unwrap_or_else(|| analysis.waveforms.clone())
-                        .any(|wave| wave.name == name)
+                    basis.map_or_else(
+                        || analysis.waveforms.clone().any(|wave| wave.name == name),
+                        |basis| basis.clone().any(|wave| wave.name == name),
+                    )
                 },
                 |op| {
                     op.node_voltages

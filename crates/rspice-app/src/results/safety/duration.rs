@@ -3,7 +3,7 @@ use super::{SoAManager, SoaDurationMode, SoaLimitTrace};
 #[cfg(test)]
 use super::{SoARuleVerdict, SoaThresholds};
 use rspice_core::{SimulationError, abort_signal::AbortSignal};
-use rspice_results::safety::{SoaDurationScan, SoaDurationScanError, scan_soa_duration_with_mode};
+use rspice_results::safety::{SoaDurationScan, scan_soa_duration_with_mode};
 
 /// Qualifications are retrospective: the complete excursion's width decides
 /// whether its above-limit samples are violations. Observation-window edges
@@ -38,7 +38,7 @@ pub fn qualify_soa_duration_with_mode(
     scan_soa_duration_with_mode(time, stress, limits, minimum_duration_s, mode, || {
         abort.is_aborted()
     })
-    .map_err(map_soa_duration_error)
+    .map_err(SimulationError::from)
 }
 
 /// Finish retained rule histories with the engine's cancellation and error types.
@@ -49,22 +49,7 @@ pub fn finalize_soa_durations(
 ) -> Result<bool, SimulationError> {
     manager
         .finalize_durations_with(time, || abort.is_aborted())
-        .map_err(map_soa_duration_error)
-}
-
-fn map_soa_duration_error(error: SoaDurationScanError) -> SimulationError {
-    match error {
-        SoaDurationScanError::InvalidMinimumDuration(value) => {
-            rspice_core::config::SimulationConfigError::InvalidValue {
-                field: "soa.minimum_duration_s",
-                value,
-                requirement: "finite and positive",
-            }
-            .into()
-        }
-        SoaDurationScanError::InvalidInput(message) => SimulationError::Circuit(message),
-        SoaDurationScanError::Aborted => SimulationError::Aborted,
-    }
+        .map_err(SimulationError::from)
 }
 
 #[cfg(test)]
