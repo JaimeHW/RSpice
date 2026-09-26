@@ -1140,7 +1140,7 @@ mod operating_point_contract_tests {
             initial_guess,
             previous_state: Some(evidence),
             ..
-        }) = retained.result_payload
+        }) = retained.data.result_payload
         else {
             panic!("retained OP lineage")
         };

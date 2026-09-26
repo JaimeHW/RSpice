@@ -187,6 +187,7 @@ fn dc_conversion_rejects_a_curve_axis_that_disagrees_with_the_shared_axis() {
     assert!(!retained.success);
     assert!(
         retained
+            .data
             .error_message
             .unwrap()
             .contains("different primary axes")

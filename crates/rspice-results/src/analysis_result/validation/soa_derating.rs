@@ -1,12 +1,12 @@
 //! Cross-check derating metadata against the complete retained waveforms.
 use super::*;
-use crate::results::safety::{
+use crate::safety::{
     SoAParameter, compare_soa_stress, soa_derating_temperature_waveform_name,
     soa_power_limit_waveform_name, soa_stress_waveform_name,
 };
 
-pub(super) fn trace<'a>(
-    analysis: &'a AnalysisResult,
+pub(super) fn trace<'a, W: AsRef<RetainedWaveform>>(
+    analysis: &'a AnalysisResult<W>,
     name: &str,
     time: &[f64],
     unit: &str,
@@ -31,6 +31,7 @@ pub(super) fn trace<'a>(
     let wave = analysis
         .waveforms
         .iter()
+        .map(AsRef::as_ref)
         .find(|wave| wave.name == name)
         .ok_or_else(|| format!("SOA derating is missing retained trace '{name}'"))?;
     if wave.y.len() != time.len()
@@ -45,8 +46,8 @@ pub(super) fn trace<'a>(
     Ok(&wave.y)
 }
 
-pub(super) fn validate(
-    analysis: &AnalysisResult,
+pub(super) fn validate<W: AsRef<RetainedWaveform>>(
+    analysis: &AnalysisResult<W>,
     time: &[f64],
     evaluation: &SoaEvaluationEvidence,
 ) -> Result<usize, String> {
@@ -100,7 +101,7 @@ pub(super) fn validate(
             worst = i;
         }
         if evaluation.thresholds.verdict(stress[i], limits[i])
-            != crate::results::safety::SoARuleVerdict::Pass
+            != crate::safety::SoARuleVerdict::Pass
         {
             events += 1;
         }

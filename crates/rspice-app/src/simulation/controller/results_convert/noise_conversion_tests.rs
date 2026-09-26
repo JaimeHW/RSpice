@@ -81,7 +81,7 @@ fn hbnoise_retains_noise_figure_as_decibels_with_its_source_reference() {
     changed.waveforms.remove(index);
     assert!(changed.validate_retained_evidence().is_err());
     assert_eq!(
-        result.noise_summary.unwrap().noise_figure.as_ref(),
+        result.data.noise_summary.unwrap().noise_figure.as_ref(),
         Some(&figure)
     );
 }

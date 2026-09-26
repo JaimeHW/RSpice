@@ -1,12 +1,12 @@
 //! Recompute current limits from the authored curve and retained terminal voltage.
 use super::*;
-use crate::results::safety::{
+use crate::safety::{
     SoARuleVerdict, compare_soa_stress, soa_envelope_limit_waveform_name,
     soa_envelope_voltage_waveform_name, soa_stress_waveform_name,
 };
 
-pub(super) fn validate(
-    analysis: &AnalysisResult,
+pub(super) fn validate<W: AsRef<RetainedWaveform>>(
+    analysis: &AnalysisResult<W>,
     time: &[f64],
     evaluation: &SoaEvaluationEvidence,
 ) -> Result<usize, String> {

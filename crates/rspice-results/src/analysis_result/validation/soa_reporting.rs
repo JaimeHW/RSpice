@@ -1,9 +1,9 @@
 //! Reporting views must retain every constant-limit event and cumulative count.
 use super::*;
-use crate::results::safety::{SoAParameter, soa_stress_waveform_name};
+use crate::safety::{SoAParameter, soa_stress_waveform_name};
 
-pub(super) fn validate(
-    analysis: &AnalysisResult,
+pub(super) fn validate<W: AsRef<RetainedWaveform>>(
+    analysis: &AnalysisResult<W>,
     time: &[f64],
     evaluations: &[SoaEvaluationEvidence],
     violations: &[SoaViolationEvidence],
@@ -47,7 +47,7 @@ pub(super) fn validate(
             unit,
         )?;
         let worst = (1..time.len()).fold(0, |worst, index| {
-            if crate::results::safety::compare_soa_stress(
+            if crate::safety::compare_soa_stress(
                 stress[index],
                 evaluation.limit_value,
                 stress[worst],

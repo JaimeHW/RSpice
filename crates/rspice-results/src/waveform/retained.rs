@@ -43,6 +43,12 @@ pub struct RetainedWaveform {
     pub complex: Option<ComplexWaveformComponents>,
 }
 
+impl AsRef<RetainedWaveform> for RetainedWaveform {
+    fn as_ref(&self) -> &RetainedWaveform {
+        self
+    }
+}
+
 impl RetainedWaveform {
     /// Create a new waveform trace
     pub fn new(

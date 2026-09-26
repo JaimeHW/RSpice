@@ -1,7 +1,7 @@
 //! Recompute excursion qualifications from the complete retained samples.
 use super::*;
-use crate::results::safety::{
-    SoARuleVerdict, SoaLimitTrace, compare_soa_stress, qualify_soa_duration_with_mode,
+use crate::safety::{
+    SoARuleVerdict, SoaLimitTrace, compare_soa_stress, scan_soa_duration_with_mode,
     soa_duration_verdict, soa_power_limit_waveform_name, soa_stress_waveform_name,
 };
 
@@ -19,16 +19,16 @@ pub(super) fn severity(verdict: SoARuleVerdict) -> Option<SoaViolationSeverityEv
     }
 }
 
-pub(super) fn validate(
-    analysis: &AnalysisResult,
+pub(super) fn validate<W: AsRef<RetainedWaveform>>(
+    analysis: &AnalysisResult<W>,
     time: &[f64],
     evaluation: &SoaEvaluationEvidence,
 ) -> Result<DurationSamples, String> {
     let duration = evaluation.duration.ok_or("Missing SOA duration policy")?;
     let parameter = evaluation.parameter.runtime_parameter();
     let unit = match parameter {
-        crate::results::safety::SoAParameter::Temp => "K",
-        crate::results::safety::SoAParameter::Pdiss => "W",
+        crate::safety::SoAParameter::Temp => "K",
+        crate::safety::SoAParameter::Pdiss => "W",
         parameter if parameter.is_current() => "A",
         _ => "V",
     };
@@ -44,10 +44,7 @@ pub(super) fn validate(
     let limits = if evaluation.envelope.is_some() {
         SoaLimitTrace::Samples(super::soa_derating::trace(
             analysis,
-            &crate::results::safety::soa_envelope_limit_waveform_name(
-                &evaluation.device_id,
-                parameter,
-            ),
+            &crate::safety::soa_envelope_limit_waveform_name(&evaluation.device_id, parameter),
             time,
             "A",
         )?)
@@ -61,14 +58,15 @@ pub(super) fn validate(
     } else {
         SoaLimitTrace::Constant(evaluation.limit_value)
     };
-    let scan = qualify_soa_duration_with_mode(
+    let scan = scan_soa_duration_with_mode(
         time,
         stress,
         limits,
         duration.minimum_duration_s,
         duration.mode(),
-        &rspice_core::abort_signal::NoAbort,
+        || false,
     )
+    .map_err(rspice_core::SimulationError::from)
     .map_err(|error| error.to_string())?;
     if scan.evidence != duration {
         return Err("SOA duration summary contradicts its retained samples".into());

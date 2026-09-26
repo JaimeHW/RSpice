@@ -1,11 +1,12 @@
 //! Units retained at the native result boundary, never inferred on history load.
 use super::*;
+use crate::analysis_payload::native_scalar_name_matches;
 use rspice_core::analysis::MeasurementUnit;
 
-impl AnalysisResult {
+impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
     /// Called only when materializing a new runner result. A missing map on
     /// historical evidence preserves its original numeric limit interpretation.
-    pub(crate) fn retain_native_scalar_units(&mut self) {
+    pub fn retain_native_scalar_units(&mut self) {
         self.native_scalar_units = self.result_payload.as_ref().and_then(|payload| {
             let names = payload.scalar_evidence_names();
             (!names.is_empty()).then(|| {
@@ -61,8 +62,8 @@ impl AnalysisResult {
 
 #[cfg(test)]
 mod tests {
-    use rspice_results::fft::FftSpectrumFormatEvidence;
-    use rspice_results::fft::spectrum::{
+    use crate::fft::FftSpectrumFormatEvidence;
+    use crate::fft::spectrum::{
         FftMetricsEvidence, FftSpectrumEvidence, FftSpectrumModeEvidence, FftSpectrumStatusEvidence,
     };
 
@@ -91,7 +92,8 @@ mod tests {
 
     #[test]
     fn native_scalar_units_keep_fft_normalization_and_unknown_quantities() {
-        use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType};
+        use crate::{analysis_payload::AnalysisResultPayload, analysis_type::AnalysisType};
+        type AnalysisResult = crate::analysis_result::AnalysisResult;
         for (physical, format, target, expected) in [
             (
                 "voltage",
@@ -134,7 +136,7 @@ mod tests {
                 largest_harmonics: vec![],
             });
             spectrum.validate().unwrap();
-            let mut result = AnalysisResult::new(1, AnalysisType::Fourier, "FFT")
+            let mut result = AnalysisResult::new(1, AnalysisType::Fourier, "FFT", 0.0)
                 .with_result_payload(AnalysisResultPayload::FftSpectrum { spectrum });
             result.retain_native_scalar_units();
             let scalar = result.scalar_evidence("FFT.fundamental_magnitude");

@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::product::ContentDigest;
-use rspice_results::result_digest::{AnalysisResultDataRef, ResultDigestEncoding};
+use rspice_results::result_digest::ResultDigestEncoding;
 
 impl AnalysisResult {
     /// SHA-256 identity of the authoritative retained data and evidence for
@@ -129,31 +129,6 @@ impl AnalysisResult {
 
     pub(crate) fn legacy_v15_result_data_digest(&self) -> ContentDigest {
         self.result_data_digest_with_encoding(ResultDigestEncoding::V15)
-    }
-
-    fn result_data_ref(
-        &self,
-    ) -> AnalysisResultDataRef<
-        '_,
-        impl ExactSizeIterator<Item = &rspice_results::waveform::RetainedWaveform> + Clone,
-    > {
-        AnalysisResultDataRef {
-            analysis_type: self.analysis_type,
-            success: self.success,
-            error_message: self.error_message.as_deref(),
-            import_source: self.import_source.as_ref(),
-            convergence: self.convergence.as_deref(),
-            waveforms: self.waveforms.iter().map(|waveform| &waveform.data),
-            dc_op: self.dc_op.as_ref(),
-            device_op: self.device_op.as_ref(),
-            noise_summary: self.noise_summary.as_ref(),
-            family_metadata: self.family_metadata.as_ref(),
-            result_payload: self.result_payload.as_ref(),
-            measurements: &self.measurements,
-            saved_output_receipts: &self.saved_output_receipts,
-            monte_carlo_checkpoint: self.monte_carlo_checkpoint.as_ref(),
-            native_scalar_units: self.native_scalar_units.as_ref(),
-        }
     }
 }
 

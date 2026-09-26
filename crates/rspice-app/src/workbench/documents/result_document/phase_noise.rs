@@ -438,7 +438,10 @@ mod tests {
         );
         analysis.measurements[1].passed = false;
         assert_eq!(retained_measurement(&analysis, "timing_jitter_rms_s"), None);
-        analysis.measurements.push(analysis.measurements[0].clone());
+        analysis
+            .data
+            .measurements
+            .push(analysis.data.measurements[0].clone());
         assert_eq!(retained_measurement(&analysis, "phase_error_rms_rad"), None);
     }
 

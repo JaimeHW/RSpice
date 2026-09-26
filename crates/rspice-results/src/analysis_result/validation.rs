@@ -1,11 +1,18 @@
-//! Validation rules for retained analysis payloads and their numerical evidence.
+//! Validate complete retained analyses and reconcile their independently versioned evidence.
 
 use super::*;
-use rspice_results::validation::{normalized_f64, same_retained_float};
+use crate::soa_evidence::{
+    SoaEvaluationEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
+    SoaViolationSeverityEvidence,
+};
+use crate::soa_source::SoaSourceHistory;
+use crate::validation::{normalized_f64, same_retained_float};
+use std::collections::HashSet;
 mod soa_derating;
 mod soa_duration;
 mod soa_envelope;
 mod soa_reporting;
+mod soa_source;
 
 fn contains_retained_coordinate(sorted: &[f64], target: f64) -> bool {
     let target = normalized_f64(target);
@@ -14,323 +21,7 @@ fn contains_retained_coordinate(sorted: &[f64], target: f64) -> bool {
         .is_ok()
 }
 
-#[derive(Debug, Clone)]
-pub struct AnalysisResult {
-    /// Unique ID within the simulation run
-    pub id: u64,
-    /// Analysis type for viewer selection
-    pub analysis_type: AnalysisType,
-    /// Human-readable label with parameters (e.g., "AC (1Hz-1GHz)")
-    pub label: String,
-    /// Unix timestamp when analysis completed
-    pub timestamp: f64,
-    /// Time-domain or frequency-domain waveforms (for sweep analyses)
-    pub waveforms: Vec<WaveformData>,
-    /// DC operating point data (for DC Op analysis)
-    pub dc_op: Option<DcOpResult>,
-    /// Per-device operating point report (bias + small-signal parameters,
-    /// the Spectre-style OP info), for DC Op analyses.
-    pub device_op: Option<rspice_core::circuit::DeviceOpReport>,
-    /// Ranked, band-integrated noise contributors, for noise analyses.
-    pub noise_summary: Option<NoiseSummary>,
-    /// Exact typed metadata for multi-run and advanced result families. This
-    /// is source evidence, not presentation state, and must survive project
-    /// and session persistence unchanged.
-    pub family_metadata: Option<AnalysisResultFamilyMetadata>,
-    /// Exact analysis-native evidence such as pole/zero roots, sensitivity
-    /// rows, or scalar-only results. This is immutable retained data, not a
-    /// viewer cache.
-    pub result_payload: Option<AnalysisResultPayload>,
-    /// Exact units for native payload scalars. Absent on historical results;
-    /// explicit Unknown is distinct from their original numeric semantics.
-    pub native_scalar_units: Option<BTreeMap<String, rspice_core::analysis::MeasurementUnit>>,
-    /// Portable committed trials retained even when the task is interrupted.
-    /// This is never a substitute for a completed statistical result.
-    pub monte_carlo_checkpoint: Option<MonteCarloCheckpointEvidence>,
-    /// Evaluated `.MEAS` results for this analysis (specs-matrix rows).
-    pub measurements: Vec<rspice_core::MeasureResult>,
-    /// Authenticated application receipts for plan-owned saved-output
-    /// contracts. The materialized waveform remains in `waveforms`; the
-    /// receipt proves why it exists and records deferred/suppressed outcomes.
-    pub saved_output_receipts: Vec<SavedOutputReceipt>,
-    /// Whether this analysis completed successfully
-    pub success: bool,
-    /// Error message if analysis failed
-    pub error_message: Option<String>,
-    /// The design objects the engine named for this failure, when it could
-    /// name any. `None` covers every successful run and every failure the
-    /// engine could not attribute — a parse error names no conductor.
-    pub failure_attribution: Option<ConvergenceAttribution>,
-    /// Quality of this result's transient source. Missing historical or
-    /// imported evidence stays unknown; it is never inferred from smooth data.
-    pub convergence: Option<std::sync::Arc<crate::state::TransientConvergenceEvidence>>,
-    /// Exact prepared-task identity. Missing only for migrated legacy result
-    /// history that was written before source instance IDs existed.
-    pub provenance: Option<AnalysisResultProvenance>,
-    /// External adapter attribution; absent for native and historical unknown sources.
-    pub import_source: Option<ResultImportSource>,
-}
-
-impl<'a> From<&'a AnalysisResult>
-    for rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointValidationRef<'a>
-{
-    fn from(analysis: &'a AnalysisResult) -> Self {
-        Self {
-            analysis_type: analysis.analysis_type,
-            provenance: analysis.provenance.as_ref(),
-            import_source: analysis.import_source.as_ref(),
-            success: analysis.success,
-            family_metadata: analysis.family_metadata.as_ref(),
-        }
-    }
-}
-
-impl AnalysisResult {
-    /// Construct a presentation-only transient result from accepted solver
-    /// points. It is deliberately unsuccessful until the engine returns its
-    /// terminal result, which keeps measurement, export, and qualification
-    /// paths from mistaking an in-flight prefix for complete evidence.
-    pub(crate) fn live_transient_partial(
-        id: u64,
-        analysis_type: AnalysisType,
-        label: impl Into<String>,
-    ) -> Self {
-        Self::failed(id, analysis_type, label, LIVE_TRANSIENT_PARTIAL_MESSAGE)
-    }
-
-    #[must_use]
-    pub fn is_live_partial(&self) -> bool {
-        !self.success
-            && matches!(
-                self.error_message.as_deref(),
-                Some(LIVE_TRANSIENT_PARTIAL_MESSAGE | LIVE_MONTE_CARLO_PARTIAL_MESSAGE)
-            )
-    }
-
-    pub(crate) fn live_monte_carlo_partial(
-        label: impl Into<String>,
-        checkpoint: MonteCarloCheckpointEvidence,
-    ) -> Self {
-        let mut result = Self::failed(
-            1,
-            AnalysisType::MonteCarlo,
-            label,
-            LIVE_MONTE_CARLO_PARTIAL_MESSAGE,
-        );
-        result.monte_carlo_checkpoint = Some(checkpoint);
-        result
-    }
-
-    /// Exact prepared-task provenance for current retained results.
-    #[must_use]
-    pub fn provenance(&self) -> Option<&AnalysisResultProvenance> {
-        self.provenance.as_ref()
-    }
-
-    /// Exact scalar evidence exposed to specification and result-document
-    /// consumers. Explicit `.MEAS` results take precedence over a same-named
-    /// analysis-native scalar so one execution cannot be counted twice.
-    pub(crate) fn scalar_evidence(&self, name: &str) -> Vec<ScalarEvidenceCandidate> {
-        let name = name.trim();
-        if name.is_empty() {
-            return Vec::new();
-        }
-
-        let measurements = self
-            .measurements
-            .iter()
-            .filter(|measurement| measurement.name.eq_ignore_ascii_case(name))
-            .map(|measurement| ScalarEvidenceCandidate {
-                unit: measurement.units.as_ref().map(|units| units.value.clone()),
-                value: measurement.value.filter(|value| value.is_finite()),
-                passed: measurement.passed && measurement.error.is_none(),
-            })
-            .collect::<Vec<_>>();
-        if !measurements.is_empty() {
-            return measurements;
-        }
-
-        self.result_payload
-            .as_ref()
-            .and_then(|payload| payload.scalar_evidence(name))
-            .map(|mut evidence| {
-                evidence.unit = self.native_scalar_unit(name);
-                evidence
-            })
-            .into_iter()
-            .collect()
-    }
-
-    /// Canonical discoverable scalar names for the active retained dataset.
-    /// These are evidence keys, not synthesized stability booleans.
-    pub(crate) fn scalar_evidence_names(&self) -> Vec<String> {
-        let mut names = self
-            .measurements
-            .iter()
-            .map(|measurement| measurement.name.clone())
-            .collect::<Vec<_>>();
-        if let Some(payload) = &self.result_payload {
-            names.extend(payload.scalar_evidence_names());
-        }
-        names
-    }
-
-    /// Create a new successful analysis result
-    pub fn new(id: u64, analysis_type: AnalysisType, label: impl Into<String>) -> Self {
-        Self {
-            id,
-            analysis_type,
-            label: label.into(),
-            timestamp: Self::current_timestamp(),
-            waveforms: Vec::new(),
-            dc_op: None,
-            device_op: None,
-            noise_summary: None,
-            family_metadata: None,
-            result_payload: None,
-            native_scalar_units: None,
-            monte_carlo_checkpoint: None,
-            measurements: Vec::new(),
-            saved_output_receipts: Vec::new(),
-            success: true,
-            error_message: None,
-            failure_attribution: None,
-            convergence: None,
-            provenance: None,
-            import_source: None,
-        }
-    }
-
-    /// Create a failed analysis result
-    pub fn failed(
-        id: u64,
-        analysis_type: AnalysisType,
-        label: impl Into<String>,
-        error: impl Into<String>,
-    ) -> Self {
-        Self {
-            id,
-            analysis_type,
-            label: label.into(),
-            timestamp: Self::current_timestamp(),
-            waveforms: Vec::new(),
-            dc_op: None,
-            device_op: None,
-            noise_summary: None,
-            family_metadata: None,
-            result_payload: None,
-            native_scalar_units: None,
-            monte_carlo_checkpoint: None,
-            measurements: Vec::new(),
-            saved_output_receipts: Vec::new(),
-            success: false,
-            error_message: Some(error.into()),
-            failure_attribution: None,
-            convergence: None,
-            provenance: None,
-            import_source: None,
-        }
-    }
-
-    /// Add waveform data to this analysis
-    pub fn with_waveforms(mut self, waveforms: Vec<WaveformData>) -> Self {
-        self.waveforms = waveforms;
-        self
-    }
-
-    /// Add DC operating point data
-    pub fn with_dc_op(mut self, dc_op: DcOpResult) -> Self {
-        self.dc_op = Some(dc_op);
-        self
-    }
-
-    /// Attach the per-device operating-point report.
-    pub fn with_device_op(mut self, report: rspice_core::circuit::DeviceOpReport) -> Self {
-        if !report.is_empty() {
-            self.device_op = Some(report);
-        }
-        self
-    }
-
-    /// Attach the ranked noise-contributor summary.
-    pub fn with_noise_summary(mut self, summary: NoiseSummary) -> Self {
-        // An empty contributor table is meaningful for the `SummaryOnly`
-        // retention policy. The integrated totals and exact analysis band are
-        // still authoritative result evidence and must survive conversion and
-        // project persistence even when individual contributors were omitted.
-        self.noise_summary = Some(summary);
-        self
-    }
-
-    /// Attach exact source metadata for an advanced result family.
-    #[must_use]
-    pub fn with_family_metadata(mut self, metadata: AnalysisResultFamilyMetadata) -> Self {
-        debug_assert!(metadata.validate_for(self.analysis_type).is_ok());
-        self.family_metadata = Some(metadata);
-        self
-    }
-
-    /// What to call this result where a reader sees its analysis named.
-    ///
-    /// A recorded `.FFT` is retained in the Fourier family, because that is
-    /// the family the Results contract already defines for a retained
-    /// coefficient spectrum. The family is not the analysis, though, and a
-    /// reader must never be told an FFT was a `.four`: the payload is what
-    /// says which request produced the result, so it is what answers here.
-    #[must_use]
-    pub fn kind_display_name(&self) -> &'static str {
-        match &self.result_payload {
-            Some(AnalysisResultPayload::FftSpectrum { .. }) => "FFT",
-            _ => self.analysis_type.display_name(),
-        }
-    }
-
-    /// The SPICE card a reader would author to reproduce this result.
-    #[must_use]
-    pub fn spice_card(&self) -> &'static str {
-        match &self.result_payload {
-            Some(AnalysisResultPayload::FftSpectrum { .. }) => ".fft",
-            _ => self.analysis_type.spice_command(),
-        }
-    }
-
-    /// Attach exact analysis-native result evidence.
-    #[must_use]
-    pub fn with_result_payload(mut self, payload: AnalysisResultPayload) -> Self {
-        debug_assert!(payload.validate_for(self.analysis_type).is_ok());
-        self.result_payload = Some(payload);
-        self
-    }
-
-    /// Attach evaluated `.MEAS` results.
-    pub fn with_measurements(mut self, measurements: Vec<rspice_core::MeasureResult>) -> Self {
-        self.measurements = measurements;
-        self
-    }
-
-    /// Attach the exact prepared task that produced this result.
-    #[must_use]
-    pub fn with_provenance(mut self, provenance: AnalysisResultProvenance) -> Self {
-        self.provenance = Some(provenance);
-        self
-    }
-
-    /// Get current timestamp as Unix epoch seconds
-    fn current_timestamp() -> f64 {
-        crate::time_compat::unix_epoch().as_secs_f64()
-    }
-
-    /// Check if this analysis has any viewable data
-    #[cfg(test)]
-    pub fn has_data(&self) -> bool {
-        !self.waveforms.is_empty()
-            || self.dc_op.is_some()
-            || self
-                .result_payload
-                .as_ref()
-                .is_some_and(AnalysisResultPayload::has_data)
-    }
-
+impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
     /// Validate relationships between independently versioned retained fields.
     /// Historical analyses may legitimately lack a newer payload; when both
     /// fields exist they must describe one coherent execution.
@@ -342,7 +33,7 @@ impl AnalysisResult {
         let retained_basis = self
             .result_payload
             .as_ref()
-            .map(Self::retained_display_basis)
+            .map(AnalysisResultPayload::retained_waveform_basis)
             .transpose()?
             .flatten();
         self.validate_saved_output_receipts(retained_basis.as_deref())?;
@@ -359,7 +50,7 @@ impl AnalysisResult {
             }
         }
         let mut waveform_names = HashSet::with_capacity(self.waveforms.len());
-        for waveform in &self.waveforms {
+        for waveform in self.waveforms.iter().map(AsRef::as_ref) {
             let name = waveform.name.trim();
             if name.is_empty() || waveform.name.chars().any(char::is_control) {
                 return Err("retained waveform requires a non-empty control-free name".to_owned());
@@ -479,7 +170,7 @@ impl AnalysisResult {
         }
         if let Some(noise) = &self.noise_summary {
             if let Some(quantity) = noise.input_quantity
-                && (self.waveforms.iter().any(|wave| {
+                && (self.waveforms.iter().map(AsRef::as_ref).any(|wave| {
                     wave.name == "inoise" && wave.unit.as_deref() != Some(quantity.density_unit())
                 }) || (noise.noise_figure.is_some()
                     && quantity != rspice_core::analysis::noise::NoiseInputQuantity::Voltage))
@@ -497,6 +188,7 @@ impl AnalysisResult {
                         || self
                             .waveforms
                             .iter()
+                            .map(AsRef::as_ref)
                             .filter(|wave| wave.name == "onoise" || wave.name.starts_with("noise("))
                             .any(|wave| wave.unit.as_deref() != Some(unit))
                     {
@@ -505,7 +197,11 @@ impl AnalysisResult {
                 }
                 if conversion.input_source.trim().is_empty()
                     && (self.analysis_type == AnalysisType::Hbnoise
-                        || self.waveforms.iter().any(|wave| wave.name == "inoise"))
+                        || self
+                            .waveforms
+                            .iter()
+                            .map(AsRef::as_ref)
+                            .any(|wave| wave.name == "inoise"))
                 {
                     return Err(
                         "Input-referred periodic noise requires a retained input source".into(),
@@ -527,7 +223,7 @@ impl AnalysisResult {
                     );
                 }
                 if self.waveforms.is_empty()
-                    || self.waveforms.iter().any(|wave| {
+                    || self.waveforms.iter().map(AsRef::as_ref).any(|wave| {
                         wave.x.first().copied() != Some(noise.band.0)
                             || wave.x.last().copied() != Some(noise.band.1)
                     })
@@ -542,6 +238,7 @@ impl AnalysisResult {
                 let mut curves = self
                     .waveforms
                     .iter()
+                    .map(AsRef::as_ref)
                     .filter(|wave| wave.name == "Noise figure (SSB)");
                 let matches = curves.next().is_some_and(|wave| {
                     wave.unit.as_deref() == Some("dB")
@@ -658,15 +355,15 @@ impl AnalysisResult {
         }
         self.validate_retained_display_basis(retained_basis.as_deref())?;
         if let Some(AnalysisResultPayload::DcSweep { evidence }) = &self.result_payload {
-            evidence.validate_retained_traces(self.waveforms.iter().map(|trace| {
-                super::super::DcTraceView {
+            evidence.validate_retained_traces(self.waveforms.iter().map(AsRef::as_ref).map(
+                |trace| crate::dc_sweep::DcTraceView {
                     name: &trace.name,
                     unit: trace.unit.as_deref(),
                     x: &trace.x,
                     sample_count: trace.y.len(),
                     complex: trace.complex.is_some(),
-                }
-            }))?;
+                },
+            ))?;
         }
 
         match (&self.family_metadata, &self.result_payload) {
@@ -712,7 +409,7 @@ impl AnalysisResult {
                         }
                         Some(soa_derating::trace(
                             self,
-                            &crate::results::safety::soa_envelope_limit_waveform_name(
+                            &crate::safety::soa_envelope_limit_waveform_name(
                                 &evaluation.device_id,
                                 evaluation.parameter.runtime_parameter(),
                             ),
@@ -726,9 +423,7 @@ impl AnalysisResult {
                         }
                         Some(soa_derating::trace(
                             self,
-                            &crate::results::safety::soa_power_limit_waveform_name(
-                                &evaluation.device_id,
-                            ),
+                            &crate::safety::soa_power_limit_waveform_name(&evaluation.device_id),
                             time,
                             "W",
                         )?)
@@ -737,7 +432,7 @@ impl AnalysisResult {
                     };
                     let stress = soa_derating::trace(
                         self,
-                        &crate::results::safety::soa_stress_waveform_name(
+                        &crate::safety::soa_stress_waveform_name(
                             &evaluation.device_id,
                             evaluation.parameter.runtime_parameter(),
                         ),
@@ -789,7 +484,7 @@ impl AnalysisResult {
                         ));
                     }
                     if evaluation.duration.is_none()
-                        && crate::results::safety::compare_soa_stress(
+                        && crate::safety::compare_soa_stress(
                             violation.actual_value,
                             violation.limit_value,
                             evaluation.worst_actual_value,
@@ -879,5 +574,6 @@ impl AnalysisResult {
         Ok(())
     }
 }
+
 #[cfg(test)]
-mod retained_payload_tests;
+mod tests;

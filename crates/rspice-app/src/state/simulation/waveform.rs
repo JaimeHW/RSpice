@@ -45,6 +45,12 @@ impl DerefMut for WaveformData {
     }
 }
 
+impl AsRef<RetainedWaveform> for WaveformData {
+    fn as_ref(&self) -> &RetainedWaveform {
+        &self.data
+    }
+}
+
 impl WaveformData {
     pub fn new(
         name: impl Into<String>,

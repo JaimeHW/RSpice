@@ -781,7 +781,10 @@ pub(crate) mod tests {
         missing.waveforms.pop();
         assert!(!structure_is_renderable(&missing));
         let mut duplicate = fixture(false);
-        duplicate.waveforms.push(duplicate.waveforms[0].clone());
+        duplicate
+            .data
+            .waveforms
+            .push(duplicate.data.waveforms[0].clone());
         assert!(!structure_is_renderable(&duplicate));
         let mut wrong_grid = fixture(false);
         wrong_grid.waveforms[0].x = vec![1e6, 3e6].into();

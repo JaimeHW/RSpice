@@ -73,16 +73,19 @@ fn soa_reporting_detail_uses_complete_history_and_hashes_its_samples() {
         unreachable!()
     };
     Arc::make_mut(source).waveforms[0].values[20] += 0.01;
-    assert_ne!(before, state.simulation.runs[0].analyses[0].result_data_digest());
+    assert_ne!(
+        before,
+        state.simulation.runs[0].analyses[0].result_data_digest()
+    );
 }
 
 fn replace_stress(state: &mut AppState, samples: usize, peak: f64) {
     let mut donor = soa_state(1, samples, peak);
     let replacement = donor.simulation.runs[0].analyses.remove(0);
     let analysis = &mut state.simulation.runs[0].analyses[0];
-    analysis.waveforms = replacement.waveforms;
-    analysis.result_payload = replacement.result_payload;
-    analysis.family_metadata = replacement.family_metadata;
+    analysis.waveforms = replacement.data.waveforms;
+    analysis.result_payload = replacement.data.result_payload;
+    analysis.family_metadata = replacement.data.family_metadata;
 }
 
 fn envelope(state: &mut AppState) -> Arc<[[f64; 2]]> {

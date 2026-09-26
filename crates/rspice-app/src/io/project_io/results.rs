@@ -1889,38 +1889,41 @@ impl ProjectAnalysisResult {
             .map(ProjectAnalysisResultProvenance::into_provenance)
             .transpose()?;
         let mut analysis = AnalysisResult {
-            id: self.id,
-            analysis_type,
-            label: self.label,
-            timestamp: self.timestamp,
-            waveforms: self
-                .waveforms
-                .into_iter()
-                .map(ProjectWaveformData::into_waveform)
-                .collect(),
-            dc_op: self.dc_op.map(ProjectDcOpResult::into_dc_op),
-            device_op: self.device_op.map(ProjectDeviceOpReport::into_report),
-            noise_summary: self
-                .noise_summary
-                .map(ProjectNoiseSummary::into_noise_summary),
-            family_metadata: self.family_metadata,
-            result_payload: self.result_payload.into_value(),
-            native_scalar_units: self.native_scalar_units.into_value(),
-            monte_carlo_checkpoint: self.monte_carlo_checkpoint.into_value(),
-            measurements: self
-                .measurements
-                .into_iter()
-                .map(ProjectMeasurement::into_measurement)
-                .collect(),
-            saved_output_receipts: self.saved_output_receipts,
-            success: self.success,
-            error_message: self.error_message,
-            failure_attribution: self.failure_attribution,
-            convergence: self.convergence.into_value().map(std::sync::Arc::new),
-            provenance,
-            import_source: self.import_source.into_value(),
+            data: rspice_results::analysis_result::AnalysisResult {
+                id: self.id,
+                analysis_type,
+                label: self.label,
+                timestamp: self.timestamp,
+                waveforms: self
+                    .waveforms
+                    .into_iter()
+                    .map(ProjectWaveformData::into_waveform)
+                    .collect(),
+                dc_op: self.dc_op.map(ProjectDcOpResult::into_dc_op),
+                device_op: self.device_op.map(ProjectDeviceOpReport::into_report),
+                noise_summary: self
+                    .noise_summary
+                    .map(ProjectNoiseSummary::into_noise_summary),
+                family_metadata: self.family_metadata,
+                result_payload: self.result_payload.into_value(),
+                native_scalar_units: self.native_scalar_units.into_value(),
+                monte_carlo_checkpoint: self.monte_carlo_checkpoint.into_value(),
+                measurements: self
+                    .measurements
+                    .into_iter()
+                    .map(ProjectMeasurement::into_measurement)
+                    .collect(),
+                saved_output_receipts: self.saved_output_receipts,
+                success: self.success,
+                error_message: self.error_message,
+                failure_attribution: self.failure_attribution,
+                convergence: self.convergence.into_value().map(std::sync::Arc::new),
+                provenance,
+                import_source: self.import_source.into_value(),
+            },
         };
         let cached_names = analysis
+            .data
             .saved_output_receipts
             .iter()
             .filter(|receipt| {
@@ -1937,7 +1940,7 @@ impl ProjectAnalysisResult {
             })
             .collect::<HashSet<_>>();
         if !cached_names.is_empty() {
-            for waveform in &mut analysis.waveforms {
+            for waveform in &mut analysis.data.waveforms {
                 if cached_names.contains(waveform.name.as_str()) {
                     waveform.rebuild_display_cache(
                         crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,

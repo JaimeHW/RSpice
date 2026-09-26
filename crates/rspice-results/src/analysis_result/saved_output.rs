@@ -1,10 +1,10 @@
-//! Validate application saved-output receipts through the canonical retained-data rules.
+//! Validate analysis saved-output receipts through the canonical retained-data rules.
 
-use crate::state::{AnalysisResult, WaveformData};
-use rspice_results::dc_sweep::DcTraceView;
-use rspice_results::saved_output::SavedOutputValidationRef;
+use super::{AnalysisResult, RetainedWaveform};
+use crate::dc_sweep::DcTraceView;
+use crate::saved_output::SavedOutputValidationRef;
 
-fn trace_view(waveform: &WaveformData) -> DcTraceView<'_> {
+fn trace_view(waveform: &RetainedWaveform) -> DcTraceView<'_> {
     DcTraceView {
         name: &waveform.name,
         unit: waveform.unit.as_deref(),
@@ -14,14 +14,14 @@ fn trace_view(waveform: &WaveformData) -> DcTraceView<'_> {
     }
 }
 
-impl AnalysisResult {
-    pub(in crate::state::simulation) fn validate_saved_output_receipts(
+impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
+    pub(super) fn validate_saved_output_receipts(
         &self,
-        quasi_periodic_basis: Option<&[WaveformData]>,
+        quasi_periodic_basis: Option<&[RetainedWaveform]>,
     ) -> Result<(), String> {
         SavedOutputValidationRef {
             analysis_type: self.analysis_type,
-            waveforms: self.waveforms.iter().map(trace_view),
+            waveforms: self.waveforms.iter().map(AsRef::as_ref).map(trace_view),
             dc_op: self.dc_op.as_ref(),
             result_payload: self.result_payload.as_ref(),
             saved_output_receipts: &self.saved_output_receipts,

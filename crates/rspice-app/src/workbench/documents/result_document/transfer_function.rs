@@ -604,6 +604,7 @@ mod tests {
             TransferFunctionNormalizationEvidence::None,
             1.0,
         )
+        .data
         .result_payload;
         let mut mismatched = AnalysisResult::new(2, AnalysisType::Ac, "AC");
         mismatched.result_payload = payload;

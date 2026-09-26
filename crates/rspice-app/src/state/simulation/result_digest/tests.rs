@@ -1012,7 +1012,7 @@ fn soa_evidence_are_field_sensitive_v4_content_identity() {
 /// Two results whose event histories are identical, one of which says
 /// eight of the conductors are one word.
 fn events_with_and_without_a_bus() -> (AnalysisResult, AnalysisResult) {
-    use crate::state::simulation::analysis_result::{
+    use rspice_results::events::{
         DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
         DigitalEventTraceEvidence,
     };

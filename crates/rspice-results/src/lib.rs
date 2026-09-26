@@ -6,6 +6,8 @@
 
 #[cfg(feature = "engine-evidence")]
 pub mod analysis_payload;
+#[cfg(feature = "engine-evidence")]
+pub mod analysis_result;
 pub mod analysis_type;
 pub mod bode;
 pub mod calculator;

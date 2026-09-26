@@ -4,11 +4,9 @@
 use super::*;
 use std::sync::Arc;
 
-impl AnalysisResult {
-    pub(crate) fn retained_display_basis(
-        payload: &AnalysisResultPayload,
-    ) -> Result<Option<Vec<WaveformData>>, String> {
-        let mut traces = match payload {
+impl AnalysisResultPayload {
+    pub fn retained_waveform_basis(&self) -> Result<Option<Vec<RetainedWaveform>>, String> {
+        let mut traces = match self {
             AnalysisResultPayload::Qpss { operating_point } => {
                 AnalysisResultPayload::qpss_display_traces(operating_point)?
             }
@@ -17,7 +15,7 @@ impl AnalysisResult {
                     .into_iter()
                     .map(|(name, unit, values)| {
                         let (real, imaginary) = values.iter().map(|v| (v.re, v.im)).unzip();
-                        rspice_results::analysis_payload::QpxfDisplayTrace {
+                        crate::analysis_payload::QpxfDisplayTrace {
                             name,
                             unit,
                             frequencies: response.metadata.request.offsets_hz.clone(),
@@ -53,27 +51,26 @@ impl AnalysisResult {
                     .map(|(r, i)| i.atan2(*r).to_degrees())
                     .collect();
                 waveforms.push(
-                    WaveformData::new(format!("|{}|", trace.name), x.clone(), magnitude, "#f5b700")
+                    RetainedWaveform::new(format!("|{}|", trace.name), x.clone(), magnitude)
                         .with_unit(trace.unit)
                         .with_complex_components(trace.name.clone(), trace.real, imaginary),
                 );
                 waveforms.push(
-                    WaveformData::new(format!("phase({})", trace.name), x, phase, "#f5b700")
+                    RetainedWaveform::new(format!("phase({})", trace.name), x, phase)
                         .with_unit("°"),
                 );
             } else {
-                waveforms.push(
-                    WaveformData::new(trace.name, x, trace.real, "#f5b700").with_unit(trace.unit),
-                );
+                waveforms
+                    .push(RetainedWaveform::new(trace.name, x, trace.real).with_unit(trace.unit));
             }
         }
         Ok(Some(waveforms))
     }
 }
-impl AnalysisResult {
+impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
     pub(super) fn validate_retained_display_basis(
         &self,
-        expected: Option<&[WaveformData]>,
+        expected: Option<&[RetainedWaveform]>,
     ) -> Result<(), String> {
         let Some(expected) = expected else {
             return Ok(());
@@ -86,7 +83,7 @@ impl AnalysisResult {
             .flat_map(|r| r.status.materialized_waveforms())
             .map(|(name, _)| name)
             .collect();
-        for actual in &self.waveforms {
+        for actual in self.waveforms.iter().map(AsRef::as_ref) {
             if let Some(expected) = canonical.get(actual.name.as_str()) {
                 if actual.x != expected.x
                     || actual.y != expected.y

@@ -751,7 +751,8 @@ fn sensitivity_completion_preserves_unavailable_results_and_finite_console_value
         "SENS",
     );
     assert!(retained.success);
-    let Some(AnalysisResultPayload::SensitivityStudy { evidence }) = retained.result_payload else {
+    let Some(AnalysisResultPayload::SensitivityStudy { evidence }) = retained.data.result_payload
+    else {
         panic!("sensitivity retained")
     };
     assert_eq!(evidence.rows[0].raw[0].value(), Some(0.0));
@@ -1216,7 +1217,7 @@ fn live_current_impulses_reach_a_charge_only_preview_and_survive_bad_analog_colu
     let Some(AnalysisResultPayload::TransientEvents {
         current_impulses: Some(history),
         ..
-    }) = analysis.result_payload
+    }) = analysis.data.result_payload
     else {
         panic!("retained current history")
     };

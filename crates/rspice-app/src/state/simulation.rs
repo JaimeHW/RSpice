@@ -24,7 +24,6 @@ mod run;
 mod run_history;
 pub use rspice_results::result_import::{ResultImportFormat, ResultImportSource};
 mod run_receipt;
-mod saved_output;
 mod specification_verdict;
 mod state_impl;
 mod state_model;
@@ -63,14 +62,7 @@ pub use ac_bode::{
     ac_bode_shape_for_analysis, ac_bode_shape_for_selection, ac_bode_summary_for_analysis,
     ac_bode_summary_for_selection,
 };
-pub use analysis_result::{
-    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultProvenance, AnalysisResultPvtPoint,
-    AnalysisResultSourceDomain, DigitalBusEvidence, DigitalBusSourceEvidence,
-    DigitalEventPointEvidence, DigitalEventTraceEvidence, MonteCarloVariableMetadata,
-    PeriodicNoiseOutputQuantity, RealEventPointEvidence, RealEventTraceEvidence,
-    SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
-    SoaViolationSeverityEvidence,
-};
+pub use analysis_result::AnalysisResult;
 pub use rspice_results::analysis_payload::AnalysisResultPayload;
 pub use rspice_results::analysis_type::AnalysisType;
 pub use rspice_results::convergence_attribution::ConvergenceAttribution;
@@ -78,12 +70,26 @@ pub use rspice_results::convergence_quality::{
     ConvergenceReport, PeriodicConvergenceEvidence, PeriodicInitializationMethod,
     TransientConvergenceEvidence,
 };
+pub use rspice_results::events::{
+    DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
+    DigitalEventTraceEvidence, RealEventPointEvidence, RealEventTraceEvidence,
+};
+pub use rspice_results::family_metadata::{
+    AnalysisResultFamilyMetadata, MonteCarloVariableMetadata, PeriodicNoiseOutputQuantity,
+};
 pub use rspice_results::operating_point::{
     DcOpResult, OperatingPointAccuracyEvidence, OperatingPointAnnotationEvidence,
     OperatingPointDeviceDetailEvidence, OperatingPointHomotopyEvidence,
     OperatingPointInitialGuessEvidence, OperatingPointNodeInitializationEvidence,
     OperatingPointPreviousStateEvidence, OperatingPointProcessEvidence,
     OperatingPointSaveDeviceEvidence, OperatingPointTemperatureEvidence, OperatingPointValue,
+};
+pub use rspice_results::provenance::{
+    AnalysisResultProvenance, AnalysisResultPvtPoint, AnalysisResultSourceDomain,
+};
+pub use rspice_results::soa_evidence::{
+    SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
+    SoaViolationSeverityEvidence,
 };
 pub use rspice_results::soa_source::{SoaSourceHistory, SoaSourceWaveform};
 pub use rspice_results::transfer_function::{
