@@ -65,7 +65,7 @@ pub mod soa_rule;
 pub mod sp_config;
 pub mod sp_draft;
 pub mod specification;
-pub mod spice_value;
+pub use rspice_results::spice_value;
 pub mod stb_draft;
 pub mod study_measurement;
 pub mod temp_draft;

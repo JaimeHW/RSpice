@@ -39,12 +39,15 @@ pub mod report_document;
 pub mod result_import;
 pub mod safety;
 pub mod sampling;
+pub mod saved_output;
 #[cfg(feature = "engine-evidence")]
 pub mod sensitivity;
 pub mod simulation_values;
 pub mod soa_evidence;
 #[cfg(feature = "engine-evidence")]
 pub mod soa_source;
+#[cfg(feature = "engine-evidence")]
+pub mod spice_value;
 pub mod stability;
 pub mod transfer_function;
 pub mod validation;

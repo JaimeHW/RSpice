@@ -5,17 +5,23 @@
 //! It also owns the bounded-text and parameter-name validators reused by
 //! authored plan records, independently of a live project workspace.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
-use rspice_app_types::hierarchy_path::ProbeTarget;
 use rspice_app_types::product::{AnalysisInstanceId, ObjectRevision, SavedOutputId};
-use rspice_results::calculator::{ast::CalculatorExpr, parser::Parser};
+use rspice_results::calculator::parser::Parser;
 
 pub use crate::output_policy::OutputSelectionMode;
+
+use rspice_results::saved_output::parse_probe_target;
+pub use rspice_results::saved_output::{
+    ComplexExpressionPolicy, SavedOutputDisplayIntent, SavedOutputKind, SavedOutputPolicy,
+    SavedOutputPrecision, SavedOutputStreaming, device_current_probe, raw_probe_unit,
+    saved_output_references, validate_raw_probe,
+};
 
 /// Authored authority for a saved output. Probe-owned rows remain in the plan
 /// so undo can restore their exact identity, but execution includes them only
@@ -28,46 +34,6 @@ pub enum SavedOutputOrigin {
     SchematicProbe,
     /// A bounded node selection synthesized for the prepared run.
     Automatic,
-}
-
-/// Initial presentation intent, independent from whether and how the full
-/// precision quantity is retained.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum SavedOutputDisplayIntent {
-    #[default]
-    Plot,
-    DataBrowserOnly,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SavedOutputKind {
-    RawVoltageOrCurrent,
-    DerivedExpression,
-    DeviceOperatingPointQuantity,
-    NoiseContributor,
-    RfPortQuantity,
-}
-
-impl SavedOutputKind {
-    pub const ALL: [Self; 5] = [
-        Self::RawVoltageOrCurrent,
-        Self::DerivedExpression,
-        Self::DeviceOperatingPointQuantity,
-        Self::NoiseContributor,
-        Self::RfPortQuantity,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::RawVoltageOrCurrent => "Raw voltage / current",
-            Self::DerivedExpression => "Derived expression",
-            Self::DeviceOperatingPointQuantity => "Device operating-point quantity",
-            Self::NoiseContributor => "Noise contributor",
-            Self::RfPortQuantity => "RF port quantity",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,100 +50,6 @@ impl SavedOutputCompatibility {
             Self::OpTranAc => "OP + TRAN + AC",
             Self::AllCompatibleAnalyses => "All compatible analyses",
             Self::SelectedAnalysis { .. } => "Selected analysis only",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SavedOutputPolicy {
-    EveryAcceptedPoint,
-    SelectedAndFinalPoints,
-    OnDemandFromRetainedState,
-    FailureDiagnosticsOnly,
-}
-
-impl SavedOutputPolicy {
-    pub const ALL: [Self; 4] = [
-        Self::EveryAcceptedPoint,
-        Self::SelectedAndFinalPoints,
-        Self::OnDemandFromRetainedState,
-        Self::FailureDiagnosticsOnly,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::EveryAcceptedPoint => "Every accepted point",
-            Self::SelectedAndFinalPoints => "Selected + final points",
-            Self::OnDemandFromRetainedState => "On demand from retained state",
-            Self::FailureDiagnosticsOnly => "Failure diagnostics only",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SavedOutputPrecision {
-    FullSourcePrecision,
-    DisplayCacheWithFullSourcePrecision,
-}
-
-impl SavedOutputPrecision {
-    pub const ALL: [Self; 2] = [
-        Self::FullSourcePrecision,
-        Self::DisplayCacheWithFullSourcePrecision,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::FullSourcePrecision => "f64 / complex128",
-            Self::DisplayCacheWithFullSourcePrecision => {
-                "f32 display cache + full source precision"
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SavedOutputStreaming {
-    LivePlotAdaptiveDisplayDecimation,
-    StoreOnly,
-}
-
-impl SavedOutputStreaming {
-    pub const ALL: [Self; 2] = [Self::LivePlotAdaptiveDisplayDecimation, Self::StoreOnly];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::LivePlotAdaptiveDisplayDecimation => "Live plot · adaptive display decimation",
-            Self::StoreOnly => "Store only",
-        }
-    }
-}
-
-/// Interpretation of complex source signals in an authored expression.
-/// Missing fields preserve historical magnitude arithmetic. New expressions
-/// opt into rectangular arithmetic; reopening a recipe never changes it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ComplexExpressionPolicy {
-    #[default]
-    LegacyMagnitude,
-    Rectangular,
-}
-
-impl ComplexExpressionPolicy {
-    pub const ALL: [Self; 2] = [Self::Rectangular, Self::LegacyMagnitude];
-
-    pub const fn is_legacy(&self) -> bool {
-        matches!(self, Self::LegacyMagnitude)
-    }
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::LegacyMagnitude => "Legacy · magnitude arithmetic",
-            Self::Rectangular => "Complex · rectangular arithmetic",
         }
     }
 }
@@ -421,119 +293,11 @@ fn validate_saved_output_expression(kind: SavedOutputKind, expression: &str) -> 
     }
 }
 
-/// A shared reference grammar for preparation and persisted receipt validation.
-/// Keys preserve literal node punctuation and numeric spellings.
-pub fn saved_output_references(
-    kind: SavedOutputKind,
-    expression: &str,
-) -> Result<Option<BTreeSet<String>>, String> {
-    let mut references = BTreeSet::new();
-    match kind {
-        SavedOutputKind::RawVoltageOrCurrent => {
-            let expression = expression.trim();
-            validate_raw_probe(expression)?;
-            if device_current_probe(expression).is_some() {
-                references.insert(expression.to_ascii_lowercase());
-                return Ok(Some(references));
-            }
-            let (function, arguments) = expression.split_once('(').expect("validated probe");
-            for argument in arguments[..arguments.len() - 1].split(',') {
-                references.insert(
-                    format!("{}({})", function.trim(), argument.trim()).to_ascii_lowercase(),
-                );
-            }
-        }
-        SavedOutputKind::DerivedExpression => {
-            let parsed = Parser::new(expression, crate::spice_value::parse_spice_value_checked)
-                .try_parse()
-                .map_err(|error| error.to_string())?;
-            let mut pending = vec![&parsed];
-            while let Some(expr) = pending.pop() {
-                match expr {
-                    CalculatorExpr::WaveformRef { signal, dataset } => {
-                        if dataset.is_some() {
-                            return Err("saved outputs require sources from their owning analysis"
-                                .to_owned());
-                        }
-                        references.insert(signal.to_ascii_lowercase());
-                    }
-                    CalculatorExpr::BinaryOp { left, right, .. } => {
-                        pending.extend([left.as_ref(), right.as_ref()])
-                    }
-                    CalculatorExpr::UnaryOp { operand, .. } => pending.push(operand),
-                    CalculatorExpr::FunctionCall { args, .. } => pending.extend(args),
-                    CalculatorExpr::Number(_) | CalculatorExpr::Constant(_) => {}
-                }
-            }
-        }
-        _ => return Ok(None),
-    }
-    Ok(Some(references))
-}
-
 fn parse_calculator_expression(expression: &str) -> Result<(), String> {
     Parser::new(expression, crate::spice_value::parse_spice_value_checked)
         .try_parse()
         .map(|_| ())
         .map_err(|error| format!("expression is invalid: {error}"))
-}
-
-/// Quantity identity for a raw probe, including accepted function whitespace.
-/// This is a unit projection; argument validation remains in validate_raw_probe.
-pub fn raw_probe_unit(expression: &str) -> Option<&'static str> {
-    if device_current_probe(expression).is_some() {
-        return Some("A");
-    }
-    let (function, _) = expression.trim().split_once('(')?;
-    match function.trim() {
-        value if value.eq_ignore_ascii_case("V") => Some("V"),
-        value if value.eq_ignore_ascii_case("I") => Some("A"),
-        _ => None,
-    }
-}
-
-pub fn validate_raw_probe(expression: &str) -> Result<(), String> {
-    let expression = expression.trim();
-    if expression.starts_with('@') {
-        return device_current_probe(expression).map(|_| ()).ok_or_else(|| {
-            "device current must use @device[i], @device[id], @device[ig], or another terminal current".to_owned()
-        });
-    }
-    let open = expression
-        .find('(')
-        .ok_or_else(|| "raw output must use V(node), V(node+, node-), or I(source)".to_owned())?;
-    if !expression.ends_with(')') {
-        return Err("raw output has an unterminated probe".to_owned());
-    }
-    let function = expression[..open].trim();
-    let arguments = &expression[open + 1..expression.len() - 1];
-    let arguments = arguments.split(',').map(str::trim).collect::<Vec<_>>();
-    if function.eq_ignore_ascii_case("V") && matches!(arguments.len(), 1 | 2)
-        || function.eq_ignore_ascii_case("I") && arguments.len() == 1
-    {
-        for argument in arguments {
-            parse_probe_target(argument).map_err(|error| {
-                format!("raw output must use V(node), V(node+, node-), or I(source): {error}")
-            })?;
-        }
-        Ok(())
-    } else {
-        Err("raw output must use V(node), V(node+, node-), or I(source)".to_owned())
-    }
-}
-
-/// A terminal-current trace, distinct from a scalar operating-point parameter.
-pub fn device_current_probe(expression: &str) -> Option<(&str, &str)> {
-    let body = expression.trim().strip_prefix('@')?;
-    let (device, quantity) = body.strip_suffix(']')?.split_once('[')?;
-    parse_probe_target(device).ok()?;
-    if !matches!(
-        quantity.to_ascii_lowercase().as_str(),
-        "i" | "id" | "ig" | "is" | "ib" | "ic" | "ie" | "isub" | "ik" | "ip" | "in" | "icp" | "icn"
-    ) {
-        return None;
-    }
-    Some((device, quantity))
 }
 
 fn validate_device_op_probe(expression: &str) -> Result<(), String> {
@@ -549,22 +313,6 @@ fn validate_device_op_probe(expression: &str) -> Result<(), String> {
     parse_probe_target(&body[..open])?;
     validate_parameter_name(&body[open + 1..body.len() - 1])
         .map_err(|error| format!("device quantity is invalid: {error}"))
-}
-
-/// Resolve one probe token — a node, device, or noise-source name, optionally
-/// scoped — against the one instance-path grammar.
-///
-/// Every spelling the product has written is accepted and resolves to the same
-/// target: canonical `/X1/net`, engine `x1.net` and `x1:net`, and the legacy
-/// `/top/X1/net` that projects saved before the design root became implicit
-/// still carry. Resolution is all this does — the persisted expression stays
-/// exactly as the project stored it, because a read is not an edit.
-///
-/// `/` on its own is the design root, which is why a doubled separator is
-/// refused here: `//net` would otherwise resolve to a root probe rather than
-/// to the empty instance name it actually spells.
-fn parse_probe_target(value: &str) -> Result<ProbeTarget, String> {
-    ProbeTarget::parse_legacy(value).map_err(|error| error.to_string())
 }
 
 pub fn validate_parameter_name(value: &str) -> Result<(), String> {
