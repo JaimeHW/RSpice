@@ -6,7 +6,7 @@
 //! authenticating against the bytes it was written from.
 
 use super::*;
-use crate::state::simulation::analysis_result::{
+use rspice_results::floquet::{
     PssFloquetMultiplierEvidence, PstbFloquetModeEvidence, PstbStabilityClassificationEvidence,
 };
 

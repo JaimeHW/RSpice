@@ -85,3 +85,9 @@ pub struct ComplexResultValue {
     pub real: f64,
     pub imaginary: f64,
 }
+
+impl From<ComplexResultValue> for num_complex::Complex64 {
+    fn from(value: ComplexResultValue) -> Self {
+        Self::new(value.real, value.imaginary)
+    }
+}

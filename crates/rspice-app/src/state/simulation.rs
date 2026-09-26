@@ -55,6 +55,13 @@ pub use rspice_results::fft::spectrum::{
 #[cfg(test)]
 pub use rspice_results::fft::spectrum::FftSpectrumModeEvidence;
 
+pub use rspice_results::floquet::{
+    FloquetOrbitKindEvidence, FloquetSpectrumCertificateEvidence, FloquetSpectrumEvidence,
+    FloquetStabilityVerdictEvidence, PssFloquetMultiplierEvidence, PstbFloquetModeEvidence,
+    PstbStabilityClassificationEvidence,
+};
+pub use rspice_results::pole_zero::{PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate};
+
 pub use ac_bode::{
     ac_bode_shape_for_analysis, ac_bode_shape_for_selection, ac_bode_summary_for_analysis,
     ac_bode_summary_for_selection,
@@ -63,17 +70,14 @@ pub use analysis_result::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultPvtPoint, AnalysisResultSourceDomain, DcOpResult, DigitalBusEvidence,
     DigitalBusSourceEvidence, DigitalEventPointEvidence, DigitalEventTraceEvidence,
-    FloquetOrbitKindEvidence, FloquetSpectrumCertificateEvidence, FloquetSpectrumEvidence,
-    FloquetStabilityVerdictEvidence, MonteCarloVariableMetadata, OperatingPointAccuracyEvidence,
-    OperatingPointAnnotationEvidence, OperatingPointDeviceDetailEvidence,
-    OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,
-    OperatingPointNodeInitializationEvidence, OperatingPointPreviousStateEvidence,
-    OperatingPointProcessEvidence, OperatingPointSaveDeviceEvidence,
-    OperatingPointTemperatureEvidence, OperatingPointValue, PeriodicNoiseOutputQuantity,
-    PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate, PssFloquetMultiplierEvidence,
-    PstbFloquetModeEvidence, PstbStabilityClassificationEvidence, RealEventPointEvidence,
-    RealEventTraceEvidence, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
-    SoaSourceHistory, SoaSourceWaveform, SoaViolationEvidence, SoaViolationSeverityEvidence,
+    MonteCarloVariableMetadata, OperatingPointAccuracyEvidence, OperatingPointAnnotationEvidence,
+    OperatingPointDeviceDetailEvidence, OperatingPointHomotopyEvidence,
+    OperatingPointInitialGuessEvidence, OperatingPointNodeInitializationEvidence,
+    OperatingPointPreviousStateEvidence, OperatingPointProcessEvidence,
+    OperatingPointSaveDeviceEvidence, OperatingPointTemperatureEvidence, OperatingPointValue,
+    PeriodicNoiseOutputQuantity, RealEventPointEvidence, RealEventTraceEvidence,
+    SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaSourceHistory,
+    SoaSourceWaveform, SoaViolationEvidence, SoaViolationSeverityEvidence,
     TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
 };

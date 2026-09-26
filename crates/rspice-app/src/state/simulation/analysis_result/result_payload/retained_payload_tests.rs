@@ -84,7 +84,7 @@ fn stable_pstb_payload() -> AnalysisResultPayload {
         real: 0.5,
         imaginary: 0.0,
     };
-    let exponent = complex_value(multiplier).ln();
+    let exponent = num_complex::Complex64::from(multiplier).ln();
     AnalysisResultPayload::Pstb {
         period_s: Some(1.0),
         fundamental_frequency_hz: Some(1.0),
@@ -226,7 +226,7 @@ fn pstb_zero_dynamic_modes_and_single_autonomous_phase_are_json_safe() {
         real: 1.0 + 0.5 * rspice_core::analysis::FLOQUET_UNIT_CIRCLE_BAND,
         imaginary: 0.0,
     };
-    let exponent = complex_value(multiplier).ln();
+    let exponent = num_complex::Complex64::from(multiplier).ln();
     let autonomous = AnalysisResultPayload::Pstb {
         period_s: Some(1.0),
         fundamental_frequency_hz: Some(1.0),
@@ -252,7 +252,7 @@ fn pstb_zero_dynamic_modes_and_single_autonomous_phase_are_json_safe() {
         stability_verdict: FloquetStabilityVerdictEvidence::Stable,
         stability_classification: PstbStabilityClassificationEvidence::Stable,
         min_stability_margin_db: None,
-        max_multiplier_magnitude: Some(complex_value(multiplier).norm()),
+        max_multiplier_magnitude: Some(num_complex::Complex64::from(multiplier).norm()),
         num_unstable: Some(0),
         subharmonics: Vec::new(),
         converged: Some(true),

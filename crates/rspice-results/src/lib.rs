@@ -19,6 +19,8 @@ pub mod events;
 pub mod family_measurements;
 pub mod family_metadata;
 pub mod fft;
+#[cfg(feature = "engine-evidence")]
+pub mod floquet;
 pub mod histogram;
 pub mod interpolation;
 pub mod measurements;
@@ -28,6 +30,8 @@ pub mod noise;
 pub mod nyquist;
 pub mod operating_point;
 pub mod optimization;
+#[cfg(feature = "engine-evidence")]
+pub mod pole_zero;
 pub mod provenance;
 pub mod report_document;
 pub mod result_import;

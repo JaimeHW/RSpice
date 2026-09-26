@@ -51,269 +51,6 @@ pub struct DcOpResult {
     pub power_dissipation: Vec<OperatingPointValue>,
 }
 
-/// Exact finite/infinite accounting and residual certificate retained for one
-/// computed pole or zero spectrum.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PoleZeroSpectrumCertificate {
-    pub problem_order: u64,
-    pub infinite_count: u64,
-    pub max_backward_error: f64,
-    pub qualification_tolerance: f64,
-}
-
-impl PoleZeroSpectrumCertificate {
-    #[must_use]
-    pub fn canonical_qualification_tolerance(problem_order: u64) -> Option<f64> {
-        let problem_order = usize::try_from(problem_order).ok()?;
-        rspice_core::analysis::pole_zero::SpectrumCertificate::exact(problem_order, 0)
-            .map(|certificate| certificate.qualification_tolerance)
-    }
-
-    fn as_core(self) -> Option<rspice_core::analysis::pole_zero::SpectrumCertificate> {
-        rspice_core::analysis::pole_zero::SpectrumCertificate::new(
-            usize::try_from(self.problem_order).ok()?,
-            usize::try_from(self.infinite_count).ok()?,
-            self.max_backward_error,
-            self.qualification_tolerance,
-        )
-    }
-
-    #[must_use]
-    pub fn finite_count(self) -> Option<u64> {
-        self.as_core()
-            .and_then(|certificate| u64::try_from(certificate.finite_count()).ok())
-    }
-
-    #[must_use]
-    pub fn is_strictly_qualified(self) -> bool {
-        self.as_core()
-            .is_some_and(|certificate| certificate.is_strictly_qualified())
-    }
-}
-
-/// Qualification state attached to one retained pole or zero vector.
-#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
-pub enum PoleZeroRootSetEvidence {
-    NotRequested,
-    QualifiedEmpty {
-        certificate: PoleZeroSpectrumCertificate,
-    },
-    Qualified {
-        certificate: PoleZeroSpectrumCertificate,
-    },
-    Approximate {
-        certificate: PoleZeroSpectrumCertificate,
-    },
-    /// Truthful migration state for results written before certificates were
-    /// retained. This state never proves stability.
-    #[default]
-    LegacyUnknown,
-}
-
-impl PoleZeroRootSetEvidence {
-    #[must_use]
-    pub const fn label(&self) -> &'static str {
-        match self {
-            Self::NotRequested => "not requested",
-            Self::QualifiedEmpty { .. } => "qualified empty",
-            Self::Qualified { .. } => "qualified",
-            Self::Approximate { .. } => "approximate",
-            Self::LegacyUnknown => "legacy unknown",
-        }
-    }
-
-    #[must_use]
-    pub const fn certificate(&self) -> Option<PoleZeroSpectrumCertificate> {
-        match self {
-            Self::QualifiedEmpty { certificate }
-            | Self::Qualified { certificate }
-            | Self::Approximate { certificate } => Some(*certificate),
-            Self::NotRequested | Self::LegacyUnknown => None,
-        }
-    }
-
-    #[must_use]
-    pub const fn is_qualified(&self) -> bool {
-        matches!(self, Self::QualifiedEmpty { .. } | Self::Qualified { .. })
-    }
-
-    #[must_use]
-    pub fn is_consistent_with_count(&self, root_count: usize) -> bool {
-        let Ok(root_count) = u64::try_from(root_count) else {
-            return false;
-        };
-        match self {
-            Self::NotRequested => root_count == 0,
-            Self::QualifiedEmpty { certificate } => {
-                root_count == 0
-                    && certificate.is_strictly_qualified()
-                    && certificate.finite_count() == Some(0)
-            }
-            Self::Qualified { certificate } => {
-                root_count > 0
-                    && certificate.is_strictly_qualified()
-                    && certificate.finite_count() == Some(root_count)
-            }
-            Self::Approximate { certificate } => certificate.as_core().is_some_and(|certificate| {
-                !certificate.is_strictly_qualified()
-                    && u64::try_from(certificate.finite_count()).ok() == Some(root_count)
-            }),
-            Self::LegacyUnknown => true,
-        }
-    }
-}
-
-/// Strict residual certificate for one complete retained Floquet spectrum.
-///
-/// This UI-owned representation is the durable serde contract. Validation is
-/// delegated to the core constructor so a project cannot authenticate an
-/// inflated qualification tolerance after the numerical contract changes.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct FloquetSpectrumCertificateEvidence {
-    pub problem_order: u64,
-    pub max_backward_error: f64,
-    pub qualification_tolerance: f64,
-}
-
-impl FloquetSpectrumCertificateEvidence {
-    #[must_use]
-    pub fn canonical_qualification_tolerance(problem_order: u64) -> Option<f64> {
-        let problem_order = usize::try_from(problem_order).ok()?;
-        Some(
-            rspice_core::analysis::FloquetSpectrumCertificate::canonical_qualification_tolerance(
-                problem_order,
-            ),
-        )
-    }
-
-    fn as_core(self) -> Option<rspice_core::analysis::FloquetSpectrumCertificate> {
-        rspice_core::analysis::FloquetSpectrumCertificate::new(
-            usize::try_from(self.problem_order).ok()?,
-            self.max_backward_error,
-            self.qualification_tolerance,
-        )
-    }
-
-    #[must_use]
-    pub fn is_strictly_qualified(self) -> bool {
-        self.as_core().is_some()
-    }
-}
-
-/// Provenance for a durable Floquet multiplier vector.
-#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
-pub enum FloquetSpectrumEvidence {
-    /// Stability post-processing was not performed.
-    NotComputed,
-    /// The periodic map is an authenticated zero-order driven map.
-    NoDynamicModes,
-    /// Every multiplier belongs to a complete strict eigenspectrum.
-    Qualified {
-        certificate: FloquetSpectrumCertificateEvidence,
-    },
-    /// Truthful state for a project written before Floquet certificates were
-    /// retained. It never proves a stability classification.
-    #[default]
-    LegacyUnknown,
-}
-
-impl FloquetSpectrumEvidence {
-    #[must_use]
-    pub const fn certificate(&self) -> Option<FloquetSpectrumCertificateEvidence> {
-        match self {
-            Self::Qualified { certificate } => Some(*certificate),
-            Self::NotComputed | Self::NoDynamicModes | Self::LegacyUnknown => None,
-        }
-    }
-
-    fn is_consistent_with_count(&self, multiplier_count: usize) -> bool {
-        match self {
-            Self::NotComputed | Self::NoDynamicModes | Self::LegacyUnknown => multiplier_count == 0,
-            Self::Qualified { certificate } => {
-                multiplier_count > 0
-                    && certificate.is_strictly_qualified()
-                    && u64::try_from(multiplier_count).ok() == Some(certificate.problem_order)
-            }
-        }
-    }
-
-    fn as_core(&self) -> Option<rspice_core::analysis::FloquetSpectrumEvidence> {
-        match self {
-            Self::NotComputed => Some(rspice_core::analysis::FloquetSpectrumEvidence::NotComputed),
-            Self::NoDynamicModes => {
-                Some(rspice_core::analysis::FloquetSpectrumEvidence::NoDynamicModes)
-            }
-            Self::Qualified { certificate } => {
-                Some(rspice_core::analysis::FloquetSpectrumEvidence::Qualified {
-                    certificate: certificate.as_core()?,
-                })
-            }
-            Self::LegacyUnknown => {
-                Some(rspice_core::analysis::FloquetSpectrumEvidence::LegacyUnknown)
-            }
-        }
-    }
-}
-
-/// Orbit policy used to interpret a retained Floquet spectrum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FloquetOrbitKindEvidence {
-    Driven,
-    Autonomous,
-    /// The producing project did not retain an orbit policy.
-    #[default]
-    LegacyUnknown,
-}
-
-/// Evidence-aware periodic stability verdict.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FloquetStabilityVerdictEvidence {
-    Stable,
-    Unstable,
-    Marginal,
-    Indeterminate,
-}
-
-/// Rich PSTB classification refining the shared four-state verdict.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PstbStabilityClassificationEvidence {
-    Stable,
-    UnstableReal,
-    UnstableComplex,
-    PeriodDoubling,
-    NeimarkSacker,
-    SaddleNode,
-    Marginal,
-    Indeterminate,
-}
-
-/// One exact multiplier in the complete PSS Floquet vector.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PssFloquetMultiplierEvidence {
-    pub multiplier: ComplexResultValue,
-}
-
-/// One complete PSTB mode. The containing vector is authoritative and is
-/// never truncated by presentation limits.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PstbFloquetModeEvidence {
-    pub multiplier: ComplexResultValue,
-    pub exponent: ComplexResultValue,
-    pub probe_participation: f64,
-    pub is_unstable: bool,
-    pub is_trivial: bool,
-    pub subharmonic_order: Option<u64>,
-}
-
 pub use rspice_results::events::{
     DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
     DigitalEventTraceEvidence, RealEventPointEvidence, RealEventTraceEvidence,
@@ -1190,17 +927,18 @@ impl AnalysisResultPayload {
                         "PSS Floquet payload does not match analysis type {analysis_type:?}"
                     ));
                 }
-                validate_pss_floquet_payload(
-                    *period_s,
-                    *fundamental_frequency_hz,
-                    *iterations,
-                    *residual_norm,
+                PssFloquetRef {
+                    period_s: *period_s,
+                    fundamental_frequency_hz: *fundamental_frequency_hz,
+                    iterations: *iterations,
+                    residual_norm: *residual_norm,
                     multipliers,
-                    floquet_evidence,
-                    *orbit_kind,
-                    *trivial_multiplier_index,
-                    *stability_verdict,
-                )?;
+                    evidence: floquet_evidence,
+                    orbit_kind: *orbit_kind,
+                    trivial_multiplier_index: *trivial_multiplier_index,
+                    verdict: *stability_verdict,
+                }
+                .validate()?;
             }
             Self::Pstb {
                 period_s,
@@ -1226,25 +964,26 @@ impl AnalysisResultPayload {
                         "PSTB payload does not match analysis type {analysis_type:?}"
                     ));
                 }
-                validate_pstb_payload(
-                    *period_s,
-                    *fundamental_frequency_hz,
-                    *stability_threshold,
-                    probe_instance.as_deref(),
-                    *detect_subharmonics,
+                PstbRef {
+                    period_s: *period_s,
+                    fundamental_frequency_hz: *fundamental_frequency_hz,
+                    stability_threshold: *stability_threshold,
+                    probe_instance: probe_instance.as_deref(),
+                    detect_subharmonics: *detect_subharmonics,
                     modes,
-                    floquet_evidence,
-                    *orbit_kind,
-                    *trivial_multiplier_index,
-                    *stability_verdict,
-                    *stability_classification,
-                    *min_stability_margin_db,
-                    *max_multiplier_magnitude,
-                    *num_unstable,
+                    evidence: floquet_evidence,
+                    orbit_kind: *orbit_kind,
+                    trivial_multiplier_index: *trivial_multiplier_index,
+                    verdict: *stability_verdict,
+                    classification: *stability_classification,
+                    min_stability_margin_db: *min_stability_margin_db,
+                    max_multiplier_magnitude: *max_multiplier_magnitude,
+                    num_unstable: *num_unstable,
                     subharmonics,
-                    *converged,
-                    *iterations,
-                )?;
+                    converged: *converged,
+                    iterations: *iterations,
+                }
+                .validate()?;
             }
             Self::Sensitivity {
                 output,
@@ -1659,7 +1398,7 @@ pub use result_payload::AnalysisResult;
 pub(crate) use result_payload::ScalarEvidenceCandidate;
 use result_payload::{
     soa_evaluation_order, soa_rule_verdict, soa_violation_order, soa_violation_severity,
-    validate_complex_values, validate_pss_floquet_payload, validate_pstb_payload,
     validate_transfer_function_output,
 };
-use rspice_results::validation::require_non_empty;
+use rspice_results::floquet::{PssFloquetRef, PstbRef};
+use rspice_results::validation::{require_non_empty, validate_complex_values};

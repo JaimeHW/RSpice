@@ -1,5 +1,6 @@
 //! Shared checks for exact retained result evidence.
 
+use crate::simulation_values::ComplexResultValue;
 use serde::{Deserialize, Serialize};
 
 pub fn require_non_empty(value: &str, label: &str) -> Result<(), String> {
@@ -65,4 +66,18 @@ impl std::fmt::Display for ResultSchemaMismatch {
             self.actual_value_count
         )
     }
+}
+
+pub fn validate_complex_values(values: &[ComplexResultValue], label: &str) -> Result<(), String> {
+    for (index, value) in values.iter().enumerate() {
+        if !value.real.is_finite() || !value.imaginary.is_finite() {
+            return Err(format!("{label} {index} has a non-finite component"));
+        }
+    }
+    Ok(())
+}
+
+/// Compare retained bits after canonicalizing signed zero.
+pub fn same_retained_float(left: f64, right: f64) -> bool {
+    normalized_f64(left).to_bits() == normalized_f64(right).to_bits()
 }

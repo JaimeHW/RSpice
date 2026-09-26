@@ -8,14 +8,14 @@
 
 use sha2::{Digest as _, Sha256};
 
-use super::analysis_result::{
-    FloquetOrbitKindEvidence, FloquetSpectrumCertificateEvidence, FloquetSpectrumEvidence,
-    FloquetStabilityVerdictEvidence, PstbStabilityClassificationEvidence,
-};
 use super::*;
 use crate::product::ContentDigest;
 use crate::state::{
     SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+};
+use rspice_results::floquet::{
+    FloquetOrbitKindEvidence, FloquetSpectrumCertificateEvidence, FloquetSpectrumEvidence,
+    FloquetStabilityVerdictEvidence, PstbStabilityClassificationEvidence,
 };
 
 const RESULT_DIGEST_MAGIC: &[u8] = b"RSPICE-RESULT-DATA";
