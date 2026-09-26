@@ -1193,7 +1193,7 @@ impl SimulationController {
             return Err("Monte Carlo completed without its requested retained checkpoint".into());
         }
         if let Some(checkpoint) = &analysis.monte_carlo_checkpoint {
-            checkpoint.validate_for(&analysis)?;
+            checkpoint.validate_for((&analysis).into())?;
         }
         self.validate_analysis_retention(run, &analysis)?;
         run.replace_live_or_add_analysis(analysis);

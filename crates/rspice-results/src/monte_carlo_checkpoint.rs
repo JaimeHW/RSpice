@@ -1,16 +1,36 @@
 //! Durable trial journals, independent of a completed statistical result.
 
+mod codec;
+mod error;
 mod library;
+pub use codec::{
+    CheckpointInspection, Observations, StudyMonteCarloCheckpoint, failed_observations,
+};
+pub use error::CheckpointError;
 pub use library::MonteCarloCheckpointLibrary;
 
-use super::{AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType};
-use crate::product::ContentDigest;
-use crate::simulation::runner::monte_carlo_checkpoint::checkpoint_digest;
-use crate::simulation::runner::study::monte_carlo::checkpoint::StudyMonteCarloCheckpoint;
+use crate::analysis_type::AnalysisType;
+use crate::family_metadata::AnalysisResultFamilyMetadata;
+use crate::provenance::AnalysisResultProvenance;
+use crate::result_import::ResultImportSource;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use rspice_app_types::product::ContentDigest;
 use rspice_core::{NoAbort, ResourceLimits};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use std::sync::Arc;
+
+/// The retained analysis facts required to admit a trial journal.
+pub struct MonteCarloCheckpointValidationRef<'a> {
+    pub analysis_type: AnalysisType,
+    pub provenance: Option<&'a AnalysisResultProvenance>,
+    pub import_source: Option<&'a ResultImportSource>,
+    pub success: bool,
+    pub family_metadata: Option<&'a AnalysisResultFamilyMetadata>,
+}
+
+pub fn checkpoint_digest(bytes: &[u8]) -> ContentDigest {
+    rspice_app_types::canonical::content_digest("rspice.studio-monte-carlo-checkpoint/v1", bytes)
+}
 
 /// Exact portable bytes shared by retained snapshots. Construction validates
 /// both the numerical rows and their measurement verdicts; callers cannot
@@ -24,7 +44,7 @@ pub struct MonteCarloCheckpointEvidence {
 }
 
 impl MonteCarloCheckpointEvidence {
-    pub(crate) fn from_bytes(bytes: Arc<[u8]>) -> Result<Self, String> {
+    pub fn from_bytes(bytes: Arc<[u8]>) -> Result<Self, String> {
         let checkpoint = StudyMonteCarloCheckpoint::from_bytes_with_limits(
             &bytes,
             ResourceLimits::default(),
@@ -58,7 +78,10 @@ impl MonteCarloCheckpointEvidence {
         self.completed_trials
     }
 
-    pub(crate) fn validate_for(&self, analysis: &AnalysisResult) -> Result<(), String> {
+    pub fn validate_for(
+        &self,
+        analysis: MonteCarloCheckpointValidationRef<'_>,
+    ) -> Result<(), String> {
         if analysis.analysis_type != AnalysisType::MonteCarlo
             || analysis.provenance.is_none()
             || analysis.import_source.is_some()
@@ -71,7 +94,7 @@ impl MonteCarloCheckpointEvidence {
             let Some(AnalysisResultFamilyMetadata::MonteCarlo {
                 member_measurements,
                 ..
-            }) = &analysis.family_metadata
+            }) = analysis.family_metadata
             else {
                 return Err(
                     "a completed checkpointed analysis requires its Monte Carlo trial roster"

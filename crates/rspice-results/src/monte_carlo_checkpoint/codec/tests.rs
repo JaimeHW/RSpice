@@ -129,11 +129,11 @@ fn studio_monte_carlo_checkpoint_envelope_rejects_missing_verdicts_corruption_an
     tiny.max_external_data_bytes = 16;
     assert!(matches!(
         StudyMonteCarloCheckpoint::from_bytes_with_limits(&bytes, tiny, &NoAbort),
-        Err(SimulationError::ResourceLimit { .. })
+        Err(CheckpointError::ResourceLimit { .. })
     ));
     assert!(matches!(
         original.to_bytes_with_limits(tiny, &NoAbort),
-        Err(SimulationError::ResourceLimit { .. })
+        Err(CheckpointError::ResourceLimit { .. })
     ));
     let mut tiny = limits;
     tiny.max_result_values = 1;

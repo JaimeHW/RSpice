@@ -99,13 +99,14 @@ fn run_monte_carlo(
             .as_ref()
             .map(|input| input.decode())
             .transpose()?;
-        let publish = |value: &monte_carlo::checkpoint::StudyMonteCarloCheckpoint| {
-            let bytes = value.to_bytes_with_limits(
-                rspice_core::ResourceLimits::default(),
-                &rspice_core::NoAbort,
-            )?;
-            observer(&bytes)
-        };
+        let publish =
+            |value: &rspice_results::monte_carlo_checkpoint::StudyMonteCarloCheckpoint| {
+                let bytes = value.to_bytes_with_limits(
+                    rspice_core::ResourceLimits::default(),
+                    &rspice_core::NoAbort,
+                )?;
+                observer(&bytes)
+            };
         run(Some(MonteCarloContinuation {
             checkpoint: &mut retained,
             trial_range: request.trial_range.clone(),

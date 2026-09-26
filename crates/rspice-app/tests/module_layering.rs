@@ -202,7 +202,7 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // from the Results renderer. Simulation-plan ownership remains open.
     ("io", "workbench", 15),
     // The persisted model reaching up into orchestration and editors.
-    ("state", "simulation", 9),
+    ("state", "simulation", 7),
     ("state", "services", 9),
     ("state", "io", 5),
     ("state", "schematic", 2),

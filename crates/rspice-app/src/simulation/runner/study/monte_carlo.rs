@@ -2,13 +2,12 @@
 
 use super::*;
 use crate::simulation::runner::spec;
-use checkpoint::StudyMonteCarloCheckpoint;
 use rspice_core::analysis::monte_carlo::Distribution;
 use rspice_core::engine::{MonteCarloStudyConfig, MonteCarloVariationSource};
 use rspice_core::netlist::{AnalysisCommand, MonteCarloDistribution};
+use rspice_results::monte_carlo_checkpoint::{StudyMonteCarloCheckpoint, failed_observations};
 use std::sync::atomic::AtomicUsize;
 
-pub(crate) mod checkpoint;
 pub(crate) mod voltages;
 
 /// A continuation always evaluates the same frozen source. An explicit range
@@ -138,7 +137,7 @@ where
                     "Monte Carlo checkpoint does not match the frozen study population".into(),
                 ));
             }
-            Some(checkpoint.numerical.clone())
+            Some(checkpoint.numerical().clone())
         } else {
             Some(
                 engine
@@ -153,7 +152,7 @@ where
         continuation
             .as_ref()
             .and_then(|value| value.checkpoint.as_ref())
-            .map(|value| value.observations.clone())
+            .map(|value| value.observations().clone())
             .unwrap_or_default(),
     );
     let retaining = continuation.is_some();
@@ -174,7 +173,7 @@ where
                 if retaining {
                     measurement_verdicts.lock().unwrap().insert(
                         trial_index,
-                        checkpoint::failed_observations(&study.measurements, &message),
+                        failed_observations(&study.measurements, &message),
                     );
                 }
                 rspice_core::SimulationError::Circuit(message)
@@ -221,6 +220,7 @@ where
                 limits,
                 &rspice_core::NoAbort,
             )
+            .map_err(SimulationError::from)
         };
         let result = engine.run_monte_carlo_measurements_checkpointed_with_abort(
             &circuit,

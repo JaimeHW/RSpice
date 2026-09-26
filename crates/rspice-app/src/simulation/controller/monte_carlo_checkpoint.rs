@@ -99,7 +99,7 @@ pub(super) fn resume_inputs_from_config(
     config: Option<&crate::simulation::dialog::mc::checkpoint::McCheckpointConfig>,
 ) -> Result<Vec<crate::simulation::execution::PreparedMonteCarloResume>, String> {
     use crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointInput;
-    use crate::simulation::runner::study::monte_carlo::checkpoint::StudyMonteCarloCheckpoint;
+    use rspice_results::monte_carlo_checkpoint::StudyMonteCarloCheckpoint;
     let Some(config) = config else {
         return Ok(Vec::new());
     };
@@ -139,7 +139,7 @@ pub(super) fn resume_inputs_from_config(
         Default::default();
     for (analysis, evidence) in selected {
         if let Some(analysis) = analysis {
-            evidence.validate_for(analysis)?;
+            evidence.validate_for(analysis.into())?;
         }
         let checkpoint = StudyMonteCarloCheckpoint::from_bytes_with_limits(
             evidence.bytes(),

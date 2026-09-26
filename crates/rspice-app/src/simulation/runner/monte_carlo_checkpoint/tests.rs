@@ -4,9 +4,7 @@ use super::*;
 use crate::product::{AnalysisInstanceId, ObjectRevision};
 use crate::simulation::dialog::McVariationSource;
 use crate::simulation::multi_run::AnalysisSpec;
-use crate::simulation::runner::study::{
-    StudyRunConfig, monte_carlo::checkpoint::StudyMonteCarloCheckpoint,
-};
+use crate::simulation::runner::study::StudyRunConfig;
 use crate::simulation::runner::worker_contract::*;
 use crate::simulation::runner::*;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

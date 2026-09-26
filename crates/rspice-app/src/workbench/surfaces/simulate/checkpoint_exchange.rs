@@ -108,9 +108,7 @@ struct Inspection {
     owner: Owner,
     label: String,
     checkpoint: MonteCarloCheckpointEvidence,
-    summary: std::sync::Arc<
-        crate::simulation::runner::study::monte_carlo::checkpoint::CheckpointInspection,
-    >,
+    summary: std::sync::Arc<rspice_results::monte_carlo_checkpoint::CheckpointInspection>,
 }
 pub(super) fn inspect(
     ctx: &egui::Context,
@@ -118,9 +116,12 @@ pub(super) fn inspect(
     label: String,
     checkpoint: MonteCarloCheckpointEvidence,
 ) {
-    let decoded = crate::simulation::runner::study::monte_carlo::checkpoint::StudyMonteCarloCheckpoint::from_bytes_with_limits(
-        checkpoint.bytes(), rspice_core::ResourceLimits::default(), &rspice_core::NoAbort,
-    );
+    let decoded =
+        rspice_results::monte_carlo_checkpoint::StudyMonteCarloCheckpoint::from_bytes_with_limits(
+            checkpoint.bytes(),
+            rspice_core::ResourceLimits::default(),
+            &rspice_core::NoAbort,
+        );
     match decoded {
         Ok(journal) => ctx.data_mut(|data| {
             data.insert_temp(

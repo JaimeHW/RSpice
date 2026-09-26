@@ -33,10 +33,10 @@ impl MonteCarloCheckpointLibrary {
             .find(|entry| entry.checkpoint.digest() == digest)
             .map(|entry| &entry.checkpoint)
     }
-    pub(crate) fn shares_content_with(&self, other: &Self) -> bool {
+    pub fn shares_content_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
-    pub(crate) fn insert(
+    pub fn insert(
         &mut self,
         name: String,
         checkpoint: MonteCarloCheckpointEvidence,
@@ -47,7 +47,7 @@ impl MonteCarloCheckpointLibrary {
             ResourceLimits::default().max_external_data_bytes,
         )
     }
-    pub(crate) fn insert_bounded(
+    pub fn insert_bounded(
         &mut self,
         name: String,
         checkpoint: MonteCarloCheckpointEvidence,
@@ -75,7 +75,7 @@ impl MonteCarloCheckpointLibrary {
         Arc::make_mut(&mut self.0).push(ImportedMonteCarloCheckpoint { name, checkpoint });
         Ok(true)
     }
-    pub(crate) fn remove(&mut self, digest: ContentDigest) -> bool {
+    pub fn remove(&mut self, digest: ContentDigest) -> bool {
         let Some(index) = self
             .0
             .iter()
@@ -140,14 +140,14 @@ struct CheckpointFile {
     checkpoint: MonteCarloCheckpointEvidence,
 }
 impl MonteCarloCheckpointEvidence {
-    pub(crate) fn portable_file_limit() -> usize {
+    pub fn portable_file_limit() -> usize {
         ResourceLimits::default()
             .max_external_data_bytes
             .div_ceil(3)
             .saturating_mul(4)
             .saturating_add(4096)
     }
-    pub(crate) fn to_portable_file(&self) -> Result<Vec<u8>, String> {
+    pub fn to_portable_file(&self) -> Result<Vec<u8>, String> {
         serde_json::to_vec(&CheckpointFile {
             format: "rspice.monte-carlo-checkpoint".into(),
             version: 1,
@@ -155,7 +155,7 @@ impl MonteCarloCheckpointEvidence {
         })
         .map_err(|error| error.to_string())
     }
-    pub(crate) fn from_portable_file(source: &str) -> Result<Self, String> {
+    pub fn from_portable_file(source: &str) -> Result<Self, String> {
         if source.len() > Self::portable_file_limit() {
             return Err("Checkpoint file exceeds its size limit".into());
         }

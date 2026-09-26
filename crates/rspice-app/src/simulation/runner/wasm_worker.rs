@@ -540,7 +540,7 @@ mod browser {
             validate_checkpoint_bytes_size(view.length() as usize)?;
             let mut bytes = vec![0; view.length() as usize];
             view.copy_to(&mut bytes);
-            crate::simulation::runner::study::monte_carlo::checkpoint::StudyMonteCarloCheckpoint::from_bytes_with_limits(
+            rspice_results::monte_carlo_checkpoint::StudyMonteCarloCheckpoint::from_bytes_with_limits(
                 &bytes, rspice_core::ResourceLimits::default(), &rspice_core::NoAbort).map_err(|error| error.to_string())?;
             Ok(bytes)
         })();

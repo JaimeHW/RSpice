@@ -80,7 +80,13 @@ fn monte_carlo_checkpoint_file_actions_preserve_owner_and_project_storage() {
     );
     assert_eq!(file_exchange::scripted_choices_remaining(), 0);
 
-    let journal = crate::simulation::runner::study::monte_carlo::checkpoint::StudyMonteCarloCheckpoint::from_bytes_with_limits(checkpoint.bytes(), rspice_core::ResourceLimits::default(), &rspice_core::NoAbort).unwrap();
+    let journal =
+        rspice_results::monte_carlo_checkpoint::StudyMonteCarloCheckpoint::from_bytes_with_limits(
+            checkpoint.bytes(),
+            rspice_core::ResourceLimits::default(),
+            &rspice_core::NoAbort,
+        )
+        .unwrap();
     let inspection = journal.inspection();
     assert_eq!(inspection.successful_trials, 1);
     assert_eq!(inspection.failed_trials, 0);

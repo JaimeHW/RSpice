@@ -8,11 +8,11 @@ use crate::simulation::runner::monte_carlo_checkpoint::{
 use crate::simulation::runner::study::{
     StudyRunConfig,
     monte_carlo::{
-        MonteCarloContinuation, checkpoint::StudyMonteCarloCheckpoint,
-        run_monte_carlo_with_continuation, source_with_statistics,
+        MonteCarloContinuation, run_monte_carlo_with_continuation, source_with_statistics,
     },
 };
 use rspice_core::{NoAbort, ResourceLimits};
+use rspice_results::monte_carlo_checkpoint::StudyMonteCarloCheckpoint;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn experiment() -> SnapshotParts {

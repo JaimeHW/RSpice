@@ -71,6 +71,20 @@ pub struct AnalysisResult {
     pub import_source: Option<ResultImportSource>,
 }
 
+impl<'a> From<&'a AnalysisResult>
+    for rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointValidationRef<'a>
+{
+    fn from(analysis: &'a AnalysisResult) -> Self {
+        Self {
+            analysis_type: analysis.analysis_type,
+            provenance: analysis.provenance.as_ref(),
+            import_source: analysis.import_source.as_ref(),
+            success: analysis.success,
+            family_metadata: analysis.family_metadata.as_ref(),
+        }
+    }
+}
+
 impl AnalysisResult {
     /// Construct a presentation-only transient result from accepted solver
     /// points. It is deliberately unsuccessful until the engine returns its
@@ -323,7 +337,7 @@ impl AnalysisResult {
     pub fn validate_retained_evidence(&self) -> Result<(), String> {
         self.validate_native_scalar_units()?;
         if let Some(checkpoint) = &self.monte_carlo_checkpoint {
-            checkpoint.validate_for(self)?;
+            checkpoint.validate_for(self.into())?;
         }
         let retained_basis = self
             .result_payload

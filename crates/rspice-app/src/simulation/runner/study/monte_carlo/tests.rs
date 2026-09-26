@@ -303,14 +303,22 @@ fn studio_monte_carlo_legacy_unitless_checkpoints_remain_readable_but_cannot_res
     run(&base, &mut typed, 3..5, &NoAbort, &|_| Ok(())).unwrap();
     let typed = typed.unwrap();
     for partially_typed in [false, true] {
-        let mut legacy = typed.clone();
-        for (index, row) in &mut legacy.observations {
+        let mut observations = typed.observations().clone();
+        for (index, row) in &mut observations {
             if !partially_typed || *index == 3 {
                 for observation in row {
                     observation.unit = None;
                 }
             }
         }
+        let legacy = StudyMonteCarloCheckpoint::capture(
+            typed.numerical(),
+            typed.measurements(),
+            &observations,
+            limits,
+            &NoAbort,
+        )
+        .unwrap();
         let bytes = legacy.to_bytes_with_limits(limits, &NoAbort).unwrap();
         let restored =
             StudyMonteCarloCheckpoint::from_bytes_with_limits(&bytes, limits, &NoAbort).unwrap();
@@ -322,9 +330,9 @@ fn studio_monte_carlo_legacy_unitless_checkpoints_remain_readable_but_cannot_res
             bytes.as_slice(),
             "historical evidence remains byte-for-byte intact",
         );
-        let old_value = &restored.observations[&3][0];
+        let old_value = &restored.observations()[&3][0];
         assert_eq!(old_value.value_in_unit("mV").unwrap(), old_value.value);
-        let typed_value = &typed.observations[&3][0];
+        let typed_value = &typed.observations()[&3][0];
         assert!(
             (typed_value.value_in_unit("mV").unwrap().unwrap() - old_value.value.unwrap() * 1000.0)
                 .abs()

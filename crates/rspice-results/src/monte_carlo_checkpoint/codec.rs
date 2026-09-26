@@ -4,8 +4,8 @@
 //! contiguous `FamilyMemberMeasurements` roster. Numbers are encoded only once,
 //! in the core binary; every accepted row also has a complete verdict record.
 
-use crate::simulation::runner::SimulationError;
-use crate::state::FamilyMeasurementEvidence;
+use super::CheckpointError;
+use crate::family_measurements::FamilyMeasurementEvidence;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::MonteCarloCheckpoint;
 use rspice_core::{ResourceKind, ResourceLimits};
@@ -14,17 +14,17 @@ use std::collections::{BTreeMap, HashSet};
 
 const MAGIC: &[u8] = b"RSPICE-STUDIO-MC\0";
 const VERSION: u32 = 2;
-pub(super) type Observations = BTreeMap<usize, Vec<FamilyMeasurementEvidence>>;
+pub type Observations = BTreeMap<usize, Vec<FamilyMeasurementEvidence>>;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct StudyMonteCarloCheckpoint {
-    pub(super) numerical: MonteCarloCheckpoint,
+pub struct StudyMonteCarloCheckpoint {
+    numerical: MonteCarloCheckpoint,
     measurements: Vec<String>,
-    pub(super) observations: Observations,
+    observations: Observations,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CheckpointInspection {
+pub struct CheckpointInspection {
     pub successful_trials: usize,
     pub failed_trials: usize,
     pub failed_measurement_trials: usize,
@@ -34,13 +34,13 @@ pub(crate) struct CheckpointInspection {
     pub measurements: Vec<String>,
 }
 
-fn invalid(message: &str) -> SimulationError {
-    SimulationError::InvalidConfig(format!("Monte Carlo checkpoint: {message}"))
+fn invalid(message: &str) -> CheckpointError {
+    CheckpointError::InvalidConfig(format!("Monte Carlo checkpoint: {message}"))
 }
-fn bound(kind: ResourceKind, requested: usize, limit: usize) -> Result<(), SimulationError> {
+fn bound(kind: ResourceKind, requested: usize, limit: usize) -> Result<(), CheckpointError> {
     if requested > limit {
-        Err(SimulationError::ResourceLimit {
-            resource: kind.as_str().into(),
+        Err(CheckpointError::ResourceLimit {
+            resource: kind,
             requested,
             limit,
         })
@@ -48,14 +48,18 @@ fn bound(kind: ResourceKind, requested: usize, limit: usize) -> Result<(), Simul
         Ok(())
     }
 }
-fn core_error(error: rspice_core::SimulationError) -> SimulationError {
-    crate::simulation::engine_bridge::EngineBridge::new().translate_error(error)
+fn core_error(error: rspice_core::SimulationError) -> CheckpointError {
+    CheckpointError::from_core(error)
 }
-fn poll(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
-    crate::simulation::runner::spec::ensure_not_aborted(abort)
+fn poll(abort: &dyn AbortSignal) -> Result<(), CheckpointError> {
+    if abort.is_aborted() {
+        Err(CheckpointError::Aborted)
+    } else {
+        Ok(())
+    }
 }
 
-pub(super) fn failed_observations(names: &[String], error: &str) -> Vec<FamilyMeasurementEvidence> {
+pub fn failed_observations(names: &[String], error: &str) -> Vec<FamilyMeasurementEvidence> {
     names
         .iter()
         .map(|name| FamilyMeasurementEvidence {
@@ -69,7 +73,19 @@ pub(super) fn failed_observations(names: &[String], error: &str) -> Vec<FamilyMe
 }
 
 impl StudyMonteCarloCheckpoint {
-    pub(crate) fn inspection(&self) -> CheckpointInspection {
+    pub fn numerical(&self) -> &MonteCarloCheckpoint {
+        &self.numerical
+    }
+
+    pub fn measurements(&self) -> &[String] {
+        &self.measurements
+    }
+
+    pub fn observations(&self) -> &Observations {
+        &self.observations
+    }
+
+    pub fn inspection(&self) -> CheckpointInspection {
         let mut ranges = Vec::new();
         let mut total_ranges = 0usize;
         let mut start = None;
@@ -122,20 +138,20 @@ impl StudyMonteCarloCheckpoint {
         }
     }
 
-    pub(crate) fn population_identity(&self) -> [u8; 32] {
+    pub fn population_identity(&self) -> [u8; 32] {
         self.numerical.population_identity()
     }
-    pub(crate) fn completed_trials(&self) -> usize {
+    pub fn completed_trials(&self) -> usize {
         self.numerical.completed_trials()
     }
-    pub(crate) fn completed_indices(&self) -> impl Iterator<Item = usize> + '_ {
+    pub fn completed_indices(&self) -> impl Iterator<Item = usize> + '_ {
         self.numerical.completed_indices()
     }
 
     /// Historical journals are valid evidence even when their units were not
     /// retained. They cannot seed a new unit-aware population: interpreting old
     /// numbers in a requested limit unit would disagree with newly solved rows.
-    pub(crate) fn validate_for_resume(&self) -> Result<(), SimulationError> {
+    pub fn validate_for_resume(&self) -> Result<(), CheckpointError> {
         if self
             .observations
             .values()
@@ -151,9 +167,9 @@ impl StudyMonteCarloCheckpoint {
 
     /// A completed range may be smaller than a pooled journal, but every
     /// retained member must agree with its committed numbers and verdicts.
-    pub(crate) fn validate_retained_members(
+    pub fn validate_retained_members(
         &self,
-        members: &[crate::state::FamilyMemberMeasurements],
+        members: &[crate::family_measurements::FamilyMemberMeasurements],
     ) -> Result<(), String> {
         if members.is_empty() {
             return Err("a completed checkpointed analysis has no trial measurements".into());
@@ -185,13 +201,13 @@ impl StudyMonteCarloCheckpoint {
 
     /// Capture only committed numerical rows. Other workers may already have
     /// evaluated a row without committing it; that row is not a checkpoint yet.
-    pub(super) fn capture(
+    pub fn capture(
         numerical: &MonteCarloCheckpoint,
         measurements: &[String],
         evaluated: &Observations,
         limits: ResourceLimits,
         abort: &dyn AbortSignal,
-    ) -> Result<Self, SimulationError> {
+    ) -> Result<Self, CheckpointError> {
         poll(abort)?;
         bound(
             ResourceKind::ResultValues,
@@ -229,11 +245,11 @@ impl StudyMonteCarloCheckpoint {
         Ok(captured)
     }
 
-    pub(super) fn validate(
+    pub fn validate(
         &self,
         limits: ResourceLimits,
         abort: &dyn AbortSignal,
-    ) -> Result<(), SimulationError> {
+    ) -> Result<(), CheckpointError> {
         poll(abort)?;
         bound(
             ResourceKind::BatchRuns,
@@ -324,12 +340,12 @@ impl StudyMonteCarloCheckpoint {
 
     /// Pool identical populations atomically. Overlaps must agree in both exact
     /// numbers and pass/fail evidence, and contribute only one trial.
-    pub(crate) fn merge_with_limits(
+    pub fn merge_with_limits(
         &mut self,
         other: &Self,
         limits: ResourceLimits,
         abort: &dyn AbortSignal,
-    ) -> Result<(), SimulationError> {
+    ) -> Result<(), CheckpointError> {
         self.validate(limits, abort)?;
         other.validate(limits, abort)?;
         if self.measurements != other.measurements
@@ -386,11 +402,11 @@ impl StudyMonteCarloCheckpoint {
 
     /// Portable envelope for files, project blobs and transferable worker bytes.
     /// Floating-point values stay in the core's exact binary representation.
-    pub(crate) fn to_bytes_with_limits(
+    pub fn to_bytes_with_limits(
         &self,
         limits: ResourceLimits,
         abort: &dyn AbortSignal,
-    ) -> Result<Vec<u8>, SimulationError> {
+    ) -> Result<Vec<u8>, CheckpointError> {
         self.validate(limits, abort)?;
         let numerical = self
             .numerical
@@ -448,11 +464,11 @@ impl StudyMonteCarloCheckpoint {
         Ok(bytes)
     }
 
-    pub(crate) fn from_bytes_with_limits(
+    pub fn from_bytes_with_limits(
         bytes: &[u8],
         limits: ResourceLimits,
         abort: &dyn AbortSignal,
-    ) -> Result<Self, SimulationError> {
+    ) -> Result<Self, CheckpointError> {
         poll(abort)?;
         bound(
             ResourceKind::ExternalDataBytes,
@@ -571,7 +587,7 @@ struct Reader<'a> {
     remaining: &'a [u8],
 }
 impl<'a> Reader<'a> {
-    fn take(&mut self, size: usize) -> Result<&'a [u8], SimulationError> {
+    fn take(&mut self, size: usize) -> Result<&'a [u8], CheckpointError> {
         if size > self.remaining.len() {
             return Err(invalid("truncated envelope data"));
         }
@@ -579,13 +595,13 @@ impl<'a> Reader<'a> {
         self.remaining = tail;
         Ok(value)
     }
-    fn size(&mut self) -> Result<usize, SimulationError> {
+    fn size(&mut self) -> Result<usize, CheckpointError> {
         usize::try_from(u64::from_le_bytes(
             self.take(8)?.try_into().expect("fixed length"),
         ))
         .map_err(|_| invalid("envelope size exceeds this platform"))
     }
-    fn text(&mut self) -> Result<String, SimulationError> {
+    fn text(&mut self) -> Result<String, CheckpointError> {
         let size = self.size()?;
         std::str::from_utf8(self.take(size)?)
             .map(str::to_owned)
