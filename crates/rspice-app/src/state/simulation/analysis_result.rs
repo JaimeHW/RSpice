@@ -29,28 +29,6 @@ pub use rspice_results::provenance::{
     AnalysisResultProvenance, AnalysisResultPvtPoint, AnalysisResultSourceDomain,
 };
 
-/// Operating point data for a single node or device terminal
-#[derive(Debug, Clone, PartialEq)]
-pub struct OperatingPointValue {
-    /// Node or terminal name (e.g., "V(out)", "I(R1)")
-    pub name: String,
-    /// Value in base units (volts, amps, etc.)
-    pub value: f64,
-    /// Unit string for display (e.g., "V", "A", "W")
-    pub unit: String,
-}
-
-/// DC operating point results - node voltages and branch currents
-#[derive(Debug, Clone, Default)]
-pub struct DcOpResult {
-    /// Node voltages
-    pub node_voltages: Vec<OperatingPointValue>,
-    /// Branch currents
-    pub branch_currents: Vec<OperatingPointValue>,
-    /// Power dissipation by device
-    pub power_dissipation: Vec<OperatingPointValue>,
-}
-
 pub use rspice_results::events::{
     DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
     DigitalEventTraceEvidence, RealEventPointEvidence, RealEventTraceEvidence,
@@ -60,85 +38,6 @@ pub use rspice_results::soa_evidence::{
     SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
     SoaViolationSeverityEvidence,
 };
-
-macro_rules! op_evidence_enum {
-    ($name:ident { $($variant:ident),+ $(,)? }) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-        #[serde(rename_all = "snake_case")]
-        pub enum $name { $($variant),+ }
-    };
-    ($name:ident { default $first:ident, $($variant:ident),+ $(,)? }) => {
-        #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-        #[serde(rename_all = "snake_case")]
-        pub enum $name { #[default] $first, $($variant),+ }
-    };
-}
-
-op_evidence_enum!(OperatingPointTemperatureEvidence {
-    PvtRunSet,
-    Nominal27C,
-    Explicit,
-    ActiveRunSetAxis
-});
-/// Identity of the accepted OP used only as the initial guess for this solve.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct OperatingPointPreviousStateEvidence {
-    pub source_content_digest: crate::product::ContentDigest,
-    pub producer_snapshot_digest: crate::product::ContentDigest,
-    pub producer_result_digest: crate::product::ContentDigest,
-}
-
-op_evidence_enum!(OperatingPointInitialGuessEvidence {
-    Automatic,
-    PreviousConverged,
-    UserNodeVoltages,
-    ZeroState,
-    PreviousCompatible
-});
-op_evidence_enum!(OperatingPointNodeInitializationEvidence {
-    UseIcAndNodeset,
-    IgnoreIcAndNodeset,
-    ForceIcValues,
-    ValidateOnly
-});
-op_evidence_enum!(OperatingPointHomotopyEvidence {
-    Adaptive,
-    SourceStepping,
-    GminStepping,
-    PseudoTransient,
-    None
-});
-op_evidence_enum!(OperatingPointAnnotationEvidence {
-    VoltagesAndCurrents,
-    VoltagesOnly,
-    VoltagesAndDeviceOp,
-    None
-});
-op_evidence_enum!(OperatingPointDeviceDetailEvidence {
-    SelectedAndViolations,
-    AllDevices,
-    ViolationsOnly,
-    None
-});
-op_evidence_enum!(OperatingPointSaveDeviceEvidence {
-    Enabled,
-    Disabled,
-    FinalPointOnly
-});
-op_evidence_enum!(OperatingPointAccuracyEvidence {
-    Fast,
-    Balanced,
-    Accurate,
-    Robust
-});
-op_evidence_enum!(OperatingPointProcessEvidence {
-    default TT,
-    SS,
-    FF,
-    SF,
-    FS
-});
 
 const fn default_op_run_point_count() -> u64 {
     1

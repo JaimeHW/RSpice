@@ -68,22 +68,24 @@ pub use ac_bode::{
 };
 pub use analysis_result::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
-    AnalysisResultPvtPoint, AnalysisResultSourceDomain, DcOpResult, DigitalBusEvidence,
+    AnalysisResultPvtPoint, AnalysisResultSourceDomain, DigitalBusEvidence,
     DigitalBusSourceEvidence, DigitalEventPointEvidence, DigitalEventTraceEvidence,
-    MonteCarloVariableMetadata, OperatingPointAccuracyEvidence, OperatingPointAnnotationEvidence,
-    OperatingPointDeviceDetailEvidence, OperatingPointHomotopyEvidence,
-    OperatingPointInitialGuessEvidence, OperatingPointNodeInitializationEvidence,
-    OperatingPointPreviousStateEvidence, OperatingPointProcessEvidence,
-    OperatingPointSaveDeviceEvidence, OperatingPointTemperatureEvidence, OperatingPointValue,
-    PeriodicNoiseOutputQuantity, RealEventPointEvidence, RealEventTraceEvidence,
-    SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaSourceHistory,
-    SoaSourceWaveform, SoaViolationEvidence, SoaViolationSeverityEvidence,
+    MonteCarloVariableMetadata, PeriodicNoiseOutputQuantity, RealEventPointEvidence,
+    RealEventTraceEvidence, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
+    SoaSourceHistory, SoaSourceWaveform, SoaViolationEvidence, SoaViolationSeverityEvidence,
 };
 pub use rspice_results::analysis_type::AnalysisType;
 pub use rspice_results::convergence_attribution::ConvergenceAttribution;
 pub use rspice_results::convergence_quality::{
     ConvergenceReport, PeriodicConvergenceEvidence, PeriodicInitializationMethod,
     TransientConvergenceEvidence,
+};
+pub use rspice_results::operating_point::{
+    DcOpResult, OperatingPointAccuracyEvidence, OperatingPointAnnotationEvidence,
+    OperatingPointDeviceDetailEvidence, OperatingPointHomotopyEvidence,
+    OperatingPointInitialGuessEvidence, OperatingPointNodeInitializationEvidence,
+    OperatingPointPreviousStateEvidence, OperatingPointProcessEvidence,
+    OperatingPointSaveDeviceEvidence, OperatingPointTemperatureEvidence, OperatingPointValue,
 };
 pub use rspice_results::transfer_function::{
     TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
