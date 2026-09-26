@@ -22,8 +22,7 @@ pub use design_var::DesignVar;
 pub use rspice_results::optimization::{
     OptimizationConstraint, OptimizationConstraintObservation, OptimizationObjectiveGoal,
     OptimizationObjectiveObservation, OptimizationObjectiveTerm, OptimizationScore,
-    validate_optimization_constraint_result, validate_optimization_constraints,
-    validate_optimization_objectives,
+    validate_optimization_constraint_result, validate_optimization_objectives,
 };
 pub use rspice_simulation_contract::optimization_search::{
     OptimizationVariableDomain, OptimizerAlgo, OptimizerConfig,

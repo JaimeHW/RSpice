@@ -85,8 +85,9 @@ pub(super) fn configured_times(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::plan::{
-        AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, SolverOwnership,
+    use rspice_simulation_contract::analysis_kind::AnalysisKind;
+    use rspice_simulation_contract::numeric_override::{
+        AnalysisNumericOverride, NumericOverrideOption, SolverOwnership,
     };
 
     #[test]

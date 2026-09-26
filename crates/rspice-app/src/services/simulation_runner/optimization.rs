@@ -127,11 +127,11 @@ impl OptimizationRunConfig {
         name: &str,
         value: f64,
         cost: f64,
-    ) -> Vec<crate::simulation::optimizer::OptimizationObjectiveObservation> {
+    ) -> Vec<rspice_results::optimization::OptimizationObjectiveObservation> {
         if self.objective_unit.trim().is_empty() {
             return Vec::new();
         }
-        use crate::simulation::optimizer::{
+        use rspice_results::optimization::{
             OptimizationObjectiveGoal as Goal, OptimizationObjectiveObservation,
             OptimizationObjectiveTerm,
         };
@@ -252,16 +252,16 @@ impl OptimizationRunConfig {
 /// One evaluated cost and its optional per-objective evidence.
 pub(crate) struct OptimizationEvaluation {
     pub cost: Value,
-    pub objectives: Vec<crate::simulation::optimizer::OptimizationObjectiveObservation>,
-    pub constraints: Vec<crate::simulation::optimizer::OptimizationConstraintObservation>,
+    pub objectives: Vec<rspice_results::optimization::OptimizationObjectiveObservation>,
+    pub constraints: Vec<rspice_results::optimization::OptimizationConstraintObservation>,
 }
 
 /// Optimization output data.
 #[derive(Debug, Clone)]
 pub struct OptimizationData {
     /// Values and weighted contributions at the exact best candidate.
-    pub best_objectives: Vec<crate::simulation::optimizer::OptimizationObjectiveObservation>,
-    pub best_constraints: Vec<crate::simulation::optimizer::OptimizationConstraintObservation>,
+    pub best_objectives: Vec<rspice_results::optimization::OptimizationObjectiveObservation>,
+    pub best_constraints: Vec<rspice_results::optimization::OptimizationConstraintObservation>,
     /// Iteration axis points.
     pub iterations: Vec<Value>,
     /// Cost history.
@@ -514,7 +514,7 @@ where
             evaluate(&physical_vars(vars)).and_then(|evaluation| {
                 if evaluation.cost.is_finite() {
                     let violation =
-                        crate::simulation::optimizer::validate_optimization_constraints(
+                        rspice_results::optimization::validate_optimization_constraints(
                             &evaluation.constraints,
                         )
                         .map_err(ServiceRunError::Failure)?;
@@ -1057,8 +1057,8 @@ mod configured_search_limits {
 #[cfg(test)]
 mod variable_domain_tests {
     use super::*;
-    use crate::simulation::optimizer::OptimizationVariableDomain as Domain;
     use rspice_core::NoAbort;
+    use rspice_simulation_contract::optimization_search::OptimizationVariableDomain as Domain;
 
     #[test]
     fn optimization_variable_domains_drive_real_circuits_and_report_physical_values() {

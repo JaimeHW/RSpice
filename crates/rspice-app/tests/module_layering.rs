@@ -211,7 +211,9 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // Project I/O now imports the lower-owned analysis kind directly; its
     // remaining references are to app-owned plan and execution fixtures.
     ("io", "simulation", 9),
-    ("services", "simulation", 8),
+    // Result aggregation, optimization execution, netlisting and materialized
+    // OP dispatch remain app-owned until R04/R11 finish their extraction.
+    ("services", "simulation", 7),
     ("simulation", "schematic", 1),
     ("services", "properties", 2),
 ];

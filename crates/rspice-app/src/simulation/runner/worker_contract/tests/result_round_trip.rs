@@ -1029,3 +1029,116 @@ fn monte_carlo_mean_confidence_survives_worker_transport_and_rejects_wrong_popul
             .contains("population")
     );
 }
+
+#[test]
+fn pss_reporting_schedules_preserve_the_authenticated_orbit() {
+    use crate::services::simulation_runner::{
+        PssRunConfig, run_pss_analysis_with_config_and_source_path_and_abort,
+    };
+    use rspice_core::NoAbort;
+
+    let deck = "PSS reporting\nV1 in 0 SIN(0 1 1k)\nR1 in out 1k\nC1 out 0 159.15494309189535n\n";
+    let mut config = PssRunConfig::new(1e3, vec!["V1".into()], 4, 1e-8);
+    config.tstab_periods = 0;
+    config.points_per_period = 512;
+    let run = |options: &str| {
+        run_pss_analysis_with_config_and_source_path_and_abort(
+            &format!("{deck}{options}\n.end\n"),
+            &config,
+            None,
+            &NoAbort,
+        )
+        .unwrap()
+    };
+    let full = run("");
+    for (options, expected) in [
+        (
+            ".options OUTPUT INITIAL_INTERVAL=250u",
+            vec![0.0, 250e-6, 500e-6, 750e-6, 1e-3],
+        ),
+        (
+            ".options OUTPUT OUTPUTTIMEPOINTS=173u,333u",
+            vec![173e-6, 333e-6, 1e-3],
+        ),
+    ] {
+        let reported = run(options);
+        assert_eq!(reported.time.len(), expected.len());
+        for (actual, expected) in reported.time.iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-15);
+        }
+        let retained = &reported.operating_point.analysis().result;
+        let baseline = &full.operating_point.analysis().result;
+        assert_eq!(retained.time, baseline.time);
+        assert_eq!(retained.node_names, baseline.node_names);
+        assert_eq!(retained.branch_names, baseline.branch_names);
+        for (actual, expected) in retained
+            .waveforms
+            .iter()
+            .chain(&retained.branch_waveforms)
+            .zip(baseline.waveforms.iter().chain(&baseline.branch_waveforms))
+        {
+            assert_eq!(actual.values, expected.values);
+        }
+        assert_eq!(
+            reported.operating_point.shooting_state(),
+            full.operating_point.shooting_state()
+        );
+        assert!(retained.time.len() > reported.time.len());
+        let values = &reported
+            .waveforms
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
+            .unwrap()
+            .1;
+        for (&time, &voltage) in reported.time.iter().zip(values) {
+            let phase = std::f64::consts::TAU * 1e3 * time;
+            assert!((voltage - 0.5 * (phase.sin() - phase.cos())).abs() < 5e-5);
+        }
+        // Exercise the same serialization boundary used by Studio, including
+        // reconstruction from the retained orbit and reporting-time buffer.
+        use crate::simulation::results::{SimulationResult, WaveformData};
+        let time = reported.time;
+        let waveforms: std::collections::HashMap<_, _> = reported
+            .waveforms
+            .into_iter()
+            .map(|(name, values)| {
+                let unit = if name.starts_with("I(") { "A" } else { "V" };
+                let waveform =
+                    WaveformData::new_time_domain_in_unit(name.clone(), time.clone(), values, unit);
+                (name, waveform)
+            })
+            .collect();
+        let expected_time = time.clone();
+        let expected_waveforms = waveforms.clone();
+        let display = SimulationResult::Transient {
+            spectra: Vec::new(),
+            time,
+            waveforms,
+            measurements: Vec::new(),
+            periodic_state: Some(reported.operating_point.clone()),
+            convergence: None,
+            events: Default::default(),
+        };
+        let restored =
+            crate::simulation::runner::worker_contract::round_trip_response_for_test(display);
+        let SimulationResult::Transient {
+            time,
+            waveforms,
+            periodic_state: Some(point),
+            ..
+        } = restored
+        else {
+            panic!("expected PSS display");
+        };
+        assert_eq!(time, expected_time);
+        assert_eq!(waveforms.len(), expected_waveforms.len());
+        for (name, expected) in expected_waveforms {
+            let actual = &waveforms[&name];
+            assert_eq!(actual.name, expected.name);
+            assert_eq!(actual.x_values, expected.x_values);
+            assert_eq!(actual.y_values, expected.y_values);
+            assert_eq!(actual.y_unit, expected.y_unit);
+        }
+        assert_eq!(point, reported.operating_point);
+    }
+}

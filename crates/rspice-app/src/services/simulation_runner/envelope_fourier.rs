@@ -11,14 +11,14 @@ use super::{
     ServiceRunError, ServiceRunResult, TransientData, build_engine_config,
     parse_runner_netlist_with_abort,
 };
-use crate::simulation::multi_run::{
-    EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
-};
 use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
+use rspice_simulation_contract::envelope_policy::{
+    EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
+};
 mod current;
 mod initialization;
 mod multirate;

@@ -63,9 +63,10 @@ mod tests {
             EnvelopeInitialPeriodicSolve::PeriodicSteadyState,
         ] {
             // Exercise the actual form-to-request conversion before dispatch.
-            let mut dialog = crate::simulation::dialog::EnvelopeDialogState::from_config(
-                &crate::simulation::dialog::envelope::EnvelopeConfig::default(),
-            );
+            let mut dialog =
+                rspice_simulation_contract::envelope_draft::EnvelopeDialogState::from_config(
+                    &rspice_simulation_contract::envelope_draft::EnvelopeConfig::default(),
+                );
             dialog.carrier_tones = "2k, 3k".into();
             dialog.harmonic_order = "3".into();
             dialog.stop_time = "4m".into();
