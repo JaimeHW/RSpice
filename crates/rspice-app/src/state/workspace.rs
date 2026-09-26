@@ -46,7 +46,7 @@ pub use project_library_publication::*;
 pub(crate) use reference_changes::{PreparedReferences, ReferenceChanges};
 pub(crate) use reference_preparation::{SchematicReferenceTransaction, reference_from_key};
 pub(crate) use rspice_simulation_contract::saved_output::{
-    device_current_probe, raw_probe_unit, saved_output_references, validate_raw_probe,
+    device_current_probe, saved_output_references, validate_raw_probe,
 };
 // The glob is crate-private: `materialize` is `pub(super)` throughout except
 // the one binding lookup two workbench surfaces reach by path, the terminal

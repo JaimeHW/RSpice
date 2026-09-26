@@ -1,17 +1,29 @@
-//! The receipt contract shared by live retention and project reload.
-//! A receipt identifies an authored output once, and its materialized members
-//! must name actual samples in the same immutable analysis.
-
-use std::collections::{HashMap, HashSet};
+//! Receipt and materialization validation against borrowed retained data.
 
 use super::*;
-use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType, DcSweepFamily};
+use crate::analysis_payload::AnalysisResultPayload;
+use crate::analysis_type::AnalysisType;
+use crate::dc_sweep::{DcSweepFamily, DcTraceView};
+use crate::operating_point::DcOpResult;
+use crate::provenance::AnalysisResultProvenance;
+use std::collections::{HashMap, HashSet};
 
-impl AnalysisResult {
-    pub(in crate::state::simulation) fn validate_saved_output_receipts(
-        &self,
-        quasi_periodic_basis: Option<&[crate::state::WaveformData]>,
-    ) -> Result<(), String> {
+/// Borrowed evidence used to authenticate saved-output receipts without copying samples.
+pub struct SavedOutputValidationRef<'a, I> {
+    pub analysis_type: AnalysisType,
+    pub waveforms: I,
+    pub dc_op: Option<&'a DcOpResult>,
+    pub result_payload: Option<&'a AnalysisResultPayload>,
+    pub saved_output_receipts: &'a [SavedOutputReceipt],
+    pub success: bool,
+    pub provenance: Option<&'a AnalysisResultProvenance>,
+}
+
+impl<'a, I> SavedOutputValidationRef<'a, I>
+where
+    I: Iterator<Item = DcTraceView<'a>> + Clone,
+{
+    pub fn validate(&self, quasi_periodic_basis: Option<I>) -> Result<(), String> {
         if self.saved_output_receipts.is_empty() {
             return Ok(());
         }
@@ -28,13 +40,13 @@ impl AnalysisResult {
         }
         let waveforms = self
             .waveforms
-            .iter()
-            .map(|waveform| (waveform.name.as_str(), waveform))
+            .clone()
+            .map(|waveform| (waveform.name, waveform))
             .collect::<HashMap<_, _>>();
         let mut identities = HashSet::new();
         let mut digests = HashSet::new();
         let mut raw_dc_axis: Option<&[f64]> = None;
-        for receipt in &self.saved_output_receipts {
+        for receipt in self.saved_output_receipts {
             if receipt.output_kind != SavedOutputKind::DerivedExpression
                 && !receipt.complex_policy.is_legacy()
             {
@@ -43,7 +55,7 @@ impl AnalysisResult {
                 );
             }
             if let Some(bindings) = &receipt.source_bindings {
-                bindings.validate(receipt, self, quasi_periodic_basis)?;
+                bindings.validate(receipt, self, quasi_periodic_basis.as_ref())?;
             }
             if !identities.insert(receipt.output_id) {
                 return Err(format!(
@@ -110,34 +122,29 @@ impl AnalysisResult {
                         {
                             return Err("saved-output DC member identity, name, or sample count is inconsistent".to_owned());
                         }
-                        if receipt.output_kind == crate::state::SavedOutputKind::RawVoltageOrCurrent
-                        {
-                            let waveform = waveforms[member.waveform_name.as_str()];
+                        if receipt.output_kind == SavedOutputKind::RawVoltageOrCurrent {
+                            let waveform = &waveforms[member.waveform_name.as_str()];
                             let unit =
-                                crate::state::workspace::raw_probe_unit(&receipt.source_expression)
-                                    .ok_or_else(|| {
-                                        "saved-output DC raw probe has no voltage/current identity"
-                                            .to_owned()
-                                    })?;
-                            if waveform.unit.as_deref() != Some(unit) || waveform.complex.is_some()
-                            {
+                                raw_probe_unit(&receipt.source_expression).ok_or_else(|| {
+                                    "saved-output DC raw probe has no voltage/current identity"
+                                        .to_owned()
+                                })?;
+                            if waveform.unit != Some(unit) || waveform.complex {
                                 return Err(
                                     "saved-output DC raw member has an inconsistent quantity"
                                         .to_owned(),
                                 );
                             }
                             if let Some(axis) = raw_dc_axis {
-                                if !std::ptr::eq(axis, waveform.x.as_slice())
-                                    && axis != waveform.x.as_slice()
-                                {
+                                if !std::ptr::eq(axis, waveform.x) && axis != waveform.x {
                                     return Err(
                                         "saved-output DC raw members have different primary axes"
                                             .to_owned(),
                                     );
                                 }
                             } else {
-                                evidence.validate_axis(&waveform.x)?;
-                                raw_dc_axis = Some(&waveform.x);
+                                evidence.validate_axis(waveform.x)?;
+                                raw_dc_axis = Some(waveform.x);
                             }
                         }
                     }
@@ -179,8 +186,8 @@ impl AnalysisResult {
                     .trace_name(&evidence.quantities[curve.quantity], curve.member)
                     .as_str(),
             )
-            && !std::ptr::eq(axis, source.x.as_slice())
-            && axis != source.x.as_slice()
+            && !std::ptr::eq(axis, source.x)
+            && axis != source.x
         {
             return Err(
                 "saved-output DC raw members differ from the retained solved primary axis"

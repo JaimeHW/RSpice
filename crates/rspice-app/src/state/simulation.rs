@@ -103,6 +103,10 @@ pub use rspice_results::convergence_attribution::ConvergenceFailureClass;
 pub use rspice_results::family_measurements::{
     FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements,
 };
+pub use rspice_results::saved_output::{
+    SavedOutputAxis, SavedOutputBoundSource, SavedOutputDcMember, SavedOutputMaterializationStatus,
+    SavedOutputReceipt, SavedOutputSourceBindings,
+};
 pub use run::{
     ExecutionTarget, RunRetention, SimulationCampaignMembership, SimulationExecutionIdentity,
     SimulationRun, SimulationRunLifecycle,
@@ -113,10 +117,6 @@ pub use run_receipt::{
     HierarchyMapRow, PreparedModelQualification, PreparedModelSourceIdentity, PreparedRunReceipt,
     PreparedRunTaskReceipt, PreparedSourceCheckReceipt, PreparedSpecification,
     PreparedSpecificationPolicy, SignOffStanding, SimulationRunProvenance,
-};
-pub use saved_output::{
-    SavedOutputAxis, SavedOutputBoundSource, SavedOutputDcMember, SavedOutputMaterializationStatus,
-    SavedOutputReceipt, SavedOutputSourceBindings,
 };
 pub use specification_verdict::{SpecificationVerdict, SpecificationVerdictStatus};
 pub use state_impl::EvidenceDomain;

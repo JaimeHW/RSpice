@@ -1,44 +1,24 @@
-//! Exact source identities captured before authored waveforms are adopted.
-//! Missing references stay missing even if an output later uses that label.
-
-use std::collections::BTreeMap;
+//! Validate exact saved-output source identities against retained data.
 
 use super::*;
-use crate::state::workspace::saved_output_references;
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SavedOutputSourceBindings {
-    pub axis: SavedOutputAxis,
-    pub references: BTreeMap<String, SavedOutputBoundSource>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum SavedOutputAxis {
-    OperatingPoint,
-    Waveform { name: String },
-    DcFamily,
-    Missing,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum SavedOutputBoundSource {
-    Waveform { name: String },
-    DcQuantity { quantity: usize },
-    Ground,
-    Missing,
-}
+use crate::analysis_payload::AnalysisResultPayload;
+use crate::dc_sweep::{DcSweepFamily, DcTraceView};
+use crate::saved_output::validation::SavedOutputValidationRef;
+use crate::saved_output::{
+    SavedOutputMaterializationStatus, SavedOutputReceipt, device_current_probe,
+    saved_output_references,
+};
 
 impl SavedOutputSourceBindings {
-    pub(super) fn validate(
+    pub(in crate::saved_output) fn validate<'a, I>(
         &self,
         receipt: &SavedOutputReceipt,
-        analysis: &crate::state::AnalysisResult,
-        basis: Option<&[crate::state::WaveformData]>,
-    ) -> Result<(), String> {
-        use crate::state::{AnalysisResultPayload, DcSweepFamily};
+        analysis: &SavedOutputValidationRef<'a, I>,
+        basis: Option<&I>,
+    ) -> Result<(), String>
+    where
+        I: Iterator<Item = DcTraceView<'a>> + Clone,
+    {
         let expected = saved_output_references(receipt.output_kind, &receipt.source_expression)?
             .ok_or_else(|| "this saved-output kind cannot carry source bindings".to_owned())?;
         if expected.iter().ne(self.references.keys()) {
@@ -57,8 +37,8 @@ impl SavedOutputSourceBindings {
             analysis.dc_op.as_ref().map_or_else(
                 || {
                     basis
-                        .unwrap_or(&analysis.waveforms)
-                        .iter()
+                        .cloned()
+                        .unwrap_or_else(|| analysis.waveforms.clone())
                         .any(|wave| wave.name == name)
                 },
                 |op| {
@@ -89,8 +69,7 @@ impl SavedOutputSourceBindings {
             _ => {}
         }
         for (reference, source) in &self.references {
-            let current = reference.starts_with("i(")
-                || crate::state::device_current_probe(reference).is_some();
+            let current = reference.starts_with("i(") || device_current_probe(reference).is_some();
             match source {
                 SavedOutputBoundSource::Ground if current => {
                     return Err("a current source cannot bind to the ground voltage".to_owned());
@@ -118,7 +97,7 @@ impl SavedOutputSourceBindings {
                         );
                     }
                     if deferred
-                        && !matches!(evidence.selection, crate::state::DcCurveSelection::All)
+                        && !matches!(evidence.selection, crate::dc_sweep::DcCurveSelection::All)
                         && evidence
                             .curve_indices()
                             .filter(|curve| curve.quantity == *quantity)
@@ -137,11 +116,4 @@ impl SavedOutputSourceBindings {
         }
         Ok(())
     }
-}
-
-/// Only absence means legacy unknown. Explicit null is malformed evidence.
-pub(super) fn deserialize_bindings<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<SavedOutputSourceBindings>, D::Error> {
-    serde::Deserialize::deserialize(deserializer).map(Some)
 }
