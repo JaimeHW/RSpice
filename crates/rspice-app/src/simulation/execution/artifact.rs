@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::canonical::CanonicalWriter;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::simulation::dependency_contract::{
     FourierTransientRequirement, PeriodicStateCapability, TransientCapability,
@@ -20,6 +19,7 @@ use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::multi_run::PssMethod;
 use crate::simulation::results::SimulationResult;
 use crate::simulation::runner::SpecExecutionOptions;
+use rspice_app_types::canonical::CanonicalWriter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::simulation) enum ExecutionArtifactKind {

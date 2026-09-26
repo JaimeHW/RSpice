@@ -135,7 +135,7 @@ impl PreparedMeasurementReferences {
     }
 
     pub(crate) fn digest(&self) -> ContentDigest {
-        crate::simulation::execution::content_digest(
+        rspice_app_types::canonical::content_digest(
             "rspice.prepared-measurement-references/v1",
             &serde_json::to_vec(&self.entries).expect("reference entries serialize"),
         )
@@ -145,7 +145,7 @@ impl PreparedMeasurementReferences {
 pub(in crate::simulation) fn reference_digest(
     reference: &MeasurementReferenceSource,
 ) -> ContentDigest {
-    crate::simulation::execution::content_digest(
+    rspice_app_types::canonical::content_digest(
         "rspice.measurement-reference/v1",
         &serde_json::to_vec(reference).expect("reference text serializes"),
     )

@@ -891,7 +891,7 @@ fn controller_manual_run_receipt_remains_authoritative_if_result_provenance_is_s
         .cached_netlist
         .as_deref()
         .expect("sealed manual deck");
-    let expected_source_digest = crate::simulation::execution::content_digest(
+    let expected_source_digest = rspice_app_types::canonical::content_digest(
         "rspice.manual-executable-source/v1",
         expanded.as_bytes(),
     );

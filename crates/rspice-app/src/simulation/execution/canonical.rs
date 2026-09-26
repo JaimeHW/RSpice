@@ -23,8 +23,6 @@ use analysis_spec::{
     pxf_sweep_tag,
 };
 
-use sha2::{Digest as _, Sha256};
-
 use crate::product::{
     AnalysisInstanceId, ContentDigest, manual_deck_analysis_instance_id_from_tag,
 };
@@ -42,135 +40,7 @@ use crate::simulation::plan::{AnalysisNumericOverride, NumericOverrideOption, Ov
 use crate::simulation::runner::SpecExecutionOptions;
 use crate::state::CanonicalAnalysisKind;
 
-const CANONICAL_MAGIC: &[u8] = b"RSPICE-CANONICAL";
-const CANONICAL_VERSION: u16 = 1;
-
-pub(super) struct CanonicalWriter {
-    hasher: Sha256,
-}
-
-impl rspice_results::convergence_quality::ConvergenceEncoder for CanonicalWriter {
-    fn u64(&mut self, value: u64) {
-        Self::u64(self, value);
-    }
-    fn f64(&mut self, value: f64) {
-        Self::f64(self, value);
-    }
-    fn string(&mut self, value: &str) {
-        Self::string(self, value);
-    }
-    fn tag(&mut self, value: u8) {
-        Self::u8(self, value);
-    }
-}
-
-impl CanonicalWriter {
-    pub(super) fn new(domain: &str) -> Self {
-        let mut writer = Self {
-            hasher: Sha256::new(),
-        };
-        writer.raw(CANONICAL_MAGIC);
-        writer.raw(&CANONICAL_VERSION.to_be_bytes());
-        writer.domain(domain);
-        writer
-    }
-
-    pub(super) fn domain(&mut self, value: &str) {
-        self.raw(&[0xd0]);
-        self.length(value.len());
-        self.raw(value.as_bytes());
-    }
-
-    pub(super) fn bool(&mut self, value: bool) {
-        self.raw(&[0x01, u8::from(value)]);
-    }
-
-    pub(super) fn u8(&mut self, value: u8) {
-        self.raw(&[0x02, value]);
-    }
-
-    pub(super) fn u64(&mut self, value: u64) {
-        self.raw(&[0x03]);
-        self.raw(&value.to_be_bytes());
-    }
-
-    pub(super) fn usize(&mut self, value: usize) {
-        self.u64(u64::try_from(value).expect("supported Rust targets use at most 64-bit usize"));
-    }
-
-    pub(super) fn i32(&mut self, value: i32) {
-        self.raw(&[0x04]);
-        self.raw(&value.to_be_bytes());
-    }
-
-    pub(super) fn f64(&mut self, value: f64) {
-        self.raw(&[0x06]);
-        self.raw(&value.to_bits().to_be_bytes());
-    }
-
-    pub(super) fn string(&mut self, value: &str) {
-        self.raw(&[0x07]);
-        self.length(value.len());
-        self.raw(value.as_bytes());
-    }
-
-    pub(super) fn bytes(&mut self, value: &[u8]) {
-        self.raw(&[0x08]);
-        self.length(value.len());
-        self.raw(value);
-    }
-
-    pub(super) fn digest(&mut self, value: ContentDigest) {
-        self.raw(&[0x09]);
-        self.raw(value.as_bytes());
-    }
-
-    pub(super) fn uuid(&mut self, value: uuid::Uuid) {
-        self.raw(&[0x0c]);
-        self.raw(value.as_bytes());
-    }
-
-    pub(super) fn sequence(&mut self, len: usize) {
-        self.raw(&[0x0a]);
-        self.length(len);
-    }
-
-    pub(super) fn option<T: ?Sized>(
-        &mut self,
-        value: Option<&T>,
-        encode: impl FnOnce(&mut Self, &T),
-    ) {
-        match value {
-            Some(value) => {
-                self.raw(&[0x0b, 1]);
-                encode(self, value);
-            }
-            None => self.raw(&[0x0b, 0]),
-        }
-    }
-
-    pub(super) fn finish(self) -> ContentDigest {
-        ContentDigest::from_bytes(self.hasher.finalize().into())
-    }
-
-    fn length(&mut self, len: usize) {
-        self.raw(
-            &u64::try_from(len)
-                .expect("supported Rust targets use at most 64-bit usize")
-                .to_be_bytes(),
-        );
-    }
-
-    fn raw(&mut self, bytes: &[u8]) {
-        self.hasher.update(bytes);
-    }
-}
-
-pub(in crate::simulation) fn content_digest(domain: &str, bytes: &[u8]) -> ContentDigest {
-    let mut writer = CanonicalWriter::new(domain);
-    writer.bytes(bytes);
-    writer.finish()
-}
+use rspice_app_types::canonical::CanonicalWriter;
 
 #[cfg(any(target_arch = "wasm32", test))]
 pub(in crate::simulation) fn f64_sequence_digest(domain: &str, values: &[f64]) -> ContentDigest {

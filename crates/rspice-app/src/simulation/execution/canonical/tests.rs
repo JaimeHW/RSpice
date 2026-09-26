@@ -7,6 +7,7 @@ use crate::simulation::multi_run::{
     EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve, FrequencySweep,
     TfAccuracy, TfNormalization,
 };
+use rspice_app_types::canonical::content_digest;
 
 #[test]
 fn analysis_kind_tags_are_append_only() {

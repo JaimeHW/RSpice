@@ -18,11 +18,11 @@ use crate::simulation::execution::{
     ExecutionTargetCapabilities, ModelSourceIdentity, PreparationError, PreparationStage,
     PreparedDependencyBinding, PreparedRunMetadata, PreparedRunSnapshot, PreparedTask,
     RunSourceReceipt, SavePolicy, SnapshotParts, TouchstoneExportPolicy, analysis_kind_tag,
-    content_digest, drc_receipt_digest, generated_executable_source_digest,
-    manual_deck_analysis_instance_id, manual_executable_source_digest,
-    manual_source_receipt_digest,
+    drc_receipt_digest, generated_executable_source_digest, manual_deck_analysis_instance_id,
+    manual_executable_source_digest, manual_source_receipt_digest,
 };
 use crate::simulation::run_set::RunSetCornerProjection;
+use rspice_app_types::canonical::content_digest;
 
 mod deferred_sources;
 mod dependency_expansion;

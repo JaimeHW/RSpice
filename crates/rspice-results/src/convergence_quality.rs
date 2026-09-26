@@ -17,6 +17,21 @@ pub trait ConvergenceEncoder {
     fn tag(&mut self, value: u8);
 }
 
+impl ConvergenceEncoder for rspice_app_types::canonical::CanonicalWriter {
+    fn u64(&mut self, value: u64) {
+        Self::u64(self, value);
+    }
+    fn f64(&mut self, value: f64) {
+        Self::f64(self, value);
+    }
+    fn string(&mut self, value: &str) {
+        Self::string(self, value);
+    }
+    fn tag(&mut self, value: u8) {
+        Self::u8(self, value);
+    }
+}
+
 /// Quality of the transient source, including a preceding periodic solve.
 /// Absence of this record means unknown quality, never verified clean quality.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

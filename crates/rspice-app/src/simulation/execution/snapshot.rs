@@ -33,8 +33,9 @@ use super::artifact::{
     PreparedDependencyBinding, ResolvedExecutionDependencies,
     validate_prepared_dependency_contract_with_options,
 };
-use super::canonical::{CanonicalWriter, analysis_config_digest, content_digest};
+use super::canonical::analysis_config_digest;
 use super::permit::ConsumedExecutionPermit;
+use rspice_app_types::canonical::{CanonicalWriter, content_digest};
 
 pub(in crate::simulation) mod bound_cards;
 mod declared_points;

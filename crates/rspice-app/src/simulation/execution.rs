@@ -19,10 +19,9 @@ pub(in crate::simulation) use artifact::{
 #[cfg(any(target_arch = "wasm32", test))]
 pub(in crate::simulation) use canonical::f64_sequence_digest;
 pub(in crate::simulation) use canonical::{
-    analysis_kind_tag, canonical_analysis_kind, content_digest, drc_receipt_digest,
-    hb_operating_point_digest, manual_deck_analysis_instance_id, manual_source_receipt_digest,
-    monte_carlo_evaluator_digest, operating_point_effective_source_digest,
-    sealed_dependency_closure_digest,
+    analysis_kind_tag, canonical_analysis_kind, drc_receipt_digest, hb_operating_point_digest,
+    manual_deck_analysis_instance_id, manual_source_receipt_digest, monte_carlo_evaluator_digest,
+    operating_point_effective_source_digest, sealed_dependency_closure_digest,
 };
 pub(in crate::simulation) use permit::{ExecutionPermit, ExecutionPermitIssuer};
 pub(crate) use sealed_source::sealed_executable_source_digest;

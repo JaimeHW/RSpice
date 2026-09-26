@@ -81,7 +81,7 @@ impl MonteCarloCheckpointInput {
 }
 
 pub(crate) fn checkpoint_digest(bytes: &[u8]) -> ContentDigest {
-    crate::simulation::execution::content_digest("rspice.studio-monte-carlo-checkpoint/v1", bytes)
+    rspice_app_types::canonical::content_digest("rspice.studio-monte-carlo-checkpoint/v1", bytes)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
