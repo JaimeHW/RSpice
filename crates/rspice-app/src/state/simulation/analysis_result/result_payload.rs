@@ -455,39 +455,6 @@ fn same_optional_retained_float(left: Option<f64>, right: Option<f64>) -> bool {
     }
 }
 
-/// An event history is a schedule: nonnegative, finite, and non-decreasing.
-///
-/// Non-decreasing, not strictly increasing. An event-driven solver settles a
-/// node through several delta cycles at one physical time, and every one of
-/// those transitions is a committed event with its own value. Their order is
-/// the order they were committed in, which is the order they are stored in —
-/// so a repeated timestamp is evidence, not corruption.
-pub(super) fn validate_event_times(
-    node_name: &str,
-    times: impl Iterator<Item = f64>,
-) -> Result<(), String> {
-    let mut previous: Option<f64> = None;
-    let mut count = 0usize;
-    for time in times {
-        count += 1;
-        if !time.is_finite() || time < 0.0 {
-            return Err(format!(
-                "event node '{node_name}' has an invalid event time"
-            ));
-        }
-        if previous.is_some_and(|previous| previous > time) {
-            return Err(format!(
-                "event node '{node_name}' events must not move backwards in time"
-            ));
-        }
-        previous = Some(time);
-    }
-    if count == 0 {
-        return Err(format!("event node '{node_name}' retained no events"));
-    }
-    Ok(())
-}
-
 pub(super) fn validate_transfer_function_output(
     expression: &str,
     expected_quantity: TransferFunctionQuantityEvidence,

@@ -1327,7 +1327,7 @@ fn current_impulses_are_authenticated_and_preserved_in_fourier_dependencies() {
     let mut result = transient();
     let legacy = create(&result);
     if let SimulationResult::Transient { events, .. } = &mut result {
-        events.current_impulses = Some(crate::state::CurrentImpulseHistoryEvidence::fixture());
+        events.current_impulses = Some(crate::state::current_impulse_history_fixture());
     }
     let artifact = create(&result);
     assert_ne!(legacy.payload_digest, artifact.payload_digest);

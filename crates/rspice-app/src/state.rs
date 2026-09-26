@@ -156,6 +156,8 @@ pub(crate) use simulation::convergence_attribution_from_core;
 pub use simulation::CurrentImpulseHistoryEvidence;
 pub(crate) use simulation::DcTraceView;
 pub(crate) use simulation::RunHistoryRevision;
+#[cfg(test)]
+pub(crate) use simulation::current_impulse_history_fixture;
 pub use simulation::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType, CanonicalAnalysisKind,

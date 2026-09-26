@@ -616,7 +616,7 @@ fn csv_export_marks_unavailable_pole_zero_gain_explicitly() {
 
 #[test]
 fn current_impulse_csv_retains_exact_charge_owner_and_zero_event_coverage() {
-    let mut history = crate::state::CurrentImpulseHistoryEvidence::fixture();
+    let mut history = crate::state::current_impulse_history_fixture();
     let mut zero = history.traces[0].clone();
     zero.owner = rspice_core::CurrentImpulseOwner::DeviceLead {
         device_name: "Q1".into(),

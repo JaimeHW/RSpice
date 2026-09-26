@@ -1220,10 +1220,7 @@ fn live_current_impulses_reach_a_charge_only_preview_and_survive_bad_analog_colu
     else {
         panic!("retained current history")
     };
-    assert_eq!(
-        history,
-        crate::state::CurrentImpulseHistoryEvidence::fixture()
-    );
+    assert_eq!(history, crate::state::current_impulse_history_fixture());
     accumulator.clear();
     assert!(accumulator.is_empty());
 }

@@ -1258,7 +1258,7 @@ fn response_with_measurement(measurement: WorkerMeasurement) -> WorkerResponse {
 
 #[test]
 fn current_impulse_history_survives_worker_transfer_and_rejects_invalid_charge() {
-    let history = crate::state::CurrentImpulseHistoryEvidence::fixture();
+    let history = crate::state::current_impulse_history_fixture();
     let mut response = response_with_measurement(projected_worker_measurement());
     let WorkerOutcome::Success(result) = &mut response.outcome else {
         unreachable!()

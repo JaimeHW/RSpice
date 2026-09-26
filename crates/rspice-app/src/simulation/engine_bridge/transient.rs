@@ -704,7 +704,7 @@ mod tests {
     #[test]
     fn current_impulse_history_conversion_preserves_exact_charge_and_window_coverage() {
         use rspice_core::{CurrentImpulseOwner, CurrentImpulsePoint};
-        let history = crate::state::CurrentImpulseHistoryEvidence::fixture();
+        let history = crate::state::current_impulse_history_fixture();
         let mut result = rspice_core::engine::TransientResult {
             time: vec![0.0, 0.5, 1.0],
             step_sizes: vec![0.0, 0.5, 0.5],

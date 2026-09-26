@@ -1764,7 +1764,7 @@ mod tests {
 
     #[test]
     fn current_impulses_offer_an_exact_event_sheet_without_digital_nodes() {
-        let mut history = crate::state::CurrentImpulseHistoryEvidence::fixture();
+        let mut history = crate::state::current_impulse_history_fixture();
         let mut second = history.traces[0].clone();
         second.owner = rspice_core::CurrentImpulseOwner::DeviceLead {
             device_name: "Q1".into(),

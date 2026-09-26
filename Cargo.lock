@@ -5629,6 +5629,7 @@ dependencies = [
  "num-complex",
  "png",
  "rspice-app-types",
+ "rspice-core",
  "rspice-units",
  "serde",
  "serde_json",

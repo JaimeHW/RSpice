@@ -396,121 +396,10 @@ pub struct SensitivityResultRow {
     pub normalized: rspice_core::analysis::sensitivity::SensitivityValue<f64>,
 }
 
-/// One committed digital event on an XSPICE event node.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DigitalEventPointEvidence {
-    pub time_s: f64,
-    /// XSPICE 12-state event code, 0..=12. The producer is
-    /// `rspice_core::xspice::DigitalValue::event_code`.
-    pub value_code: u8,
-}
-
-/// The committed event history of one XSPICE digital node.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DigitalEventTraceEvidence {
-    pub node_name: String,
-    pub points: Vec<DigitalEventPointEvidence>,
-}
-
-/// One committed real-valued event on an XSPICE event node.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RealEventPointEvidence {
-    pub time_s: f64,
-    pub value: f64,
-}
-
-/// The committed event history of one XSPICE real-valued node.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RealEventTraceEvidence {
-    pub node_name: String,
-    pub points: Vec<RealEventPointEvidence>,
-}
-
-/// Who declared a digital bus that a retained result carries.
-///
-/// The same three claims `rspice_core::engine::DigitalBusSource` makes, kept
-/// as this crate's own enum so a retained project file's encoding is owned
-/// here and does not move when the engine's derives do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DigitalBusSourceEvidence {
-    /// A model declared it: a vector port on the mixed-signal boundary.
-    Engine,
-    /// The schematic declared it: a drawn bus over its member nets.
-    Schematic,
-    /// A file claimed it: a VCD vector variable, or a rawfile bus plot.
-    Import,
-}
-
-impl From<rspice_core::engine::DigitalBusSource> for DigitalBusSourceEvidence {
-    fn from(value: rspice_core::engine::DigitalBusSource) -> Self {
-        match value {
-            rspice_core::engine::DigitalBusSource::Engine => Self::Engine,
-            rspice_core::engine::DigitalBusSource::Schematic => Self::Schematic,
-            rspice_core::engine::DigitalBusSource::Import => Self::Import,
-        }
-    }
-}
-
-impl From<DigitalBusSourceEvidence> for rspice_core::engine::DigitalBusSource {
-    fn from(value: DigitalBusSourceEvidence) -> Self {
-        match value {
-            DigitalBusSourceEvidence::Engine => Self::Engine,
-            DigitalBusSourceEvidence::Schematic => Self::Schematic,
-            DigitalBusSourceEvidence::Import => Self::Import,
-        }
-    }
-}
-
-/// One digital bus declared over retained event traces.
-///
-/// A bus is a *declaration*, never a fourth kind of history: the members keep
-/// their own [`DigitalEventTraceEvidence`], and every word this crate shows is
-/// reassembled from them by `rspice_core::execution::bus_events`. Nothing here
-/// stores a value, so a bus and its members can never disagree.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DigitalBusEvidence {
-    /// Bus name, without any range suffix.
-    pub name: String,
-    /// Declared most significant index, exactly as declared.
-    pub msb: i64,
-    /// Declared least significant index, exactly as declared.
-    pub lsb: i64,
-    /// Member node names in declaration order, declared MSB first. Each names
-    /// a retained digital event trace.
-    pub members: Vec<String>,
-    /// Who declared this bus.
-    pub source: DigitalBusSourceEvidence,
-}
-
-impl From<&rspice_core::engine::DigitalBusDeclaration> for DigitalBusEvidence {
-    fn from(value: &rspice_core::engine::DigitalBusDeclaration) -> Self {
-        Self {
-            name: value.name.clone(),
-            msb: value.msb,
-            lsb: value.lsb,
-            members: value.members.clone(),
-            source: value.source.into(),
-        }
-    }
-}
-
-impl From<&DigitalBusEvidence> for rspice_core::engine::DigitalBusDeclaration {
-    fn from(value: &DigitalBusEvidence) -> Self {
-        Self {
-            name: value.name.clone(),
-            msb: value.msb,
-            lsb: value.lsb,
-            members: value.members.clone(),
-            source: value.source.into(),
-        }
-    }
-}
+pub use rspice_results::events::{
+    DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
+    DigitalEventTraceEvidence, RealEventPointEvidence, RealEventTraceEvidence,
+};
 
 pub use rspice_results::soa_evidence::{
     SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
@@ -1789,68 +1678,12 @@ impl AnalysisResultPayload {
                         "event payload does not match analysis type {analysis_type:?}"
                     ));
                 }
-                if digital_traces.is_empty() && real_traces.is_empty() && current_impulses.is_none()
-                {
-                    return Err("event payload contains no retained event history".to_owned());
-                }
-                if let Some(history) = current_impulses {
-                    history.validate()?;
-                }
-                let mut seen = std::collections::BTreeSet::new();
-                for trace in digital_traces {
-                    require_non_empty(&trace.node_name, "event node identity")?;
-                    if !seen.insert(trace.node_name.as_str()) {
-                        return Err(format!(
-                            "event node '{}' is retained more than once",
-                            trace.node_name
-                        ));
-                    }
-                    let times = trace.points.iter().map(|point| point.time_s);
-                    validate_event_times(&trace.node_name, times)?;
-                    // The typed decoder owns the encoding: a code it refuses
-                    // is not a state this build can name, and asking it here
-                    // leaves one spelling of that bound rather than a
-                    // constant beside it that has to be kept in step.
-                    if trace.points.iter().any(|point| {
-                        rspice_core::xspice::DigitalValue::from_event_code(point.value_code)
-                            .is_none()
-                    }) {
-                        return Err(format!(
-                            "event node '{}' has a value outside the XSPICE 12-state encoding",
-                            trace.node_name
-                        ));
-                    }
-                }
-                for trace in real_traces {
-                    require_non_empty(&trace.node_name, "event node identity")?;
-                    if !seen.insert(trace.node_name.as_str()) {
-                        return Err(format!(
-                            "event node '{}' is retained more than once",
-                            trace.node_name
-                        ));
-                    }
-                    let times = trace.points.iter().map(|point| point.time_s);
-                    validate_event_times(&trace.node_name, times)?;
-                    if trace.points.iter().any(|point| !point.value.is_finite()) {
-                        return Err(format!(
-                            "event node '{}' has a non-finite value",
-                            trace.node_name
-                        ));
-                    }
-                }
-                // Width, membership, uniqueness and the 4,096-member ceiling
-                // are the engine's rules about a bus, not this crate's, and
-                // they are asked of the engine's own validator so a table the
-                // GUI accepts is exactly one the CLI and the bindings accept.
-                let declarations = digital_buses
-                    .iter()
-                    .map(rspice_core::engine::DigitalBusDeclaration::from)
-                    .collect::<Vec<_>>();
-                rspice_core::engine::validate_digital_bus_table(
-                    &declarations,
-                    digital_traces.iter().map(|trace| trace.node_name.as_str()),
-                )
-                .map_err(|error| error.to_string())?;
+                rspice_results::events::validate_event_history(
+                    digital_traces,
+                    real_traces,
+                    digital_buses,
+                    current_impulses.as_ref(),
+                )?;
             }
             Self::FftSpectrum { spectrum } => {
                 // The Fourier family owns every retained coefficient
@@ -1908,7 +1741,7 @@ pub use result_payload::AnalysisResult;
 pub(crate) use result_payload::ScalarEvidenceCandidate;
 use result_payload::{
     soa_evaluation_order, soa_rule_verdict, soa_violation_order, soa_violation_severity,
-    validate_complex_values, validate_event_times, validate_pss_floquet_payload,
-    validate_pstb_payload, validate_transfer_function_output,
+    validate_complex_values, validate_pss_floquet_payload, validate_pstb_payload,
+    validate_transfer_function_output,
 };
 use rspice_results::validation::require_non_empty;
