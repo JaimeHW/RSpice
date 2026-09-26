@@ -65,6 +65,7 @@ pub(crate) use rspice_simulation_contract::worker_run_config::{
 pub(crate) use rspice_simulation_contract::worker_spec::{
     WorkerAnalysisConfig, WorkerAnalysisSpec, WorkerSweepType,
 };
+pub(crate) use rspice_simulation_contract::worker_waveform::WorkerWaveform;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

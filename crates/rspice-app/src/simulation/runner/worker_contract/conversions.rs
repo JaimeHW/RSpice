@@ -719,53 +719,16 @@ impl From<WorkerEventHistory> for TransientEventHistory {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct WorkerWaveform {
-    pub name: String,
-    pub x_values: Vec<f64>,
-    pub y_values: Vec<f64>,
-    pub y_unit: String,
-    pub is_complex: bool,
-    pub y_imag: Option<Vec<f64>>,
-}
-
 #[cfg(test)]
-impl WorkerWaveform {
-    pub(super) fn estimated_numeric_payload_bytes(&self) -> usize {
-        sum_payload_bytes([
-            f64_payload_bytes(self.x_values.len()),
-            f64_payload_bytes(self.y_values.len()),
-            self.y_imag
-                .as_ref()
-                .map_or(0, |values| f64_payload_bytes(values.len())),
-        ])
-    }
-}
-
-impl From<WaveformData> for WorkerWaveform {
-    fn from(value: WaveformData) -> Self {
-        Self {
-            name: value.name,
-            x_values: value.x_values,
-            y_values: value.y_values,
-            y_unit: value.y_unit,
-            is_complex: value.is_complex,
-            y_imag: value.y_imag,
-        }
-    }
-}
-
-impl From<WorkerWaveform> for WaveformData {
-    fn from(value: WorkerWaveform) -> Self {
-        Self {
-            name: value.name,
-            x_values: value.x_values,
-            y_values: value.y_values,
-            y_unit: value.y_unit,
-            is_complex: value.is_complex,
-            y_imag: value.y_imag,
-        }
-    }
+fn waveform_payload_bytes(waveform: &WorkerWaveform) -> usize {
+    sum_payload_bytes([
+        f64_payload_bytes(waveform.x_values.len()),
+        f64_payload_bytes(waveform.y_values.len()),
+        waveform
+            .y_imag
+            .as_ref()
+            .map_or(0, |values| f64_payload_bytes(values.len())),
+    ])
 }
 
 #[cfg(test)]
@@ -1584,7 +1547,7 @@ pub(super) fn event_history_payload_bytes(events: &WorkerEventHistory) -> usize 
 pub(super) fn waveforms_payload_bytes(waveforms: &[WorkerWaveform]) -> usize {
     waveforms
         .iter()
-        .map(WorkerWaveform::estimated_numeric_payload_bytes)
+        .map(waveform_payload_bytes)
         .fold(0usize, |total, bytes| total.saturating_add(bytes))
 }
 

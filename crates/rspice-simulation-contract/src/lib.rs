@@ -75,4 +75,5 @@ pub mod worker_result_values;
 pub mod worker_run_config;
 pub mod worker_spec;
 pub mod worker_transport;
+pub mod worker_waveform;
 pub mod xf_draft;
