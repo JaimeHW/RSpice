@@ -1,54 +1,11 @@
-//! The exact deck every point of a completed run executed.
+//! Retained executed decks with bounded history and shared source text.
 //!
-//! A prepared run seals one source per point before dispatch and the engine
-//! reads exactly that. Nothing kept it. The run-level source sat on the
-//! controller until the next batch replaced it; the per-point sources were
-//! consumed with the tasks that carried them; and only a *manual deck* run
-//! left anything a reader could reopen — the editor buffer, which is the deck
-//! somebody typed and not the deck the engine was handed.
-//!
-//! So a corner run could be inspected in every way except the one that
-//! settles an argument: what did this point actually solve.
-//!
-//! # Retained and bounded
-//!
-//! Decks are large and a PVT sweep has one per point, so this archive has a
-//! ceiling on both counts — [`MAX_RETAINED_RUNS`] runs and
-//! [`MAX_RETAINED_BYTES`] of distinct text — and the oldest run is dropped
-//! first. Points that solved the run-level source verbatim share one
-//! allocation, which is the common case and costs nothing to keep.
-//!
-//! # Durable, and never a second authority
-//!
-//! What this holds is written to the project file, so reopening a project
-//! reopens the decks its retained runs executed. That is only safe because a
-//! reader never has to take the file's word for it: the run receipt beside
-//! each dataset seals the executable source under
-//! [`crate::state::PreparedRunReceipt::source_content_digest`], and the deck
-//! viewer recomputes that digest over the exact retained bytes before it
-//! claims anything. A rewritten deck therefore reads as unverified rather
-//! than as history.
-//!
-//! The same caps apply on the way back in — see
-//! [`ExecutedDeckArchive::restore`] — because a file that carries more than a
-//! session could have retained was not written by one.
-//!
-//! Retention is coupled to the datasets': a run the project's retention limit
-//! discarded takes its deck with it, since a deck for a dataset nobody can
-//! open answers a question nobody can ask.
-//!
-//! # An absent deck says so
-//!
-//! A run whose deck was evicted, or that ran before this archive existed, has
-//! no entry. Every reader is therefore an `Option`, and the surfaces state the
-//! absence rather than falling back to the working deck, which is a different
-//! document and would be a lie told confidently.
+//! Project persistence retains these records alongside run receipts. Readers
+//! verify exact deck bytes against the prepared receipt's source-content digest.
+//! Dataset pruning also removes its decks; a missing entry remains explicit.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-
-#[cfg(test)]
-use rspice_model_library::sealed_model_sources;
 
 /// How many runs' decks one session keeps.
 ///
@@ -212,7 +169,7 @@ impl ExecutedDeckArchive {
 
     /// Snapshot identity stays valid because every archive mutation detaches
     /// storage shared with another archive or a retained cache key.
-    pub(crate) fn shares_content_with(&self, other: &Self) -> bool {
+    pub fn shares_content_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.runs, &other.runs)
     }
 
@@ -271,7 +228,7 @@ mod tests {
         ExecutedDeckPoint {
             label: label.to_owned(),
             deck: Arc::clone(deck),
-            model_sources: sealed_model_sources(deck),
+            model_sources: Vec::new(),
         }
     }
 

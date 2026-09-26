@@ -8,14 +8,14 @@ use std::collections::HashMap;
 
 mod ac_bode;
 mod analysis_result;
-mod dc_mismatch;
-pub use dc_mismatch::{DcMismatchContributorEvidence, DcMismatchEvidence, DcMismatchScopeEvidence};
+pub use rspice_results::dc_mismatch::{
+    DcMismatchContributorEvidence, DcMismatchEvidence, DcMismatchScopeEvidence,
+};
 pub(crate) use rspice_results::dc_sweep::DcTraceView;
 pub use rspice_results::dc_sweep::{
     DcCurveSelection, DcSweepDirection, DcSweepEvidence, DcSweepFamily, DcSweepQuantity,
 };
 mod cross_probe;
-mod executed_deck;
 mod result_digest;
 pub use rspice_results::noise::{
     NoiseContributorRow, NoiseFigureEvidence, NoiseSummary, PeriodicNoiseConversionEvidence,
@@ -101,9 +101,11 @@ pub use rspice_results::transfer_function::{
 // Test-only alias: outside tests an attribution's vocabulary is only ever
 // named through the attribution's own fields.
 pub use cross_probe::{CrossProbeIndex, CrossProbeMapping, OccurrenceProbeSpelling};
-pub use executed_deck::{ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, absent_deck_reason};
 #[cfg(test)]
 pub use rspice_results::convergence_attribution::ConvergenceFailureClass;
+pub use rspice_results::executed_deck::{
+    ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, absent_deck_reason,
+};
 pub use rspice_results::family_measurements::{
     FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements,
 };
@@ -130,8 +132,7 @@ pub use state_impl::EvidenceDomain;
 pub use state_model::{SimulationRunIntent, SimulationState};
 pub use waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, WaveformData};
 
-mod monte_carlo_confidence;
-pub use monte_carlo_confidence::{
+pub use rspice_results::monte_carlo::{
     MonteCarloMeanConfidence, MonteCarloMeanInterval, MonteCarloMeanMethod,
 };
 pub use rspice_results::monte_carlo_checkpoint::{

@@ -86,10 +86,9 @@ pub struct SimulationState {
 
     /// The exact deck every point of a recent run executed.
     ///
-    /// Session-only and bounded, beside the runs rather than on them: a run is
-    /// persisted and a deck is derivable, so a copy in a project file would be
-    /// a second authority on what executed. See
-    /// [`crate::state::simulation::ExecutedDeckArchive`].
+    /// Persisted alongside run history and bounded independently. Readers verify
+    /// the retained bytes against the run's prepared source digest. See
+    /// [`ExecutedDeckArchive`].
     pub executed_decks: ExecutedDeckArchive,
 
     /// How many datasets the project keeps before the oldest unpinned one is

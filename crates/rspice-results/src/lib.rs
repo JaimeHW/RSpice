@@ -21,6 +21,7 @@ pub mod dc_mismatch;
 pub mod dc_sweep;
 #[cfg(feature = "engine-evidence")]
 pub mod events;
+pub mod executed_deck;
 pub mod family_measurements;
 pub mod family_metadata;
 pub mod fft;

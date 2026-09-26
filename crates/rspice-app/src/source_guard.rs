@@ -491,7 +491,7 @@ mod tests {
     /// another wave, which is what a scan rather than a fix-by-hand prevents.
     ///
     /// The one owner is
-    /// `state::simulation::executed_deck::absent_deck_reason`.
+    /// `rspice_results::executed_deck::absent_deck_reason`.
     /// Test files are exempt, because a test asserting the retraction has to be
     /// able to name what was retracted.
     #[test]
@@ -505,6 +505,9 @@ mod tests {
         let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut paths = Vec::new();
         rust_sources(&source_root, &mut paths);
+        paths.push(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-results/src/executed_deck.rs"),
+        );
         paths.sort();
         assert!(
             paths.len() > 100,
@@ -550,7 +553,7 @@ mod tests {
             found.is_empty(),
             "an executed deck's absence is the archive's retention policy, not a fact about \
              which session ran the dataset \u{2014} read \
-             `state::simulation::executed_deck::absent_deck_reason`:\n  {}",
+             `rspice_results::executed_deck::absent_deck_reason`:\n  {}",
             found.join("\n  ")
         );
     }
