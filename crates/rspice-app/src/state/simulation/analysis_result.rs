@@ -61,96 +61,6 @@ pub use rspice_results::soa_evidence::{
     SoaViolationSeverityEvidence,
 };
 
-/// Electrical quantity carried by one side of a retained transfer derivative.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TransferFunctionQuantityEvidence {
-    Voltage,
-    Current,
-}
-
-impl TransferFunctionQuantityEvidence {
-    const fn canonical_unit(self) -> &'static str {
-        match self {
-            Self::Voltage => "V",
-            Self::Current => "A",
-        }
-    }
-}
-
-/// Explicit JSON-safe scalar evidence.
-///
-/// Open-circuit transfer resistances are legitimately infinite. Encoding
-/// infinity as a classification keeps persisted evidence standards-compliant
-/// while preserving the mathematical result exactly. `Finite` is validated
-/// separately so deserialization cannot smuggle NaN or infinity through it.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(
-    tag = "classification",
-    content = "value",
-    rename_all = "snake_case",
-    deny_unknown_fields
-)]
-pub enum TransferFunctionScalarEvidence {
-    Finite(f64),
-    PositiveInfinity,
-    NegativeInfinity,
-}
-
-impl TransferFunctionScalarEvidence {
-    #[must_use]
-    pub fn from_f64(value: f64) -> Option<Self> {
-        if value.is_nan() {
-            None
-        } else if value == f64::INFINITY {
-            Some(Self::PositiveInfinity)
-        } else if value == f64::NEG_INFINITY {
-            Some(Self::NegativeInfinity)
-        } else {
-            Some(Self::Finite(value))
-        }
-    }
-
-    #[must_use]
-    pub const fn as_f64(self) -> f64 {
-        match self {
-            Self::Finite(value) => value,
-            Self::PositiveInfinity => f64::INFINITY,
-            Self::NegativeInfinity => f64::NEG_INFINITY,
-        }
-    }
-
-    fn validate(self, label: &str) -> Result<(), String> {
-        if let Self::Finite(value) = self
-            && !value.is_finite()
-        {
-            return Err(format!(
-                "transfer-function {label} uses a non-finite value in the finite classification"
-            ));
-        }
-        Ok(())
-    }
-}
-
-/// Gain-normalization policy actually applied to retained TF evidence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TransferFunctionNormalizationEvidence {
-    None,
-    RelativeToNominal,
-    PerSourceUnit,
-}
-
-/// Numerical policy actually applied to the TF operating-point solves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TransferFunctionAccuracyEvidence {
-    Fast,
-    Balanced,
-    Accurate,
-    Robust,
-}
-
 macro_rules! op_evidence_enum {
     ($name:ident { $($variant:ident),+ $(,)? }) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1081,62 +991,21 @@ impl AnalysisResultPayload {
                         "transfer-function payload does not match analysis type {analysis_type:?}"
                     ));
                 }
-                require_non_empty(input_source, "transfer-function input source")?;
-                if input_source.chars().any(char::is_whitespace) {
-                    return Err("transfer-function input source contains whitespace".to_owned());
+                TransferFunctionRef {
+                    input_source,
+                    output_expression,
+                    input_quantity,
+                    output_quantity,
+                    input_unit,
+                    output_unit,
+                    normalization,
+                    gain,
+                    input_resistance,
+                    output_resistance,
+                    nominal_input,
+                    nominal_output,
                 }
-                require_non_empty(output_expression, "transfer-function output expression")?;
-                validate_transfer_function_output(output_expression, *output_quantity)?;
-
-                if input_unit != input_quantity.canonical_unit() {
-                    return Err(format!(
-                        "transfer-function input unit '{input_unit}' does not match {input_quantity:?}"
-                    ));
-                }
-                if output_unit != output_quantity.canonical_unit() {
-                    return Err(format!(
-                        "transfer-function output unit '{output_unit}' does not match {output_quantity:?}"
-                    ));
-                }
-                if gain.is_none() && input_resistance.is_none() && output_resistance.is_none() {
-                    return Err(
-                        "transfer-function payload contains no requested scalar evidence"
-                            .to_owned(),
-                    );
-                }
-                for (label, scalar) in [
-                    ("gain", gain.as_ref()),
-                    ("input resistance", input_resistance.as_ref()),
-                    ("output resistance", output_resistance.as_ref()),
-                ] {
-                    if let Some(scalar) = scalar {
-                        scalar.validate(label)?;
-                    }
-                }
-
-                let relative_gain = *normalization
-                    == TransferFunctionNormalizationEvidence::RelativeToNominal
-                    && gain.is_some();
-                if relative_gain != nominal_input.is_some()
-                    || relative_gain != nominal_output.is_some()
-                {
-                    return Err(
-                        "transfer-function nominal values must be present exactly when a relative-normalized gain is retained"
-                            .to_owned(),
-                    );
-                }
-                for (label, value) in [
-                    ("nominal input", nominal_input.as_ref()),
-                    ("nominal output", nominal_output.as_ref()),
-                ] {
-                    if let Some(value) = value
-                        && (!value.is_finite() || *value == 0.0)
-                    {
-                        return Err(format!(
-                            "transfer-function {label} must be finite and nonzero"
-                        ));
-                    }
-                }
+                .validate()?;
             }
             Self::Soa {
                 source_history: _,
@@ -1398,7 +1267,7 @@ pub use result_payload::AnalysisResult;
 pub(crate) use result_payload::ScalarEvidenceCandidate;
 use result_payload::{
     soa_evaluation_order, soa_rule_verdict, soa_violation_order, soa_violation_severity,
-    validate_transfer_function_output,
 };
 use rspice_results::floquet::{PssFloquetRef, PstbRef};
+use rspice_results::transfer_function::TransferFunctionRef;
 use rspice_results::validation::{require_non_empty, validate_complex_values};

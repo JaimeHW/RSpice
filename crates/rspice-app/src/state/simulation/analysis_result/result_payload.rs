@@ -7,50 +7,6 @@ mod soa_duration;
 mod soa_envelope;
 mod soa_reporting;
 
-pub(super) fn validate_transfer_function_output(
-    expression: &str,
-    expected_quantity: TransferFunctionQuantityEvidence,
-) -> Result<(), String> {
-    let trimmed = expression.trim();
-    if expression != trimmed {
-        return Err("transfer-function output contains surrounding whitespace".to_owned());
-    }
-    let expression = trimmed;
-    let Some(open) = expression.find('(') else {
-        return Err(
-            "transfer-function output must use V(node), V(node,ref), or I(element)".to_owned(),
-        );
-    };
-    if !expression.ends_with(')') || expression[open + 1..expression.len() - 1].contains(['(', ')'])
-    {
-        return Err("transfer-function output has unbalanced parentheses".to_owned());
-    }
-    let function = &expression[..open];
-    let arguments = expression[open + 1..expression.len() - 1]
-        .split(',')
-        .collect::<Vec<_>>();
-    if arguments.iter().any(|argument| {
-        argument.is_empty()
-            || *argument != argument.trim()
-            || argument.chars().any(char::is_whitespace)
-    }) {
-        return Err("transfer-function output contains an invalid identifier".to_owned());
-    }
-    let quantity = if function.eq_ignore_ascii_case("V") && matches!(arguments.len(), 1 | 2) {
-        TransferFunctionQuantityEvidence::Voltage
-    } else if function.eq_ignore_ascii_case("I") && arguments.len() == 1 {
-        TransferFunctionQuantityEvidence::Current
-    } else {
-        return Err(
-            "transfer-function output must use V(node), V(node,ref), or I(element)".to_owned(),
-        );
-    };
-    if quantity != expected_quantity {
-        return Err("transfer-function output quantity contradicts its expression".to_owned());
-    }
-    Ok(())
-}
-
 pub(super) fn soa_rule_verdict(
     actual: f64,
     limit: f64,

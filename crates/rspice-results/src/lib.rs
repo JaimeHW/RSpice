@@ -42,6 +42,7 @@ pub mod sensitivity;
 pub mod simulation_values;
 pub mod soa_evidence;
 pub mod stability;
+pub mod transfer_function;
 pub mod validation;
 pub mod viewer_catalog;
 pub mod visualization_document;
