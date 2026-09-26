@@ -9,6 +9,9 @@ use std::ops::{Deref, DerefMut};
 
 use crate::run::SimulationRun;
 
+mod queries;
+pub use queries::{has_retained_op_state, newest_retained_op_state};
+
 pub type RunHistoryRevision = rspice_app_types::source_revision::SourceRevision;
 
 /// Retained runs with a revision that covers every mutable collection access.

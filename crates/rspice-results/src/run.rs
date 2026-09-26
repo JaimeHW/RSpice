@@ -4,6 +4,7 @@
 //! finished. The lifecycle is explicit because a queued re-run, a cancelled
 //! run, and a failed run are all different things to the UI.
 
+use crate::analysis_payload::AnalysisResultPayload;
 use crate::analysis_result::AnalysisResult;
 use crate::provenance::AnalysisResultSourceDomain;
 use crate::run_receipt::{PreparedRunReceipt, SimulationRunProvenance};
@@ -673,6 +674,34 @@ impl<A> SimulationRun<A> {
             }
         }
         Ok(())
+    }
+
+    /// Canonical SOA warning/violation devices for an exact project revision.
+    pub fn soa_violation_context<W: AsRef<RetainedWaveform>>(
+        &self,
+        project_revision: rspice_app_types::product::ObjectRevision,
+    ) -> Option<(rspice_app_types::product::ContentDigest, Vec<String>)>
+    where
+        A: AsRef<AnalysisResult<W>>,
+    {
+        let receipt = self.prepared_receipt()?;
+        if receipt.project_revision() != project_revision {
+            return None;
+        }
+        let mut devices = self
+            .analyses
+            .iter()
+            .flat_map(|analysis| match analysis.as_ref().result_payload.as_ref() {
+                Some(AnalysisResultPayload::Soa { violations, .. }) => violations
+                    .iter()
+                    .map(|violation| violation.device_id.clone())
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        devices.sort();
+        devices.dedup();
+        (!devices.is_empty()).then(|| (receipt.source_content_digest(), devices))
     }
 
     /// Add an analysis result to this run

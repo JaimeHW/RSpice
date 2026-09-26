@@ -128,26 +128,11 @@ impl SimulationState {
         project_revision: crate::product::ObjectRevision,
         allow_changed_revision: bool,
     ) -> Option<crate::results::operating_point::OpPreviousState> {
-        let analysis = self.retained_op_result(project_revision, allow_changed_revision)?;
-        let provenance = analysis.provenance()?;
-        let AnalysisResultPayload::OperatingPoint {
-            mna_node_names,
-            mna_branch_names,
-            mna_solution,
-            effective_source_content_digest: Some(source_content_digest),
-            ..
-        } = analysis.result_payload.as_ref()?
-        else {
-            return None;
-        };
-        Some(crate::results::operating_point::OpPreviousState {
-            source_content_digest: *source_content_digest,
-            producer_snapshot_digest: provenance.prepared_snapshot_digest(),
-            producer_result_digest: analysis.result_data_digest(),
-            node_names: mna_node_names.clone(),
-            branch_names: mna_branch_names.clone(),
-            solution: mna_solution.clone(),
-        })
+        rspice_results::run_history::newest_retained_op_state(
+            self.runs.iter().map(|run| &run.data),
+            project_revision,
+            allow_changed_revision,
+        )
     }
 
     pub(crate) fn has_retained_op_state(
@@ -155,42 +140,11 @@ impl SimulationState {
         project_revision: crate::product::ObjectRevision,
         allow_changed_revision: bool,
     ) -> bool {
-        self.retained_op_result(project_revision, allow_changed_revision)
-            .is_some()
-    }
-
-    fn retained_op_result(
-        &self,
-        project_revision: crate::product::ObjectRevision,
-        allow_changed_revision: bool,
-    ) -> Option<&AnalysisResult> {
-        self.runs.iter().find_map(|run| {
-            let receipt = run.prepared_receipt()?;
-            if !allow_changed_revision && receipt.project_revision() != project_revision {
-                return None;
-            }
-            run.analyses.iter().rev().find(|analysis| {
-                if !analysis.success
-                    || analysis.analysis_type != AnalysisType::DcOp
-                    || analysis.provenance().is_none()
-                {
-                    return false;
-                }
-                let Some(AnalysisResultPayload::OperatingPoint {
-                    mna_node_names,
-                    mna_branch_names,
-                    mna_solution,
-                    effective_source_content_digest: Some(_),
-                    ..
-                }) = analysis.result_payload.as_ref()
-                else {
-                    return false;
-                };
-                !mna_solution.is_empty()
-                    && mna_node_names.len().saturating_add(mna_branch_names.len())
-                        == mna_solution.len()
-            })
-        })
+        rspice_results::run_history::has_retained_op_state(
+            self.runs.iter().map(|run| &run.data),
+            project_revision,
+            allow_changed_revision,
+        )
     }
 
     /// Canonical devices with retained SOA warning/violation evidence in the
@@ -199,24 +153,6 @@ impl SimulationState {
         &self,
         project_revision: crate::product::ObjectRevision,
     ) -> Option<(crate::product::ContentDigest, Vec<String>)> {
-        let run = self.active_run()?;
-        let receipt = run.prepared_receipt()?;
-        if receipt.project_revision() != project_revision {
-            return None;
-        }
-        let mut devices = run
-            .analyses
-            .iter()
-            .flat_map(|analysis| match analysis.result_payload.as_ref() {
-                Some(AnalysisResultPayload::Soa { violations, .. }) => violations
-                    .iter()
-                    .map(|violation| violation.device_id.clone())
-                    .collect::<Vec<_>>(),
-                _ => Vec::new(),
-            })
-            .collect::<Vec<_>>();
-        devices.sort();
-        devices.dedup();
-        (!devices.is_empty()).then(|| (receipt.source_content_digest(), devices))
+        self.active_run()?.soa_violation_context(project_revision)
     }
 }
