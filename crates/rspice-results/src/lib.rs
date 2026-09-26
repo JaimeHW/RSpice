@@ -38,6 +38,8 @@ pub mod optimization;
 pub mod pole_zero;
 pub mod provenance;
 pub mod report_document;
+#[cfg(feature = "engine-evidence")]
+pub mod result_digest;
 pub mod result_import;
 pub mod safety;
 pub mod sampling;
