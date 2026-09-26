@@ -40,10 +40,11 @@ mod current_impulses;
 pub(crate) use current_impulses::current_impulse_history_fixture;
 pub use rspice_results::current_impulses::CurrentImpulseHistoryEvidence;
 
-mod sensitivity_study;
-pub use sensitivity_study::{
-    SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow,
+pub use rspice_results::sensitivity::{
+    SensitivityBasisEvidence, SensitivityResultMode, SensitivityResultRow,
+    SensitivityStudyEvidence, SensitivityStudyRow,
 };
+pub use rspice_results::simulation_values::ComplexResultValue;
 
 pub use rspice_results::fft::spectrum::{
     FftMetricsEvidence, FftSpectrumEvidence, FftSpectrumStatusEvidence,
@@ -60,20 +61,19 @@ pub use ac_bode::{
 };
 pub use analysis_result::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
-    AnalysisResultPvtPoint, AnalysisResultSourceDomain, ComplexResultValue, DcOpResult,
-    DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
-    DigitalEventTraceEvidence, FloquetOrbitKindEvidence, FloquetSpectrumCertificateEvidence,
-    FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence, MonteCarloVariableMetadata,
-    OperatingPointAccuracyEvidence, OperatingPointAnnotationEvidence,
-    OperatingPointDeviceDetailEvidence, OperatingPointHomotopyEvidence,
-    OperatingPointInitialGuessEvidence, OperatingPointNodeInitializationEvidence,
-    OperatingPointPreviousStateEvidence, OperatingPointProcessEvidence,
-    OperatingPointSaveDeviceEvidence, OperatingPointTemperatureEvidence, OperatingPointValue,
-    PeriodicNoiseOutputQuantity, PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate,
-    PssFloquetMultiplierEvidence, PstbFloquetModeEvidence, PstbStabilityClassificationEvidence,
-    RealEventPointEvidence, RealEventTraceEvidence, SensitivityResultMode, SensitivityResultRow,
-    SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaSourceHistory,
-    SoaSourceWaveform, SoaViolationEvidence, SoaViolationSeverityEvidence,
+    AnalysisResultPvtPoint, AnalysisResultSourceDomain, DcOpResult, DigitalBusEvidence,
+    DigitalBusSourceEvidence, DigitalEventPointEvidence, DigitalEventTraceEvidence,
+    FloquetOrbitKindEvidence, FloquetSpectrumCertificateEvidence, FloquetSpectrumEvidence,
+    FloquetStabilityVerdictEvidence, MonteCarloVariableMetadata, OperatingPointAccuracyEvidence,
+    OperatingPointAnnotationEvidence, OperatingPointDeviceDetailEvidence,
+    OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,
+    OperatingPointNodeInitializationEvidence, OperatingPointPreviousStateEvidence,
+    OperatingPointProcessEvidence, OperatingPointSaveDeviceEvidence,
+    OperatingPointTemperatureEvidence, OperatingPointValue, PeriodicNoiseOutputQuantity,
+    PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate, PssFloquetMultiplierEvidence,
+    PstbFloquetModeEvidence, PstbStabilityClassificationEvidence, RealEventPointEvidence,
+    RealEventTraceEvidence, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
+    SoaSourceHistory, SoaSourceWaveform, SoaViolationEvidence, SoaViolationSeverityEvidence,
     TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
 };

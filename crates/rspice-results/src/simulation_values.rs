@@ -74,3 +74,14 @@ pub struct EventNodeHistory<P> {
     pub node_name: String,
     pub points: Vec<P>,
 }
+
+/// One exact complex value retained from an analysis result.
+///
+/// Preserves the solver's ordered real/imaginary evidence independently of
+/// viewer state. The containing analysis payload owns root classification.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComplexResultValue {
+    pub real: f64,
+    pub imaginary: f64,
+}

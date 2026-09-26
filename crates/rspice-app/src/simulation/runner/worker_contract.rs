@@ -789,7 +789,7 @@ pub(crate) enum WorkerSimulationResult {
         gain: Option<f64>,
     },
     SensitivityStudy {
-        evidence: crate::state::SensitivityStudyEvidence,
+        evidence: rspice_results::sensitivity::SensitivityStudyEvidence,
     },
     /// Linearized DC mismatch spread and its ranked contributors.
     ///

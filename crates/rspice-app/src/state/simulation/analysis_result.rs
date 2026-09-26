@@ -51,18 +51,6 @@ pub struct DcOpResult {
     pub power_dissipation: Vec<OperatingPointValue>,
 }
 
-/// One exact complex value retained from an analysis result.
-///
-/// This is deliberately independent of the pole-zero viewer's presentation
-/// model. Root classification is owned by [`AnalysisResultPayload`], while
-/// this value preserves the solver's ordered real/imaginary evidence.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ComplexResultValue {
-    pub real: f64,
-    pub imaginary: f64,
-}
-
 /// Exact finite/infinite accounting and residual certificate retained for one
 /// computed pole or zero spectrum.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -324,23 +312,6 @@ pub struct PstbFloquetModeEvidence {
     pub is_unstable: bool,
     pub is_trivial: bool,
     pub subharmonic_order: Option<u64>,
-}
-
-/// Analysis basis used to produce a retained sensitivity result.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
-pub enum SensitivityResultMode {
-    Dc,
-    Ac { frequency_hz: f64 },
-}
-
-/// One parameter's exact raw and normalized sensitivity.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SensitivityResultRow {
-    pub parameter: String,
-    pub raw: rspice_core::analysis::sensitivity::SensitivityValue<f64>,
-    pub normalized: rspice_core::analysis::sensitivity::SensitivityValue<f64>,
 }
 
 pub use rspice_results::events::{

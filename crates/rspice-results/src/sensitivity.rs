@@ -22,7 +22,7 @@
 
 use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
 
-use super::ComplexResultValue;
+use crate::simulation_values::ComplexResultValue;
 
 /// The points one study was solved at, and the nominal output at each.
 ///
@@ -284,11 +284,28 @@ impl SensitivityStudyEvidence {
     }
 }
 
+/// Analysis basis used to produce a retained sensitivity result.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SensitivityResultMode {
+    Dc,
+    Ac { frequency_hz: f64 },
+}
+
+/// One parameter's exact raw and normalized sensitivity.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SensitivityResultRow {
+    pub parameter: String,
+    pub raw: rspice_core::analysis::sensitivity::SensitivityValue<f64>,
+    pub normalized: rspice_core::analysis::sensitivity::SensitivityValue<f64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    pub(crate) fn dc_fixture() -> SensitivityStudyEvidence {
+    fn dc_fixture() -> SensitivityStudyEvidence {
         SensitivityStudyEvidence {
             output: "I(V1)".to_owned(),
             filter: "PARAM:*".to_owned(),
@@ -303,7 +320,7 @@ mod tests {
         }
     }
 
-    pub(crate) fn ac_fixture() -> SensitivityStudyEvidence {
+    fn ac_fixture() -> SensitivityStudyEvidence {
         SensitivityStudyEvidence {
             output: "V(OUT)".to_owned(),
             filter: String::new(),

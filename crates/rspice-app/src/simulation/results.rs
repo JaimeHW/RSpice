@@ -231,7 +231,7 @@ pub enum SimulationResult {
     /// One `.SENS` study, exactly as the engine's complete entries answered
     /// it: one filter, one grid, and one column per variable per point.
     SensitivityStudy {
-        evidence: std::sync::Arc<crate::state::SensitivityStudyEvidence>,
+        evidence: std::sync::Arc<rspice_results::sensitivity::SensitivityStudyEvidence>,
     },
 
     /// Scalar DC small-signal transfer function around the converged
