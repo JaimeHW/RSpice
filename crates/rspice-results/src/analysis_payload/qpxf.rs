@@ -2,7 +2,7 @@
 use super::*;
 use rspice_core::engine::{QpxfAnalysisResult, QpxfGroupDelay, QpxfOutput, QpxfQuantity};
 
-pub(crate) struct QpxfDisplayTrace {
+pub struct QpxfDisplayTrace {
     pub name: String,
     pub unit: &'static str,
     pub frequencies: Vec<f64>,
@@ -10,7 +10,7 @@ pub(crate) struct QpxfDisplayTrace {
     pub imaginary: Option<Vec<f64>>,
 }
 impl AnalysisResultPayload {
-    pub(crate) fn qpxf_display_traces(
+    pub fn qpxf_display_traces(
         response: &QpxfAnalysisResult,
     ) -> Result<Vec<QpxfDisplayTrace>, String> {
         response

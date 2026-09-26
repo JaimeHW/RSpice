@@ -4,6 +4,8 @@
 //! The `engine-evidence` feature retains core-backed observations and their
 //! canonical validation; document and calculation consumers can omit it.
 
+#[cfg(feature = "engine-evidence")]
+pub mod analysis_payload;
 pub mod analysis_type;
 pub mod bode;
 pub mod calculator;
@@ -41,6 +43,8 @@ pub mod sampling;
 pub mod sensitivity;
 pub mod simulation_values;
 pub mod soa_evidence;
+#[cfg(feature = "engine-evidence")]
+pub mod soa_source;
 pub mod stability;
 pub mod transfer_function;
 pub mod validation;

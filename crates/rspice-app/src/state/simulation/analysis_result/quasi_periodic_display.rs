@@ -4,25 +4,35 @@
 use super::*;
 use std::sync::Arc;
 
-impl AnalysisResultPayload {
-    pub(crate) fn retained_display_basis(&self) -> Result<Option<Vec<WaveformData>>, String> {
-        let mut traces = match self {
-            Self::Qpss { operating_point } => qpss::display_traces(operating_point)?,
-            Self::Qpac { response } => Self::qpac_display_traces(response)?
-                .into_iter()
-                .map(|(name, unit, values)| {
-                    let (real, imaginary) = values.iter().map(|v| (v.re, v.im)).unzip();
-                    qpxf::QpxfDisplayTrace {
-                        name,
-                        unit,
-                        frequencies: response.metadata.request.offsets_hz.clone(),
-                        real,
-                        imaginary: Some(imaginary),
-                    }
-                })
-                .collect(),
-            Self::Qpxf { response } => Self::qpxf_display_traces(response)?,
-            Self::Qpnoise { response } => Self::qpnoise_display_traces(response)?,
+impl AnalysisResult {
+    pub(crate) fn retained_display_basis(
+        payload: &AnalysisResultPayload,
+    ) -> Result<Option<Vec<WaveformData>>, String> {
+        let mut traces = match payload {
+            AnalysisResultPayload::Qpss { operating_point } => {
+                AnalysisResultPayload::qpss_display_traces(operating_point)?
+            }
+            AnalysisResultPayload::Qpac { response } => {
+                AnalysisResultPayload::qpac_display_traces(response)?
+                    .into_iter()
+                    .map(|(name, unit, values)| {
+                        let (real, imaginary) = values.iter().map(|v| (v.re, v.im)).unzip();
+                        rspice_results::analysis_payload::QpxfDisplayTrace {
+                            name,
+                            unit,
+                            frequencies: response.metadata.request.offsets_hz.clone(),
+                            real,
+                            imaginary: Some(imaginary),
+                        }
+                    })
+                    .collect()
+            }
+            AnalysisResultPayload::Qpxf { response } => {
+                AnalysisResultPayload::qpxf_display_traces(response)?
+            }
+            AnalysisResultPayload::Qpnoise { response } => {
+                AnalysisResultPayload::qpnoise_display_traces(response)?
+            }
             _ => return Ok(None),
         };
         traces.sort_by(|a, b| a.name.cmp(&b.name));

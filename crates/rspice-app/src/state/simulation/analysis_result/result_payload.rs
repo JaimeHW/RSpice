@@ -7,81 +7,11 @@ mod soa_duration;
 mod soa_envelope;
 mod soa_reporting;
 
-pub(super) fn soa_rule_verdict(
-    actual: f64,
-    limit: f64,
-    thresholds: crate::results::safety::SoaThresholds,
-) -> SoaRuleVerdictEvidence {
-    match thresholds.verdict(actual, limit) {
-        crate::results::safety::SoARuleVerdict::Pass => SoaRuleVerdictEvidence::Pass,
-        crate::results::safety::SoARuleVerdict::Warning => SoaRuleVerdictEvidence::Warning,
-        crate::results::safety::SoARuleVerdict::Violation => SoaRuleVerdictEvidence::Violation,
-        crate::results::safety::SoARuleVerdict::Critical => SoaRuleVerdictEvidence::Critical,
-    }
-}
-
-pub(super) fn soa_violation_severity(
-    actual: f64,
-    limit: f64,
-    thresholds: crate::results::safety::SoaThresholds,
-) -> Option<SoaViolationSeverityEvidence> {
-    match soa_rule_verdict(actual, limit, thresholds) {
-        SoaRuleVerdictEvidence::Pass => None,
-        SoaRuleVerdictEvidence::Warning => Some(SoaViolationSeverityEvidence::Warning),
-        SoaRuleVerdictEvidence::Violation => Some(SoaViolationSeverityEvidence::Violation),
-        SoaRuleVerdictEvidence::Critical => Some(SoaViolationSeverityEvidence::Critical),
-    }
-}
-
-pub(super) fn soa_evaluation_order(
-    left: &SoaEvaluationEvidence,
-    right: &SoaEvaluationEvidence,
-) -> std::cmp::Ordering {
-    left.device_id
-        .cmp(&right.device_id)
-        .then_with(|| left.parameter.cmp(&right.parameter))
-}
-
-pub(super) fn soa_violation_order(
-    left: &SoaViolationEvidence,
-    right: &SoaViolationEvidence,
-) -> std::cmp::Ordering {
-    left.device_id
-        .cmp(&right.device_id)
-        .then_with(|| left.time_s.total_cmp(&right.time_s))
-        .then_with(|| left.parameter.cmp(&right.parameter))
-        .then_with(|| left.severity.cmp(&right.severity))
-        .then_with(|| left.limit_value.total_cmp(&right.limit_value))
-        .then_with(|| left.actual_value.total_cmp(&right.actual_value))
-}
-
 fn contains_retained_coordinate(sorted: &[f64], target: f64) -> bool {
     let target = normalized_f64(target);
     sorted
         .binary_search_by(|probe| normalized_f64(*probe).total_cmp(&target))
         .is_ok()
-}
-
-/// Single analysis result with metadata and waveforms.
-///
-/// This represents one analysis within a simulation run, containing
-/// all the data needed to display results in the appropriate viewer.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ScalarEvidenceCandidate {
-    pub unit: Option<rspice_core::analysis::MeasurementUnit>,
-    pub value: Option<f64>,
-    pub passed: bool,
-}
-
-impl ScalarEvidenceCandidate {
-    pub(crate) fn value_in_unit(&self, requested: &str) -> Result<Option<f64>, String> {
-        match (&self.unit, self.value) {
-            (Some(unit), Some(value)) if !requested.trim().is_empty() => {
-                unit.convert_value(value, requested).map(Some)
-            }
-            _ => Ok(self.value),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -398,7 +328,7 @@ impl AnalysisResult {
         let retained_basis = self
             .result_payload
             .as_ref()
-            .map(AnalysisResultPayload::retained_display_basis)
+            .map(Self::retained_display_basis)
             .transpose()?
             .flatten();
         self.validate_saved_output_receipts(retained_basis.as_deref())?;
@@ -738,7 +668,7 @@ impl AnalysisResult {
                 }),
             ) => {
                 if let Some(source) = source_history {
-                    source.validate_report(time, &self.waveforms)?;
+                    soa_source::validate_report(source, time, &self.waveforms)?;
                     soa_reporting::validate(self, time, evaluations, violations)?;
                 }
                 let rules = evaluations

@@ -60,13 +60,10 @@ fn quasi_periodic_saved_outputs_select_physical_qpss_and_qpac_sources_without_lo
         .to_spec()
         .unwrap();
     for (original, spec) in [qpss(), (qpac, spec)] {
-        let basis = original
-            .result_payload
-            .as_ref()
-            .unwrap()
-            .retained_display_basis()
-            .unwrap()
-            .unwrap();
+        let basis =
+            AnalysisResult::retained_display_basis(original.result_payload.as_ref().unwrap())
+                .unwrap()
+                .unwrap();
         let expected = basis
             .iter()
             .find(|w| {

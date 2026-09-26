@@ -162,7 +162,7 @@ fn source_waveforms(analysis: &AnalysisResult) -> Result<Vec<WaveformData>, Stri
     if let Some(basis) = analysis
         .result_payload
         .as_ref()
-        .map(crate::state::AnalysisResultPayload::retained_display_basis)
+        .map(crate::state::AnalysisResult::retained_display_basis)
         .transpose()?
         .flatten()
     {

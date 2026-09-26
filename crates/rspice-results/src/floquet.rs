@@ -153,7 +153,7 @@ pub struct PstbFloquetModeEvidence {
 }
 
 /// Borrowed inputs for validating retained PSS Floquet evidence.
-pub struct PssFloquetRef<'a> {
+pub(crate) struct PssFloquetRef<'a> {
     pub period_s: Option<f64>,
     pub fundamental_frequency_hz: Option<f64>,
     pub iterations: Option<u64>,
@@ -255,7 +255,7 @@ impl PssFloquetRef<'_> {
 }
 
 /// Borrowed inputs for validating complete PSTB spectrum evidence.
-pub struct PstbRef<'a> {
+pub(crate) struct PstbRef<'a> {
     pub period_s: Option<f64>,
     pub fundamental_frequency_hz: Option<f64>,
     pub stability_threshold: Option<f64>,

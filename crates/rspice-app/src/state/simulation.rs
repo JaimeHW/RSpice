@@ -46,9 +46,7 @@ pub use rspice_results::sensitivity::{
 };
 pub use rspice_results::simulation_values::ComplexResultValue;
 
-pub use rspice_results::fft::spectrum::{
-    FftMetricsEvidence, FftSpectrumEvidence, FftSpectrumStatusEvidence,
-};
+pub use rspice_results::fft::spectrum::{FftSpectrumEvidence, FftSpectrumStatusEvidence};
 // Test-only, like the attribution vocabulary in `state.rs`: outside tests the
 // compatibility mode a spectrum was computed under is only ever read through
 // the evidence's own field, never named as a type.
@@ -67,13 +65,14 @@ pub use ac_bode::{
     ac_bode_summary_for_selection,
 };
 pub use analysis_result::{
-    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
-    AnalysisResultPvtPoint, AnalysisResultSourceDomain, DigitalBusEvidence,
-    DigitalBusSourceEvidence, DigitalEventPointEvidence, DigitalEventTraceEvidence,
-    MonteCarloVariableMetadata, PeriodicNoiseOutputQuantity, RealEventPointEvidence,
-    RealEventTraceEvidence, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
-    SoaSourceHistory, SoaSourceWaveform, SoaViolationEvidence, SoaViolationSeverityEvidence,
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultProvenance, AnalysisResultPvtPoint,
+    AnalysisResultSourceDomain, DigitalBusEvidence, DigitalBusSourceEvidence,
+    DigitalEventPointEvidence, DigitalEventTraceEvidence, MonteCarloVariableMetadata,
+    PeriodicNoiseOutputQuantity, RealEventPointEvidence, RealEventTraceEvidence,
+    SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
+    SoaViolationSeverityEvidence,
 };
+pub use rspice_results::analysis_payload::AnalysisResultPayload;
 pub use rspice_results::analysis_type::AnalysisType;
 pub use rspice_results::convergence_attribution::ConvergenceAttribution;
 pub use rspice_results::convergence_quality::{
@@ -87,6 +86,7 @@ pub use rspice_results::operating_point::{
     OperatingPointPreviousStateEvidence, OperatingPointProcessEvidence,
     OperatingPointSaveDeviceEvidence, OperatingPointTemperatureEvidence, OperatingPointValue,
 };
+pub use rspice_results::soa_source::{SoaSourceHistory, SoaSourceWaveform};
 pub use rspice_results::transfer_function::{
     TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,

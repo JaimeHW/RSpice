@@ -3,7 +3,7 @@ use super::qpxf::QpxfDisplayTrace;
 use super::*;
 use rspice_core::engine::{QpnoiseAnalysisResult, QpnoiseObservation, QpnoiseValue, QpxfQuantity};
 
-pub(crate) fn output_label(response: &QpnoiseAnalysisResult, index: usize) -> String {
+fn output_label(response: &QpnoiseAnalysisResult, index: usize) -> String {
     let output = &response.metadata.request.outputs[index];
     let name = match &output.observation {
         QpnoiseObservation::Voltage { positive, negative } => format!("V({positive},{negative})"),
@@ -86,7 +86,7 @@ fn density(
     );
 }
 impl AnalysisResultPayload {
-    pub(crate) fn qpnoise_display_traces(
+    pub fn qpnoise_display_traces(
         response: &QpnoiseAnalysisResult,
     ) -> Result<Vec<QpxfDisplayTrace>, String> {
         response
@@ -184,7 +184,7 @@ impl AnalysisResultPayload {
         Ok(traces)
     }
     /// Conservative resident-byte accounting of the primary and derived arrays.
-    pub(crate) fn qpnoise_response_bytes(r: &QpnoiseAnalysisResult) -> usize {
+    pub fn qpnoise_response_bytes(r: &QpnoiseAnalysisResult) -> usize {
         use rspice_core::analysis::quasi_periodic::QuasiPeriodicNoiseSpectrum as Spectrum;
         let add = |a: usize, b: usize| a.saturating_add(b);
         let matrix = |c: &rspice_core::analysis::quasi_periodic::QuasiPeriodicNoiseCovariance| {

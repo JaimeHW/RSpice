@@ -5,7 +5,7 @@ use rspice_core::engine::{QpacAnalysisResult, QpacInputQuantity};
 type Trace = (String, &'static str, Vec<rspice_core::Complex64>);
 
 impl AnalysisResultPayload {
-    pub(crate) fn qpac_display_traces(result: &QpacAnalysisResult) -> Result<Vec<Trace>, String> {
+    pub fn qpac_display_traces(result: &QpacAnalysisResult) -> Result<Vec<Trace>, String> {
         let grid = result
             .validate_retained_payload_with_abort(
                 &rspice_core::ResourceLimits::default(),
