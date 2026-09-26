@@ -16,13 +16,12 @@ mod qpxf;
 use qpnoise::validate_worker_qpnoise_result;
 use qpxf::validate_worker_qpxf_result;
 mod qpss;
-mod recorded_fft;
 use qpac::validate_worker_qpac_result;
 use qpss::validate_worker_qpss_result;
 mod transport;
 
 pub(crate) use conversions::*;
-pub(crate) use recorded_fft::WorkerRecordedFftSpectrum;
+use rspice_simulation_contract::worker_recorded_fft::{self, WorkerRecordedFftSpectrum};
 pub(crate) use transport::*;
 
 #[cfg(test)]
@@ -1566,7 +1565,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                     measurements: worker_measurements(measurements),
                     convergence: convergence.map(std::sync::Arc::unwrap_or_clone),
                     events: events.into(),
-                    spectra: recorded_fft::worker_spectra(spectra),
+                    spectra: worker_recorded_fft::worker_spectra(spectra),
                 }),
             },
             SimulationResult::Ac {
@@ -1926,7 +1925,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 periodic_state: None,
                 convergence: convergence.map(std::sync::Arc::new),
                 events: events.into(),
-                spectra: recorded_fft::recorded_spectra(spectra),
+                spectra: worker_recorded_fft::recorded_spectra(spectra),
             },
             WorkerSimulationResult::Fft {
                 spectrum,

@@ -32,8 +32,10 @@ mod qpss;
 use qpss::WorkerQpssOperatingPointTransport;
 #[cfg(test)]
 mod tests;
-use super::recorded_fft::WorkerRecordedFftSpectrumTransport;
 use dc_sweep::WorkerDcSweepEvidence;
+use rspice_simulation_contract::worker_recorded_fft::{
+    WorkerRecordedFftSpectrumTransport, validate_worker_spectra,
+};
 
 pub(super) fn validate_worker_response_before_transport(
     response: &WorkerResponse,
@@ -70,10 +72,10 @@ pub(super) fn validate_worker_response_before_transport(
         }
         match result.as_ref() {
             WorkerSimulationResult::Transient { spectra, .. } => {
-                super::recorded_fft::validate_worker_spectra(spectra)?;
+                validate_worker_spectra(spectra)?;
             }
             WorkerSimulationResult::Fft { spectrum, .. } => {
-                super::recorded_fft::validate_worker_spectra(std::slice::from_ref(spectrum))?;
+                validate_worker_spectra(std::slice::from_ref(spectrum))?;
             }
             _ => {}
         }

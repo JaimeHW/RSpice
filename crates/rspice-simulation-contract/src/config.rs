@@ -38,8 +38,7 @@ pub use operating_point::{
 };
 
 pub use recorded_fft::{
-    FFT_DEFAULT_POINTS, FFT_WINDOWS, FftFormatChoice, FftRequest, fft_format_from_core,
-    fft_format_to_core, fft_point_counts, window_keyword,
+    FFT_DEFAULT_POINTS, FFT_WINDOWS, FftFormatChoice, FftRequest, fft_point_counts, window_keyword,
 };
 
 /// Unified analysis configuration

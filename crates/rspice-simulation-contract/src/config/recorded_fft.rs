@@ -9,6 +9,7 @@
 
 use rspice_core::netlist::{FftAnalysis, FftOutput, FftWindow};
 use rspice_core::numerics::rustfft_qualification::MAX_QUALIFIED_RUSTFFT_LENGTH;
+use rspice_results::fft::fft_format_from_core;
 use serde::{Deserialize, Serialize};
 
 /// The `.FFT FORMAT=` selection, or `None` for the mode's own default.
@@ -283,24 +284,6 @@ impl FftRequest {
             ));
         }
         Ok(())
-    }
-}
-
-/// Convert the engine's resolved FFT format to its portable result representation.
-#[must_use]
-pub const fn fft_format_from_core(format: rspice_core::netlist::FftFormat) -> FftFormatChoice {
-    match format {
-        rspice_core::netlist::FftFormat::Normalized => FftFormatChoice::Normalized,
-        rspice_core::netlist::FftFormat::Unnormalized => FftFormatChoice::Unnormalized,
-    }
-}
-
-/// Convert retained FFT format evidence to the engine's unit-policy vocabulary.
-#[must_use]
-pub const fn fft_format_to_core(format: FftFormatChoice) -> rspice_core::netlist::FftFormat {
-    match format {
-        FftFormatChoice::Normalized => rspice_core::netlist::FftFormat::Normalized,
-        FftFormatChoice::Unnormalized => rspice_core::netlist::FftFormat::Unnormalized,
     }
 }
 

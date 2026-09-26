@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::state::FftSpectrumEvidence;
+use super::spectrum::FftSpectrumEvidence;
 
 /// A recorded spectrum plus the key that pairs it with its FFT analysis.
 ///

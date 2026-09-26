@@ -8,17 +8,17 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::transport::WorkerF64Series;
-use crate::simulation::results::RecordedFftSpectrum;
-use crate::state::FftSpectrumEvidence;
+use crate::worker_transport::WorkerF64Series;
+use rspice_results::fft::recorded::RecordedFftSpectrum;
+use rspice_results::fft::spectrum::FftSpectrumEvidence;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct WorkerRecordedFftSpectrum {
-    pub(crate) request_key: String,
-    pub(crate) evidence: FftSpectrumEvidence,
-    pub(crate) frequency: Vec<f64>,
-    pub(crate) real: Vec<f64>,
-    pub(crate) imaginary: Vec<f64>,
+pub struct WorkerRecordedFftSpectrum {
+    pub request_key: String,
+    pub evidence: FftSpectrumEvidence,
+    pub frequency: Vec<f64>,
+    pub real: Vec<f64>,
+    pub imaginary: Vec<f64>,
 }
 
 impl From<&RecordedFftSpectrum> for WorkerRecordedFftSpectrum {
@@ -46,7 +46,7 @@ impl From<WorkerRecordedFftSpectrum> for RecordedFftSpectrum {
 }
 
 impl WorkerRecordedFftSpectrum {
-    pub(super) fn numeric_value_count(&self) -> usize {
+    pub fn numeric_value_count(&self) -> usize {
         self.frequency
             .len()
             .saturating_add(self.real.len())
@@ -54,7 +54,7 @@ impl WorkerRecordedFftSpectrum {
     }
 }
 
-pub(super) fn worker_spectra(
+pub fn worker_spectra(
     spectra: Vec<std::sync::Arc<RecordedFftSpectrum>>,
 ) -> Vec<WorkerRecordedFftSpectrum> {
     spectra
@@ -63,7 +63,7 @@ pub(super) fn worker_spectra(
         .collect()
 }
 
-pub(super) fn recorded_spectra(
+pub fn recorded_spectra(
     spectra: Vec<WorkerRecordedFftSpectrum>,
 ) -> Vec<std::sync::Arc<RecordedFftSpectrum>> {
     spectra
@@ -73,7 +73,7 @@ pub(super) fn recorded_spectra(
 }
 
 /// Refuse a spectrum whose evidence does not describe its own columns.
-pub(super) fn validate_worker_spectra(spectra: &[WorkerRecordedFftSpectrum]) -> Result<(), String> {
+pub fn validate_worker_spectra(spectra: &[WorkerRecordedFftSpectrum]) -> Result<(), String> {
     for spectrum in spectra {
         RecordedFftSpectrum::from(spectrum.clone()).validate()?;
     }
@@ -81,7 +81,7 @@ pub(super) fn validate_worker_spectra(spectra: &[WorkerRecordedFftSpectrum]) -> 
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct WorkerRecordedFftSpectrumTransport {
+pub struct WorkerRecordedFftSpectrumTransport {
     request_key: String,
     evidence: FftSpectrumEvidence,
     frequency: WorkerF64Series,
@@ -90,7 +90,7 @@ pub(crate) struct WorkerRecordedFftSpectrumTransport {
 }
 
 impl WorkerRecordedFftSpectrumTransport {
-    pub(super) fn from_spectra(
+    pub fn from_spectra(
         spectra: Vec<WorkerRecordedFftSpectrum>,
         buffers: &mut Vec<Vec<f64>>,
     ) -> Vec<Self> {
@@ -106,7 +106,7 @@ impl WorkerRecordedFftSpectrumTransport {
             .collect()
     }
 
-    pub(super) fn into_spectra(
+    pub fn into_spectra(
         transported: Vec<Self>,
         buffers: &[Vec<f64>],
     ) -> Result<Vec<WorkerRecordedFftSpectrum>, String> {

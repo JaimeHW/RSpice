@@ -15,11 +15,10 @@ mod qpac;
 mod qpnoise;
 mod qpss;
 mod qpxf;
-mod recorded_fft;
 
 pub use monte_carlo::MonteCarloVariableResult;
 pub use operating_point::DcOpResult;
-pub use recorded_fft::RecordedFftSpectrum;
+pub use rspice_results::fft::recorded::RecordedFftSpectrum;
 pub use rspice_results::waveform::WaveformData;
 
 /// The waveform a stability run retains its Nyquist contour under.
