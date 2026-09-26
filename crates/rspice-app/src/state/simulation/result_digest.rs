@@ -52,7 +52,7 @@ struct ResultDigestWriter {
     retained_bytes: u64,
 }
 
-impl super::ConvergenceEncoder for ResultDigestWriter {
+impl rspice_results::convergence_quality::ConvergenceEncoder for ResultDigestWriter {
     fn u64(&mut self, value: u64) {
         Self::u64(self, value);
     }

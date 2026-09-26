@@ -3,13 +3,15 @@
 //! Indices use two exact 32-bit limbs per entry in Float64 transfer buffers.
 //! Counts remain decimal strings in metadata; no 64-bit integer is rounded by JS.
 
-use crate::state::{PeriodicConvergenceEvidence, TransientConvergenceEvidence};
+use rspice_results::convergence_quality::{
+    PeriodicConvergenceEvidence, TransientConvergenceEvidence,
+};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct ConvergenceTransport<S> {
+pub struct ConvergenceTransport<S> {
     metadata: TransientConvergenceEvidence,
     transient_indices: S,
     transient_times: S,
@@ -17,7 +19,7 @@ pub(crate) struct ConvergenceTransport<S> {
 }
 
 impl<S> ConvergenceTransport<S> {
-    pub(in crate::simulation) fn from_evidence<'a>(
+    pub fn from_evidence<'a>(
         evidence: &'a TransientConvergenceEvidence,
         mut append: impl FnMut(Cow<'a, [f64]>) -> S,
     ) -> Self {
@@ -52,7 +54,7 @@ impl<S> ConvergenceTransport<S> {
         }
     }
 
-    pub(in crate::simulation) fn into_evidence(
+    pub fn into_evidence(
         self,
         declared_len: impl Fn(&S) -> usize,
         mut read: impl FnMut(S) -> Result<Vec<f64>, String>,

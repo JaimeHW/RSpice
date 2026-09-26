@@ -9,10 +9,7 @@ use std::collections::HashMap;
 
 mod ac_bode;
 mod analysis_result;
-mod convergence_attribution;
-mod convergence_quality;
 mod dc_mismatch;
-pub(crate) use convergence_quality::ConvergenceEncoder;
 pub use dc_mismatch::{DcMismatchContributorEvidence, DcMismatchEvidence, DcMismatchScopeEvidence};
 pub(crate) use rspice_results::dc_sweep::DcTraceView;
 pub use rspice_results::dc_sweep::{
@@ -79,13 +76,12 @@ pub use analysis_result::{
     TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
     TransferFunctionScalarEvidence,
 };
-pub(crate) use convergence_attribution::from_core as convergence_attribution_from_core;
-pub use convergence_quality::{
+pub use rspice_results::analysis_type::AnalysisType;
+pub use rspice_results::convergence_attribution::ConvergenceAttribution;
+pub use rspice_results::convergence_quality::{
     ConvergenceReport, PeriodicConvergenceEvidence, PeriodicInitializationMethod,
     TransientConvergenceEvidence,
 };
-pub use rspice_results::analysis_type::AnalysisType;
-pub use rspice_results::convergence_attribution::ConvergenceAttribution;
 pub use rspice_simulation_contract::analysis_tag::CanonicalAnalysisKind;
 // Test-only alias: outside tests an attribution's vocabulary is only ever
 // named through the attribution's own fields.

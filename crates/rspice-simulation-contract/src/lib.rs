@@ -11,6 +11,7 @@ pub mod analysis_spec_values;
 pub mod analysis_tag;
 pub mod capture_group;
 pub mod config;
+pub mod convergence_transport;
 pub mod corner_config;
 pub mod corner_draft;
 pub mod dependency_contract;

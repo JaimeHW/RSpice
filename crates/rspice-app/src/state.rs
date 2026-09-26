@@ -148,10 +148,8 @@ pub use rspice_design_model::design_management::*;
 pub use schematic::*;
 // Test-only aliases: the submodule is private, so this path is the only way
 // the tests can name an attribution's vocabulary directly.
-pub(crate) use simulation::ConvergenceEncoder;
 #[cfg(test)]
 pub use simulation::ConvergenceFailureClass;
-pub(crate) use simulation::convergence_attribution_from_core;
 
 pub use simulation::CurrentImpulseHistoryEvidence;
 pub(crate) use simulation::DcTraceView;

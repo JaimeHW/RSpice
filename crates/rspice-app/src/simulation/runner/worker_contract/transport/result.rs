@@ -56,7 +56,7 @@ impl WorkerSimulationResultTransport {
                 waveforms: transport_waveforms(waveforms, buffers),
                 measurements,
                 convergence: convergence.as_ref().map(|quality| {
-                    crate::simulation::results::ConvergenceTransport::from_evidence(
+                    rspice_simulation_contract::convergence_transport::ConvergenceTransport::from_evidence(
                         quality,
                         |values| WorkerF64Series::from_vec(values.into_owned(), buffers),
                     )
@@ -72,7 +72,7 @@ impl WorkerSimulationResultTransport {
                     .pop()
                     .expect("one spectrum in, one spectrum out"),
                 convergence: convergence.as_ref().map(|quality| {
-                    crate::simulation::results::ConvergenceTransport::from_evidence(
+                    rspice_simulation_contract::convergence_transport::ConvergenceTransport::from_evidence(
                         quality,
                         |values| WorkerF64Series::from_vec(values.into_owned(), buffers),
                     )
@@ -196,7 +196,7 @@ impl WorkerSimulationResultTransport {
                 noise_reference_temperature_kelvin,
             } => Self::Ac {
                 convergence: convergence.as_ref().map(|quality| {
-                    crate::simulation::results::ConvergenceTransport::from_evidence(
+                    rspice_simulation_contract::convergence_transport::ConvergenceTransport::from_evidence(
                         quality,
                         |values| WorkerF64Series::from_vec(values.into_owned(), buffers),
                     )
@@ -293,7 +293,7 @@ impl WorkerSimulationResultTransport {
                     })
                     .transpose()?,
                 convergence: convergence.as_ref().map(|quality| {
-                    crate::simulation::results::ConvergenceTransport::from_evidence(
+                    rspice_simulation_contract::convergence_transport::ConvergenceTransport::from_evidence(
                         quality,
                         |values| WorkerF64Series::from_vec(values.into_owned(), buffers),
                     )

@@ -9,6 +9,8 @@ pub mod bode;
 pub mod calculator;
 pub mod convergence_attribution;
 #[cfg(feature = "engine-evidence")]
+pub mod convergence_quality;
+#[cfg(feature = "engine-evidence")]
 pub mod current_impulses;
 pub mod dc_mismatch;
 pub mod dc_sweep;

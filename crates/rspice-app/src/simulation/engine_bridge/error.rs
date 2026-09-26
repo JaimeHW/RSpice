@@ -39,7 +39,7 @@ impl EngineBridge {
         let diagnostic = self.engine.convergence_quality().failure_diagnostic?;
         diagnostic
             .describes(&rendered)
-            .then(|| crate::state::convergence_attribution_from_core(&diagnostic))
+            .then(|| rspice_results::convergence_attribution::from_core(&diagnostic))
     }
 
     fn translate_unattributed(&self, err: rspice_core::SimulationError) -> SimulationError {

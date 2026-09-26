@@ -277,7 +277,7 @@ impl ResolvedExecutionDependencies {
                             })
                             .collect();
                         let convergence = trajectory.convergence.as_ref().map(|quality|
-                            crate::simulation::results::ConvergenceTransport::from_evidence(quality, |values| {
+                            rspice_simulation_contract::convergence_transport::ConvergenceTransport::from_evidence(quality, |values| {
                                 let reference = TransferBufferRef { buffer: buffers.len(), len: values.len() };
                                 buffers.push(values);
                                 reference

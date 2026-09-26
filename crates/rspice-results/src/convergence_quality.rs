@@ -3,14 +3,14 @@
 //! Source indices belong to the engine trajectory. Source times are captured
 //! before output cropping or envelope projection changes the displayed axis.
 
-use super::convergence_attribution::from_core as convergence_attribution_from_core;
+use crate::convergence_attribution::ConvergenceAttribution;
+use crate::convergence_attribution::from_core as convergence_attribution_from_core;
 use rspice_core::abort_signal::AbortSignal;
-use rspice_results::convergence_attribution::ConvergenceAttribution;
 use serde::{Deserialize, Serialize};
 
 /// Existing result and artifact writers keep their own framing and accounting.
 /// The field walk is shared so the two identities cannot omit different facts.
-pub(crate) trait ConvergenceEncoder {
+pub trait ConvergenceEncoder {
     fn u64(&mut self, value: u64);
     fn f64(&mut self, value: f64);
     fn string(&mut self, value: &str);
@@ -92,7 +92,7 @@ pub struct ConvergenceTimeBasis {
 
 impl TransientConvergenceEvidence {
     /// Float64 values used by the compact worker/dependency representation.
-    pub(crate) fn transfer_value_count(&self) -> usize {
+    pub fn transfer_value_count(&self) -> usize {
         self.transient
             .force_accepted_indices
             .len()
@@ -120,7 +120,7 @@ impl TransientConvergenceEvidence {
                 .is_some_and(|initialization| initialization.report.force_accepted_points != 0)
     }
 
-    pub(crate) fn encode(&self, writer: &mut impl ConvergenceEncoder) {
+    pub fn encode(&self, writer: &mut impl ConvergenceEncoder) {
         self.transient.encode(writer);
         writer.tag(u8::from(self.initialization.is_some()));
         if let Some(initialization) = &self.initialization {
@@ -167,8 +167,7 @@ impl TransientConvergenceEvidence {
 
 impl ConvergenceReport {
     /// Copy scalar metadata without cloning the two potentially large vectors.
-    #[cfg(any(target_arch = "wasm32", test))]
-    pub(crate) fn metadata_only(&self) -> Self {
+    pub fn metadata_only(&self) -> Self {
         let Self {
             total_iterations,
             gmin_stepping_count,
@@ -238,9 +237,7 @@ impl ConvergenceReport {
         writer.f64(*avg_iterations_per_solve);
         writer.tag(u8::from(failure_diagnostic.is_some()));
         if let Some(diagnostic) = failure_diagnostic {
-            use rspice_results::convergence_attribution::{
-                ConvergenceFailureClass, ConvergenceSiteKind,
-            };
+            use crate::convergence_attribution::{ConvergenceFailureClass, ConvergenceSiteKind};
             writer.tag(match diagnostic.class {
                 ConvergenceFailureClass::NoDcPathToGround => 0,
                 ConvergenceFailureClass::ConditioningDependentBias => 1,

@@ -49,7 +49,7 @@ pub(super) struct CanonicalWriter {
     hasher: Sha256,
 }
 
-impl crate::state::ConvergenceEncoder for CanonicalWriter {
+impl rspice_results::convergence_quality::ConvergenceEncoder for CanonicalWriter {
     fn u64(&mut self, value: u64) {
         Self::u64(self, value);
     }

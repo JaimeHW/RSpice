@@ -1157,7 +1157,11 @@ pub(crate) enum WorkerSimulationResultTransport {
         time: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
         measurements: Vec<WorkerMeasurement>,
-        convergence: Option<crate::simulation::results::ConvergenceTransport<WorkerF64Series>>,
+        convergence: Option<
+            rspice_simulation_contract::convergence_transport::ConvergenceTransport<
+                WorkerF64Series,
+            >,
+        >,
         /// Event histories ride the JSON envelope rather than the binary
         /// buffer channel: they are short, and their times are the datum, not
         /// a resampling of `time`.
@@ -1168,7 +1172,11 @@ pub(crate) enum WorkerSimulationResultTransport {
     },
     Fft {
         spectrum: WorkerRecordedFftSpectrumTransport,
-        convergence: Option<crate::simulation::results::ConvergenceTransport<WorkerF64Series>>,
+        convergence: Option<
+            rspice_simulation_contract::convergence_transport::ConvergenceTransport<
+                WorkerF64Series,
+            >,
+        >,
     },
     Pss {
         measurements: Vec<WorkerMeasurement>,
@@ -1225,7 +1233,11 @@ pub(crate) enum WorkerSimulationResultTransport {
         operating_point: WorkerHbOperatingPointTransport,
     },
     Ac {
-        convergence: Option<crate::simulation::results::ConvergenceTransport<WorkerF64Series>>,
+        convergence: Option<
+            rspice_simulation_contract::convergence_transport::ConvergenceTransport<
+                WorkerF64Series,
+            >,
+        >,
         frequencies: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
         measurements: Vec<WorkerMeasurement>,
@@ -1277,7 +1289,11 @@ pub(crate) enum WorkerSimulationResultTransport {
     Soa {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source_history: Option<crate::state::SoaSourceHistory<WorkerF64Series>>,
-        convergence: Option<crate::simulation::results::ConvergenceTransport<WorkerF64Series>>,
+        convergence: Option<
+            rspice_simulation_contract::convergence_transport::ConvergenceTransport<
+                WorkerF64Series,
+            >,
+        >,
         time: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
         violations: Vec<WorkerSoAViolation>,

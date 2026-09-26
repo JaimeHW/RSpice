@@ -7,10 +7,6 @@ use crate::results::safety::{SoAEvaluation, SoAViolation};
 use std::collections::HashMap;
 
 mod accessors;
-#[cfg(any(target_arch = "wasm32", test))]
-mod convergence_transport;
-#[cfg(any(target_arch = "wasm32", test))]
-pub(crate) use convergence_transport::ConvergenceTransport;
 mod measurements;
 pub(crate) use measurements::{parse_study_bin, parse_study_tuple};
 mod monte_carlo;

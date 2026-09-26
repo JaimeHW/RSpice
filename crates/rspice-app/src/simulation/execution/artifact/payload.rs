@@ -1652,7 +1652,9 @@ struct TransientTrajectoryTransferMetadata {
     time: TransferBufferRef,
     waveforms: BTreeMap<String, TransferBufferRef>,
     #[serde(default)]
-    convergence: Option<crate::simulation::results::ConvergenceTransport<TransferBufferRef>>,
+    convergence: Option<
+        rspice_simulation_contract::convergence_transport::ConvergenceTransport<TransferBufferRef>,
+    >,
     #[serde(default)]
     spectra: Vec<RecordedFftSpectrumTransferMetadata>,
 }
