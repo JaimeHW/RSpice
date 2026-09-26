@@ -92,7 +92,7 @@ mod tests {
             .unwrap();
         assert_eq!(projected.x.as_slice(), &[0.0, 0.5]);
         assert_eq!(projected.y.as_slice(), &[5.0, 25.0]);
-        let complex = projected.complex.unwrap();
+        let complex = projected.data.complex.unwrap();
         assert_eq!(complex.real.as_slice(), &[3.0, 7.0]);
         assert_eq!(complex.imag.as_slice(), &[4.0, 24.0]);
         assert_eq!(source, before);

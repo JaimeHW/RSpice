@@ -1922,7 +1922,7 @@ fn open_dock(app: &mut RSpiceApp, dock: VisualizationDock) {
                 studio.draft_trace_analysis = Some(analysis_id);
                 studio.draft_trace_visibility = waveforms
                     .into_iter()
-                    .map(|waveform| (waveform.name, waveform.visible))
+                    .map(|waveform| (waveform.data.name, waveform.visible))
                     .collect();
             } else {
                 studio.draft_trace_dataset = None;

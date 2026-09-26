@@ -497,8 +497,8 @@ pub(super) fn resolve_strip_exprs(
                 }
             };
             let base_label = expression_label(&expr, output.waveform.complex.is_some());
-            let x = output.waveform.x;
-            let y = output.waveform.y;
+            let x = output.waveform.data.x;
+            let y = output.waveform.data.y;
             let family_style = group.map(|group| group.style);
             let cache_key =
                 base_cache_key ^ group.map_or(0, |group| group.stable_key.rotate_left(19));

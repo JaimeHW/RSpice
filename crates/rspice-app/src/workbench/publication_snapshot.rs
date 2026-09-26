@@ -1537,16 +1537,7 @@ mod tests {
     }
 
     fn waveform(name: &str, x: &[f64], y: &[f64]) -> WaveformData {
-        WaveformData {
-            name: name.to_string(),
-            x: Arc::new(x.to_vec()),
-            y: Arc::new(y.to_vec()),
-            unit: None,
-            color: "#000000".to_string(),
-            complex: None,
-            visible: true,
-            display_cache: None,
-        }
+        WaveformData::new(name, Arc::new(x.to_vec()), Arc::new(y.to_vec()), "#000000")
     }
 
     fn analysis(label: &str, waveforms: Vec<WaveformData>) -> AnalysisResult {

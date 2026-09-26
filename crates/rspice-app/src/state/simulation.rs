@@ -3,7 +3,6 @@
 //! Manages simulation execution state and results.
 
 use super::schematic::Point;
-use rspice_core::Value;
 use rspice_results::yield_analysis::{YieldAnalysisProvenance, YieldResult};
 use std::collections::HashMap;
 
@@ -107,6 +106,7 @@ pub use rspice_results::saved_output::{
     SavedOutputAxis, SavedOutputBoundSource, SavedOutputDcMember, SavedOutputMaterializationStatus,
     SavedOutputReceipt, SavedOutputSourceBindings,
 };
+pub use rspice_results::waveform::SharedWaveformValues;
 pub use run::{
     ExecutionTarget, RunRetention, SimulationCampaignMembership, SimulationExecutionIdentity,
     SimulationRun, SimulationRunLifecycle,
@@ -121,7 +121,7 @@ pub use run_receipt::{
 pub use specification_verdict::{SpecificationVerdict, SpecificationVerdictStatus};
 pub use state_impl::EvidenceDomain;
 pub use state_model::{SimulationRunIntent, SimulationState};
-pub use waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, SharedWaveformValues, WaveformData};
+pub use waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, WaveformData};
 
 mod monte_carlo_confidence;
 pub use monte_carlo_confidence::{

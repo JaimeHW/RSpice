@@ -24,7 +24,10 @@ fn complex_selected_samples_project_magnitude_after_rectangular_interpolation() 
     .unwrap();
     assert_eq!(selected.x.as_slice(), &[0.0, 0.5, 1.0]);
     assert_eq!(selected.y.as_slice(), &[1.0, 0.0, 1.0]);
-    assert_eq!(selected.complex.unwrap().real.as_slice(), &[1.0, 0.0, -1.0]);
+    assert_eq!(
+        selected.data.complex.unwrap().real.as_slice(),
+        &[1.0, 0.0, -1.0]
+    );
     assert_eq!(source.y.as_slice(), &[1.0, 1.0]);
 }
 
