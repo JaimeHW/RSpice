@@ -910,7 +910,10 @@ fn controller_manual_run_receipt_remains_authoritative_if_result_provenance_is_s
             task_provenance.prepared_snapshot_digest()
         );
         assert_eq!(receipt.source_content_digest(), expected_source_digest);
-        assert!(receipt.source_check_receipt().is_manual_source_check());
+        assert!(matches!(
+            receipt.source_check_receipt(),
+            crate::state::PreparedSourceCheckReceipt::ManualSourceCheck(_)
+        ));
         assert_eq!(receipt.tasks().len(), 1);
         let task = &receipt.tasks()[0];
         assert_eq!(task.instance_id(), task_provenance.source_instance_id());
@@ -987,7 +990,10 @@ fn controller_manual_run_receipt_survives_production_project_round_trip() {
         AnalysisResultSourceDomain::ManualDeck
     );
     assert_eq!(receipt.simulation_plan_id(), None);
-    assert!(receipt.source_check_receipt().is_manual_source_check());
+    assert!(matches!(
+        receipt.source_check_receipt(),
+        crate::state::PreparedSourceCheckReceipt::ManualSourceCheck(_)
+    ));
     assert_eq!(receipt.tasks()[0].instance_id(), expected_source_id);
     assert_eq!(result_provenance.source_instance_id(), expected_source_id);
     assert_eq!(

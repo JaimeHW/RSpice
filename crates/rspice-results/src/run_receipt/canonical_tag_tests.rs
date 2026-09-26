@@ -8,7 +8,8 @@
 
 use super::*;
 
-use crate::state::{AnalysisResultProvenance, CanonicalAnalysisKind};
+use crate::provenance::AnalysisResultProvenance;
+type AnalysisResult = crate::analysis_result::AnalysisResult;
 
 fn digest(byte: u8) -> ContentDigest {
     ContentDigest::from_bytes([byte; 32])
@@ -35,7 +36,7 @@ fn task_receipt(
 }
 
 fn plan_receipt(tasks: Vec<PreparedRunTaskReceipt>) -> PreparedRunReceipt {
-    PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+    PreparedRunReceipt::new(PreparedRunReceiptInput {
         source_domain: AnalysisResultSourceDomain::SimulationPlan,
         simulation_plan_id: Some(SimulationPlanId::new()),
         project_revision: ObjectRevision::INITIAL,
@@ -44,14 +45,14 @@ fn plan_receipt(tasks: Vec<PreparedRunTaskReceipt>) -> PreparedRunReceipt {
         source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(0x73)),
         project_model_sources: Vec::new(),
         specifications: Vec::new(),
-        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
+        specification_policy: crate::specification::PreparedSpecificationPolicy::default(),
         tasks,
     })
     .expect("a fixture plan receipt is well formed")
 }
 
 fn result_for(task: &PreparedRunTaskReceipt, snapshot: ContentDigest) -> AnalysisResult {
-    AnalysisResult::new(1, task.result_analysis_type(), "result").with_provenance(
+    AnalysisResult::new(1, task.result_analysis_type(), "result", 0.0).with_provenance(
         AnalysisResultProvenance::new(
             task.instance_id(),
             task.source_revision(),
@@ -105,7 +106,7 @@ fn each_tag_added_after_the_cap_constructs_validates_and_names_its_result_family
         let snapshot = receipt.prepared_snapshot_digest();
         let result = result_for(&receipt.tasks()[0], snapshot);
         receipt
-            .validate_result_prefix(std::slice::from_ref(&result))
+            .validate_result_prefix((std::slice::from_ref(&result)).iter())
             .unwrap_or_else(|error| {
                 panic!("a result produced by tag {tag} must authenticate: {error}")
             });
@@ -135,7 +136,7 @@ fn runnable_preview_workflows_authenticate_but_remain_explicitly_non_sign_off() 
         .map(|task| result_for(task, snapshot))
         .collect::<Vec<_>>();
     receipt
-        .validate_result_prefix(&results)
+        .validate_result_prefix((results).iter())
         .expect("every runnable preview result authenticates against its exact task");
 
     assert_eq!(
@@ -218,7 +219,7 @@ fn a_run_ending_in_the_spectrum_task_authenticates_at_every_truncation() {
     // leave a hole at its own index in every partial run.
     for length in 0..=results.len() {
         receipt
-            .validate_result_prefix(&results[..length])
+            .validate_result_prefix((results[..length]).iter())
             .unwrap_or_else(|error| {
                 panic!("the first {length} result(s) must authenticate: {error}")
             });
@@ -226,12 +227,15 @@ fn a_run_ending_in_the_spectrum_task_authenticates_at_every_truncation() {
 
     assert!(
         receipt
-            .validate_result_prefix(&[
-                results[0].clone(),
-                results[1].clone(),
-                results[2].clone(),
-                results[2].clone(),
-            ])
+            .validate_result_prefix(
+                ([
+                    results[0].clone(),
+                    results[1].clone(),
+                    results[2].clone(),
+                    results[2].clone(),
+                ])
+                .iter()
+            )
             .is_err(),
         "more results than authenticated tasks must fail"
     );
@@ -244,13 +248,13 @@ fn the_spectrum_result_cannot_be_moved_ahead_of_the_solve_it_reads() {
 
     assert!(
         receipt
-            .validate_result_prefix(&[op.clone(), spectrum.clone()])
+            .validate_result_prefix(([op.clone(), spectrum.clone()]).iter())
             .is_err(),
         "the spectrum cannot occupy the PSS task's index"
     );
     assert!(
         receipt
-            .validate_result_prefix(&[op, spectrum, pss])
+            .validate_result_prefix(([op, spectrum, pss]).iter())
             .is_err(),
         "reordering the pair fails the positional zip in both directions"
     );

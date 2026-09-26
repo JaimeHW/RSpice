@@ -5631,6 +5631,7 @@ dependencies = [
  "png",
  "rspice-app-types",
  "rspice-core",
+ "rspice-design-model",
  "rspice-units",
  "serde",
  "serde_json",

@@ -1571,7 +1571,7 @@ impl ProjectSimulationRun {
                 .cloned()
                 .map(ProjectAnalysisResult::into_analysis)
                 .collect::<Result<Vec<_>, _>>()?;
-            receipt.validate_result_prefix(&analyses)?;
+            receipt.validate_result_prefix((analyses).iter().map(|analysis| &analysis.data))?;
         }
         let retained_digest = self.dataset_content_digest.as_ref().copied().ok_or_else(|| {
             format!("runs[{run_idx}].dataset_content_digest is required by simulation results schema v12")

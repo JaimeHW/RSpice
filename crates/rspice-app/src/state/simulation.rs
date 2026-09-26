@@ -23,6 +23,7 @@ pub use rspice_results::noise::{
 mod run;
 mod run_history;
 pub use rspice_results::result_import::{ResultImportFormat, ResultImportSource};
+#[cfg(test)]
 mod run_receipt;
 mod state_impl;
 mod state_model;
@@ -107,6 +108,11 @@ pub use rspice_results::convergence_attribution::ConvergenceFailureClass;
 pub use rspice_results::family_measurements::{
     FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements,
 };
+pub use rspice_results::run_receipt::{
+    HierarchyMapRow, PreparedModelQualification, PreparedModelSourceIdentity, PreparedRunReceipt,
+    PreparedRunReceiptInput, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SignOffStanding,
+    SimulationRunProvenance,
+};
 pub use rspice_results::saved_output::{
     SavedOutputAxis, SavedOutputBoundSource, SavedOutputDcMember, SavedOutputMaterializationStatus,
     SavedOutputReceipt, SavedOutputSourceBindings,
@@ -120,11 +126,6 @@ pub use run::{
 };
 pub use run_history::RunHistory;
 pub(crate) use run_history::RunHistoryRevision;
-pub use run_receipt::{
-    HierarchyMapRow, PreparedModelQualification, PreparedModelSourceIdentity, PreparedRunReceipt,
-    PreparedRunReceiptInput, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SignOffStanding,
-    SimulationRunProvenance,
-};
 pub use state_impl::EvidenceDomain;
 pub use state_model::{SimulationRunIntent, SimulationState};
 pub use waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, WaveformData};

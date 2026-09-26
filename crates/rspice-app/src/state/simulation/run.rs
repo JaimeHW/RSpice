@@ -640,7 +640,7 @@ impl SimulationRun {
                 }
             }
             SimulationRunProvenance::Prepared(receipt) => {
-                receipt.validate_result_prefix(analyses)?;
+                receipt.validate_result_prefix((analyses).iter().map(|analysis| &analysis.data))?;
             }
         }
         Ok(())
