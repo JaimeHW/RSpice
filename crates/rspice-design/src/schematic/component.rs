@@ -1036,20 +1036,6 @@ impl Component {
         }
     }
 
-    /// Rotate a point by the component's rotation (legacy method)
-    ///
-    /// NOTE: For new code, prefer transform_point() which also applies mirror.
-    /// This method is kept for backward compatibility.
-    #[inline]
-    pub fn rotate_point(&self, p: Point) -> Point {
-        match self.rotation {
-            Rotation::R0 => p,
-            Rotation::R90 => Point::new(p.y.saturating_neg(), p.x),
-            Rotation::R180 => Point::new(p.x.saturating_neg(), p.y.saturating_neg()),
-            Rotation::R270 => Point::new(p.y, p.x.saturating_neg()),
-        }
-    }
-
     /// Get the bounding box of this component in grid coordinates
     ///
     /// Returns (min_x, min_y, max_x, max_y) representing the
