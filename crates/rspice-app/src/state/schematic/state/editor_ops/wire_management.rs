@@ -4,6 +4,7 @@
 //! its vertices, or an endpoint. The distinction drives the cursor and what
 //! a drag does.
 
+use super::super::wire_edit;
 use super::super::*;
 
 impl SchematicState {
@@ -13,14 +14,12 @@ impl SchematicState {
 
     /// Add a wire
     pub fn add_wire(&mut self, points: Vec<Point>) -> Option<u64> {
-        if points.len() < 2 {
-            return None;
+        let id = wire_edit::add_wire(&mut self.document, &mut self.identity, points);
+        if id.is_some() {
+            self.is_dirty = true;
+            self.bump_topology_version();
         }
-        let id = self.next_id();
-        self.document.wires.push(Wire::new(id, points));
-        self.is_dirty = true;
-        self.bump_topology_version();
-        Some(id)
+        id
     }
 
     /// Find wire at grid position
@@ -31,40 +30,6 @@ impl SchematicState {
             }
         }
         None
-    }
-
-    /// Find all wire points at a grid position
-    /// Returns (wire_id, point_index) pairs for junction detection
-    pub fn wire_points_at(&self, pos: Point) -> Vec<(u64, usize)> {
-        let mut result = Vec::new();
-        for wire in &self.document.wires {
-            for (idx, point) in wire.points.iter().enumerate() {
-                if *point == pos {
-                    result.push((wire.id, idx));
-                }
-            }
-        }
-        result
-    }
-
-    /// Find all wire ENDPOINTS at a grid position
-    /// Unlike wire_points_at, this only returns first/last points of wires
-    pub fn wire_endpoints_at(&self, pos: Point) -> Vec<(u64, usize)> {
-        let mut result = Vec::new();
-        for wire in &self.document.wires {
-            if let Some(first) = wire.points.first()
-                && *first == pos
-            {
-                result.push((wire.id, 0));
-            }
-            if wire.points.len() > 1
-                && let Some(last) = wire.points.last()
-                && *last == pos
-            {
-                result.push((wire.id, wire.points.len() - 1));
-            }
-        }
-        result
     }
 
     /// Find wire vertex at a grid position for dragging
@@ -148,41 +113,6 @@ impl SchematicState {
         }
     }
 
-    /// Simplify wire path by removing intermediate points on straight segments
-    /// Does `points` contain any collinear interior vertex that
-    /// `simplify_wire_path` would remove? Cheap pre-check so cleanup passes
-    /// don't clone paths that are already minimal.
-    pub(crate) fn has_collinear_vertices(points: &[Point]) -> bool {
-        points.windows(3).any(|w| {
-            (w[0].x == w[1].x && w[1].x == w[2].x) || (w[0].y == w[1].y && w[1].y == w[2].y)
-        })
-    }
-
-    pub(crate) fn simplify_wire_path(points: Vec<Point>) -> Vec<Point> {
-        if points.len() <= 2 {
-            return points;
-        }
-
-        let mut result = Vec::with_capacity(points.len());
-        result.push(points[0]);
-
-        for i in 1..points.len() - 1 {
-            let prev = &points[i - 1];
-            let curr = &points[i];
-            let next = &points[i + 1];
-
-            let all_same_x = prev.x == curr.x && curr.x == next.x;
-            let all_same_y = prev.y == curr.y && curr.y == next.y;
-
-            if !all_same_x && !all_same_y {
-                result.push(*curr);
-            }
-        }
-
-        result.push(*points.last().unwrap());
-        result
-    }
-
     /// Finish drawing the current wire
     ///
     /// Implements professional EDA behavior:
@@ -202,7 +132,7 @@ impl SchematicState {
             return None;
         }
 
-        let simplified = Self::simplify_wire_path(points);
+        let simplified = wire_edit::simplify_wire_path(points);
 
         if simplified.len() < 2 {
             return None;
@@ -250,20 +180,7 @@ impl SchematicState {
     /// share the same endpoint vertex, moving any attached wire keeps the
     /// junction topology intact.
     pub fn split_wires_at_t_junction(&mut self, point: Point) {
-        // Find wires that pass through this point but don't have it as a vertex
-        let wires_to_split: Vec<u64> = self
-            .document
-            .wires
-            .iter()
-            .filter(|w| {
-                // Wire passes through point mid-segment (not at a vertex)
-                w.contains_point(point) && !w.points.contains(&point)
-            })
-            .map(|w| w.id)
-            .collect();
-
-        // Split each wire at the junction point
-        for wire_id in wires_to_split {
+        for wire_id in wire_edit::wires_to_split_at(&self.document, point) {
             let _ = self.split_wire(wire_id, point);
         }
     }

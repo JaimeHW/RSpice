@@ -4,6 +4,7 @@
 //! crossing wires connect, and a net label names the net it sits on. Adding
 //! or removing either invalidates cached connectivity.
 
+use super::super::junction_edit;
 use super::super::*;
 
 impl SchematicState {
@@ -13,23 +14,18 @@ impl SchematicState {
 
     /// Add an explicit junction at a position
     pub fn add_junction(&mut self, pos: Point) -> u64 {
-        // Check if junction already exists at this position
-        if let Some(existing) = self.document.junctions.iter().find(|j| j.pos == pos) {
-            return existing.id;
+        let (id, inserted) =
+            junction_edit::add_junction(&mut self.document, &mut self.identity, pos);
+        if inserted {
+            self.is_dirty = true;
+            self.bump_topology_version();
         }
-
-        let id = self.next_id();
-        self.document.junctions.push(Junction::new(id, pos));
-        self.is_dirty = true;
-        self.bump_topology_version();
         id
     }
 
     /// Remove a junction by ID
     pub fn remove_junction(&mut self, id: u64) -> bool {
-        let len_before = self.document.junctions.len();
-        self.document.junctions.retain(|j| j.id != id);
-        let removed = self.document.junctions.len() < len_before;
+        let removed = junction_edit::remove_junction(&mut self.document, id);
         if removed {
             self.is_dirty = true;
             self.bump_topology_version();
@@ -53,8 +49,7 @@ impl SchematicState {
 
     /// Add a net label at the given position
     pub fn add_net_label(&mut self, pos: Point, name: String) -> u64 {
-        let id = self.next_id();
-        self.document.net_labels.push(NetLabel::new(id, pos, name));
+        let id = junction_edit::add_net_label(&mut self.document, &mut self.identity, pos, name);
         self.is_dirty = true;
         self.bump_topology_version();
         id

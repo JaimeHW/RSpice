@@ -13,7 +13,6 @@ mod connection_ops;
 mod interface_repair_ops;
 mod junction_labels;
 mod movement_ops;
-mod preview_ops;
 mod replace_ops;
 mod stretch_ops;
 mod tool_ops;

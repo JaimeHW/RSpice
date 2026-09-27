@@ -28,13 +28,16 @@ use super::wire::{Wire, WireConnection, WireDrawing, WireSegment};
 mod components;
 mod editor_ops;
 mod identity;
+mod junction_edit;
 mod junction_ops;
 mod selection_ops;
 #[cfg(test)]
 mod serialization_tests;
 mod stimulus_placement;
+mod terminal_connection;
 mod undo;
 mod viewport;
+mod wire_edit;
 
 pub use stimulus_placement::PendingStimulusPlacement;
 
@@ -46,9 +49,6 @@ pub use stimulus_placement::PendingStimulusPlacement;
 fn default_zoom() -> f64 {
     1.0
 }
-
-/// Snap distance in grid units for terminal connections
-const SNAP_DISTANCE: i32 = 1;
 
 /// Connectivity policy applied while translating a schematic selection.
 ///
