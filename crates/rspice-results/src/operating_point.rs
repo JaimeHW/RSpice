@@ -3,6 +3,9 @@
 //! The solver may seed a later run from this record only after validating its
 //! source and result digests and its complete, finite MNA ordering.
 
+#[cfg(feature = "engine-evidence")]
+pub mod report;
+
 use serde::{Deserialize, Serialize};
 
 use rspice_app_types::product::ContentDigest;

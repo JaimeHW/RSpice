@@ -9,12 +9,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use egui::Ui;
+use rspice_results::operating_point::report::{
+    OperatingPointReportFacts, annotation_label, device_param_unit, process_label,
+};
 
 use crate::simulation::netlist_gen::bus_notations;
 use crate::state::{
-    AnalysisResultPayload, AnalysisType, DcOpResult, OperatingPointAnnotationEvidence,
-    OperatingPointDeviceDetailEvidence, OperatingPointProcessEvidence, RunHistoryRevision,
-    SchematicAnnotationVisibility,
+    AnalysisResultPayload, AnalysisType, DcOpResult, OperatingPointDeviceDetailEvidence,
+    RunHistoryRevision, SchematicAnnotationVisibility,
 };
 use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
@@ -47,17 +49,6 @@ struct RetainedDetail {
     violations: Vec<String>,
 }
 
-#[derive(Clone)]
-struct SolveFacts {
-    temperature_celsius: f64,
-    process: OperatingPointProcessEvidence,
-    point_index: u64,
-    point_count: u64,
-    mna_nodes: usize,
-    mna_branches: usize,
-    annotation: OperatingPointAnnotationEvidence,
-}
-
 /// The sheet's identity and solve facts, without the solution itself.
 ///
 /// The retained node and device tables stay where they are; a viewer that
@@ -73,7 +64,7 @@ struct OpEvidence {
     detail_policy: Option<OperatingPointDeviceDetailEvidence>,
     node_count: usize,
     branch_count: usize,
-    facts: Option<SolveFacts>,
+    facts: Option<OperatingPointReportFacts>,
 }
 
 #[derive(Clone)]
@@ -120,7 +111,7 @@ fn selected_op_evidence(state: &AppState) -> Option<OpEvidence> {
             ..
         }) => (
             Some(*device_detail),
-            Some(SolveFacts {
+            Some(OperatingPointReportFacts {
                 temperature_celsius: *temperature_celsius,
                 process: *run_point_process,
                 point_index: *run_point_index,
@@ -175,7 +166,7 @@ pub(crate) fn export_csv(analysis: &crate::state::AnalysisResult) -> Option<supe
                 selected: selected_devices.clone(),
                 violations: violation_devices.clone(),
             }),
-            Some(SolveFacts {
+            Some(OperatingPointReportFacts {
                 temperature_celsius: *temperature_celsius,
                 process: *run_point_process,
                 point_index: *run_point_index,
@@ -323,16 +314,6 @@ fn contains_identity(identities: &[String], candidate: &str) -> bool {
         .any(|identity| identity.eq_ignore_ascii_case(candidate))
 }
 
-fn process_label(process: OperatingPointProcessEvidence) -> &'static str {
-    match process {
-        OperatingPointProcessEvidence::TT => "TT",
-        OperatingPointProcessEvidence::SS => "SS",
-        OperatingPointProcessEvidence::FF => "FF",
-        OperatingPointProcessEvidence::SF => "SF",
-        OperatingPointProcessEvidence::FS => "FS",
-    }
-}
-
 fn detail_label(policy: Option<OperatingPointDeviceDetailEvidence>) -> &'static str {
     match policy {
         None => "legacy retained report",
@@ -342,15 +323,6 @@ fn detail_label(policy: Option<OperatingPointDeviceDetailEvidence>) -> &'static 
         }
         Some(OperatingPointDeviceDetailEvidence::ViolationsOnly) => "violations retained",
         Some(OperatingPointDeviceDetailEvidence::None) => "device detail not retained",
-    }
-}
-
-fn annotation_label(annotation: OperatingPointAnnotationEvidence) -> &'static str {
-    match annotation {
-        OperatingPointAnnotationEvidence::VoltagesAndCurrents => "voltages and currents",
-        OperatingPointAnnotationEvidence::VoltagesOnly => "voltages only",
-        OperatingPointAnnotationEvidence::VoltagesAndDeviceOp => "voltages and device OP",
-        OperatingPointAnnotationEvidence::None => "not retained",
     }
 }
 
@@ -746,18 +718,6 @@ fn device_columns(
         .into_iter()
         .map(|(_, name, unit)| (name, unit))
         .collect()
-}
-
-fn device_param_unit(family: &str, name: &str) -> &'static str {
-    if rspice_core::op_label::OpLabel::is_intrinsic_voltage_name(name) {
-        return "V";
-    }
-    match (family, name) {
-        ("MOSFET", "id") | ("BJT", "ic" | "ib") | ("DIODE", "id") => "A",
-        ("MOSFET", "vgs" | "vds" | "vbs" | "vth") | ("BJT", "vbe" | "vce") | ("DIODE", "vd") => "V",
-        ("MOSFET", "gm" | "gds" | "gmb") | ("BJT", "gm") | ("DIODE", "gd") => "S",
-        _ => "",
-    }
 }
 
 fn op_column_rect(row: egui::Rect, offset: f32, width: f32) -> egui::Rect {
