@@ -183,7 +183,7 @@ fn revision_history_round_trips_and_restores_as_a_new_monotonic_revision() {
     assert_eq!(restored.revision_history().len(), 3);
     assert!(matches!(
         restored.restore_revision(
-            crate::product::ObjectRevision::new(3).unwrap(),
+            rspice_app_types::product::ObjectRevision::new(3).unwrap(),
             initial_revision,
         ),
         Err(ProjectSourceError::StaleRevisionRestore { .. })

@@ -5249,6 +5249,7 @@ dependencies = [
  "rspice-automation-runtime",
  "rspice-cloud-client",
  "rspice-core",
+ "rspice-design",
  "rspice-design-model",
  "rspice-formats",
  "rspice-hardcopy-contract",
@@ -5473,6 +5474,20 @@ dependencies = [
  "wasm-bindgen",
  "wide",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "rspice-design"
+version = "0.1.0"
+dependencies = [
+ "rspice-app-types",
+ "rspice-design-model",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.20",
+ "unicode-normalization",
+ "uuid",
 ]
 
 [[package]]

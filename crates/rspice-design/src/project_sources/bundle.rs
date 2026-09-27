@@ -22,8 +22,7 @@ impl ProjectSourceBundle {
             ProjectSourceId::new(),
             owner,
             language,
-            root_path,
-            root_content,
+            (root_path, root_content),
             files,
             dependencies,
             roles,
@@ -47,8 +46,7 @@ impl ProjectSourceBundle {
             ProjectSourceId::new(),
             owner,
             language,
-            root_path,
-            root_content,
+            (root_path, root_content),
             files,
             dependencies,
             roles,
@@ -70,24 +68,23 @@ impl ProjectSourceBundle {
             id,
             owner,
             language,
-            root_path,
-            root_content,
+            (root_path, root_content),
             files,
             dependencies,
             roles,
         )
     }
 
-    pub fn try_new_with_id_and_roles(
+    fn try_new_with_id_and_roles(
         id: ProjectSourceId,
         owner: ProjectSourceOwner,
         language: ProjectSourceLanguage,
-        root_path: impl Into<String>,
-        root_content: impl Into<String>,
+        root: (impl Into<String>, impl Into<String>),
         files: impl IntoIterator<Item = ProjectSourceFile>,
         dependencies: impl IntoIterator<Item = ProjectSourceDependency>,
         roles: impl IntoIterator<Item = ProjectSourceRoleBinding>,
     ) -> Result<Self, ProjectSourceError> {
+        let (root_path, root_content) = root;
         let root_path = root_path.into();
         let mut bundle = Self {
             id,

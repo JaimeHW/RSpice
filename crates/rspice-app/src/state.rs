@@ -17,7 +17,7 @@ pub(crate) mod netlist_document;
 pub(crate) mod params_string;
 pub(crate) mod pdk_config;
 mod physical_layout;
-mod project_sources;
+pub(crate) use rspice_design::project_sources;
 pub(crate) mod property_types;
 pub(crate) use rspice_results::result_presentation;
 mod schematic;

@@ -15,7 +15,7 @@ use sha2::{Digest as _, Sha256};
 use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
-use crate::product::{ContentDigest, ObjectRevision, ProjectId};
+use rspice_app_types::product::{ContentDigest, ObjectRevision, ProjectId};
 
 use rspice_design_model::cell_view::CellViewRef;
 
@@ -245,7 +245,7 @@ pub enum ProjectSourceOwner {
 /// variants cannot create owners that are visually indistinguishable but
 /// operationally different.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct CanonicalCellViewOwnerKey {
+pub struct CanonicalCellViewOwnerKey {
     library: String,
     cell: String,
     view: String,
@@ -262,7 +262,7 @@ impl fmt::Display for CanonicalCellViewOwnerKey {
 /// Uppercasing before lowercasing provides locale-independent expansion for
 /// characters such as German sharp-s. NFC on both sides also makes composed
 /// and decomposed accented names identical without changing stored spelling.
-pub(crate) fn canonical_cell_view_owner_key(
+pub fn canonical_cell_view_owner_key(
     library: &str,
     cell: &str,
     view: &str,
@@ -2094,11 +2094,11 @@ fn path_key(path: &str) -> String {
     path.to_lowercase()
 }
 
-pub(crate) fn project_source_path_key(path: &str) -> String {
+pub fn project_source_path_key(path: &str) -> String {
     path_key(path)
 }
 
-pub(crate) fn project_source_paths_equal(first: &str, second: &str) -> bool {
+pub fn project_source_paths_equal(first: &str, second: &str) -> bool {
     path_key(first) == path_key(second)
 }
 
