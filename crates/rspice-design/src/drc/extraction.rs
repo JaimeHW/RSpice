@@ -9,15 +9,16 @@ use super::checker::{
     append_vector_width_violations, diagnostic_location,
 };
 use super::input::{ComponentInfo, ParameterRangeIssue, PinInfo};
-use super::netlist_gen::extraction::{
-    ConnectivityDiagnosticKind, ExtractedConnectivity, ExtractedTerminal,
-};
 use super::types::{DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
-use crate::state::{Component, ComponentType, PropertyDefinition, PropertyValue};
-use rspice_design::properties::PropertyCatalog;
+use crate::connectivity::{ConnectivityDiagnosticKind, ExtractedConnectivity, ExtractedTerminal};
+use crate::properties::PropertyCatalog;
+use crate::properties::PropertyDefinition;
+use crate::properties::PropertyValue;
+use crate::schematic::component::Component;
+use crate::schematic::component_type::ComponentType;
 
 pub fn extract_components(
-    schematic: &rspice_design::schematic::document::SchematicDocument,
+    schematic: &crate::schematic::document::SchematicDocument,
     connectivity: &ExtractedConnectivity,
     mut component_known_for: impl FnMut(&Component) -> Option<bool>,
 ) -> Vec<ComponentInfo> {
@@ -44,7 +45,7 @@ pub fn extract_components(
             .and_then(|binding| binding.interface())
             .into_iter()
             .flatten()
-            .filter(|port| port.direction == crate::state::PortDirection::Out)
+            .filter(|port| port.direction == crate::schematic::port::PortDirection::Out)
             .map(|port| port.name)
             .collect();
 
@@ -105,7 +106,7 @@ fn effective_component_properties<'a>(
     component: &Component,
     registry: &'a PropertyCatalog,
 ) -> Option<(
-    &'a crate::state::PropertySheet,
+    &'a crate::properties::PropertySheet,
     std::collections::HashMap<String, PropertyValue>,
 )> {
     if component.kind == ComponentType::CellInstance {
@@ -117,7 +118,7 @@ fn effective_component_properties<'a>(
     let sheet = registry.get(component.kind)?;
     Some((
         sheet,
-        rspice_design::properties::component::collect_properties_with_sheet(component, Some(sheet)),
+        crate::properties::component::collect_properties_with_sheet(component, Some(sheet)),
     ))
 }
 
@@ -147,7 +148,8 @@ fn property_value_is_missing(definition: &PropertyDefinition, value: &PropertyVa
             definition.required
                 && matches!(
                     definition.prop_type,
-                    crate::state::PropertyType::Number | crate::state::PropertyType::Expression
+                    crate::properties::PropertyType::Number
+                        | crate::properties::PropertyType::Expression
                 )
                 && value.trim().is_empty()
         }
@@ -205,11 +207,11 @@ fn exact_numeric_constant(definition: &PropertyDefinition, value: &PropertyValue
     let mut unconstrained = definition.clone();
     unconstrained.min_value = None;
     unconstrained.max_value = None;
-    rspice_design::properties::value::parse_expression_source(
+    crate::properties::value::parse_expression_source(
         &unconstrained,
         source,
-        crate::quantity::QuantityPresentationPolicy::default(),
-        crate::quantity::UiNumberLocale::default(),
+        rspice_app_types::quantity::QuantityPresentationPolicy::default(),
+        rspice_app_types::quantity::UiNumberLocale::default(),
     )
     .ok()
     .and_then(|value| value.as_number())
@@ -314,11 +316,11 @@ const fn is_current_source(kind: ComponentType) -> bool {
 /// The extractor runs once inside the measured operation; both returned inputs
 /// must describe the same document and connectivity pass.
 pub fn run_check(
-    schematic: &rspice_design::schematic::document::SchematicDocument,
+    schematic: &crate::schematic::document::SchematicDocument,
     config: DrcConfig,
     extract: impl FnOnce() -> (Vec<ComponentInfo>, ExtractedConnectivity),
 ) -> DrcResult {
-    let start = crate::time_compat::Instant::now();
+    let start = web_time::Instant::now();
     let (components, connectivity) = extract();
     let severity_overrides = config.severity_overrides.clone();
     let connectivity_policy = config.connectivity.clone();

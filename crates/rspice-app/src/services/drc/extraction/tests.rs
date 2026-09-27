@@ -5,7 +5,6 @@
 //! design check equals its node in the emitted deck. A disagreement is fixed in
 //! the shared extraction, never patched into one consumer.
 
-use super::super::input::ParameterRangeIssue;
 use super::*;
 use crate::services::drc::{DrcLocation, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::state::{
@@ -13,6 +12,7 @@ use crate::state::{
     LibraryCellInstance, LibraryManager, NetLabel, Point, PortDirection, PortSpec, SchematicState,
     SymbolDocument, SymbolPin, View, ViewType, Wire,
 };
+use rspice_design::drc::ParameterRangeIssue;
 use std::collections::HashMap;
 
 fn port(name: &str, direction: PortDirection) -> PortSpec {
@@ -635,9 +635,27 @@ fn the_second_extraction_has_no_survivors() {
             "services/drc/extraction.rs",
             include_str!("../extraction.rs"),
         ),
-        ("services/drc/domain.rs", include_str!("../domain.rs")),
-        ("services/drc/checker.rs", include_str!("../checker.rs")),
-        ("services/drc/net.rs", include_str!("../net.rs")),
+        (
+            "rspice-design/src/drc/extraction.rs",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../rspice-design/src/drc/extraction.rs"
+            )),
+        ),
+        (
+            "rspice-design/src/drc/checker.rs",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../rspice-design/src/drc/checker.rs"
+            )),
+        ),
+        (
+            "rspice-design/src/drc/net.rs",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../rspice-design/src/drc/net.rs"
+            )),
+        ),
     ] {
         let shipped = crate::source_guard::production_source(source);
         assert!(

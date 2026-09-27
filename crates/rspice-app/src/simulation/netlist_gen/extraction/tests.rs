@@ -8,6 +8,9 @@ use super::*;
 use crate::state::{
     BusDeclaration, BusSlice, BusTapOrientation, ComponentType, NetLabel, NetNamingPolicy, Wire,
 };
+use rspice_design::connectivity::{
+    ConnectivityAnchor, ConnectivityDiagnosticKind, ExtractedTerminal,
+};
 
 fn named_port(schematic: &mut SchematicState, at: Point, name: &str) {
     let id = schematic.add_component(ComponentType::Port, at);

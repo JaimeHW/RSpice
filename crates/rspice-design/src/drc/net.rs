@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::checker::component_identity;
 use super::input::ComponentInfo;
-use super::netlist_gen::extraction::ExtractedConnectivity;
+use crate::connectivity::ExtractedConnectivity;
 
 /// What the rules know about one electrical node.
 #[derive(Debug, Clone, Default)]
@@ -56,7 +56,7 @@ pub(super) fn fold_nets(
         let name = net.spice_name();
         let tapped = connectivity.tapped_nets.contains(&net.id);
         let entry = nets.entry(name.clone()).or_default();
-        entry.is_ground |= crate::state::is_ground_reference(&name);
+        entry.is_ground |= crate::schematic::ground_names::is_ground_reference(&name);
         entry.wire_ids.extend(net.wires.iter().copied());
         entry.tapped |= tapped;
     }
@@ -65,7 +65,7 @@ pub(super) fn fold_nets(
         let identity = component_identity(component);
         for pin in &component.pins {
             let entry = nets.entry(pin.net_name.clone()).or_default();
-            entry.is_ground |= crate::state::is_ground_reference(&pin.net_name);
+            entry.is_ground |= crate::schematic::ground_names::is_ground_reference(&pin.net_name);
             entry.connection_count += 1;
             if component.is_ground_symbol {
                 entry.ground_symbol_count += 1;
@@ -95,7 +95,7 @@ pub(super) fn fold_nets(
         // A projected bit is exactly a node whose deck spelling differs from
         // the drawing's; a member name written by hand parses as a slice.
         net.bus_member = connectivity.display_names.contains_key(name)
-            || crate::state::BusSlice::parse(name).is_ok_and(|slice| slice.is_scalar());
+            || crate::schematic::bus::BusSlice::parse(name).is_ok_and(|slice| slice.is_scalar());
         net.connected_components.sort();
         net.connected_components.dedup();
         net.wire_ids.sort_unstable();

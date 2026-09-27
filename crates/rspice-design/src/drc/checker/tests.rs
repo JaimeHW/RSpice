@@ -8,9 +8,9 @@
 //! lives.
 
 use super::*;
-use crate::services::drc::input::{ParameterRangeIssue, PinInfo};
-use crate::state::Point;
-use rspice_design::schematic::document::SchematicDocument;
+use crate::drc::input::{ParameterRangeIssue, PinInfo};
+use crate::schematic::document::SchematicDocument;
+use rspice_design_model::Point;
 
 /// A terminal that something else in the drawing meets.
 fn pin(name: &str, net: &str) -> PinInfo {
@@ -613,7 +613,9 @@ fn configured_severity_override_is_applied_to_checker_findings() {
 /// A four-bit port standing on a two-bit bus, plus the wider case that no
 /// slice can rescue.
 fn width_mismatch_schematic(bus: &str, port: &str) -> SchematicDocument {
-    use crate::state::{Bus, BusDeclaration, ComponentType};
+    use crate::schematic::bus::Bus;
+    use crate::schematic::bus::BusDeclaration;
+    use crate::schematic::component_type::ComponentType;
 
     let mut schematic = SchematicDocument::default();
     schematic.buses.push(
@@ -626,7 +628,7 @@ fn width_mismatch_schematic(bus: &str, port: &str) -> SchematicDocument {
         .expect("fixture bus geometry"),
     );
     schematic.components.push(
-        crate::state::Component::new(2, ComponentType::Port, Point::new(100, 0))
+        crate::schematic::component::Component::new(2, ComponentType::Port, Point::new(100, 0))
             .with_name_value("", port),
     );
     schematic
@@ -634,21 +636,21 @@ fn width_mismatch_schematic(bus: &str, port: &str) -> SchematicDocument {
 
 fn width_findings(
     schematic: &SchematicDocument,
-    width_mismatch: crate::state::BundleWidthMismatchPolicy,
+    width_mismatch: crate::connectivity_contract::BundleWidthMismatchPolicy,
 ) -> Vec<DrcViolation> {
     let mut result = DrcResult::new();
-    let policy = crate::state::ConnectivityPolicy {
+    let policy = crate::connectivity_contract::ConnectivityPolicy {
         width_mismatch,
-        ..crate::state::ConnectivityPolicy::default()
+        ..crate::connectivity_contract::ConnectivityPolicy::default()
     };
-    let connectivity = rspice_design::connectivity::extract(schematic, |_| None, |_| None);
+    let connectivity = crate::connectivity::extract(schematic, |_| None, |_| None);
     append_vector_width_violations(&connectivity, &policy, &mut result, &HashMap::new());
     result.violations().to_vec()
 }
 
 #[test]
 fn the_width_mismatch_policy_decides_whether_a_narrow_bus_blocks() {
-    use crate::state::BundleWidthMismatchPolicy;
+    use crate::connectivity_contract::BundleWidthMismatchPolicy;
 
     // The bus is wider than the connection asks for, so an explicit slice
     // could express what the drawing means.
@@ -687,7 +689,8 @@ fn off_sheet_findings(schematic: &SchematicDocument) -> Vec<DrcViolation> {
 
 #[test]
 fn a_lone_off_sheet_connector_is_advised_and_a_paired_one_is_not() {
-    use crate::state::{CrossSheetPortDirection, NetLabel};
+    use crate::schematic::net_label::NetLabel;
+    use rspice_design_model::design_management::CrossSheetPortDirection;
 
     let mut schematic = SchematicDocument::default();
     schematic.net_labels.push(NetLabel::off_sheet(
@@ -735,7 +738,9 @@ fn a_lone_off_sheet_connector_is_advised_and_a_paired_one_is_not() {
 
 #[test]
 fn partner_matching_folds_case_under_every_policy_and_honors_severity_overrides() {
-    use crate::state::{CrossSheetPortDirection, NetLabel, NetNamingPolicy};
+    use crate::schematic::document_policy::NetNamingPolicy;
+    use crate::schematic::net_label::NetLabel;
+    use rspice_design_model::design_management::CrossSheetPortDirection;
 
     let mut schematic = SchematicDocument::default();
     schematic.net_labels.push(NetLabel::off_sheet(
@@ -774,11 +779,13 @@ fn partner_matching_folds_case_under_every_policy_and_honors_severity_overrides(
 
 #[test]
 fn case_colliding_net_names_are_a_drc_error() {
-    use crate::state::{ComponentType, NetLabel, NetNamingPolicy};
+    use crate::schematic::component_type::ComponentType;
+    use crate::schematic::document_policy::NetNamingPolicy;
+    use crate::schematic::net_label::NetLabel;
 
     let named_port = |schematic: &mut SchematicDocument, name: &str| {
         schematic.components.push(
-            crate::state::Component::new(2, ComponentType::Port, Point::new(200, 0))
+            crate::schematic::component::Component::new(2, ComponentType::Port, Point::new(200, 0))
                 .with_name_value("", name),
         );
     };
@@ -860,7 +867,8 @@ fn case_colliding_net_names_are_a_drc_error() {
 
 #[test]
 fn the_advisory_continues_the_result_id_sequence_it_is_appended_to() {
-    use crate::state::{CrossSheetPortDirection, NetLabel};
+    use crate::schematic::net_label::NetLabel;
+    use rspice_design_model::design_management::CrossSheetPortDirection;
 
     let mut schematic = SchematicDocument::default();
     schematic.net_labels.push(NetLabel::off_sheet(

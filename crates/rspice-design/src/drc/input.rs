@@ -4,7 +4,7 @@
 //! rules never see wires, junctions, or label positions, because judging those
 //! again would be a second extraction and two extractions disagree.
 
-use crate::state::Point;
+use rspice_design_model::Point;
 
 /// Simplified component info for DRC checking.
 #[derive(Debug, Clone)]

@@ -2,7 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::state::{CellViewRef, Point};
+use rspice_design_model::Point;
+use rspice_design_model::cell_view::CellViewRef;
 
 /// Severity level for DRC violations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

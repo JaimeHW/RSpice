@@ -9,10 +9,8 @@ use std::collections::HashMap;
 
 use super::input::ComponentInfo;
 use super::net::{NetInfo, fold_nets};
-use super::netlist_gen::extraction::{
-    ConnectivityAnchor, ConnectivityDiagnosticKind, ExtractedConnectivity,
-};
 use super::types::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
+use crate::connectivity::{ConnectivityAnchor, ConnectivityDiagnosticKind, ExtractedConnectivity};
 
 /// Where one connectivity diagnostic points, in the vocabulary a finding uses.
 pub(super) fn diagnostic_location(anchor: &ConnectivityAnchor) -> DrcLocation {
@@ -75,7 +73,7 @@ pub struct DrcConfig {
     /// invalidate a cached report — but never deserializes back: the project
     /// contract is the only authority that may set it.
     #[serde(skip_deserializing)]
-    pub connectivity: crate::state::ConnectivityPolicy,
+    pub connectivity: crate::connectivity_contract::ConnectivityPolicy,
 }
 
 impl Default for DrcConfig {
@@ -90,7 +88,7 @@ impl Default for DrcConfig {
             check_shorted_outputs: true,
             min_connections: 2,
             severity_overrides: HashMap::new(),
-            connectivity: crate::state::ConnectivityPolicy::default(),
+            connectivity: crate::connectivity_contract::ConnectivityPolicy::default(),
         }
     }
 }
@@ -141,7 +139,7 @@ impl DrcChecker {
         components: &[ComponentInfo],
         connectivity: &ExtractedConnectivity,
     ) -> DrcResult {
-        let start = crate::time_compat::Instant::now();
+        let start = web_time::Instant::now();
         self.next_id = 0;
         let mut result = DrcResult::new();
 
@@ -639,7 +637,7 @@ impl DrcChecker {
 /// is why this is stated rather than failed. The rule counts declarations
 /// rather than sheets because the name, not the page, is what joins nets.
 pub(super) fn append_off_sheet_connector_violations(
-    schematic: &rspice_design::schematic::document::SchematicDocument,
+    schematic: &crate::schematic::document::SchematicDocument,
     result: &mut DrcResult,
     severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
 ) {
@@ -684,7 +682,7 @@ pub(super) fn append_off_sheet_connector_violations(
 
 /// Report every vector connection whose two ends declare different widths.
 ///
-/// This is where [`crate::state::BundleWidthMismatchPolicy`] decides something.
+/// This is where [`crate::connectivity_contract::BundleWidthMismatchPolicy`] decides something.
 /// Under `BlockConnection` a mismatched join is an error: the deck would have
 /// to invent or drop conductors to emit it. Under `ExplicitSliceOrExtend` the
 /// project has said it will slice or extend deliberately, so a mismatch the
@@ -694,14 +692,14 @@ pub(super) fn append_off_sheet_connector_violations(
 /// policy, so that one stays an error.
 pub(super) fn append_vector_width_violations(
     connectivity: &ExtractedConnectivity,
-    policy: &crate::state::ConnectivityPolicy,
+    policy: &crate::connectivity_contract::ConnectivityPolicy,
     result: &mut DrcResult,
     severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
 ) {
     let mut next_id = result.total_count();
     for mismatch in &connectivity.vector_nets.mismatches {
         let sliceable = policy.width_mismatch
-            == crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend
+            == crate::connectivity_contract::BundleWidthMismatchPolicy::ExplicitSliceOrExtend
             && mismatch.found_width >= mismatch.declared_width;
         let mut violation = DrcViolation::new(
             next_id,
@@ -733,11 +731,12 @@ pub(super) fn append_vector_width_violations(
 /// ports — and the finding is located on the second of the two, which is the
 /// one that arrived after the name was already taken.
 pub(super) fn append_case_collision_violations(
-    schematic: &rspice_design::schematic::document::SchematicDocument,
+    schematic: &crate::schematic::document::SchematicDocument,
     result: &mut DrcResult,
     severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
 ) {
-    let mut labels: Vec<&crate::state::NetLabel> = schematic.net_labels.iter().collect();
+    let mut labels: Vec<&crate::schematic::net_label::NetLabel> =
+        schematic.net_labels.iter().collect();
     labels.sort_by_key(|label| label.id);
     let authored = labels
         .into_iter()

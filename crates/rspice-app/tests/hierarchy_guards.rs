@@ -977,8 +977,8 @@ const NESTED_RECORD_FIELDS: &[(&str, &str)] = &[("ConnectivityContract", "policy
 const PROJECTION_MODULES: &[(&str, &str)] = &[
     ("simulation/netlist_gen.rs", "the generated deck"),
     ("simulation/netlist_gen/", "the generated deck"),
-    ("services/drc.rs", "the ERC/DRC report"),
-    ("services/drc/", "the ERC/DRC report"),
+    ("design/drc.rs", "the ERC/DRC report"),
+    ("design/drc/", "the ERC/DRC report"),
     ("workbench/app_state/design_checks.rs", "the ERC/DRC report"),
     (
         "state/workspace/materialize.rs",
@@ -1100,8 +1100,8 @@ fn reads_field(code: &str, receivers: &[&str], field: &str) -> bool {
 
 #[test]
 fn persisted_policies_reach_a_projection() {
-    // The design crates own these persisted contracts; the app still supplies
-    // their project and netlist projections.
+    // Design rules and application coordinators produce the projections of
+    // these persisted contracts.
     let mut declarations: BTreeMap<String, String> = BTreeMap::new();
     let mut projections: Vec<(String, String, String)> = Vec::new();
     for (prefix, root) in [

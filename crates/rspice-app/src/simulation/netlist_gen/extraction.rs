@@ -3,9 +3,7 @@
 use super::HierarchySource;
 use crate::state::{Component, Point, SchematicState};
 
-pub use rspice_design::connectivity::{
-    ConnectivityAnchor, ConnectivityDiagnosticKind, ExtractedConnectivity, ExtractedTerminal,
-};
+pub use rspice_design::connectivity::ExtractedConnectivity;
 
 pub fn extract(
     schematic: &SchematicState,
