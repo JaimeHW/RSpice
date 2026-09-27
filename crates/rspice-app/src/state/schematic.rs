@@ -36,7 +36,7 @@ use rspice_design::schematic::net_label;
 mod placement_authority;
 mod point;
 mod port;
-mod probe;
+use rspice_design::schematic::probe;
 mod replacement;
 use rspice_design::schematic::rotation;
 mod selection;

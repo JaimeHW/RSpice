@@ -12,6 +12,7 @@ pub mod ground_names;
 pub mod label_position;
 pub mod net_label;
 pub mod port;
+pub mod probe;
 pub mod rotation;
 pub mod stimulus_provenance;
 pub mod wire;
