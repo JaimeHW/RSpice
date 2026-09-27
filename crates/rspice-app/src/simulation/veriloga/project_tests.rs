@@ -163,10 +163,10 @@ endmodule
         .seal_model_sources_for_binding(&package.binding(), package.archive_digest())
         .unwrap();
     let runtime = compile_signed_pdk_source_runtime(
-        &sealed.binding,
-        sealed.archive_digest,
-        &sealed.veriloga_artifacts,
-        &sealed.veriloga_bindings[0],
+        &sealed.as_parts().binding,
+        sealed.as_parts().archive_digest,
+        &sealed.as_parts().veriloga_artifacts,
+        &sealed.as_parts().veriloga_bindings[0],
     )
     .unwrap();
     let runtime: PreparedVerilogARuntime =
@@ -179,13 +179,13 @@ endmodule
     assert!(!canonical.digital.processes.is_empty());
     assert_controlled_conductance(&runtime, 250.0);
 
-    let mut tampered = sealed.veriloga_artifacts.clone();
+    let mut tampered = sealed.as_parts().veriloga_artifacts.clone();
     tampered[0].source.push('\n');
     let error = compile_signed_pdk_source_runtime(
-        &sealed.binding,
-        sealed.archive_digest,
+        &sealed.as_parts().binding,
+        sealed.as_parts().archive_digest,
         &tampered,
-        &sealed.veriloga_bindings[0],
+        &sealed.as_parts().veriloga_bindings[0],
     )
     .unwrap_err()
     .to_string();

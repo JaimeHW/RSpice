@@ -154,6 +154,7 @@ impl SealedModelExecutionSources {
         mut self,
         pdk: crate::state::pdk_config::SealedPdkModelSources,
     ) -> Result<Self, String> {
+        let pdk = pdk.into_parts();
         if self.pdk_identity.is_some() {
             return Err("A sealed model snapshot already contains a signed PDK binding".to_owned());
         }

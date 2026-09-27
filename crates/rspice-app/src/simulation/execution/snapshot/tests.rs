@@ -783,10 +783,10 @@ fn signed_pdk_runtime() -> crate::simulation::veriloga::PreparedVerilogARuntime 
         .seal_model_sources_for_binding(&package.binding(), package.archive_digest())
         .unwrap();
     crate::simulation::veriloga::compile_signed_pdk_source_runtime(
-        &sealed.binding,
-        sealed.archive_digest,
-        &sealed.veriloga_artifacts,
-        &sealed.veriloga_bindings[0],
+        &sealed.as_parts().binding,
+        sealed.as_parts().archive_digest,
+        &sealed.as_parts().veriloga_artifacts,
+        &sealed.as_parts().veriloga_bindings[0],
     )
     .unwrap()
 }
