@@ -842,7 +842,7 @@ fn validate_property_expression(
             Err(format!("{} expression is empty", definition.display_name))
         };
     }
-    super::editors::parse_expression_source(
+    super::super::value::parse_expression_source(
         definition,
         source,
         crate::quantity::QuantityPresentationPolicy::default(),

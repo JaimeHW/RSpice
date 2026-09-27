@@ -10,11 +10,13 @@
 //! - `property_bridge` - Bidirectional property synchronization
 //! - `pwl_editor` - Piecewise-linear waveform editor
 
+mod component_fields;
 pub(crate) mod model_browser;
 pub(crate) mod property_bridge;
 pub(crate) mod pwl_editor;
 mod schema;
 pub(crate) mod source_preview;
+mod value;
 pub use schema::PropertyEditorSchema;
 pub(crate) mod tabbed_dialog;
 
