@@ -12,9 +12,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
-use crate::product::{ContentDigest, ObjectRevision};
-use crate::quantity::LayoutDatabaseUnit;
-use crate::state::CellViewRef;
+use rspice_app_types::product::{ContentDigest, ObjectRevision};
+use rspice_app_types::quantity::LayoutDatabaseUnit;
+use rspice_design_model::cell_view::CellViewRef;
 
 pub const PHYSICAL_LAYOUT_DOCUMENT_SCHEMA_VERSION: u16 = 1;
 pub const MAX_LAYOUT_OBJECTS: usize = 1_000_000;
@@ -631,7 +631,7 @@ impl PhysicalLayoutDocument {
         Ok(ContentDigest::from_bytes(hasher.finalize().into()))
     }
 
-    pub(crate) fn copy_for_cell(
+    pub fn copy_for_cell(
         &self,
         source_library: &str,
         source_cell: &str,
@@ -659,7 +659,7 @@ impl PhysicalLayoutDocument {
         Ok(candidate)
     }
 
-    pub(crate) fn rename_cell_references(
+    pub fn rename_cell_references(
         &self,
         library: &str,
         source_cell: &str,
@@ -692,7 +692,7 @@ impl PhysicalLayoutDocument {
         Ok(candidate)
     }
 
-    pub(crate) fn rename_library_references(
+    pub fn rename_library_references(
         &self,
         source_library: &str,
         target_library: &str,
@@ -724,7 +724,7 @@ impl PhysicalLayoutDocument {
         Ok(candidate)
     }
 
-    pub(crate) fn rename_view_references(
+    pub fn rename_view_references(
         &self,
         library: &str,
         cell: &str,
