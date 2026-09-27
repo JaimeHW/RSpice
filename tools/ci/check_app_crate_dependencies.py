@@ -64,6 +64,7 @@ def violations(
     direct: dict[str, set[str]], closures: dict[str, set[str]],
     portable_formats: set[str] | None = None,
     native_bundle_formats: set[str] | None = None,
+    table_schema_formats: set[str] | None = None,
 ) -> list[str]:
     """Validate the package graph; absent planned crates need no placeholder."""
     issues = []
@@ -85,6 +86,7 @@ def violations(
     for label, dependencies in (
         ("without optional features", portable_formats),
         ("with only native-bundle", native_bundle_formats),
+        ("with only table-schema", table_schema_formats),
     ):
         for dep in sorted(dependencies or set()):
             if dep in ENGINE_PACKAGES or dep.startswith("rspice-veriloga-model-"):
@@ -119,7 +121,7 @@ def main() -> int:
         }
     portable_formats = {}
     if "rspice-formats" in direct:
-        for feature in ("", "native-bundle"):
+        for feature in ("", "native-bundle", "table-schema"):
             selection = ("--features", feature) if feature else ()
             tree = run(
                 "cargo", "tree", "--locked", "-p", "rspice-formats", "--no-default-features",
@@ -130,7 +132,10 @@ def main() -> int:
                 match.group(1) for line in tree.splitlines()
                 if (match := PACKAGE_LINE.match(line))
             }
-    issues = violations(direct, closures, portable_formats.get(""), portable_formats.get("native-bundle"))
+    issues = violations(
+        direct, closures, portable_formats.get(""), portable_formats.get("native-bundle"),
+        portable_formats.get("table-schema"),
+    )
     if issues:
         print("\n".join(issues))
         return 1

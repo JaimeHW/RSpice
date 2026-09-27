@@ -63,6 +63,7 @@ jobs:
           python3 tools/ci/check_app_crate_dependencies.py
           cargo test --locked -p rspice-results --no-default-features --lib
           cargo test --locked -p rspice-formats --no-default-features --lib
+          cargo test --locked -p rspice-formats --no-default-features --features table-schema --lib
           cargo test --locked -p rspice-formats --no-default-features --features native-bundle --lib
           cargo test --locked -p rspice-formats --no-default-features --features result-csv --lib
           cargo test --locked -p rspice-formats --no-default-features --features monte-carlo-checkpoint --lib

@@ -17,6 +17,8 @@ pub mod psf;
 #[cfg(feature = "result-csv")]
 pub mod result_csv;
 pub mod table;
+#[cfg(feature = "table-schema")]
+pub mod table_schema;
 pub mod waveform_io;
 #[cfg(feature = "xlsx")]
 pub mod xlsx;

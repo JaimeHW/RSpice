@@ -20,6 +20,7 @@ class DependencyPolicyTests(unittest.TestCase):
                 {"rspice-formats": {"rspice-app-types", "rspice-results", "rspice-core"}},
                 {"rspice-formats", "csv", "serde"},
                 {"rspice-formats", "serde_json", "sha2"},
+                {"rspice-formats", "serde_json"},
             ),
             [],
         )
@@ -40,6 +41,10 @@ class DependencyPolicyTests(unittest.TestCase):
         self.assertEqual(
             violations({}, {}, native_bundle_formats={"rspice-formats", "rspice-core"}),
             ["rspice-formats with only native-bundle reaches simulator package rspice-core"],
+        )
+        self.assertEqual(
+            violations({}, {}, table_schema_formats={"rspice-formats", "rspice-core"}),
+            ["rspice-formats with only table-schema reaches simulator package rspice-core"],
         )
 
 

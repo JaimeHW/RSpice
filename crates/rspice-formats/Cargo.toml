@@ -12,6 +12,7 @@ rust-version.workspace = true
 workspace = true
 
 [features]
+table-schema = ["dep:serde_json"]
 # Reuse canonical retained results without enabling the engine in default codecs.
 result-csv = ["dep:rspice-app-types", "dep:rspice-core", "dep:rspice-results", "dep:serde_json"]
 native-bundle = ["dep:serde_json", "dep:sha2"]
