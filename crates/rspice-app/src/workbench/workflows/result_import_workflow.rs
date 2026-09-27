@@ -13,7 +13,7 @@ use crate::state::{
 use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::{ResultImportDialogState, ResultImportStage};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Read as _;
 use std::path::Path;

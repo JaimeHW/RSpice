@@ -5,9 +5,8 @@
 //! inventing domain or signal identity.
 
 use super::*;
-use rspice_formats::numeric::MAX_EXACT_F64_INTEGER;
 use rspice_results::result_import::waveforms::ImportedSignal;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::io::Cursor;
 
 const MAX_ARCHIVE_MEMBERS: usize = 1_024;
@@ -84,15 +83,6 @@ fn present_imported_waveforms(
         notes: Vec::new(),
         event_payload: None,
     }
-}
-
-fn validate_name(format: ResultImportFormat, kind: &str, name: &str) -> Result<(), String> {
-    rspice_results::result_import::waveforms::validate_name(
-        format,
-        kind,
-        name,
-        MAX_SIGNAL_NAME_BYTES,
-    )
 }
 
 // -------------------------------------------------------------------------
@@ -629,7 +619,8 @@ pub(super) fn parse_psf_ascii(
 #[path = "result_import_adapters/digital.rs"]
 mod digital;
 
-pub(super) use digital::{looks_like_fst, parse_fst, parse_vcd};
+pub(super) use digital::{parse_fst, parse_vcd};
+pub(super) use rspice_formats::fst::looks_like_fst;
 
 #[cfg(test)]
 use digital::preflight_fst_for_test as preflight_fst;

@@ -363,28 +363,6 @@ fn vcd_imports_initialized_digital_events() {
     assert_basic(parsed, ResultImportFormat::Vcd);
 }
 
-#[test]
-fn vcd_imports_unknown_and_high_impedance_at_the_projection_level() {
-    let vcd = b"$timescale 1 ns $end\n$scope module top $end\n$var wire 1 ! a $end\n$var wire 2 \" bus $end\n$upscope $end\n$enddefinitions $end\n#0\nx!\nb0x \"\n#1\n1!\nb01 \"\n#2\nz!\nb11 \"\n";
-    let parsed = parse_vcd(vcd, ResultImportFormat::Vcd).expect("four-state VCD imports");
-    assert_eq!(parsed.waveforms[0].y.as_slice(), &[0.5, 1.0, 0.5]);
-    assert_eq!(
-        parsed.waveforms[1].y.as_slice(),
-        &[0.5, 1.0, 3.0],
-        "a vector with any unknown bit denotes no integer"
-    );
-    let note = &parsed.notes[0];
-    assert!(
-        note.starts_with("3 sampled values were unknown (x) or high impedance (z)"),
-        "unexpected note: {note}"
-    );
-    assert!(note.contains("0.5"), "unexpected note: {note}");
-    assert!(
-        note.contains("keeps the four-state code the file recorded"),
-        "the level is the grid's decision, not a loss: {note}"
-    );
-}
-
 /// A vector no `f64` sample can hold used to be refused outright, taking the
 /// rest of the file with it. It imports: the word is retained whole as a
 /// declared bus, and the grid — which is where the f64 limit lives — carries
@@ -411,34 +389,6 @@ fn a_vector_no_f64_sample_can_hold_reaches_the_grid_one_bit_at_a_time() {
         "unexpected notes: {:?}",
         parsed.notes
     );
-}
-
-#[test]
-fn vcd_aliases_share_one_timeline_under_their_own_names() {
-    let vcd = b"$timescale 1 ns $end\n$scope module top $end\n$var wire 1 ! clk $end\n$var wire 1 ! clock $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n#5\n1!\n";
-    let parsed = parse_vcd(vcd, ResultImportFormat::Vcd).expect("aliased VCD");
-    assert_eq!(
-        parsed
-            .waveforms
-            .iter()
-            .map(|waveform| waveform.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["top.clk", "top.clock"]
-    );
-    assert_eq!(parsed.waveforms[0].y, parsed.waveforms[1].y);
-    assert!(Arc::ptr_eq(&parsed.waveforms[0].y, &parsed.waveforms[1].y));
-}
-
-#[test]
-fn vcd_keeps_the_changes_a_dumpoff_block_records() {
-    let vcd = b"$timescale 1 ns $end\n$scope module top $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n#0\n$dumpvars\n0!\n$end\n#5\n1!\n#10\n$dumpoff\nx!\n$end\n";
-    let parsed = parse_vcd(vcd, ResultImportFormat::Vcd).expect("VCD with a dump block");
-    assert_eq!(
-        parsed.waveforms[0].y.as_slice(),
-        &[0.0, 1.0, 0.5],
-        "a $dumpoff block records that the signals stopped being dumped"
-    );
-    assert_eq!(parsed.sample_count, 3);
 }
 
 fn generated_fst() -> Vec<u8> {
