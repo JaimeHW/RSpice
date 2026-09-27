@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 
+use rspice_design::schematic::identity::SchematicIdentity;
 use serde::{Deserialize, Serialize};
 
 use super::bus::{Bus, BusDrawing, BusTap, PendingBusTap};
@@ -25,8 +26,6 @@ use super::tool::Tool;
 use super::wire::{Wire, WireConnection, WireDrawing, WireSegment};
 
 mod components;
-mod design_identity;
-use design_identity::SchematicIdentity;
 mod editor_ops;
 mod identity;
 mod junction_ops;

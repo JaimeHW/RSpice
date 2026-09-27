@@ -1,6 +1,6 @@
 //! Schematic object identity, reference counters, and deterministic load repair.
 
-use super::{ComponentType, SchematicDocument};
+use super::{component_type::ComponentType, document::SchematicDocument};
 use std::collections::{HashMap, HashSet};
 
 /// Runtime allocation state for one schematic, independent of its editor.
