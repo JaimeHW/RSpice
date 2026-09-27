@@ -5,9 +5,9 @@
 //! wiring to pins that survive the swap. Refuses the replacement outright
 //! when the new master cannot carry the existing connections.
 
-use super::super::super::replacement::*;
-use super::super::super::replacement_edit::{self, InstanceReplacement, ReplacementContext};
 use super::super::*;
+use rspice_design::schematic::replacement::*;
+use rspice_design::schematic::replacement_edit::{self, InstanceReplacement, ReplacementContext};
 
 impl SchematicState {
     /// Capture immutable authority for the exact selected component using its

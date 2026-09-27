@@ -39,9 +39,7 @@ mod placement_authority;
 mod point;
 mod port;
 use rspice_design::schematic::probe;
-pub(crate) mod interface_repair;
-mod replacement;
-pub(crate) mod replacement_edit;
+use rspice_design::schematic::replacement;
 use rspice_design::schematic::rotation;
 mod selection;
 mod snap;
@@ -158,4 +156,6 @@ pub use visibility::{
     SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility, SchematicVisibilityPolicy,
     SchematicWireRoutingStyle,
 };
-pub use wire::{Wire, WireConnection, WireRoutingMode, WireSegment};
+#[cfg(test)]
+pub use wire::WireConnection;
+pub use wire::{Wire, WireRoutingMode, WireSegment};

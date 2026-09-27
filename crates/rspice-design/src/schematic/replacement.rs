@@ -8,7 +8,12 @@
 
 use std::fmt;
 
-use super::{Component, ComponentType, LibraryCellInstance, Point, PortDirection};
+use super::wire::WireConnection;
+use super::{
+    component::{Component, LibraryCellInstance},
+    component_type::ComponentType,
+};
+use rspice_design_model::{Point, port::PortDirection};
 
 /// One named terminal in an instance replacement contract.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -374,7 +379,7 @@ pub struct SchematicReplacementImpact {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SchematicReplacementPreview {
     pub component: Component,
-    pub connections: Vec<super::WireConnection>,
+    pub connections: Vec<WireConnection>,
     pub wire_edits: Vec<SchematicReplacementWireEdit>,
     pub compatibility: SchematicReplacementCompatibility,
     pub impact: SchematicReplacementImpact,
@@ -556,7 +561,7 @@ pub fn parse_replacement_parameters_strict(
 ) -> Result<std::collections::HashMap<String, String>, SchematicReplacementError> {
     let malformed = |reason| SchematicReplacementError::MalformedParameterString { reason };
     let mut result = std::collections::HashMap::new();
-    for entry in rspice_design::parameters::parameter_entries(input) {
+    for entry in crate::parameters::parameter_entries(input) {
         let entry = entry.map_err(malformed)?;
         if !valid_replacement_parameter_name(entry.key) {
             return Err(malformed(format!(
@@ -593,7 +598,7 @@ pub fn format_replacement_parameters(
 }
 
 pub fn valid_replacement_parameter_name(name: &str) -> bool {
-    rspice_design::parameters::valid_parameter_name(name)
+    crate::parameters::valid_parameter_name(name)
 }
 
 #[cfg(test)]

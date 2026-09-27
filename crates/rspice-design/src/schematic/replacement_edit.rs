@@ -6,7 +6,10 @@ use super::replacement::{
     format_replacement_parameters, parse_replacement_parameters_strict,
     valid_replacement_parameter_name,
 };
-use super::{Component, ComponentType, Point, PortDirection, Rotation, WireConnection};
+use super::{
+    component::Component, component_type::ComponentType, rotation::Rotation, wire::WireConnection,
+};
+use rspice_design_model::{Point, port::PortDirection};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Current editor selection and topology counter used to check retained review authority.
@@ -610,7 +613,7 @@ pub(super) fn build_wire_edits(
             *point = target;
         }
         let (replacement_points, point_indices) =
-            rspice_design::schematic::movement::orthogonal_route_for_corresponding_points(
+            super::movement::orthogonal_route_for_corresponding_points(
                 wire_id,
                 &wire.points,
                 &moved_points,
@@ -1277,10 +1280,11 @@ pub(super) fn normalized(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::super::component::LibraryCellInstance;
+    use super::super::history::SchematicSnapshot;
     use super::super::interface_repair::InstanceInterfaceRepair;
-    use super::super::{LibraryCellInstance, PortSpec};
     use super::*;
-    use rspice_design::schematic::history::SchematicSnapshot;
+    use rspice_design_model::port::PortSpec;
 
     #[test]
     fn discarded_replacement_and_repair_preserve_the_document() {
@@ -1307,6 +1311,14 @@ mod tests {
             name: "IN".to_owned(),
             direction: PortDirection::In,
         }];
+        assert_eq!(
+            InstanceInterfaceRepair::prepare(&mut document, 1, &old_ports, |_| panic!(
+                "ineligible source must not resolve symbols"
+            ))
+            .unwrap_err(),
+            SchematicReplacementError::SelectExactlyOneInstance,
+        );
+        assert!(before.is_equal_document(&document));
         let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
         binding.bind_interface(&old_ports);
         document.components[0] = Component::new(1, ComponentType::CellInstance, Point::origin())
@@ -1316,6 +1328,15 @@ mod tests {
             direction: PortDirection::Out,
         }];
         let before = SchematicSnapshot::capture(&document);
+        assert_eq!(
+            InstanceInterfaceRepair::prepare(&mut document, 1, &[], |_| panic!(
+                "empty interface must not resolve symbols"
+            ))
+            .unwrap_err(),
+            SchematicReplacementError::SelectExactlyOneInstance,
+        );
+        assert!(before.is_equal_document(&document));
+
         drop(InstanceInterfaceRepair::prepare(&mut document, 1, &new_ports, |_| None).unwrap());
         assert!(before.is_equal_document(&document));
     }

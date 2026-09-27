@@ -16,12 +16,12 @@ use std::rc::Rc;
 
 use super::*;
 use crate::product::ContentDigest;
-use crate::state::interface_repair::same_terminal_contract;
 use crate::state::workspace::{
     ConfigurationExecutionBinding, ConfigurationExecutionPlan, MasterKey, assign_master_names,
     master_closure_digest,
 };
 use crate::state::{CellViewRef, LibraryCellInstance};
+use rspice_design::schematic::interface_repair::same_terminal_contract;
 
 #[cfg(test)]
 mod tests;

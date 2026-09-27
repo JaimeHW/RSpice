@@ -8,8 +8,14 @@ use super::replacement_edit::{
     TerminalPlacement, build_wire_edits, connected_source_terminals, normalized, terminal_lookup,
     terminal_placements, validate_replacement_geometry,
 };
-use super::{Component, LibraryCellInstance, Point, PortSpec, Rotation, WireConnection};
-use rspice_design::resolved_symbol::ResolvedCellSymbol;
+use super::{
+    component::{Component, LibraryCellInstance},
+    component_type::ComponentType,
+    rotation::Rotation,
+    wire::WireConnection,
+};
+use crate::resolved_symbol::ResolvedCellSymbol;
+use rspice_design_model::{Point, port::PortSpec};
 use std::collections::{HashMap, HashSet};
 
 /// An interface repair whose validated candidate cannot outlive its target borrow.
@@ -60,6 +66,9 @@ impl<'document, 'ports> InstanceInterfaceRepair<'document, 'ports> {
             .find(|component| component.id == component_id)
             .cloned()
             .ok_or(SchematicReplacementError::SourceInstanceMissing { component_id })?;
+        if source.kind != ComponentType::CellInstance || master_ports.is_empty() {
+            return Err(SchematicReplacementError::SelectExactlyOneInstance);
+        }
         let binding = source.library_cell.clone().ok_or_else(|| {
             SchematicReplacementError::InvalidSourceContract {
                 reason: "the selected instance carries no library binding".to_owned(),

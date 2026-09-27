@@ -13,12 +13,12 @@
 //! uses, so a surface can never offer this repair for an instance the deck
 //! would still emit, or withhold it from one the deck refuses.
 
-use super::super::super::interface_repair::{InstanceInterfaceRepair, interface_is_stale};
 use super::super::super::{
     ComponentType, LibraryCellInstance, PortSpec, SchematicReplacementError,
 };
 use super::super::*;
 use crate::state::{LibraryManager, SymbolResolver};
+use rspice_design::schematic::interface_repair::{InstanceInterfaceRepair, interface_is_stale};
 use std::collections::HashMap;
 
 impl SchematicState {

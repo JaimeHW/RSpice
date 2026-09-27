@@ -8,7 +8,7 @@
 //! error rather than a silent first-match win.
 
 use super::*;
-use crate::state::interface_repair::same_terminal_contract;
+use rspice_design::schematic::interface_repair::same_terminal_contract;
 
 pub(super) fn is_project_virtual_source_path(path: &Path) -> bool {
     path.to_str()
