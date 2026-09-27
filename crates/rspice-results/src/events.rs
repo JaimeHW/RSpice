@@ -1,5 +1,7 @@
 //! Exact retained digital/real events, bus declarations, and history validation.
 
+pub mod projection;
+
 use crate::analysis_payload::AnalysisResultPayload;
 use crate::current_impulses::CurrentImpulseHistoryEvidence;
 use crate::simulation_values::{DigitalEventPoint, EventNodeHistory, RealEventPoint};
