@@ -4,6 +4,9 @@
 //! finished. The lifecycle is explicit because a queued re-run, a cancelled
 //! run, and a failed run are all different things to the UI.
 
+mod evidence_domain;
+pub use evidence_domain::EvidenceDomain;
+
 use crate::analysis_payload::AnalysisResultPayload;
 use crate::analysis_result::AnalysisResult;
 use crate::provenance::AnalysisResultSourceDomain;
@@ -257,6 +260,18 @@ pub struct SimulationRun<A = AnalysisResult> {
     specification_verdicts: Option<Vec<SpecificationVerdict>>,
     /// Optional immutable grouping identity for a multi-plan campaign.
     campaign_membership: Option<SimulationCampaignMembership>,
+}
+
+impl<A> AsRef<SimulationRun<A>> for SimulationRun<A> {
+    fn as_ref(&self) -> &SimulationRun<A> {
+        self
+    }
+}
+
+impl<A> AsMut<SimulationRun<A>> for SimulationRun<A> {
+    fn as_mut(&mut self) -> &mut SimulationRun<A> {
+        self
+    }
 }
 
 impl<A> SimulationRun<A> {

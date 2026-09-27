@@ -3,47 +3,6 @@
 use super::*;
 use crate::product::{DatasetId, RunId};
 
-/// How the selected dataset relates to the plan whose limits are being read.
-///
-/// Only [`Self::ThisPlan`] and [`Self::Legacy`] are datasets a plan's limits may
-/// be judged against. The rest are not refusals to show anything — they are the
-/// reason a surface has nothing to show, and naming that reason is the whole
-/// point: "no evidence" and "the evidence belongs to another plan" send an
-/// engineer to two different places.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EvidenceDomain {
-    /// The plan being read owns the selected run.
-    ThisPlan,
-    /// Another plan owns it.
-    AnotherPlan,
-    /// A manual deck produced it, so no plan owns it.
-    ManualDeck,
-    /// History from before runs recorded plan ownership. Readable, because
-    /// refusing it would hide every result a project had before receipts.
-    Legacy,
-    /// Nothing is selected.
-    NoDataset,
-}
-
-impl EvidenceDomain {
-    /// Whether a plan's limits may be answered by this dataset.
-    #[must_use]
-    pub const fn answers_a_plan_limit(self) -> bool {
-        matches!(self, Self::ThisPlan | Self::Legacy)
-    }
-
-    /// What a surface says when the dataset cannot answer its limits.
-    #[must_use]
-    pub const fn refusal(self) -> Option<&'static str> {
-        match self {
-            Self::ThisPlan | Self::Legacy => None,
-            Self::AnotherPlan => Some("active dataset belongs to another plan"),
-            Self::ManualDeck => Some("active dataset is a manual deck, owned by no plan"),
-            Self::NoDataset => Some("no dataset loaded"),
-        }
-    }
-}
-
 impl SimulationState {
     /// Whether an execution still owns mutable simulation state.
     ///
@@ -620,10 +579,8 @@ impl SimulationState {
         &self,
         plan_id: crate::product::SimulationPlanId,
     ) -> Option<&SimulationRun> {
-        self.active_run().filter(|run| {
-            run.prepared_receipt()
-                .is_none_or(|receipt| receipt.simulation_plan_id() == Some(plan_id))
-        })
+        self.active_run()
+            .filter(|run| run.evidence_domain(Some(plan_id)).answers_a_plan_limit())
     }
 
     /// How the selected dataset relates to the plan whose limits are being read.
@@ -638,24 +595,16 @@ impl SimulationState {
         &self,
         plan_id: Option<crate::product::SimulationPlanId>,
     ) -> EvidenceDomain {
-        let Some(run) = self.active_run() else {
-            return EvidenceDomain::NoDataset;
-        };
-        let Some(receipt) = run.prepared_receipt() else {
-            return EvidenceDomain::Legacy;
-        };
-        match (receipt.simulation_plan_id(), plan_id) {
-            (Some(owner), Some(reader)) if owner == reader => EvidenceDomain::ThisPlan,
-            (Some(_), _) => EvidenceDomain::AnotherPlan,
-            (None, _) => EvidenceDomain::ManualDeck,
-        }
+        self.active_run().map_or(EvidenceDomain::NoDataset, |run| {
+            run.evidence_domain(plan_id)
+        })
     }
 
     /// Index of the newest run that owns at least one retained analysis.
     /// Run history is newest-first, so this is also the exact dataset the
     /// split-results stage should initially track.
     pub fn newest_retained_result_run_index(&self) -> Option<usize> {
-        self.runs.iter().position(|run| !run.analyses.is_empty())
+        self.runs.newest_retained_result_run_index()
     }
 
     /// Get count of runs in history
@@ -752,19 +701,7 @@ impl SimulationState {
     fn prune_runs_history(&mut self) {
         let limit = self.effective_retained_dataset_limit();
         let selected_run_id = self.active_run().map(|run| run.run_id);
-        while self.runs.len() > limit {
-            // Oldest first among the pruneable, and never index 0: the head of
-            // a newest-first history is the run that was just produced.
-            let Some(oldest_pruneable) = self
-                .runs
-                .iter()
-                .rposition(|run| run.retention().is_pruneable())
-                .filter(|index| *index > 0)
-            else {
-                break;
-            };
-            self.runs.remove(oldest_pruneable);
-        }
+        self.runs.prune_runs(limit);
         // Pinning makes pruning remove from the middle, so the index-based
         // selection is re-resolved from the identity it pointed at rather than
         // left to land on whichever run shifted into that slot.
@@ -790,28 +727,12 @@ impl SimulationState {
 
     #[must_use]
     pub fn retained_plan_dataset_count(&self, plan_id: crate::product::SimulationPlanId) -> usize {
-        self.runs
-            .iter()
-            .filter(|run| {
-                run.prepared_receipt()
-                    .and_then(PreparedRunReceipt::simulation_plan_id)
-                    == Some(plan_id)
-            })
-            .count()
+        self.runs.retained_plan_dataset_count(plan_id)
     }
 
     #[must_use]
     pub fn pinned_plan_run_count(&self, plan_id: crate::product::SimulationPlanId) -> usize {
-        self.runs
-            .iter()
-            .filter(|run| {
-                run.retention().is_pinned()
-                    && run
-                        .prepared_receipt()
-                        .and_then(PreparedRunReceipt::simulation_plan_id)
-                        == Some(plan_id)
-            })
-            .count()
+        self.runs.pinned_plan_run_count(plan_id)
     }
 
     pub(crate) fn prune_plan_runs(
@@ -819,21 +740,8 @@ impl SimulationState {
         plan_id: crate::product::SimulationPlanId,
         limit: usize,
     ) {
-        let limit = limit.max(1);
         let selected_run_id = self.active_run().map(|run| run.run_id);
-        while self.retained_plan_dataset_count(plan_id) > limit {
-            let Some(index) = self.runs.iter().rposition(|run| {
-                run.retention().is_pruneable()
-                    && run
-                        .prepared_receipt()
-                        .and_then(PreparedRunReceipt::simulation_plan_id)
-                        == Some(plan_id)
-                    && Some(run.run_id) != selected_run_id
-            }) else {
-                break;
-            };
-            self.runs.remove(index);
-        }
+        self.runs.prune_plan_runs(plan_id, limit, selected_run_id);
         if let Some(run_id) = selected_run_id {
             self.active_run_idx = self.runs.iter().position(|run| run.run_id == run_id);
             if self.active_run_idx.is_none() {
@@ -872,11 +780,7 @@ impl SimulationState {
     /// more than its limit; [`Self::retention_limit_is_unenforceable`] is how
     /// the page says so rather than implying the limit is being enforced.
     pub fn set_run_retention(&mut self, run_id: RunId, retention: RunRetention) -> bool {
-        let Some(run) = self.runs.iter_mut().find(|run| run.run_id == run_id) else {
-            return false;
-        };
-        run.set_retention(retention);
-        true
+        self.runs.set_run_retention(run_id, retention)
     }
 
     /// The retention limit in force, resolved from the project's own setting.

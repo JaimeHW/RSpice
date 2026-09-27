@@ -24,6 +24,18 @@ impl DerefMut for SimulationRun {
     }
 }
 
+impl AsRef<RetainedRun<AnalysisResult>> for SimulationRun {
+    fn as_ref(&self) -> &RetainedRun<AnalysisResult> {
+        &self.data
+    }
+}
+
+impl AsMut<RetainedRun<AnalysisResult>> for SimulationRun {
+    fn as_mut(&mut self) -> &mut RetainedRun<AnalysisResult> {
+        &mut self.data
+    }
+}
+
 impl SimulationRun {
     /// Create current run evidence and start its live monotonic clock.
     pub fn new(run_number: u64) -> Self {

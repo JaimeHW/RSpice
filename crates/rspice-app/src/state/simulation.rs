@@ -110,8 +110,8 @@ pub use rspice_results::family_measurements::{
     FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements,
 };
 pub use rspice_results::run::{
-    ExecutionTarget, RunRetention, SimulationCampaignMembership, SimulationExecutionIdentity,
-    SimulationRunLifecycle,
+    EvidenceDomain, ExecutionTarget, RunRetention, SimulationCampaignMembership,
+    SimulationExecutionIdentity, SimulationRunLifecycle,
 };
 pub use rspice_results::run_receipt::{
     HierarchyMapRow, PreparedModelQualification, PreparedModelSourceIdentity, PreparedRunReceipt,
@@ -128,7 +128,6 @@ pub use rspice_results::waveform::SharedWaveformValues;
 pub use run::SimulationRun;
 pub type RunHistory = rspice_results::run_history::RunHistory<SimulationRun>;
 pub(crate) use rspice_results::run_history::RunHistoryRevision;
-pub use state_impl::EvidenceDomain;
 pub use state_model::{SimulationRunIntent, SimulationState};
 pub use waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, WaveformData};
 
