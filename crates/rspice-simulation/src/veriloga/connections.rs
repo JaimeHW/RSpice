@@ -3,7 +3,7 @@
 use super::{
     PreparedVerilogASourceBinding, valid_sealed_source_key, valid_veriloga_netlist_identifier,
 };
-use crate::product::ContentDigest;
+use rspice_app_types::product::ContentDigest;
 use sha2::{Digest as _, Sha256};
 
 /// A connection library has source provenance and an import alias, but no

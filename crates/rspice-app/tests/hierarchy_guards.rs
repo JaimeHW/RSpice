@@ -413,14 +413,7 @@ const PATH_GRAMMAR_OWNER: &str = "rspice-app-types::hierarchy_path";
 /// Measured 2026-08-17 over the shipped source: comments are excluded, string
 /// literals are not, and `#[cfg(test)]` items are cut out — a fixture path in
 /// a test is not a production grammar site.
-const PATH_GRAMMAR_SITES: &[(&str, usize)] = &[
-    // `simulation/veriloga/runtime.rs` strips a leading separator from a *portable
-    // data-file* path, not from a hierarchy path. The pattern set cannot tell
-    // the two apart, so this is a ceiling on that one site; it retires when
-    // the module takes its path handling from a path type of its own rather
-    // than by editing this table.
-    ("simulation/veriloga/runtime.rs", 1),
-];
+const PATH_GRAMMAR_SITES: &[(&str, usize)] = &[];
 
 /// Occurrences of the literal root-cell name across the shipped crate.
 ///

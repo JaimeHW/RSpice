@@ -43,7 +43,7 @@ fn seal_runtime(file: &str, module: &str, source: &str) -> PreparedVerilogARunti
         .expect("fixture module compiles");
     PreparedVerilogARuntime::try_from_virtual_compilation(
         format!("__rspice_project__/fixture/{file}"),
-        crate::product::ContentDigest::from_bytes([0x5a; 32]),
+        rspice_app_types::product::ContentDigest::from_bytes([0x5a; 32]),
         module.to_owned(),
         &compilation,
     )
@@ -122,10 +122,7 @@ fn sealed_canonical_ir_constants_survive_the_json_the_runtime_ships() {
 /// this module could not be sealed at all — `serde_json` wrote the reset
 /// as `null` and the sealed payload then refused to decode, which took the
 /// whole browser path away from every `$bound_step` model.
-const BOUND_STEP_SOURCE: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../rspice-simulation/tests/fixtures/bound_step.va"
-));
+const BOUND_STEP_SOURCE: &str = include_str!("../../tests/fixtures/bound_step.va");
 
 /// The declaration-side spellings, and the silent ones. Both are folded
 /// constants, so neither is announced by anything in the source text.
@@ -154,10 +151,7 @@ const BOUND_STEP_SOURCE: &str = include_str!(concat!(
 /// (`RangeBound.upper` is an `Option<Expression>` whose `None` means
 /// `+inf`), so an open range never becomes a float at all — which is why
 /// the shipped corpus, full of open ranges, carries no non-finite float.
-const INFINITE_CONSTANT_SOURCE: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../rspice-simulation/tests/fixtures/infinite_constant.va"
-));
+const INFINITE_CONSTANT_SOURCE: &str = include_str!("../../tests/fixtures/infinite_constant.va");
 
 /// Every non-finite `PushConst` in a compiled program, however nested,
 /// with its assigned variable when the expression writes a variable.

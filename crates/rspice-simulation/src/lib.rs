@@ -7,3 +7,4 @@ pub mod compilation;
 pub mod model_import;
 pub mod model_sources;
 pub mod pdk;
+pub mod veriloga;

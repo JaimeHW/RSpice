@@ -2,9 +2,10 @@
 
 use sha2::{Digest as _, Sha256};
 
-mod runtime;
-pub(crate) use runtime::compile_signed_pdk_source_runtime;
-pub use runtime::{PreparedRuntimeError, PreparedVerilogARuntime, PreparedVerilogARuntimeSet};
+pub(crate) use rspice_simulation::veriloga::compile_signed_pdk_source_runtime;
+pub use rspice_simulation::veriloga::{
+    PreparedRuntimeError, PreparedVerilogARuntime, PreparedVerilogARuntimeSet,
+};
 pub(crate) mod build_profile;
 
 #[cfg(test)]
@@ -182,7 +183,7 @@ pub(crate) fn compile_project_source_bundle_runtime(
 pub(crate) fn compile_model_library_source_runtimes(
     authority: &crate::state::model_library::SealedModelLibraryVerilogAAuthority,
 ) -> Result<PreparedVerilogARuntimeSet, PreparedRuntimeError> {
-    runtime::compile_model_library_source_runtimes(
+    rspice_simulation::veriloga::compile_model_library_source_runtimes(
         authority,
         model_library_virtual_compile_limits(),
     )

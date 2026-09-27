@@ -25,7 +25,6 @@ use rspice_model_library::pdk::package::authenticate_archive;
 use serde::{Deserialize, Serialize};
 
 use rspice_simulation::pdk::{SealedPdkModelSources, validate_runtime_compatibility};
-pub(crate) use rspice_simulation::pdk::{SealedPdkVerilogAArtifact, SealedPdkVerilogABinding};
 pub use rspice_simulation::pdk::{
     ValidatedPdkTechnologyPackage, validate_archive, validate_archive_bytes,
 };

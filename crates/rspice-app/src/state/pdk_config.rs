@@ -81,7 +81,7 @@ pub(crate) use technology_package::tests::fixture_archive_with_veriloga as signe
 #[cfg(test)]
 pub(crate) use technology_package::tests::fixture_archive_with_veriloga_source as signed_veriloga_source_test_fixture;
 pub use technology_package::{
-    MAX_PDK_ARCHIVE_BYTES, MAX_PDK_ARTIFACT_BYTES, MAX_PDK_ARTIFACTS, MAX_PDK_TOTAL_ARTIFACT_BYTES,
+    MAX_PDK_ARCHIVE_BYTES,
     PdkAdministrativeAuthority, PdkConnectivityEdge, PdkExecutionTarget, PdkExtractionContract,
     PdkExtractionQualificationVector, PdkExtractionQuantity, PdkLayerAlias, PdkLayerKind,
     PdkLayerPurposeRef, PdkPublisherTrustStore, PdkRecognitionContract,
@@ -91,7 +91,6 @@ pub use technology_package::{
     PdkTrustAuditAction, PdkTrustAuditReceipt, PdkViaDefinition, TrustedPdkPublisherKey,
     ValidatedPdkTechnologyPackage,
 };
-pub(crate) use technology_package::{SealedPdkVerilogAArtifact, SealedPdkVerilogABinding};
 // =============================================================================
 // Constants
 // =============================================================================
