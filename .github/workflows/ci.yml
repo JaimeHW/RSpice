@@ -64,6 +64,7 @@ jobs:
           cargo test --locked -p rspice-results --no-default-features --lib
           cargo test --locked -p rspice-formats --no-default-features --lib
           cargo test --locked -p rspice-formats --no-default-features --features native-bundle --lib
+          cargo test --locked -p rspice-formats --no-default-features --features result-csv --lib
           cargo test --locked -p rspice-formats --no-default-features --features monte-carlo-checkpoint --lib
           cargo test --locked -p rspice-app-types -p rspice-results -p rspice-hardcopy-contract -p rspice-model-library -p rspice-formats -p rspice-simulation-contract --lib
       - name: UI incremental build identity regressions

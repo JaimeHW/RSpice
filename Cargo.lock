@@ -5521,6 +5521,7 @@ dependencies = [
  "npyz",
  "num-complex",
  "parquet",
+ "rspice-core",
  "rspice-results",
  "rust_xlsxwriter",
  "rustyhdf5",

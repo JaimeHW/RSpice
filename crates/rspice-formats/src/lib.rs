@@ -14,6 +14,8 @@ pub mod native_bundle;
 pub mod numeric;
 pub mod numpy;
 pub mod psf;
+#[cfg(feature = "result-csv")]
+pub mod result_csv;
 pub mod table;
 pub mod waveform_io;
 #[cfg(feature = "xlsx")]

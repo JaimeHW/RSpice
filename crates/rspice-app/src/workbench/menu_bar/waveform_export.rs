@@ -606,35 +606,7 @@ fn fft_spectrum_csv(
         .source_cache
         .as_ref()
         .map_or(data.name.as_str(), |cache| cache.name.as_str());
-    let mut contents = String::from("field,value,unit\n");
-    for (field, value, unit) in [
-        ("source", csv_text(source), ""),
-        ("window", csv_text(data.window.display_name()), ""),
-        ("fft_size", data.fft_size.to_string(), ""),
-        ("sample_rate", format!("{:.17e}", data.sample_rate), "Hz"),
-        (
-            "resolution_bandwidth",
-            format!("{:.17e}", data.resolution_bandwidth()),
-            "Hz",
-        ),
-        (
-            "normalization",
-            csv_text(data.normalization.display_name()),
-            "",
-        ),
-    ] {
-        contents.push_str(&format!("{field},{value},{unit}\n"));
-    }
-    contents.push_str("\nfrequency_hz,magnitude,magnitude_db,phase_rad\n");
-    for point in &data.points {
-        contents.push_str(&format!(
-            "{:.17e},{:.17e},{:.17e},{:.17e}\n",
-            point.frequency,
-            point.magnitude,
-            point.magnitude_db(),
-            point.phase
-        ));
-    }
+    let contents = rspice_formats::result_csv::encode_spectrum_csv(source, data);
     Ok(PreparedTypedResultCsv {
         default_name: "rspice-spectrum.csv",
         detail: format!("{} spectrum points", data.points.len()),
@@ -648,55 +620,12 @@ fn histogram_bins_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
     if histogram.bins.is_empty() {
         return None;
     }
-    let mut contents = String::from("field,value,unit\n");
-    for (field, value) in [
-        ("measurement", csv_text(&histogram.name)),
-        ("display_mode", csv_text(display.mode.label())),
-        ("ordinate_unit", csv_text(display.mode.unit())),
-        ("total_count", histogram.total_count.to_string()),
-        ("total_weight", format!("{:.17e}", histogram.total_weight)),
-        ("underflow", histogram.underflow.to_string()),
-        ("overflow", histogram.overflow.to_string()),
-        ("data_min", format!("{:.17e}", histogram.data_min)),
-        ("data_max", format!("{:.17e}", histogram.data_max)),
-    ] {
-        contents.push_str(&format!("{field},{value},\n"));
-    }
-    contents.push_str("\nbin_lower,bin_upper,count,weight\n");
-    for bin in &histogram.bins {
-        contents.push_str(&format!(
-            "{:.17e},{:.17e},{},{:.17e}\n",
-            bin.lower, bin.upper, bin.count, bin.weight
-        ));
-    }
-    if display.cdf.is_some() {
-        contents.push_str("\nobservation,cumulative_probability\n");
-        for (x, y) in display.source_points(&histogram) {
-            contents.push_str(&format!("{x:.17e},{y:.17e}\n"));
-        }
-    } else {
-        contents.push_str("\nbin_center,display_ordinate\n");
-        for (x, y) in display.source_points(&histogram) {
-            contents.push_str(&format!("{x:.17e},{y:.17e}\n"));
-        }
-    }
+    let contents = rspice_formats::result_csv::encode_histogram_csv(&histogram, &display);
     Some(PreparedTypedResultCsv {
         default_name: "rspice-distribution.csv",
         detail: format!("{} distribution ({})", histogram.name, display.mode.label()),
         contents,
     })
-}
-
-/// A measurement that could not be made exports as an empty cell, not as a
-/// zero: a spreadsheet that averages a column of rise times must not be handed
-/// a `0 s` that no acquisition contains.
-///
-/// An *unbounded* measurement keeps its value and exports as `inf`. The Q and
-/// SNR of a noiseless eye are unbounded, which is an answer — the sheet prints
-/// `∞` for them — and blanking it here would tell a reader the eye had no Q at
-/// all, which is the one thing an empty cell in this column means.
-fn csv_measurement(value: Option<f64>) -> String {
-    value.map_or_else(String::new, |value| format!("{value:.17e}"))
 }
 
 fn eye_measurements_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
@@ -724,43 +653,12 @@ fn eye_measurements_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
         Some(EyeTimebaseProvenance::Explicit { .. }) => "explicit".to_owned(),
         Some(EyeTimebaseProvenance::AutoRejected(_)) | None => "unknown".to_owned(),
     };
-    let mut contents = String::from("field,value,unit\n");
-    for (field, value, unit) in [
-        ("acquisitions", eye.data.traces.len().to_string(), ""),
-        ("unit_intervals", eye.data.ui_count.to_string(), ""),
-        ("data_rate", format!("{:.17e}", m.data_rate), "b/s"),
-        ("unit_interval", format!("{:.17e}", m.unit_interval), "s"),
-        ("unit_interval_source", csv_text(&unit_interval_source), ""),
-        ("eye_height", format!("{:.17e}", m.eye_height), "V"),
-        ("eye_width", format!("{:.17e}", m.eye_width), "UI"),
-        ("eye_area", format!("{:.17e}", m.eye_area), ""),
-        (
-            "vertical_margin",
-            format!("{:.17e}", m.vertical_margin),
-            "V",
-        ),
-        (
-            "horizontal_margin",
-            format!("{:.17e}", m.horizontal_margin),
-            "UI",
-        ),
-        ("rise_time", csv_measurement(m.rise_time), "s"),
-        ("fall_time", csv_measurement(m.fall_time), "s"),
-        ("jitter_pp", format!("{:.17e}", m.jitter_pp), "s"),
-        ("jitter_rms", format!("{:.17e}", m.jitter_rms), "s"),
-        ("jitter_dj", format!("{:.17e}", m.jitter_dj), "s"),
-        ("crossing_level", csv_measurement(m.crossing_level), "V"),
-        (
-            "crossing_percentage",
-            csv_measurement(m.crossing_percentage),
-            "",
-        ),
-        ("snr", csv_measurement(m.snr_db), "dB"),
-        ("q_factor", csv_measurement(m.q_factor), ""),
-        ("estimated_ber", csv_measurement(m.estimated_ber), ""),
-    ] {
-        contents.push_str(&format!("{field},{value},{unit}\n"));
-    }
+    let contents = rspice_formats::result_csv::encode_eye_measurements_csv(
+        eye.data.traces.len(),
+        eye.data.ui_count,
+        &unit_interval_source,
+        m,
+    );
     Some(PreparedTypedResultCsv {
         default_name: "rspice-eye.csv",
         detail: format!("{} eye acquisitions", eye.data.traces.len()),
