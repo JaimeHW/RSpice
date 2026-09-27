@@ -41,11 +41,7 @@ impl MonteCarloCheckpointLibrary {
         name: String,
         checkpoint: MonteCarloCheckpointEvidence,
     ) -> Result<bool, String> {
-        self.insert_bounded(
-            name,
-            checkpoint,
-            ResourceLimits::default().max_external_data_bytes,
-        )
+        self.insert_bounded(name, checkpoint, MonteCarloCheckpointEvidence::byte_limit())
     }
     pub fn insert_bounded(
         &mut self,
@@ -113,7 +109,7 @@ impl<'de> Deserialize<'de> for MonteCarloCheckpointLibrary {
                     bytes = bytes
                         .saturating_add(entry.name.len())
                         .saturating_add(entry.checkpoint.bytes().len());
-                    if bytes > ResourceLimits::default().max_external_data_bytes {
+                    if bytes > MonteCarloCheckpointEvidence::byte_limit() {
                         return Err(serde::de::Error::custom(
                             "Imported checkpoints exceed the combined storage limit",
                         ));
@@ -141,8 +137,7 @@ struct CheckpointFile {
 }
 impl MonteCarloCheckpointEvidence {
     pub fn portable_file_limit() -> usize {
-        ResourceLimits::default()
-            .max_external_data_bytes
+        Self::byte_limit()
             .div_ceil(3)
             .saturating_mul(4)
             .saturating_add(4096)

@@ -44,6 +44,11 @@ pub struct MonteCarloCheckpointEvidence {
 }
 
 impl MonteCarloCheckpointEvidence {
+    /// Default bound for retained journal bytes and imported checkpoint storage.
+    pub fn byte_limit() -> usize {
+        ResourceLimits::default().max_external_data_bytes
+    }
+
     pub fn from_bytes(bytes: Arc<[u8]>) -> Result<Self, String> {
         let checkpoint = StudyMonteCarloCheckpoint::from_bytes_with_limits(
             &bytes,
@@ -156,7 +161,7 @@ fn decode_bounded_bytes<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Ar
             formatter.write_str("a bounded Base64 Monte Carlo checkpoint")
         }
         fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
-            let limit = ResourceLimits::default().max_external_data_bytes;
+            let limit = MonteCarloCheckpointEvidence::byte_limit();
             // Check encoded size before allocating the decoded binary. The
             // project loader separately bounds the entire input document.
             if value.is_empty() || value.len() > limit.div_ceil(3).saturating_mul(4) {
