@@ -16,9 +16,10 @@ use std::rc::Rc;
 
 use super::*;
 use crate::product::ContentDigest;
+use crate::state::interface_repair::same_terminal_contract;
 use crate::state::workspace::{
     ConfigurationExecutionBinding, ConfigurationExecutionPlan, MasterKey, assign_master_names,
-    master_closure_digest, same_terminal_contract,
+    master_closure_digest,
 };
 use crate::state::{CellViewRef, LibraryCellInstance};
 

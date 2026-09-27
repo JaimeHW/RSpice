@@ -50,13 +50,10 @@ pub(crate) use rspice_simulation_contract::saved_output::{
     device_current_probe, saved_output_references,
 };
 // The glob is crate-private: `materialize` is `pub(super)` throughout except
-// the one binding lookup two workbench surfaces reach by path, the terminal
-// contract netlist generation compares against, and the metadata lookup the
+// the one binding lookup two workbench surfaces reach by path and the metadata lookup the
 // Models & PDKs symbol-contract table reads a declared family with.
 use materialize::*;
-pub(crate) use materialize::{
-    metadata_value, project_veriloga_binding_for_view, same_terminal_contract,
-};
+pub(crate) use materialize::{metadata_value, project_veriloga_binding_for_view};
 
 pub use rspice_simulation_contract::saved_output::{
     ComplexExpressionPolicy, OutputSelectionMode, SavedOutput, SavedOutputCompatibility,

@@ -8,6 +8,7 @@
 //! error rather than a silent first-match win.
 
 use super::*;
+use crate::state::interface_repair::same_terminal_contract;
 
 pub(super) fn is_project_virtual_source_path(path: &Path) -> bool {
     path.to_str()
@@ -410,25 +411,6 @@ pub(super) fn metadata_terminal_names_for_keys<const N: usize>(
             .collect()
     });
     (!values.is_empty()).then_some(values)
-}
-
-/// Whether a placed interface still presents the authoritative one.
-///
-/// This is the crate's one answer to that question: the resolver asks it when
-/// it materializes a binding, and netlist generation asks it again — through
-/// its own typed defect — before it emits an instance. Two spellings of the
-/// comparison would let a binding pass materialization and fail emission for
-/// reasons that disagree.
-pub(crate) fn same_terminal_contract<L, R>(placed: &[L], authoritative: &[R]) -> bool
-where
-    L: AsRef<str>,
-    R: AsRef<str>,
-{
-    placed.len() == authoritative.len()
-        && placed
-            .iter()
-            .zip(authoritative)
-            .all(|(left, right)| left.as_ref().eq_ignore_ascii_case(right.as_ref()))
 }
 
 pub(super) fn metadata_source_path(metadata: &HashMap<String, String>) -> Option<&Path> {

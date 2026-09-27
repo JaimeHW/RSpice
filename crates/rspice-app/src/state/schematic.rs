@@ -39,7 +39,9 @@ mod placement_authority;
 mod point;
 mod port;
 use rspice_design::schematic::probe;
+pub(crate) mod interface_repair;
 mod replacement;
+pub(crate) mod replacement_edit;
 use rspice_design::schematic::rotation;
 mod selection;
 mod snap;
@@ -118,13 +120,9 @@ pub use port::{
 };
 pub use probe::SchematicProbe;
 pub use replacement::{
-    SchematicReplacementAuthority, SchematicReplacementCompatibility, SchematicReplacementError,
-    SchematicReplacementImpact, SchematicReplacementMappingStatus, SchematicReplacementParameter,
-    SchematicReplacementParameterMapping, SchematicReplacementPreview,
-    SchematicReplacementSemanticStatus, SchematicReplacementSourceSpec,
-    SchematicReplacementTargetSpec, SchematicReplacementTerminal,
-    SchematicReplacementTerminalMapping, SchematicReplacementValuePolicy,
-    SchematicReplacementWireEdit,
+    SchematicReplacementAuthority, SchematicReplacementError, SchematicReplacementParameter,
+    SchematicReplacementPreview, SchematicReplacementSourceSpec, SchematicReplacementTargetSpec,
+    SchematicReplacementTerminal,
 };
 pub(crate) use replacement::{
     format_replacement_parameters, parse_replacement_parameters_strict,

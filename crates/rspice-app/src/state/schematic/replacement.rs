@@ -281,10 +281,10 @@ impl SchematicReplacementTargetSpec {
 /// Immutable authority for the exact selected component and source contract.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SchematicReplacementAuthority {
-    pub(crate) component_id: u64,
-    pub(crate) topology_version: u64,
-    pub(crate) source_component: Component,
-    pub(crate) source_spec: SchematicReplacementSourceSpec,
+    pub(super) component_id: u64,
+    pub(super) topology_version: u64,
+    pub(super) source_component: Component,
+    pub(super) source_spec: SchematicReplacementSourceSpec,
 }
 
 impl SchematicReplacementAuthority {
@@ -521,9 +521,7 @@ impl fmt::Display for SchematicReplacementError {
 
 impl std::error::Error for SchematicReplacementError {}
 
-pub(crate) fn default_component_terminals(
-    component: &Component,
-) -> Vec<SchematicReplacementTerminal> {
+fn default_component_terminals(component: &Component) -> Vec<SchematicReplacementTerminal> {
     if component.kind == ComponentType::CellInstance {
         return component
             .instance_pin_layout()
@@ -553,12 +551,12 @@ pub(crate) fn default_component_terminals(
         .collect()
 }
 
-pub(crate) fn parse_replacement_parameters_strict(
+pub fn parse_replacement_parameters_strict(
     input: &str,
 ) -> Result<std::collections::HashMap<String, String>, SchematicReplacementError> {
     let malformed = |reason| SchematicReplacementError::MalformedParameterString { reason };
     let mut result = std::collections::HashMap::new();
-    for entry in crate::state::params_string::parameter_entries(input) {
+    for entry in rspice_design::parameters::parameter_entries(input) {
         let entry = entry.map_err(malformed)?;
         if !valid_replacement_parameter_name(entry.key) {
             return Err(malformed(format!(
@@ -582,7 +580,7 @@ pub(crate) fn parse_replacement_parameters_strict(
     Ok(result)
 }
 
-pub(crate) fn format_replacement_parameters(
+pub fn format_replacement_parameters(
     parameters: &std::collections::HashMap<String, String>,
 ) -> String {
     let mut parameters = parameters.iter().collect::<Vec<_>>();
@@ -594,8 +592,8 @@ pub(crate) fn format_replacement_parameters(
         .join(" ")
 }
 
-pub(crate) fn valid_replacement_parameter_name(name: &str) -> bool {
-    crate::state::params_string::valid_parameter_name(name)
+pub fn valid_replacement_parameter_name(name: &str) -> bool {
+    rspice_design::parameters::valid_parameter_name(name)
 }
 
 #[cfg(test)]

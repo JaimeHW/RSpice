@@ -139,18 +139,20 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
                 ),
                 selection: crate::state::Selection::default(),
             },
-            replacement_authority: crate::state::SchematicReplacementAuthority {
-                component_id: 1,
-                topology_version: 0,
-                source_component: crate::state::Component::new(
-                    1,
-                    crate::state::ComponentType::VoltageSource,
-                    crate::state::Point::origin(),
-                ),
-                source_spec: crate::state::SchematicReplacementSourceSpec::new(
-                    Vec::new(),
-                    Vec::<String>::new(),
-                ),
+            replacement_authority: {
+                let mut schematic = crate::state::SchematicState::default();
+                schematic
+                    .document
+                    .components
+                    .push(crate::state::Component::new(
+                        1,
+                        crate::state::ComponentType::VoltageSource,
+                        crate::state::Point::origin(),
+                    ));
+                schematic.selection.select_only_component(1);
+                schematic
+                    .replacement_authority()
+                    .expect("valid replacement review fixture")
             },
             source_component_id: 1,
             current: "U1 \u{00b7} OPA189".to_owned(),
