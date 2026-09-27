@@ -1581,7 +1581,7 @@ mod generated_veriloga_netlist_tests {
             .with_library_cell(binding)
             .with_name_value("X1", descriptor.model_name);
         let mut schematic = SchematicState::default();
-        schematic.components.push(component);
+        schematic.document.components.push(component);
 
         let generated = generate_netlist(&schematic);
         assert!(generated.errors.is_empty(), "{:?}", generated.errors);

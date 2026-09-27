@@ -152,12 +152,12 @@ fn unresolved_generated_veriloga_bindings_survive_project_save_and_reload() {
         let top = workspace.active_view.key();
         let schematic = workspace.schematic_buffers.get_mut(&top).unwrap();
         schematic.add_library_cell_component(Point::new(10, 20), binding);
-        let before = serde_json::to_value(&schematic.components[0]).unwrap();
+        let before = serde_json::to_value(&schematic.document.components[0]).unwrap();
         let json = serde_json::to_string(&ProjectFile::new(workspace, libraries)).unwrap();
 
         let loaded =
             load_project_text(&json, None).expect("an unresolved model must not cost the project");
-        let restored = &loaded.workspace.schematic_buffers[&top].components[0];
+        let restored = &loaded.workspace.schematic_buffers[&top].document.components[0];
         assert_eq!(serde_json::to_value(restored).unwrap(), before);
         assert!(
             validate_generated_veriloga_binding(restored.library_cell.as_ref().unwrap()).is_err()
@@ -174,8 +174,12 @@ fn unresolved_generated_veriloga_bindings_survive_project_save_and_reload() {
         let reloaded =
             load_project_text(&saved, None).expect("unresolved evidence remains loadable");
         assert_eq!(
-            serde_json::to_value(&reloaded.workspace.schematic_buffers[&top].components[0])
-                .unwrap(),
+            serde_json::to_value(
+                &reloaded.workspace.schematic_buffers[&top]
+                    .document
+                    .components[0]
+            )
+            .unwrap(),
             before,
             "saving must preserve both absent and explicitly null identity fields"
         );
