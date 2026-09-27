@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::state::AnalysisResultPayload;
+use rspice_results::events::imported_event_payload;
 
 #[derive(Debug)]
 struct DigitalSignal {
@@ -231,61 +232,6 @@ fn vector_variables(count: usize) -> String {
     } else {
         format!("{count} vector variables are")
     }
-}
-
-/// The retained event evidence for histories a digital importer decoded.
-///
-/// Both importers land here, so a VCD bus and an FST bus are one shape: the
-/// same declaration type over the same member traces, carrying the same
-/// four-state codes. `None` when the source recorded no event at all, which
-/// is what an analog-only file is.
-fn imported_event_payload(
-    histories: &rspice_core::execution::VcdEventHistories,
-) -> Option<AnalysisResultPayload> {
-    if histories.digital_traces.is_empty() && histories.real_traces.is_empty() {
-        return None;
-    }
-    let digital_traces = histories
-        .digital_traces
-        .iter()
-        .map(|trace| crate::state::DigitalEventTraceEvidence {
-            node_name: trace.node_name.clone(),
-            points: trace
-                .points
-                .iter()
-                .map(|point| crate::state::DigitalEventPointEvidence {
-                    time_s: point.time,
-                    value_code: point.value.event_code(),
-                })
-                .collect(),
-        })
-        .collect();
-    let real_traces = histories
-        .real_traces
-        .iter()
-        .map(|trace| crate::state::RealEventTraceEvidence {
-            node_name: trace.node_name.clone(),
-            points: trace
-                .points
-                .iter()
-                .map(|point| crate::state::RealEventPointEvidence {
-                    time_s: point.time,
-                    value: point.value,
-                })
-                .collect(),
-        })
-        .collect();
-    let digital_buses = histories
-        .digital_buses
-        .iter()
-        .map(crate::state::DigitalBusEvidence::from)
-        .collect();
-    Some(AnalysisResultPayload::TransientEvents {
-        current_impulses: None,
-        digital_traces,
-        real_traces,
-        digital_buses,
-    })
 }
 
 /// The unsigned integer a four-state vector denotes, or `None` when any bit is
