@@ -2,8 +2,8 @@
 //!
 //! Splitting wires, moving shared vertices, and maintaining conductor topology.
 
-use super::super::wire_edit;
 use super::super::*;
+use rspice_design::schematic::wire_edit;
 
 impl SchematicState {
     // =========================================================================

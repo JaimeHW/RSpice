@@ -16,6 +16,7 @@ workspace = true
 symbol-test-observation = []
 
 [dependencies]
+log.workspace = true
 regex.workspace = true
 rspice-app-types.workspace = true
 # Authored parameter names retain the engine lexer's exact identifier grammar.

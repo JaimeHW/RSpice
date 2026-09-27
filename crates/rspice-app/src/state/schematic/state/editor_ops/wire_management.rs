@@ -4,8 +4,8 @@
 //! its vertices, or an endpoint. The distinction drives the cursor and what
 //! a drag does.
 
-use super::super::wire_edit;
 use super::super::*;
+use rspice_design::schematic::wire_edit;
 
 impl SchematicState {
     // =========================================================================

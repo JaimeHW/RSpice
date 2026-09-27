@@ -1,6 +1,12 @@
 //! Junction and net-label document edits and geometric maintenance.
 
-use super::{Junction, NetLabel, Point, SchematicDocument, SchematicIdentity, Wire};
+use super::{
+    document::SchematicDocument,
+    identity::SchematicIdentity,
+    net_label::{Junction, NetLabel},
+    wire::Wire,
+};
+use rspice_design_model::Point;
 use std::collections::HashSet;
 
 /// Row/column interval index over orthogonal wire segments. Built once per

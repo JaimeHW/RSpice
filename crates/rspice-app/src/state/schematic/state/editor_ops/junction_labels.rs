@@ -4,8 +4,8 @@
 //! crossing wires connect, and a net label names the net it sits on. Adding
 //! or removing either invalidates cached connectivity.
 
-use super::super::junction_edit;
 use super::super::*;
+use rspice_design::schematic::junction_edit;
 
 impl SchematicState {
     // =========================================================================

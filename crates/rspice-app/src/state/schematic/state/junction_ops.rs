@@ -1,7 +1,7 @@
 //! Editor notifications around junction document maintenance.
 
-use super::junction_edit;
 use super::*;
+use rspice_design::schematic::junction_edit;
 
 impl SchematicState {
     /// Automatically place junctions at all detected intersection points

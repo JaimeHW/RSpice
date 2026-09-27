@@ -1,6 +1,7 @@
 //! Rebuild terminal-to-wire connections from intrinsic or resolved geometry.
 
-use super::{Point, SchematicDocument, WireConnection};
+use super::{document::SchematicDocument, wire::WireConnection};
+use rspice_design_model::Point;
 
 /// Snap distance in grid units for terminal connections.
 const SNAP_DISTANCE: i32 = 1;

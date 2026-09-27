@@ -4,8 +4,8 @@
 //! operation that changes where a terminal or a wire end sits rebuilds from
 //! the terminals rather than patching individual connections.
 
-use super::super::terminal_connection;
 use super::super::*;
+use rspice_design::schematic::terminal_connection;
 
 impl SchematicState {
     // =========================================================================

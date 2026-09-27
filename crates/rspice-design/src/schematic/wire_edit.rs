@@ -1,6 +1,11 @@
 //! Wire document edits and path cleanup, independent of routing gestures.
 
-use super::{Point, SchematicDocument, SchematicIdentity, Wire, WireSegment};
+use super::{
+    document::SchematicDocument,
+    identity::SchematicIdentity,
+    wire::{Wire, WireSegment},
+};
+use rspice_design_model::Point;
 
 /// Add a wire
 pub fn add_wire(
