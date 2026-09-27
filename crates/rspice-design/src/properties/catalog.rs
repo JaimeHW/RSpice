@@ -6,7 +6,7 @@
 
 use super::*;
 
-mod registry_components;
+mod components;
 
 impl PropertyCatalog {
     /// Create a new registry with default property sheets for all component types

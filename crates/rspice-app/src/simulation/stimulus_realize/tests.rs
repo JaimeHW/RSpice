@@ -1,7 +1,7 @@
 //! What the bridge has to agree with: the deck, the parser, and the evaluator.
 
 use super::*;
-use crate::state::property_types::PropertyCatalog;
+use rspice_design::properties::PropertyCatalog;
 
 use crate::state::stimulus_library::definition::{StimulusFamily, StimulusKind};
 use crate::state::{SchematicState, Wire};

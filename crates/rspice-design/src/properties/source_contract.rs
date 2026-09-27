@@ -46,8 +46,8 @@
 //! audited through the transient component it realizes to and there is only one
 //! rule set for both.
 
-use crate::state::ComponentType;
-use crate::state::property_types::{PropertySheet, PropertyValue};
+use crate::properties::{PropertySheet, PropertyValue};
+use crate::schematic::component_type::ComponentType;
 use std::collections::HashMap;
 
 /// How firmly the engine speaks about a field.
@@ -132,14 +132,16 @@ impl<'a> SourceFields<'a> {
             .or_else(|| self.sheet.get(name).map(|def| &def.default_value))
             .and_then(property_value_as_number)
             .or_else(|| {
-                self.params
-                    .get(name)
-                    .and_then(|value| crate::quantity::parse_engineering_value(value).ok())
+                self.params.get(name).and_then(|value| {
+                    rspice_app_types::quantity::parse_engineering_value(value).ok()
+                })
             })
             .or_else(|| {
                 self.primary
                     .filter(|(field, _)| *field == name)
-                    .and_then(|(_, value)| crate::quantity::parse_engineering_value(value).ok())
+                    .and_then(|(_, value)| {
+                        rspice_app_types::quantity::parse_engineering_value(value).ok()
+                    })
             })
     }
 
@@ -193,7 +195,7 @@ fn property_value_as_number(value: &PropertyValue) -> Option<f64> {
             .strip_prefix('{')
             .and_then(|displayed| displayed.strip_suffix('}'))
             .unwrap_or(&displayed);
-        crate::quantity::parse_engineering_value(literal).ok()
+        rspice_app_types::quantity::parse_engineering_value(literal).ok()
     })
 }
 
@@ -507,7 +509,7 @@ fn pwl_file_findings(fields: &SourceFields<'_>, findings: &mut Vec<SourceContrac
     }
     if let Some(repeat) = fields
         .text("r")
-        .and_then(|value| crate::quantity::parse_engineering_value(&value).ok())
+        .and_then(|value| rspice_app_types::quantity::parse_engineering_value(&value).ok())
     {
         if repeat < 0.0 {
             findings.push(SourceContractFinding::refusal(

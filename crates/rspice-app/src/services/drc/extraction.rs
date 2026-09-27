@@ -14,8 +14,8 @@ use super::netlist_gen::extraction::{
     ConnectivityDiagnosticKind, ExtractedConnectivity, ExtractedTerminal,
 };
 use super::types::{DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
-use crate::state::property_types::PropertyCatalog;
 use crate::state::{Component, ComponentType, PropertyDefinition, PropertyValue};
+use rspice_design::properties::PropertyCatalog;
 
 /// Resolve the design once, and bind every placed component to it.
 pub(super) fn extract_checked_design(

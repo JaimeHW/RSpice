@@ -18,9 +18,9 @@ pub use rspice_app_types::property::{
 // Component Property Registry
 // =============================================================================
 
-use crate::state::ComponentType;
+use crate::schematic::component_type::ComponentType;
 
-mod registry;
+mod catalog;
 mod source_contract;
 
 pub use source_contract::{

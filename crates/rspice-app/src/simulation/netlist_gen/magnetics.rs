@@ -633,8 +633,8 @@ mod tests {
 
     #[test]
     fn inductor_coupling_property_accepts_signed_values_and_keeps_absence_distinct() {
-        use crate::state::property_types::PropertyCatalog;
         use crate::state::property_types::PropertyValue;
+        use rspice_design::properties::PropertyCatalog;
 
         let registry = PropertyCatalog::new();
         let definition = registry

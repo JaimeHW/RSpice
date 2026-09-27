@@ -73,7 +73,7 @@ impl PropertyCatalog {
 mod tests {
     use super::*;
 
-    use crate::state::property_types::TRRANDOM_DISTRIBUTIONS;
+    use crate::properties::TRRANDOM_DISTRIBUTIONS;
 
     /// The TRRANDOM sheet's defaults are the parser's own.
     ///

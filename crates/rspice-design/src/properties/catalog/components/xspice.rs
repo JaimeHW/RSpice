@@ -1,7 +1,7 @@
 //! Property sheets for XSPICE code-model devices.
 
 use super::*;
-use crate::state::DeviceImplementation;
+use crate::schematic::device_descriptor::DeviceImplementation;
 
 /// Property sheets for the XSPICE code-model blocks.
 ///

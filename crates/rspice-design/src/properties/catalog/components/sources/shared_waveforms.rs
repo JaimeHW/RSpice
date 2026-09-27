@@ -8,7 +8,7 @@
 
 use super::*;
 
-use crate::state::property_types::TRRANDOM_DISTRIBUTIONS;
+use crate::properties::TRRANDOM_DISTRIBUTIONS;
 
 /// The quantity a source drives. Only the unit, the default instance name, and
 /// the current-source amplitude defaults depend on it.
