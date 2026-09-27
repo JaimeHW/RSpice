@@ -11,6 +11,7 @@ pub mod component_display;
 pub mod component_edit;
 pub mod component_references;
 pub mod component_type;
+pub mod deletion;
 pub mod design_note;
 pub mod device_descriptor;
 pub mod document;

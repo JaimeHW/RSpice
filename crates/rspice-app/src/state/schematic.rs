@@ -28,7 +28,7 @@ mod component;
 mod component_references;
 use rspice_design::schematic::component_references as reference_edit;
 use rspice_design::schematic::component_type;
-mod deletion;
+use rspice_design::schematic::deletion;
 mod design_note;
 mod device_catalog;
 use rspice_design::schematic::device_descriptor;

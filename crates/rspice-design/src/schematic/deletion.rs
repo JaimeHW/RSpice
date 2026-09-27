@@ -1,7 +1,7 @@
 //! Deletion of complete schematic objects and their dependent markers.
 
 use super::document::SchematicDocument;
-use rspice_design::schematic::junction_edit;
+use super::junction_edit;
 use rspice_design_model::Point;
 use std::collections::HashSet;
 
@@ -167,7 +167,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::super::{
-        committed_history::SchematicSnapshot,
+        history::SchematicSnapshot,
         net_label::{Junction, NetLabel},
     };
     use super::*;
