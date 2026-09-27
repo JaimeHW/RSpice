@@ -1,7 +1,7 @@
 //! Exact source rows and coordinates supplied before expression evaluation.
 
 use super::EvaluationError;
-use crate::state::{SharedWaveformValues, WaveformData};
+use crate::waveform::{RetainedWaveform, SharedWaveformValues};
 
 #[derive(Clone, Copy)]
 pub(super) struct SampleProjection<'a> {
@@ -27,7 +27,10 @@ impl<'a> SampleProjection<'a> {
         Ok(Self { indices, axis })
     }
 
-    pub(super) fn apply(&self, source: &WaveformData) -> Result<WaveformData, EvaluationError> {
+    pub(super) fn apply(
+        &self,
+        source: &RetainedWaveform,
+    ) -> Result<RetainedWaveform, EvaluationError> {
         let length = source.x.len();
         if source.y.len() != length
             || source
@@ -62,7 +65,6 @@ impl<'a> SampleProjection<'a> {
             complex.real = select(&complex.real);
             complex.imag = select(&complex.imag);
         }
-        projected.display_cache = None;
         Ok(projected)
     }
 }
@@ -78,13 +80,9 @@ mod tests {
 
     #[test]
     fn row_projection_preserves_complex_evidence_and_the_declared_coordinate() {
-        let source = WaveformData::new(
-            "V(out)",
-            vec![100.0, 101.0, 102.0],
-            vec![5.0, 13.0, 25.0],
-            "#fff",
-        )
-        .with_complex_components("V(out)", vec![3.0, 5.0, 7.0], vec![4.0, 12.0, 24.0]);
+        let source =
+            RetainedWaveform::new("V(out)", vec![100.0, 101.0, 102.0], vec![5.0, 13.0, 25.0])
+                .with_complex_components("V(out)", vec![3.0, 5.0, 7.0], vec![4.0, 12.0, 24.0]);
         let before = source.clone();
         let projected = SampleProjection::new(&[0, 2], Some(&[0.0, 0.5]))
             .unwrap()
@@ -92,7 +90,7 @@ mod tests {
             .unwrap();
         assert_eq!(projected.x.as_slice(), &[0.0, 0.5]);
         assert_eq!(projected.y.as_slice(), &[5.0, 25.0]);
-        let complex = projected.data.complex.unwrap();
+        let complex = projected.complex.unwrap();
         assert_eq!(complex.real.as_slice(), &[3.0, 7.0]);
         assert_eq!(complex.imag.as_slice(), &[4.0, 24.0]);
         assert_eq!(source, before);
@@ -105,7 +103,7 @@ mod tests {
         }
         assert!(SampleProjection::new(&[0, 1], Some(&[0.0])).is_err());
         assert!(SampleProjection::new(&[0], Some(&[f64::NAN])).is_err());
-        let source = WaveformData::new("V(out)", vec![0.0, 1.0], vec![2.0, 3.0], "#fff");
+        let source = RetainedWaveform::new("V(out)", vec![0.0, 1.0], vec![2.0, 3.0]);
         assert!(
             SampleProjection::new(&[2], None)
                 .unwrap()
@@ -123,11 +121,10 @@ mod tests {
 
     #[test]
     fn projected_context_keeps_ground_coordinates_and_magnitude_fallback_in_scope() {
-        let source = [WaveformData::new(
+        let source = [RetainedWaveform::new(
             "|V(out)|",
             vec![100.0, 101.0, 102.0],
             vec![10.0, 1.0, 20.0],
-            "#fff",
         )];
         let ctx = WaveformsContext::new(&source)
             .with_sample_projection(&[1], Some(&[4.0]))

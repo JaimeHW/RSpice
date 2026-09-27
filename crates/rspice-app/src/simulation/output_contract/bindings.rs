@@ -238,7 +238,10 @@ impl calculator::EvaluationContext for Context<'_> {
             Ok(probe::Source::Waveform(waveform)) => Some(waveform),
             _ => None,
         };
-        calculator::magnitude_value(self.get_waveform(signal, dataset), source)
+        calculator::magnitude_value(
+            self.get_waveform(signal, dataset),
+            source.map(AsRef::as_ref),
+        )
     }
 
     fn get_waveform(
