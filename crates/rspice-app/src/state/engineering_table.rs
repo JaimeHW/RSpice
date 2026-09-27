@@ -931,27 +931,28 @@ pub fn schema_json(
     include_hidden_columns: bool,
     include_metadata: bool,
 ) -> Result<String, String> {
+    use rspice_formats::table_schema::{SchemaColumn, SchemaView, encode_table_schema};
     let projection = dataset.project_selected(view, include_hidden_columns, None);
-    serde_json::to_string_pretty(&serde_json::json!({
-        "schema": 1,
-        "grid_id": dataset.id,
-        "title": dataset.title,
-        "source_revision": include_metadata.then_some(dataset.source_revision),
-        "logical_rows": dataset.rows.len(),
-        "columns": projection.columns.iter().map(|column| serde_json::json!({
-            "id": column.id,
-            "label": column.label,
-            "unit": column.unit,
-            "quantity_type": if column.unit.is_some() { "engineering-scalar" } else { "text" },
-            "identifier": column.identifier,
-        })).collect::<Vec<_>>(),
-        "sort": include_metadata.then_some(&view.sort),
-        "filters": include_metadata.then_some(&view.filters),
-        "filter_grammar": include_metadata.then_some(view.filter_grammar),
-        "virtualization": include_metadata.then_some(view.virtualization),
-        "frozen_identifiers": include_metadata.then_some(view.frozen_identifiers),
-    }))
-    .map_err(|error| error.to_string())
+    encode_table_schema(
+        &dataset.id,
+        &dataset.title,
+        dataset.source_revision,
+        dataset.rows.len(),
+        projection.columns.iter().map(|column| SchemaColumn {
+            id: &column.id,
+            label: &column.label,
+            unit: column.unit.as_deref(),
+            identifier: column.identifier,
+        }),
+        SchemaView {
+            sort: &view.sort,
+            filters: &view.filters,
+            filter_grammar: view.filter_grammar,
+            virtualization: view.virtualization,
+            frozen_identifiers: view.frozen_identifiers,
+        },
+        include_metadata,
+    )
 }
 
 pub fn xlsx_bytes(
