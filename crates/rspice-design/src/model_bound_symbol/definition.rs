@@ -251,8 +251,8 @@ pub fn load_model_bound_symbol(
 
     // Counted below the guard on purpose: a legacy symbol carrying no typed
     // contract costs one map lookup, which is not what the counter watches.
-    #[cfg(test)]
-    crate::state::SYMBOL_VIEW_PARSES.with(|count| count.set(count.get() + 1));
+    #[cfg(any(test, feature = "symbol-test-observation"))]
+    crate::symbol::SYMBOL_VIEW_PARSES.with(|count| count.set(count.get() + 1));
 
     ModelBoundSymbolDefinition::from_json_bytes(encoded.as_bytes(), &view.name).map(Some)
 }

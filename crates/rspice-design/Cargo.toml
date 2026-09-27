@@ -21,6 +21,7 @@ rspice-app-types.workspace = true
 # Authored parameter names retain the engine lexer's exact identifier grammar.
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false }
 rspice-design-model.workspace = true
+rspice-model-library.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

@@ -3,6 +3,7 @@
 pub mod configuration_set;
 pub mod connectivity_contract;
 pub mod library;
+pub mod model_bound_symbol;
 pub mod netlist_document;
 pub mod parameters;
 pub mod physical_layout;

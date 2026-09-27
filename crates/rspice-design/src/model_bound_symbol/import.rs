@@ -75,19 +75,11 @@ fn report_for_definition(
         definition,
         warnings,
         definition.imported_graphic.as_ref().map_or_else(
-            || {
-                crate::state::materialize_symbol_document(definition)
-                    .body
-                    .len()
-            },
+            || materialize_symbol_document(definition).body.len(),
             |source| source.primitive_count,
         ),
         definition.imported_graphic.as_ref().map_or_else(
-            || {
-                crate::state::materialize_symbol_document(definition)
-                    .pins
-                    .len()
-            },
+            || materialize_symbol_document(definition).pins.len(),
             |source| source.pin_anchors.len(),
         ),
     )

@@ -1,7 +1,7 @@
 //! Model-bound symbol tests.
 
 use super::*;
-use crate::state::{DisplayMode, PropertyType};
+use rspice_app_types::property::{DisplayMode, PropertyType};
 
 fn definition(revision: u64) -> ModelBoundSymbolDefinition {
     let model = SymbolModelReference::new("vendor", "OPA189_A").with_source_path(
@@ -108,11 +108,8 @@ fn strict_definition_round_trip_preserves_contract_and_metadata_projection() {
     assert_eq!(restored, definition);
 
     let mut view = View::new("symbol", ViewType::Symbol);
-    crate::state::store_model_bound_symbol(&restored, &mut view).unwrap();
-    assert_eq!(
-        crate::state::load_model_bound_symbol(&view).unwrap(),
-        Some(definition)
-    );
+    store_model_bound_symbol(&restored, &mut view).unwrap();
+    assert_eq!(load_model_bound_symbol(&view).unwrap(), Some(definition));
     assert!(view.metadata["cdf.parameter_contract"].contains("\"default\":\"100\""));
     assert_eq!(view.metadata["model.family"], "OPA189_A");
 }
@@ -159,7 +156,7 @@ fn malformed_or_extended_import_is_rejected_without_coercion() {
 fn construction_plan_is_atomic_and_stale_guarded() {
     let mut library = Library::new("analog_blocks");
     let before = serde_json::to_string(&library).unwrap();
-    let plan = crate::state::prepare_symbol_construction(&definition(1), &library).unwrap();
+    let plan = prepare_symbol_construction(&definition(1), &library).unwrap();
     assert_eq!(
         serde_json::to_string(&library).unwrap(),
         before,
@@ -174,7 +171,7 @@ fn construction_plan_is_atomic_and_stale_guarded() {
     assert_eq!(library.get_cell("precision_opamp").unwrap().view_count(), 0);
 
     library.remove_cell("precision_opamp");
-    crate::state::prepare_symbol_construction(&definition(1), &library)
+    prepare_symbol_construction(&definition(1), &library)
         .unwrap()
         .commit(&mut library)
         .unwrap();
@@ -311,7 +308,7 @@ fn replacing_form_synchronizes_the_exact_emitted_parameter_order() {
     assert_eq!(replaced.netlist.parameter_order, ["gain", "cell_gain"]);
 
     let mut view = View::new("symbol", ViewType::Symbol);
-    crate::state::store_model_bound_symbol(&replaced, &mut view).unwrap();
+    store_model_bound_symbol(&replaced, &mut view).unwrap();
     assert!(view.metadata["cdf.parameter_contract"].contains("cell_gain"));
     assert!(!view.metadata["cdf.parameter_contract"].contains("model_gain"));
     assert!(view.metadata["netlist.cell_defaults"].contains("cell_gain"));
@@ -359,7 +356,7 @@ fn canonical_extension_and_ltspice_review_anchors_are_preserved() {
     assert!(!imported.report.binding_valid);
     assert!(!imported.definition.netlist.is_executable());
 
-    let document = crate::state::materialize_symbol_document(&imported.definition);
+    let document = materialize_symbol_document(&imported.definition);
     assert_eq!(document.pins.len(), 1);
     assert_eq!(document.pins[0].name, "IN");
     assert_eq!(document.pins[0].position, Some(Point::new(0, 16)));
