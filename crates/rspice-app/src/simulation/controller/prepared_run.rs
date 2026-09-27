@@ -1795,7 +1795,7 @@ fn prepared_project_veriloga_runtimes(
         && receipt.token.revision == bundle.revision().get()
         && receipt.token.closure_digest == bundle.closure_digest()
     {
-        let runtime = crate::simulation::veriloga::PreparedVerilogARuntime::try_new(
+        let runtime = crate::simulation::veriloga::prepare_project_runtime(
             state.workspace.project.id(),
             bundle,
             &receipt.token,
@@ -1837,12 +1837,8 @@ fn prepared_project_veriloga_runtimes(
             ),
         )
     })?;
-    let runtime =
-        crate::simulation::veriloga::PreparedVerilogARuntime::try_from_current_bundle_receipt(
-            state.workspace.project.id(),
-            bundle,
-            &receipt,
-        )
+    let runtime = receipt
+        .prepare_runtime(state.workspace.project.id(), bundle)
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
     crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))

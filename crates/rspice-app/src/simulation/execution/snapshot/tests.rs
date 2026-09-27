@@ -760,10 +760,7 @@ fn project_runtime() -> crate::simulation::veriloga::PreparedVerilogARuntime {
         Some("snapshot_owned"),
     )
     .unwrap();
-    crate::simulation::veriloga::PreparedVerilogARuntime::try_from_current_bundle_receipt(
-        project_id, &bundle, &receipt,
-    )
-    .unwrap()
+    receipt.prepare_runtime(project_id, &bundle).unwrap()
 }
 
 fn signed_pdk_runtime() -> crate::simulation::veriloga::PreparedVerilogARuntime {

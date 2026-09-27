@@ -1,0 +1,11 @@
+
+`include "disciplines.vams"
+module rspice_infinite_constant_probe(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real folded = 1.0/0.0;
+  parameter real unbounded = 1.0 from (0:2*inf);
+  parameter real excluded = 0.5 from (0:1) exclude inf;
+  parameter real conductance = 0.5 from (0:inf);
+  analog I(p, n) <+ conductance * V(p, n);
+endmodule

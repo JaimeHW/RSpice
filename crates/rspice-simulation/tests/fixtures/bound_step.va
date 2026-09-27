@@ -1,0 +1,11 @@
+
+`include "disciplines.vams"
+module rspice_bound_step_probe(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real conductance = 0.5;
+  analog begin
+    $bound_step(1e-9);
+    I(p, n) <+ conductance * V(p, n);
+  end
+endmodule

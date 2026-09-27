@@ -172,7 +172,7 @@ impl VerilogABuildProfile {
                 .map(|(name, value)| (name.clone(), Some(value.clone())))
                 .collect(),
             undefines: self.preprocessor.undefines.clone(),
-            ..super::unified_runtime_compiler_options()
+            ..rspice_simulation::compilation::unified_runtime_compiler_options()
         }
     }
 

@@ -40,7 +40,10 @@ fn project_bundle(profile: &build_profile::VerilogABuildProfile) -> ProjectSourc
 }
 
 fn assert_controlled_conductance(runtime: &PreparedVerilogARuntime, series_resistance: f64) {
-    runtime.install().unwrap();
+    super::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
+        .unwrap()
+        .install()
+        .unwrap();
     let deck = rspice_core::Netlist::parse(&format!(
         "profiled mixed device\nV1 input 0 1\nR1 input out {series_resistance}\nX1 out 0 {}\n{}\n.end\n",
         runtime.netlist_alias(), project_veriloga_directive(runtime.source_key(), runtime.netlist_alias()),
@@ -88,7 +91,7 @@ fn unified_mixed_project_compilation_preserves_profile_and_backend_requirements(
     assert!(!receipt.report.canonical_ir.digital.processes.is_empty());
     let configured =
         compile_project_source_bundle_runtime(project_id, &bundle, "project_controlled").unwrap();
-    let editor = PreparedVerilogARuntime::try_new(
+    let editor = super::prepare_project_runtime(
         project_id,
         &bundle,
         &receipt.token,
@@ -175,7 +178,12 @@ endmodule
     assert_eq!(runtime.source_digest(), package.archive_digest());
     assert_eq!(runtime.terminal_names().unwrap(), ["p", "n"]);
     let canonical: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
-        serde_json::from_str(&runtime.canonical_ir_json).unwrap();
+        serde_json::from_str(
+            serde_json::to_value(&runtime).unwrap()["canonical_ir_json"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
     assert!(!canonical.digital.processes.is_empty());
     assert_controlled_conductance(&runtime, 250.0);
 

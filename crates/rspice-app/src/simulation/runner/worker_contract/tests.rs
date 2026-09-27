@@ -817,11 +817,7 @@ fn worker_request_round_trips_project_veriloga_runtime_artifacts() {
         Some("worker_owned"),
     )
     .unwrap();
-    let runtime =
-        crate::simulation::veriloga::PreparedVerilogARuntime::try_from_current_bundle_receipt(
-            project_id, &bundle, &receipt,
-        )
-        .unwrap();
+    let runtime = receipt.prepare_runtime(project_id, &bundle).unwrap();
     let request = WorkerRequest {
         measurement_references: Default::default(),
         id: 8,

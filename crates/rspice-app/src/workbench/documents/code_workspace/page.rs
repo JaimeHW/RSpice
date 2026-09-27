@@ -199,32 +199,27 @@ pub struct VerilogACompileReceipt {
 /// validates. The receipt also carries `CodeEditorDiagnostic`, so it stays
 /// here rather than travelling down to `simulation::veriloga` with the
 /// runtime it produces.
-impl PreparedVerilogARuntime {
-    pub fn try_from_current_bundle_receipt(
+impl VerilogACompileReceipt {
+    pub fn prepare_runtime(
+        &self,
         project_id: crate::product::ProjectId,
         bundle: &crate::state::ProjectSourceBundle,
-        receipt: &VerilogACompileReceipt,
-    ) -> Result<Self, crate::simulation::veriloga::PreparedRuntimeError> {
-        Self::try_from_current_bundle_receipt_with_alias(
-            project_id,
-            bundle,
-            receipt,
-            receipt.module_name.clone(),
-        )
+    ) -> Result<PreparedVerilogARuntime, crate::simulation::veriloga::PreparedRuntimeError> {
+        self.prepare_runtime_with_alias(project_id, bundle, self.module_name.clone())
     }
 
-    pub fn try_from_current_bundle_receipt_with_alias(
+    pub fn prepare_runtime_with_alias(
+        &self,
         project_id: crate::product::ProjectId,
         bundle: &crate::state::ProjectSourceBundle,
-        receipt: &VerilogACompileReceipt,
         netlist_alias: impl Into<String>,
-    ) -> Result<Self, crate::simulation::veriloga::PreparedRuntimeError> {
-        Self::try_new(
+    ) -> Result<PreparedVerilogARuntime, crate::simulation::veriloga::PreparedRuntimeError> {
+        crate::simulation::veriloga::prepare_project_runtime(
             project_id,
             bundle,
-            &receipt.token,
-            &receipt.module_name,
-            &receipt.report,
+            &self.token,
+            &self.module_name,
+            &self.report,
             netlist_alias,
         )
     }
@@ -852,10 +847,9 @@ mod tests {
         let receipt =
             super::super::compile_project_bundle_receipt(project_id, &bundle, Some(module_name))
                 .unwrap();
-        PreparedVerilogARuntime::try_from_current_bundle_receipt_with_alias(
-            project_id, &bundle, &receipt, alias,
-        )
-        .unwrap()
+        receipt
+            .prepare_runtime_with_alias(project_id, &bundle, alias)
+            .unwrap()
     }
 
     #[test]
@@ -887,8 +881,7 @@ mod tests {
         let receipt = super::super::compile_project_bundle_receipt(project_id, bundle, None)
             .expect("edited current bundle compiles");
 
-        let runtime =
-            PreparedVerilogARuntime::try_from_current_bundle_receipt(project_id, bundle, &receipt);
+        let runtime = receipt.prepare_runtime(project_id, bundle);
 
         assert!(runtime.is_ok());
         assert_eq!(receipt.token.bundle_id, stable_id);

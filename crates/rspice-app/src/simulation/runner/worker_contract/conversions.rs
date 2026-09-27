@@ -557,7 +557,9 @@ pub(crate) fn prepare_wasm_jit_request_value(
     };
     for runtime in request.project_veriloga_runtimes.device_runtimes() {
         match runtime.compile_wasm_jit_artifact() {
-            Ok(artifact) => preparation.artifacts.push(artifact),
+            Ok(artifact) => preparation.artifacts.push(
+                crate::simulation::veriloga::WasmJitWorkerArtifact::from_compiled(&artifact),
+            ),
             Err(error) => preparation.errors.push(format!(
                 "Verilog-A runtime '{}' could not qualify for the browser JIT: {error}",
                 runtime.netlist_alias()
