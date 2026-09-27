@@ -113,13 +113,11 @@ fn load_breaks_an_instantiation_cycle_and_names_both_ends() {
 #[test]
 #[cfg(feature = "generated-veriloga-catalog")]
 fn unresolved_generated_veriloga_bindings_survive_project_save_and_reload() {
-    use crate::state::{
-        PersistedGeneratedIdentity, generated_veriloga_library_binding,
-        validate_generated_veriloga_binding,
-    };
+    use crate::state::{generated_veriloga_library_binding, validate_generated_veriloga_binding};
     use rspice_core::device::veriloga_builtins::{
         GENERATED_VERILOGA_COMPATIBILITY_CATALOG, generated_veriloga_model_descriptor,
     };
+    use rspice_design::schematic::component::PersistedGeneratedIdentity;
 
     let descriptor = generated_veriloga_model_descriptor("vbic13").unwrap();
     let historical = GENERATED_VERILOGA_COMPATIBILITY_CATALOG

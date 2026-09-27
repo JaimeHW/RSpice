@@ -2,9 +2,8 @@
 
 pub use rspice_design::schematic::component::{
     BuiltinXspiceInstance, BuiltinXspicePortBinding, BuiltinXspicePortDirection,
-    BuiltinXspicePortType, Component, ComponentDisplayMode, GeneratedVerilogAInstance,
-    InstanceMultiplicity, LibraryCellInstance, PersistedGeneratedIdentity,
-    explicit_component_model,
+    BuiltinXspicePortType, Component, ComponentDisplayMode, InstanceMultiplicity,
+    LibraryCellInstance, explicit_component_model,
 };
 pub use rspice_model_library::symbol::validate_library_netlist_template;
 

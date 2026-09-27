@@ -12,6 +12,7 @@ rust-version.workspace = true
 workspace = true
 
 [features]
+generated-veriloga-catalog = ["rspice-core/veriloga-builtins"]
 # Enabled by the app dev-dependency to retain parser/cache regression coverage.
 symbol-test-observation = []
 

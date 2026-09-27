@@ -14,14 +14,14 @@ use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
 use super::{
-    GeneratedVerilogAInstance, LibraryCellInstance, PersistedGeneratedIdentity, PortDirection,
-    PortSpec,
+    component::{GeneratedVerilogAInstance, LibraryCellInstance, PersistedGeneratedIdentity},
+    port::{PortDirection, PortSpec},
 };
 
 pub const GENERATED_VERILOGA_BINDING_SCHEMA_REVISION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum GeneratedVerilogABindingMigration {
+pub enum GeneratedVerilogABindingMigration {
     Current,
     Migrated,
     Unresolved(String),
@@ -84,7 +84,7 @@ pub fn generated_veriloga_library_binding(
     Ok(binding)
 }
 
-pub fn validate_generated_veriloga_descriptor(
+fn validate_generated_veriloga_descriptor(
     descriptor: &GeneratedVerilogAModelDescriptor,
 ) -> Result<(), String> {
     if descriptor.abi_version != GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION {
@@ -266,7 +266,7 @@ pub fn validate_generated_veriloga_binding(
 /// Upgrade one exact schema-v1 generated binding to the current split-identity
 /// contract. Near matches remain untouched and unresolved so a project stays
 /// loadable without silently changing executable meaning.
-pub(crate) fn migrate_generated_veriloga_binding(
+pub fn migrate_generated_veriloga_binding(
     binding: &mut LibraryCellInstance,
 ) -> GeneratedVerilogABindingMigration {
     let Some(contract) = binding.generated_veriloga.as_ref() else {
@@ -854,7 +854,7 @@ mod tests {
             |binding| binding.terminal_dirs[0] = PortDirection::In,
             |binding| binding.interface_bound = false,
             |binding| {
-                binding.builtin_xspice = Some(crate::state::schematic::BuiltinXspiceInstance {
+                binding.builtin_xspice = Some(crate::schematic::component::BuiltinXspiceInstance {
                     schema_revision: 1,
                     stable_id: "other".to_owned(),
                     model_type: "other".to_owned(),

@@ -35,7 +35,7 @@ use rspice_design::schematic::device_descriptor;
 use rspice_design::schematic::document;
 use rspice_design::schematic::document_policy;
 mod documentation_shape;
-mod generated_veriloga_catalog;
+use rspice_design::schematic::generated_veriloga_catalog;
 mod ground_names;
 mod hierarchy;
 use rspice_design::schematic::hierarchy as hierarchy_edit;
@@ -72,9 +72,8 @@ pub use bus::{
 };
 pub use component::{
     BuiltinXspiceInstance, BuiltinXspicePortBinding, BuiltinXspicePortDirection,
-    BuiltinXspicePortType, Component, ComponentDisplayMode, GeneratedVerilogAInstance,
-    InstanceMultiplicity, LibraryCellInstance, PersistedGeneratedIdentity,
-    explicit_component_model, validate_library_netlist_template,
+    BuiltinXspicePortType, Component, ComponentDisplayMode, InstanceMultiplicity,
+    LibraryCellInstance, explicit_component_model, validate_library_netlist_template,
 };
 pub use component_type::ComponentType;
 pub use design_note::{

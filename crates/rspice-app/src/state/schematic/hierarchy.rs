@@ -1,12 +1,13 @@
-//! Editor candidates and live generated-model resolution for hierarchy extraction.
+//! Editor candidates for hierarchy extraction.
 
 use super::hierarchy_edit;
-use super::{Component, ComponentType, LibraryCellInstance, Point, PortDiscipline, SchematicState};
 #[cfg(test)]
-use super::{PortDirection, Rotation};
+use super::{ComponentType, PortDirection, PortDiscipline, Rotation};
+use super::{LibraryCellInstance, Point, SchematicState};
 pub use hierarchy_edit::{
     HierarchyExtractionError, HierarchyExtractionPlan, HierarchyExtractionTerminal,
     HierarchyNetConnectivity, SheetMoveConnectivityPlan, hierarchy_terminal_direction,
+    hierarchy_terminal_discipline,
 };
 #[cfg(test)]
 use std::collections::BTreeSet;
@@ -37,45 +38,6 @@ impl HierarchyExtractionCandidate {
             parent_point_to_net,
             child_point_to_net,
         )
-    }
-}
-
-/// Discipline carried by a built-in terminal. Hierarchical instances are
-/// resolved against their master interface by the application because that
-/// requires project/library authority unavailable to the schematic core.
-pub fn hierarchy_terminal_discipline(component: &Component, terminal_name: &str) -> PortDiscipline {
-    if let Some(binding) = component.library_cell.as_ref()
-        && binding.is_generated_veriloga()
-        && let Ok(descriptor) = super::validate_generated_veriloga_binding(binding)
-        && let Some(terminal) = descriptor
-            .terminals
-            .iter()
-            .find(|terminal| terminal.name.eq_ignore_ascii_case(terminal_name))
-    {
-        return match terminal.discipline.to_ascii_lowercase().as_str() {
-            "logic" | "digital" => PortDiscipline::Logic,
-            "wreal" | "real" => PortDiscipline::Wreal,
-            "thermal" | "temperature" | "heat" => PortDiscipline::Thermal,
-            _ => PortDiscipline::Electrical,
-        };
-    }
-    match component.kind {
-        ComponentType::XspiceAdcBridge => {
-            if terminal_name.eq_ignore_ascii_case("out") {
-                PortDiscipline::Logic
-            } else {
-                PortDiscipline::Electrical
-            }
-        }
-        ComponentType::XspiceDacBridge => {
-            if terminal_name.eq_ignore_ascii_case("in") {
-                PortDiscipline::Logic
-            } else {
-                PortDiscipline::Electrical
-            }
-        }
-        kind if kind.is_digital() => PortDiscipline::Logic,
-        _ => PortDiscipline::Electrical,
     }
 }
 
