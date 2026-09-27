@@ -4,4 +4,5 @@
 //! bounded callbacks before its caller may publish an installation.
 
 pub mod compilation;
+pub mod model_import;
 pub mod pdk;

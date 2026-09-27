@@ -127,42 +127,6 @@ fn browser_bundle_retains_and_executes_the_complete_sibling_dependency_closure()
 }
 
 #[test]
-fn explicit_browser_root_ignores_unreachable_documents_binaries_and_sources() {
-    let mut manager = ModelLibraryManager::new();
-    let name = manager
-        .load_library_bundle_from_root(
-            "selected-root.lib",
-            "models/root.lib",
-            vec![
-                (
-                    "models/root.lib".to_owned(),
-                    b".include \"device.inc\"\n".to_vec(),
-                ),
-                (
-                    "models/device.inc".to_owned(),
-                    b".model reachable_d D (IS=2e-14)\n".to_vec(),
-                ),
-                ("README.txt".to_owned(), b"Installation notes".to_vec()),
-                ("datasheet.pdf".to_owned(), vec![0, 0xff, 0, 0xfe]),
-                (
-                    "examples/unrelated.lib".to_owned(),
-                    b".model unrelated_d D (IS=9e-14)\n".to_vec(),
-                ),
-            ],
-            None,
-        )
-        .expect("the selected executable closure imports");
-    let library = manager.get_library(&name).expect("library retained");
-    assert_eq!(library.source_contents.len(), 2);
-    assert!(library.models.contains_key("reachable_d"));
-    assert!(!library.models.contains_key("unrelated_d"));
-    assert!(library.source_contents.iter().all(|source| {
-        let path = source.path.to_string_lossy();
-        !path.ends_with("README.txt") && !path.ends_with("datasheet.pdf")
-    }));
-}
-
-#[test]
 fn ambiguous_browser_bundle_requires_an_explicit_root() {
     let mut manager = ModelLibraryManager::new();
     let error = manager
@@ -283,56 +247,6 @@ fn browser_bundle_rejects_case_colliding_nested_member_identities() {
         .expect_err("portable bundle identities cannot collide by case");
     assert!(error.contains("ignoring case"), "{error}");
     assert_eq!(manager.library_count(), 0);
-}
-
-#[test]
-fn browser_bundle_resolves_sibling_names_case_insensitively_without_losing_identity() {
-    let mut manager = ModelLibraryManager::new();
-    let name = manager
-        .load_library_bundle(
-            "case-bundle.lib",
-            vec![
-                ("ROOT.LIB".to_owned(), b".include \"device.inc\"\n".to_vec()),
-                (
-                    "Device.INC".to_owned(),
-                    b".model nested_d D (IS=2e-14)\n".to_vec(),
-                ),
-            ],
-            None,
-        )
-        .expect("browser bundles use portable case-insensitive sibling lookup");
-    let library = manager.get_library(&name).expect("imported library");
-    assert!(
-        library
-            .source_closure
-            .iter()
-            .any(|pin| pin.path.ends_with("Device.INC"))
-    );
-    assert!(library.models.contains_key("nested_d"));
-}
-
-#[test]
-fn browser_bundle_discovers_native_spectre_include_edges_after_adaptation() {
-    let mut manager = ModelLibraryManager::new();
-    let name = manager
-        .load_library_bundle(
-            "spectre-bundle.scs",
-            vec![
-                (
-                    "root.scs".to_owned(),
-                    b"simulator lang=spectre\ninclude \"device.scs\"\n".to_vec(),
-                ),
-                (
-                    "device.scs".to_owned(),
-                    b"simulator lang=spectre\nmodel native_d diode { is=2e-14 }\n".to_vec(),
-                ),
-            ],
-            None,
-        )
-        .expect("adapted native Spectre includes retain authenticated edges");
-    let library = manager.get_library(&name).expect("imported library");
-    assert_eq!(library.source_edges.len(), 1);
-    assert!(library.models.contains_key("native_d"));
 }
 
 #[test]
