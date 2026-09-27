@@ -7,7 +7,8 @@
 //! showed it has gone.
 
 use super::*;
-use crate::workbench::documents::result_document::manifest::ManifestViewModel;
+use crate::workbench::documents::result_document::manifest::manifest_for_run;
+use rspice_results::manifest::ManifestViewModel;
 
 /// Resolve an active Visualization Studio pane without depending on a window,
 /// screenshot, framebuffer, or transient viewer cache.
@@ -721,7 +722,7 @@ pub(super) fn resolve_results_manifest_source(
         return Err(HardcopySourceError::UnsupportedScope(scope));
     }
 
-    let manifest = ManifestViewModel::from_run(run);
+    let manifest = manifest_for_run(run);
     let semantic_document =
         HardcopySemanticDocument::ResultSummary(Box::new(semantic_manifest_summary(&manifest)));
     let dataset_digest = run.dataset_content_digest();

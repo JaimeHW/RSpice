@@ -859,7 +859,7 @@ fn wilson_interval_is_bounded_and_contains_the_observed_rate() {
 fn the_result_inspector_routes_through_the_workspace_memos() {
     let shipped = crate::source_guard::without_test_items(include_str!("../inspector.rs"));
     assert!(
-        !shipped.contains("ManifestViewModel::from_run"),
+        !shipped.contains("ManifestViewModel::from_run") && !shipped.contains("manifest_for_run("),
         "the inspector rebuilds the manifest projection, digest and all, every frame"
     );
     assert!(

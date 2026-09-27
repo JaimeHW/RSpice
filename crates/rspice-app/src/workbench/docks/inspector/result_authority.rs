@@ -220,7 +220,7 @@ pub(super) const RESULT_QUALIFICATION_GAPS: [(&str, &str); 5] = [
 pub(super) fn result_dataset_authority(
     ui: &mut Ui,
     run: &crate::state::SimulationRun,
-    manifest: &crate::workbench::documents::result_document::manifest::ManifestViewModel,
+    manifest: &rspice_results::manifest::ManifestViewModel,
     executed: Option<&[String]>,
     plan_block: Option<&'static str>,
 ) -> AuthorityRoutes {

@@ -30,6 +30,8 @@ pub mod fft;
 pub mod floquet;
 pub mod histogram;
 pub mod interpolation;
+#[cfg(feature = "engine-evidence")]
+pub mod manifest;
 pub mod measurements;
 pub mod monte_carlo;
 #[cfg(feature = "engine-evidence")]
