@@ -226,12 +226,7 @@ impl SimulationRun {
     }
 
     fn dataset_content_digest_with_encoding(&self, version: ResultDigestEncoding) -> ContentDigest {
-        rspice_results::result_digest::dataset_content_digest(
-            self.analyses
-                .iter()
-                .map(|analysis| (analysis.id, analysis.result_data_ref())),
-            version,
-        )
+        self.data.dataset_content_digest_with_encoding(version)
     }
 }
 

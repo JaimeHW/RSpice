@@ -10,11 +10,12 @@ pub use evidence_domain::EvidenceDomain;
 use crate::analysis_payload::AnalysisResultPayload;
 use crate::analysis_result::AnalysisResult;
 use crate::provenance::AnalysisResultSourceDomain;
+use crate::result_digest::ResultDigestEncoding;
 use crate::run_receipt::{PreparedRunReceipt, SimulationRunProvenance};
 use crate::specification_verdict::SpecificationVerdict;
 use crate::waveform::RetainedWaveform;
 use rspice_app_types::product::{
-    AnalysisInstanceId, DatasetId, JobId, RunId, SimulationCampaignId,
+    AnalysisInstanceId, ContentDigest, DatasetId, JobId, RunId, SimulationCampaignId,
 };
 
 /// Immutable membership of one run in a reviewed multi-plan campaign.
@@ -275,6 +276,25 @@ impl<A> AsMut<SimulationRun<A>> for SimulationRun<A> {
 }
 
 impl<A> SimulationRun<A> {
+    /// Digest the ordered retained analyses with the selected canonical encoding.
+    /// Run addresses, timestamps and waveform presentation do not enter this identity.
+    #[must_use]
+    pub fn dataset_content_digest_with_encoding<W: AsRef<RetainedWaveform>>(
+        &self,
+        version: ResultDigestEncoding,
+    ) -> ContentDigest
+    where
+        A: AsRef<AnalysisResult<W>>,
+    {
+        crate::result_digest::dataset_content_digest(
+            self.analyses
+                .iter()
+                .map(AsRef::as_ref)
+                .map(|analysis| (analysis.id, analysis.result_data_ref())),
+            version,
+        )
+    }
+
     /// Create retained run evidence using the host-supplied timestamp and target.
     pub fn new(run_number: u64, timestamp: f64, execution_target: ExecutionTarget) -> Self {
         let time_str = Self::format_time(timestamp);
