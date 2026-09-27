@@ -71,7 +71,7 @@ impl SchematicState {
         let (component_id, master_ports) = selected_master_interface(self, masters)
             .ok_or(SchematicReplacementError::SelectExactlyOneInstance)?;
         let resolver = SymbolResolver::new(libraries, masters);
-        let (document, _, mut edit) = self.document_edit_parts();
+        let (document, _, _, mut edit) = self.document_edit_parts();
         let repair =
             InstanceInterfaceRepair::prepare(document, component_id, &master_ports, |binding| {
                 resolver.resolve_binding(binding)

@@ -4,8 +4,7 @@ use super::{Point, SchematicState};
 use rspice_design::schematic::documentation_shape::MAX_DOCUMENTATION_POLYGON_POINTS;
 pub use rspice_design::schematic::documentation_shape::{
     DocumentationShape, DocumentationShapeError, DocumentationShapeGeometry,
-    DocumentationShapeKind, DocumentationShapeLayer, arc_parameters,
-    clamped_documentation_shape_translation, geometry_from_points,
+    DocumentationShapeKind, DocumentationShapeLayer, arc_parameters, geometry_from_points,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

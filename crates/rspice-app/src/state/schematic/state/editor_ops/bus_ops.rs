@@ -22,7 +22,7 @@ impl SchematicState {
         if self.read_only {
             return Err(BusParseError::ReadOnly);
         }
-        let (document, identity, mut edit) = self.document_edit_parts();
+        let (document, identity, _, mut edit) = self.document_edit_parts();
         let placement = BusPlacement::prepare(document, identity, points, declaration)?;
         edit.begin(placement.document(), "draw bus");
         let id = placement.commit();
@@ -104,7 +104,7 @@ impl SchematicState {
         if self.read_only {
             return Err(BusParseError::ReadOnly);
         }
-        let (document, identity, mut edit) = self.document_edit_parts();
+        let (document, identity, _, mut edit) = self.document_edit_parts();
         let placement = BusTapPlacement::prepare(
             document,
             identity,
@@ -138,7 +138,7 @@ impl SchematicState {
         if self.read_only {
             return Err(BusParseError::ReadOnly);
         }
-        let (document, identity, mut edit) = self.document_edit_parts();
+        let (document, identity, _, mut edit) = self.document_edit_parts();
         let placement = BusTapPlacement::prepare_configured(
             document,
             identity,
@@ -173,7 +173,7 @@ impl SchematicState {
         if self.read_only {
             return Err(BusParseError::ReadOnly);
         }
-        let (document, _, mut edit) = self.document_edit_parts();
+        let (document, _, _, mut edit) = self.document_edit_parts();
         let Some(change) = BusPropertyEdit::prepare(document, expected, declaration.as_ref())?
         else {
             return Ok(false);
@@ -213,7 +213,7 @@ impl SchematicState {
         if self.read_only {
             return Err(BusParseError::ReadOnly);
         }
-        let (document, _, mut edit) = self.document_edit_parts();
+        let (document, _, _, mut edit) = self.document_edit_parts();
         let Some(change) = BusTapPropertyEdit::prepare(
             document,
             expected,

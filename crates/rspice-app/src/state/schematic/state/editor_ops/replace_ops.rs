@@ -79,7 +79,7 @@ impl SchematicState {
             return Err(SchematicReplacementError::ReadOnly);
         }
         let context = self.replacement_context();
-        let (document, identity, mut edit) = self.document_edit_parts();
+        let (document, identity, _, mut edit) = self.document_edit_parts();
         let replacement = InstanceReplacement::prepare(document, context, authority, target)?;
         let impact = replacement.impact();
         let reference_counter = replacement.reference_counter();

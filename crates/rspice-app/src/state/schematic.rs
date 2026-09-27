@@ -20,9 +20,12 @@ mod array;
 mod bus;
 mod canvas_cache;
 mod clipboard;
+mod clipboard_edit;
+mod junction_candidates;
 use rspice_design::schematic::history as committed_history;
 mod component;
 mod component_references;
+mod reference_edit;
 use rspice_design::schematic::component_type;
 mod design_note;
 mod device_catalog;
@@ -88,7 +91,6 @@ pub use document_policy::{
     SchematicGridPitch, SchematicPageOrientation, SchematicPageSize, SelectionCrossingPolicy,
     WireJunctionPolicy,
 };
-pub(crate) use documentation_shape::clamped_documentation_shape_translation;
 pub use documentation_shape::{
     DocumentationShape, DocumentationShapeError, DocumentationShapeGeometry,
     DocumentationShapeKind, DocumentationShapeLayer, PendingDocumentationShapePlacement,

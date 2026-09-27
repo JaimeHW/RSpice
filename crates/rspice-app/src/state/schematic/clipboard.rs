@@ -194,7 +194,7 @@ impl ClipboardData {
     /// translates their anchors with the rest of the duplicated geometry.
     /// The source selection origin is intentionally preserved so choosing the
     /// attachment policy cannot move the duplicate.
-    pub(crate) fn preserve_named_net_attachments(
+    pub fn preserve_named_net_attachments(
         &mut self,
         attachments: impl IntoIterator<Item = (Point, String)>,
     ) -> usize {

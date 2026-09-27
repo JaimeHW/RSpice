@@ -5,8 +5,10 @@
 //! re-anchoring it at the paste point with fresh object identities.
 
 #[cfg(test)]
+use super::super::super::SchematicProbe;
+use super::super::super::clipboard_edit;
+#[cfg(test)]
 use super::super::super::{BusDeclaration, BusSlice, BusTapOrientation, DesignNoteKind};
-use super::super::super::{SchematicProbe, clamped_documentation_shape_translation};
 use super::super::*;
 
 impl SchematicState {
@@ -46,130 +48,23 @@ impl SchematicState {
     /// over in the same deterministic way as Copy.
     pub(crate) fn capture_complete_selection_resolved(
         &self,
-        mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+        terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
     ) -> ClipboardData {
-        let selected_comps: Vec<Component> = self
-            .document
-            .components
-            .iter()
-            .filter(|c| self.selection.has_component(c.id))
-            .cloned()
-            .collect();
-
-        // Get all terminal positions for selected components
-        let selected_terminals: Vec<Point> = selected_comps
-            .iter()
-            .flat_map(&mut terminal_points_for)
-            .collect();
-
-        // Find wires that have both endpoints at selected component terminals
-        let mut wires_to_copy: Vec<Wire> = Vec::new();
-
-        for wire in &self.document.wires {
-            // Check if explicitly selected
-            if self.selection.has_wire(wire.id) {
-                if wire.points.len() >= 2 {
-                    wires_to_copy.push(wire.clone());
-                }
-                continue;
-            }
-
-            // Check if both endpoints connect to selected components
-            if wire.points.len() >= 2 {
-                let start = wire.points[0];
-                let end = *wire.points.last().unwrap();
-
-                let start_connected = selected_terminals.contains(&start);
-                let end_connected = selected_terminals.contains(&end);
-
-                if start_connected && end_connected {
-                    wires_to_copy.push(wire.clone());
-                }
-            }
-        }
-
-        // Junction dots that sit on a copied wire travel with the selection;
-        // a pasted multi-way joint must keep its explicit connection dots.
-        let mut junctions_to_copy: Vec<Point> = self
-            .document
-            .junctions
-            .iter()
-            .map(|j| j.pos)
-            .filter(|pos| {
-                self.selection.has_junction(*pos)
-                    || wires_to_copy.iter().any(|wire| wire.contains_point(*pos))
-            })
-            .collect();
-        junctions_to_copy.sort_by_key(|point| (point.x, point.y));
-        junctions_to_copy.dedup();
-
-        let explicitly_selected_bus_ids = self.selection.buses.clone();
-        let mut bus_ids_to_copy = explicitly_selected_bus_ids.clone();
-        bus_ids_to_copy.extend(
-            self.document
-                .bus_taps
-                .iter()
-                .filter(|tap| self.selection.has_bus_tap(tap.id))
-                .map(|tap| tap.bus_id),
-        );
-        let buses_to_copy: Vec<Bus> = self
-            .document
-            .buses
-            .iter()
-            .filter(|bus| bus_ids_to_copy.contains(&bus.id))
-            .cloned()
-            .collect();
-        let bus_taps_to_copy: Vec<BusTap> = self
-            .document
-            .bus_taps
-            .iter()
-            .filter(|tap| {
-                self.selection.has_bus_tap(tap.id)
-                    || explicitly_selected_bus_ids.contains(&tap.bus_id)
-            })
-            .cloned()
-            .collect();
-        let net_labels_to_copy: Vec<NetLabel> = self
-            .document
-            .net_labels
-            .iter()
-            .filter(|label| self.selection.has_net_label(label.id))
-            .cloned()
-            .collect();
-        let design_notes_to_copy: Vec<DesignNote> = self
-            .document
-            .design_notes
-            .iter()
-            .filter(|note| self.selection.has_design_note(note.id))
-            .cloned()
-            .collect();
-        let documentation_shapes_to_copy: Vec<DocumentationShape> = self
-            .document
-            .documentation_shapes
-            .iter()
-            .filter(|shape| self.selection.has_documentation_shape(shape.id))
-            .cloned()
-            .collect();
-        let probes_to_copy: Vec<SchematicProbe> = self
-            .document
-            .probes
-            .iter()
-            .filter(|probe| self.selection.has_probe(probe.id))
-            .cloned()
-            .collect();
-
-        ClipboardData::from_complete_selection(ClipboardData {
-            components: selected_comps,
-            wires: wires_to_copy,
-            junctions: junctions_to_copy,
-            buses: buses_to_copy,
-            bus_taps: bus_taps_to_copy,
-            net_labels: net_labels_to_copy,
-            design_notes: design_notes_to_copy,
-            documentation_shapes: documentation_shapes_to_copy,
-            probes: probes_to_copy,
-            origin: Point::origin(),
-        })
+        clipboard_edit::capture_complete_selection(
+            &self.document,
+            clipboard_edit::CopySelection {
+                components: &self.selection.components,
+                wires: &self.selection.wires,
+                net_labels: &self.selection.net_labels,
+                design_notes: &self.selection.design_notes,
+                documentation_shapes: &self.selection.documentation_shapes,
+                probes: &self.selection.probes,
+                buses: &self.selection.buses,
+                bus_taps: &self.selection.bus_taps,
+            },
+            self.selection.junctions.iter().map(|junction| junction.pos),
+            terminal_points_for,
+        )
     }
 
     /// Check if clipboard has content
@@ -187,293 +82,49 @@ impl SchematicState {
         if self.read_only || !self.can_paste() {
             return Ok(false);
         }
-
-        let junction_only = self.clipboard.components.is_empty()
-            && self.clipboard.wires.is_empty()
-            && self.clipboard.buses.is_empty()
-            && self.clipboard.bus_taps.is_empty()
-            && self.clipboard.net_labels.is_empty()
-            && self.clipboard.design_notes.is_empty()
-            && self.clipboard.documentation_shapes.is_empty()
-            && self.clipboard.probes.is_empty();
-        // A junction-only clipboard is a connectivity edit, not decoration.
-        // Snap its anchor through the same ambiguous-crossing candidate set as
-        // the junction tool, then reject it before opening an undo transaction
-        // unless at least one translated marker would create a new connection.
-        let paste_pos = if junction_only {
-            let Some(candidate) = self.nearest_junction_candidate(pos, self.document.grid_size)
-            else {
-                return Ok(false);
-            };
-            candidate
-        } else {
-            pos
+        let (document, identity, clipboard, mut edit) = self.document_edit_parts();
+        let Some(paste) =
+            clipboard_edit::ClipboardPaste::prepare(document, identity, clipboard, pos)?
+        else {
+            return Ok(false);
         };
-        if junction_only {
-            let offset_x = paste_pos.x.saturating_sub(self.clipboard.origin.x);
-            let offset_y = paste_pos.y.saturating_sub(self.clipboard.origin.y);
-            let has_valid_target = self.clipboard.junctions.iter().any(|junction| {
-                let target = Point::new(
-                    junction.x.saturating_add(offset_x),
-                    junction.y.saturating_add(offset_y),
-                );
-                !self.has_junction(target)
-                    && self.nearest_junction_candidate(target, 0) == Some(target)
-            });
-            if !has_valid_target {
-                return Ok(false);
+        edit.begin(paste.document(), "paste");
+        let pasted = paste.commit();
+        if pasted.has_content() {
+            edit.selection.clear();
+            for object in pasted.components {
+                edit.selection.select_component(object.id);
+            }
+            for object in pasted.wires {
+                edit.selection.select_wire(object.id);
+            }
+            for object in pasted.net_labels {
+                edit.selection.select_net_label(object.id);
+            }
+            for object in pasted.design_notes {
+                edit.selection.select_design_note(object.id);
+            }
+            for object in pasted.documentation_shapes {
+                edit.selection.select_documentation_shape(object.id);
+            }
+            for object in pasted.probes {
+                edit.selection.select_probe(object.id);
+            }
+            for object in pasted.buses {
+                edit.selection.select_bus(object.id);
+            }
+            for object in pasted.bus_taps {
+                edit.selection.select_bus_tap(object.id);
+            }
+            for object in pasted.junctions {
+                edit.selection.select_junction(object.pos);
+            }
+            edit.mark_dirty();
+            for _ in 0..pasted.topology_changes {
+                edit.mark_topology_changed();
             }
         }
-
-        let references = super::super::super::component_references::PreparedCopyReferences::new(
-            &self.clipboard.components,
-        )?;
-        Ok(self.with_undo("paste", |s| {
-            let clipboard_components = s.clipboard.components.clone();
-            let clipboard_wires: Vec<Wire> = s
-                .clipboard
-                .wires
-                .iter()
-                .filter(|wire| wire.points.len() >= 2)
-                .cloned()
-                .collect();
-            let clipboard_junctions = s.clipboard.junctions.clone();
-            let clipboard_net_labels = s.clipboard.net_labels.clone();
-            let clipboard_buses = s.clipboard.buses.clone();
-            let clipboard_bus_taps = s.clipboard.bus_taps.clone();
-            let clipboard_design_notes = s.clipboard.design_notes.clone();
-            let clipboard_documentation_shapes = s.clipboard.documentation_shapes.clone();
-            let clipboard_probes = s.clipboard.probes.clone();
-            let origin = s.clipboard.origin;
-
-            if clipboard_components.is_empty()
-                && clipboard_wires.is_empty()
-                && clipboard_junctions.is_empty()
-                && clipboard_net_labels.is_empty()
-                && clipboard_buses.is_empty()
-                && clipboard_bus_taps.is_empty()
-                && clipboard_design_notes.is_empty()
-                && clipboard_documentation_shapes.is_empty()
-                && clipboard_probes.is_empty()
-            {
-                return;
-            }
-
-            let offset_x = paste_pos.x.saturating_sub(origin.x);
-            let offset_y = paste_pos.y.saturating_sub(origin.y);
-            let documentation_shape_offset = clamped_documentation_shape_translation(
-                clipboard_documentation_shapes
-                    .iter()
-                    .filter(|shape| shape.validate().is_ok()),
-                Point::new(offset_x, offset_y),
-            );
-
-            let mut committed = false;
-            let mut electrical_committed = false;
-
-            // Allocate every identity before remapping references within the copy.
-            let mut copied_components = Vec::with_capacity(clipboard_components.len());
-            for comp in clipboard_components {
-                electrical_committed = true;
-                if !committed {
-                    s.selection.clear();
-                    committed = true;
-                }
-                let new_id = s.next_id();
-                let mut new_comp = comp;
-                new_comp.id = new_id;
-                new_comp.pos.x = new_comp.pos.x.saturating_add(offset_x);
-                new_comp.pos.y = new_comp.pos.y.saturating_add(offset_y);
-                new_comp.name = s.generate_name(new_comp.kind);
-                copied_components.push(new_comp);
-                s.selection.select_component(new_id);
-            }
-            references.apply(&mut copied_components);
-            s.document.components.extend(copied_components);
-
-            // Paste wires with new IDs
-            for wire in clipboard_wires {
-                electrical_committed = true;
-                if !committed {
-                    s.selection.clear();
-                    committed = true;
-                }
-                let new_id = s.next_id();
-                let new_points: Vec<Point> = wire
-                    .points
-                    .iter()
-                    .map(|p| Point::new(p.x.saturating_add(offset_x), p.y.saturating_add(offset_y)))
-                    .collect();
-                s.document.wires.push(Wire::new(new_id, new_points));
-                s.selection.select_wire(new_id);
-            }
-
-            // Labels retain their user-facing net names while receiving new
-            // document identities and translated attachment anchors.
-            for mut label in clipboard_net_labels {
-                electrical_committed = true;
-                if !committed {
-                    s.selection.clear();
-                    committed = true;
-                }
-                let new_id = s.next_id();
-                label.id = new_id;
-                label.pos = Point::new(
-                    label.pos.x.saturating_add(offset_x),
-                    label.pos.y.saturating_add(offset_y),
-                );
-                s.document.net_labels.push(label);
-                s.selection.select_net_label(new_id);
-            }
-
-            // Documentation objects retain their typed semantics and source
-            // text, but receive a fresh stable document/review identity.
-            for note in clipboard_design_notes {
-                if note.validate().is_err() {
-                    continue;
-                }
-                let target = Point::new(
-                    note.pos.x.saturating_add(offset_x),
-                    note.pos.y.saturating_add(offset_y),
-                );
-                let new_id = s.next_id();
-                let Ok(new_note) = DesignNote::new(new_id, target, note.kind, note.text) else {
-                    continue;
-                };
-                if !committed {
-                    s.selection.clear();
-                    committed = true;
-                }
-                s.document.design_notes.push(new_note);
-                s.selection.select_design_note(new_id);
-            }
-
-            for mut shape in clipboard_documentation_shapes {
-                if shape.validate().is_err() {
-                    continue;
-                }
-                shape.translate(documentation_shape_offset);
-                if shape.validate().is_err() {
-                    continue;
-                }
-                if !committed {
-                    s.selection.clear();
-                    committed = true;
-                }
-                let new_id = s.next_id();
-                shape.id = new_id;
-                s.document.documentation_shapes.push(shape);
-                s.selection.select_documentation_shape(new_id);
-            }
-
-            // Probe markers are non-electrical authored output intent. Bound
-            // markers retain their exact raw expression; unbound markers get
-            // a fresh display reference matching their new stable identity.
-            for mut probe in clipboard_probes {
-                if probe.validate().is_err() {
-                    continue;
-                }
-                let new_id = s.next_id();
-                probe.id = new_id;
-                probe.position = Point::new(
-                    probe.position.x.saturating_add(offset_x),
-                    probe.position.y.saturating_add(offset_y),
-                );
-                if probe.source_expression.is_none() {
-                    probe.reference = format!("P{new_id}");
-                }
-                if probe.validate().is_err() {
-                    continue;
-                }
-                if !committed {
-                    s.selection.clear();
-                    committed = true;
-                }
-                s.document.probes.push(probe);
-                s.selection.select_probe(new_id);
-            }
-
-            // Paste buses before taps so every source reference can be
-            // remapped to a fresh stable document identity.
-            let mut bus_id_map = std::collections::HashMap::new();
-            for mut bus in clipboard_buses {
-                let old_id = bus.id;
-                bus.translate(Point::new(offset_x, offset_y));
-                if bus.validate().is_err() {
-                    continue;
-                }
-                electrical_committed = true;
-                if !committed {
-                    s.selection.clear();
-                    committed = true;
-                }
-                let new_id = s.next_id();
-                bus.id = new_id;
-                s.document.buses.push(bus);
-                bus_id_map.entry(old_id).or_insert(new_id);
-                s.selection.select_bus(new_id);
-            }
-
-            for mut tap in clipboard_bus_taps {
-                let Some(&new_bus_id) = bus_id_map.get(&tap.bus_id) else {
-                    continue;
-                };
-                tap.bus_id = new_bus_id;
-                tap.translate(Point::new(offset_x, offset_y));
-                let Some(source) = s.document.buses.iter().find(|bus| bus.id == new_bus_id) else {
-                    continue;
-                };
-                if tap.validate_against_bus(source).is_ok() {
-                    electrical_committed = true;
-                    if !committed {
-                        s.selection.clear();
-                        committed = true;
-                    }
-                    tap.id = s.next_id();
-                    let id = tap.id;
-                    s.document.bus_taps.push(tap);
-                    s.selection.select_bus_tap(id);
-                }
-            }
-
-            // Re-create junction dots only where at least two distinct wires
-            // meet. This makes junction-only copy/paste useful without ever
-            // manufacturing an electrically meaningless floating marker.
-            for junction in clipboard_junctions {
-                let target = Point::new(
-                    junction.x.saturating_add(offset_x),
-                    junction.y.saturating_add(offset_y),
-                );
-                let valid_target = if junction_only {
-                    s.nearest_junction_candidate(target, 0) == Some(target)
-                } else {
-                    s.document
-                        .wires
-                        .iter()
-                        .filter(|wire| wire.contains_point(target))
-                        .map(|wire| wire.id)
-                        .collect::<std::collections::HashSet<_>>()
-                        .len()
-                        >= 2
-                };
-                if valid_target && !s.has_junction(target) {
-                    electrical_committed = true;
-                    if !committed {
-                        s.selection.clear();
-                        committed = true;
-                    }
-                    s.add_junction(target);
-                    s.selection.select_junction(target);
-                }
-            }
-
-            if committed {
-                s.is_dirty = true;
-                if electrical_committed {
-                    s.bump_topology_version();
-                }
-            }
-        }))
+        Ok(edit.end(document))
     }
 }
 

@@ -47,6 +47,10 @@ impl DocumentEditState<'_> {
         committed
     }
 
+    pub(super) fn mark_dirty(&mut self) {
+        *self.is_dirty = true;
+    }
+
     pub(super) fn mark_topology_changed(&mut self) {
         *self.is_dirty = true;
         *self.topology_version = self.topology_version.wrapping_add(1);
@@ -59,11 +63,13 @@ impl SchematicState {
     ) -> (
         &mut SchematicDocument,
         &mut SchematicIdentity,
+        &ClipboardData,
         DocumentEditState<'_>,
     ) {
         (
             &mut self.document,
             &mut self.identity,
+            &self.clipboard,
             DocumentEditState {
                 history: &mut self.undo_history,
                 selection: &mut self.selection,
@@ -107,7 +113,7 @@ impl SchematicState {
     /// state.end_operation();
     /// ```
     pub fn begin_operation(&mut self, description: impl Into<String>) {
-        let (document, _, mut edit) = self.document_edit_parts();
+        let (document, _, _, mut edit) = self.document_edit_parts();
         edit.begin(document, description);
     }
 
@@ -119,7 +125,7 @@ impl SchematicState {
     /// # Returns
     /// `true` if an undo entry was created, `false` if nothing changed.
     pub fn end_operation(&mut self) -> bool {
-        let (document, _, mut edit) = self.document_edit_parts();
+        let (document, _, _, mut edit) = self.document_edit_parts();
         edit.end(document)
     }
 
