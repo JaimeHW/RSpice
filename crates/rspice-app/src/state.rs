@@ -89,13 +89,16 @@ pub use library_browser::{
     Cell, Library, LibraryCellPlacementCandidate, LibraryManager, ProjectLibraryLockAuthority,
     View, ViewType, library_cell_placement_candidates,
 };
+#[cfg(test)]
+pub(crate) use model_bound_symbol::store_model_bound_symbol;
 pub use model_bound_symbol::{
     GeneratedSymbolViews, MODEL_BOUND_SYMBOL_METADATA_KEY, MODEL_BOUND_SYMBOL_SCHEMA_VERSION,
     ModelBoundSymbolDefinition, ParameterInheritance, SymbolDefinitionImport, SymbolElectricalType,
     SymbolFormDiagnostic, SymbolGraphicTemplate, SymbolIdentity, SymbolImplementationView,
     SymbolModelReference, SymbolNetlistBinding, SymbolParameterConstraints, SymbolParameterDefault,
     SymbolParameterField, SymbolParameterForm, SymbolParameterSection, SymbolParameterVisibility,
-    SymbolPinDefinition, SymbolPinSide, SymbolSourceContract,
+    SymbolPinDefinition, SymbolPinSide, SymbolSourceContract, build_symbol_test_fixture,
+    load_model_bound_symbol, materialize_symbol_document, prepare_symbol_construction,
 };
 pub use model_library::ModelLibraryManager;
 pub use netlist_document::{

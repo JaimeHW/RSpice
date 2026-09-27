@@ -238,16 +238,15 @@ fn bound_symbol_provider_library(
         .into_iter()
         .filter(|candidate| !candidate.name.eq_ignore_ascii_case(&binding.view));
     for candidate in preferred.chain(remaining) {
-        let definition = crate::state::ModelBoundSymbolDefinition::load_from_view(candidate)
-            .map_err(|error| {
-                PreparationError::new(
-                    PreparationStage::ModelBindings,
-                    format!(
-                        "Model-bound instance '{}:{}' has an invalid retained symbol contract: {error}",
-                        view, instance
-                    ),
-                )
-            })?;
+        let definition = crate::state::load_model_bound_symbol(candidate).map_err(|error| {
+            PreparationError::new(
+                PreparationStage::ModelBindings,
+                format!(
+                    "Model-bound instance '{}:{}' has an invalid retained symbol contract: {error}",
+                    view, instance
+                ),
+            )
+        })?;
         if let Some(definition) = definition {
             return Ok(definition
                 .netlist

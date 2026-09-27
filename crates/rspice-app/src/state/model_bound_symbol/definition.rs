@@ -283,33 +283,6 @@ impl ModelBoundSymbolDefinition {
         Ok(definition)
     }
 
-    pub fn load_from_view(view: &View) -> Result<Option<Self>, SymbolDefinitionError> {
-        let Some(encoded) = view.metadata.get(MODEL_BOUND_SYMBOL_METADATA_KEY) else {
-            return Ok(None);
-        };
-
-        // Counted below the guard on purpose: a legacy symbol carrying no typed
-        // contract costs one map lookup, which is not what the counter watches.
-        #[cfg(test)]
-        crate::state::SYMBOL_VIEW_PARSES.with(|count| count.set(count.get() + 1));
-
-        Self::from_json_bytes(encoded.as_bytes(), &view.name).map(Some)
-    }
-
-    pub fn store_in_view(&self, view: &mut View) -> Result<(), SymbolDefinitionError> {
-        self.validate()?;
-        let mut candidate = view.clone();
-        project_definition_metadata(self, &mut candidate.metadata)?;
-        if self.generated_views.symbol || view.view_type == ViewType::Symbol {
-            self.symbol_document()
-                .store_in_view(&mut candidate)
-                .map_err(SymbolDefinitionError::Serialization)?;
-        }
-        candidate.modified = true;
-        *view = candidate;
-        Ok(())
-    }
-
     pub fn replace_parameter_form(
         &self,
         replacement: SymbolParameterForm,
@@ -338,125 +311,6 @@ impl ModelBoundSymbolDefinition {
         let canonical = serde_json::to_vec(self)
             .map_err(|error| SymbolDefinitionError::Serialization(error.to_string()))?;
         Ok(stable_digest(&canonical))
-    }
-
-    pub fn build_plan(
-        &self,
-        library: &Library,
-    ) -> Result<SymbolConstructionPlan, SymbolDefinitionError> {
-        self.validate()?;
-
-        if library.read_only {
-            return Err(SymbolDefinitionError::ReadOnlyLibrary(library.name.clone()));
-        }
-        if library.name != self.identity.library {
-            return Err(SymbolDefinitionError::LibraryIdentityMismatch {
-                expected: self.identity.library.clone(),
-                actual: library.name.clone(),
-            });
-        }
-        let before = library.get_cell(&self.identity.cell).cloned();
-        if let SymbolSourceContract::ExistingSchematicPins { schematic_view, .. } = &self.source {
-            let view = before
-                .as_ref()
-                .and_then(|cell| cell.get_view(schematic_view))
-                .ok_or_else(|| {
-                    SymbolDefinitionError::SourcePinMismatch(format!(
-                        "existing schematic view `{schematic_view}` does not exist in {}/{}",
-                        self.identity.library, self.identity.cell
-                    ))
-                })?;
-            if !matches!(view.view_type, ViewType::Schematic | ViewType::Testbench) {
-                return Err(SymbolDefinitionError::SourcePinMismatch(format!(
-                    "existing source view `{schematic_view}` is not a schematic/testbench"
-                )));
-            }
-        }
-        if let Some(existing) = &before
-            && let Some(current) = definition_from_cell(existing)?
-            && current.identity.revision >= self.identity.revision
-        {
-            return Err(SymbolDefinitionError::NonMonotonicRevision {
-                current: current.identity.revision,
-                proposed: self.identity.revision,
-            });
-        }
-        let mut after = before
-            .clone()
-            .unwrap_or_else(|| Cell::new(&self.identity.cell));
-        after.name = self.identity.cell.clone();
-        project_definition_metadata(self, &mut after.metadata)?;
-
-        if self.generated_views.symbol {
-            let mut view = after
-                .get_view(SYMBOL_VIEW_NAME)
-                .cloned()
-                .unwrap_or_else(|| View::new(SYMBOL_VIEW_NAME, ViewType::Symbol));
-            view.view_type = ViewType::Symbol;
-            self.store_in_view(&mut view)?;
-            after.add_view(view);
-        }
-        if self.generated_views.parameter_form {
-            let mut view = after
-                .get_view(PARAMETER_FORM_VIEW_NAME)
-                .cloned()
-                .unwrap_or_else(|| View::new(PARAMETER_FORM_VIEW_NAME, ViewType::Custom));
-            project_definition_metadata(self, &mut view.metadata)?;
-            view.metadata.insert(
-                SYMBOL_PARAMETER_FORM_METADATA_KEY.to_owned(),
-                serde_json::to_string(&self.parameter_form)
-                    .map_err(|error| SymbolDefinitionError::Serialization(error.to_string()))?,
-            );
-            view.modified = true;
-            after.add_view(view);
-        }
-        if self.generated_views.simulation_test_fixture {
-            let mut view = after
-                .get_view(TEST_FIXTURE_VIEW_NAME)
-                .cloned()
-                .unwrap_or_else(|| View::new(TEST_FIXTURE_VIEW_NAME, ViewType::Testbench));
-            project_definition_metadata(self, &mut view.metadata)?;
-            view.metadata.insert(
-                "test_fixture.contract".to_owned(),
-                "pin_access_harness.v1".to_owned(),
-            );
-            view.metadata.insert(
-                "test_fixture.buffer".to_owned(),
-                serde_json::to_string(&self.test_fixture_contract()?)
-                    .map_err(|error| SymbolDefinitionError::Serialization(error.to_string()))?,
-            );
-            view.modified = true;
-            after.add_view(view);
-        }
-
-        if let SymbolSourceContract::Model { model, .. } = &self.source {
-            let view_name = model.implementation_view.view_name();
-            let mut view = after
-                .get_view(view_name)
-                .cloned()
-                .unwrap_or_else(|| View::new(view_name, model.implementation_view.view_type()));
-            view.view_type = model.implementation_view.view_type();
-            project_definition_metadata(self, &mut view.metadata)?;
-            view.file_path = model.source_path.as_ref().map(std::path::PathBuf::from);
-            if let Some(module_name) = &model.module_name {
-                view.metadata
-                    .insert("veriloga.module".to_owned(), module_name.clone());
-            }
-            view.modified = true;
-            after.add_view(view);
-        }
-
-        let expected_cell_json = before.map(|cell| serialize_cell(&cell)).transpose()?;
-        Ok(SymbolConstructionPlan {
-            library: library.name.clone(),
-            cell: self.identity.cell.clone(),
-            expected_cell_json,
-            after,
-        })
-    }
-
-    pub fn symbol_document(&self) -> SymbolDocument {
-        symbol_document_for(self)
     }
 
     /// Typed pin-access harness contract used by the application to publish
@@ -496,135 +350,9 @@ impl ModelBoundSymbolDefinition {
                 .collect(),
         })
     }
-
-    /// Build the editable pin-access harness represented by
-    /// `test_fixture_contract`. It never invents a stimulus or analysis.
-    pub fn build_test_fixture_schematic(&self) -> Result<SchematicState, SymbolDefinitionError> {
-        let contract = self.test_fixture_contract()?;
-        let model = self.netlist.model.as_ref();
-        let ports = contract
-            .accesses
-            .iter()
-            .map(|access| PortSpec {
-                name: access.port_name.clone(),
-                direction: access.direction,
-            })
-            .collect::<Vec<_>>();
-        let mut binding = LibraryCellInstance::new(
-            &contract.library,
-            &contract.cell,
-            &contract.implementation_view,
-        );
-        binding.bind_interface(&ports);
-        binding.source_path = model
-            .and_then(|model| model.source_path.as_ref())
-            .map(std::path::PathBuf::from);
-        binding.module_name = model
-            .and_then(|model| model.module_name.clone())
-            .or_else(|| model.map(|model| model.model.clone()));
-        binding.netlist_template = Some(self.netlist.template.clone());
-        binding.model_section = model.and_then(|model| model.section.clone());
-        binding.reference_prefix = Some(self.netlist.device_prefix.clone());
-        binding.parameter_order = self.netlist.parameter_order.clone();
-
-        let mut schematic = SchematicState::default();
-        let dut = Component::new(1, ComponentType::CellInstance, Point::new(200, 200))
-            .with_library_cell(binding)
-            .with_name_value(&contract.dut_instance_name, &contract.cell);
-        schematic.components.push(dut);
-
-        let document = self.symbol_document();
-        let mut ordered_pins = self.pins.iter().collect::<Vec<_>>();
-        ordered_pins.sort_by_key(|pin| pin.order);
-
-        let mut component_id = 2u64;
-        let mut wire_id = 1u64;
-        for (access, definition_pin) in contract.accesses.iter().zip(ordered_pins) {
-            let offset = document
-                .pin(&access.port_name)
-                .and_then(|pin| pin.position)
-                .ok_or_else(|| {
-                    SymbolDefinitionError::InvalidNetlist(
-                        "authored symbol has an unplaced test-fixture terminal".to_owned(),
-                    )
-                })?;
-            let dut_terminal = Point::new(200 + offset.x, 200 + offset.y);
-            let (port_position, rotation) = match definition_pin.side {
-                SymbolPinSide::Left => (Point::new(60, dut_terminal.y), Rotation::R180),
-                SymbolPinSide::Right => (Point::new(340, dut_terminal.y), Rotation::R0),
-                SymbolPinSide::Top => (Point::new(dut_terminal.x, 60), Rotation::R270),
-                SymbolPinSide::Bottom => (Point::new(dut_terminal.x, 340), Rotation::R90),
-            };
-            let mut port = Component::new(component_id, ComponentType::Port, port_position)
-                .with_rotation(rotation)
-                .with_name_value("", &access.port_name);
-            port.params = format!(
-                "dir={} signal_type={} discipline={} interface_order={} documentation={}_pin_access",
-                access.direction.keyword(),
-                match access.electrical_type {
-                    SymbolElectricalType::Logic => "logic",
-                    SymbolElectricalType::Power | SymbolElectricalType::Ground => "power",
-                    _ => "analog",
-                },
-                if access.electrical_type == SymbolElectricalType::Logic {
-                    "logic"
-                } else {
-                    "electrical"
-                },
-                access.order,
-                access.port_name
-            );
-            let port_id = port.id;
-            let (_, port_terminal) = port.terminal_positions()[0];
-            schematic.components.push(port);
-            let route = if dut_terminal.x == port_terminal.x || dut_terminal.y == port_terminal.y {
-                vec![dut_terminal, port_terminal]
-            } else {
-                vec![
-                    dut_terminal,
-                    Point::new(port_terminal.x, dut_terminal.y),
-                    port_terminal,
-                ]
-            };
-            schematic.wires.push(Wire::new(wire_id, route));
-            schematic
-                .connections
-                .push(WireConnection::new(wire_id, 0, 1, &access.port_name));
-            schematic
-                .connections
-                .push(WireConnection::new(wire_id, 1, port_id, "P"));
-            component_id += 1;
-            wire_id += 1;
-
-            if access.ground {
-                let ground = Component::new(
-                    component_id,
-                    ComponentType::Ground,
-                    Point::new(dut_terminal.x, dut_terminal.y.saturating_add(60)),
-                );
-                let ground_id = ground.id;
-                let (_, ground_terminal) = ground.terminal_positions()[0];
-                schematic.components.push(ground);
-                schematic
-                    .wires
-                    .push(Wire::new(wire_id, vec![dut_terminal, ground_terminal]));
-                schematic
-                    .connections
-                    .push(WireConnection::new(wire_id, 0, 1, &access.port_name));
-                schematic
-                    .connections
-                    .push(WireConnection::new(wire_id, 1, ground_id, "GND"));
-                component_id += 1;
-                wire_id += 1;
-            }
-        }
-        schematic.is_dirty = true;
-        schematic.needs_fit = true;
-        Ok(schematic)
-    }
 }
 
-fn symbol_document_for(definition: &ModelBoundSymbolDefinition) -> SymbolDocument {
+pub fn materialize_symbol_document(definition: &ModelBoundSymbolDefinition) -> SymbolDocument {
     let half_width = 40;
     let half_height = 40.max(((definition.pins.len() as i32 + 1) / 2) * 10);
     let body = if let Some(imported) = &definition.imported_graphic {
@@ -871,4 +599,288 @@ fn stable_digest(bytes: &[u8]) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("fnv1a64:{hash:016x}")
+}
+
+pub fn load_model_bound_symbol(
+    view: &View,
+) -> Result<Option<ModelBoundSymbolDefinition>, SymbolDefinitionError> {
+    let Some(encoded) = view.metadata.get(MODEL_BOUND_SYMBOL_METADATA_KEY) else {
+        return Ok(None);
+    };
+
+    // Counted below the guard on purpose: a legacy symbol carrying no typed
+    // contract costs one map lookup, which is not what the counter watches.
+    #[cfg(test)]
+    crate::state::SYMBOL_VIEW_PARSES.with(|count| count.set(count.get() + 1));
+
+    ModelBoundSymbolDefinition::from_json_bytes(encoded.as_bytes(), &view.name).map(Some)
+}
+
+pub fn store_model_bound_symbol(
+    definition: &ModelBoundSymbolDefinition,
+    view: &mut View,
+) -> Result<(), SymbolDefinitionError> {
+    definition.validate()?;
+    let mut candidate = view.clone();
+    project_definition_metadata(definition, &mut candidate.metadata)?;
+    if definition.generated_views.symbol || view.view_type == ViewType::Symbol {
+        materialize_symbol_document(definition)
+            .store_in_view(&mut candidate)
+            .map_err(SymbolDefinitionError::Serialization)?;
+    }
+    candidate.modified = true;
+    *view = candidate;
+    Ok(())
+}
+
+pub fn prepare_symbol_construction(
+    definition: &ModelBoundSymbolDefinition,
+    library: &Library,
+) -> Result<SymbolConstructionPlan, SymbolDefinitionError> {
+    definition.validate()?;
+
+    if library.read_only {
+        return Err(SymbolDefinitionError::ReadOnlyLibrary(library.name.clone()));
+    }
+    if library.name != definition.identity.library {
+        return Err(SymbolDefinitionError::LibraryIdentityMismatch {
+            expected: definition.identity.library.clone(),
+            actual: library.name.clone(),
+        });
+    }
+    let before = library.get_cell(&definition.identity.cell).cloned();
+    if let SymbolSourceContract::ExistingSchematicPins { schematic_view, .. } = &definition.source {
+        let view = before
+            .as_ref()
+            .and_then(|cell| cell.get_view(schematic_view))
+            .ok_or_else(|| {
+                SymbolDefinitionError::SourcePinMismatch(format!(
+                    "existing schematic view `{schematic_view}` does not exist in {}/{}",
+                    definition.identity.library, definition.identity.cell
+                ))
+            })?;
+        if !matches!(view.view_type, ViewType::Schematic | ViewType::Testbench) {
+            return Err(SymbolDefinitionError::SourcePinMismatch(format!(
+                "existing source view `{schematic_view}` is not a schematic/testbench"
+            )));
+        }
+    }
+    if let Some(existing) = &before
+        && let Some(current) = definition_from_cell(existing)?
+        && current.identity.revision >= definition.identity.revision
+    {
+        return Err(SymbolDefinitionError::NonMonotonicRevision {
+            current: current.identity.revision,
+            proposed: definition.identity.revision,
+        });
+    }
+    let mut after = before
+        .clone()
+        .unwrap_or_else(|| Cell::new(&definition.identity.cell));
+    after.name = definition.identity.cell.clone();
+    project_definition_metadata(definition, &mut after.metadata)?;
+
+    if definition.generated_views.symbol {
+        let mut view = after
+            .get_view(SYMBOL_VIEW_NAME)
+            .cloned()
+            .unwrap_or_else(|| View::new(SYMBOL_VIEW_NAME, ViewType::Symbol));
+        view.view_type = ViewType::Symbol;
+        store_model_bound_symbol(definition, &mut view)?;
+        after.add_view(view);
+    }
+    if definition.generated_views.parameter_form {
+        let mut view = after
+            .get_view(PARAMETER_FORM_VIEW_NAME)
+            .cloned()
+            .unwrap_or_else(|| View::new(PARAMETER_FORM_VIEW_NAME, ViewType::Custom));
+        project_definition_metadata(definition, &mut view.metadata)?;
+        view.metadata.insert(
+            SYMBOL_PARAMETER_FORM_METADATA_KEY.to_owned(),
+            serde_json::to_string(&definition.parameter_form)
+                .map_err(|error| SymbolDefinitionError::Serialization(error.to_string()))?,
+        );
+        view.modified = true;
+        after.add_view(view);
+    }
+    if definition.generated_views.simulation_test_fixture {
+        let mut view = after
+            .get_view(TEST_FIXTURE_VIEW_NAME)
+            .cloned()
+            .unwrap_or_else(|| View::new(TEST_FIXTURE_VIEW_NAME, ViewType::Testbench));
+        project_definition_metadata(definition, &mut view.metadata)?;
+        view.metadata.insert(
+            "test_fixture.contract".to_owned(),
+            "pin_access_harness.v1".to_owned(),
+        );
+        view.metadata.insert(
+            "test_fixture.buffer".to_owned(),
+            serde_json::to_string(&definition.test_fixture_contract()?)
+                .map_err(|error| SymbolDefinitionError::Serialization(error.to_string()))?,
+        );
+        view.modified = true;
+        after.add_view(view);
+    }
+
+    if let SymbolSourceContract::Model { model, .. } = &definition.source {
+        let view_name = model.implementation_view.view_name();
+        let mut view = after.get_view(view_name).cloned().unwrap_or_else(|| {
+            View::new(
+                view_name,
+                symbol_implementation_view_type(model.implementation_view),
+            )
+        });
+        view.view_type = symbol_implementation_view_type(model.implementation_view);
+        project_definition_metadata(definition, &mut view.metadata)?;
+        view.file_path = model.source_path.as_ref().map(std::path::PathBuf::from);
+        if let Some(module_name) = &model.module_name {
+            view.metadata
+                .insert("veriloga.module".to_owned(), module_name.clone());
+        }
+        view.modified = true;
+        after.add_view(view);
+    }
+
+    let expected_cell_json = before.map(|cell| serialize_cell(&cell)).transpose()?;
+    Ok(SymbolConstructionPlan {
+        library: library.name.clone(),
+        cell: definition.identity.cell.clone(),
+        expected_cell_json,
+        after,
+    })
+}
+
+/// Build the editable pin-access harness represented by
+/// `test_fixture_contract`. It never invents a stimulus or analysis.
+pub fn build_symbol_test_fixture(
+    definition: &ModelBoundSymbolDefinition,
+) -> Result<SchematicState, SymbolDefinitionError> {
+    let contract = definition.test_fixture_contract()?;
+    let model = definition.netlist.model.as_ref();
+    let ports = contract
+        .accesses
+        .iter()
+        .map(|access| PortSpec {
+            name: access.port_name.clone(),
+            direction: access.direction,
+        })
+        .collect::<Vec<_>>();
+    let mut binding = LibraryCellInstance::new(
+        &contract.library,
+        &contract.cell,
+        &contract.implementation_view,
+    );
+    binding.bind_interface(&ports);
+    binding.source_path = model
+        .and_then(|model| model.source_path.as_ref())
+        .map(std::path::PathBuf::from);
+    binding.module_name = model
+        .and_then(|model| model.module_name.clone())
+        .or_else(|| model.map(|model| model.model.clone()));
+    binding.netlist_template = Some(definition.netlist.template.clone());
+    binding.model_section = model.and_then(|model| model.section.clone());
+    binding.reference_prefix = Some(definition.netlist.device_prefix.clone());
+    binding.parameter_order = definition.netlist.parameter_order.clone();
+
+    let mut schematic = SchematicState::default();
+    let dut = Component::new(1, ComponentType::CellInstance, Point::new(200, 200))
+        .with_library_cell(binding)
+        .with_name_value(&contract.dut_instance_name, &contract.cell);
+    schematic.components.push(dut);
+
+    let document = materialize_symbol_document(definition);
+    let mut ordered_pins = definition.pins.iter().collect::<Vec<_>>();
+    ordered_pins.sort_by_key(|pin| pin.order);
+
+    let mut component_id = 2u64;
+    let mut wire_id = 1u64;
+    for (access, definition_pin) in contract.accesses.iter().zip(ordered_pins) {
+        let offset = document
+            .pin(&access.port_name)
+            .and_then(|pin| pin.position)
+            .ok_or_else(|| {
+                SymbolDefinitionError::InvalidNetlist(
+                    "authored symbol has an unplaced test-fixture terminal".to_owned(),
+                )
+            })?;
+        let dut_terminal = Point::new(200 + offset.x, 200 + offset.y);
+        let (port_position, rotation) = match definition_pin.side {
+            SymbolPinSide::Left => (Point::new(60, dut_terminal.y), Rotation::R180),
+            SymbolPinSide::Right => (Point::new(340, dut_terminal.y), Rotation::R0),
+            SymbolPinSide::Top => (Point::new(dut_terminal.x, 60), Rotation::R270),
+            SymbolPinSide::Bottom => (Point::new(dut_terminal.x, 340), Rotation::R90),
+        };
+        let mut port = Component::new(component_id, ComponentType::Port, port_position)
+            .with_rotation(rotation)
+            .with_name_value("", &access.port_name);
+        port.params = format!(
+            "dir={} signal_type={} discipline={} interface_order={} documentation={}_pin_access",
+            access.direction.keyword(),
+            match access.electrical_type {
+                SymbolElectricalType::Logic => "logic",
+                SymbolElectricalType::Power | SymbolElectricalType::Ground => "power",
+                _ => "analog",
+            },
+            if access.electrical_type == SymbolElectricalType::Logic {
+                "logic"
+            } else {
+                "electrical"
+            },
+            access.order,
+            access.port_name
+        );
+        let port_id = port.id;
+        let (_, port_terminal) = port.terminal_positions()[0];
+        schematic.components.push(port);
+        let route = if dut_terminal.x == port_terminal.x || dut_terminal.y == port_terminal.y {
+            vec![dut_terminal, port_terminal]
+        } else {
+            vec![
+                dut_terminal,
+                Point::new(port_terminal.x, dut_terminal.y),
+                port_terminal,
+            ]
+        };
+        schematic.wires.push(Wire::new(wire_id, route));
+        schematic
+            .connections
+            .push(WireConnection::new(wire_id, 0, 1, &access.port_name));
+        schematic
+            .connections
+            .push(WireConnection::new(wire_id, 1, port_id, "P"));
+        component_id += 1;
+        wire_id += 1;
+
+        if access.ground {
+            let ground = Component::new(
+                component_id,
+                ComponentType::Ground,
+                Point::new(dut_terminal.x, dut_terminal.y.saturating_add(60)),
+            );
+            let ground_id = ground.id;
+            let (_, ground_terminal) = ground.terminal_positions()[0];
+            schematic.components.push(ground);
+            schematic
+                .wires
+                .push(Wire::new(wire_id, vec![dut_terminal, ground_terminal]));
+            schematic
+                .connections
+                .push(WireConnection::new(wire_id, 0, 1, &access.port_name));
+            schematic
+                .connections
+                .push(WireConnection::new(wire_id, 1, ground_id, "GND"));
+            component_id += 1;
+            wire_id += 1;
+        }
+    }
+    schematic.is_dirty = true;
+    schematic.needs_fit = true;
+    Ok(schematic)
+}
+
+const fn symbol_implementation_view_type(view: SymbolImplementationView) -> ViewType {
+    match view {
+        SymbolImplementationView::Spice => ViewType::Spice,
+        SymbolImplementationView::VerilogA => ViewType::VerilogA,
+    }
 }

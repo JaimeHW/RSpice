@@ -280,11 +280,7 @@ impl AppState {
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
             .and_then(|cell| cell.get_view(&reference.view))
-            .and_then(|view| {
-                ModelBoundSymbolDefinition::load_from_view(view)
-                    .ok()
-                    .flatten()
-            })
+            .and_then(|view| crate::state::load_model_bound_symbol(view).ok().flatten())
     }
 
     /// The publication contract of the active symbol view.

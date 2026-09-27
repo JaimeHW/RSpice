@@ -1476,13 +1476,13 @@ fn author_technology_symbol_variant(
     })?;
 
     let mut candidate = app.state.library_manager.clone();
-    let plan = variant
-        .build_plan(
-            candidate
-                .get_library(target_library)
-                .expect("target library was resolved above"),
-        )
-        .map_err(|error| error.to_string())?;
+    let plan = crate::state::prepare_symbol_construction(
+        &variant,
+        candidate
+            .get_library(target_library)
+            .expect("target library was resolved above"),
+    )
+    .map_err(|error| error.to_string())?;
     plan.commit(
         candidate
             .get_library_mut(target_library)

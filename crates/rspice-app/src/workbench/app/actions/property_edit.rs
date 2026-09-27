@@ -49,8 +49,8 @@ fn authoritative_cell_instance_sheet(
     } else {
         let mut found = None;
         for view in cell.views_sorted() {
-            let Some(candidate) = ModelBoundSymbolDefinition::load_from_view(view)
-                .map_err(|error| error.to_string())?
+            let Some(candidate) =
+                crate::state::load_model_bound_symbol(view).map_err(|error| error.to_string())?
             else {
                 continue;
             };
@@ -844,8 +844,7 @@ mod tests {
         definition: &ModelBoundSymbolDefinition,
     ) -> LibraryCellInstance {
         let mut library = Library::new(&definition.identity.library);
-        definition
-            .build_plan(&library)
+        crate::state::prepare_symbol_construction(definition, &library)
             .expect("construction plan")
             .commit(&mut library)
             .expect("definition publication");

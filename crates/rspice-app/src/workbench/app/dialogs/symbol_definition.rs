@@ -15,7 +15,7 @@ mod state;
 pub(crate) use state::{SymbolImportDialogState, SymbolParameterFormDialogState};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::state::{CellViewRef, ModelBoundSymbolDefinition, ViewType};
+use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app_state::AppState;
 
 pub(crate) fn open_symbol_import_dialog(state: &mut AppState) {
@@ -99,7 +99,7 @@ pub(crate) fn open_symbol_parameter_form_dialog_for(state: &mut AppState, target
         ));
         return;
     }
-    let definition = match crate::state::ModelBoundSymbolDefinition::load_from_view(view) {
+    let definition = match crate::state::load_model_bound_symbol(view) {
         Ok(Some(definition)) => definition,
         Ok(None) => {
             state.push_user_message(ConsoleMessage::warning(
@@ -212,10 +212,7 @@ fn first_model_bound_symbol_reference(state: &AppState) -> Option<CellViewRef> {
                     .into_iter()
                     .filter(|view| {
                         view.view_type == ViewType::Symbol
-                            && matches!(
-                                ModelBoundSymbolDefinition::load_from_view(view),
-                                Ok(Some(_))
-                            )
+                            && matches!(crate::state::load_model_bound_symbol(view), Ok(Some(_)))
                     })
                     .map(move |view| CellViewRef::new(&library.name, &cell.name, &view.name))
             })
@@ -229,12 +226,7 @@ fn reference_has_typed_definition(state: &AppState, reference: &CellViewRef) -> 
         .get_library(&reference.library)
         .and_then(|library| library.get_cell(&reference.cell))
         .and_then(|cell| cell.get_view(&reference.view))
-        .is_some_and(|view| {
-            matches!(
-                ModelBoundSymbolDefinition::load_from_view(view),
-                Ok(Some(_))
-            )
-        })
+        .is_some_and(|view| matches!(crate::state::load_model_bound_symbol(view), Ok(Some(_))))
 }
 
 /// Maximum UTF-8 source accepted by the symbol-definition importer.
@@ -282,9 +274,7 @@ mod tests {
             .library_manager
             .get_library_mut(&library_name)
             .expect("project library");
-        imported
-            .definition
-            .build_plan(library)
+        crate::state::prepare_symbol_construction(&imported.definition, library)
             .expect("construction plan")
             .commit(library)
             .expect("commit definition");

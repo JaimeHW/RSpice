@@ -136,9 +136,7 @@ impl RSpiceApp {
             let library = candidate
                 .get_library_mut(&library_name)
                 .ok_or_else(|| format!("Target library '{library_name}' no longer exists."))?;
-            let plan = imported
-                .definition
-                .build_plan(library)
+            let plan = crate::state::prepare_symbol_construction(&imported.definition, library)
                 .map_err(|error| error.to_string())?;
             plan.commit(library).map_err(|error| error.to_string())?;
             publish_symbol_definition_candidate(
@@ -408,7 +406,7 @@ fn import_candidate(
                     .and_then(|library| library.get_cell(&reference.cell))
                     .and_then(|cell| cell.get_view(&reference.view))
                     .ok_or_else(|| "The selected pin/model contract is unavailable.".to_owned())?;
-                let mut definition = ModelBoundSymbolDefinition::load_from_view(view)
+                let mut definition = crate::state::load_model_bound_symbol(view)
                     .map_err(|error| error.to_string())?
                     .ok_or_else(|| {
                         "The selected symbol has no typed pin/model contract.".to_owned()
@@ -454,10 +452,7 @@ fn bound_symbol_references(state: &crate::workbench::app_state::AppState) -> Vec
         for cell in library.cells_sorted() {
             for view in cell.views_sorted() {
                 if view.view_type == crate::state::ViewType::Symbol
-                    && matches!(
-                        ModelBoundSymbolDefinition::load_from_view(view),
-                        Ok(Some(_))
-                    )
+                    && matches!(crate::state::load_model_bound_symbol(view), Ok(Some(_)))
                 {
                     references.push(CellViewRef::new(&library.name, &cell.name, &view.name));
                 }

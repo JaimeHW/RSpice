@@ -11,8 +11,8 @@ use super::controller::{
 };
 use super::state::*;
 use crate::state::{
-    CellViewRef, ComponentType, Library, ModelBoundSymbolDefinition, Point, SymbolSourceContract,
-    ViewType, model_library::DeviceModel, model_library::ModelType,
+    CellViewRef, ComponentType, Library, Point, SymbolSourceContract, ViewType,
+    model_library::DeviceModel, model_library::ModelType,
 };
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
@@ -169,7 +169,7 @@ fn commit_publishes_one_typed_revision_and_opens_the_symbol_editor() {
         );
     }
     let definition =
-        ModelBoundSymbolDefinition::load_from_view(cell.get_view("symbol").expect("symbol view"))
+        crate::state::load_model_bound_symbol(cell.get_view("symbol").expect("symbol view"))
             .expect("valid definition")
             .expect("definition metadata");
     assert_eq!(definition.identity.revision, 1);

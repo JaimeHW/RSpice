@@ -836,11 +836,19 @@ fn report_for_definition(
     SymbolImportReport {
         format,
         primitive_count: definition.imported_graphic.as_ref().map_or_else(
-            || definition.symbol_document().body.len(),
+            || {
+                crate::state::materialize_symbol_document(definition)
+                    .body
+                    .len()
+            },
             |source| source.primitive_count,
         ),
         explicit_pin_anchor_count: definition.imported_graphic.as_ref().map_or_else(
-            || definition.symbol_document().pins.len(),
+            || {
+                crate::state::materialize_symbol_document(definition)
+                    .pins
+                    .len()
+            },
             |source| source.pin_anchors.len(),
         ),
         pin_order_valid: validate_import_pin_anchors(definition).is_ok()

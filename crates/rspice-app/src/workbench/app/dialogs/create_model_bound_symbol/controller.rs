@@ -456,8 +456,8 @@ pub(super) fn build_create_symbol_definition(
     if let Some(cell) = library.get_cell(cell_name) {
         let views = cell.views_sorted();
         for view in views {
-            if let Some(definition) = ModelBoundSymbolDefinition::load_from_view(view)
-                .map_err(|error| error.to_string())?
+            if let Some(definition) =
+                crate::state::load_model_bound_symbol(view).map_err(|error| error.to_string())?
             {
                 current = Some(definition);
                 break;
@@ -647,8 +647,7 @@ pub(super) fn build_create_symbol_definition(
         },
     );
     definition.validate().map_err(|error| error.to_string())?;
-    definition
-        .build_plan(library)
+    crate::state::prepare_symbol_construction(&definition, library)
         .map_err(|error| error.to_string())?;
     Ok(definition)
 }
@@ -973,8 +972,7 @@ pub(super) fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(
     let library = candidate
         .get_library_mut(&library_name)
         .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?;
-    definition
-        .build_plan(library)
+    crate::state::prepare_symbol_construction(&definition, library)
         .map_err(|error| error.to_string())?
         .commit(library)
         .map_err(|error| error.to_string())?;
@@ -990,8 +988,7 @@ pub(super) fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(
                 .get(&reference.key())
                 .cloned()
         };
-        let after = definition
-            .build_test_fixture_schematic()
+        let after = crate::state::build_symbol_test_fixture(&definition)
             .map_err(|error| error.to_string())?;
         Some(SymbolDefinitionFixtureDelta {
             reference,

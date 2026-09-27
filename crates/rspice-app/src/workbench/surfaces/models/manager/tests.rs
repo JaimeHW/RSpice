@@ -152,7 +152,7 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
         .and_then(|library| library.get_cell("nmos_custom"))
         .and_then(|cell| cell.get_view("symbol"))
         .expect("variant symbol view exists");
-    let definition = ModelBoundSymbolDefinition::load_from_view(view)
+    let definition = crate::state::load_model_bound_symbol(view)
         .expect("metadata loads")
         .expect("typed definition exists");
     assert_eq!(definition.identity.library, "signed_variant_test");

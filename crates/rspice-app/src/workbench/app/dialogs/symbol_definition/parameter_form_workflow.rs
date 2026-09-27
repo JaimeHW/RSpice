@@ -6,9 +6,9 @@ use egui::{
 
 use crate::diagnostics::ConsoleMessage;
 use crate::state::{
-    CellViewRef, ModelBoundSymbolDefinition, ParameterInheritance, PropertyType,
-    SymbolParameterConstraints, SymbolParameterDefault, SymbolParameterField, SymbolParameterForm,
-    SymbolParameterSection, SymbolParameterVisibility,
+    CellViewRef, ParameterInheritance, PropertyType, SymbolParameterConstraints,
+    SymbolParameterDefault, SymbolParameterField, SymbolParameterForm, SymbolParameterSection,
+    SymbolParameterVisibility,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -168,7 +168,7 @@ impl RSpiceApp {
                 .and_then(|library| library.get_cell(&target.cell))
                 .and_then(|cell| cell.get_view(&target.view))
                 .ok_or_else(|| "The target symbol view no longer exists.".to_owned())?;
-            let current = ModelBoundSymbolDefinition::load_from_view(current_view)
+            let current = crate::state::load_model_bound_symbol(current_view)
                 .map_err(|error| error.to_string())?
                 .ok_or_else(|| "The target symbol no longer has a typed definition.".to_owned())?;
             if current
@@ -190,8 +190,7 @@ impl RSpiceApp {
             let library = candidate
                 .get_library_mut(&target.library)
                 .ok_or_else(|| format!("Library '{}' no longer exists.", target.library))?;
-            let plan = replacement
-                .build_plan(library)
+            let plan = crate::state::prepare_symbol_construction(&replacement, library)
                 .map_err(|error| error.to_string())?;
             plan.commit(library).map_err(|error| error.to_string())?;
             publish_symbol_definition_candidate(

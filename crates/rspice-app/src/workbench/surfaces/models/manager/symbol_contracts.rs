@@ -411,7 +411,7 @@ fn parse_symbol_view(site: &SymbolViewSite<'_>) -> ParsedSymbolView {
         cell,
         view,
     } = site;
-    let definition_result = ModelBoundSymbolDefinition::load_from_view(view);
+    let definition_result = crate::state::load_model_bound_symbol(view);
     let document_result = SymbolDocument::load_from_view(view);
     let definition = definition_result.as_ref().ok().and_then(Clone::clone);
     let pins = document_result

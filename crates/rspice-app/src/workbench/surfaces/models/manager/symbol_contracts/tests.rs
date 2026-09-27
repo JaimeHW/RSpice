@@ -425,8 +425,7 @@ pub(in crate::workbench::surfaces::models::manager) fn seed_symbol_registry(stat
     for cell_name in ["precision_opamp", "buffer_opamp"] {
         let definition = bound_definition(cell_name);
         let mut view = View::new("symbol", ViewType::Symbol);
-        definition
-            .store_in_view(&mut view)
+        crate::state::store_model_bound_symbol(&definition, &mut view)
             .expect("a validated definition stores with its generated artwork");
         let mut cell = Cell::new(cell_name);
         cell.add_view(view);
@@ -437,8 +436,7 @@ pub(in crate::workbench::surfaces::models::manager) fn seed_symbol_registry(stat
     // blocking state, and the reason the page checks rather than trusts.
     let definition = bound_definition("mismatched_opamp");
     let mut view = View::new("symbol", ViewType::Symbol);
-    definition
-        .store_in_view(&mut view)
+    crate::state::store_model_bound_symbol(&definition, &mut view)
         .expect("a validated definition stores with its generated artwork");
     let scrambled = ["OUT", "INP", "INN", "VDD", "VSS"]
         .into_iter()

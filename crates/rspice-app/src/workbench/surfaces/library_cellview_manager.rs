@@ -337,8 +337,7 @@ fn symbol_projection(app: &RSpiceApp) -> Option<SymbolProjection> {
         reference,
         library_read_only: library.read_only,
         modified: view.modified,
-        definition: ModelBoundSymbolDefinition::load_from_view(view)
-            .map_err(|error| error.to_string()),
+        definition: crate::state::load_model_bound_symbol(view).map_err(|error| error.to_string()),
         legacy_document: SymbolDocument::load_from_view(view),
     })
 }
@@ -380,10 +379,7 @@ fn first_symbol_reference(app: &RSpiceApp, typed_only: bool) -> Option<CellViewR
                         return None;
                     }
                     if typed_only
-                        && !matches!(
-                            ModelBoundSymbolDefinition::load_from_view(view),
-                            Ok(Some(_))
-                        )
+                        && !matches!(crate::state::load_model_bound_symbol(view), Ok(Some(_)))
                     {
                         return None;
                     }
@@ -642,7 +638,7 @@ fn typed_symbol_surface(
     definition: &ModelBoundSymbolDefinition,
     projection: &SymbolProjection,
 ) {
-    let document = definition.symbol_document();
+    let document = crate::state::materialize_symbol_document(definition);
     let ports = definition
         .pins
         .iter()
@@ -1194,8 +1190,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let definition = typed_symbol();
         let mut view = View::new("symbol", ViewType::Symbol);
-        definition
-            .store_in_view(&mut view)
+        crate::state::store_model_bound_symbol(&definition, &mut view)
             .expect("typed symbol stores");
         let mut cell = Cell::new("amp");
         cell.add_view(view);

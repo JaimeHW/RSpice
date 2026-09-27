@@ -89,13 +89,6 @@ impl SymbolImplementationView {
             Self::VerilogA => "veriloga",
         }
     }
-
-    pub const fn view_type(self) -> ViewType {
-        match self {
-            Self::Spice => ViewType::Spice,
-            Self::VerilogA => ViewType::VerilogA,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
