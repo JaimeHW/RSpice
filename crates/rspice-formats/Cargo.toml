@@ -12,8 +12,8 @@ rust-version.workspace = true
 workspace = true
 
 [features]
-# Reuse canonical retained spectra and eye measurements without enabling the engine in default codecs.
-result-csv = ["dep:rspice-app-types", "dep:rspice-core", "dep:rspice-results"]
+# Reuse canonical retained results without enabling the engine in default codecs.
+result-csv = ["dep:rspice-app-types", "dep:rspice-core", "dep:rspice-results", "dep:serde_json"]
 native-bundle = ["dep:serde_json", "dep:sha2"]
 monte-carlo-checkpoint = ["dep:rspice-results", "dep:serde_json"]
 columnar = ["dep:arrow-array", "dep:arrow-ipc", "dep:arrow-schema", "dep:bytes", "dep:parquet"]
