@@ -14,7 +14,7 @@ mod model_bound_symbol;
 pub(crate) mod model_hub;
 pub(crate) mod model_library;
 pub(crate) use rspice_design::netlist_document;
-pub(crate) mod params_string;
+pub(crate) use rspice_design::parameters as params_string;
 pub(crate) mod pdk_config;
 use rspice_design::physical_layout;
 pub(crate) use rspice_design::project_sources;
@@ -99,8 +99,8 @@ pub use netlist_document::{
     find_all_in_source_bounded, replace_source_ranges,
 };
 pub(crate) use netlist_document::{
-    card_tokens, find_all_in_source_range_bounded_filter,
-    parse_include_directives, same_include_graph,
+    card_tokens, find_all_in_source_range_bounded_filter, parse_include_directives,
+    same_include_graph,
 };
 pub use params_string::{format_params_string, parse_params_string};
 pub use physical_layout::{
@@ -119,10 +119,8 @@ pub use project_sources::{
     PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION, ProjectSourceBundle, ProjectSourceDependency,
     ProjectSourceDocument, ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage,
     ProjectSourceOwner, ProjectSourceQualificationAttempt, ProjectSourceQualificationCheck,
-    ProjectSourceQualificationDisposition,
-    ProjectSourceQualificationTarget, ProjectSourceRegistry,
-    ProjectSourceRole, ProjectSourceRoleBinding,
-    project_veriloga_bundle_source_key,
+    ProjectSourceQualificationDisposition, ProjectSourceQualificationTarget, ProjectSourceRegistry,
+    ProjectSourceRole, ProjectSourceRoleBinding, project_veriloga_bundle_source_key,
 };
 pub(crate) use project_sources::{
     CanonicalCellViewOwnerKey, canonical_cell_view_owner_key, project_source_path_key,

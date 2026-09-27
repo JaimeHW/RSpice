@@ -17,7 +17,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::product::ContentDigest;
-use crate::state::{ComponentType, format_params_string, parse_params_string};
+use crate::state::ComponentType;
 
 /// Why a stimulus definition could not be built.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -535,20 +535,7 @@ impl StimulusDefinition {
     }
 }
 
-/// A parameter string in one canonical spelling.
-///
-/// Round-tripping through the grammar sorts the keys and drops empty ones, so
-/// `va=1 vo=0` and `vo=0 va=1` are the same text and neither reads as an edit.
-#[must_use]
-pub fn normalize_params(params: &str) -> String {
-    if crate::state::params_string::validate_parameter_text(params).is_ok() {
-        format_params_string(&parse_params_string(params))
-    } else {
-        // Invalid authored text still contributes to provenance and dirty
-        // comparisons. A partial lookup must never make two drafts identical.
-        params.to_owned()
-    }
-}
+pub use rspice_design::parameters::normalize_params;
 
 /// Whether a name is one unquoted word the netlist reader accepts.
 ///
@@ -578,27 +565,6 @@ pub fn is_spice_identifier(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn normalization_keeps_invalid_authored_tails_and_duplicate_order_distinct() {
-        for text in [
-            "va=1 note='first",
-            "va=1 note='second",
-            "va=1 VA=2",
-            "VA=2 va=1",
-        ] {
-            assert_eq!(normalize_params(text), text);
-        }
-        assert_ne!(
-            normalize_params("va=1 note='first"),
-            normalize_params("va=1 note='second")
-        );
-        assert_ne!(normalize_params("va=1 VA=2"), normalize_params("VA=2 va=1"));
-        assert_eq!(
-            normalize_params("freq=1k va=2"),
-            normalize_params("va=2 freq=1k")
-        );
-    }
 
     #[test]
     fn every_placeable_source_type_round_trips_through_family_and_kind() {

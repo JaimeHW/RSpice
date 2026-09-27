@@ -7,20 +7,20 @@ use std::collections::HashMap;
 
 /// One authored parameter or bare flag, excluding its surrounding separators.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ParameterEntry<'a> {
-    pub(crate) raw: &'a str,
-    pub(crate) key: &'a str,
-    pub(crate) value: Option<&'a str>,
+pub struct ParameterEntry<'a> {
+    pub raw: &'a str,
+    pub key: &'a str,
+    pub value: Option<&'a str>,
 }
 
-pub(crate) struct ParameterEntries<'a> {
+pub struct ParameterEntries<'a> {
     input: &'a str,
     offset: usize,
 }
 
 /// Iterate complete entries, stopping after a lexical error. Mutating callers
 /// must handle that error before publishing any changes.
-pub(crate) fn parameter_entries(input: &str) -> ParameterEntries<'_> {
+pub fn parameter_entries(input: &str) -> ParameterEntries<'_> {
     ParameterEntries { input, offset: 0 }
 }
 
@@ -169,7 +169,7 @@ fn value_end(input: &str, start: usize) -> Result<usize, &'static str> {
     }
 }
 
-pub(crate) fn valid_parameter_name(name: &str) -> bool {
+pub fn valid_parameter_name(name: &str) -> bool {
     let mut bytes = name.bytes();
     let Some(first) = bytes.next() else {
         return false;
@@ -262,7 +262,7 @@ pub fn format_params_string(params: &HashMap<String, String>) -> String {
 /// Authoring validation accepts flags and requires unambiguous assignments.
 /// A single-field update may repair duplicates of its own key; a whole-text
 /// or property-map publication must not silently choose between duplicates.
-pub(crate) fn validate_parameter_text(params: &str) -> Result<(), String> {
+pub fn validate_parameter_text(params: &str) -> Result<(), String> {
     let mut names = std::collections::HashSet::new();
     for entry in parameter_entries(params) {
         let entry = entry?;
@@ -282,7 +282,7 @@ pub(crate) fn validate_parameter_text(params: &str) -> Result<(), String> {
 /// Replace one decoded field, preserving every other raw entry and its order.
 /// Collapse only that key's duplicates. A blank field removes all overrides;
 /// malformed existing text is refused before any candidate is returned.
-pub(crate) fn set_parameter_value(params: &str, key: &str, value: &str) -> Result<String, String> {
+pub fn set_parameter_value(params: &str, key: &str, value: &str) -> Result<String, String> {
     if !valid_parameter_name(key) {
         return Err(format!("'{key}' is not a valid parameter name."));
     }
@@ -305,6 +305,21 @@ pub(crate) fn set_parameter_value(params: &str, key: &str, value: &str) -> Resul
         parts.push(replacement);
     }
     Ok(parts.join(" "))
+}
+
+/// A parameter string in one canonical spelling.
+///
+/// Round-tripping through the grammar sorts the keys and drops empty ones, so
+/// `va=1 vo=0` and `vo=0 va=1` are the same text and neither reads as an edit.
+#[must_use]
+pub fn normalize_params(params: &str) -> String {
+    if validate_parameter_text(params).is_ok() {
+        format_params_string(&parse_params_string(params))
+    } else {
+        // Invalid authored text still contributes to provenance and dirty
+        // comparisons. A partial lookup must never make two drafts identical.
+        params.to_owned()
+    }
 }
 
 #[cfg(test)]
@@ -499,5 +514,25 @@ mod tests {
         for key in ["", "x y", "a=b", "\"quoted\"", "1.0"] {
             assert!(!valid_parameter_name(key), "{key}");
         }
+    }
+    #[test]
+    fn normalization_keeps_invalid_authored_tails_and_duplicate_order_distinct() {
+        for text in [
+            "va=1 note='first",
+            "va=1 note='second",
+            "va=1 VA=2",
+            "VA=2 va=1",
+        ] {
+            assert_eq!(normalize_params(text), text);
+        }
+        assert_ne!(
+            normalize_params("va=1 note='first"),
+            normalize_params("va=1 note='second")
+        );
+        assert_ne!(normalize_params("va=1 VA=2"), normalize_params("VA=2 va=1"));
+        assert_eq!(
+            normalize_params("freq=1k va=2"),
+            normalize_params("va=2 freq=1k")
+        );
     }
 }
