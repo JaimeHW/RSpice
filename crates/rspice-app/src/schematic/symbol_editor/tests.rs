@@ -50,8 +50,8 @@ fn drag_symbol_edit_records_one_undo_snapshot_per_gesture() {
 
     let key = state.workspace.active_key();
     assert_eq!(
-        state.ui.symbol.undo_stacks.get(&key).map(Vec::len),
-        Some(1),
+        state.ui.symbol.history.undo_depth(&key),
+        1,
         "a drag must create one undo transaction no matter how many snap buckets it crosses"
     );
     assert!(state.ui.symbol.drag_undo_recorded);
@@ -332,8 +332,8 @@ fn a_multi_object_grab_moves_the_whole_selection_as_one_edit() {
     ));
     let key = state.workspace.active_key();
     assert_eq!(
-        state.ui.symbol.undo_stacks.get(&key).map(Vec::len),
-        Some(1),
+        state.ui.symbol.history.undo_depth(&key),
+        1,
         "a group drag is one undo transaction, not one per moved object"
     );
 }

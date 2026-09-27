@@ -11,15 +11,13 @@ use crate::diagnostics::{ConsoleMessage, LogAnchor, LogSeverity};
 use crate::schematic::view::SchematicSymbolContext;
 use crate::services::drc::DrcSeverity;
 use crate::state::{
-    CellViewRef, Component, ComponentType, OpenCellView, Point, PortDirection, PortSpec,
-    SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY, SchematicState, SymbolDocument, View,
-    ViewType,
+    CellViewRef, ComponentType, OpenCellView, Point, PortDirection, PortSpec, SchematicState,
+    SymbolDocument, View, ViewType,
 };
-use crate::workbench::SymbolDocumentSnapshot;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
 use crate::workbench::state::WorkspaceDocumentId;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 pub(super) const MAX_FINDING_ROWS: usize = 50;
 
@@ -56,140 +54,6 @@ fn first_schematic_reference_in(libraries: &crate::state::LibraryManager) -> Opt
 
 fn is_schematic_like(view_type: ViewType) -> bool {
     matches!(view_type, ViewType::Schematic | ViewType::Testbench)
-}
-
-/// Where each pin's terminal moved to, keyed by the name it had before.
-///
-/// This answers one question only — did a terminal move — so that the wire
-/// endpoints attached to it move with it. It cannot answer whether a pin was
-/// renamed: the old name is simply absent from `after`, which is
-/// indistinguishable from a deletion. `renames` supplies that half, declared
-/// by whoever performed the rename, so a pin that was renamed *and* moved is
-/// still followed to its new position.
-pub(super) fn symbol_pin_position_remaps(
-    before: &SymbolDocument,
-    after: &SymbolDocument,
-    renames: &std::collections::BTreeMap<String, String>,
-) -> HashMap<String, (Point, Point)> {
-    let mut remaps = HashMap::new();
-    for before_pin in &before.pins {
-        let Some(old_position) = before_pin.position.map(|position| position - before.origin)
-        else {
-            continue;
-        };
-        let after_name = renames
-            .get(&before_pin.name)
-            .map_or(before_pin.name.as_str(), String::as_str);
-        let Some(after_pin) = after.pin(after_name) else {
-            continue;
-        };
-        let Some(new_position) = after_pin.position.map(|position| position - after.origin) else {
-            continue;
-        };
-        if old_position != new_position {
-            remaps.insert(
-                before_pin.name.to_ascii_lowercase(),
-                (old_position, new_position),
-            );
-        }
-    }
-    remaps
-}
-
-pub(super) fn remap_symbol_instance_wires(
-    schematic: &mut SchematicState,
-    reference: &CellViewRef,
-    pin_remaps: &HashMap<String, (Point, Point)>,
-) -> bool {
-    if pin_remaps.is_empty() {
-        return false;
-    }
-
-    let mut world_remaps = Vec::new();
-    for component in &schematic.document.components {
-        append_component_symbol_remaps(component, reference, pin_remaps, &mut world_remaps);
-    }
-    if world_remaps.is_empty() {
-        return false;
-    }
-
-    let mut updates: Vec<(usize, usize, Point)> = Vec::new();
-    for (wire_index, wire) in schematic.document.wires.iter().enumerate() {
-        for (point_index, point) in wire.points.iter().enumerate() {
-            if let Some((_, new_position)) = world_remaps
-                .iter()
-                .find(|(old_position, _)| point == old_position)
-            {
-                updates.push((wire_index, point_index, *new_position));
-            }
-        }
-    }
-    if updates.is_empty() {
-        return false;
-    }
-
-    for (wire_index, point_index, new_position) in updates {
-        if let Some(wire) = schematic.document.wires.get_mut(wire_index)
-            && point_index < wire.points.len()
-        {
-            wire.points[point_index] = new_position;
-        }
-    }
-    schematic.is_dirty = true;
-    schematic.bump_topology_version();
-    true
-}
-
-fn append_component_symbol_remaps(
-    component: &Component,
-    reference: &CellViewRef,
-    pin_remaps: &HashMap<String, (Point, Point)>,
-    world_remaps: &mut Vec<(Point, Point)>,
-) {
-    let Some(binding) = component.library_cell.as_ref() else {
-        return;
-    };
-    if !binding.library.eq_ignore_ascii_case(&reference.library)
-        || !binding.cell.eq_ignore_ascii_case(&reference.cell)
-    {
-        return;
-    }
-
-    if binding.terminal_order.is_empty() {
-        for &(old_offset, new_offset) in pin_remaps.values() {
-            push_world_pin_remap(component, old_offset, new_offset, world_remaps);
-        }
-        return;
-    }
-
-    for terminal_name in &binding.terminal_order {
-        let Some(&(old_offset, new_offset)) = pin_remaps.get(&terminal_name.to_ascii_lowercase())
-        else {
-            continue;
-        };
-        push_world_pin_remap(component, old_offset, new_offset, world_remaps);
-    }
-}
-
-fn push_world_pin_remap(
-    component: &Component,
-    old_offset: Point,
-    new_offset: Point,
-    world_remaps: &mut Vec<(Point, Point)>,
-) {
-    let old_offset = component.transform_point(old_offset);
-    let new_offset = component.transform_point(new_offset);
-    let old_position = Point::new(
-        component.pos.x.saturating_add(old_offset.x),
-        component.pos.y.saturating_add(old_offset.y),
-    );
-    let new_position = Point::new(
-        component.pos.x.saturating_add(new_offset.x),
-        component.pos.y.saturating_add(new_offset.y),
-    );
-    if old_position != new_position {
-        world_remaps.push((old_position, new_position));
-    }
 }
 
 fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> SchematicState {
@@ -345,78 +209,6 @@ pub(super) fn log_severity_from_drc(severity: DrcSeverity) -> LogSeverity {
         DrcSeverity::Critical | DrcSeverity::Error => LogSeverity::Error,
         DrcSeverity::Warning => LogSeverity::Warning,
         DrcSeverity::Info => LogSeverity::Info,
-    }
-}
-
-pub(super) fn symbol_snapshot_from_view(
-    view: &View,
-    fallback: &SymbolDocument,
-    preserve_missing_metadata: bool,
-) -> SymbolDocumentSnapshot {
-    let symbol_document_metadata = match view.metadata.get(SYMBOL_DOCUMENT_METADATA_KEY) {
-        Some(encoded) => Some(encoded.clone()),
-        None if preserve_missing_metadata => None,
-        None => serde_json::to_string(fallback).ok(),
-    };
-    SymbolDocumentSnapshot {
-        document: fallback.clone(),
-        symbol_document_metadata,
-        symbol_editor_metadata: view.metadata.get(SYMBOL_EDITOR_METADATA_KEY).cloned(),
-        generated_metadata: view.metadata.get("generated").cloned(),
-        ports_metadata: view.metadata.get("ports").cloned(),
-        renames: std::collections::BTreeMap::new(),
-    }
-}
-
-pub(super) fn symbol_metadata_snapshot_from_view(
-    view: &View,
-    fallback: &SymbolDocument,
-) -> SymbolDocumentSnapshot {
-    SymbolDocumentSnapshot {
-        document: fallback.clone(),
-        symbol_document_metadata: view.metadata.get(SYMBOL_DOCUMENT_METADATA_KEY).cloned(),
-        symbol_editor_metadata: view.metadata.get(SYMBOL_EDITOR_METADATA_KEY).cloned(),
-        generated_metadata: view.metadata.get("generated").cloned(),
-        ports_metadata: view.metadata.get("ports").cloned(),
-        renames: std::collections::BTreeMap::new(),
-    }
-}
-
-pub(super) fn restore_symbol_snapshot_in_view(view: &mut View, snapshot: &SymbolDocumentSnapshot) {
-    match &snapshot.symbol_document_metadata {
-        Some(encoded) => {
-            view.metadata
-                .insert(SYMBOL_DOCUMENT_METADATA_KEY.to_owned(), encoded.clone());
-        }
-        None => {
-            view.metadata.remove(SYMBOL_DOCUMENT_METADATA_KEY);
-        }
-    }
-    match &snapshot.symbol_editor_metadata {
-        Some(encoded) => {
-            view.metadata
-                .insert(SYMBOL_EDITOR_METADATA_KEY.to_owned(), encoded.clone());
-        }
-        None => {
-            view.metadata.remove(SYMBOL_EDITOR_METADATA_KEY);
-        }
-    }
-    match &snapshot.generated_metadata {
-        Some(encoded) => {
-            view.metadata
-                .insert("generated".to_owned(), encoded.clone());
-        }
-        None => {
-            view.metadata.remove("generated");
-        }
-    }
-    match &snapshot.ports_metadata {
-        Some(encoded) => {
-            view.metadata.insert("ports".to_owned(), encoded.clone());
-        }
-        None => {
-            view.metadata.remove("ports");
-        }
     }
 }
 

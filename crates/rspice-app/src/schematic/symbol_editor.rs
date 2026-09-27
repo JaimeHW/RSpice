@@ -674,7 +674,11 @@ fn read_only_banner(ui: &mut Ui, state: &mut AppState) {
 fn revision_state_strip(ui: &mut Ui, state: &AppState, revision: u64) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let dirty = state.ui.symbol.is_dirty(&state.workspace.active_key());
+    let dirty = state
+        .ui
+        .symbol
+        .history
+        .is_dirty(&state.workspace.active_key());
     let (text, color) = if dirty {
         (
             format!("Unpublished edits \u{00b7} last published revision {revision}"),

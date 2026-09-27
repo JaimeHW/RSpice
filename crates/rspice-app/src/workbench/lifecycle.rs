@@ -13,4 +13,5 @@ pub(crate) mod recovery;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod recovery_checkpoint;
 pub(crate) mod session;
+pub(crate) mod symbol_edit;
 pub(crate) mod window_session;

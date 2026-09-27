@@ -4,6 +4,8 @@
 //! [`crate::workbench::WorkbenchState`]. This module contains only cross-frame document
 //! interaction state and durable presentation preferences.
 
+use super::symbol_edit::SymbolHistory;
+pub use super::symbol_edit::{SymbolCommitIntent, SymbolDocumentSnapshot};
 use serde::{Deserialize, Serialize};
 
 use crate::state::{GridStyle, SchematicVisibilityPolicy, SchematicWireRoutingStyle};
@@ -348,18 +350,6 @@ impl SymbolSelection {
     }
 }
 
-/// What an author meant by a symbol edit, beyond the geometry it produced.
-///
-/// Comparing two documents can only report what changed, and a pin rename is
-/// indistinguishable from a delete plus an add by that measure — the old name
-/// is simply gone. Placed instances wire to pins *by name*, so the rename has
-/// to be declared by whoever performed it and carried with the commit.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SymbolCommitIntent {
-    /// Old pin name → new pin name.
-    pub renames: std::collections::BTreeMap<String, String>,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SymbolClipboard {
     pub pins: Vec<crate::state::SymbolPin>,
@@ -389,44 +379,6 @@ impl SymbolClipboard {
             crate::state::Point::new(xs.iter().min().copied()?, ys.iter().min().copied()?),
             crate::state::Point::new(xs.iter().max().copied()?, ys.iter().max().copied()?),
         ))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SymbolDocumentSnapshot {
-    pub document: crate::state::SymbolDocument,
-    pub symbol_document_metadata: Option<String>,
-    pub symbol_editor_metadata: Option<String>,
-    pub generated_metadata: Option<String>,
-    pub ports_metadata: Option<String>,
-    /// Pin renames restoring this snapshot must carry to placed instances.
-    ///
-    /// Restoring the document alone would leave every instance wired to the
-    /// name the edit introduced while the symbol declares the old one again,
-    /// which detaches the connection instead of undoing it. The entry is
-    /// written when a rename is committed, and inverted each time the edit
-    /// crosses between the undo and redo stacks.
-    pub renames: std::collections::BTreeMap<String, String>,
-}
-
-impl SymbolDocumentSnapshot {
-    pub fn from_document(document: &crate::state::SymbolDocument) -> Self {
-        Self {
-            document: document.clone(),
-            symbol_document_metadata: None,
-            symbol_editor_metadata: None,
-            generated_metadata: None,
-            ports_metadata: None,
-            renames: std::collections::BTreeMap::new(),
-        }
-    }
-
-    /// The same edit read in the other direction.
-    pub fn inverted_renames(&self) -> std::collections::BTreeMap<String, String> {
-        self.renames
-            .iter()
-            .map(|(from, to)| (to.clone(), from.clone()))
-            .collect()
     }
 }
 
@@ -465,15 +417,7 @@ pub struct SymbolUiState {
     pub save_revision_note: String,
     pub save_error: Option<String>,
     pub clipboard: SymbolClipboard,
-    pub undo_stacks: std::collections::HashMap<String, Vec<SymbolDocumentSnapshot>>,
-    pub redo_stacks: std::collections::HashMap<String, Vec<SymbolDocumentSnapshot>>,
-    /// Undo-stack depth of each cellview's last published revision.
-    ///
-    /// A symbol document is written into the project library as it is drawn,
-    /// so "has this been edited" cannot be read off the stored view. The
-    /// depth at which the author last published is the only fact that
-    /// answers it, and undoing back to that depth answers it again.
-    pub save_points: std::collections::HashMap<String, usize>,
+    pub history: SymbolHistory,
 }
 
 impl Default for SymbolUiState {
@@ -506,29 +450,12 @@ impl Default for SymbolUiState {
             save_revision_note: String::new(),
             save_error: None,
             clipboard: SymbolClipboard::default(),
-            undo_stacks: std::collections::HashMap::new(),
-            redo_stacks: std::collections::HashMap::new(),
-            save_points: std::collections::HashMap::new(),
+            history: SymbolHistory::default(),
         }
     }
 }
 
 impl SymbolUiState {
-    /// Whether the cellview carries edits its last published revision does
-    /// not contain. This is the single authority: no surface re-derives
-    /// dirtiness by comparing documents or reading a stored modified flag.
-    pub fn is_dirty(&self, key: &str) -> bool {
-        let depth = self.undo_stacks.get(key).map_or(0, Vec::len);
-        depth != self.save_points.get(key).copied().unwrap_or(0)
-    }
-
-    /// Record that everything on the stack up to here is published.
-    pub fn mark_save_point(&mut self, key: impl Into<String>) {
-        let key = key.into();
-        let depth = self.undo_stacks.get(&key).map_or(0, Vec::len);
-        self.save_points.insert(key, depth);
-    }
-
     pub fn clear_selection(&mut self) {
         self.selection = SymbolSelection::default();
         self.selected_pin = None;

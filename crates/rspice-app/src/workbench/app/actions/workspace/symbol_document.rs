@@ -24,11 +24,12 @@ use crate::state::{
 use crate::workbench::app_state::AppState;
 use crate::workbench::{SymbolCommitIntent, SymbolDocumentSnapshot};
 
-use super::{
-    MAX_FINDING_ROWS, log_severity_from_drc, parse_encoded_ports, remap_symbol_instance_wires,
+use crate::workbench::lifecycle::symbol_edit::{
     restore_symbol_snapshot_in_view, symbol_metadata_snapshot_from_view,
     symbol_pin_position_remaps, symbol_snapshot_from_view,
 };
+
+use super::{MAX_FINDING_ROWS, log_severity_from_drc, parse_encoded_ports};
 
 impl AppState {
     pub(crate) fn active_symbol_ports(&self) -> Vec<PortSpec> {
@@ -255,19 +256,10 @@ impl AppState {
         // names back, so it carries the reverse of what was just applied.
         if !intent.renames.is_empty() {
             let key = self.workspace.active_key();
-            if let Some(entry) = self
-                .ui
+            self.ui
                 .symbol
-                .undo_stacks
-                .get_mut(&key)
-                .and_then(|stack| stack.last_mut())
-            {
-                entry.renames = intent
-                    .renames
-                    .iter()
-                    .map(|(from, to)| (to.clone(), from.clone()))
-                    .collect();
-            }
+                .history
+                .record_inverse_renames(&key, &intent.renames);
         }
         self.workspace.set_active_dirty(true);
         Ok(())
@@ -340,7 +332,7 @@ impl AppState {
         self.store_active_symbol_editor_bundle(document, &candidate)?;
         *metadata = candidate;
         let key = self.workspace.active_key();
-        self.ui.symbol.mark_save_point(key);
+        self.ui.symbol.history.mark_save_point(key);
         Ok(revision)
     }
 
@@ -452,28 +444,21 @@ impl AppState {
         snapshot: SymbolDocumentSnapshot,
         max_len: usize,
     ) {
-        let undo_stack = self.ui.symbol.undo_stacks.entry(key.clone()).or_default();
-        undo_stack.push(snapshot);
-        if undo_stack.len() > max_len {
-            undo_stack.remove(0);
-        }
-        self.ui.symbol.redo_stacks.remove(&key);
+        self.ui.symbol.history.record_edit(key, snapshot, max_len);
     }
 
     pub(crate) fn can_undo_active_symbol_document(&self) -> bool {
         self.ui
             .symbol
-            .undo_stacks
-            .get(&self.workspace.active_key())
-            .is_some_and(|stack| !stack.is_empty())
+            .history
+            .can_undo(&self.workspace.active_key())
     }
 
     pub(crate) fn can_redo_active_symbol_document(&self) -> bool {
         self.ui
             .symbol
-            .redo_stacks
-            .get(&self.workspace.active_key())
-            .is_some_and(|stack| !stack.is_empty())
+            .history
+            .can_redo(&self.workspace.active_key())
     }
 
     pub(crate) fn undo_active_symbol_document(&mut self) -> Result<bool, String> {
@@ -481,18 +466,13 @@ impl AppState {
             return Err(self.read_only_master_message());
         }
         let key = self.workspace.active_key();
-        let Some(previous) = self.ui.symbol.undo_stacks.get_mut(&key).and_then(Vec::pop) else {
+        let Some(previous) = self.ui.symbol.history.pop_undo(&key) else {
             return Ok(false);
         };
         let current = self.load_active_symbol_document()?;
         let mut current_snapshot = self.active_symbol_metadata_snapshot(&current);
         current_snapshot.renames = previous.inverted_renames();
-        self.ui
-            .symbol
-            .redo_stacks
-            .entry(key)
-            .or_default()
-            .push(current_snapshot);
+        self.ui.symbol.history.finish_undo(key, current_snapshot);
         self.restore_active_symbol_snapshot(&previous)?;
         Ok(true)
     }
@@ -502,18 +482,13 @@ impl AppState {
             return Err(self.read_only_master_message());
         }
         let key = self.workspace.active_key();
-        let Some(next) = self.ui.symbol.redo_stacks.get_mut(&key).and_then(Vec::pop) else {
+        let Some(next) = self.ui.symbol.history.pop_redo(&key) else {
             return Ok(false);
         };
         let current = self.load_active_symbol_document()?;
         let mut current_snapshot = self.active_symbol_metadata_snapshot(&current);
         current_snapshot.renames = next.inverted_renames();
-        self.ui
-            .symbol
-            .undo_stacks
-            .entry(key)
-            .or_default()
-            .push(current_snapshot);
+        self.ui.symbol.history.finish_redo(key, current_snapshot);
         self.restore_active_symbol_snapshot(&next)?;
         Ok(true)
     }
@@ -588,55 +563,33 @@ impl AppState {
     }
 }
 
-/// Rewrite the terminal names of every instance of `reference` in one sheet.
-///
-/// `renames` is keyed by lowercased old name; instance bindings and wire
-/// connections both match terminals case-insensitively, so both are rewritten
-/// from the same table and cannot drift apart.
+fn remap_symbol_instance_wires(
+    schematic: &mut SchematicState,
+    reference: &CellViewRef,
+    pin_remaps: &std::collections::HashMap<String, (crate::state::Point, crate::state::Point)>,
+) -> bool {
+    if !crate::workbench::lifecycle::symbol_edit::remap_symbol_instance_wires(
+        &mut schematic.document,
+        reference,
+        pin_remaps,
+    ) {
+        return false;
+    }
+    schematic.is_dirty = true;
+    schematic.bump_topology_version();
+    true
+}
+
 fn rename_instance_terminals(
     schematic: &mut SchematicState,
     reference: &CellViewRef,
     renames: &BTreeMap<String, String>,
 ) -> usize {
-    let instances: Vec<u64> = schematic
-        .document
-        .components
-        .iter()
-        .filter(|component| {
-            component.library_cell.as_ref().is_some_and(|binding| {
-                binding.library.eq_ignore_ascii_case(&reference.library)
-                    && binding.cell.eq_ignore_ascii_case(&reference.cell)
-            })
-        })
-        .map(|component| component.id)
-        .collect();
-    if instances.is_empty() {
-        return 0;
-    }
-
-    let mut renamed = 0;
-    for component in &mut schematic.document.components {
-        let Some(binding) = component.library_cell.as_mut() else {
-            continue;
-        };
-        if !instances.contains(&component.id) {
-            continue;
-        }
-        for terminal in &mut binding.terminal_order {
-            if let Some(new_name) = renames.get(&terminal.to_ascii_lowercase()) {
-                *terminal = new_name.clone();
-            }
-        }
-    }
-    for connection in &mut schematic.document.connections {
-        if !instances.contains(&connection.component_id) {
-            continue;
-        }
-        if let Some(new_name) = renames.get(&connection.terminal_name.to_ascii_lowercase()) {
-            connection.terminal_name = new_name.clone();
-            renamed += 1;
-        }
-    }
+    let renamed = crate::workbench::lifecycle::symbol_edit::rename_instance_terminals(
+        &mut schematic.document,
+        reference,
+        renames,
+    );
     if renamed > 0 {
         schematic.is_dirty = true;
         schematic.bump_topology_version();
