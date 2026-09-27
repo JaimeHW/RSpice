@@ -33,7 +33,6 @@ mod selection_ops;
 #[cfg(test)]
 mod serialization_tests;
 mod stimulus_placement;
-mod stretch;
 mod undo;
 mod viewport;
 
@@ -50,7 +49,9 @@ fn default_zoom() -> f64 {
 
 pub use rspice_design::schematic::movement::{MoveSelectionError, MoveSelectionMode};
 
-pub use stretch::{StretchOrthogonalPolicy, StretchSelectionError, StretchTarget};
+pub use rspice_design::schematic::stretch::{
+    StretchOrthogonalPolicy, StretchSelectionError, StretchTarget,
+};
 
 /// A model card armed for the next placement of one exact device kind.
 ///

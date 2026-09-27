@@ -4,8 +4,8 @@
 //! operation that resizes a shape or reroutes one leg of a wire without
 //! detaching either end.
 
-use super::super::stretch;
 use super::super::*;
+use rspice_design::schematic::stretch;
 
 impl SchematicState {
     /// Whether the current selection contains at least one live stretch handle.

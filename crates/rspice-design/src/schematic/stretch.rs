@@ -1,7 +1,9 @@
 //! Validated stretch previews and document edits.
 
-use super::super::{BusTargetKind, DocumentationShapeGeometry, WireSegment};
-use super::{Component, SchematicDocument};
+use super::{
+    bus::BusTargetKind, component::Component, document::SchematicDocument,
+    documentation_shape::DocumentationShapeGeometry, wire::WireSegment,
+};
 use rspice_design_model::Point;
 use serde::{Deserialize, Serialize};
 
