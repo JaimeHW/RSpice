@@ -649,31 +649,62 @@ impl RSpiceApp {
         };
         let schematic = &self.state.schematic;
         let target = parse_id("component-")
-            .filter(|id| schematic.components.iter().any(|object| object.id == *id))
+            .filter(|id| {
+                schematic
+                    .document
+                    .components
+                    .iter()
+                    .any(|object| object.id == *id)
+            })
             .map(CrossProbeTarget::Component)
             .or_else(|| {
                 parse_id("wire-")
-                    .filter(|id| schematic.wires.iter().any(|object| object.id == *id))
+                    .filter(|id| {
+                        schematic
+                            .document
+                            .wires
+                            .iter()
+                            .any(|object| object.id == *id)
+                    })
                     .map(CrossProbeTarget::Wire)
             })
             .or_else(|| {
                 parse_id("net-label-")
-                    .filter(|id| schematic.net_labels.iter().any(|object| object.id == *id))
+                    .filter(|id| {
+                        schematic
+                            .document
+                            .net_labels
+                            .iter()
+                            .any(|object| object.id == *id)
+                    })
                     .map(CrossProbeTarget::NetLabel)
             })
             .or_else(|| {
                 parse_id("bus-")
-                    .filter(|id| schematic.buses.iter().any(|object| object.id == *id))
+                    .filter(|id| {
+                        schematic
+                            .document
+                            .buses
+                            .iter()
+                            .any(|object| object.id == *id)
+                    })
                     .map(CrossProbeTarget::Bus)
             })
             .or_else(|| {
                 parse_id("bus-tap-")
-                    .filter(|id| schematic.bus_taps.iter().any(|object| object.id == *id))
+                    .filter(|id| {
+                        schematic
+                            .document
+                            .bus_taps
+                            .iter()
+                            .any(|object| object.id == *id)
+                    })
                     .map(CrossProbeTarget::BusTap)
             })
             .or_else(|| {
                 parse_id("junction-").and_then(|id| {
                     schematic
+                        .document
                         .junctions
                         .iter()
                         .find(|object| object.id == id)

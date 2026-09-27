@@ -20,6 +20,7 @@ fn rename(fixture: &mut Fixture, name: &str) -> Result<bool, String> {
     let expected = fixture
         .state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == fixture.sources[0])
@@ -44,6 +45,7 @@ fn assert_projection(fixture: &Fixture, name: &str) {
     let projected = projection.root_schematic().unwrap();
     assert_eq!(
         projected
+            .document
             .components
             .iter()
             .find(|c| c.id == fixture.sources[0])
@@ -53,6 +55,7 @@ fn assert_projection(fixture: &Fixture, name: &str) {
     );
     assert_eq!(
         projected
+            .document
             .components
             .iter()
             .find(|c| c.id == fixture.dependents[0])
@@ -242,6 +245,7 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
         for schematic in [source, projection.root_schematic().unwrap()] {
             assert_eq!(
                 schematic
+                    .document
                     .components
                     .iter()
                     .find(|c| c.id == fixture.sources[0])
@@ -251,6 +255,7 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
             );
             assert_eq!(
                 schematic
+                    .document
                     .components
                     .iter()
                     .find(|c| c.id == fixture.dependents[0])
@@ -259,7 +264,7 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
                 format!("vref={name}")
             );
             assert_eq!(
-                schematic.probes[0].source_expression.as_deref(),
+                schematic.document.probes[0].source_expression.as_deref(),
                 Some(format!("I({name})").as_str())
             );
         }
@@ -269,7 +274,10 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
             .unwrap()
             .saved_outputs;
         assert_eq!(outputs[0].source_expression, format!("I({name})"));
-        assert_eq!(source.probes[0].saved_output_id, Some(outputs[0].id));
+        assert_eq!(
+            source.document.probes[0].saved_output_id,
+            Some(outputs[0].id)
+        );
         assert_eq!(
             loaded.workspace.design_management.annotation(),
             fixture.state.workspace.design_management.annotation()

@@ -37,7 +37,7 @@ fn app_with_model_bound_instance() -> (RSpiceApp, u64) {
     let component = Component::new(41, ComponentType::CellInstance, Point::origin())
         .with_library_cell(binding)
         .with_name_value("XU1", "OPA189");
-    app.state.schematic.components.push(component);
+    app.state.schematic.document.components.push(component);
     app.state.schematic.init_undo_history();
     (app, 41)
 }
@@ -159,7 +159,7 @@ fn app_with_probe_on_last_sheet(sheets: usize) -> (RSpiceApp, u64) {
 
     const PROBE: u64 = 77;
     let mut app = RSpiceApp::test_instance();
-    app.state.schematic.probes.push(
+    app.state.schematic.document.probes.push(
         SchematicProbe::new(
             PROBE,
             Point::new(10, 20),
@@ -237,6 +237,7 @@ fn one_instance_beats_the_set_and_several_fall_through_to_multi() {
     let mut state = state_with_two_components();
     let ids: Vec<u64> = state
         .schematic
+        .document
         .components
         .iter()
         .map(|component| component.id)
@@ -252,7 +253,7 @@ fn one_instance_beats_the_set_and_several_fall_through_to_multi() {
 #[test]
 fn one_probe_has_its_own_inspector_and_mixed_selection_falls_back_to_multi() {
     let mut state = AppState::default();
-    state.schematic.probes.push(
+    state.schematic.document.probes.push(
         SchematicProbe::new(73, Point::new(10, 20), "V(out)", Some("V(out)".to_owned())).unwrap(),
     );
     state.schematic.selection.select_only_probe(73);
@@ -299,7 +300,7 @@ fn conductors_on_one_net_inspect_that_net_and_a_split_falls_back_to_multi() {
 #[test]
 fn wireless_semantic_net_selection_routes_to_the_exact_net_inspector() {
     let mut state = AppState::default();
-    state.schematic.components.push(Component::new(
+    state.schematic.document.components.push(Component::new(
         71,
         ComponentType::CellInstance,
         Point::origin(),
@@ -333,11 +334,15 @@ fn wireless_semantic_net_selection_routes_to_the_exact_net_inspector() {
 #[test]
 fn explicit_junction_selection_resolves_its_live_net() {
     let mut state = AppState::default();
-    state.schematic.wires.push(crate::state::Wire::segment(
-        7,
-        Point::new(-20, 0),
-        Point::new(20, 0),
-    ));
+    state
+        .schematic
+        .document
+        .wires
+        .push(crate::state::Wire::segment(
+            7,
+            Point::new(-20, 0),
+            Point::new(20, 0),
+        ));
     state
         .schematic
         .selection
@@ -362,7 +367,7 @@ fn a_selected_interface_port_routes_to_the_shared_net_inspector() {
     let mut state = AppState::default();
     let port =
         Component::new(77, ComponentType::Port, Point::origin()).with_name_value("P1", "VIN");
-    state.schematic.components.push(port);
+    state.schematic.document.components.push(port);
     state.schematic.selection.select_only_component(77);
     let nets = vec![DesignNet {
         name: "VIN".to_owned(),
@@ -388,10 +393,11 @@ fn a_conductor_with_no_resolved_net_never_claims_one() {
 #[test]
 fn isolated_instance_terminals_are_open_not_bound_to_synthetic_nodes() {
     let mut state = AppState::default();
-    state
-        .schematic
-        .components
-        .push(Component::new(42, ComponentType::Resistor, Point::origin()));
+    state.schematic.document.components.push(Component::new(
+        42,
+        ComponentType::Resistor,
+        Point::origin(),
+    ));
 
     let sheet = sheet_connectivity(&state);
     let terminals = sheet.terminals.get(&42).expect("resistor terminals");
@@ -529,24 +535,24 @@ fn inherited_temperature_materializes_one_undoable_instance_override() {
         .schematic
         .add_component(ComponentType::Resistor, Point::origin());
     app.state.schematic.init_undo_history();
-    let component = app.state.schematic.components[0].clone();
+    let component = app.state.schematic.document.components[0].clone();
     let field = InlineEditField::Parameter(TEMPERATURE_PARAM.to_owned());
 
     assert_eq!(field_value(&component, &field), "");
     assert!(begin_edit(&mut app, id, field.clone()));
     update_edit(&mut app, "85°C".to_owned());
-    assert_eq!(app.state.schematic.components[0], component);
+    assert_eq!(app.state.schematic.document.components[0], component);
     assert!(app.state.commit_inline_component_edit().unwrap());
 
     assert_eq!(
-        crate::state::parse_params_string(&app.state.schematic.components[0].params)
+        crate::state::parse_params_string(&app.state.schematic.document.components[0].params)
             .get(TEMPERATURE_PARAM)
             .map(String::as_str),
         Some("85")
     );
     assert!(app.state.schematic.undo());
     assert!(
-        !crate::state::parse_params_string(&app.state.schematic.components[0].params)
+        !crate::state::parse_params_string(&app.state.schematic.document.components[0].params)
             .contains_key(TEMPERATURE_PARAM)
     );
     assert!(!app.state.schematic.can_undo());
@@ -560,20 +566,23 @@ fn free_form_parameters_edit_is_atomic_and_undoable() {
         .schematic
         .add_component(ComponentType::CellInstance, Point::origin());
     app.state.schematic.init_undo_history();
-    let component = app.state.schematic.components[0].clone();
+    let component = app.state.schematic.document.components[0].clone();
     let field = InlineEditField::Parameters;
 
     assert_eq!(field_value(&component, &field), "");
     assert!(begin_edit(&mut app, id, field.clone()));
     for candidate in ["m=2", "m=2 tc1=0.01"] {
         update_edit(&mut app, candidate.to_owned());
-        assert_eq!(app.state.schematic.components[0], component);
+        assert_eq!(app.state.schematic.document.components[0], component);
     }
     assert!(app.state.commit_inline_component_edit().unwrap());
 
-    assert_eq!(app.state.schematic.components[0].params, "m=2 tc1=0.01");
+    assert_eq!(
+        app.state.schematic.document.components[0].params,
+        "m=2 tc1=0.01"
+    );
     assert!(app.state.schematic.undo());
-    assert!(app.state.schematic.components[0].params.is_empty());
+    assert!(app.state.schematic.document.components[0].params.is_empty());
     assert!(
         !app.state.schematic.can_undo(),
         "one inline session must create exactly one undo entry"
@@ -589,9 +598,9 @@ fn an_instance_rename_is_rejected_when_it_collides_or_is_empty() {
     state
         .schematic
         .add_component(ComponentType::Resistor, Point::new(40, 0));
-    state.schematic.components[0].name = "R1".to_owned();
-    state.schematic.components[1].name = "R2".to_owned();
-    let subject = state.schematic.components[0].clone();
+    state.schematic.document.components[0].name = "R1".to_owned();
+    state.schematic.document.components[1].name = "R2".to_owned();
+    let subject = state.schematic.document.components[0].clone();
 
     assert!(field_rejection(&state, &subject, &InlineEditField::Instance, "R7").is_none());
     assert!(
@@ -607,8 +616,8 @@ fn an_instance_rename_is_rejected_when_it_collides_or_is_empty() {
 #[test]
 fn an_instance_rename_still_obeys_the_family_designator_rule() {
     let mut state = state_with_two_components();
-    state.schematic.components[0].name = "R1".to_owned();
-    let resistor = state.schematic.components[0].clone();
+    state.schematic.document.components[0].name = "R1".to_owned();
+    let resistor = state.schematic.document.components[0].clone();
 
     let rejected = field_rejection(&state, &resistor, &InlineEditField::Instance, "C1")
         .expect("a resistor cannot take a capacitor designator");
@@ -618,7 +627,7 @@ fn an_instance_rename_still_obeys_the_family_designator_rule() {
 #[test]
 fn declared_parameters_are_typed_while_unknown_extensions_remain_lossless() {
     let state = state_with_two_components();
-    let subject = state.schematic.components[0].clone();
+    let subject = state.schematic.document.components[0].clone();
 
     assert!(field_rejection(&state, &subject, &InlineEditField::Value, "10k").is_none());
     assert!(field_rejection(&state, &subject, &InlineEditField::Value, "").is_none());
@@ -664,7 +673,7 @@ fn an_inline_source_edit_is_refused_by_the_gate_the_editor_commits_through() {
     state
         .schematic
         .add_component(ComponentType::VoltageSourcePwl, Point::new(0, 0));
-    let subject = state.schematic.components[0].clone();
+    let subject = state.schematic.document.components[0].clone();
     let field = InlineEditField::Parameter("td".to_owned());
 
     let inline =
@@ -751,8 +760,8 @@ fn literal_value_tuning_stages_a_typed_variable_without_mutating_authority() {
         .state
         .schematic
         .add_component(ComponentType::Resistor, Point::origin());
-    app.state.schematic.components[0].name = "RLOAD".to_owned();
-    app.state.schematic.components[0].value = "10k".to_owned();
+    app.state.schematic.document.components[0].name = "RLOAD".to_owned();
+    app.state.schematic.document.components[0].value = "10k".to_owned();
     let plan_id = app.state.sim_setup.stable_analysis_plan().unwrap().id();
     let variables_before = app
         .state
@@ -765,7 +774,7 @@ fn literal_value_tuning_stages_a_typed_variable_without_mutating_authority() {
 
     stage_component_tuning(&mut app, component_id).expect("resistor literal is tunable");
 
-    assert_eq!(app.state.schematic.components[0].value, "10k");
+    assert_eq!(app.state.schematic.document.components[0].value, "10k");
     assert_eq!(app.state.schematic.topology_version(), topology_before);
     assert_eq!(
         app.state
@@ -808,7 +817,7 @@ fn parameter_bound_value_tuning_selects_the_existing_typed_variable() {
         .state
         .schematic
         .add_component(ComponentType::Resistor, Point::origin());
-    app.state.schematic.components[0].value = "{RGAIN}".to_owned();
+    app.state.schematic.document.components[0].value = "{RGAIN}".to_owned();
     let plan_id = app.state.sim_setup.stable_analysis_plan().unwrap().id();
     let variable = crate::state::DesignVariable::new(
         "RGAIN",
@@ -858,7 +867,7 @@ fn value_tuning_fails_closed_when_no_truthful_quantity_exists() {
         .state
         .schematic
         .add_component(ComponentType::Inductor, Point::origin());
-    app.state.schematic.components[0].value = "10u".to_owned();
+    app.state.schematic.document.components[0].value = "10u".to_owned();
 
     let error = stage_component_tuning(&mut app, component_id)
         .expect_err("inductance is not representable by the current typed variable schema");
@@ -879,8 +888,8 @@ fn unsupported_value_tuning_action_is_disabled_with_the_staging_reason() {
     app.state
         .schematic
         .add_component(ComponentType::Inductor, Point::origin());
-    app.state.schematic.components[0].value = "10u".to_owned();
-    let component = app.state.schematic.components[0].clone();
+    app.state.schematic.document.components[0].value = "10u".to_owned();
+    let component = app.state.schematic.document.components[0].clone();
 
     let reason = component_tuning_action_block_reason(&app, &component)
         .expect("an unsupported typed quantity cannot expose an enabled Tune action");
@@ -901,13 +910,13 @@ fn unsupported_value_tuning_action_is_disabled_with_the_staging_reason() {
 fn applying_a_field_reports_whether_the_design_actually_changed() {
     let mut app = RSpiceApp::test_instance();
     app.state = state_with_two_components();
-    let id = app.state.schematic.components[0].id;
+    let id = app.state.schematic.document.components[0].id;
     let before = app.state.schematic.topology_version();
 
     assert!(begin_edit(&mut app, id, InlineEditField::Value));
     update_edit(&mut app, "10k".to_owned());
     assert!(app.state.commit_inline_component_edit().unwrap());
-    assert_eq!(app.state.schematic.components[0].value, "10k");
+    assert_eq!(app.state.schematic.document.components[0].value, "10k");
     assert!(app.state.schematic.topology_version() > before);
 
     let settled = app.state.schematic.topology_version();
@@ -930,6 +939,7 @@ fn model_choices_stay_inside_the_bound_library_and_device_family() {
     let component = app
         .state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == id)
@@ -960,13 +970,13 @@ fn bound_model_choices_reject_other_family_and_polarity_collisions() {
     let mut pjf = DeviceModel::new("PJF_MODEL", ModelType::Other);
     pjf.spice_type = Some("PJF".to_owned());
     library.add_model(pjf);
-    app.state.schematic.components[0]
+    app.state.schematic.document.components[0]
         .library_cell
         .as_mut()
         .expect("fixture binding")
         .module_name = Some("NJF_MODEL".to_owned());
 
-    let component = &app.state.schematic.components[0];
+    let component = &app.state.schematic.document.components[0];
     let choices = bound_model_choices(&app.state, component, "NJF_MODEL");
     assert_eq!(
         choices
@@ -1000,10 +1010,14 @@ fn bound_model_choices_accept_same_family_across_catalog_model_types() {
     let component = Component::new(52, ComponentType::CellInstance, Point::origin())
         .with_library_cell(binding)
         .with_name_value("D1", "junction");
-    app.state.schematic.components.push(component);
+    app.state.schematic.document.components.push(component);
     app.state.schematic.init_undo_history();
 
-    let choices = bound_model_choices(&app.state, &app.state.schematic.components[0], "DIODE_A");
+    let choices = bound_model_choices(
+        &app.state,
+        &app.state.schematic.document.components[0],
+        "DIODE_A",
+    );
     assert_eq!(
         choices
             .iter()
@@ -1048,7 +1062,7 @@ fn selecting_a_bound_model_is_atomic_undoable_and_netlist_authoritative() {
         apply_bound_model_choice(&mut app, id, "OPA189_B")
             .expect("same opaque cell-model family is compatible")
     );
-    let binding = app.state.schematic.components[0]
+    let binding = app.state.schematic.document.components[0]
         .library_cell
         .as_ref()
         .expect("binding");
@@ -1058,7 +1072,7 @@ fn selecting_a_bound_model_is_atomic_undoable_and_netlist_authoritative() {
 
     assert!(app.state.schematic.undo());
     assert_eq!(
-        app.state.schematic.components[0]
+        app.state.schematic.document.components[0]
             .library_cell
             .as_ref()
             .and_then(|binding| binding.module_name.as_deref()),
@@ -1071,7 +1085,7 @@ fn the_default_section_choice_removes_the_instance_override() {
     let (mut app, id) = app_with_model_bound_instance();
     apply_bound_model_section(&mut app, id, "");
     assert_eq!(
-        app.state.schematic.components[0]
+        app.state.schematic.document.components[0]
             .library_cell
             .as_ref()
             .and_then(|binding| binding.model_section.as_deref()),
@@ -1084,20 +1098,20 @@ fn the_default_section_choice_removes_the_instance_override() {
 fn an_inline_session_folds_its_keystrokes_into_one_undo_entry() {
     let mut app = RSpiceApp::test_instance();
     app.state = state_with_two_components();
-    let id = app.state.schematic.components[0].id;
+    let id = app.state.schematic.document.components[0].id;
     app.state.schematic.init_undo_history();
-    let before = app.state.schematic.components[0].clone();
+    let before = app.state.schematic.document.components[0].clone();
     assert!(begin_edit(&mut app, id, InlineEditField::Value));
 
     for text in ["1", "1k", "15k"] {
         update_edit(&mut app, text.to_owned());
-        assert_eq!(app.state.schematic.components[0], before);
+        assert_eq!(app.state.schematic.document.components[0], before);
     }
     assert!(app.state.commit_inline_component_edit().unwrap());
-    assert_eq!(app.state.schematic.components[0].value, "15k");
+    assert_eq!(app.state.schematic.document.components[0].value, "15k");
 
     assert!(app.state.schematic.undo());
-    assert_eq!(app.state.schematic.components[0], before);
+    assert_eq!(app.state.schematic.document.components[0], before);
     assert!(
         !app.state.schematic.can_undo(),
         "three keystrokes produced more than one undo step"
@@ -1296,20 +1310,29 @@ fn the_net_inspector_states_the_sheets_a_connector_partners_with() {
     let key = state.workspace.active_schematic_reference().key();
     state
         .schematic
+        .document
         .net_labels
         .push(NetLabel::new(1, Point::origin(), "LOCAL"));
-    state.schematic.net_labels.push(NetLabel::off_sheet(
-        2,
-        Point::new(20, 0),
-        "BIAS",
-        CrossSheetPortDirection::Output,
-    ));
-    state.schematic.net_labels.push(NetLabel::off_sheet(
-        3,
-        Point::new(40, 0),
-        "BIAS",
-        CrossSheetPortDirection::Input,
-    ));
+    state
+        .schematic
+        .document
+        .net_labels
+        .push(NetLabel::off_sheet(
+            2,
+            Point::new(20, 0),
+            "BIAS",
+            CrossSheetPortDirection::Output,
+        ));
+    state
+        .schematic
+        .document
+        .net_labels
+        .push(NetLabel::off_sheet(
+            3,
+            Point::new(40, 0),
+            "BIAS",
+            CrossSheetPortDirection::Input,
+        ));
 
     // A plain label declares no crossing, so the panel stays as it was.
     assert!(off_sheet_declaration(&state, "LOCAL").is_none());
@@ -1407,11 +1430,15 @@ fn unresolve_configuration(state: &mut AppState) {
 #[test]
 fn the_inspector_states_an_unresolved_configuration_instead_of_buffer_connectivity() {
     let mut state = AppState::default();
-    state.schematic.wires.push(crate::state::Wire::segment(
-        1,
-        Point::new(0, 0),
-        Point::new(40, 0),
-    ));
+    state
+        .schematic
+        .document
+        .wires
+        .push(crate::state::Wire::segment(
+            1,
+            Point::new(0, 0),
+            Point::new(40, 0),
+        ));
     state.sync_active_schematic_to_workspace();
     assert!(
         !sheet_connectivity(&state).nets.is_empty(),
@@ -1445,16 +1472,24 @@ fn the_inspector_reads_the_projection_so_coincident_pages_stay_two_nets() {
     // inspector therefore reports one net or two depending entirely on which
     // document it read, which is what this pins.
     let mut state = AppState::default();
-    state.schematic.wires.push(crate::state::Wire::segment(
-        FIRST_WIRE,
-        Point::new(0, 0),
-        Point::new(40, 0),
-    ));
-    state.schematic.wires.push(crate::state::Wire::segment(
-        SECOND_WIRE,
-        Point::new(0, 0),
-        Point::new(40, 0),
-    ));
+    state
+        .schematic
+        .document
+        .wires
+        .push(crate::state::Wire::segment(
+            FIRST_WIRE,
+            Point::new(0, 0),
+            Point::new(40, 0),
+        ));
+    state
+        .schematic
+        .document
+        .wires
+        .push(crate::state::Wire::segment(
+            SECOND_WIRE,
+            Point::new(0, 0),
+            Point::new(40, 0),
+        ));
     state.sync_active_schematic_to_workspace();
     assert_eq!(
         crate::simulation::netlist_gen::design_nets(&state.schematic).len(),

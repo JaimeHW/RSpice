@@ -29,6 +29,7 @@ pub(in crate::workbench) fn placed_instance(
     }
     let position = state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == component_id)

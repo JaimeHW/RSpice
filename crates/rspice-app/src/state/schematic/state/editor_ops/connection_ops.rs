@@ -14,7 +14,7 @@ impl SchematicState {
 
     /// Find a component terminal at or near a grid position
     pub fn find_terminal_at(&self, pos: Point) -> Option<(u64, String, Point)> {
-        for comp in &self.components {
+        for comp in &self.document.components {
             for (term_name, term_pos) in comp.terminal_positions() {
                 let dx = (pos.x - term_pos.x).abs();
                 let dy = (pos.y - term_pos.y).abs();
@@ -29,6 +29,7 @@ impl SchematicState {
     /// Rebuild all wire connections based on current positions
     pub fn rebuild_connections(&mut self) {
         let terminals = self
+            .document
             .components
             .iter()
             .flat_map(|component| {
@@ -45,9 +46,10 @@ impl SchematicState {
     /// geometry. Authored library symbols must use this path because their pin
     /// positions can differ from intrinsic fallback geometry.
     pub fn rebuild_connections_from_terminals(&mut self, terminals: &[(u64, String, Point)]) {
-        self.connections.clear();
+        self.document.connections.clear();
 
         let wire_endpoints: Vec<(u64, Point, usize)> = self
+            .document
             .wires
             .iter()
             .filter(|w| !w.points.is_empty())
@@ -66,7 +68,7 @@ impl SchematicState {
                 (pos.x - terminal.x).abs() <= SNAP_DISTANCE
                     && (pos.y - terminal.y).abs() <= SNAP_DISTANCE
             }) {
-                self.connections.push(WireConnection::new(
+                self.document.connections.push(WireConnection::new(
                     wire_id,
                     point_index,
                     *comp_id,
@@ -78,7 +80,8 @@ impl SchematicState {
 
     /// Find all connections for a specific component
     pub fn connections_for_component(&self, component_id: u64) -> Vec<&WireConnection> {
-        self.connections
+        self.document
+            .connections
             .iter()
             .filter(|c| c.component_id == component_id)
             .collect()

@@ -97,7 +97,7 @@ fn adopt(state: &mut AppState, id: u64, reference: &str, definition: &str) {
     let mut component = Component::new(id, held.component_type(), Point::new(4 + id as i32, 4));
     component.name = reference.to_owned();
     held.adopt_onto(&mut component).expect("adopt");
-    state.schematic.components.push(component);
+    state.schematic.document.components.push(component);
 }
 
 /// Every definition is under the heading of the family it realizes, and a

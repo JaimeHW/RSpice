@@ -1006,6 +1006,7 @@ fn save_active_overlays_only_active_document_on_accepted_baseline() {
             .schematic_buffers
             .get(&state.workspace.active_key())
             .expect("active buffer")
+            .document
             .components
             .len(),
         1
@@ -1596,7 +1597,7 @@ fn revert_is_document_scoped_and_rejects_active_document_and_baseline_races() {
     let ac_id = insert_ac_analysis(&mut state);
     let scoped = prepare_revert_active_document(&state).expect("prepare scoped revert");
     confirm_revert_active_document(&mut state, &scoped).expect("confirm scoped revert");
-    assert!(state.schematic.components.is_empty());
+    assert!(state.schematic.document.components.is_empty());
     assert_eq!(
         state
             .sim_setup
@@ -1622,7 +1623,7 @@ fn revert_is_document_scoped_and_rejects_active_document_and_baseline_races() {
         active_race_error,
         ProjectLifecycleError::RevertReviewStale
     ));
-    assert_eq!(state.schematic.components.len(), 1);
+    assert_eq!(state.schematic.document.components.len(), 1);
 
     state
         .workbench
@@ -1644,7 +1645,7 @@ fn revert_is_document_scoped_and_rejects_active_document_and_baseline_races() {
         baseline_race_error,
         ProjectLifecycleError::RevertReviewStale
     ));
-    assert_eq!(state.schematic.components.len(), 2);
+    assert_eq!(state.schematic.document.components.len(), 2);
     remove_project_artifacts(&path);
 }
 
@@ -1685,6 +1686,7 @@ fn close_active_document_is_presentation_only() {
             .schematic_buffers
             .get(&second.key())
             .expect("closed document data retained")
+            .document
             .components
             .len(),
         1

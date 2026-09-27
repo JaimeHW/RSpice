@@ -860,7 +860,7 @@ fn authored_sheet_format(
             .map(|sheet| sheet.page_format().clone())
             .ok_or_else(|| "The governed active sheet is unavailable.".to_owned());
     }
-    let policy = state.schematic.document_policy;
+    let policy = state.schematic.document.document_policy;
     if let Some(custom) = policy.custom_page_size {
         return crate::state::SchematicSheetFormat::try_custom(
             "Custom",

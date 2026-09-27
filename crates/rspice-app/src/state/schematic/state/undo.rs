@@ -230,7 +230,7 @@ impl SchematicState {
     /// project does not hold was never answered by the cell catalog at all.
     pub fn revalidate_instance_bindings(&mut self, libraries: &LibraryManager) -> Vec<String> {
         let mut missing_masters = Vec::new();
-        for component in &mut self.components {
+        for component in &mut self.document.components {
             if component.kind != ComponentType::CellInstance {
                 continue;
             }
@@ -268,8 +268,8 @@ mod tests {
 
     fn assert_grid_pitch_contract(state: &SchematicState, pitch: SchematicGridPitch) {
         let expected = pitch.canvas_grid_size();
-        assert_eq!(state.document_policy.grid_pitch, pitch);
-        assert_eq!(state.grid_size, expected);
+        assert_eq!(state.document.document_policy.grid_pitch, pitch);
+        assert_eq!(state.document.grid_size, expected);
         assert_eq!(state.snap_engine.grid_size, expected);
     }
 
@@ -280,8 +280,8 @@ mod tests {
         let baseline = state.content_version();
 
         assert!(state.with_undo("change schematic grid pitch", |schematic| {
-            schematic.document_policy.grid_pitch = SchematicGridPitch::Mil25;
-            schematic.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
+            schematic.document.document_policy.grid_pitch = SchematicGridPitch::Mil25;
+            schematic.document.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
             schematic.snap_engine.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
         }));
         assert_eq!(state.content_version(), baseline + 1);
@@ -303,8 +303,8 @@ mod tests {
         assert_grid_pitch_contract(&state, SchematicGridPitch::Mil50);
 
         assert!(state.with_undo("change schematic grid pitch", |schematic| {
-            schematic.document_policy.grid_pitch = SchematicGridPitch::Mil25;
-            schematic.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
+            schematic.document.document_policy.grid_pitch = SchematicGridPitch::Mil25;
+            schematic.document.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
             schematic.snap_engine.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
         }));
         assert_grid_pitch_contract(&state, SchematicGridPitch::Mil25);

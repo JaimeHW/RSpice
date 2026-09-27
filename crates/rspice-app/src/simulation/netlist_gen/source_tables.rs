@@ -178,7 +178,7 @@ mod tests {
 
     fn netlist_with_library(library: &StimulusLibrary, source: Component) -> NetlistResult {
         let mut state = SchematicState::default();
-        state.components = vec![source];
+        state.document.components = vec![source];
         let buffers = HashMap::new();
         let hierarchy = HierarchySource::from_buffers(&buffers).with_stimulus_library(library);
         generate_netlist_hierarchical(&state, &[], &hierarchy)
@@ -280,7 +280,7 @@ mod tests {
         let mut source = Component::new(1, ComponentType::VoltageSourcePwlFile, Point::origin())
             .with_name_value("V1", "");
         source.params = format!("file={}", named.display());
-        state.components = vec![source];
+        state.document.components = vec![source];
         let result = generate_netlist(&state);
         assert!(
             result.errors.iter().any(|error| {

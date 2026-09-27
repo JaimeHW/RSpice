@@ -149,6 +149,7 @@ impl SchematicSymbolContext {
         let mut resolved_by_binding = Vec::new();
         for component in state
             .schematic
+            .document
             .components
             .iter()
             .filter(|component| component.kind == ComponentType::CellInstance)
@@ -271,15 +272,15 @@ impl SchematicSymbolContext {
         &self,
         schematic: &SchematicState,
     ) -> Option<(i32, i32, i32, i32)> {
-        if schematic.components.is_empty()
-            && schematic.wires.is_empty()
-            && schematic.buses.is_empty()
-            && schematic.bus_taps.is_empty()
-            && schematic.junctions.is_empty()
-            && schematic.net_labels.is_empty()
-            && schematic.design_notes.is_empty()
-            && schematic.documentation_shapes.is_empty()
-            && schematic.probes.is_empty()
+        if schematic.document.components.is_empty()
+            && schematic.document.wires.is_empty()
+            && schematic.document.buses.is_empty()
+            && schematic.document.bus_taps.is_empty()
+            && schematic.document.junctions.is_empty()
+            && schematic.document.net_labels.is_empty()
+            && schematic.document.design_notes.is_empty()
+            && schematic.document.documentation_shapes.is_empty()
+            && schematic.document.probes.is_empty()
         {
             return None;
         }
@@ -295,49 +296,49 @@ impl SchematicSymbolContext {
             max_y = max_y.max(max.y);
         };
 
-        for component in &schematic.components {
+        for component in &schematic.document.components {
             let (min, max) = self.component_bounds(component);
             include(min, max);
         }
 
-        for wire in &schematic.wires {
+        for wire in &schematic.document.wires {
             for point in &wire.points {
                 include(*point, *point);
             }
         }
 
-        for bus in &schematic.buses {
+        for bus in &schematic.document.buses {
             for point in &bus.points {
                 include(*point, *point);
             }
         }
 
-        for tap in &schematic.bus_taps {
+        for tap in &schematic.document.bus_taps {
             for point in crate::schematic::bus_geometry::bus_tap_route_points(tap) {
                 include(point, point);
             }
         }
 
-        for junction in &schematic.junctions {
+        for junction in &schematic.document.junctions {
             include(junction.pos, junction.pos);
         }
 
-        for label in &schematic.net_labels {
+        for label in &schematic.document.net_labels {
             let (min, max) = net_labels::world_bounds(label);
             include(min, max);
         }
 
-        for note in &schematic.design_notes {
+        for note in &schematic.document.design_notes {
             let (min, max) = design_notes::conservative_world_bounds(note);
             include(min, max);
         }
 
-        for shape in &schematic.documentation_shapes {
+        for shape in &schematic.document.documentation_shapes {
             let (min, max) = documentation_shapes::world_bounds(shape);
             include(min, max);
         }
 
-        for probe in &schematic.probes {
+        for probe in &schematic.document.probes {
             let (min, max) = drawing::probe_world_bounds(probe);
             include(min, max);
         }
@@ -364,7 +365,7 @@ impl SchematicSymbolContext {
 
         let mut count = 0;
 
-        for component in &schematic.components {
+        for component in &schematic.document.components {
             let (min, max) = self.component_bounds(component);
             let matches = if enclosed_only {
                 rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
@@ -377,7 +378,7 @@ impl SchematicSymbolContext {
             }
         }
 
-        for wire in &schematic.wires {
+        for wire in &schematic.document.wires {
             let wire_in_rect = if enclosed_only {
                 wire.points
                     .iter()
@@ -393,7 +394,7 @@ impl SchematicSymbolContext {
             }
         }
 
-        for bus in &schematic.buses {
+        for bus in &schematic.document.buses {
             let bus_in_rect = if enclosed_only {
                 bus.points
                     .iter()
@@ -409,7 +410,7 @@ impl SchematicSymbolContext {
             }
         }
 
-        for tap in &schematic.bus_taps {
+        for tap in &schematic.document.bus_taps {
             let route = crate::schematic::bus_geometry::bus_tap_route_points(tap);
             let tap_in_rect = if enclosed_only {
                 route
@@ -426,7 +427,7 @@ impl SchematicSymbolContext {
             }
         }
 
-        for junction in &schematic.junctions {
+        for junction in &schematic.document.junctions {
             if point_in_rect(junction.pos, min_x, min_y, max_x, max_y)
                 && !schematic.selection.has_junction(junction.pos)
             {
@@ -435,7 +436,7 @@ impl SchematicSymbolContext {
             }
         }
 
-        for label in &schematic.net_labels {
+        for label in &schematic.document.net_labels {
             let (min, max) = net_labels::world_bounds(label);
             let matches = if enclosed_only {
                 rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
@@ -448,7 +449,7 @@ impl SchematicSymbolContext {
             }
         }
 
-        for note in &schematic.design_notes {
+        for note in &schematic.document.design_notes {
             let (min, max) = design_notes::conservative_world_bounds(note);
             let matches = if enclosed_only {
                 rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
@@ -461,7 +462,7 @@ impl SchematicSymbolContext {
             }
         }
 
-        for shape in &schematic.documentation_shapes {
+        for shape in &schematic.document.documentation_shapes {
             let matches = documentation_shapes::shape_intersects_rect(
                 shape,
                 min_x,
@@ -476,7 +477,7 @@ impl SchematicSymbolContext {
             }
         }
 
-        for probe in &schematic.probes {
+        for probe in &schematic.document.probes {
             let (min, max) = probe.world_bounds();
             let matches = if enclosed_only {
                 rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
@@ -665,19 +666,31 @@ fn schematic_accessibility_description(
     };
     format!(
         "{}, {}, {}, {}, {}, {}, {}, {}, {}.{traversal_instruction} Active tool: {}.{shortcuts}",
-        counted(schematic.components.len(), "component", "components"),
-        counted(schematic.wires.len(), "wire", "wires"),
-        counted(schematic.buses.len(), "bus", "buses"),
-        counted(schematic.bus_taps.len(), "bus tap", "bus taps"),
-        counted(schematic.junctions.len(), "junction", "junctions"),
-        counted(schematic.net_labels.len(), "net label", "net labels"),
-        counted(schematic.design_notes.len(), "design note", "design notes"),
         counted(
-            schematic.documentation_shapes.len(),
+            schematic.document.components.len(),
+            "component",
+            "components"
+        ),
+        counted(schematic.document.wires.len(), "wire", "wires"),
+        counted(schematic.document.buses.len(), "bus", "buses"),
+        counted(schematic.document.bus_taps.len(), "bus tap", "bus taps"),
+        counted(schematic.document.junctions.len(), "junction", "junctions"),
+        counted(
+            schematic.document.net_labels.len(),
+            "net label",
+            "net labels"
+        ),
+        counted(
+            schematic.document.design_notes.len(),
+            "design note",
+            "design notes"
+        ),
+        counted(
+            schematic.document.documentation_shapes.len(),
             "documentation shape",
             "documentation shapes"
         ),
-        counted(schematic.probes.len(), "probe flag", "probe flags"),
+        counted(schematic.document.probes.len(), "probe flag", "probe flags"),
         tool,
     )
 }
@@ -686,6 +699,7 @@ fn schematic_selection_accessibility_status(state: &AppState) -> String {
     if let Some(component) = state.schematic.selection.single_component().and_then(|id| {
         state
             .schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == id)
@@ -727,17 +741,17 @@ fn schematic_selection_accessibility_status(state: &AppState) -> String {
 
 fn schematic_keyboard_navigation_has_objects(state: &AppState) -> bool {
     let filter = state.ui.schematic_selection_filter;
-    (filter.instances && !state.schematic.components.is_empty())
+    (filter.instances && !state.schematic.document.components.is_empty())
         || (filter.wires
-            && (!state.schematic.wires.is_empty()
-                || !state.schematic.buses.is_empty()
-                || !state.schematic.bus_taps.is_empty()
-                || !state.schematic.junctions.is_empty()))
-        || (filter.labels && !state.schematic.net_labels.is_empty())
+            && (!state.schematic.document.wires.is_empty()
+                || !state.schematic.document.buses.is_empty()
+                || !state.schematic.document.bus_taps.is_empty()
+                || !state.schematic.document.junctions.is_empty()))
+        || (filter.labels && !state.schematic.document.net_labels.is_empty())
         || (filter.annotations
-            && (!state.schematic.design_notes.is_empty()
-                || !state.schematic.documentation_shapes.is_empty()
-                || !state.schematic.probes.is_empty()))
+            && (!state.schematic.document.design_notes.is_empty()
+                || !state.schematic.document.documentation_shapes.is_empty()
+                || !state.schematic.document.probes.is_empty()))
 }
 
 fn schematic_keyboard_focus_label(
@@ -764,6 +778,7 @@ fn schematic_keyboard_focus_label(
         SchematicKeyboardFocus::Junction(_) => format!("junction {id}"),
         SchematicKeyboardFocus::NetLabel(_) => state
             .schematic
+            .document
             .net_labels
             .iter()
             .find(|label| label.id == id)
@@ -773,6 +788,7 @@ fn schematic_keyboard_focus_label(
             ),
         SchematicKeyboardFocus::Probe(_) => state
             .schematic
+            .document
             .probes
             .iter()
             .find(|probe| probe.id == id)
@@ -927,6 +943,7 @@ pub(crate) fn drawn_failure_site_count(
         .filter(|device| {
             state
                 .schematic
+                .document
                 .components
                 .iter()
                 .any(|component| component.spice_instance_name().eq_ignore_ascii_case(device))
@@ -947,6 +964,7 @@ fn result_mapping_is_current(state: &AppState) -> bool {
 fn wires_touching(state: &AppState, points: &[crate::state::Point]) -> Vec<u64> {
     state
         .schematic
+        .document
         .wires
         .iter()
         .filter(|wire| points.iter().any(|point| wire.contains_point(*point)))
@@ -1014,6 +1032,7 @@ pub(crate) fn select_failure_sites(
         .filter_map(|device| {
             state
                 .schematic
+                .document
                 .components
                 .iter()
                 .find(|component| component.spice_instance_name().eq_ignore_ascii_case(device))
@@ -1212,7 +1231,7 @@ pub fn render_schematic_view(
     }
     // Report the cursor position in grid units; the workbench status bar shows it.
     let to_grid_units = |pos: egui::Pos2, state: &AppState| {
-        let grid = f64::from(state.schematic.grid_size.max(1));
+        let grid = f64::from(state.schematic.document.grid_size.max(1));
         let x = ((f64::from(pos.x - available.min.x)) - state.schematic.pan.0)
             / state.schematic.zoom
             / grid;
@@ -1408,6 +1427,7 @@ mod tests {
         let b = Point::new(40, 0);
         state
             .schematic
+            .document
             .wires
             .push(crate::state::Wire::new(1, vec![a, b]));
         state.simulation.cross_probe.update(
@@ -1469,6 +1489,7 @@ mod tests {
         let b = Point::new(40, 0);
         state
             .schematic
+            .document
             .wires
             .push(crate::state::Wire::new(1, vec![a, b]));
         state.simulation.cross_probe.update(
@@ -1569,7 +1590,7 @@ mod tests {
             revision: 0,
         };
         let mut schematic = SchematicState::default();
-        schematic.components.push(component);
+        schematic.document.components.push(component);
 
         assert_eq!(context.content_bounds(&schematic), Some((80, 10, 220, 90)));
     }
@@ -1579,7 +1600,7 @@ mod tests {
         let mut schematic = SchematicState::default();
         let label = NetLabel::new(77, Point::new(100, 80), "afe_out");
         let (min, max) = net_labels::world_bounds(&label);
-        schematic.net_labels.push(label);
+        schematic.document.net_labels.push(label);
         let context = SchematicSymbolContext::default();
 
         assert_eq!(
@@ -1608,7 +1629,7 @@ mod tests {
         )
         .unwrap();
         let (min, max) = design_notes::conservative_world_bounds(&note);
-        schematic.design_notes.push(note);
+        schematic.document.design_notes.push(note);
         let context = SchematicSymbolContext::default();
 
         assert_eq!(
@@ -1653,7 +1674,7 @@ mod tests {
             revision: 0,
         };
         let mut schematic = SchematicState::default();
-        schematic.components.push(component);
+        schematic.document.components.push(component);
 
         let selected = context.select_in_rect(
             &mut schematic,
@@ -1668,7 +1689,7 @@ mod tests {
     #[test]
     fn enclosed_selection_rejects_partial_component_intersections() {
         let mut schematic = SchematicState::default();
-        schematic.components.push(Component::new(
+        schematic.document.components.push(Component::new(
             1,
             ComponentType::Resistor,
             Point::new(100, 50),
@@ -1690,7 +1711,7 @@ mod tests {
     fn intersecting_selection_detects_wire_crossing_without_an_inside_vertex() {
         let mut schematic = SchematicState::default();
         schematic.add_wire(vec![Point::new(0, 50), Point::new(100, 50)]);
-        let wire_id = schematic.wires[0].id;
+        let wire_id = schematic.document.wires[0].id;
         let context = SchematicSymbolContext::default();
 
         assert_eq!(
@@ -1750,6 +1771,7 @@ mod tests {
         );
         let component = state
             .schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == id)
@@ -1780,6 +1802,7 @@ mod tests {
         let context = SchematicSymbolContext::from_state(&state);
         let component = state
             .schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == id)
@@ -1811,24 +1834,27 @@ mod tests {
         use crate::state::{Junction, NetLabel, Wire};
 
         let mut state = AppState::default();
-        state.schematic.components.push(Component::new(
+        state.schematic.document.components.push(Component::new(
             1,
             ComponentType::Resistor,
             Point::new(0, 0),
         ));
         state
             .schematic
+            .document
             .wires
             .push(Wire::new(2, vec![Point::new(0, 0), Point::new(10, 0)]));
         state
             .schematic
+            .document
             .junctions
             .push(Junction::new(3, Point::new(10, 0)));
         state
             .schematic
+            .document
             .net_labels
             .push(NetLabel::new(4, Point::new(10, 0), "OUT"));
-        state.schematic.design_notes.push(
+        state.schematic.document.design_notes.push(
             crate::state::DesignNote::new(
                 5,
                 Point::new(20, 10),
@@ -1887,7 +1913,7 @@ mod tests {
         let mut component = Component::new(17, ComponentType::Resistor, Point::new(40, 20));
         component.name = "RGAIN".to_owned();
         component.value = "499 ohm".to_owned();
-        state.schematic.components.push(component);
+        state.schematic.document.components.push(component);
         state.schematic.selection.select_only_component(17);
 
         let output = ctx.run_ui(

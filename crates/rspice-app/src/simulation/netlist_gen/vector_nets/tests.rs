@@ -35,6 +35,7 @@ fn declared_bus(id: u64, declaration: &str, start: Point, end: Point) -> Bus {
 fn resistor(state: &mut SchematicState, pos: Point, value: &str) {
     let id = state.add_component(ComponentType::Resistor, pos);
     state
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == id)
@@ -45,6 +46,7 @@ fn resistor(state: &mut SchematicState, pos: Point, value: &str) {
 fn place_port(state: &mut SchematicState, name: &str, pos: Point) {
     let id = state.add_component(ComponentType::Port, pos);
     state
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == id)
@@ -66,9 +68,10 @@ fn scalar_tap_design() -> SchematicState {
         BusTapOrientation::Down,
     )
     .expect("fixture tap");
-    state.buses.push(bus);
-    state.bus_taps.push(tap);
+    state.document.buses.push(bus);
+    state.document.bus_taps.push(tap);
     state
+        .document
         .wires
         .push(Wire::segment(3, Point::new(20, 0), Point::new(40, 0)));
     resistor(&mut state, Point::new(40, 0), "1k");
@@ -103,23 +106,24 @@ fn projection_names_every_bit_of_a_declared_bus_once() {
     let mut state = SchematicState::default();
     // Two buses of the same declaration, touching end to end: one vector net,
     // and eight nodes rather than sixteen.
-    state.buses.push(declared_bus(
+    state.document.buses.push(declared_bus(
         1,
         "DATA[7:0]",
         Point::new(0, 0),
         Point::new(40, 0),
     ));
-    state.buses.push(declared_bus(
+    state.document.buses.push(declared_bus(
         2,
         "DATA[7:0]",
         Point::new(40, 0),
         Point::new(80, 0),
     ));
 
-    let connectivity =
-        crate::state::vector_connectivity(&state.buses, &state.components, |component| {
-            component.terminal_positions_resolved(None)
-        });
+    let connectivity = crate::state::vector_connectivity(
+        &state.document.buses,
+        &state.document.components,
+        |component| component.terminal_positions_resolved(None),
+    );
     assert_eq!(connectivity.nets.len(), 1);
     assert!(connectivity.mismatches.is_empty());
 
@@ -135,7 +139,7 @@ fn projection_names_every_bit_of_a_declared_bus_once() {
 #[test]
 fn a_sixty_four_bit_bus_adds_exactly_sixty_four_named_nets() {
     let mut state = SchematicState::default();
-    state.buses.push(declared_bus(
+    state.document.buses.push(declared_bus(
         1,
         "W[63:0]",
         Point::new(0, 0),
@@ -154,23 +158,24 @@ fn a_sixty_four_bit_bus_adds_exactly_sixty_four_named_nets() {
 #[test]
 fn touching_buses_that_declare_different_ranges_are_not_one_vector_net() {
     let mut state = SchematicState::default();
-    state.buses.push(declared_bus(
+    state.document.buses.push(declared_bus(
         1,
         "DATA[7:0]",
         Point::new(0, 0),
         Point::new(40, 0),
     ));
-    state.buses.push(declared_bus(
+    state.document.buses.push(declared_bus(
         2,
         "DATA[15:0]",
         Point::new(40, 0),
         Point::new(80, 0),
     ));
 
-    let connectivity =
-        crate::state::vector_connectivity(&state.buses, &state.components, |component| {
-            component.terminal_positions_resolved(None)
-        });
+    let connectivity = crate::state::vector_connectivity(
+        &state.document.buses,
+        &state.document.components,
+        |component| component.terminal_positions_resolved(None),
+    );
 
     assert_eq!(connectivity.nets.len(), 2);
     // The conflict itself is reported once, by the bus-tap projection that has
@@ -200,9 +205,10 @@ fn a_slice_tap_resolves_to_the_same_bit_under_either_index_order() {
             BusTapOrientation::Down,
         )
         .expect("fixture tap");
-        state.buses.push(bus);
-        state.bus_taps.push(tap);
+        state.document.buses.push(bus);
+        state.document.bus_taps.push(tap);
         state
+            .document
             .wires
             .push(Wire::segment(3, Point::new(20, 0), Point::new(40, 0)));
         resistor(&mut state, Point::new(40, 0), "1k");
@@ -264,9 +270,10 @@ fn reg4_master() -> SchematicState {
         BusTapOrientation::Down,
     )
     .expect("fixture tap");
-    master.buses.push(bus);
-    master.bus_taps.push(tap);
+    master.document.buses.push(bus);
+    master.document.bus_taps.push(tap);
     master
+        .document
         .wires
         .push(Wire::segment(3, Point::new(120, 40), Point::new(160, 40)));
     resistor(&mut master, Point::new(180, 40), "1k");
@@ -285,13 +292,14 @@ fn a_vector_port_becomes_deck_formals_and_per_bit_instance_nodes() {
     binding.terminal_order = vec!["DATA[3:0]".to_owned(), "EN".to_owned()];
     let instance = top.add_library_cell_component(Point::new(200, 100), binding);
     let terminals = top
+        .document
         .components
         .iter()
         .find(|component| component.id == instance)
         .expect("placed instance")
         .terminal_positions();
     let (data, enable) = (terminals[0].1, terminals[1].1);
-    top.buses.push(declared_bus(
+    top.document.buses.push(declared_bus(
         1,
         "DATA[3:0]",
         data,
@@ -357,6 +365,7 @@ fn one_four_bit_vector_joins_two_instances_of_one_master() {
         binding.terminal_order = vec!["DATA[3:0]".to_owned(), "EN".to_owned()];
         let instance = top.add_library_cell_component(Point::new(200, row), binding);
         let terminals = top
+            .document
             .components
             .iter()
             .find(|component| component.id == instance)
@@ -369,7 +378,7 @@ fn one_four_bit_vector_joins_two_instances_of_one_master() {
 
     // One bus, declared once, reaching both vector terminals.
     let (first, second) = (data_terminals[0], data_terminals[1]);
-    top.buses.push(
+    top.document.buses.push(
         Bus::new(
             1,
             vec![
@@ -466,12 +475,14 @@ fn a_multi_bit_tap_lands_its_slice_on_the_source_bus_conductors() {
         BusTapOrientation::Down,
     )
     .expect("fixture destination tap");
-    state.buses = vec![source, destination];
-    state.bus_taps = vec![slice_tap, from_source, from_destination];
+    state.document.buses = vec![source, destination];
+    state.document.bus_taps = vec![slice_tap, from_source, from_destination];
     state
+        .document
         .wires
         .push(Wire::segment(6, Point::new(80, -80), Point::new(100, -80)));
     state
+        .document
         .wires
         .push(Wire::segment(7, Point::new(80, 80), Point::new(100, 80)));
     resistor(&mut state, Point::new(100, -80), "1k");
@@ -500,14 +511,14 @@ fn a_multi_bit_tap_lands_its_slice_on_the_source_bus_conductors() {
 #[test]
 fn a_projected_bit_is_shown_in_the_notation_its_own_bus_declared() {
     let mut square = SchematicState::default();
-    square.buses.push(declared_bus(
+    square.document.buses.push(declared_bus(
         1,
         "DATA[3:0]",
         Point::new(0, 0),
         Point::new(40, 0),
     ));
     let mut angle = SchematicState::default();
-    angle.buses.push(declared_bus(
+    angle.document.buses.push(declared_bus(
         1,
         "DATA<3:0>",
         Point::new(0, 0),
@@ -563,13 +574,14 @@ fn a_vector_terminal_on_a_narrower_bus_is_reported_with_both_widths() {
     binding.terminal_order = vec!["DATA[3:0]".to_owned(), "EN".to_owned()];
     let instance = top.add_library_cell_component(Point::new(200, 100), binding);
     let data = top
+        .document
         .components
         .iter()
         .find(|component| component.id == instance)
         .expect("placed instance")
         .terminal_positions()[0]
         .1;
-    top.buses.push(declared_bus(
+    top.document.buses.push(declared_bus(
         1,
         "DATA[1:0]",
         data,
@@ -630,6 +642,7 @@ fn no_width_mismatch_policy_lets_an_implicit_mismatch_reach_the_deck() {
         binding.terminal_order = vec!["DATA[3:0]".to_owned(), "EN".to_owned()];
         let instance = top.add_library_cell_component(Point::new(200, 100), binding);
         let data = top
+            .document
             .components
             .iter()
             .find(|component| component.id == instance)
@@ -639,7 +652,7 @@ fn no_width_mismatch_policy_lets_an_implicit_mismatch_reach_the_deck() {
         // A bus wide enough to slice from: the case the permissive policy
         // states as a warning in the ERC, and still refuses here because no
         // selector was authored.
-        top.buses.push(declared_bus(
+        top.document.buses.push(declared_bus(
             1,
             "DATA[7:0]",
             data,

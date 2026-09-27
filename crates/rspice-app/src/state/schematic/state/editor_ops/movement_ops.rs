@@ -19,41 +19,49 @@ impl SchematicState {
 
     /// Number of selected movable objects that still exist in this document.
     pub fn live_movable_selection_count(&self) -> usize {
-        self.components
+        self.document
+            .components
             .iter()
             .filter(|item| self.selection.has_component(item.id))
             .count()
             + self
+                .document
                 .wires
                 .iter()
                 .filter(|item| self.selection.has_wire(item.id))
                 .count()
             + self
+                .document
                 .buses
                 .iter()
                 .filter(|item| self.selection.has_bus(item.id))
                 .count()
             + self
+                .document
                 .bus_taps
                 .iter()
                 .filter(|item| self.selection.has_bus_tap(item.id))
                 .count()
             + self
+                .document
                 .net_labels
                 .iter()
                 .filter(|item| self.selection.has_net_label(item.id))
                 .count()
             + self
+                .document
                 .design_notes
                 .iter()
                 .filter(|item| self.selection.has_design_note(item.id))
                 .count()
             + self
+                .document
                 .documentation_shapes
                 .iter()
                 .filter(|item| self.selection.has_documentation_shape(item.id))
                 .count()
             + self
+                .document
                 .probes
                 .iter()
                 .filter(|item| self.selection.has_probe(item.id))
@@ -77,7 +85,12 @@ impl SchematicState {
         }
         // Get the component's terminal positions BEFORE moving
         let terminals: Vec<Point> = {
-            if let Some(comp) = self.components.iter().find(|c| c.id == component_id) {
+            if let Some(comp) = self
+                .document
+                .components
+                .iter()
+                .find(|c| c.id == component_id)
+            {
                 terminal_points_for(comp)
             } else {
                 return;
@@ -88,7 +101,7 @@ impl SchematicState {
         let mut wire_updates: Vec<(u64, usize, Point)> = Vec::new();
         let mut moved_wire_points = std::collections::HashSet::new();
 
-        for wire in &self.wires {
+        for wire in &self.document.wires {
             for (point_idx, point) in wire.points.iter().enumerate() {
                 for term_pos in &terminals {
                     if *point == *term_pos {
@@ -102,20 +115,25 @@ impl SchematicState {
         }
 
         // Move the component
-        if let Some(comp) = self.components.iter_mut().find(|c| c.id == component_id) {
+        if let Some(comp) = self
+            .document
+            .components
+            .iter_mut()
+            .find(|c| c.id == component_id)
+        {
             comp.pos = offset_point(comp.pos, delta);
         }
 
         // Apply wire updates
         for (wire_id, point_idx, new_pos) in wire_updates {
-            if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id)
+            if let Some(wire) = self.document.wires.iter_mut().find(|w| w.id == wire_id)
                 && point_idx < wire.points.len()
             {
                 wire.points[point_idx] = new_pos;
             }
         }
 
-        for tap in &mut self.bus_taps {
+        for tap in &mut self.document.bus_taps {
             if tap.target_kind() == BusTargetKind::Wire
                 && moved_wire_points.contains(&tap.connection_point)
             {
@@ -150,7 +168,8 @@ impl SchematicState {
             return;
         }
         let documentation_shape_delta = clamped_documentation_shape_translation(
-            self.documentation_shapes
+            self.document
+                .documentation_shapes
                 .iter()
                 .filter(|shape| self.selection.has_documentation_shape(shape.id)),
             delta,
@@ -161,6 +180,7 @@ impl SchematicState {
         // Terminal positions of every selected component, BEFORE moving.
         let mut terminals: std::collections::HashSet<Point> = std::collections::HashSet::new();
         for comp in self
+            .document
             .components
             .iter()
             .filter(|c| self.selection.components.contains(&c.id))
@@ -174,7 +194,7 @@ impl SchematicState {
         let mut wire_updates: Vec<(usize, usize, Point)> = Vec::new();
         let mut wires_to_move: Vec<usize> = Vec::new();
 
-        for (wire_index, wire) in self.wires.iter().enumerate() {
+        for (wire_index, wire) in self.document.wires.iter().enumerate() {
             if self.selection.wires.contains(&wire.id) {
                 continue; // moved wholesale below
             }
@@ -194,15 +214,17 @@ impl SchematicState {
         }
 
         for tap in self
+            .document
             .bus_taps
             .iter()
             .filter(|tap| tap.target_kind() == BusTargetKind::Wire)
         {
             let target_follows = wires_to_move
                 .iter()
-                .any(|index| self.wires[*index].contains_point(tap.connection_point))
+                .any(|index| self.document.wires[*index].contains_point(tap.connection_point))
                 || wire_updates.iter().any(|(wire_index, point_index, _)| {
-                    self.wires[*wire_index].points.get(*point_index) == Some(&tap.connection_point)
+                    self.document.wires[*wire_index].points.get(*point_index)
+                        == Some(&tap.connection_point)
                 });
             if target_follows {
                 tap_targets_moving_conductor.insert(tap.id);
@@ -211,6 +233,7 @@ impl SchematicState {
 
         // Move selected components.
         for comp in self
+            .document
             .components
             .iter_mut()
             .filter(|c| self.selection.components.contains(&c.id))
@@ -219,6 +242,7 @@ impl SchematicState {
         }
 
         for label in self
+            .document
             .net_labels
             .iter_mut()
             .filter(|label| self.selection.has_net_label(label.id))
@@ -227,6 +251,7 @@ impl SchematicState {
         }
 
         for note in self
+            .document
             .design_notes
             .iter_mut()
             .filter(|note| self.selection.has_design_note(note.id))
@@ -235,6 +260,7 @@ impl SchematicState {
         }
 
         for shape in self
+            .document
             .documentation_shapes
             .iter_mut()
             .filter(|shape| self.selection.has_documentation_shape(shape.id))
@@ -243,6 +269,7 @@ impl SchematicState {
         }
 
         for probe in self
+            .document
             .probes
             .iter_mut()
             .filter(|probe| self.selection.has_probe(probe.id))
@@ -252,6 +279,7 @@ impl SchematicState {
 
         // Move selected wires wholesale.
         for wire in self
+            .document
             .wires
             .iter_mut()
             .filter(|w| self.selection.wires.contains(&w.id))
@@ -265,7 +293,7 @@ impl SchematicState {
 
         // Move fully attached wires.
         for wire_index in wires_to_move {
-            if let Some(wire) = self.wires.get_mut(wire_index) {
+            if let Some(wire) = self.document.wires.get_mut(wire_index) {
                 for point in &mut wire.points {
                     *point = offset_point(*point, delta);
                 }
@@ -274,7 +302,7 @@ impl SchematicState {
 
         // Apply stretch updates for partially connected wires.
         for (wire_index, point_idx, new_pos) in wire_updates {
-            if let Some(wire) = self.wires.get_mut(wire_index)
+            if let Some(wire) = self.document.wires.get_mut(wire_index)
                 && point_idx < wire.points.len()
             {
                 wire.points[point_idx] = new_pos;
@@ -312,6 +340,7 @@ impl SchematicState {
             return Ok(false);
         }
         let terminal_points_by_component = self
+            .document
             .components
             .iter()
             .map(|component| (component.id, terminal_points_for(component)))
@@ -375,16 +404,18 @@ impl SchematicState {
     pub fn move_wire(&mut self, wire_id: u64, delta: Point) {
         if self.read_only
             || delta == Point::origin()
-            || self.wires.iter().all(|wire| wire.id != wire_id)
+            || self.document.wires.iter().all(|wire| wire.id != wire_id)
         {
             return;
         }
         let attached_taps: std::collections::HashSet<u64> = self
+            .document
             .wires
             .iter()
             .find(|wire| wire.id == wire_id)
             .map(|wire| {
-                self.bus_taps
+                self.document
+                    .bus_taps
                     .iter()
                     .filter(|tap| {
                         tap.target_kind() == BusTargetKind::Wire
@@ -395,6 +426,7 @@ impl SchematicState {
             })
             .unwrap_or_default();
         let old_endpoints: Vec<Point> = self
+            .document
             .wires
             .iter()
             .find(|w| w.id == wire_id)
@@ -410,19 +442,19 @@ impl SchematicState {
             })
             .unwrap_or_default();
 
-        if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id) {
+        if let Some(wire) = self.document.wires.iter_mut().find(|w| w.id == wire_id) {
             for point in &mut wire.points {
                 *point = offset_point(*point, delta);
             }
         }
 
         for old_pt in old_endpoints {
-            if let Some(junction) = self.junctions.iter_mut().find(|j| j.pos == old_pt) {
+            if let Some(junction) = self.document.junctions.iter_mut().find(|j| j.pos == old_pt) {
                 junction.pos = offset_point(junction.pos, delta);
             }
         }
 
-        for tap in &mut self.bus_taps {
+        for tap in &mut self.document.bus_taps {
             if attached_taps.contains(&tap.id) {
                 tap.connection_point = offset_point(tap.connection_point, delta);
             }
@@ -448,7 +480,8 @@ impl SchematicState {
             return;
         }
         let documentation_shape_delta = clamped_documentation_shape_translation(
-            self.documentation_shapes
+            self.document
+                .documentation_shapes
                 .iter()
                 .filter(|shape| self.selection.has_documentation_shape(shape.id)),
             delta,
@@ -458,6 +491,7 @@ impl SchematicState {
         // Union of selected components' terminals, BEFORE moving.
         let mut terminals: std::collections::HashSet<Point> = std::collections::HashSet::new();
         for comp in self
+            .document
             .components
             .iter()
             .filter(|c| self.selection.components.contains(&c.id))
@@ -466,11 +500,12 @@ impl SchematicState {
         }
 
         for tap in self
+            .document
             .bus_taps
             .iter()
             .filter(|tap| tap.target_kind() == BusTargetKind::Wire)
         {
-            let follows_rubber_band = self.wires.iter().any(|wire| {
+            let follows_rubber_band = self.document.wires.iter().any(|wire| {
                 !self.selection.wires.contains(&wire.id)
                     && wire
                         .points
@@ -486,6 +521,7 @@ impl SchematicState {
         // terminal follows it.
         if !terminals.is_empty() {
             for wire in self
+                .document
                 .wires
                 .iter_mut()
                 .filter(|w| !self.selection.wires.contains(&w.id))
@@ -500,6 +536,7 @@ impl SchematicState {
 
         // Move the selected components.
         for comp in self
+            .document
             .components
             .iter_mut()
             .filter(|c| self.selection.components.contains(&c.id))
@@ -508,6 +545,7 @@ impl SchematicState {
         }
 
         for label in self
+            .document
             .net_labels
             .iter_mut()
             .filter(|label| self.selection.has_net_label(label.id))
@@ -516,6 +554,7 @@ impl SchematicState {
         }
 
         for note in self
+            .document
             .design_notes
             .iter_mut()
             .filter(|note| self.selection.has_design_note(note.id))
@@ -524,6 +563,7 @@ impl SchematicState {
         }
 
         for shape in self
+            .document
             .documentation_shapes
             .iter_mut()
             .filter(|shape| self.selection.has_documentation_shape(shape.id))
@@ -532,6 +572,7 @@ impl SchematicState {
         }
 
         for probe in self
+            .document
             .probes
             .iter_mut()
             .filter(|probe| self.selection.has_probe(probe.id))
@@ -542,6 +583,7 @@ impl SchematicState {
         // Move selected wires entirely, tracking endpoints for junctions.
         let mut wire_endpoints: Vec<Point> = Vec::new();
         for wire in self
+            .document
             .wires
             .iter_mut()
             .filter(|w| self.selection.wires.contains(&w.id))
@@ -561,7 +603,7 @@ impl SchematicState {
 
         // Move junctions at selected wire endpoints
         for old_pt in wire_endpoints {
-            if let Some(junction) = self.junctions.iter_mut().find(|j| j.pos == old_pt) {
+            if let Some(junction) = self.document.junctions.iter_mut().find(|j| j.pos == old_pt) {
                 junction.pos = offset_point(junction.pos, delta);
             }
         }
@@ -577,7 +619,7 @@ impl SchematicState {
         if self.read_only || old_pos == new_pos {
             return;
         }
-        for wire in &mut self.wires {
+        for wire in &mut self.document.wires {
             for point in &mut wire.points {
                 if *point == old_pos {
                     *point = new_pos;
@@ -585,11 +627,16 @@ impl SchematicState {
             }
         }
 
-        if let Some(junction) = self.junctions.iter_mut().find(|j| j.pos == old_pos) {
+        if let Some(junction) = self
+            .document
+            .junctions
+            .iter_mut()
+            .find(|j| j.pos == old_pos)
+        {
             junction.pos = new_pos;
         }
 
-        for tap in &mut self.bus_taps {
+        for tap in &mut self.document.bus_taps {
             if tap.target_kind() == BusTargetKind::Wire && tap.connection_point == old_pos {
                 tap.connection_point = new_pos;
             }
@@ -602,14 +649,15 @@ impl SchematicState {
 
 fn tap_targets_selected_conductor(state: &SchematicState) -> std::collections::HashSet<u64> {
     state
+        .document
         .bus_taps
         .iter()
         .filter(|tap| match tap.target_kind() {
-            BusTargetKind::Wire => state.wires.iter().any(|wire| {
+            BusTargetKind::Wire => state.document.wires.iter().any(|wire| {
                 state.selection.wires.contains(&wire.id)
                     && wire.contains_point(tap.connection_point)
             }),
-            BusTargetKind::Bus => state.buses.iter().any(|bus| {
+            BusTargetKind::Bus => state.document.buses.iter().any(|bus| {
                 state.selection.buses.contains(&bus.id) && bus.contains_point(tap.connection_point)
             }),
         })
@@ -619,34 +667,42 @@ fn tap_targets_selected_conductor(state: &SchematicState) -> std::collections::H
 
 fn has_live_movable_selection(state: &SchematicState) -> bool {
     state
+        .document
         .components
         .iter()
         .any(|item| state.selection.has_component(item.id))
         || state
+            .document
             .wires
             .iter()
             .any(|item| state.selection.has_wire(item.id))
         || state
+            .document
             .buses
             .iter()
             .any(|item| state.selection.has_bus(item.id))
         || state
+            .document
             .bus_taps
             .iter()
             .any(|item| state.selection.has_bus_tap(item.id))
         || state
+            .document
             .net_labels
             .iter()
             .any(|item| state.selection.has_net_label(item.id))
         || state
+            .document
             .design_notes
             .iter()
             .any(|item| state.selection.has_design_note(item.id))
         || state
+            .document
             .documentation_shapes
             .iter()
             .any(|item| state.selection.has_documentation_shape(item.id))
         || state
+            .document
             .probes
             .iter()
             .any(|item| state.selection.has_probe(item.id))
@@ -654,22 +710,27 @@ fn has_live_movable_selection(state: &SchematicState) -> bool {
 
 fn has_live_electrical_selection(state: &SchematicState) -> bool {
     state
+        .document
         .components
         .iter()
         .any(|item| state.selection.has_component(item.id))
         || state
+            .document
             .wires
             .iter()
             .any(|item| state.selection.has_wire(item.id))
         || state
+            .document
             .buses
             .iter()
             .any(|item| state.selection.has_bus(item.id))
         || state
+            .document
             .bus_taps
             .iter()
             .any(|item| state.selection.has_bus_tap(item.id))
         || state
+            .document
             .net_labels
             .iter()
             .any(|item| state.selection.has_net_label(item.id))
@@ -682,13 +743,14 @@ fn move_selected_bus_geometry(
 ) {
     let selected_bus_ids = state.selection.buses.clone();
     for bus in state
+        .document
         .buses
         .iter_mut()
         .filter(|bus| selected_bus_ids.contains(&bus.id))
     {
         bus.translate(delta);
     }
-    for tap in &mut state.bus_taps {
+    for tap in &mut state.document.bus_taps {
         if selected_bus_ids.contains(&tap.bus_id) {
             tap.bus_point = offset_point(tap.bus_point, delta);
         }
@@ -725,6 +787,7 @@ fn tap_motion_for_rigid_selection(
     state: &SchematicState,
 ) -> std::collections::HashMap<u64, TapMotion> {
     state
+        .document
         .bus_taps
         .iter()
         .map(|tap| {
@@ -732,11 +795,11 @@ fn tap_motion_for_rigid_selection(
             let source = selected || state.selection.has_bus(tap.bus_id);
             let target = selected
                 || match tap.target_kind() {
-                    BusTargetKind::Wire => state.wires.iter().any(|wire| {
+                    BusTargetKind::Wire => state.document.wires.iter().any(|wire| {
                         state.selection.has_wire(wire.id)
                             && wire.contains_point(tap.connection_point)
                     }),
-                    BusTargetKind::Bus => state.buses.iter().any(|bus| {
+                    BusTargetKind::Bus => state.document.buses.iter().any(|bus| {
                         state.selection.has_bus(bus.id) && bus.contains_point(tap.connection_point)
                     }),
                 };
@@ -747,10 +810,12 @@ fn tap_motion_for_rigid_selection(
 
 fn junctions_following_selected_wires(state: &SchematicState) -> std::collections::HashSet<Point> {
     state
+        .document
         .junctions
         .iter()
         .filter_map(|junction| {
             let incident = state
+                .document
                 .wires
                 .iter()
                 .filter(|wire| wire.contains_point(junction.pos))
@@ -771,12 +836,14 @@ fn preflight_rigid_translation(
     junctions_to_move: &std::collections::HashSet<Point>,
 ) -> Result<(), MoveSelectionError> {
     let selected_points = state
+        .document
         .components
         .iter()
         .filter(|item| state.selection.has_component(item.id))
         .map(|item| item.pos)
         .chain(
             state
+                .document
                 .wires
                 .iter()
                 .filter(|item| state.selection.has_wire(item.id))
@@ -784,6 +851,7 @@ fn preflight_rigid_translation(
         )
         .chain(
             state
+                .document
                 .buses
                 .iter()
                 .filter(|item| state.selection.has_bus(item.id))
@@ -791,6 +859,7 @@ fn preflight_rigid_translation(
         )
         .chain(
             state
+                .document
                 .net_labels
                 .iter()
                 .filter(|item| state.selection.has_net_label(item.id))
@@ -798,6 +867,7 @@ fn preflight_rigid_translation(
         )
         .chain(
             state
+                .document
                 .design_notes
                 .iter()
                 .filter(|item| state.selection.has_design_note(item.id))
@@ -805,6 +875,7 @@ fn preflight_rigid_translation(
         )
         .chain(
             state
+                .document
                 .documentation_shapes
                 .iter()
                 .filter(|item| state.selection.has_documentation_shape(item.id))
@@ -812,6 +883,7 @@ fn preflight_rigid_translation(
         )
         .chain(
             state
+                .document
                 .probes
                 .iter()
                 .filter(|item| state.selection.has_probe(item.id))
@@ -821,7 +893,7 @@ fn preflight_rigid_translation(
     for point in selected_points {
         checked_offset(point, delta)?;
     }
-    for tap in &state.bus_taps {
+    for tap in &state.document.bus_taps {
         let motion = tap_motion.get(&tap.id).copied().unwrap_or_default();
         if motion.source {
             checked_offset(tap.bus_point, delta)?;
@@ -840,7 +912,7 @@ fn preflight_connected_translation(
 ) -> Result<(), MoveSelectionError> {
     let mut moved_wire_ids = std::collections::HashSet::new();
     let mut moved_wire_points = std::collections::HashSet::new();
-    for wire in &state.wires {
+    for wire in &state.document.wires {
         if state.selection.has_wire(wire.id) {
             moved_wire_ids.insert(wire.id);
             moved_wire_points.extend(wire.points.iter().copied());
@@ -872,12 +944,13 @@ fn preflight_connected_translation(
         }
     }
     for tap in state
+        .document
         .bus_taps
         .iter()
         .filter(|tap| tap.target_kind() == BusTargetKind::Wire)
     {
         let target_moves = moved_wire_points.contains(&tap.connection_point)
-            || state.wires.iter().any(|wire| {
+            || state.document.wires.iter().any(|wire| {
                 moved_wire_ids.contains(&wire.id) && wire.contains_point(tap.connection_point)
             });
         if target_moves {
@@ -892,16 +965,18 @@ fn orthogonalize_connected_rubber_bands(
     candidate: &mut SchematicState,
 ) -> Result<(), MoveSelectionError> {
     for old_wire in original
+        .document
         .wires
         .iter()
         .filter(|wire| !original.selection.has_wire(wire.id))
     {
         let candidate_index = candidate
+            .document
             .wires
             .iter()
             .position(|wire| wire.id == old_wire.id)
             .expect("movement candidates preserve wire identities");
-        let candidate_points = candidate.wires[candidate_index].points.clone();
+        let candidate_points = candidate.document.wires[candidate_index].points.clone();
         if candidate_points == old_wire.points {
             continue;
         }
@@ -917,6 +992,7 @@ fn orthogonalize_connected_rubber_bands(
         )?;
 
         for connection in candidate
+            .document
             .connections
             .iter_mut()
             .filter(|connection| connection.wire_id == old_wire.id)
@@ -927,15 +1003,15 @@ fn orthogonalize_connected_rubber_bands(
                 },
             )?;
         }
-        candidate.wires[candidate_index].points = route;
+        candidate.document.wires[candidate_index].points = route;
 
-        for tap in candidate.bus_taps.iter().filter(|tap| {
+        for tap in candidate.document.bus_taps.iter().filter(|tap| {
             tap.target_kind() == BusTargetKind::Wire
-                && original.bus_taps.iter().any(|old_tap| {
+                && original.document.bus_taps.iter().any(|old_tap| {
                     old_tap.id == tap.id && old_wire.contains_point(old_tap.connection_point)
                 })
         }) {
-            if !candidate.wires[candidate_index].contains_point(tap.connection_point) {
+            if !candidate.document.wires[candidate_index].contains_point(tap.connection_point) {
                 return Err(MoveSelectionError::AttachedTapCannotBePreserved { tap_id: tap.id });
             }
         }
@@ -1079,6 +1155,7 @@ fn apply_rigid_selection_translation(
     junctions_to_move: &std::collections::HashSet<Point>,
 ) {
     for component in state
+        .document
         .components
         .iter_mut()
         .filter(|item| state.selection.has_component(item.id))
@@ -1086,6 +1163,7 @@ fn apply_rigid_selection_translation(
         component.pos = exact_offset(component.pos, delta);
     }
     for wire in state
+        .document
         .wires
         .iter_mut()
         .filter(|item| state.selection.has_wire(item.id))
@@ -1095,6 +1173,7 @@ fn apply_rigid_selection_translation(
         }
     }
     for bus in state
+        .document
         .buses
         .iter_mut()
         .filter(|item| state.selection.has_bus(item.id))
@@ -1104,6 +1183,7 @@ fn apply_rigid_selection_translation(
         }
     }
     for label in state
+        .document
         .net_labels
         .iter_mut()
         .filter(|item| state.selection.has_net_label(item.id))
@@ -1111,6 +1191,7 @@ fn apply_rigid_selection_translation(
         label.pos = exact_offset(label.pos, delta);
     }
     for note in state
+        .document
         .design_notes
         .iter_mut()
         .filter(|item| state.selection.has_design_note(item.id))
@@ -1118,6 +1199,7 @@ fn apply_rigid_selection_translation(
         note.translate(delta);
     }
     for shape in state
+        .document
         .documentation_shapes
         .iter_mut()
         .filter(|item| state.selection.has_documentation_shape(item.id))
@@ -1125,18 +1207,19 @@ fn apply_rigid_selection_translation(
         shape.translate(delta);
     }
     for probe in state
+        .document
         .probes
         .iter_mut()
         .filter(|item| state.selection.has_probe(item.id))
     {
         probe.position = exact_offset(probe.position, delta);
     }
-    for junction in &mut state.junctions {
+    for junction in &mut state.document.junctions {
         if junctions_to_move.contains(&junction.pos) {
             junction.pos = exact_offset(junction.pos, delta);
         }
     }
-    for tap in &mut state.bus_taps {
+    for tap in &mut state.document.bus_taps {
         let motion = tap_motion.get(&tap.id).copied().unwrap_or_default();
         if motion.source {
             tap.bus_point = exact_offset(tap.bus_point, delta);
@@ -1148,7 +1231,7 @@ fn apply_rigid_selection_translation(
 }
 
 fn update_connections_after_rigid_move(state: &mut SchematicState) {
-    state.connections.retain(|connection| {
+    state.document.connections.retain(|connection| {
         state.selection.has_component(connection.component_id)
             == state.selection.has_wire(connection.wire_id)
     });
@@ -1158,12 +1241,13 @@ fn validate_moved_tap_sources(
     state: &SchematicState,
     tap_motion: &std::collections::HashMap<u64, TapMotion>,
 ) -> Result<(), MoveSelectionError> {
-    for tap in &state.bus_taps {
+    for tap in &state.document.bus_taps {
         let motion = tap_motion.get(&tap.id).copied().unwrap_or_default();
         if !motion.source {
             continue;
         }
         let valid = state
+            .document
             .buses
             .iter()
             .find(|bus| bus.id == tap.bus_id)
@@ -1179,16 +1263,18 @@ fn validate_moved_tap_targets(
     state: &SchematicState,
     tap_motion: &std::collections::HashMap<u64, TapMotion>,
 ) -> Result<(), MoveSelectionError> {
-    for tap in &state.bus_taps {
+    for tap in &state.document.bus_taps {
         if !tap_motion.get(&tap.id).is_some_and(|motion| motion.target) {
             continue;
         }
         let attached = match tap.target_kind() {
             BusTargetKind::Wire => state
+                .document
                 .wires
                 .iter()
                 .any(|wire| wire.contains_point(tap.connection_point)),
             BusTargetKind::Bus => state
+                .document
                 .buses
                 .iter()
                 .filter(|bus| bus.id != tap.bus_id)
@@ -1210,6 +1296,7 @@ fn shove_attached_wires(
     candidate_terminals: &std::collections::HashMap<u64, Vec<Point>>,
 ) -> Result<(), MoveSelectionError> {
     let stationary_terminals = original
+        .document
         .components
         .iter()
         .filter(|component| !original.selection.has_component(component.id))
@@ -1218,6 +1305,7 @@ fn shove_attached_wires(
         .copied()
         .collect::<std::collections::HashSet<_>>();
     let mut affected = original
+        .document
         .wires
         .iter()
         .filter(|wire| {
@@ -1234,6 +1322,7 @@ fn shove_attached_wires(
 
     for wire_id in affected {
         let old_wire = original
+            .document
             .wires
             .iter()
             .find(|wire| wire.id == wire_id)
@@ -1244,7 +1333,7 @@ fn shove_attached_wires(
         let last_index = old_wire.points.len().saturating_sub(1);
         if old_wire.points.iter().enumerate().any(|(index, point)| {
             selected_terminals.contains(point) && index != 0 && index != last_index
-        }) || original.connections.iter().any(|connection| {
+        }) || original.document.connections.iter().any(|connection| {
             connection.wire_id == wire_id
                 && connection.point_index != 0
                 && connection.point_index != last_index
@@ -1275,23 +1364,25 @@ fn shove_attached_wires(
         } else {
             old_end
         };
-        let route = orthogonal_route_candidates(new_start, new_end, candidate.grid_size.max(1))
-            .into_iter()
-            .find(|route| {
-                !route_collides(
-                    original,
-                    candidate,
-                    old_wire,
-                    route,
-                    original_terminals,
-                    candidate_terminals,
-                )
-            })
-            .ok_or(MoveSelectionError::NoLegalShoveRoute { wire_id })?;
+        let route =
+            orthogonal_route_candidates(new_start, new_end, candidate.document.grid_size.max(1))
+                .into_iter()
+                .find(|route| {
+                    !route_collides(
+                        original,
+                        candidate,
+                        old_wire,
+                        route,
+                        original_terminals,
+                        candidate_terminals,
+                    )
+                })
+                .ok_or(MoveSelectionError::NoLegalShoveRoute { wire_id })?;
 
         remap_taps_for_shoved_wire(original, candidate, old_wire, &route)?;
         let new_last_index = route.len() - 1;
         for connection in candidate
+            .document
             .connections
             .iter_mut()
             .filter(|connection| connection.wire_id == wire_id)
@@ -1301,6 +1392,7 @@ fn shove_attached_wires(
             }
         }
         candidate
+            .document
             .wires
             .iter_mut()
             .find(|wire| wire.id == wire_id)
@@ -1326,7 +1418,7 @@ fn endpoint_has_stationary_component_connection(
     wire_id: u64,
     point_index: usize,
 ) -> bool {
-    state.connections.iter().any(|connection| {
+    state.document.connections.iter().any(|connection| {
         connection.wire_id == wire_id
             && connection.point_index == point_index
             && !state.selection.has_component(connection.component_id)
@@ -1335,6 +1427,7 @@ fn endpoint_has_stationary_component_connection(
 
 fn restore_shoved_endpoint_junction(state: &mut SchematicState, moved: Point, anchored: Point) {
     if let Some(junction) = state
+        .document
         .junctions
         .iter_mut()
         .find(|junction| junction.pos == moved)
@@ -1353,13 +1446,14 @@ fn remap_taps_for_shoved_wire(
     let old_end = *old_wire.points.last().expect("wire has endpoints");
     let new_start = route[0];
     let new_end = *route.last().expect("route has endpoints");
-    for old_tap in original.bus_taps.iter().filter(|tap| {
+    for old_tap in original.document.bus_taps.iter().filter(|tap| {
         tap.target_kind() == BusTargetKind::Wire && old_wire.contains_point(tap.connection_point)
     }) {
         if original.selection.has_bus_tap(old_tap.id) {
             continue;
         }
         let candidate_point = candidate
+            .document
             .bus_taps
             .iter()
             .find(|tap| tap.id == old_tap.id)
@@ -1380,6 +1474,7 @@ fn remap_taps_for_shoved_wire(
             return Err(MoveSelectionError::AttachedTapCannotBePreserved { tap_id: old_tap.id });
         };
         if let Some(tap) = candidate
+            .document
             .bus_taps
             .iter_mut()
             .find(|tap| tap.id == old_tap.id)
@@ -1494,8 +1589,17 @@ fn route_collides(
             }
         }
     }
-    for wire in candidate.wires.iter().filter(|wire| wire.id != wire_id) {
-        let source_wire = original.wires.iter().find(|source| source.id == wire.id);
+    for wire in candidate
+        .document
+        .wires
+        .iter()
+        .filter(|wire| wire.id != wire_id)
+    {
+        let source_wire = original
+            .document
+            .wires
+            .iter()
+            .find(|source| source.id == wire.id);
         let retained_start = source_wire.is_some_and(|source| source.contains_point(old_start))
             && wire.contains_point(route_start);
         let retained_end = source_wire.is_some_and(|source| source.contains_point(old_end))
@@ -1515,8 +1619,12 @@ fn route_collides(
             }
         }
     }
-    for bus in &candidate.buses {
-        let source_bus = original.buses.iter().find(|source| source.id == bus.id);
+    for bus in &candidate.document.buses {
+        let source_bus = original
+            .document
+            .buses
+            .iter()
+            .find(|source| source.id == bus.id);
         let retained_start = source_bus.is_some_and(|source| source.contains_point(old_start))
             && bus.contains_point(route_start);
         let retained_end = source_bus.is_some_and(|source| source.contains_point(old_end))
@@ -1536,7 +1644,7 @@ fn route_collides(
             }
         }
     }
-    for component in &candidate.components {
+    for component in &candidate.document.components {
         let terminals = terminal_points_by_component
             .get(&component.id)
             .map(Vec::as_slice)
@@ -1666,21 +1774,34 @@ fn reject_new_selected_conductor_overlaps(
     candidate: &SchematicState,
 ) -> Result<(), MoveSelectionError> {
     for moved in candidate
+        .document
         .wires
         .iter()
         .filter(|wire| candidate.selection.has_wire(wire.id))
     {
-        for other in candidate.wires.iter().filter(|wire| wire.id != moved.id) {
+        for other in candidate
+            .document
+            .wires
+            .iter()
+            .filter(|wire| wire.id != moved.id)
+        {
             let overlaps = moved.segments().any(|left| {
                 other
                     .segments()
                     .any(|right| positive_length_overlap(left, right))
             });
             let existed = original
+                .document
                 .wires
                 .iter()
                 .find(|wire| wire.id == moved.id)
-                .zip(original.wires.iter().find(|wire| wire.id == other.id))
+                .zip(
+                    original
+                        .document
+                        .wires
+                        .iter()
+                        .find(|wire| wire.id == other.id),
+                )
                 .is_some_and(|(left_wire, right_wire)| {
                     left_wire.segments().any(|left| {
                         right_wire
@@ -1694,7 +1815,7 @@ fn reject_new_selected_conductor_overlaps(
                 });
             }
         }
-        for bus in &candidate.buses {
+        for bus in &candidate.document.buses {
             if moved.segments().any(|left| {
                 bus.points
                     .windows(2)
@@ -1714,11 +1835,12 @@ fn reject_selected_wire_component_body_overlaps(
     terminal_points_by_component: &std::collections::HashMap<u64, Vec<Point>>,
 ) -> Result<(), MoveSelectionError> {
     for wire in candidate
+        .document
         .wires
         .iter()
         .filter(|wire| candidate.selection.has_wire(wire.id))
     {
-        for component in &candidate.components {
+        for component in &candidate.document.components {
             let terminals = terminal_points_by_component
                 .get(&component.id)
                 .map(Vec::as_slice)
@@ -1745,16 +1867,16 @@ fn commit_movement_candidate(
     candidate: SchematicState,
     electrical_selection: bool,
 ) {
-    state.components = candidate.components;
-    state.wires = candidate.wires;
-    state.buses = candidate.buses;
-    state.bus_taps = candidate.bus_taps;
-    state.net_labels = candidate.net_labels;
-    state.junctions = candidate.junctions;
-    state.design_notes = candidate.design_notes;
-    state.documentation_shapes = candidate.documentation_shapes;
-    state.probes = candidate.probes;
-    state.connections = candidate.connections;
+    state.document.components = candidate.document.components;
+    state.document.wires = candidate.document.wires;
+    state.document.buses = candidate.document.buses;
+    state.document.bus_taps = candidate.document.bus_taps;
+    state.document.net_labels = candidate.document.net_labels;
+    state.document.junctions = candidate.document.junctions;
+    state.document.design_notes = candidate.document.design_notes;
+    state.document.documentation_shapes = candidate.document.documentation_shapes;
+    state.document.probes = candidate.document.probes;
+    state.document.connections = candidate.document.connections;
     state.is_dirty = true;
     if electrical_selection {
         state.bump_topology_version();

@@ -201,22 +201,30 @@ impl ProjectWorkspace {
             return Ok(None);
         };
         let live_object_ids = schematic
+            .document
             .components
             .iter()
             .map(|object| object.id)
-            .chain(schematic.wires.iter().map(|object| object.id))
-            .chain(schematic.buses.iter().map(|object| object.id))
-            .chain(schematic.bus_taps.iter().map(|object| object.id))
-            .chain(schematic.junctions.iter().map(|object| object.id))
-            .chain(schematic.net_labels.iter().map(|object| object.id))
-            .chain(schematic.design_notes.iter().map(|object| object.id))
+            .chain(schematic.document.wires.iter().map(|object| object.id))
+            .chain(schematic.document.buses.iter().map(|object| object.id))
+            .chain(schematic.document.bus_taps.iter().map(|object| object.id))
+            .chain(schematic.document.junctions.iter().map(|object| object.id))
+            .chain(schematic.document.net_labels.iter().map(|object| object.id))
             .chain(
                 schematic
+                    .document
+                    .design_notes
+                    .iter()
+                    .map(|object| object.id),
+            )
+            .chain(
+                schematic
+                    .document
                     .documentation_shapes
                     .iter()
                     .map(|object| object.id),
             )
-            .chain(schematic.probes.iter().map(|object| object.id))
+            .chain(schematic.document.probes.iter().map(|object| object.id))
             .collect::<Vec<_>>();
 
         let mut candidate = self.design_management.clone();
@@ -427,36 +435,36 @@ impl ProjectWorkspace {
                     .unwrap_or_else(crate::state::Point::origin)
             };
 
-            for component in &mut projected.components {
+            for component in &mut projected.document.components {
                 component.pos = translated_point(component.pos, offset_for(component.id))?;
             }
-            for wire in &mut projected.wires {
+            for wire in &mut projected.document.wires {
                 let delta = offset_for(wire.id);
                 for point in &mut wire.points {
                     *point = translated_point(*point, delta)?;
                 }
             }
-            for bus in &mut projected.buses {
+            for bus in &mut projected.document.buses {
                 let delta = offset_for(bus.id);
                 for point in &mut bus.points {
                     *point = translated_point(*point, delta)?;
                 }
             }
-            for tap in &mut projected.bus_taps {
+            for tap in &mut projected.document.bus_taps {
                 let delta = offset_for(tap.id);
                 tap.bus_point = translated_point(tap.bus_point, delta)?;
                 tap.connection_point = translated_point(tap.connection_point, delta)?;
             }
-            for junction in &mut projected.junctions {
+            for junction in &mut projected.document.junctions {
                 junction.pos = translated_point(junction.pos, offset_for(junction.id))?;
             }
-            for label in &mut projected.net_labels {
+            for label in &mut projected.document.net_labels {
                 label.pos = translated_point(label.pos, offset_for(label.id))?;
             }
-            for note in &mut projected.design_notes {
+            for note in &mut projected.document.design_notes {
                 note.pos = translated_point(note.pos, offset_for(note.id))?;
             }
-            for shape in &mut projected.documentation_shapes {
+            for shape in &mut projected.document.documentation_shapes {
                 let delta = offset_for(shape.id);
                 let (minimum, maximum) = shape.bounds();
                 let _ = translated_point(minimum, delta)?;
@@ -483,12 +491,15 @@ impl ProjectWorkspace {
                     // off-sheet connector is, so it carries the contract's
                     // direction rather than reading as a plain local name.
                     let next_id = projected.next_id();
-                    projected.net_labels.push(crate::state::NetLabel::off_sheet(
-                        next_id,
-                        anchor,
-                        contract.definition().net_name.clone(),
-                        contract.definition().direction,
-                    ));
+                    projected
+                        .document
+                        .net_labels
+                        .push(crate::state::NetLabel::off_sheet(
+                            next_id,
+                            anchor,
+                            contract.definition().net_name.clone(),
+                            contract.definition().direction,
+                        ));
                 }
             }
         }
@@ -501,7 +512,7 @@ impl ProjectWorkspace {
             .transpose()?;
         if let Some(resolved) = &active_variant {
             let mut do_not_populate = HashSet::new();
-            for component in &projected.components {
+            for component in &projected.document.components {
                 if matches!(
                     resolved.override_for(cell_view_key, component.id)?,
                     Some(crate::state::VariantObjectOverride::DoNotPopulate { .. })
@@ -510,9 +521,11 @@ impl ProjectWorkspace {
                 }
             }
             projected
+                .document
                 .components
                 .retain(|component| !do_not_populate.contains(&component.id));
             projected
+                .document
                 .connections
                 .retain(|connection| !do_not_populate.contains(&connection.component_id));
         }
@@ -527,6 +540,7 @@ impl ProjectWorkspace {
             BTreeMap::new()
         } else {
             let sources = projected
+                .document
                 .components
                 .iter()
                 .map(|component| {
@@ -543,7 +557,7 @@ impl ProjectWorkspace {
                 .collect()
         };
         if !names.is_empty() {
-            projected.components =
+            projected.document.components =
                 projected
                     .prepare_component_renames(&names)
                     .map_err(|reason| {
@@ -555,7 +569,7 @@ impl ProjectWorkspace {
         }
 
         if let Some(resolved) = &active_variant {
-            for component in &mut projected.components {
+            for component in &mut projected.document.components {
                 let Some(override_value) = resolved.override_for(cell_view_key, component.id)?
                 else {
                     continue;
@@ -1902,13 +1916,14 @@ mod tests {
             .expect("move with explicit boundary contract");
 
         assert!(
-            schematic.net_labels.is_empty(),
+            schematic.document.net_labels.is_empty(),
             "the crossing is a sheet contract, not an authored label"
         );
         let projected = workspace
             .materialize_design_management_schematic(&key, &schematic)
             .expect("materialize governed design");
         let crossing: Vec<_> = projected
+            .document
             .net_labels
             .iter()
             .filter(|label| label.name == "BIAS")
@@ -1947,6 +1962,7 @@ mod tests {
         let substituted = schematic.add_component(ComponentType::Resistor, Point::new(10, 10));
         let omitted = schematic.add_component(ComponentType::Capacitor, Point::new(20, 10));
         schematic
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == substituted)
@@ -2026,17 +2042,20 @@ mod tests {
             .expect("materialize variant and annotation");
         assert!(
             projected
+                .document
                 .components
                 .iter()
                 .all(|component| component.id != omitted)
         );
         assert!(
             projected
+                .document
                 .connections
                 .iter()
                 .all(|connection| connection.component_id != omitted)
         );
         let component = projected
+            .document
             .components
             .iter()
             .find(|component| component.id == substituted)
@@ -2053,6 +2072,7 @@ mod tests {
         assert_eq!(component.name, "R1");
 
         schematic
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == substituted)
@@ -2068,6 +2088,7 @@ mod tests {
         assert!(error.to_string().contains("unterminated"));
         assert_eq!(
             schematic
+                .document
                 .components
                 .iter()
                 .find(|component| component.id == substituted)

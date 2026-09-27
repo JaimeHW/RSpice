@@ -337,15 +337,18 @@ mod tests {
                 .get(&key)
                 .expect("document seeded when view is created");
             assert_eq!(
-                document.document_policy.grid_pitch,
+                document.document.document_policy.grid_pitch,
                 SchematicGridPitch::Metric
             );
             assert_eq!(
-                document.grid_size,
+                document.document.grid_size,
                 SchematicGridPitch::Metric.canvas_grid_size()
             );
             assert_eq!(
-                document.document_policy.operating_point_annotations,
+                document
+                    .document
+                    .document_policy
+                    .operating_point_annotations,
                 OperatingPointAnnotationPolicy::Hidden
             );
         }
@@ -389,6 +392,7 @@ mod tests {
             .add_component(ComponentType::Port, Point::origin());
         app.state
             .schematic
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == port_id)

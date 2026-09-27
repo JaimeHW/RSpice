@@ -170,30 +170,36 @@ impl SchematicState {
         if !self.selection.wire_segments.is_empty() || !self.selection.wire_vertices.is_empty() {
             return false;
         }
-        self.components
+        self.document
+            .components
             .iter()
             .any(|item| self.selection.has_component(item.id))
             || self
+                .document
                 .wires
                 .iter()
                 .any(|item| self.selection.has_wire(item.id) && item.points.len() >= 2)
             || self
+                .document
                 .buses
                 .iter()
                 .any(|item| self.selection.has_bus(item.id) && item.validate().is_ok())
             || self
+                .document
                 .bus_taps
                 .iter()
                 .any(|item| self.selection.has_bus_tap(item.id))
             || self
+                .document
                 .net_labels
                 .iter()
                 .any(|item| self.selection.has_net_label(item.id))
             || self
+                .document
                 .design_notes
                 .iter()
                 .any(|item| self.selection.has_design_note(item.id) && item.validate().is_ok())
-            || self.documentation_shapes.iter().any(|item| {
+            || self.document.documentation_shapes.iter().any(|item| {
                 self.selection.has_documentation_shape(item.id) && item.validate().is_ok()
             })
     }
@@ -221,6 +227,7 @@ impl SchematicState {
         let member_count = count.member_count();
         let mut clauses = Vec::new();
         let mut selected_components: Vec<_> = self
+            .document
             .components
             .iter()
             .filter(|item| self.selection.has_component(item.id))
@@ -252,6 +259,7 @@ impl SchematicState {
         }
         let selected_ids = &self.selection.components;
         let occupied_names: HashSet<String> = self
+            .document
             .components
             .iter()
             .filter(|component| !selected_ids.contains(&component.id))
@@ -293,6 +301,7 @@ impl SchematicState {
 
         let mut indexed_sources = Vec::<(String, u32, BusNotation)>::new();
         let mut selected_labels: Vec<_> = self
+            .document
             .net_labels
             .iter()
             .filter(|item| self.selection.has_net_label(item.id))
@@ -305,6 +314,7 @@ impl SchematicState {
         }
 
         let mut selected_taps: Vec<_> = self
+            .document
             .bus_taps
             .iter()
             .filter(|item| self.selection.has_bus_tap(item.id) && item.slice.is_scalar())
@@ -412,17 +422,18 @@ impl SchematicState {
         let next_id = built.next_id;
         let preview = built.preview;
         let committed = self.with_undo("create array", move |state| {
-            state.components.extend(preview.components);
-            state.wires.extend(preview.wires);
-            state.junctions.extend(preview.junctions);
-            state.buses.extend(preview.buses);
-            state.bus_taps.extend(preview.bus_taps);
-            state.net_labels.extend(preview.net_labels);
-            state.design_notes.extend(preview.design_notes);
+            state.document.components.extend(preview.components);
+            state.document.wires.extend(preview.wires);
+            state.document.junctions.extend(preview.junctions);
+            state.document.buses.extend(preview.buses);
+            state.document.bus_taps.extend(preview.bus_taps);
+            state.document.net_labels.extend(preview.net_labels);
+            state.document.design_notes.extend(preview.design_notes);
             state
+                .document
                 .documentation_shapes
                 .extend(preview.documentation_shapes);
-            state.connections.extend(preview.connections);
+            state.document.connections.extend(preview.connections);
             state.selection = preview.selection;
             state.next_id = next_id;
             state.rebuild_component_counters_after_array();
@@ -494,7 +505,8 @@ impl SchematicState {
         let mut collision_index = GeometryBroadPhase::from_geometry(&outside_geometry);
         let radial_documentation = plan.kind == SchematicArrayKind::RadialDocumentation;
         let mut radial_note_positions: Vec<(u64, Point)> = if radial_documentation {
-            self.design_notes
+            self.document
+                .design_notes
                 .iter()
                 .map(|note| (note.id, note.pos))
                 .collect()
@@ -503,7 +515,8 @@ impl SchematicState {
         };
         let mut radial_shape_geometries: Vec<(u64, DocumentationShapeGeometry)> =
             if radial_documentation {
-                self.documentation_shapes
+                self.document
+                    .documentation_shapes
                     .iter()
                     .map(|shape| (shape.id, shape.geometry.clone()))
                     .collect()
@@ -606,11 +619,10 @@ impl SchematicState {
                 {
                     item.name = value;
                 }
-                NetLabel::validate_name(&item.name, self.document_policy.net_naming).map_err(
-                    |_| SchematicArrayError::InvalidSourceName {
+                NetLabel::validate_name(&item.name, self.document.document_policy.net_naming)
+                    .map_err(|_| SchematicArrayError::InvalidSourceName {
                         name: item.name.clone(),
-                    },
-                )?;
+                    })?;
                 replica.selection.select_net_label(item.id);
                 replica.net_labels.push(item);
             }
@@ -721,6 +733,7 @@ impl SchematicState {
     ) -> Result<(), SchematicArrayError> {
         let selected_ids = &self.selection.components;
         let mut occupied: HashSet<String> = self
+            .document
             .components
             .iter()
             .filter(|component| !selected_ids.contains(&component.id))
@@ -728,6 +741,7 @@ impl SchematicState {
             .map(|component| component.name.to_ascii_lowercase())
             .collect();
         let mut selected: Vec<_> = self
+            .document
             .components
             .iter()
             .filter(|component| selected_ids.contains(&component.id))
@@ -756,7 +770,7 @@ impl SchematicState {
     }
 
     fn rebuild_component_counters_after_array(&mut self) {
-        for component in &self.components {
+        for component in &self.document.components {
             let prefix = component.kind.spice_prefix();
             if let Some(number) = component
                 .name
@@ -1100,42 +1114,48 @@ fn validate_live_array_selection(state: &SchematicState) -> Result<(), Schematic
         .selection
         .components
         .iter()
-        .any(|id| !state.components.iter().any(|item| item.id == *id))
+        .any(|id| !state.document.components.iter().any(|item| item.id == *id))
         || state
             .selection
             .wires
             .iter()
-            .any(|id| !state.wires.iter().any(|item| item.id == *id))
+            .any(|id| !state.document.wires.iter().any(|item| item.id == *id))
         || state
             .selection
             .buses
             .iter()
-            .any(|id| !state.buses.iter().any(|item| item.id == *id))
+            .any(|id| !state.document.buses.iter().any(|item| item.id == *id))
         || state
             .selection
             .bus_taps
             .iter()
-            .any(|id| !state.bus_taps.iter().any(|item| item.id == *id))
+            .any(|id| !state.document.bus_taps.iter().any(|item| item.id == *id))
         || state
             .selection
             .net_labels
             .iter()
-            .any(|id| !state.net_labels.iter().any(|item| item.id == *id))
-        || state
-            .selection
-            .design_notes
-            .iter()
-            .any(|id| !state.design_notes.iter().any(|item| item.id == *id))
-        || state
-            .selection
-            .documentation_shapes
-            .iter()
-            .any(|id| !state.documentation_shapes.iter().any(|item| item.id == *id))
-        || state
-            .selection
-            .junctions
-            .iter()
-            .any(|selection| !state.junctions.iter().any(|item| item.pos == selection.pos));
+            .any(|id| !state.document.net_labels.iter().any(|item| item.id == *id))
+        || state.selection.design_notes.iter().any(|id| {
+            !state
+                .document
+                .design_notes
+                .iter()
+                .any(|item| item.id == *id)
+        })
+        || state.selection.documentation_shapes.iter().any(|id| {
+            !state
+                .document
+                .documentation_shapes
+                .iter()
+                .any(|item| item.id == *id)
+        })
+        || state.selection.junctions.iter().any(|selection| {
+            !state
+                .document
+                .junctions
+                .iter()
+                .any(|item| item.pos == selection.pos)
+        });
     if stale {
         return Err(SchematicArrayError::StaleSelection {
             object_id: first_stale_selection_id(state),
@@ -1155,6 +1175,7 @@ fn validate_array_source_selection_direct(
     state: &SchematicState,
 ) -> Result<(), SchematicArrayError> {
     let selected_terminals: HashSet<Point> = state
+        .document
         .components
         .iter()
         .filter(|component| state.selection.has_component(component.id))
@@ -1166,6 +1187,7 @@ fn validate_array_source_selection_direct(
         })
         .collect();
     let selected_owned_wire_points: HashSet<(u64, usize)> = state
+        .document
         .connections
         .iter()
         .filter(|connection| {
@@ -1178,7 +1200,7 @@ fn validate_array_source_selection_direct(
         .collect();
 
     let mut captured_wire_ids = HashSet::new();
-    for wire in &state.wires {
+    for wire in &state.document.wires {
         let explicitly_selected = state.selection.has_wire(wire.id);
         let implicitly_selected = if wire.points.len() < 2 {
             false
@@ -1200,22 +1222,24 @@ fn validate_array_source_selection_direct(
     }
 
     let selected_tap_owner_ids: HashSet<u64> = state
+        .document
         .bus_taps
         .iter()
         .filter(|tap| state.selection.has_bus_tap(tap.id))
         .map(|tap| tap.bus_id)
         .collect();
-    for bus in &state.buses {
+    for bus in &state.document.buses {
         if state.selection.has_bus(bus.id) || selected_tap_owner_ids.contains(&bus.id) {
             bus.validate()
                 .map_err(|_| SchematicArrayError::InvalidGeometry { object_id: bus.id })?;
         }
     }
-    for tap in &state.bus_taps {
+    for tap in &state.document.bus_taps {
         if !state.selection.has_bus_tap(tap.id) && !state.selection.has_bus(tap.bus_id) {
             continue;
         }
         let bus = state
+            .document
             .buses
             .iter()
             .find(|bus| bus.id == tap.bus_id)
@@ -1223,13 +1247,13 @@ fn validate_array_source_selection_direct(
         tap.validate_against_bus(bus)
             .map_err(|_| SchematicArrayError::InvalidBusTap { tap_id: tap.id })?;
     }
-    for note in &state.design_notes {
+    for note in &state.document.design_notes {
         if state.selection.has_design_note(note.id) {
             note.validate()
                 .map_err(|_| SchematicArrayError::InvalidGeometry { object_id: note.id })?;
         }
     }
-    for shape in &state.documentation_shapes {
+    for shape in &state.document.documentation_shapes {
         if state.selection.has_documentation_shape(shape.id) {
             shape
                 .validate()
@@ -1240,7 +1264,7 @@ fn validate_array_source_selection_direct(
     }
 
     let mut owned_points = HashSet::new();
-    for connection in &state.connections {
+    for connection in &state.document.connections {
         if !captured_wire_ids.contains(&connection.wire_id)
             || !state
                 .selection
@@ -1250,6 +1274,7 @@ fn validate_array_source_selection_direct(
             continue;
         }
         let Some(wire) = state
+            .document
             .wires
             .iter()
             .find(|wire| wire.id == connection.wire_id)
@@ -1379,17 +1404,17 @@ fn capture_array_selection(
     let mut objects = state.capture_complete_selection_resolved(terminal_points_for);
     let selected_components = &state.selection.components;
     let captured_wire_ids: HashSet<u64> = objects.wires.iter().map(|wire| wire.id).collect();
-    for wire in &state.wires {
+    for wire in &state.document.wires {
         if captured_wire_ids.contains(&wire.id) || wire.points.len() < 2 {
             continue;
         }
         let last = wire.points.len() - 1;
-        let owns_start = state.connections.iter().any(|connection| {
+        let owns_start = state.document.connections.iter().any(|connection| {
             connection.wire_id == wire.id
                 && connection.point_index == 0
                 && selected_components.contains(&connection.component_id)
         });
-        let owns_end = state.connections.iter().any(|connection| {
+        let owns_end = state.document.connections.iter().any(|connection| {
             connection.wire_id == wire.id
                 && connection.point_index == last
                 && selected_components.contains(&connection.component_id)
@@ -1405,7 +1430,7 @@ fn capture_array_selection(
         .iter()
         .map(|component| component.id)
         .collect();
-    for junction in &state.junctions {
+    for junction in &state.document.junctions {
         if objects.junctions.contains(&junction.pos)
             || !objects
                 .wires
@@ -1420,6 +1445,7 @@ fn capture_array_selection(
     objects.junctions.dedup();
 
     let mut connections: Vec<_> = state
+        .document
         .connections
         .iter()
         .filter(|connection| {
@@ -1592,14 +1618,14 @@ fn first_stale_selection_id(state: &SchematicState) -> u64 {
         .components
         .iter()
         .copied()
-        .find(|id| !state.components.iter().any(|item| item.id == *id))
+        .find(|id| !state.document.components.iter().any(|item| item.id == *id))
         .or_else(|| {
             state
                 .selection
                 .wires
                 .iter()
                 .copied()
-                .find(|id| !state.wires.iter().any(|item| item.id == *id))
+                .find(|id| !state.document.wires.iter().any(|item| item.id == *id))
         })
         .or_else(|| {
             state
@@ -1607,7 +1633,7 @@ fn first_stale_selection_id(state: &SchematicState) -> u64 {
                 .buses
                 .iter()
                 .copied()
-                .find(|id| !state.buses.iter().any(|item| item.id == *id))
+                .find(|id| !state.document.buses.iter().any(|item| item.id == *id))
         })
         .or_else(|| {
             state
@@ -1615,7 +1641,7 @@ fn first_stale_selection_id(state: &SchematicState) -> u64 {
                 .bus_taps
                 .iter()
                 .copied()
-                .find(|id| !state.bus_taps.iter().any(|item| item.id == *id))
+                .find(|id| !state.document.bus_taps.iter().any(|item| item.id == *id))
         })
         .or_else(|| {
             state
@@ -1623,15 +1649,16 @@ fn first_stale_selection_id(state: &SchematicState) -> u64 {
                 .net_labels
                 .iter()
                 .copied()
-                .find(|id| !state.net_labels.iter().any(|item| item.id == *id))
+                .find(|id| !state.document.net_labels.iter().any(|item| item.id == *id))
         })
         .or_else(|| {
-            state
-                .selection
-                .design_notes
-                .iter()
-                .copied()
-                .find(|id| !state.design_notes.iter().any(|item| item.id == *id))
+            state.selection.design_notes.iter().copied().find(|id| {
+                !state
+                    .document
+                    .design_notes
+                    .iter()
+                    .any(|item| item.id == *id)
+            })
         })
         .or_else(|| {
             state
@@ -1639,14 +1666,26 @@ fn first_stale_selection_id(state: &SchematicState) -> u64 {
                 .documentation_shapes
                 .iter()
                 .copied()
-                .find(|id| !state.documentation_shapes.iter().any(|item| item.id == *id))
+                .find(|id| {
+                    !state
+                        .document
+                        .documentation_shapes
+                        .iter()
+                        .any(|item| item.id == *id)
+                })
         })
         .or_else(|| {
             state
                 .selection
                 .junctions
                 .iter()
-                .find(|selection| !state.junctions.iter().any(|item| item.pos == selection.pos))
+                .find(|selection| {
+                    !state
+                        .document
+                        .junctions
+                        .iter()
+                        .any(|item| item.pos == selection.pos)
+                })
                 .map(|_| 0)
         })
         .unwrap_or(0)
@@ -1711,12 +1750,12 @@ fn geometry_for_state(
     component_bounds_for: &mut impl FnMut(&Component) -> (i32, i32, i32, i32),
 ) -> ReplicaGeometry {
     geometry_from_parts(
-        &state.components,
-        &state.wires,
-        &state.buses,
-        &state.bus_taps,
-        &state.net_labels,
-        &state.junctions,
+        &state.document.components,
+        &state.document.wires,
+        &state.document.buses,
+        &state.document.bus_taps,
+        &state.document.net_labels,
+        &state.document.junctions,
         terminal_points_for,
         component_bounds_for,
     )
@@ -1960,16 +1999,23 @@ fn validate_geometry_separation(
 
 fn live_ids(state: &SchematicState) -> impl Iterator<Item = u64> + '_ {
     state
+        .document
         .components
         .iter()
         .map(|item| item.id)
-        .chain(state.wires.iter().map(|item| item.id))
-        .chain(state.junctions.iter().map(|item| item.id))
-        .chain(state.buses.iter().map(|item| item.id))
-        .chain(state.bus_taps.iter().map(|item| item.id))
-        .chain(state.net_labels.iter().map(|item| item.id))
-        .chain(state.design_notes.iter().map(|item| item.id))
-        .chain(state.documentation_shapes.iter().map(|item| item.id))
+        .chain(state.document.wires.iter().map(|item| item.id))
+        .chain(state.document.junctions.iter().map(|item| item.id))
+        .chain(state.document.buses.iter().map(|item| item.id))
+        .chain(state.document.bus_taps.iter().map(|item| item.id))
+        .chain(state.document.net_labels.iter().map(|item| item.id))
+        .chain(state.document.design_notes.iter().map(|item| item.id))
+        .chain(
+            state
+                .document
+                .documentation_shapes
+                .iter()
+                .map(|item| item.id),
+        )
 }
 
 fn validate_candidate(
@@ -1994,6 +2040,7 @@ fn validate_candidate(
         }
     }
     let mut names: HashSet<String> = state
+        .document
         .components
         .iter()
         .filter(|component| !component.name.is_empty())
@@ -2013,6 +2060,7 @@ fn validate_candidate(
             .find(|wire| wire.id == connection.wire_id)
             .or_else(|| {
                 state
+                    .document
                     .wires
                     .iter()
                     .find(|wire| wire.id == connection.wire_id)
@@ -2024,7 +2072,7 @@ fn validate_candidate(
             || !additions
                 .components
                 .iter()
-                .chain(state.components.iter())
+                .chain(state.document.components.iter())
                 .any(|component| component.id == connection.component_id)
         {
             return Err(SchematicArrayError::InvalidConnection(connection.wire_id));

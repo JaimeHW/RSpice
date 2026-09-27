@@ -526,7 +526,7 @@ pub(super) fn renumber_request(
         } else {
             format!("/{}", cell_view_key.replace(['/', '\\'], "_"))
         };
-        for component in &schematic.components {
+        for component in &schematic.document.components {
             let prefix = component.kind.spice_prefix();
             if prefix.is_empty() || component.name.trim().is_empty() {
                 continue;
@@ -624,7 +624,7 @@ pub(super) fn variant_connectivity_signature(
                 generated.errors.join(" ")
             ));
         }
-        for component in &schematic.components {
+        for component in &schematic.document.components {
             for (terminal_name, point) in component.terminal_positions_resolved(None) {
                 let net_name = generated
                     .point_to_net

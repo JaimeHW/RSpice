@@ -396,7 +396,11 @@ fn an_instance_the_grammar_cannot_name_is_reported_rather_than_skipped() {
         .get_mut(&CellViewRef::default_top().key())
         .expect("top buffer");
     top.add_library_cell_component(Point::new(20, 20), instance("work", "amp"));
-    top.components.last_mut().expect("placed instance").name = "X 1".to_owned();
+    top.document
+        .components
+        .last_mut()
+        .expect("placed instance")
+        .name = "X 1".to_owned();
     add_schematic_master(
         &mut libraries,
         &mut workspace,

@@ -232,20 +232,23 @@ fn hierarchical_design() -> RSpiceApp {
     }
 
     let mut app = RSpiceApp::test_instance();
-    app.state
-        .schematic
-        .components
-        .push(named(801, ComponentType::VoltageSource, "VDD", "dc=5"));
+    app.state.schematic.document.components.push(named(
+        801,
+        ComponentType::VoltageSource,
+        "VDD",
+        "dc=5",
+    ));
     for (id, name) in [(802, "XA"), (803, "XB")] {
         let mut instance = Component::new(id, ComponentType::CellInstance, Point::new(80, 80))
             .with_library_cell(LibraryCellInstance::new("work", "afe", "schematic"));
         instance.name = name.to_owned();
-        app.state.schematic.components.push(instance);
+        app.state.schematic.document.components.push(instance);
     }
     app.state.sync_active_schematic_to_workspace();
 
     let mut child = SchematicState::default();
     child
+        .document
         .components
         .push(named(811, ComponentType::VoltageSourceSin, "V1", "freq=1k"));
 

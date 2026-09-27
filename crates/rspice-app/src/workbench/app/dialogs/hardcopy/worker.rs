@@ -1200,7 +1200,7 @@ mod tests {
 
     fn worker_fixture_with_wire_endpoint(endpoint_x: i32) -> WorkerFixture {
         let mut state = AppState::default();
-        state.schematic.wires.push(Wire::segment(
+        state.schematic.document.wires.push(Wire::segment(
             881,
             Point::new(-20, 5),
             Point::new(endpoint_x, 5),

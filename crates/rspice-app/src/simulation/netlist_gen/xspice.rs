@@ -186,7 +186,7 @@ impl<'a> NetlistGenerator<'a> {
         {
             return true;
         }
-        self.schematic.components.iter().any(|candidate| {
+        self.schematic.document.components.iter().any(|candidate| {
             candidate.id != component_id
                 && self
                     .component_terminal_positions(candidate)

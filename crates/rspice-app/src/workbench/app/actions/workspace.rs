@@ -106,7 +106,7 @@ pub(super) fn remap_symbol_instance_wires(
     }
 
     let mut world_remaps = Vec::new();
-    for component in &schematic.components {
+    for component in &schematic.document.components {
         append_component_symbol_remaps(component, reference, pin_remaps, &mut world_remaps);
     }
     if world_remaps.is_empty() {
@@ -114,7 +114,7 @@ pub(super) fn remap_symbol_instance_wires(
     }
 
     let mut updates: Vec<(usize, usize, Point)> = Vec::new();
-    for (wire_index, wire) in schematic.wires.iter().enumerate() {
+    for (wire_index, wire) in schematic.document.wires.iter().enumerate() {
         for (point_index, point) in wire.points.iter().enumerate() {
             if let Some((_, new_position)) = world_remaps
                 .iter()
@@ -129,7 +129,7 @@ pub(super) fn remap_symbol_instance_wires(
     }
 
     for (wire_index, point_index, new_position) in updates {
-        if let Some(wire) = schematic.wires.get_mut(wire_index)
+        if let Some(wire) = schematic.document.wires.get_mut(wire_index)
             && point_index < wire.points.len()
         {
             wire.points[point_index] = new_position;
@@ -205,7 +205,7 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
     schematic.recalculate_runtime_state();
     schematic.snap_engine = state.ui.schematic_snap.clone();
     schematic.reconcile_grid_pitch_runtime();
-    state.ui.schematic_snap.grid_size = schematic.grid_size;
+    state.ui.schematic_snap.grid_size = schematic.document.grid_size;
     schematic.wire_drawing.routing_mode = state.ui.schematic_routing_mode;
     schematic.bus_drawing.routing_mode = state.ui.schematic_routing_mode;
     // Views from read-only libraries open for inspection, never for edit —
@@ -256,6 +256,7 @@ impl AppState {
         let terminals = {
             let symbols = SchematicSymbolContext::from_state(self);
             self.schematic
+                .document
                 .components
                 .iter()
                 .flat_map(|component| {
@@ -287,40 +288,43 @@ impl AppState {
         // runtime engine.
         schematic.snap_engine = self.ui.schematic_snap.clone();
         let preferences = &self.ui.preferences;
-        schematic.document_policy.grid_pitch =
+        schematic.document.document_policy.grid_pitch =
             match preferences.choice(ChoicePreference::SchematicGrid) {
                 0 => SchematicGridPitch::Mil50,
                 1 => SchematicGridPitch::Mil25,
                 2 => SchematicGridPitch::Metric,
                 _ => unreachable!("schematic grid preference is normalized before use"),
             };
-        schematic.document_policy.wire_junctions =
+        schematic.document.document_policy.wire_junctions =
             match preferences.choice(ChoicePreference::WireJunctionBehavior) {
                 0 => WireJunctionPolicy::OrthogonalAutomatic,
                 1 => WireJunctionPolicy::OrthogonalManual,
                 2 => WireJunctionPolicy::AnyAngle,
                 _ => unreachable!("wire policy is normalized before use"),
             };
-        schematic.document_policy.selection_crossing =
+        schematic.document.document_policy.selection_crossing =
             match preferences.choice(ChoicePreference::SelectionCrossingPolicy) {
                 0 => SelectionCrossingPolicy::Directional,
                 1 => SelectionCrossingPolicy::EnclosedOnly,
                 2 => SelectionCrossingPolicy::Intersecting,
                 _ => unreachable!("selection policy is normalized before use"),
             };
-        schematic.document_policy.net_naming =
+        schematic.document.document_policy.net_naming =
             match preferences.choice(ChoicePreference::NetNamingPolicy) {
                 0 => NetNamingPolicy::StrictCaseSensitive,
                 1 => NetNamingPolicy::SpiceCompatibleRelaxed,
                 _ => unreachable!("net naming policy is normalized before use"),
             };
-        schematic.document_policy.property_commit =
+        schematic.document.document_policy.property_commit =
             match preferences.choice(ChoicePreference::PropertyCommitPolicy) {
                 0 => PropertyCommitPolicy::Atomic,
                 1 => PropertyCommitPolicy::ApplyValidFields,
                 _ => unreachable!("property policy is normalized before use"),
             };
-        schematic.document_policy.operating_point_annotations =
+        schematic
+            .document
+            .document_policy
+            .operating_point_annotations =
             match preferences.choice(ChoicePreference::OperatingPointAnnotation) {
                 0 => OperatingPointAnnotationPolicy::VoltagesAndSelectedCurrents,
                 1 => OperatingPointAnnotationPolicy::VoltagesOnly,
@@ -1386,7 +1390,8 @@ impl AppState {
             let old_key = CellViewRef::new(src_library, cell, view.as_str()).key();
             let new_key = CellViewRef::new(dst_library, new_name, view.as_str()).key();
             if let Some(mut buffer) = self.workspace.schematic_buffers.get(&old_key).cloned() {
-                buffer.validated_revisions = crate::state::ValidatedRevisionJournal::default();
+                buffer.document.validated_revisions =
+                    crate::state::ValidatedRevisionJournal::default();
                 self.workspace.schematic_buffers.insert(new_key, buffer);
             }
         }
@@ -1519,7 +1524,7 @@ impl AppState {
         // Instance bindings follow — in every buffer and the live sheet.
         let mut remapped = 0usize;
         let mut remap_schematic = |schematic: &mut crate::state::SchematicState| {
-            for component in &mut schematic.components {
+            for component in &mut schematic.document.components {
                 if let Some(binding) = component.library_cell.as_mut()
                     && binding.library == library
                     && binding.cell == cell
@@ -1981,7 +1986,7 @@ impl AppState {
         let active_key = self.workspace.active_key();
         let mut remapped = 0usize;
         let mut remap_schematic = |schematic: &mut SchematicState, counted: bool| {
-            for component in &mut schematic.components {
+            for component in &mut schematic.document.components {
                 if let Some(binding) = component.library_cell.as_mut()
                     && rebind(binding)
                     && counted
@@ -2009,6 +2014,7 @@ impl AppState {
         let owned_prefix = format!("{library}/");
         let count = |schematic: &SchematicState| {
             schematic
+                .document
                 .components
                 .iter()
                 .filter(|component| {
@@ -2154,6 +2160,7 @@ impl AppState {
     ) -> Option<(String, CellViewRef)> {
         let component = self
             .schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == component_id)?;
@@ -2182,6 +2189,7 @@ impl AppState {
     pub(crate) fn veriloga_source_for_component(&self, component_id: u64) -> Option<CellViewRef> {
         let component = self
             .schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == component_id)?;

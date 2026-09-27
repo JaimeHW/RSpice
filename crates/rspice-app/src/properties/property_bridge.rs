@@ -779,6 +779,7 @@ mod tests {
             .place_pending_port(Point::origin(), pending)
             .expect("typed port places");
         let mut component = state
+            .document
             .components
             .iter()
             .find(|component| component.id == id)
@@ -829,6 +830,7 @@ mod tests {
             .place_pending_port(Point::origin(), pending)
             .expect("typed port places");
         let mut component = state
+            .document
             .components
             .iter()
             .find(|component| component.id == id)

@@ -135,7 +135,7 @@ fn validate_draft(state: &AppState) -> DraftValidation {
         draft.kind,
         draft.text.clone(),
         draft.topology_version,
-        &state.schematic.design_notes,
+        &state.schematic.document.design_notes,
     ) {
         Ok(pending) => DraftValidation::Valid(pending.with_document_authority(
             draft.design_execution_epoch,
@@ -159,8 +159,9 @@ fn design_note_preview_text(state: &AppState) -> String {
     let view_path = state.workspace.active_view.display_path();
     note.rendered_text(&DesignNoteRenderContext {
         view_path: &view_path,
-        component_count: state.schematic.components.len(),
-        conductor_count: state.schematic.wires.len() + state.schematic.buses.len(),
+        component_count: state.schematic.document.components.len(),
+        conductor_count: state.schematic.document.wires.len()
+            + state.schematic.document.buses.len(),
     })
 }
 
@@ -576,7 +577,7 @@ mod tests {
             "Browser recovery qualification"
         );
         assert!(app.state.dialogs.design_note.dirty);
-        assert!(app.state.schematic.design_notes.is_empty());
+        assert!(app.state.schematic.document.design_notes.is_empty());
     }
 
     #[test]
@@ -613,7 +614,7 @@ mod tests {
         };
         assert_eq!(pending.text, "Bias network");
         assert!(pending.document_authority.is_some());
-        assert!(state.schematic.design_notes.is_empty());
+        assert!(state.schematic.document.design_notes.is_empty());
     }
 
     #[test]

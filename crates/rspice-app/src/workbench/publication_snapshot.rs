@@ -361,6 +361,7 @@ fn engineering_publication(
     let resolved_pin_names = component_pin_names_with_hierarchy(subject, &hierarchy);
     let published_components = state
         .schematic
+        .document
         .components
         .iter()
         .filter(|component| !component.kind.spice_prefix().is_empty())

@@ -203,7 +203,7 @@ fn stretch_target_at(
     let selection = &state.schematic.selection;
     let mut candidates: Vec<(f64, u8, u64, usize, StretchTarget)> = Vec::new();
 
-    for wire in state.schematic.wires.iter().filter(|wire| {
+    for wire in state.schematic.document.wires.iter().filter(|wire| {
         object_is_on_active_sheet(state, wire.id)
             && (selection.has_wire(wire.id)
                 || selection
@@ -229,6 +229,7 @@ fn stretch_target_at(
     }
     for bus in state
         .schematic
+        .document
         .buses
         .iter()
         .filter(|bus| selection.has_bus(bus.id) && object_is_on_active_sheet(state, bus.id))
@@ -245,9 +246,16 @@ fn stretch_target_at(
             }
         }
     }
-    for shape in state.schematic.documentation_shapes.iter().filter(|shape| {
-        selection.has_documentation_shape(shape.id) && object_is_on_active_sheet(state, shape.id)
-    }) {
+    for shape in state
+        .schematic
+        .document
+        .documentation_shapes
+        .iter()
+        .filter(|shape| {
+            selection.has_documentation_shape(shape.id)
+                && object_is_on_active_sheet(state, shape.id)
+        })
+    {
         for (point_index, control) in shape.geometry.points().into_iter().enumerate() {
             let dx = f64::from(control.x) - f64::from(point.x);
             let dy = f64::from(control.y) - f64::from(point.y);
@@ -359,7 +367,7 @@ mod tests {
 
     fn selected_stretch_wire() -> AppState {
         let mut state = AppState::default();
-        state.schematic.wires.push(Wire::new(
+        state.schematic.document.wires.push(Wire::new(
             7,
             vec![
                 Point::new(0, 0),
@@ -387,12 +395,14 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
+            .document
             .wires
             .push(Wire::segment(1, Point::new(0, 0), Point::new(100, 0)));
-        state
-            .schematic
-            .wires
-            .push(Wire::segment(2, Point::new(0, 10), Point::new(100, 10)));
+        state.schematic.document.wires.push(Wire::segment(
+            2,
+            Point::new(0, 10),
+            Point::new(100, 10),
+        ));
         state.schematic.selection.select_only_wire_segment(2, 0);
         let viewport = Viewport {
             offset: egui::Pos2::ZERO,
@@ -416,7 +426,7 @@ mod tests {
     #[test]
     fn vertex_selection_can_resolve_either_authorized_incident_segment() {
         let mut state = AppState::default();
-        state.schematic.wires.push(Wire::new(
+        state.schematic.document.wires.push(Wire::new(
             4,
             vec![Point::new(0, 0), Point::new(0, 20), Point::new(30, 20)],
         ));
@@ -457,8 +467,14 @@ mod tests {
 
         commit_armed_stretch_selection(&mut state, &symbols);
 
-        assert_eq!(state.schematic.wires[0].points[1], Point::new(0, 30));
-        assert_eq!(state.schematic.wires[0].points[2], Point::new(20, 30));
+        assert_eq!(
+            state.schematic.document.wires[0].points[1],
+            Point::new(0, 30)
+        );
+        assert_eq!(
+            state.schematic.document.wires[0].points[2],
+            Point::new(20, 30)
+        );
         assert_eq!(
             state.schematic.undo_description(),
             Some("stretch selection")
@@ -471,12 +487,16 @@ mod tests {
                 .workspace
                 .active_schematic()
                 .expect("active workspace buffer")
+                .document
                 .wires[0]
                 .points[1],
             Point::new(0, 30)
         );
         assert!(state.schematic.undo());
-        assert_eq!(state.schematic.wires[0].points[1], Point::new(0, 20));
+        assert_eq!(
+            state.schematic.document.wires[0].points[1],
+            Point::new(0, 20)
+        );
         assert!(
             !state.schematic.can_undo(),
             "the gesture owns one undo record"
@@ -486,13 +506,13 @@ mod tests {
     #[test]
     fn cancel_preserves_geometry_selection_and_history() {
         let mut state = selected_stretch_wire();
-        let baseline = state.schematic.wires[0].clone();
+        let baseline = state.schematic.document.wires[0].clone();
         arm_test_stretch(&mut state);
         state.dialogs.stretch_selection.preview_delta = Point::new(0, 10);
 
         crate::workbench::app::cancel_armed_stretch_selection(&mut state);
 
-        assert_eq!(state.schematic.wires[0], baseline);
+        assert_eq!(state.schematic.document.wires[0], baseline);
         assert!(state.schematic.selection.has_wire_segment(7, 1));
         assert_eq!(state.schematic.tool, crate::state::Tool::Select);
         assert!(!state.schematic.can_undo());
@@ -503,16 +523,17 @@ mod tests {
         let mut state = selected_stretch_wire();
         state
             .schematic
+            .document
             .junctions
             .push(Junction::new(1, Point::new(10, 20)));
-        let baseline = state.schematic.wires[0].clone();
+        let baseline = state.schematic.document.wires[0].clone();
         arm_test_stretch(&mut state);
         state.dialogs.stretch_selection.preview_delta = Point::new(0, 10);
         let symbols = SchematicSymbolContext::from_state(&state);
 
         commit_armed_stretch_selection(&mut state, &symbols);
 
-        assert_eq!(state.schematic.wires[0], baseline);
+        assert_eq!(state.schematic.document.wires[0], baseline);
         assert!(state.schematic.selection.has_wire_segment(7, 1));
         assert_eq!(state.schematic.tool, crate::state::Tool::StretchSelection);
         assert!(state.dialogs.stretch_selection.armed);

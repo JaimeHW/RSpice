@@ -324,7 +324,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
         // document buffer and keep wire and bus gestures coherent.
         state.schematic.snap_engine = state.ui.schematic_snap.clone();
         state.schematic.reconcile_grid_pitch_runtime();
-        state.ui.schematic_snap.grid_size = state.schematic.grid_size;
+        state.ui.schematic_snap.grid_size = state.schematic.document.grid_size;
         state.schematic.wire_drawing.routing_mode = state.ui.schematic_routing_mode;
         state.schematic.bus_drawing.routing_mode = state.ui.schematic_routing_mode;
         state.workbench.reconcile_restored_navigation();
@@ -685,7 +685,10 @@ mod tests {
                 state.workspace.project.id()
             );
             assert_eq!(restored.workspace.project.name(), "Legacy saved circuit");
-            assert_eq!(restored.schematic.components, state.schematic.components);
+            assert_eq!(
+                restored.schematic.document.components,
+                state.schematic.document.components
+            );
             assert!(
                 !restored
                     .log_buffer
@@ -704,7 +707,10 @@ mod tests {
                         recovered.workspace.project.id(),
                         state.workspace.project.id()
                     );
-                    assert_eq!(recovered.schematic.components, state.schematic.components);
+                    assert_eq!(
+                        recovered.schematic.document.components,
+                        state.schematic.document.components
+                    );
                     assert!(
                         recovered
                             .log_buffer
@@ -764,6 +770,7 @@ mod tests {
                 .schematic_buffers
                 .get(&active_key)
                 .expect("working schematic buffer survives")
+                .document
                 .components
                 .len(),
             1

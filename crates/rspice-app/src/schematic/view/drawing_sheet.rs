@@ -709,6 +709,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
         DrawingSheetOverflowTarget::Junction(id) => {
             let Some(position) = state
                 .schematic
+                .document
                 .junctions
                 .iter()
                 .find(|junction| junction.id == id)
@@ -833,7 +834,7 @@ fn active_object_bounds<'a>(
     symbol_context: &SchematicSymbolContext,
 ) -> Vec<PrintableObjectBounds<'a>> {
     let mut bounds = Vec::new();
-    for component in &state.schematic.components {
+    for component in &state.schematic.document.components {
         if object_is_on_active_sheet(state, component.id) {
             let (min, max) = symbol_context.component_bounds(component);
             // Hardcopy always emits the retained instance name and value at
@@ -865,7 +866,7 @@ fn active_object_bounds<'a>(
             });
         }
     }
-    for wire in &state.schematic.wires {
+    for wire in &state.schematic.document.wires {
         if object_is_on_active_sheet(state, wire.id)
             && let Some(rect) = points_bounds(&wire.points)
         {
@@ -878,7 +879,7 @@ fn active_object_bounds<'a>(
             });
         }
     }
-    for bus in &state.schematic.buses {
+    for bus in &state.schematic.document.buses {
         if object_is_on_active_sheet(state, bus.id)
             && let Some(rect) = points_bounds(&bus.points)
         {
@@ -894,7 +895,7 @@ fn active_object_bounds<'a>(
             });
         }
     }
-    for tap in &state.schematic.bus_taps {
+    for tap in &state.schematic.document.bus_taps {
         if object_is_on_active_sheet(state, tap.id) {
             let route = crate::schematic::bus_geometry::bus_tap_route_points(tap);
             let Some(rect) = points_bounds(&route) else {
@@ -909,7 +910,7 @@ fn active_object_bounds<'a>(
             });
         }
     }
-    for junction in &state.schematic.junctions {
+    for junction in &state.schematic.document.junctions {
         if object_is_on_active_sheet(state, junction.id) {
             // Hardcopy renders an exact 900 µm filled junction dot. Include
             // that physical radius rather than treating the junction as a
@@ -929,7 +930,7 @@ fn active_object_bounds<'a>(
             });
         }
     }
-    for label in &state.schematic.net_labels {
+    for label in &state.schematic.document.net_labels {
         if object_is_on_active_sheet(state, label.id) {
             let (min, max) = super::net_labels::world_bounds(label);
             bounds.push(PrintableObjectBounds {
@@ -945,7 +946,7 @@ fn active_object_bounds<'a>(
             });
         }
     }
-    for note in &state.schematic.design_notes {
+    for note in &state.schematic.document.design_notes {
         if object_is_on_active_sheet(state, note.id) {
             let (min, max) = super::design_notes::conservative_world_bounds(note);
             bounds.push(PrintableObjectBounds {
@@ -957,7 +958,7 @@ fn active_object_bounds<'a>(
             });
         }
     }
-    for shape in &state.schematic.documentation_shapes {
+    for shape in &state.schematic.document.documentation_shapes {
         if object_is_on_active_sheet(state, shape.id) {
             let (min, max) = super::documentation_shapes::world_bounds(shape);
             bounds.push(PrintableObjectBounds {
@@ -1898,15 +1899,15 @@ mod tests {
     #[test]
     fn overflow_report_retains_exact_item_identity_severity_coordinates_and_zone() {
         let mut state = AppState::default();
-        state.schematic.components.push(
+        state.schematic.document.components.push(
             Component::new(11, ComponentType::Resistor, Point::new(1_100, 100))
                 .with_name_value("R_OUT", "1k"),
         );
-        state.schematic.wires.push(Wire::new(
+        state.schematic.document.wires.push(Wire::new(
             21,
             vec![Point::new(-100, 100), Point::new(-80, 100)],
         ));
-        state.schematic.wires.push(Wire::new(
+        state.schematic.document.wires.push(Wire::new(
             22,
             vec![Point::new(500, 650), Point::new(520, 650)],
         ));
@@ -1955,13 +1956,15 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
+            .document
             .junctions
             .push(Junction::new(31, Point::new(1_100, 100)));
-        state
-            .schematic
-            .net_labels
-            .push(NetLabel::new(32, Point::new(1_100, 140), "OUTSIDE"));
-        state.schematic.design_notes.push(
+        state.schematic.document.net_labels.push(NetLabel::new(
+            32,
+            Point::new(1_100, 140),
+            "OUTSIDE",
+        ));
+        state.schematic.document.design_notes.push(
             DesignNote::new(
                 33,
                 Point::new(1_100, 180),
@@ -1970,7 +1973,7 @@ mod tests {
             )
             .expect("valid design note"),
         );
-        state.schematic.documentation_shapes.push(
+        state.schematic.document.documentation_shapes.push(
             DocumentationShape::new(
                 34,
                 DocumentationShapeGeometry::Line {
@@ -2012,13 +2015,14 @@ mod tests {
     #[test]
     fn component_overflow_includes_the_hardcopy_name_and_value_extent() {
         let mut state = AppState::default();
-        state.schematic.components.push(
+        state.schematic.document.components.push(
             Component::new(61, ComponentType::Resistor, Point::new(1_000, 100))
                 .with_name_value("R_INSTANCE_NAME_REACHES_BEYOND_THE_PAPER_EDGE", "1k"),
         );
         let symbol_context = SchematicSymbolContext::from_state(&state);
         let sheet = ActiveDrawingSheet::resolve(&state);
-        let (body_min, body_max) = symbol_context.component_bounds(&state.schematic.components[0]);
+        let (body_min, body_max) =
+            symbol_context.component_bounds(&state.schematic.document.components[0]);
         let body = WorldRect::from_points(body_min, body_max);
         let object = active_object_bounds(&state, &symbol_context)
             .into_iter()
@@ -2052,7 +2056,7 @@ mod tests {
         let route = vec![Point::new(0, 15), Point::new(0, 0), Point::new(15, 0)];
         let route_bounds = points_bounds(&route).expect("the route has points");
         let mut state = AppState::default();
-        state.schematic.wires.push(Wire::new(91, route));
+        state.schematic.document.wires.push(Wire::new(91, route));
         let symbol_context = SchematicSymbolContext::from_state(&state);
         let object = active_object_bounds(&state, &symbol_context)
             .into_iter()
@@ -2090,7 +2094,7 @@ mod tests {
     #[test]
     fn overflow_navigation_selects_and_centers_the_exact_current_target() {
         let mut state = AppState::default();
-        state.schematic.wires.push(Wire::new(
+        state.schematic.document.wires.push(Wire::new(
             41,
             vec![Point::new(1_080, 120), Point::new(1_120, 120)],
         ));

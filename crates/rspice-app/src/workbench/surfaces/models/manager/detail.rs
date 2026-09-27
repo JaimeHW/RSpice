@@ -168,6 +168,7 @@ fn project_selection<'a>(
         .and_then(|component_id| {
             app.state
                 .schematic
+                .document
                 .components
                 .iter()
                 .find(|component| component.id == component_id)

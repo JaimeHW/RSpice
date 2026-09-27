@@ -351,7 +351,7 @@ impl<'a> MasterIndex<'a> {
             // A port tied to ground inside the cell emits node 0 in the body
             // while the header still declares the port: the pin would float at
             // every instantiation.
-            for component in &draft.schematic.components {
+            for component in &draft.schematic.document.components {
                 let Some(spec) = component.port_spec() else {
                     continue;
                 };
@@ -477,7 +477,7 @@ impl<'a> MasterWalk<'a> {
     /// digests of the masters they bind to.
     fn visit(&mut self, schematic: &'a SchematicState, path: &InstancePath) -> Vec<ContentDigest> {
         let mut digests = Vec::new();
-        for component in &schematic.components {
+        for component in &schematic.document.components {
             if component.kind != ComponentType::CellInstance {
                 continue;
             }

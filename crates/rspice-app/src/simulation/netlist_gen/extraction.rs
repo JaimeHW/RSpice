@@ -199,6 +199,7 @@ fn declared_notation(schematic: &SchematicState, deck_name: &str) -> BusNotation
         .rsplit_once('#')
         .map_or(deck_name, |(base, _)| base);
     schematic
+        .document
         .buses
         .iter()
         .filter_map(|bus| bus.declaration.as_ref())
@@ -315,12 +316,12 @@ impl<'a> Pass<'a> {
         // Seeded nodes: always nets, even when isolated (a floating terminal
         // must still get its own SPICE node).
         let mut point_graph: HashMap<Point, HashSet<Point>> = HashMap::new();
-        for wire in &schematic.wires {
+        for wire in &schematic.document.wires {
             for point in &wire.points {
                 point_graph.entry(*point).or_default();
             }
         }
-        for component in &schematic.components {
+        for component in &schematic.document.components {
             for (_, terminal_pos) in terminal_positions(component, hierarchy) {
                 point_graph.entry(terminal_pos).or_default();
             }
@@ -341,10 +342,10 @@ impl<'a> Pass<'a> {
             for point in point_graph.keys() {
                 add_candidate(*point);
             }
-            for junction in &schematic.junctions {
+            for junction in &schematic.document.junctions {
                 add_candidate(junction.pos);
             }
-            for label in &schematic.net_labels {
+            for label in &schematic.document.net_labels {
                 add_candidate(label.pos);
             }
             for binding in &self.buses.scalar_taps {
@@ -367,7 +368,7 @@ impl<'a> Pass<'a> {
             }
         }
 
-        for wire in &schematic.wires {
+        for wire in &schematic.document.wires {
             for seg in wire.points.windows(2) {
                 let (a, b) = (seg[0], seg[1]);
                 if a.y == b.y {
@@ -473,10 +474,11 @@ impl<'a> Pass<'a> {
     fn project_vector_nets(&mut self) {
         let schematic = self.schematic;
         let hierarchy = self.hierarchy;
-        let connectivity =
-            vector_connectivity(&schematic.buses, &schematic.components, |component| {
-                terminal_positions(component, hierarchy)
-            });
+        let connectivity = vector_connectivity(
+            &schematic.document.buses,
+            &schematic.document.components,
+            |component| terminal_positions(component, hierarchy),
+        );
 
         for mismatch in &connectivity.mismatches {
             self.diagnostics.push(ConnectivityDiagnostic {
@@ -518,9 +520,9 @@ impl<'a> Pass<'a> {
     fn apply_interface_ports(&mut self) {
         let schematic = self.schematic;
         let hierarchy = self.hierarchy;
-        let policy = schematic.document_policy.net_naming;
+        let policy = schematic.document.document_policy.net_naming;
         let mut name_to_net: HashMap<String, usize> = HashMap::new();
-        for component in &schematic.components {
+        for component in &schematic.document.components {
             if component.kind != ComponentType::Port {
                 continue;
             }
@@ -579,7 +581,7 @@ impl<'a> Pass<'a> {
     /// reported as an orphan.
     fn apply_net_labels(&mut self) {
         let schematic = self.schematic;
-        let policy = schematic.document_policy.net_naming;
+        let policy = schematic.document.document_policy.net_naming;
         // Typed scalar aliases are the electrical contract, so resolve them
         // before ordinary labels. A conflicting free-form label is a blocking
         // error rather than a warning that silently changes DATA[n] into an
@@ -660,7 +662,7 @@ impl<'a> Pass<'a> {
             }
         }
 
-        let mut labels: Vec<&NetLabel> = schematic.net_labels.iter().collect();
+        let mut labels: Vec<&NetLabel> = schematic.document.net_labels.iter().collect();
         labels.sort_by_key(|label| label.id);
         for label in labels {
             let authored_name = label.name.trim();
@@ -779,7 +781,7 @@ impl<'a> Pass<'a> {
     fn identify_ground(&mut self) {
         let schematic = self.schematic;
         let hierarchy = self.hierarchy;
-        for component in &schematic.components {
+        for component in &schematic.document.components {
             if component.kind != ComponentType::Ground {
                 continue;
             }
@@ -803,7 +805,7 @@ impl<'a> Pass<'a> {
 
         // A wire belongs to exactly one net; index it under that net so a
         // conductor-level finding can name the drawn object.
-        for wire in &schematic.wires {
+        for wire in &schematic.document.wires {
             let Some(&net_id) = wire.points.first().and_then(|p| self.point_to_net.get(p)) else {
                 continue;
             };
@@ -822,6 +824,7 @@ impl<'a> Pass<'a> {
         // An annotation is a name written onto a point: it holds a terminal
         // that meets no conductor into the drawing rather than leaving it open.
         let annotations: HashSet<Point> = schematic
+            .document
             .net_labels
             .iter()
             .map(|label| label.pos)
@@ -830,7 +833,7 @@ impl<'a> Pass<'a> {
 
         let mut bound: Vec<(u64, String, Point, usize)> = Vec::new();
         let mut terminal_counts: HashMap<usize, usize> = HashMap::new();
-        for component in &schematic.components {
+        for component in &schematic.document.components {
             for (pin, point) in terminal_positions(component, hierarchy) {
                 let Some(&net_id) = self.point_to_net.get(&point) else {
                     continue;

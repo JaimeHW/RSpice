@@ -70,7 +70,7 @@ mod tests {
     fn design_declaring_data() -> AppState {
         let mut state = AppState::default();
         let declaration = BusDeclaration::parse("DATA[7:0]").expect("a bus declaration");
-        state.schematic.buses.push(
+        state.schematic.document.buses.push(
             Bus::segment(1, Point::new(0, 0), Point::new(100, 0), Some(declaration))
                 .expect("a drawn bus"),
         );

@@ -523,6 +523,7 @@ fn place_instance(
     binding.bind_interface(ports);
     let id = schematic.add_library_cell_component(position, binding);
     let component = schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == id)
@@ -646,6 +647,7 @@ fn add_wire(schematic: &mut SchematicState, start: Point, end: Point) -> u64 {
 
 fn set_value(schematic: &mut SchematicState, component: u64, value: &str) {
     schematic
+        .document
         .components
         .iter_mut()
         .find(|candidate| candidate.id == component)
@@ -667,14 +669,15 @@ fn interface_of(state: &AppState, library: &str, cell: &str) -> Vec<PortSpec> {
 /// membership is keyed on.
 fn live_object_ids(schematic: &SchematicState) -> Vec<u64> {
     schematic
+        .document
         .components
         .iter()
         .map(|object| object.id)
-        .chain(schematic.wires.iter().map(|object| object.id))
-        .chain(schematic.buses.iter().map(|object| object.id))
-        .chain(schematic.bus_taps.iter().map(|object| object.id))
-        .chain(schematic.junctions.iter().map(|object| object.id))
-        .chain(schematic.net_labels.iter().map(|object| object.id))
+        .chain(schematic.document.wires.iter().map(|object| object.id))
+        .chain(schematic.document.buses.iter().map(|object| object.id))
+        .chain(schematic.document.bus_taps.iter().map(|object| object.id))
+        .chain(schematic.document.junctions.iter().map(|object| object.id))
+        .chain(schematic.document.net_labels.iter().map(|object| object.id))
         .collect()
 }
 

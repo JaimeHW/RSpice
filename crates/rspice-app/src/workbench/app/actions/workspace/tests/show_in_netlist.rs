@@ -30,6 +30,7 @@ fn located_instance_state() -> (AppState, u64, u64, u64) {
     for (id, name) in [(source_id, "V1"), (load_id, "R1"), (unmapped_id, "C9")] {
         if let Some(component) = state
             .schematic
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == id)

@@ -673,6 +673,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
 fn net_anchor(state: &AppState, net: &DesignNet) -> Option<crate::state::Point> {
     state
         .schematic
+        .document
         .net_labels
         .iter()
         .find(|label| label.name.eq_ignore_ascii_case(&net.name))
@@ -680,6 +681,7 @@ fn net_anchor(state: &AppState, net: &DesignNet) -> Option<crate::state::Point> 
         .or_else(|| {
             state
                 .schematic
+                .document
                 .wires
                 .iter()
                 .find(|wire| net.wire_ids.contains(&wire.id))
@@ -689,6 +691,7 @@ fn net_anchor(state: &AppState, net: &DesignNet) -> Option<crate::state::Point> 
             net.terminals.iter().find_map(|terminal| {
                 state
                     .schematic
+                    .document
                     .components
                     .iter()
                     .find(|component| component.id == terminal.component_id)
@@ -776,6 +779,7 @@ fn port_rows(
     let mut declared: BTreeMap<String, usize> = BTreeMap::new();
     for spec in state
         .schematic
+        .document
         .components
         .iter()
         .filter_map(crate::state::Component::port_spec)
@@ -784,6 +788,7 @@ fn port_rows(
     }
     let mut rows = state
         .schematic
+        .document
         .components
         .iter()
         .enumerate()
@@ -1032,6 +1037,7 @@ fn descend_to_placed(
     }
     let Some(position) = state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == component_id)
@@ -1414,6 +1420,7 @@ fn placed_object(
 ) -> Option<NavigatorObject> {
     let position = state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == component_id)
@@ -1548,6 +1555,7 @@ fn reveal_probe_expression(state: &mut AppState, expression: &str) {
         RawProbeTarget::Current(component_name) => {
             let Some(component) = state
                 .schematic
+                .document
                 .components
                 .iter()
                 .find(|component| component.name.eq_ignore_ascii_case(component_name))

@@ -101,7 +101,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
     {
         return;
     }
-    if app.state.schematic.components.is_empty() {
+    if app.state.schematic.document.components.is_empty() {
         app.state.ui.netlist.generation_error =
             Some("Add a circuit before generating the primary netlist.".to_owned());
         return;
@@ -466,7 +466,7 @@ fn source_line_component(
         return None;
     }
     let schematic = state.workspace.schematic_buffers.get(&reference.key())?;
-    schematic.components.iter().find_map(|component| {
+    schematic.document.components.iter().find_map(|component| {
         let base = component.spice_instance_name();
         let prefix = component.kind.spice_prefix();
         let emitted = if prefix.is_empty()

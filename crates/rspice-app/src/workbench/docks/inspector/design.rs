@@ -127,6 +127,7 @@ pub(super) fn subject(state: &AppState, nets: &[DesignNet]) -> DesignSubject {
     if let Some(id) = selection.single_component() {
         if let Some(port) = state
             .schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == id)
@@ -220,7 +221,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
         }
     };
     // A selected label names its net outright.
-    for label in &state.schematic.net_labels {
+    for label in &state.schematic.document.net_labels {
         if state.schematic.selection.net_labels.contains(&label.id) && !accept(&label.name) {
             return None;
         }
@@ -246,6 +247,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
             let Some(extracted) = connectivity.net_at(junction.pos).or_else(|| {
                 state
                     .schematic
+                    .document
                     .wires
                     .iter()
                     .filter(|wire| wire.contains_point(junction.pos))
@@ -275,7 +277,12 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Some(session) = app.state.workbench.inline_edit.session()
         && (session.authority != app.state.inline_edit_authority()
             || app.state.schematic_edit_read_only()
-            || !app.state.schematic.components.contains(&session.expected))
+            || !app
+                .state
+                .schematic
+                .document
+                .components
+                .contains(&session.expected))
     {
         if session.candidate.as_ref() == Some(&session.expected) {
             app.state.workbench.inline_edit.end();
@@ -394,6 +401,7 @@ fn sheet_connectivity(state: &AppState) -> SheetConnectivity {
 
     let terminals = state
         .schematic
+        .document
         .components
         .iter()
         .map(|component| {
@@ -701,6 +709,7 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
     let child_view_count = app
         .state
         .schematic
+        .document
         .components
         .iter()
         .filter(|component| {
@@ -767,7 +776,7 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
         "Grid / snap",
         &format!(
             "{} · snap {}",
-            schematic_grid_label(app.state.schematic.document_policy.grid_pitch),
+            schematic_grid_label(app.state.schematic.document.document_policy.grid_pitch),
             if app.state.schematic.snap_engine.enabled {
                 "on"
             } else {
@@ -817,7 +826,7 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
     property_row(
         ui,
         "Instances",
-        &app.state.schematic.components.len().to_string(),
+        &app.state.schematic.document.components.len().to_string(),
     );
     property_row(ui, "Nets", &nets.len().to_string());
     property_row(
@@ -828,7 +837,7 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
             count => count.to_string(),
         },
     );
-    let probes = app.state.schematic.probes.len();
+    let probes = app.state.schematic.document.probes.len();
     property_row(
         ui,
         "Probes",
@@ -1240,6 +1249,7 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
     let selected: Vec<(u64, String, String)> = app
         .state
         .schematic
+        .document
         .components
         .iter()
         .filter(|component| app.state.schematic.selection.has_component(component.id))
@@ -1353,6 +1363,7 @@ fn note_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     let Some(note) = app
         .state
         .schematic
+        .document
         .design_notes
         .iter()
         .find(|note| note.id == id)
@@ -1392,6 +1403,7 @@ fn shape_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     let Some(shape) = app
         .state
         .schematic
+        .document
         .documentation_shapes
         .iter()
         .find(|shape| shape.id == id)
@@ -1437,6 +1449,7 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     let Some(probe) = app
         .state
         .schematic
+        .document
         .probes
         .iter()
         .find(|probe| probe.id == id)
@@ -1517,7 +1530,12 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
             .state
             .schematic
             .with_undo("edit schematic probe", |schematic| {
-                if let Some(live) = schematic.probes.iter_mut().find(|probe| probe.id == id) {
+                if let Some(live) = schematic
+                    .document
+                    .probes
+                    .iter_mut()
+                    .find(|probe| probe.id == id)
+                {
                     live.enabled = enabled;
                     live.plot_on_materialization = plot_on_materialization;
                     schematic.is_dirty = true;

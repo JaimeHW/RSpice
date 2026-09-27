@@ -397,12 +397,12 @@ fn prepare_loaded_schematic(
 ) -> Result<SchematicState, SchematicIoError> {
     file.validate()?;
 
-    for note in &file.schematic.design_notes {
+    for note in &file.schematic.document.design_notes {
         note.validate().map_err(|error| {
             SchematicIoError::ParseError(format!("invalid design note object {}: {error}", note.id))
         })?;
     }
-    for shape in &file.schematic.documentation_shapes {
+    for shape in &file.schematic.document.documentation_shapes {
         shape.validate().map_err(|error| {
             SchematicIoError::ParseError(format!(
                 "invalid documentation shape object {}: {error}",
@@ -410,7 +410,7 @@ fn prepare_loaded_schematic(
             ))
         })?;
     }
-    for probe in &file.schematic.probes {
+    for probe in &file.schematic.document.probes {
         probe.validate().map_err(|error| {
             SchematicIoError::ParseError(format!(
                 "invalid schematic probe object {}: {error}",
@@ -572,11 +572,11 @@ mod tests {
     fn documentation_shapes_round_trip_and_legacy_documents_default_empty() {
         let shapes = documentation_shape_fixture();
         let mut schematic = SchematicState::default();
-        schematic.documentation_shapes = shapes.clone();
+        schematic.document.documentation_shapes = shapes.clone();
 
         let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
         let loaded = load_schematic_text(&json, None).unwrap();
-        assert_eq!(loaded.documentation_shapes, shapes);
+        assert_eq!(loaded.document.documentation_shapes, shapes);
 
         let mut legacy: serde_json::Value = serde_json::from_str(&json).unwrap();
         legacy["version"]["minor"] = serde_json::json!(1);
@@ -585,13 +585,13 @@ mod tests {
             .unwrap()
             .remove("documentation_shapes");
         let loaded = load_schematic_text(&legacy.to_string(), None).unwrap();
-        assert!(loaded.documentation_shapes.is_empty());
+        assert!(loaded.document.documentation_shapes.is_empty());
     }
 
     #[test]
     fn probe_flags_round_trip_and_legacy_documents_default_empty() {
         let mut schematic = SchematicState::default();
-        schematic.probes.push(
+        schematic.document.probes.push(
             crate::state::SchematicProbe::new(
                 44,
                 crate::state::Point::new(30, 20),
@@ -603,9 +603,9 @@ mod tests {
 
         let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
         let loaded = load_schematic_text(&json, None).unwrap();
-        assert_eq!(loaded.probes.len(), 1);
+        assert_eq!(loaded.document.probes.len(), 1);
         assert_eq!(
-            loaded.probes[0].source_expression.as_deref(),
+            loaded.document.probes[0].source_expression.as_deref(),
             Some("V(out)")
         );
 
@@ -615,7 +615,7 @@ mod tests {
             .unwrap()
             .remove("probes");
         let loaded = load_schematic_text(&legacy.to_string(), None).unwrap();
-        assert!(loaded.probes.is_empty());
+        assert!(loaded.document.probes.is_empty());
     }
 
     #[test]
@@ -679,7 +679,10 @@ mod tests {
     fn malformed_serialized_live_documentation_shapes_fail_closed() {
         let shapes = documentation_shape_fixture();
         let mut schematic = SchematicState::default();
-        schematic.documentation_shapes.push(shapes[0].clone());
+        schematic
+            .document
+            .documentation_shapes
+            .push(shapes[0].clone());
         let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
 
         let mut malformed_live: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -732,13 +735,13 @@ mod tests {
             .unwrap(),
             review,
         ];
-        schematic.design_notes = notes.clone();
+        schematic.document.design_notes = notes.clone();
         schematic.selection.select_only_design_note(93);
         schematic.copy_selection();
         assert_eq!(schematic.clipboard.design_notes.len(), 1);
         let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
         let loaded = load_schematic_text(&json, None).unwrap();
-        assert_eq!(loaded.design_notes, notes);
+        assert_eq!(loaded.document.design_notes, notes);
         assert!(loaded.clipboard.design_notes.is_empty());
 
         let mut legacy: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -747,13 +750,13 @@ mod tests {
             .unwrap()
             .remove("design_notes");
         let loaded = load_schematic_text(&legacy.to_string(), None).unwrap();
-        assert!(loaded.design_notes.is_empty());
+        assert!(loaded.document.design_notes.is_empty());
     }
 
     #[test]
     fn malformed_serialized_design_note_fails_closed() {
         let mut schematic = SchematicState::default();
-        schematic.design_notes.push(
+        schematic.document.design_notes.push(
             crate::state::DesignNote::new(
                 3,
                 crate::state::Point::origin(),
@@ -869,9 +872,13 @@ mod tests {
 
         let mut original = SchematicState::default();
         let live_component_id = original.add_component(ComponentType::Resistor, Point::new(0, 0));
-        original.wires.push(Wire::new(98, Vec::new()));
-        original.wires.push(Wire::new(99, vec![Point::new(5, 5)]));
+        original.document.wires.push(Wire::new(98, Vec::new()));
         original
+            .document
+            .wires
+            .push(Wire::new(99, vec![Point::new(5, 5)]));
+        original
+            .document
             .wires
             .push(Wire::new(100, vec![Point::new(0, 0), Point::new(20, 0)]));
         original
@@ -898,12 +905,13 @@ mod tests {
         let mut loaded = load_schematic_text(&json, Some(Path::new("corrupt-import.rsch")))
             .expect("repairable schematic loads");
 
-        assert_eq!(loaded.wires.len(), 1);
-        assert_eq!(loaded.wires[0].id, 100);
+        assert_eq!(loaded.document.wires.len(), 1);
+        assert_eq!(loaded.document.wires[0].id, 100);
         assert!(loaded.clipboard.is_empty());
         assert!(loaded.selection.is_empty());
         assert!(
             loaded
+                .document
                 .components
                 .iter()
                 .any(|component| component.id == live_component_id),
@@ -922,9 +930,11 @@ mod tests {
 
         let mut original = SchematicState::default();
         original
+            .document
             .wires
             .push(Wire::segment(40, Point::new(0, 0), Point::new(20, 0)));
         original
+            .document
             .wires
             .push(Wire::segment(40, Point::new(0, 10), Point::new(20, 10)));
         original.selection.select_wire(40);
@@ -935,10 +945,15 @@ mod tests {
         let mut loaded = load_schematic_text(&json, Some(Path::new("duplicate-wires.rsch")))
             .expect("repairable schematic loads");
 
-        let mut wire_ids: HashSet<u64> = loaded.wires.iter().map(|wire| wire.id).collect();
-        assert_eq!(wire_ids.len(), loaded.wires.len());
+        let mut wire_ids: HashSet<u64> = loaded.document.wires.iter().map(|wire| wire.id).collect();
+        assert_eq!(wire_ids.len(), loaded.document.wires.len());
         assert_eq!(
-            loaded.wires.iter().filter(|wire| wire.id == 40).count(),
+            loaded
+                .document
+                .wires
+                .iter()
+                .filter(|wire| wire.id == 40)
+                .count(),
             1,
             "the original duplicate id must stay with exactly one wire"
         );

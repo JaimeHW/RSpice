@@ -24,8 +24,8 @@ impl SchematicState {
     /// * `at_point` - The point at which to split (must be on the wire)
     pub fn split_wire(&mut self, wire_id: u64, at_point: Point) -> Option<(u64, u64)> {
         // Find the wire
-        let wire_idx = self.wires.iter().position(|w| w.id == wire_id)?;
-        let wire = &self.wires[wire_idx];
+        let wire_idx = self.document.wires.iter().position(|w| w.id == wire_id)?;
+        let wire = &self.document.wires[wire_idx];
 
         // Validate that the point is on the wire
         if !wire.contains_point(at_point) {
@@ -82,14 +82,14 @@ impl SchematicState {
         }
 
         // Remove original wire
-        self.wires.remove(wire_idx);
+        self.document.wires.remove(wire_idx);
 
         // Create two new wires
         let id1 = self.next_id();
         let id2 = self.next_id();
 
-        self.wires.push(Wire::new(id1, before_points));
-        self.wires.push(Wire::new(id2, after_points));
+        self.document.wires.push(Wire::new(id1, before_points));
+        self.document.wires.push(Wire::new(id2, after_points));
 
         self.is_dirty = true;
         self.bump_topology_version();
@@ -107,7 +107,7 @@ impl SchematicState {
     ///
     /// Returns the modified wire ID if successful
     pub fn split_wire_at_segment(&mut self, wire_id: u64, segment_index: usize) -> Option<u64> {
-        let wire = self.wires.iter_mut().find(|w| w.id == wire_id)?;
+        let wire = self.document.wires.iter_mut().find(|w| w.id == wire_id)?;
 
         if segment_index >= wire.segment_count() {
             return None;
@@ -147,33 +147,44 @@ impl SchematicState {
         }
 
         // Find both wires
-        let idx_a = self.wires.iter().position(|w| w.id == wire_a)?;
-        let idx_b = self.wires.iter().position(|w| w.id == wire_b)?;
+        let idx_a = self.document.wires.iter().position(|w| w.id == wire_a)?;
+        let idx_b = self.document.wires.iter().position(|w| w.id == wire_b)?;
 
         // Check if they share an endpoint
-        let (a_start, a_end) = (self.wires[idx_a].start()?, self.wires[idx_a].end()?);
-        let (b_start, b_end) = (self.wires[idx_b].start()?, self.wires[idx_b].end()?);
+        let (a_start, a_end) = (
+            self.document.wires[idx_a].start()?,
+            self.document.wires[idx_a].end()?,
+        );
+        let (b_start, b_end) = (
+            self.document.wires[idx_b].start()?,
+            self.document.wires[idx_b].end()?,
+        );
 
         // Determine connection type and build merged points
         let merged_points: Vec<Point> = if a_end == b_start {
             // A's end connects to B's start: A.start ? A.end/B.start ? B.end
-            let mut pts = self.wires[idx_a].points.clone();
-            pts.extend(self.wires[idx_b].points.iter().skip(1));
+            let mut pts = self.document.wires[idx_a].points.clone();
+            pts.extend(self.document.wires[idx_b].points.iter().skip(1));
             pts
         } else if a_end == b_end {
             // A's end connects to B's end: A.start ? A.end/B.end ? B.start
-            let mut pts = self.wires[idx_a].points.clone();
-            pts.extend(self.wires[idx_b].points.iter().rev().skip(1));
+            let mut pts = self.document.wires[idx_a].points.clone();
+            pts.extend(self.document.wires[idx_b].points.iter().rev().skip(1));
             pts
         } else if a_start == b_end {
             // B's end connects to A's start: B.start ? B.end/A.start ? A.end
-            let mut pts = self.wires[idx_b].points.clone();
-            pts.extend(self.wires[idx_a].points.iter().skip(1));
+            let mut pts = self.document.wires[idx_b].points.clone();
+            pts.extend(self.document.wires[idx_a].points.iter().skip(1));
             pts
         } else if a_start == b_start {
             // A's start connects to B's start: A.end ? A.start/B.start ? B.end
-            let mut pts: Vec<Point> = self.wires[idx_a].points.iter().rev().cloned().collect();
-            pts.extend(self.wires[idx_b].points.iter().skip(1));
+            let mut pts: Vec<Point> = self.document.wires[idx_a]
+                .points
+                .iter()
+                .rev()
+                .cloned()
+                .collect();
+            pts.extend(self.document.wires[idx_b].points.iter().skip(1));
             pts
         } else {
             // Wires don't share an endpoint
@@ -186,12 +197,14 @@ impl SchematicState {
         } else {
             (idx_b, idx_a)
         };
-        self.wires.remove(remove_first);
-        self.wires.remove(remove_second);
+        self.document.wires.remove(remove_first);
+        self.document.wires.remove(remove_second);
 
         // Create merged wire
         let merged_id = self.next_id();
-        self.wires.push(Wire::new(merged_id, merged_points));
+        self.document
+            .wires
+            .push(Wire::new(merged_id, merged_points));
 
         self.is_dirty = true;
         self.bump_topology_version();
@@ -207,7 +220,7 @@ impl SchematicState {
     /// # Arguments
     /// * `wire_id` - The wire to straighten
     pub fn straighten_wire(&mut self, wire_id: u64) {
-        if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id) {
+        if let Some(wire) = self.document.wires.iter_mut().find(|w| w.id == wire_id) {
             let simplified = Self::simplify_wire_path(wire.points.clone());
             if simplified != wire.points {
                 wire.points = simplified;
@@ -220,7 +233,7 @@ impl SchematicState {
     /// Optimize all wires by removing collinear intermediate points
     pub fn optimize_all_wires(&mut self) {
         let mut changed = false;
-        for wire in &mut self.wires {
+        for wire in &mut self.document.wires {
             // Most wires are already minimal — don't clone their paths.
             if !Self::has_collinear_vertices(&wire.points) {
                 continue;
@@ -248,10 +261,10 @@ impl SchematicState {
     /// A tuple of (wires_modified, wires_removed) counts
     pub fn remove_degenerate_segments(&mut self) -> (usize, usize) {
         let mut wires_modified = 0;
-        let initial_wire_count = self.wires.len();
+        let initial_wire_count = self.document.wires.len();
 
         // Phase 1: Remove zero-length segments from each wire
-        for wire in &mut self.wires {
+        for wire in &mut self.document.wires {
             let original_len = wire.points.len();
 
             // Remove consecutive duplicate points (zero-length segments)
@@ -270,6 +283,7 @@ impl SchematicState {
 
         // Phase 2: Remove wires that are now invalid (< 2 points)
         let wires_to_remove: Vec<u64> = self
+            .document
             .wires
             .iter()
             .filter(|w| w.points.len() < 2)
@@ -280,9 +294,9 @@ impl SchematicState {
             log::info!("Removing zero-length wire id={}", wire_id);
         }
 
-        self.wires.retain(|w| w.points.len() >= 2);
+        self.document.wires.retain(|w| w.points.len() >= 2);
 
-        let wires_removed = initial_wire_count - self.wires.len();
+        let wires_removed = initial_wire_count - self.document.wires.len();
 
         if wires_modified > 0 || wires_removed > 0 {
             self.is_dirty = true;
@@ -297,12 +311,12 @@ impl SchematicState {
     /// Returns true if the wire was modified, false if unchanged or not found.
     /// If the wire becomes invalid (< 2 points), it is removed entirely.
     pub fn remove_degenerate_segments_for_wire(&mut self, wire_id: u64) -> bool {
-        let wire_idx = match self.wires.iter().position(|w| w.id == wire_id) {
+        let wire_idx = match self.document.wires.iter().position(|w| w.id == wire_id) {
             Some(idx) => idx,
             None => return false,
         };
 
-        let wire = &mut self.wires[wire_idx];
+        let wire = &mut self.document.wires[wire_idx];
         let original_len = wire.points.len();
 
         // Remove consecutive duplicate points
@@ -317,14 +331,14 @@ impl SchematicState {
 
         if cleaned.len() < 2 {
             // Wire is now invalid, remove it
-            self.wires.remove(wire_idx);
+            self.document.wires.remove(wire_idx);
             self.is_dirty = true;
             self.bump_topology_version();
             return true;
         }
 
         if was_modified {
-            self.wires[wire_idx].points = cleaned;
+            self.document.wires[wire_idx].points = cleaned;
             self.is_dirty = true;
             self.bump_topology_version();
         }
@@ -361,9 +375,9 @@ impl SchematicState {
     ///
     /// Returns true if a wire was deleted
     pub fn delete_wire(&mut self, wire_id: u64) -> bool {
-        let len_before = self.wires.len();
-        self.wires.retain(|w| w.id != wire_id);
-        let deleted = self.wires.len() < len_before;
+        let len_before = self.document.wires.len();
+        self.document.wires.retain(|w| w.id != wire_id);
+        let deleted = self.document.wires.len() < len_before;
         if deleted {
             self.is_dirty = true;
             self.bump_topology_version();
@@ -385,7 +399,7 @@ impl SchematicState {
         at_point: Point,
         corner_offset: Point,
     ) -> bool {
-        let wire = match self.wires.iter_mut().find(|w| w.id == wire_id) {
+        let wire = match self.document.wires.iter_mut().find(|w| w.id == wire_id) {
             Some(w) => w,
             None => return false,
         };
@@ -416,7 +430,7 @@ impl SchematicState {
     ///
     /// Returns true if successful
     pub fn move_wire_vertex(&mut self, wire_id: u64, vertex_index: usize, new_pos: Point) -> bool {
-        if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id)
+        if let Some(wire) = self.document.wires.iter_mut().find(|w| w.id == wire_id)
             && wire.move_vertex(vertex_index, new_pos)
         {
             self.is_dirty = true;
@@ -446,7 +460,7 @@ impl SchematicState {
 
         // First, check if this is a junction point where wires might pass through
         // without having a vertex. If so, split those wires first.
-        let is_junction = self.junctions.iter().any(|j| j.pos == old_pos);
+        let is_junction = self.document.junctions.iter().any(|j| j.pos == old_pos);
         if is_junction {
             // Split any wires that pass through this junction point but don't have a vertex there
             self.split_wires_at_t_junction(old_pos);
@@ -455,7 +469,7 @@ impl SchematicState {
         let mut moved = false;
 
         // Move all wire vertices at this position
-        for wire in &mut self.wires {
+        for wire in &mut self.document.wires {
             for point in &mut wire.points {
                 if *point == old_pos {
                     *point = new_pos;
@@ -465,7 +479,7 @@ impl SchematicState {
         }
 
         // Also move any junction at this position
-        for junction in &mut self.junctions {
+        for junction in &mut self.document.junctions {
             if junction.pos == old_pos {
                 junction.pos = new_pos;
             }

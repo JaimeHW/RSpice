@@ -68,7 +68,7 @@ impl ConsumerIndex {
             };
         };
         let sheet = app.state.workspace.active_view.display_path();
-        for component in &schematic.components {
+        for component in &schematic.document.components {
             let Some(model) = explicit_component_model(component) else {
                 continue;
             };

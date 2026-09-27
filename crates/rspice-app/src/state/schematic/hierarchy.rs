@@ -138,7 +138,7 @@ impl HierarchyExtractionPlan {
                 let discipline = inferred_discipline(&net.source_name, &selected_terminals)?;
                 for terminal in selected_terminals {
                     let connection = schematic
-                        .connections
+                        .document.connections
                         .iter()
                         .find(|connection| {
                             connection.component_id == terminal.component_id
@@ -153,6 +153,7 @@ impl HierarchyExtractionPlan {
                             ))
                         })?;
                     let wire = schematic
+                        .document
                         .wires
                         .iter()
                         .find(|wire| wire.id == connection.wire_id)
@@ -196,7 +197,7 @@ impl HierarchyExtractionPlan {
                 continue;
             }
 
-            for wire in &schematic.wires {
+            for wire in &schematic.document.wires {
                 let wire_net = wire
                     .points
                     .iter()
@@ -216,12 +217,12 @@ impl HierarchyExtractionPlan {
                     moved_object_ids.insert(wire.id);
                 }
             }
-            for junction in &schematic.junctions {
+            for junction in &schematic.document.junctions {
                 if self.point_to_net.get(&junction.pos) == Some(&net.source_name) {
                     moved_object_ids.insert(junction.id);
                 }
             }
-            for label in &schematic.net_labels {
+            for label in &schematic.document.net_labels {
                 if self.point_to_net.get(&label.pos) == Some(&net.source_name) {
                     moved_object_ids.insert(label.id);
                 }
@@ -294,6 +295,7 @@ impl HierarchyExtractionCandidate {
     ) -> Result<(), HierarchyExtractionError> {
         let instance = self
             .parent
+            .document
             .components
             .iter()
             .find(|component| component.id == self.instance_id)
@@ -421,6 +423,7 @@ impl HierarchyExtractionCandidate {
         for port in &plan.ports {
             let component = self
                 .child
+                .document
                 .components
                 .iter()
                 .find(|component| {
@@ -538,6 +541,7 @@ impl SchematicState {
         let mut source_components = Vec::with_capacity(source_component_ids.len());
         for id in &source_component_ids {
             let component = self
+                .document
                 .components
                 .iter()
                 .find(|component| component.id == *id)
@@ -550,7 +554,7 @@ impl SchematicState {
             source_components.push(component);
         }
 
-        let origin = snapped_selection_center(&source_components, self.grid_size)?;
+        let origin = snapped_selection_center(&source_components, self.document.grid_size)?;
         let mut terminals_by_net = BTreeMap::<String, Vec<&HierarchyExtractionTerminal>>::new();
         for terminal in terminals
             .iter()
@@ -584,6 +588,7 @@ impl SchematicState {
         }
 
         let bus_bound_nets = self
+            .document
             .bus_taps
             .iter()
             .filter_map(|tap| {
@@ -625,7 +630,8 @@ impl SchematicState {
                 .map(|terminal| terminal.point)
                 .collect::<HashSet<_>>();
             external_terminal_points.extend(
-                self.bus_taps
+                self.document
+                    .bus_taps
                     .iter()
                     .filter(|tap| {
                         connectivity.point_to_net.get(&tap.connection_point) == Some(&source_name)
@@ -661,6 +667,7 @@ impl SchematicState {
                     })
             };
             let child_junctions = self
+                .document
                 .junctions
                 .iter()
                 .filter(|junction| {
@@ -670,6 +677,7 @@ impl SchematicState {
                 .map(|junction| junction.pos)
                 .collect::<Vec<_>>();
             let child_labels = self
+                .document
                 .net_labels
                 .iter()
                 .filter(|label| {
@@ -689,7 +697,7 @@ impl SchematicState {
                     ports.len() + 1,
                 );
                 let name = unique_port_name(base, &mut reserved_names);
-                NetLabel::validate_name(&name, self.document_policy.net_naming)
+                NetLabel::validate_name(&name, self.document.document_policy.net_naming)
                     .map_err(|_| HierarchyExtractionError::InvalidPortName(name.clone()))?;
                 ports.push(HierarchyExtractionPort {
                     name,
@@ -724,6 +732,7 @@ impl SchematicState {
             point_to_net: connectivity.point_to_net.clone(),
             source_segments_by_net: connectivity.net_segments.clone(),
             source_bus_segments: self
+                .document
                 .buses
                 .iter()
                 .flat_map(|bus| bus.points.windows(2).map(|pair| (pair[0], pair[1])))
@@ -760,16 +769,17 @@ impl SchematicState {
         }
 
         let mut child = SchematicState::default();
-        child.grid_size = self.grid_size;
-        child.document_policy = self.document_policy;
+        child.document.grid_size = self.document.grid_size;
+        child.document.document_policy = self.document.document_policy;
         for component in self
+            .document
             .components
             .iter()
             .filter(|component| selected.contains(&component.id))
         {
             let mut moved = component.clone();
             moved.pos = checked_sub(moved.pos, plan.origin)?;
-            child.components.push(moved);
+            child.document.components.push(moved);
         }
         child.recalculate_runtime_state();
 
@@ -806,7 +816,7 @@ impl SchematicState {
         }
 
         for net in plan.nets.iter().filter(|net| net.global_ground) {
-            let selected_ground_is_moved = self.components.iter().any(|component| {
+            let selected_ground_is_moved = self.document.components.iter().any(|component| {
                 selected.contains(&component.id)
                     && component.kind == ComponentType::Ground
                     && component
@@ -842,6 +852,7 @@ impl SchematicState {
             .collect::<Result<Vec<_>, HierarchyExtractionError>>()?;
         child_terminals.extend(
             child
+                .document
                 .components
                 .iter()
                 .filter(|component| !selected.contains(&component.id))
@@ -862,22 +873,24 @@ impl SchematicState {
             .collect::<HashSet<_>>();
         let mut parent = self.clone();
         parent
+            .document
             .components
             .retain(|component| !selected.contains(&component.id));
         parent
+            .document
             .connections
             .retain(|connection| !selected.contains(&connection.component_id));
-        parent.wires.retain(|wire| {
+        parent.document.wires.retain(|wire| {
             !wire.points.iter().any(|point| {
                 self.net_name_at_point(*point, plan)
                     .is_some_and(|net| child_only_nets.contains(net))
             })
         });
-        parent.junctions.retain(|junction| {
+        parent.document.junctions.retain(|junction| {
             self.net_name_at_point(junction.pos, plan)
                 .is_none_or(|net| !child_only_nets.contains(net))
         });
-        parent.net_labels.retain(|label| {
+        parent.document.net_labels.retain(|label| {
             self.net_name_at_point(label.pos, plan)
                 .is_none_or(|net| !child_only_nets.contains(net))
         });
@@ -895,6 +908,7 @@ impl SchematicState {
         let (instance_pos, parent_routes) = hierarchy_instance_position(&parent, plan, &binding)?;
         let instance_id = parent.add_library_cell_component(instance_pos, binding.clone());
         let instance = parent
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == instance_id)
@@ -1320,6 +1334,7 @@ fn place_child_ports(
         return Ok(());
     }
     let obstacles = child
+        .document
         .components
         .iter()
         .map(|component| {
@@ -1379,7 +1394,7 @@ fn place_child_ports(
         .map(|(_, bounds)| bounds.3)
         .max()
         .unwrap_or(20);
-    let pitch = child.grid_size.max(10).saturating_mul(2);
+    let pitch = child.document.grid_size.max(10).saturating_mul(2);
     let mut port_routes = Vec::<Vec<Point>>::new();
     let mut left = 0i32;
     let mut right = 0i32;
@@ -1436,6 +1451,7 @@ fn place_child_ports(
         };
         let id = child.add_component(ComponentType::Port, component_pos);
         let component = child
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == id)
@@ -1472,7 +1488,7 @@ fn place_child_ports(
             .collect::<HashSet<_>>();
         let route = (0..32).find_map(|attempt| {
             let lane = index.saturating_add(attempt * plan.ports.len().max(1));
-            let route = orthogonal_path(terminal, anchor, lane, child.grid_size.max(1));
+            let route = orthogonal_path(terminal, anchor, lane, child.document.grid_size.max(1));
             child_route_is_safe(
                 &route,
                 anchor,
@@ -1573,7 +1589,7 @@ fn hierarchy_instance_position(
     plan: &HierarchyExtractionPlan,
     binding: &LibraryCellInstance,
 ) -> Result<(Point, Vec<Vec<Point>>), HierarchyExtractionError> {
-    let step = parent.grid_size.max(10).saturating_mul(4);
+    let step = parent.document.grid_size.max(10).saturating_mul(4);
     let candidates = std::iter::once(Point::origin()).chain((1i32..=8).flat_map(|ring| {
         let radius = ring.saturating_mul(step);
         [
@@ -1588,6 +1604,7 @@ fn hierarchy_instance_position(
         ]
     }));
     let obstacles = parent
+        .document
         .components
         .iter()
         .map(|component| {
@@ -1648,8 +1665,12 @@ fn hierarchy_instance_position(
         for (index, (port, terminal)) in plan.ports.iter().zip(terminals).enumerate() {
             let route = (0..16).find_map(|attempt| {
                 let lane = index.saturating_add(attempt * plan.ports.len().max(1));
-                let route =
-                    orthogonal_path(terminal, port.parent_anchor, lane, parent.grid_size.max(1));
+                let route = orthogonal_path(
+                    terminal,
+                    port.parent_anchor,
+                    lane,
+                    parent.document.grid_size.max(1),
+                );
                 route_is_safe(
                     &route,
                     port.parent_anchor,
@@ -1869,6 +1890,7 @@ mod tests {
 
     fn terminals(schematic: &SchematicState) -> Vec<HierarchyExtractionTerminal> {
         schematic
+            .document
             .components
             .iter()
             .flat_map(|component| {
@@ -1896,6 +1918,7 @@ mod tests {
 
     fn bounds(schematic: &SchematicState) -> HashMap<u64, (i32, i32, i32, i32)> {
         schematic
+            .document
             .components
             .iter()
             .map(|component| (component.id, component.bounding_box()))
@@ -1943,10 +1966,11 @@ mod tests {
         let candidate = schematic
             .materialize_hierarchy_extraction(&plan, "work", "sensor_frontend", "schematic")
             .expect("candidate");
-        assert_eq!(candidate.parent.components.len(), 2);
+        assert_eq!(candidate.parent.document.components.len(), 2);
         assert!(
             candidate
                 .parent
+                .document
                 .components
                 .iter()
                 .any(|component| component.id == load)
@@ -1954,6 +1978,7 @@ mod tests {
         assert_eq!(
             candidate
                 .child
+                .document
                 .components
                 .iter()
                 .filter(|component| component.kind != ComponentType::Port)
@@ -1992,6 +2017,7 @@ mod tests {
         let selected_main = schematic.add_component(ComponentType::Resistor, Point::origin());
         let selected_branch = schematic.add_component(ComponentType::Resistor, Point::new(-40, 60));
         schematic
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == selected_branch)
@@ -2017,6 +2043,7 @@ mod tests {
         assert!(
             candidate
                 .parent
+                .document
                 .components
                 .iter()
                 .any(|component| component.id == outside)
@@ -2024,6 +2051,7 @@ mod tests {
         assert!(
             candidate
                 .parent
+                .document
                 .net_labels
                 .iter()
                 .any(|label| { label.name == "sense" && label.pos == Point::new(-40, 0) })
@@ -2031,11 +2059,12 @@ mod tests {
         assert!(
             candidate
                 .parent
+                .document
                 .junctions
                 .iter()
                 .any(|junction| { junction.pos == Point::new(-40, 0) })
         );
-        assert!(!candidate.parent.wires.iter().any(|wire| {
+        assert!(!candidate.parent.document.wires.iter().any(|wire| {
             wire.points.windows(2).any(|segment| {
                 point_on_segment(Point::new(-20, 0), segment[0], segment[1])
                     && segment[0] != Point::new(-20, 0)
@@ -2074,6 +2103,7 @@ mod tests {
         assert!(
             candidate
                 .parent
+                .document
                 .components
                 .iter()
                 .find(|component| component.id == candidate.instance_id)
@@ -2111,6 +2141,7 @@ mod tests {
         assert!(
             candidate
                 .child
+                .document
                 .components
                 .iter()
                 .any(|component| component.kind == ComponentType::Ground)
@@ -2191,16 +2222,16 @@ mod tests {
             expected,
             "cycles and dangling stubs remain exact"
         );
-        assert!(candidate.child.junctions.iter().any(|junction| {
+        assert!(candidate.child.document.junctions.iter().any(|junction| {
             junction.pos == checked_sub(Point::new(50, -20), plan.origin).expect("junction")
         }));
-        assert!(candidate.child.net_labels.iter().any(|label| {
+        assert!(candidate.child.document.net_labels.iter().any(|label| {
             label.name == "sense"
                 && label.pos == checked_sub(Point::new(50, -40), plan.origin).expect("label")
         }));
-        assert!(candidate.parent.wires.is_empty());
-        assert!(candidate.parent.junctions.is_empty());
-        assert!(candidate.parent.net_labels.is_empty());
+        assert!(candidate.parent.document.wires.is_empty());
+        assert!(candidate.parent.document.junctions.is_empty());
+        assert!(candidate.parent.document.net_labels.is_empty());
     }
 
     #[test]
@@ -2224,10 +2255,11 @@ mod tests {
             .materialize_hierarchy_extraction(&plan, "work", "labels", "schematic")
             .expect("candidate");
 
-        assert!(candidate.child.wires.is_empty());
+        assert!(candidate.child.document.wires.is_empty());
         assert_eq!(
             candidate
                 .child
+                .document
                 .net_labels
                 .iter()
                 .filter(|label| label.name == "sense")
@@ -2286,13 +2318,14 @@ mod tests {
             .expect("candidate");
 
         assert_eq!(
-            candidate.child.wires.len(),
+            candidate.child.document.wires.len(),
             1,
             "the child owns only its generated port route"
         );
         assert!(
             candidate
                 .parent
+                .document
                 .wires
                 .iter()
                 .any(|wire| { wire.points == [Point::new(20, 0), Point::new(80, 0)] })
@@ -2310,6 +2343,7 @@ mod tests {
         let selected = schematic.add_component(ComponentType::Resistor, Point::origin());
         let stationary = schematic.add_component(ComponentType::Resistor, Point::new(80, 0));
         let selected_terminal = schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == selected)
@@ -2319,6 +2353,7 @@ mod tests {
             .max_by_key(|(_, point)| point.x)
             .expect("selected terminal");
         let stationary_terminal = schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == stationary)
@@ -2330,13 +2365,13 @@ mod tests {
         let wire = schematic
             .add_wire(vec![selected_terminal.1, stationary_terminal.1])
             .expect("boundary wire");
-        schematic.connections.push(WireConnection::new(
+        schematic.document.connections.push(WireConnection::new(
             wire,
             0,
             selected,
             selected_terminal.0.clone(),
         ));
-        schematic.connections.push(WireConnection::new(
+        schematic.document.connections.push(WireConnection::new(
             wire,
             1,
             stationary,
@@ -2371,6 +2406,7 @@ mod tests {
         let left = schematic.add_component(ComponentType::Resistor, Point::origin());
         let right = schematic.add_component(ComponentType::Resistor, Point::new(80, 0));
         let left_terminal = schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == left)
@@ -2380,6 +2416,7 @@ mod tests {
             .max_by_key(|(_, point)| point.x)
             .expect("left terminal");
         let right_terminal = schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == right)
@@ -2392,9 +2429,11 @@ mod tests {
             .add_wire(vec![left_terminal.1, right_terminal.1])
             .expect("internal wire");
         schematic
+            .document
             .connections
             .push(WireConnection::new(wire, 0, left, left_terminal.0));
         schematic
+            .document
             .connections
             .push(WireConnection::new(wire, 1, right, right_terminal.0));
         let label = schematic.add_net_label(left_terminal.1, "sense".to_owned());
@@ -2445,6 +2484,7 @@ mod tests {
             .expect("candidate");
         let child_port_terminal = candidate
             .child
+            .document
             .components
             .iter()
             .find(|component| component.kind == ComponentType::Port)

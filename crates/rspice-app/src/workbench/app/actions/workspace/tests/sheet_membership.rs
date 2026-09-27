@@ -152,6 +152,7 @@ fn sheet_of(state: &AppState, owner: &CellViewRef, object_id: u64) -> Option<She
 fn delete_component(state: &mut AppState, object_id: u64) {
     assert!(state.schematic.with_undo("delete selection", |schematic| {
         schematic
+            .document
             .components
             .retain(|component| component.id != object_id);
     }));
@@ -215,6 +216,7 @@ fn deleting_a_port_anchor_then_undo_restores_the_connection() {
     assert!(
         app.state
             .schematic
+            .document
             .components
             .iter()
             .any(|component| component.id == crossing.moved),

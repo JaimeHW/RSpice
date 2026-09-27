@@ -34,7 +34,7 @@ impl ProjectWorkspace {
             .schematic_buffers
             .iter()
             .flat_map(|(key, schematic)| {
-                schematic.components.iter().map(move |component| {
+                schematic.document.components.iter().map(move |component| {
                     crate::state::SchematicObjectKey::new(key, component.id)
                         .map(|object| (object, component.name.as_str()))
                 })
@@ -65,9 +65,10 @@ impl ProjectWorkspace {
         for (key, names) in by_document {
             let source = &self.schematic_buffers[&key];
             let mut candidate = source.clone();
-            candidate.components = source.prepare_component_renames(&names).map_err(|reason| {
-                format!("Cannot restore reference annotation in '{key}': {reason}")
-            })?;
+            candidate.document.components =
+                source.prepare_component_renames(&names).map_err(|reason| {
+                    format!("Cannot restore reference annotation in '{key}': {reason}")
+                })?;
             candidate.is_dirty = true;
             candidate.bump_topology_version();
             before.insert(key.clone(), source.clone());

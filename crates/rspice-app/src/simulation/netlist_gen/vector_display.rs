@@ -61,7 +61,11 @@ impl BusNotations {
     fn of_sheets<'a>(sheets: impl IntoIterator<Item = &'a SchematicState>) -> Self {
         let mut by_bus = HashMap::new();
         for sheet in sheets {
-            let buses = sheet.buses.iter().filter_map(|bus| bus.declaration.clone());
+            let buses = sheet
+                .document
+                .buses
+                .iter()
+                .filter_map(|bus| bus.declaration.clone());
             let ports = sheet.interface_ports();
             for declaration in buses.chain(ports.iter().filter_map(PortSpec::vector)) {
                 match by_bus.entry(declaration.name.to_ascii_lowercase()) {

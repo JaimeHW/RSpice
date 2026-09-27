@@ -107,7 +107,7 @@ pub(crate) fn action_export_netlist_with_io(
                 _ => state.ui.netlist.generated_source.clone(),
             }
         } else {
-            if state.schematic.components.is_empty() {
+            if state.schematic.document.components.is_empty() {
                 state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
                     "No circuit to export. Add components first.",
                 ));
@@ -360,7 +360,7 @@ fn generated_export_source(source: &str, format: crate::io::NetlistFormat) -> St
 }
 
 pub(crate) fn action_view_netlist(state: &mut AppState) {
-    if state.schematic.components.is_empty() {
+    if state.schematic.document.components.is_empty() {
         state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
             "No circuit to generate netlist. Add components first.",
         ));

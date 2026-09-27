@@ -55,10 +55,10 @@ use crate::state::{Component, ComponentType, Point, Rotation, SchematicState, Wi
 /// Load an example circuit by name
 pub fn load_example(name: &str, state: &mut SchematicState) {
     // Clear existing circuit
-    state.components.clear();
-    state.wires.clear();
-    state.junctions.clear();
-    state.net_labels.clear();
+    state.document.components.clear();
+    state.document.wires.clear();
+    state.document.junctions.clear();
+    state.document.net_labels.clear();
     state.selection.clear();
 
     match name {
@@ -94,24 +94,24 @@ fn build_rc_lowpass(state: &mut SchematicState) {
     let v1 = Component::new(id, ComponentType::VoltageSourceAc, Point::new(100, 200))
         .with_name_value("VIN", "1");
     id += 1;
-    state.components.push(v1);
+    state.document.components.push(v1);
 
     // Series resistor — horizontal: (180,100), (220,100).
     let r1 = Component::new(id, ComponentType::Resistor, Point::new(200, 100))
         .with_name_value("R1", "1k");
     id += 1;
-    state.components.push(r1);
+    state.document.components.push(r1);
 
     // Shunt capacitor — vertical: top (280,180), bottom (280,220).
     let c1 = Component::new(id, ComponentType::Capacitor, Point::new(280, 200))
         .with_rotation(Rotation::R90)
         .with_name_value("C1", "159n");
     id += 1;
-    state.components.push(c1);
+    state.document.components.push(c1);
 
     // Ground — stem at (190,260), teeing into the bottom rail.
     let gnd = Component::new(id, ComponentType::Ground, Point::new(190, 270));
-    state.components.push(gnd);
+    state.document.components.push(gnd);
 
     // VIN+ up and over to R1 left.
     add_wire(
@@ -161,7 +161,7 @@ fn build_voltage_divider(state: &mut SchematicState) {
     let v1 = Component::new(id, ComponentType::VoltageSource, Point::new(100, 160))
         .with_name_value("VCC", "5");
     id += 1;
-    state.components.push(v1);
+    state.document.components.push(v1);
 
     // Divider string — vertical resistors: R1 (200,80)/(200,120),
     // R2 (200,160)/(200,200).
@@ -169,17 +169,17 @@ fn build_voltage_divider(state: &mut SchematicState) {
         .with_rotation(Rotation::R90)
         .with_name_value("R1", "10k");
     id += 1;
-    state.components.push(r1);
+    state.document.components.push(r1);
 
     let r2 = Component::new(id, ComponentType::Resistor, Point::new(200, 180))
         .with_rotation(Rotation::R90)
         .with_name_value("R2", "10k");
     id += 1;
-    state.components.push(r2);
+    state.document.components.push(r2);
 
     // Ground — stem at (150,240) on the bottom rail.
     let gnd = Component::new(id, ComponentType::Ground, Point::new(150, 250));
-    state.components.push(gnd);
+    state.document.components.push(gnd);
 
     // VCC+ up and over to R1 top.
     add_wire(
@@ -224,50 +224,50 @@ fn build_common_emitter(state: &mut SchematicState) {
     let q1 = Component::new(id, ComponentType::NpnBjt, Point::new(260, 180))
         .with_name_value("Q1", "2N2222");
     id += 1;
-    state.components.push(q1);
+    state.document.components.push(q1);
 
     // Base bias from the supply rail — vertical: (180,100)/(180,140).
     let rb = Component::new(id, ComponentType::Resistor, Point::new(180, 120))
         .with_rotation(Rotation::R90)
         .with_name_value("RB", "100k");
     id += 1;
-    state.components.push(rb);
+    state.document.components.push(rb);
 
     // Collector load — vertical: (280,80)/(280,120).
     let rc = Component::new(id, ComponentType::Resistor, Point::new(280, 100))
         .with_rotation(Rotation::R90)
         .with_name_value("RC", "1k");
     id += 1;
-    state.components.push(rc);
+    state.document.components.push(rc);
 
     // Emitter degeneration — vertical: (280,240)/(280,280).
     let re = Component::new(id, ComponentType::Resistor, Point::new(280, 260))
         .with_rotation(Rotation::R90)
         .with_name_value("RE", "100");
     id += 1;
-    state.components.push(re);
+    state.document.components.push(re);
 
     // Input coupling — horizontal: (100,180)/(140,180).
     let cin = Component::new(id, ComponentType::Capacitor, Point::new(120, 180))
         .with_name_value("CIN", "1u");
     id += 1;
-    state.components.push(cin);
+    state.document.components.push(cin);
 
     // AC input — vertical at R0: + (60,220), − (60,260).
     let vin = Component::new(id, ComponentType::VoltageSourceAc, Point::new(60, 240))
         .with_name_value("VIN", "10m");
     id += 1;
-    state.components.push(vin);
+    state.document.components.push(vin);
 
     // Supply — vertical at R0: + (380,100), − (380,140).
     let vcc = Component::new(id, ComponentType::VoltageSource, Point::new(380, 120))
         .with_name_value("VCC", "12");
     id += 1;
-    state.components.push(vcc);
+    state.document.components.push(vcc);
 
     // Ground — stem at (220,300) on the bottom rail.
     let gnd = Component::new(id, ComponentType::Ground, Point::new(220, 310));
-    state.components.push(gnd);
+    state.document.components.push(gnd);
 
     // Supply rail and drops.
     add_wire(state, vec![Point::new(180, 60), Point::new(380, 60)]);
@@ -320,30 +320,30 @@ fn build_cmos_inverter(state: &mut SchematicState) {
         .with_mirror_v(true)
         .with_name_value("MP", "PMOS W=2u L=0.18u");
     id += 1;
-    state.components.push(mp);
+    state.document.components.push(mp);
 
     // Pull-down NMOS — D (260,200), G (220,240), S (260,280), bulk (260,240).
     let mn = Component::new(id, ComponentType::Nmos, Point::new(240, 240))
         .with_name_value("MN", "NMOS W=1u L=0.18u");
     id += 1;
-    state.components.push(mn);
+    state.document.components.push(mn);
 
     // Supply — vertical at R0: + (360,60), − (360,100).
     let vdd = Component::new(id, ComponentType::VoltageSource, Point::new(360, 80))
         .with_name_value("VDD", "1.8");
     id += 1;
-    state.components.push(vdd);
+    state.document.components.push(vdd);
 
     // Input pulse — vertical at R0: + (120,220), − (120,260).
     let mut vin = Component::new(id, ComponentType::VoltageSourcePulse, Point::new(120, 240))
         .with_name_value("VIN", "0");
     vin.params = "v2=1.8 td=0 tr=1n tf=1n pw=5n per=10n".to_owned();
     id += 1;
-    state.components.push(vin);
+    state.document.components.push(vin);
 
     // Ground — stem at (240,320) on the bottom rail.
     let gnd = Component::new(id, ComponentType::Ground, Point::new(240, 330));
-    state.components.push(gnd);
+    state.document.components.push(gnd);
 
     // Input to both gates (tee at (160,180)).
     add_wire(
@@ -426,54 +426,54 @@ fn build_differential_pair(state: &mut SchematicState) {
     let q1 = Component::new(id, ComponentType::NpnBjt, Point::new(160, 200))
         .with_name_value("Q1", "2N2222");
     id += 1;
-    state.components.push(q1);
+    state.document.components.push(q1);
 
     // Q2 mirrored — C (300,160), B (340,200), E (300,240).
     let q2 = Component::new(id, ComponentType::NpnBjt, Point::new(320, 200))
         .with_mirror_h(true)
         .with_name_value("Q2", "2N2222");
     id += 1;
-    state.components.push(q2);
+    state.document.components.push(q2);
 
     // Collector loads — vertical: RC1 (180,80)/(180,120), RC2 (300,80)/(300,120).
     let rc1 = Component::new(id, ComponentType::Resistor, Point::new(180, 100))
         .with_rotation(Rotation::R90)
         .with_name_value("RC1", "1k");
     id += 1;
-    state.components.push(rc1);
+    state.document.components.push(rc1);
 
     let rc2 = Component::new(id, ComponentType::Resistor, Point::new(300, 100))
         .with_rotation(Rotation::R90)
         .with_name_value("RC2", "1k");
     id += 1;
-    state.components.push(rc2);
+    state.document.components.push(rc2);
 
     // Supply — vertical at R0: + (460,80), − (460,120).
     let vcc = Component::new(id, ComponentType::VoltageSource, Point::new(460, 100))
         .with_name_value("VCC", "12");
     id += 1;
-    state.components.push(vcc);
+    state.document.components.push(vcc);
 
     // Differential drive — vertical at R0.
     let vin1 = Component::new(id, ComponentType::VoltageSourceAc, Point::new(60, 260))
         .with_name_value("VIN1", "1m");
     id += 1;
-    state.components.push(vin1);
+    state.document.components.push(vin1);
 
     let vin2 = Component::new(id, ComponentType::VoltageSourceAc, Point::new(420, 260))
         .with_name_value("VIN2", "1m");
     id += 1;
-    state.components.push(vin2);
+    state.document.components.push(vin2);
 
     // Tail sink — vertical at R0: + (240,290), − (240,330).
     let iee = Component::new(id, ComponentType::CurrentSource, Point::new(240, 310))
         .with_name_value("IEE", "1m");
     id += 1;
-    state.components.push(iee);
+    state.document.components.push(iee);
 
     // Ground — stem at (240,360) on the bottom rail.
     let gnd = Component::new(id, ComponentType::Ground, Point::new(240, 370));
-    state.components.push(gnd);
+    state.document.components.push(gnd);
 
     // Collector loads down to the collectors.
     add_wire(state, vec![Point::new(180, 120), Point::new(180, 160)]);
@@ -544,36 +544,36 @@ fn build_opamp_inverter(state: &mut SchematicState) {
     let opamp =
         Component::new(id, ComponentType::OpAmp, Point::new(280, 160)).with_name_value("E1", "1e6");
     id += 1;
-    state.components.push(opamp);
+    state.document.components.push(opamp);
 
     // Input resistor — horizontal: (140,170)/(180,170).
     let rin = Component::new(id, ComponentType::Resistor, Point::new(160, 170))
         .with_name_value("RIN", "1k");
     id += 1;
-    state.components.push(rin);
+    state.document.components.push(rin);
 
     // Feedback resistor — horizontal above: (260,100)/(300,100).
     let rf = Component::new(id, ComponentType::Resistor, Point::new(280, 100))
         .with_name_value("RF", "10k");
     id += 1;
-    state.components.push(rf);
+    state.document.components.push(rf);
 
     // Input source — vertical at R0: + (80,190), − (80,230).
     let vin = Component::new(id, ComponentType::VoltageSourceAc, Point::new(80, 210))
         .with_name_value("VIN", "100m");
     id += 1;
-    state.components.push(vin);
+    state.document.components.push(vin);
 
     // Main ground — stem at (200,300) on the bottom rail.
     let gnd = Component::new(id, ComponentType::Ground, Point::new(200, 310));
     id += 1;
-    state.components.push(gnd);
+    state.document.components.push(gnd);
 
     // Local reference for the non-inverting input — inverted ground whose
     // stem sits at (220,130).
     let gnd_ref = Component::new(id, ComponentType::Ground, Point::new(220, 120))
         .with_rotation(Rotation::R180);
-    state.components.push(gnd_ref);
+    state.document.components.push(gnd_ref);
 
     // VIN+ to RIN.
     add_wire(
@@ -638,16 +638,17 @@ fn add_wire(state: &mut SchematicState, points: Vec<Point>) {
     if points.len() < 2 {
         return;
     }
-    let wire_id = state.wires.len() as u64 + 1;
+    let wire_id = state.document.wires.len() as u64 + 1;
     let wire = Wire::new(wire_id, points);
-    state.wires.push(wire);
+    state.document.wires.push(wire);
 }
 
 /// Name a net at a point on a wire (also names the node in the netlist and
 /// the resulting waveforms).
 fn add_label(state: &mut SchematicState, pos: Point, name: &str) {
-    let label_id = state.net_labels.len() as u64 + 1;
+    let label_id = state.document.net_labels.len() as u64 + 1;
     state
+        .document
         .net_labels
         .push(crate::state::NetLabel::new(label_id, pos, name));
 }
@@ -681,12 +682,13 @@ mod tests {
             let mut state = SchematicState::default();
             load_example(name, &mut state);
             assert!(
-                !state.components.is_empty(),
+                !state.document.components.is_empty(),
                 "{}: example did not build",
                 name
             );
 
             let terminals: HashSet<Point> = state
+                .document
                 .components
                 .iter()
                 .flat_map(|component| {
@@ -698,7 +700,7 @@ mod tests {
                 .collect();
 
             let on_some_wire = |point: Point, skip_wire: u64| {
-                state.wires.iter().any(|wire| {
+                state.document.wires.iter().any(|wire| {
                     wire.id != skip_wire
                         && wire.points.windows(2).any(|seg| {
                             let (a, b) = (seg[0], seg[1]);
@@ -713,9 +715,14 @@ mod tests {
                 })
             };
 
-            let labels: HashSet<Point> = state.net_labels.iter().map(|label| label.pos).collect();
+            let labels: HashSet<Point> = state
+                .document
+                .net_labels
+                .iter()
+                .map(|label| label.pos)
+                .collect();
 
-            for wire in &state.wires {
+            for wire in &state.document.wires {
                 for endpoint in [wire.points[0], *wire.points.last().unwrap()] {
                     assert!(
                         terminals.contains(&endpoint)
@@ -738,7 +745,7 @@ mod tests {
         for name in FLAT_EXAMPLES {
             let mut state = SchematicState::default();
             load_example(name, &mut state);
-            for wire in &state.wires {
+            for wire in &state.document.wires {
                 for seg in wire.points.windows(2) {
                     assert!(
                         seg[0].x == seg[1].x || seg[0].y == seg[1].y,

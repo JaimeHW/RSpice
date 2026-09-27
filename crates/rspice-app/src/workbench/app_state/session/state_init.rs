@@ -71,7 +71,11 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         workspace.migrate_active_plan_data(plan.id());
     }
     let mut ui = crate::workbench::UiSessionState::new();
-    ui.schematic_snap.grid_size = schematic.document_policy.grid_pitch.canvas_grid_size();
+    ui.schematic_snap.grid_size = schematic
+        .document
+        .document_policy
+        .grid_pitch
+        .canvas_grid_size();
     if let Some(bundle) = workspace.project_sources.bundle_for_owner(
         &crate::state::ProjectSourceOwner::code_workspace(
             crate::state::ProjectSourceLanguage::VerilogA,

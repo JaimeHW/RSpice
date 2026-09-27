@@ -27,8 +27,8 @@ impl SchematicEditAuthority {
             active_schematic_epoch: state.active_schematic_epoch,
             topology_version: state.schematic.topology_version(),
             view_path: state.workspace.active_view.display_path(),
-            grid_size: state.schematic.grid_size,
-            document_policy: state.schematic.document_policy,
+            grid_size: state.schematic.document.grid_size,
+            document_policy: state.schematic.document.document_policy,
             snapshot: SchematicSnapshot::capture(&state.schematic),
             selection: state.schematic.selection.clone(),
         }
@@ -64,8 +64,8 @@ impl SchematicEditAuthority {
         if self.view_path != state.workspace.active_view.display_path() {
             return Err(reopen("The active cell/view changed"));
         }
-        if self.grid_size != state.schematic.grid_size
-            || self.document_policy != state.schematic.document_policy
+        if self.grid_size != state.schematic.document.grid_size
+            || self.document_policy != state.schematic.document.document_policy
         {
             return Err(reopen("The schematic grid or editing policy changed"));
         }
@@ -95,9 +95,9 @@ mod tests {
         let authority = SchematicEditAuthority::capture(&state);
         assert!(authority.validate(&state, "Move selection").is_ok());
 
-        state.schematic.components[0].value = "2k".to_owned();
+        state.schematic.document.components[0].value = "2k".to_owned();
         assert!(authority.validate(&state, "Move selection").is_err());
-        state.schematic.components[0].value = "1k".to_owned();
+        state.schematic.document.components[0].value = "1k".to_owned();
         state.schematic.selection.clear();
         assert!(authority.validate(&state, "Move selection").is_err());
     }

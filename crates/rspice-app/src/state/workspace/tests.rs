@@ -1038,6 +1038,7 @@ fn design_management_projection_namespaces_sheets_and_materializes_explicit_port
         .expect("second wire");
     let component = schematic.add_component(ComponentType::Resistor, Point::new(20, 0));
     let terminal_name = schematic
+        .document
         .components
         .iter()
         .find(|candidate| candidate.id == component)
@@ -1048,6 +1049,7 @@ fn design_management_projection_namespaces_sheets_and_materializes_explicit_port
         .map(|(name, _)| name)
         .expect("terminal at the second-wire anchor");
     schematic
+        .document
         .connections
         .push(crate::state::WireConnection::new(
             second,
@@ -1108,6 +1110,7 @@ fn design_management_projection_namespaces_sheets_and_materializes_explicit_port
         .materialize_design_management_schematic(&key, &schematic)
         .expect("materialize governed design");
     let first_position = projected
+        .document
         .wires
         .iter()
         .find(|wire| wire.id == first)
@@ -1115,6 +1118,7 @@ fn design_management_projection_namespaces_sheets_and_materializes_explicit_port
         .copied()
         .expect("first wire");
     let second_position = projected
+        .document
         .wires
         .iter()
         .find(|wire| wire.id == second)
@@ -1126,6 +1130,7 @@ fn design_management_projection_namespaces_sheets_and_materializes_explicit_port
     assert_eq!(second_position, Point::new(1_000_000, 0));
 
     let mut port_positions = projected
+        .document
         .net_labels
         .iter()
         .filter(|label| label.name == "BIAS")
@@ -1160,7 +1165,7 @@ fn hierarchy_resolution_reports_unbound_and_recursive_masters() {
         .schematic_buffers
         .get_mut(&CellViewRef::default_top().key())
         .expect("top buffer");
-    top.components.clear();
+    top.document.components.clear();
     top.add_library_cell_component(Point::new(20, 20), instance("work", "loop"));
     let mut loop_master = SchematicState::default();
     loop_master.add_library_cell_component(Point::new(20, 20), instance("work", "loop"));
@@ -1376,6 +1381,7 @@ fn hierarchy_resolution_rejects_missing_and_conflicting_source_bindings() {
         .schematic_buffers
         .get_mut(&CellViewRef::default_top().key())
         .expect("top buffer")
+        .document
         .components
         .last_mut()
         .expect("source-backed instance")

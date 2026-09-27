@@ -114,7 +114,7 @@ fn draw_bus_arms_directly_but_bus_tap_waits_for_its_validated_dialog() {
 fn place_pin_opens_the_isolated_mockup_transaction_without_mutating_the_document() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    let components = app.state.schematic.components.clone();
+    let components = app.state.schematic.document.components.clone();
     let topology = app.state.schematic.topology_version();
     let dirty = app.state.schematic.is_dirty;
     let tool = app.state.schematic.tool;
@@ -132,7 +132,7 @@ fn place_pin_opens_the_isolated_mockup_transaction_without_mutating_the_document
         app.state.dialogs.pin_port.signal_type,
         crate::state::PortSignalType::Analog
     );
-    assert_eq!(app.state.schematic.components, components);
+    assert_eq!(app.state.schematic.document.components, components);
     assert_eq!(app.state.schematic.topology_version(), topology);
     assert_eq!(app.state.schematic.is_dirty, dirty);
     assert_eq!(app.state.schematic.tool, tool);
@@ -144,7 +144,7 @@ fn place_pin_opens_the_isolated_mockup_transaction_without_mutating_the_document
 fn place_text_opens_the_isolated_mockup_transaction_without_mutating_the_document() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    let notes = app.state.schematic.design_notes.clone();
+    let notes = app.state.schematic.document.design_notes.clone();
     let topology = app.state.schematic.topology_version();
     let dirty = app.state.schematic.is_dirty;
     let tool = app.state.schematic.tool;
@@ -153,7 +153,7 @@ fn place_text_opens_the_isolated_mockup_transaction_without_mutating_the_documen
 
     assert!(app.state.dialogs.design_note.open);
     assert_eq!(app.state.dialogs.design_note.text, "Bias network");
-    assert_eq!(app.state.schematic.design_notes, notes);
+    assert_eq!(app.state.schematic.document.design_notes, notes);
     assert_eq!(app.state.schematic.topology_version(), topology);
     assert_eq!(app.state.schematic.is_dirty, dirty);
     assert_eq!(app.state.schematic.tool, tool);
@@ -165,7 +165,7 @@ fn place_text_opens_the_isolated_mockup_transaction_without_mutating_the_documen
 fn place_shape_opens_the_isolated_mockup_transaction_without_mutating_the_document() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    let shapes = app.state.schematic.documentation_shapes.clone();
+    let shapes = app.state.schematic.document.documentation_shapes.clone();
     let topology = app.state.schematic.topology_version();
     let dirty = app.state.schematic.is_dirty;
     let tool = app.state.schematic.tool;
@@ -177,7 +177,7 @@ fn place_shape_opens_the_isolated_mockup_transaction_without_mutating_the_docume
         app.state.dialogs.documentation_shape.kind,
         crate::state::DocumentationShapeKind::Rectangle
     );
-    assert_eq!(app.state.schematic.documentation_shapes, shapes);
+    assert_eq!(app.state.schematic.document.documentation_shapes, shapes);
     assert_eq!(app.state.schematic.topology_version(), topology);
     assert_eq!(app.state.schematic.is_dirty, dirty);
     assert_eq!(app.state.schematic.tool, tool);
@@ -195,7 +195,7 @@ fn every_raw_port_command_route_is_projected_through_the_same_dialog() {
     assert!(app.state.dialogs.pin_port.open);
     assert_eq!(app.state.schematic.tool, Tool::Select);
     assert!(app.state.schematic.pending_port_sequence.is_none());
-    assert!(app.state.schematic.components.is_empty());
+    assert!(app.state.schematic.document.components.is_empty());
 }
 
 #[test]
@@ -227,7 +227,7 @@ fn port_undo_and_redo_resynchronize_the_generated_symbol_contract() {
     assert_eq!(symbol_ports(&app).as_deref(), Some("BIAS_EN:in"));
 
     Command::Undo.execute(&mut app);
-    assert!(app.state.schematic.components.is_empty());
+    assert!(app.state.schematic.document.components.is_empty());
     assert!(symbol_ports(&app).is_none());
 
     Command::Redo.execute(&mut app);

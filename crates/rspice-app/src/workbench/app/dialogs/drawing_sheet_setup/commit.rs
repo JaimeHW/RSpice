@@ -1137,20 +1137,27 @@ fn remember_explicit_format(
 
 fn all_stable_object_ids(schematic: &crate::state::SchematicState) -> Vec<u64> {
     let mut ids = std::collections::BTreeSet::new();
-    ids.extend(schematic.components.iter().map(|object| object.id));
-    ids.extend(schematic.wires.iter().map(|object| object.id));
-    ids.extend(schematic.buses.iter().map(|object| object.id));
-    ids.extend(schematic.bus_taps.iter().map(|object| object.id));
-    ids.extend(schematic.junctions.iter().map(|object| object.id));
-    ids.extend(schematic.net_labels.iter().map(|object| object.id));
-    ids.extend(schematic.design_notes.iter().map(|object| object.id));
+    ids.extend(schematic.document.components.iter().map(|object| object.id));
+    ids.extend(schematic.document.wires.iter().map(|object| object.id));
+    ids.extend(schematic.document.buses.iter().map(|object| object.id));
+    ids.extend(schematic.document.bus_taps.iter().map(|object| object.id));
+    ids.extend(schematic.document.junctions.iter().map(|object| object.id));
+    ids.extend(schematic.document.net_labels.iter().map(|object| object.id));
     ids.extend(
         schematic
+            .document
+            .design_notes
+            .iter()
+            .map(|object| object.id),
+    );
+    ids.extend(
+        schematic
+            .document
             .documentation_shapes
             .iter()
             .map(|object| object.id),
     );
-    ids.extend(schematic.probes.iter().map(|object| object.id));
+    ids.extend(schematic.document.probes.iter().map(|object| object.id));
     ids.into_iter().collect()
 }
 
@@ -1239,7 +1246,7 @@ mod tests {
             ),
             governed: None,
         };
-        state.schematic.grid_size += 1;
+        state.schematic.document.grid_size += 1;
         assert!(validate_drawing_sheet_authority(&state, &authority).is_err());
     }
 

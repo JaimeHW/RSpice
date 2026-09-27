@@ -165,28 +165,28 @@ struct PreparedSchematicOwner {
 impl PreparedSchematicOwner {
     fn capture(schematic: SchematicState) -> Self {
         Self {
-            components: schematic.components,
-            wires: schematic.wires,
-            buses: schematic.buses,
-            bus_taps: schematic.bus_taps,
-            junctions: schematic.junctions,
-            net_labels: schematic.net_labels,
-            design_notes: schematic.design_notes,
-            documentation_shapes: schematic.documentation_shapes,
+            components: schematic.document.components,
+            wires: schematic.document.wires,
+            buses: schematic.document.buses,
+            bus_taps: schematic.document.bus_taps,
+            junctions: schematic.document.junctions,
+            net_labels: schematic.document.net_labels,
+            design_notes: schematic.document.design_notes,
+            documentation_shapes: schematic.document.documentation_shapes,
             selection: schematic.selection,
         }
     }
 
     fn restore(self) -> SchematicState {
         let mut schematic = SchematicState::default();
-        schematic.components = self.components;
-        schematic.wires = self.wires;
-        schematic.buses = self.buses;
-        schematic.bus_taps = self.bus_taps;
-        schematic.junctions = self.junctions;
-        schematic.net_labels = self.net_labels;
-        schematic.design_notes = self.design_notes;
-        schematic.documentation_shapes = self.documentation_shapes;
+        schematic.document.components = self.components;
+        schematic.document.wires = self.wires;
+        schematic.document.buses = self.buses;
+        schematic.document.bus_taps = self.bus_taps;
+        schematic.document.junctions = self.junctions;
+        schematic.document.net_labels = self.net_labels;
+        schematic.document.design_notes = self.design_notes;
+        schematic.document.documentation_shapes = self.documentation_shapes;
         schematic.selection = self.selection;
         schematic
     }
@@ -203,13 +203,13 @@ struct PreparedSchematicInterfaceOwner {
 impl PreparedSchematicInterfaceOwner {
     fn capture(schematic: SchematicState) -> Self {
         Self {
-            components: schematic.components,
+            components: schematic.document.components,
         }
     }
 
     fn restore(self) -> SchematicState {
         let mut schematic = SchematicState::default();
-        schematic.components = self.components;
+        schematic.document.components = self.components;
         schematic
     }
 }

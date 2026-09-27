@@ -166,6 +166,7 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
     let mut app = RSpiceApp::test_instance();
     app.state
         .schematic
+        .document
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
     let reference = app.state.workspace.active_view.clone();
@@ -255,6 +256,7 @@ fn legacy_output_page_setup_does_not_rewrite_document_policy() {
     let mut app = RSpiceApp::test_instance();
     app.state
         .schematic
+        .document
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
     let reference = app.state.workspace.active_view.clone();
@@ -267,7 +269,7 @@ fn legacy_output_page_setup_does_not_rewrite_document_policy() {
             &app.state,
         )
         .expect("legacy schematic resolves");
-    let policy_before = app.state.schematic.document_policy;
+    let policy_before = app.state.schematic.document.document_policy;
     let format = SchematicSheetFormat::try_custom(
         "Custom",
         300_123,
@@ -288,7 +290,7 @@ fn legacy_output_page_setup_does_not_rewrite_document_policy() {
     commit_authenticated_page_setup(&mut app, resolved, pending).unwrap();
 
     assert_eq!(
-        app.state.schematic.document_policy, policy_before,
+        app.state.schematic.document.document_policy, policy_before,
         "hardcopy output media must not mutate the authored schematic policy"
     );
     assert_eq!(app.state.schematic.undo_history.undo_description(), None);
@@ -305,6 +307,7 @@ fn page_setup_rejects_late_read_only_authority_without_partial_commit() {
     let mut app = RSpiceApp::test_instance();
     app.state
         .schematic
+        .document
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
     let reference = app.state.workspace.active_view.clone();
@@ -353,7 +356,7 @@ fn page_setup_rejects_late_read_only_authority_without_partial_commit() {
             .is_none()
     );
     assert_eq!(
-        app.state.schematic.document_policy.page_size,
+        app.state.schematic.document.document_policy.page_size,
         SchematicPageSize::A4
     );
 }
@@ -423,6 +426,7 @@ fn publication_reuses_only_the_exact_sealed_preview_plan() {
     let mut app = RSpiceApp::test_instance();
     app.state
         .schematic
+        .document
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
     let reference = app.state.workspace.active_view.clone();
@@ -470,6 +474,7 @@ fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
     let mut app = RSpiceApp::test_instance();
     app.state
         .schematic
+        .document
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
     let reference = app.state.workspace.active_view.clone();

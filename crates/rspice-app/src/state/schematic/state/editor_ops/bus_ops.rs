@@ -24,7 +24,7 @@ impl SchematicState {
         let mut created_id = None;
         self.with_undo("draw bus", |schematic| {
             let id = schematic.next_id();
-            schematic.buses.push(Bus { id, ..candidate });
+            schematic.document.buses.push(Bus { id, ..candidate });
             schematic.selection.clear();
             schematic.selection.select_bus(id);
             schematic.is_dirty = true;
@@ -36,7 +36,8 @@ impl SchematicState {
 
     /// Find the first bus whose polyline contains an exact grid position.
     pub fn bus_at(&self, position: Point) -> Option<u64> {
-        self.buses
+        self.document
+            .buses
             .iter()
             .find(|bus| bus.contains_point(position))
             .map(|bus| bus.id)
@@ -45,7 +46,8 @@ impl SchematicState {
     /// Find the nearest source point on any bus within a grid-unit radius.
     pub fn nearest_bus_at(&self, position: Point, radius: i32) -> Option<(u64, Point)> {
         let max_distance = i128::from(radius.max(0)).pow(2);
-        self.buses
+        self.document
+            .buses
             .iter()
             .filter_map(|bus| {
                 let (point, distance) = bus.nearest_point(position)?;
@@ -127,6 +129,7 @@ impl SchematicState {
             return Err(BusParseError::ReadOnly);
         }
         let bus = self
+            .document
             .buses
             .iter()
             .find(|bus| bus.id == bus_id)
@@ -135,7 +138,7 @@ impl SchematicState {
         let mut created_id = None;
         self.with_undo("place bus tap", |schematic| {
             let id = schematic.next_id();
-            schematic.bus_taps.push(BusTap { id, ..candidate });
+            schematic.document.bus_taps.push(BusTap { id, ..candidate });
             schematic.selection.clear();
             schematic.selection.select_bus_tap(id);
             schematic.is_dirty = true;
@@ -159,6 +162,7 @@ impl SchematicState {
             return Err(BusParseError::ReadOnly);
         }
         let source = self
+            .document
             .buses
             .iter()
             .find(|bus| bus.id == bus_id)
@@ -181,13 +185,18 @@ impl SchematicState {
 
         let mut created_id = None;
         self.with_undo("place bus tap", |schematic| {
-            if let Some(source) = schematic.buses.iter_mut().find(|bus| bus.id == bus_id) {
+            if let Some(source) = schematic
+                .document
+                .buses
+                .iter_mut()
+                .find(|bus| bus.id == bus_id)
+            {
                 source
                     .declaration
                     .get_or_insert_with(|| pending.bus_declaration.clone());
             }
             let id = schematic.next_id();
-            schematic.bus_taps.push(BusTap { id, ..candidate });
+            schematic.document.bus_taps.push(BusTap { id, ..candidate });
             schematic.selection.clear();
             schematic.selection.select_bus_tap(id);
             schematic.is_dirty = true;
@@ -199,16 +208,20 @@ impl SchematicState {
 
     /// Move a bus while preserving tap attachment at both ends.
     pub fn move_bus(&mut self, bus_id: u64, delta: Point) -> bool {
-        if self.read_only || delta == Point::origin() || !self.buses.iter().any(|b| b.id == bus_id)
+        if self.read_only
+            || delta == Point::origin()
+            || !self.document.buses.iter().any(|b| b.id == bus_id)
         {
             return false;
         }
         let target_taps: std::collections::HashSet<u64> = self
+            .document
             .buses
             .iter()
             .find(|bus| bus.id == bus_id)
             .map(|bus| {
-                self.bus_taps
+                self.document
+                    .bus_taps
                     .iter()
                     .filter(|tap| {
                         tap.target_kind() == BusTargetKind::Bus
@@ -219,10 +232,15 @@ impl SchematicState {
             })
             .unwrap_or_default();
         self.with_undo("move bus", |schematic| {
-            if let Some(bus) = schematic.buses.iter_mut().find(|bus| bus.id == bus_id) {
+            if let Some(bus) = schematic
+                .document
+                .buses
+                .iter_mut()
+                .find(|bus| bus.id == bus_id)
+            {
                 bus.translate(delta);
             }
-            for tap in &mut schematic.bus_taps {
+            for tap in &mut schematic.document.bus_taps {
                 if tap.bus_id == bus_id {
                     tap.bus_point = offset_point(tap.bus_point, delta);
                 }
@@ -239,22 +257,27 @@ impl SchematicState {
     pub fn move_bus_tap(&mut self, tap_id: u64, delta: Point) -> bool {
         if self.read_only
             || delta == Point::origin()
-            || !self.bus_taps.iter().any(|tap| tap.id == tap_id)
+            || !self.document.bus_taps.iter().any(|tap| tap.id == tap_id)
         {
             return false;
         }
-        let Some(tap) = self.bus_taps.iter().find(|tap| tap.id == tap_id) else {
+        let Some(tap) = self.document.bus_taps.iter().find(|tap| tap.id == tap_id) else {
             return false;
         };
         let moved_source = offset_point(tap.bus_point, delta);
-        let Some(bus) = self.buses.iter().find(|bus| bus.id == tap.bus_id) else {
+        let Some(bus) = self.document.buses.iter().find(|bus| bus.id == tap.bus_id) else {
             return false;
         };
         if !bus.contains_point(moved_source) {
             return false;
         }
         self.with_undo("move bus tap", |schematic| {
-            if let Some(tap) = schematic.bus_taps.iter_mut().find(|tap| tap.id == tap_id) {
+            if let Some(tap) = schematic
+                .document
+                .bus_taps
+                .iter_mut()
+                .find(|tap| tap.id == tap_id)
+            {
                 tap.translate(delta);
             }
             schematic.is_dirty = true;
@@ -279,8 +302,8 @@ impl SchematicState {
         }
 
         let changed = self.with_undo("edit bus properties", move |schematic| {
-            schematic.buses = candidate_buses;
-            schematic.bus_taps = candidate_taps;
+            schematic.document.buses = candidate_buses;
+            schematic.document.bus_taps = candidate_taps;
             schematic.is_dirty = true;
             schematic.bump_topology_version();
         });
@@ -326,7 +349,12 @@ impl SchematicState {
 
         let tap_id = candidate.id;
         let changed = self.with_undo("edit bus tap properties", move |schematic| {
-            if let Some(tap) = schematic.bus_taps.iter_mut().find(|tap| tap.id == tap_id) {
+            if let Some(tap) = schematic
+                .document
+                .bus_taps
+                .iter_mut()
+                .find(|tap| tap.id == tap_id)
+            {
                 *tap = candidate;
             }
             schematic.is_dirty = true;
@@ -366,6 +394,7 @@ fn build_bus_property_candidates(
         return Err(BusParseError::ReadOnly);
     }
     let current = schematic
+        .document
         .buses
         .iter()
         .find(|bus| bus.id == expected.id)
@@ -378,7 +407,7 @@ fn build_bus_property_candidates(
         .as_ref()
         .zip(declaration)
         .is_some_and(|(before, after)| before.direction() != after.direction());
-    let mut candidate_buses = schematic.buses.clone();
+    let mut candidate_buses = schematic.document.buses.clone();
     let candidate = candidate_buses
         .iter_mut()
         .find(|bus| bus.id == expected.id)
@@ -388,9 +417,9 @@ fn build_bus_property_candidates(
 
     let connectivity = bus_connectivity(schematic, expected.id);
     let connected = &connectivity.connected;
-    let mut candidate_taps = schematic.bus_taps.clone();
+    let mut candidate_taps = schematic.document.bus_taps.clone();
     let Some(selected_declaration) = declaration else {
-        let has_dependency = schematic.bus_taps.iter().any(|tap| {
+        let has_dependency = schematic.document.bus_taps.iter().any(|tap| {
             tap.bus_id == expected.id
                 || (tap.target_kind() == BusTargetKind::Bus
                     && connectivity
@@ -444,6 +473,7 @@ fn build_bus_property_candidates(
             .map(|index| &candidate_buses[*index])
             .ok_or(BusParseError::InvalidBusReference)?;
         let source_before = schematic
+            .document
             .buses
             .iter()
             .find(|bus| bus.id == tap.bus_id)
@@ -490,7 +520,7 @@ fn build_bus_property_candidates(
             tap.slice.notation = source_declaration.notation;
         }
         tap.validate_against_bus(source)?;
-        validate_tap_destination(&schematic.wires, &candidate_buses, tap)?;
+        validate_tap_destination(&schematic.document.wires, &candidate_buses, tap)?;
     }
     let impact = property_impact(
         schematic,
@@ -514,6 +544,7 @@ fn build_bus_tap_property_candidate(
         return Err(BusParseError::ReadOnly);
     }
     let current = schematic
+        .document
         .bus_taps
         .iter()
         .find(|tap| tap.id == expected.id)
@@ -522,6 +553,7 @@ fn build_bus_tap_property_candidate(
         return Err(BusParseError::StaleObject);
     }
     let bus = schematic
+        .document
         .buses
         .iter()
         .find(|bus| bus.id == bus_id)
@@ -534,7 +566,11 @@ fn build_bus_tap_property_candidate(
         slice,
         orientation,
     )?;
-    validate_tap_destination(&schematic.wires, &schematic.buses, &candidate)?;
+    validate_tap_destination(
+        &schematic.document.wires,
+        &schematic.document.buses,
+        &candidate,
+    )?;
     Ok(candidate)
 }
 
@@ -575,16 +611,18 @@ struct BusConnectivity {
 
 fn bus_connectivity(schematic: &SchematicState, seed: u64) -> BusConnectivity {
     let mut adjacency: std::collections::HashMap<u64, Vec<u64>> = schematic
+        .document
         .buses
         .iter()
         .map(|bus| (bus.id, Vec::new()))
         .collect();
     let mut targets_by_tap = std::collections::HashMap::new();
-    for tap in &schematic.bus_taps {
+    for tap in &schematic.document.bus_taps {
         if tap.target_kind() != BusTargetKind::Bus {
             continue;
         }
         let targets: Vec<u64> = schematic
+            .document
             .buses
             .iter()
             .filter(|bus| bus.id != tap.bus_id && bus.contains_point(tap.connection_point))
@@ -622,12 +660,14 @@ fn property_impact(
     BusPropertyImpact {
         connected_buses,
         buses_changed: schematic
+            .document
             .buses
             .iter()
             .zip(candidate_buses)
             .filter(|(stored, candidate)| stored != candidate)
             .count(),
         taps_changed: schematic
+            .document
             .bus_taps
             .iter()
             .zip(candidate_taps)
@@ -705,10 +745,10 @@ mod tests {
         state.start_bus(Point::new(0, 0), None).unwrap();
         state.extend_bus(Point::new(10, 10));
         let id = state.finish_bus().unwrap().unwrap();
-        assert_eq!(state.buses.len(), 1);
-        assert_eq!(state.buses[0].id, id);
+        assert_eq!(state.document.buses.len(), 1);
+        assert_eq!(state.document.buses[0].id, id);
         assert!(state.undo());
-        assert!(state.buses.is_empty());
+        assert!(state.document.buses.is_empty());
     }
 
     #[test]
@@ -725,7 +765,7 @@ mod tests {
                 BusTapOrientation::Down,
             )
             .unwrap();
-        assert_eq!(state.bus_taps[0].id, tap_id);
+        assert_eq!(state.document.bus_taps[0].id, tap_id);
         assert!(
             state
                 .place_bus_tap(
@@ -738,7 +778,7 @@ mod tests {
                 .is_ok()
         );
         assert!(state.undo());
-        assert_eq!(state.bus_taps.len(), 1);
+        assert_eq!(state.document.bus_taps.len(), 1);
     }
 
     #[test]
@@ -757,11 +797,14 @@ mod tests {
         state
             .place_configured_bus_tap(bus_id, Point::new(5, 0), Point::new(5, 5), &pending)
             .unwrap();
-        assert_eq!(state.buses[0].declaration, Some(pending.bus_declaration));
-        assert_eq!(state.bus_taps.len(), 1);
+        assert_eq!(
+            state.document.buses[0].declaration,
+            Some(pending.bus_declaration)
+        );
+        assert_eq!(state.document.bus_taps.len(), 1);
         assert!(state.undo());
-        assert_eq!(state.buses[0].declaration, None);
-        assert!(state.bus_taps.is_empty());
+        assert_eq!(state.document.buses[0].declaration, None);
+        assert!(state.document.bus_taps.is_empty());
     }
 
     #[test]
@@ -774,7 +817,7 @@ mod tests {
             state.add_bus(vec![Point::new(0, 0), Point::new(5, 0)], None),
             Err(BusParseError::ReadOnly)
         );
-        assert!(state.buses.is_empty());
+        assert!(state.document.buses.is_empty());
         assert!(!state.can_undo());
     }
 
@@ -794,6 +837,7 @@ mod tests {
         let mut state = SchematicState::default();
         let bus_id = declared_bus(&mut state);
         state
+            .document
             .wires
             .push(Wire::segment(90, Point::new(0, 5), Point::new(20, 5)));
         state
@@ -806,7 +850,7 @@ mod tests {
             )
             .unwrap();
         state.clear_undo_history();
-        let expected = state.buses[0].clone();
+        let expected = state.document.buses[0].clone();
 
         assert!(
             state
@@ -816,17 +860,20 @@ mod tests {
                 )
                 .unwrap()
         );
-        assert_eq!(state.buses[0].points, expected.points);
-        assert_eq!(state.bus_taps[0].bus_point, Point::new(5, 0));
-        assert_eq!(state.bus_taps[0].connection_point, Point::new(5, 5));
+        assert_eq!(state.document.buses[0].points, expected.points);
+        assert_eq!(state.document.bus_taps[0].bus_point, Point::new(5, 0));
         assert_eq!(
-            state.buses[0].declaration,
+            state.document.bus_taps[0].connection_point,
+            Point::new(5, 5)
+        );
+        assert_eq!(
+            state.document.buses[0].declaration,
             Some(BusDeclaration::parse("DATA[15:0]").unwrap())
         );
         assert_eq!(state.undo_history.undo_count(), 1);
         assert!(state.undo());
-        assert_eq!(state.buses[0], expected);
-        assert_eq!(state.bus_taps[0].bus_point, Point::new(5, 0));
+        assert_eq!(state.document.buses[0], expected);
+        assert_eq!(state.document.bus_taps[0].bus_point, Point::new(5, 0));
     }
 
     #[test]
@@ -843,14 +890,14 @@ mod tests {
             )
             .unwrap();
         state.clear_undo_history();
-        let expected = state.buses[0].clone();
+        let expected = state.document.buses[0].clone();
 
         assert_eq!(
             state
                 .edit_bus_properties(&expected, Some(BusDeclaration::parse("DATA[3:0]").unwrap()),),
             Err(BusParseError::SelectorOutOfRange)
         );
-        assert_eq!(state.buses[0], expected);
+        assert_eq!(state.document.buses[0], expected);
         assert!(!state.can_undo());
     }
 
@@ -874,7 +921,7 @@ mod tests {
             )
             .unwrap();
         state.clear_undo_history();
-        let expected = state.buses[0].clone();
+        let expected = state.document.buses[0].clone();
 
         assert!(
             state
@@ -884,18 +931,18 @@ mod tests {
                 )
                 .unwrap()
         );
-        assert_eq!(state.buses[0].points, expected.points);
+        assert_eq!(state.document.buses[0].points, expected.points);
         assert_eq!(
-            state.bus_taps[0].slice,
+            state.document.bus_taps[0].slice,
             BusSlice::parse("ADDR<4:6>").unwrap()
         );
         assert_eq!(
-            state.buses[1].declaration,
+            state.document.buses[1].declaration,
             Some(BusDeclaration::parse("ADDR<4:6>").unwrap())
         );
         assert!(state.undo());
         assert_eq!(
-            state.bus_taps[0].slice,
+            state.document.bus_taps[0].slice,
             BusSlice::parse("DATA[6:4]").unwrap()
         );
     }
@@ -927,6 +974,7 @@ mod tests {
         state.clear_undo_history();
         let before = state.clone();
         let expected = state
+            .document
             .buses
             .iter()
             .find(|bus| bus.id == selected)
@@ -940,6 +988,7 @@ mod tests {
         );
         assert_eq!(
             state
+                .document
                 .buses
                 .iter()
                 .find(|bus| bus.id == connected)
@@ -948,13 +997,13 @@ mod tests {
             Some(BusDeclaration::parse("ADDR[0:3]").unwrap())
         );
         assert_eq!(
-            state.bus_taps[0].slice,
+            state.document.bus_taps[0].slice,
             BusSlice::parse("ADDR[0:3]").unwrap()
         );
         assert_eq!(state.undo_history.undo_count(), 1);
         assert!(state.undo());
-        assert_eq!(state.buses, before.buses);
-        assert_eq!(state.bus_taps, before.bus_taps);
+        assert_eq!(state.document.buses, before.document.buses);
+        assert_eq!(state.document.bus_taps, before.document.bus_taps);
     }
 
     #[test]
@@ -972,6 +1021,7 @@ mod tests {
             .unwrap();
         state.clear_undo_history();
         let expected = state
+            .document
             .bus_taps
             .iter()
             .find(|tap| tap.id == tap_id)
@@ -990,8 +1040,14 @@ mod tests {
                 )
                 .unwrap()
         );
-        assert_eq!(state.bus_taps[0].slice, BusSlice::parse("DATA[4]").unwrap());
-        assert_eq!(state.bus_taps[0].orientation, BusTapOrientation::Left);
+        assert_eq!(
+            state.document.bus_taps[0].slice,
+            BusSlice::parse("DATA[4]").unwrap()
+        );
+        assert_eq!(
+            state.document.bus_taps[0].orientation,
+            BusTapOrientation::Left
+        );
         assert_eq!(state.undo_history.undo_count(), 1);
     }
 
@@ -1010,6 +1066,7 @@ mod tests {
             .unwrap();
         state.clear_undo_history();
         let expected = state
+            .document
             .bus_taps
             .iter()
             .find(|tap| tap.id == tap_id)
@@ -1028,7 +1085,7 @@ mod tests {
                 )
                 .unwrap()
         );
-        let edited = state.bus_taps[0].clone();
+        let edited = state.document.bus_taps[0].clone();
         assert_eq!(edited.slice, BusSlice::parse("DATA[0:3]").unwrap());
         assert_eq!(edited.orientation, BusTapOrientation::Up);
         assert_eq!(
@@ -1042,7 +1099,7 @@ mod tests {
             ),
             Err(BusParseError::SelectorOutOfRange)
         );
-        assert_eq!(state.bus_taps[0], edited);
+        assert_eq!(state.document.bus_taps[0], edited);
     }
 
     #[test]
@@ -1068,22 +1125,25 @@ mod tests {
             )
             .unwrap();
         state.clear_undo_history();
-        let before_taps = state.bus_taps.clone();
-        let expected = state.buses[0].clone();
+        let before_taps = state.document.bus_taps.clone();
+        let expected = state.document.buses[0].clone();
 
         assert!(
             state
                 .edit_bus_properties(&expected, Some(BusDeclaration::parse("ADDR<0:7>").unwrap()),)
                 .unwrap()
         );
-        assert_eq!(state.bus_taps[0].slice, BusSlice::parse("ADDR<3>").unwrap());
         assert_eq!(
-            state.bus_taps[1].slice,
+            state.document.bus_taps[0].slice,
+            BusSlice::parse("ADDR<3>").unwrap()
+        );
+        assert_eq!(
+            state.document.bus_taps[1].slice,
             BusSlice::parse("ADDR<4:6>").unwrap()
         );
         assert_eq!(state.undo_history.undo_count(), 1);
         assert!(state.undo());
-        assert_eq!(state.bus_taps, before_taps);
+        assert_eq!(state.document.bus_taps, before_taps);
     }
 
     #[test]
@@ -1097,9 +1157,11 @@ mod tests {
             )
             .unwrap();
         state
+            .document
             .wires
             .push(Wire::segment(90, Point::new(0, 5), Point::new(20, 5)));
         state
+            .document
             .wires
             .push(Wire::segment(91, Point::new(0, 15), Point::new(20, 15)));
         let tap_id = state
@@ -1113,6 +1175,7 @@ mod tests {
             .unwrap();
         state.clear_undo_history();
         let expected = state
+            .document
             .bus_taps
             .iter()
             .find(|tap| tap.id == tap_id)
@@ -1131,12 +1194,15 @@ mod tests {
                 )
                 .unwrap()
         );
-        assert_eq!(state.bus_taps[0].bus_id, second);
-        assert_eq!(state.bus_taps[0].slice, BusSlice::parse("ADDR[2]").unwrap());
+        assert_eq!(state.document.bus_taps[0].bus_id, second);
+        assert_eq!(
+            state.document.bus_taps[0].slice,
+            BusSlice::parse("ADDR[2]").unwrap()
+        );
         assert!(state.undo());
-        assert_eq!(state.bus_taps[0], expected);
+        assert_eq!(state.document.bus_taps[0], expected);
 
-        state.bus_taps[0].orientation = BusTapOrientation::Left;
+        state.document.bus_taps[0].orientation = BusTapOrientation::Left;
         assert_eq!(
             state.edit_bus_tap_properties(
                 &expected,
@@ -1155,6 +1221,7 @@ mod tests {
         let mut state = SchematicState::default();
         let source = declared_bus(&mut state);
         state
+            .document
             .wires
             .push(Wire::segment(90, Point::new(0, 5), Point::new(20, 5)));
         let tap_id = state
@@ -1168,6 +1235,7 @@ mod tests {
             .unwrap();
         state.clear_undo_history();
         let expected = state
+            .document
             .bus_taps
             .iter()
             .find(|tap| tap.id == tap_id)
@@ -1185,7 +1253,7 @@ mod tests {
             ),
             Err(BusParseError::InvalidDestination)
         );
-        assert_eq!(state.bus_taps[0], expected);
+        assert_eq!(state.document.bus_taps[0], expected);
         assert!(!state.can_undo());
     }
 
@@ -1210,6 +1278,7 @@ mod tests {
             .unwrap();
         state.clear_undo_history();
         let expected = state
+            .document
             .bus_taps
             .iter()
             .find(|tap| tap.id == tap_id)
@@ -1227,7 +1296,7 @@ mod tests {
             ),
             Err(BusParseError::InvalidDestination)
         );
-        assert_eq!(state.bus_taps[0], expected);
+        assert_eq!(state.document.bus_taps[0], expected);
         assert!(!state.can_undo());
     }
 
@@ -1245,6 +1314,7 @@ mod tests {
             )
             .unwrap();
         let scalar_expected = scalar_state
+            .document
             .bus_taps
             .iter()
             .find(|tap| tap.id == scalar_tap)
@@ -1270,6 +1340,7 @@ mod tests {
             )
             .unwrap();
         scalar_state
+            .document
             .wires
             .push(Wire::segment(90, Point::new(0, 5), Point::new(20, 5)));
         assert_eq!(
@@ -1308,6 +1379,7 @@ mod tests {
             )
             .unwrap();
         let vector_expected = vector_state
+            .document
             .bus_taps
             .iter()
             .find(|tap| tap.id == vector_tap)
@@ -1327,9 +1399,11 @@ mod tests {
         );
 
         vector_state
+            .document
             .buses
             .retain(|bus| bus.id == vector_source || bus.id == first_target);
         vector_state
+            .document
             .wires
             .push(Wire::segment(91, Point::new(0, 5), Point::new(20, 5)));
         assert_eq!(
@@ -1370,9 +1444,10 @@ mod tests {
             )
             .unwrap();
         state.clear_undo_history();
-        let before_buses = state.buses.clone();
-        let before_taps = state.bus_taps.clone();
+        let before_buses = state.document.buses.clone();
+        let before_taps = state.document.bus_taps.clone();
         let expected = state
+            .document
             .buses
             .iter()
             .find(|bus| bus.id == destination)
@@ -1389,6 +1464,7 @@ mod tests {
         );
         assert_eq!(
             state
+                .document
                 .buses
                 .iter()
                 .find(|bus| bus.id == destination)
@@ -1403,6 +1479,7 @@ mod tests {
         );
         assert_eq!(
             state
+                .document
                 .buses
                 .iter()
                 .find(|bus| bus.id == source)
@@ -1411,17 +1488,18 @@ mod tests {
             Some(BusDeclaration::parse("RENAMED[3:0]").unwrap())
         );
         assert_eq!(
-            state.bus_taps[0].slice,
+            state.document.bus_taps[0].slice,
             BusSlice::parse("RENAMED[3:0]").unwrap()
         );
         assert_eq!(state.undo_history.undo_count(), 1);
-        let after_buses = state.buses.clone();
-        let after_taps = state.bus_taps.clone();
+        let after_buses = state.document.buses.clone();
+        let after_taps = state.document.bus_taps.clone();
         assert!(state.undo());
-        assert_eq!(state.buses, before_buses);
-        assert_eq!(state.bus_taps, before_taps);
+        assert_eq!(state.document.buses, before_buses);
+        assert_eq!(state.document.bus_taps, before_taps);
         assert_eq!(
             state
+                .document
                 .buses
                 .iter()
                 .find(|bus| bus.id == destination)
@@ -1429,10 +1507,10 @@ mod tests {
             &expected
         );
         assert!(state.redo());
-        assert_eq!(state.buses, after_buses);
-        assert_eq!(state.bus_taps, after_taps);
+        assert_eq!(state.document.buses, after_buses);
+        assert_eq!(state.document.bus_taps, after_taps);
         assert_eq!(
-            state.bus_taps[0].slice,
+            state.document.bus_taps[0].slice,
             BusSlice::parse("RENAMED[3:0]").unwrap()
         );
     }
@@ -1444,7 +1522,7 @@ mod tests {
         state.clear_undo_history();
         state.is_dirty = false;
         let version = state.topology_version();
-        let expected = state.buses[0].clone();
+        let expected = state.document.buses[0].clone();
         let declaration = expected.declaration.clone().expect("declared bus");
 
         let impact = state

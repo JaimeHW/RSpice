@@ -946,7 +946,7 @@ mod tests {
         state.sim_setup.stb.probe_source = "VLOOP1".to_owned();
         state.sim_setup.stb.probe_reference = StbProbeReference::Placed;
         // Another probe is drawn, so the remedy has something to offer.
-        state.schematic.components.push(
+        state.schematic.document.components.push(
             Component::new(1, ComponentType::LoopProbe, Point::new(0, 0))
                 .with_name_value("VLOOP2", ""),
         );
@@ -969,7 +969,7 @@ mod tests {
         state.sim_setup.stb.ensure_initialized();
         state.sim_setup.stb.probe_source = "VLOOP1".to_owned();
         state.sim_setup.stb.probe_reference = StbProbeReference::Placed;
-        state.schematic.components.push(
+        state.schematic.document.components.push(
             Component::new(1, ComponentType::LoopProbe, Point::new(0, 0))
                 .with_name_value("VLOOP1", ""),
         );
@@ -998,7 +998,7 @@ mod tests {
         state.sim_setup.pstb.ensure_initialized();
         state.sim_setup.pstb.probe = "VLOOP1".to_owned();
         state.sim_setup.pstb.probe_reference = StbProbeReference::Placed;
-        state.schematic.components.push(
+        state.schematic.document.components.push(
             Component::new(1, ComponentType::LoopProbe, Point::new(0, 0))
                 .with_name_value("VLOOP2", ""),
         );

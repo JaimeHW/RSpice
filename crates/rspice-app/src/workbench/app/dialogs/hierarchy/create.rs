@@ -59,7 +59,7 @@ pub(crate) fn create_hierarchy_available(state: &AppState) -> bool {
         && !state.schematic.selection.components.is_empty()
         && state.schematic.selection.count() == state.schematic.selection.components.len()
         && state.schematic.selection.components.iter().all(|id| {
-            state.schematic.components.iter().any(|component| {
+            state.schematic.document.components.iter().any(|component| {
                 component.id == *id && component.kind != crate::state::ComponentType::Port
             })
         })
@@ -425,7 +425,7 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
         }
         NetLabel::validate_name(
             draft.name.trim(),
-            state.schematic.document_policy.net_naming,
+            state.schematic.document.document_policy.net_naming,
         )
         .map_err(|error| format!("Port '{}': {error}", draft.name.trim()))?;
         if !names.insert(draft.name.trim().to_ascii_lowercase()) {
@@ -490,12 +490,14 @@ fn source_plan(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
     let symbols = SchematicSymbolContext::from_state(state);
     let component_bounds = state
         .schematic
+        .document
         .components
         .iter()
         .map(|component| (component.id, symbols.component_bounds_tuple(component)))
         .collect::<std::collections::HashMap<_, _>>();
     let terminals = state
         .schematic
+        .document
         .components
         .iter()
         .flat_map(|component| {
@@ -569,6 +571,7 @@ fn resolved_terminal_contract(
         return fallback;
     };
     master
+        .document
         .components
         .iter()
         .filter_map(|port| port.port_contract().map(|contract| (port, contract)))
@@ -771,6 +774,7 @@ fn source_schematic_with_canonical_connections(state: &AppState) -> crate::state
     let symbols = SchematicSymbolContext::from_state(state);
     let terminals = state
         .schematic
+        .document
         .components
         .iter()
         .flat_map(|component| {
@@ -1012,6 +1016,7 @@ mod tests {
                 .schematic_buffers
                 .get(&parent_ref.key())
                 .expect("parent buffer")
+                .document
                 .components
                 .iter()
                 .any(|component| component.kind == ComponentType::CellInstance)
@@ -1058,6 +1063,7 @@ mod tests {
             .add_component(ComponentType::Resistor, Point::origin());
         let selected_name = state
             .schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == selected)

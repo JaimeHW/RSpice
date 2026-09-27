@@ -50,6 +50,7 @@ fn state_with_open_symbol(parent_instances: usize) -> AppState {
     for (index, name) in ["IN", "OUT"].into_iter().enumerate() {
         let port = declaring.add_component(ComponentType::Port, Point::new(0, index as i32 * 20));
         declaring
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == port)
@@ -80,16 +81,16 @@ fn state_with_open_symbol(parent_instances: usize) -> AppState {
 fn place_instance(schematic: &mut SchematicState, id: u64, x: i32) {
     let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
     binding.bind_interface(&interface());
-    schematic.components.push(
+    schematic.document.components.push(
         Component::new(id, ComponentType::CellInstance, Point::new(x, 0))
             .with_library_cell(binding),
     );
-    schematic.wires.push(Wire::segment(
+    schematic.document.wires.push(Wire::segment(
         id + 50,
         Point::new(x, 0),
         Point::new(x + 10, 0),
     ));
-    schematic.connections.push(WireConnection {
+    schematic.document.connections.push(WireConnection {
         wire_id: id + 50,
         point_index: 0,
         component_id: id,
@@ -103,6 +104,7 @@ fn terminal_names(state: &AppState) -> Vec<String> {
         .schematic_buffers
         .get(PARENT)
         .expect("the parent buffer exists")
+        .document
         .connections
         .iter()
         .map(|connection| connection.terminal_name.clone())
@@ -110,6 +112,7 @@ fn terminal_names(state: &AppState) -> Vec<String> {
     names.extend(
         state
             .schematic
+            .document
             .connections
             .iter()
             .map(|connection| connection.terminal_name.clone()),
@@ -349,7 +352,7 @@ fn a_pin_rename_reaches_every_placed_instance() {
         "every placed instance follows the pin, in stored buffers and on the \
          live sheet alike"
     );
-    for component in &state.schematic.components {
+    for component in &state.schematic.document.components {
         let Some(binding) = component.library_cell.as_ref() else {
             continue;
         };

@@ -1010,7 +1010,7 @@ fn both_loop_stability_forms_offer_the_probes_the_drawing_holds() {
 #[cfg(not(target_arch = "wasm32"))]
 fn placed_ports(ports: &[(&str, &str)]) -> Vec<crate::simulation::placed_sources::PlacedRfPort> {
     let mut schematic = crate::state::SchematicState::default();
-    schematic.components = ports
+    schematic.document.components = ports
         .iter()
         .enumerate()
         .map(|(index, (name, params))| {

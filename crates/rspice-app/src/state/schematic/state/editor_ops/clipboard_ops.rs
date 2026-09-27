@@ -49,6 +49,7 @@ impl SchematicState {
         mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
     ) -> ClipboardData {
         let selected_comps: Vec<Component> = self
+            .document
             .components
             .iter()
             .filter(|c| self.selection.has_component(c.id))
@@ -64,7 +65,7 @@ impl SchematicState {
         // Find wires that have both endpoints at selected component terminals
         let mut wires_to_copy: Vec<Wire> = Vec::new();
 
-        for wire in &self.wires {
+        for wire in &self.document.wires {
             // Check if explicitly selected
             if self.selection.has_wire(wire.id) {
                 if wire.points.len() >= 2 {
@@ -90,6 +91,7 @@ impl SchematicState {
         // Junction dots that sit on a copied wire travel with the selection;
         // a pasted multi-way joint must keep its explicit connection dots.
         let mut junctions_to_copy: Vec<Point> = self
+            .document
             .junctions
             .iter()
             .map(|j| j.pos)
@@ -104,18 +106,21 @@ impl SchematicState {
         let explicitly_selected_bus_ids = self.selection.buses.clone();
         let mut bus_ids_to_copy = explicitly_selected_bus_ids.clone();
         bus_ids_to_copy.extend(
-            self.bus_taps
+            self.document
+                .bus_taps
                 .iter()
                 .filter(|tap| self.selection.has_bus_tap(tap.id))
                 .map(|tap| tap.bus_id),
         );
         let buses_to_copy: Vec<Bus> = self
+            .document
             .buses
             .iter()
             .filter(|bus| bus_ids_to_copy.contains(&bus.id))
             .cloned()
             .collect();
         let bus_taps_to_copy: Vec<BusTap> = self
+            .document
             .bus_taps
             .iter()
             .filter(|tap| {
@@ -125,24 +130,28 @@ impl SchematicState {
             .cloned()
             .collect();
         let net_labels_to_copy: Vec<NetLabel> = self
+            .document
             .net_labels
             .iter()
             .filter(|label| self.selection.has_net_label(label.id))
             .cloned()
             .collect();
         let design_notes_to_copy: Vec<DesignNote> = self
+            .document
             .design_notes
             .iter()
             .filter(|note| self.selection.has_design_note(note.id))
             .cloned()
             .collect();
         let documentation_shapes_to_copy: Vec<DocumentationShape> = self
+            .document
             .documentation_shapes
             .iter()
             .filter(|shape| self.selection.has_documentation_shape(shape.id))
             .cloned()
             .collect();
         let probes_to_copy: Vec<SchematicProbe> = self
+            .document
             .probes
             .iter()
             .filter(|probe| self.selection.has_probe(probe.id))
@@ -192,7 +201,8 @@ impl SchematicState {
         // the junction tool, then reject it before opening an undo transaction
         // unless at least one translated marker would create a new connection.
         let paste_pos = if junction_only {
-            let Some(candidate) = self.nearest_junction_candidate(pos, self.grid_size) else {
+            let Some(candidate) = self.nearest_junction_candidate(pos, self.document.grid_size)
+            else {
                 return Ok(false);
             };
             candidate
@@ -279,7 +289,7 @@ impl SchematicState {
                 s.selection.select_component(new_id);
             }
             references.apply(&mut copied_components);
-            s.components.extend(copied_components);
+            s.document.components.extend(copied_components);
 
             // Paste wires with new IDs
             for wire in clipboard_wires {
@@ -294,7 +304,7 @@ impl SchematicState {
                     .iter()
                     .map(|p| Point::new(p.x.saturating_add(offset_x), p.y.saturating_add(offset_y)))
                     .collect();
-                s.wires.push(Wire::new(new_id, new_points));
+                s.document.wires.push(Wire::new(new_id, new_points));
                 s.selection.select_wire(new_id);
             }
 
@@ -312,7 +322,7 @@ impl SchematicState {
                     label.pos.x.saturating_add(offset_x),
                     label.pos.y.saturating_add(offset_y),
                 );
-                s.net_labels.push(label);
+                s.document.net_labels.push(label);
                 s.selection.select_net_label(new_id);
             }
 
@@ -334,7 +344,7 @@ impl SchematicState {
                     s.selection.clear();
                     committed = true;
                 }
-                s.design_notes.push(new_note);
+                s.document.design_notes.push(new_note);
                 s.selection.select_design_note(new_id);
             }
 
@@ -352,7 +362,7 @@ impl SchematicState {
                 }
                 let new_id = s.next_id();
                 shape.id = new_id;
-                s.documentation_shapes.push(shape);
+                s.document.documentation_shapes.push(shape);
                 s.selection.select_documentation_shape(new_id);
             }
 
@@ -379,7 +389,7 @@ impl SchematicState {
                     s.selection.clear();
                     committed = true;
                 }
-                s.probes.push(probe);
+                s.document.probes.push(probe);
                 s.selection.select_probe(new_id);
             }
 
@@ -399,7 +409,7 @@ impl SchematicState {
                 }
                 let new_id = s.next_id();
                 bus.id = new_id;
-                s.buses.push(bus);
+                s.document.buses.push(bus);
                 bus_id_map.entry(old_id).or_insert(new_id);
                 s.selection.select_bus(new_id);
             }
@@ -410,7 +420,7 @@ impl SchematicState {
                 };
                 tap.bus_id = new_bus_id;
                 tap.translate(Point::new(offset_x, offset_y));
-                let Some(source) = s.buses.iter().find(|bus| bus.id == new_bus_id) else {
+                let Some(source) = s.document.buses.iter().find(|bus| bus.id == new_bus_id) else {
                     continue;
                 };
                 if tap.validate_against_bus(source).is_ok() {
@@ -421,7 +431,7 @@ impl SchematicState {
                     }
                     tap.id = s.next_id();
                     let id = tap.id;
-                    s.bus_taps.push(tap);
+                    s.document.bus_taps.push(tap);
                     s.selection.select_bus_tap(id);
                 }
             }
@@ -437,7 +447,8 @@ impl SchematicState {
                 let valid_target = if junction_only {
                     s.nearest_junction_candidate(target, 0) == Some(target)
                 } else {
-                    s.wires
+                    s.document
+                        .wires
                         .iter()
                         .filter(|wire| wire.contains_point(target))
                         .map(|wire| wire.id)
@@ -481,7 +492,7 @@ mod tests {
             "Check bias path",
         )
         .unwrap();
-        schematic.design_notes.push(note.clone());
+        schematic.document.design_notes.push(note.clone());
         schematic.selection.select_only_design_note(note.id);
         schematic.copy_selection();
         assert_eq!(schematic.clipboard.origin, note.pos);
@@ -489,8 +500,8 @@ mod tests {
 
         let topology = schematic.topology_version();
         assert!(schematic.paste_at(Point::new(100, 120)));
-        assert_eq!(schematic.design_notes.len(), 2);
-        let pasted = schematic.design_notes.last().unwrap();
+        assert_eq!(schematic.document.design_notes.len(), 2);
+        let pasted = schematic.document.design_notes.last().unwrap();
         assert_ne!(pasted.id, note.id);
         assert_eq!(pasted.pos, Point::new(100, 120));
         assert_eq!(pasted.kind, DesignNoteKind::ReviewNote);
@@ -501,18 +512,21 @@ mod tests {
         );
         assert_eq!(schematic.topology_version(), topology);
         assert!(schematic.undo());
-        assert_eq!(schematic.design_notes, vec![note]);
+        assert_eq!(schematic.document.design_notes, vec![note]);
         assert_eq!(schematic.topology_version(), topology);
     }
 
     #[test]
     fn clipboard_drops_malformed_wires_from_corrupt_import_state() {
         let mut schematic = SchematicState::default();
-        schematic.wires.push(Wire::new(10, Vec::new()));
-        schematic.wires.push(Wire::new(11, vec![Point::new(5, 5)]));
+        schematic.document.wires.push(Wire::new(10, Vec::new()));
+        schematic
+            .document
+            .wires
+            .push(Wire::new(11, vec![Point::new(5, 5)]));
         schematic.selection.select_wire(10);
         schematic.selection.select_wire(11);
-        let original_wire_count = schematic.wires.len();
+        let original_wire_count = schematic.document.wires.len();
 
         schematic.copy_selection();
 
@@ -522,7 +536,7 @@ mod tests {
         );
         schematic.paste_at(Point::new(20, 20));
         assert_eq!(
-            schematic.wires.len(),
+            schematic.document.wires.len(),
             original_wire_count,
             "paste must not create additional invalid wires"
         );
@@ -533,7 +547,7 @@ mod tests {
         let source = Point::new(20, 20);
         let target = Point::new(80, 80);
         let mut schematic = SchematicState::default();
-        schematic.wires = vec![
+        schematic.document.wires = vec![
             Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
             Wire::new(2, vec![Point::new(20, 0), Point::new(20, 40)]),
             Wire::new(3, vec![Point::new(60, 80), Point::new(100, 80)]),
@@ -556,7 +570,7 @@ mod tests {
     fn junction_only_paste_rejects_empty_space_without_an_undo_step() {
         let source = Point::new(20, 20);
         let mut schematic = SchematicState::default();
-        schematic.wires = vec![
+        schematic.document.wires = vec![
             Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
             Wire::new(2, vec![Point::new(20, 0), Point::new(20, 40)]),
         ];
@@ -566,7 +580,7 @@ mod tests {
 
         assert!(!schematic.paste_at(Point::new(200, 200)));
         assert!(!schematic.can_undo());
-        assert_eq!(schematic.junctions.len(), 1);
+        assert_eq!(schematic.document.junctions.len(), 1);
     }
 
     #[test]
@@ -583,32 +597,33 @@ mod tests {
         )
         .unwrap();
         let mut schematic = SchematicState::default();
-        schematic.buses.push(bus);
-        schematic.bus_taps.push(tap);
+        schematic.document.buses.push(bus);
+        schematic.document.bus_taps.push(tap);
         schematic.recalculate_runtime_state();
-        let original_bus_id = schematic.buses[0].id;
+        let original_bus_id = schematic.document.buses[0].id;
         schematic.selection.select_only_bus(original_bus_id);
         schematic.copy_selection();
         let clipboard_origin = schematic.clipboard.origin;
         schematic.clear_undo_history();
 
         assert!(schematic.paste_at(Point::new(100, 100)));
-        assert_eq!(schematic.buses.len(), 2);
-        assert_eq!(schematic.bus_taps.len(), 2);
+        assert_eq!(schematic.document.buses.len(), 2);
+        assert_eq!(schematic.document.bus_taps.len(), 2);
         let pasted_bus_id = schematic
+            .document
             .buses
             .iter()
             .find(|bus| bus.id != original_bus_id)
             .unwrap()
             .id;
-        assert!(schematic.bus_taps.iter().any(|tap| {
+        assert!(schematic.document.bus_taps.iter().any(|tap| {
             tap.bus_id == pasted_bus_id
                 && tap.connection_point
                     == Point::new(10 + 100 - clipboard_origin.x, 5 + 100 - clipboard_origin.y)
         }));
         assert!(schematic.undo());
-        assert_eq!(schematic.buses.len(), 1);
-        assert_eq!(schematic.bus_taps.len(), 1);
+        assert_eq!(schematic.document.buses.len(), 1);
+        assert_eq!(schematic.document.bus_taps.len(), 1);
     }
 
     #[test]
@@ -645,8 +660,8 @@ mod tests {
         assert_eq!(schematic.topology_version(), topology_before);
         assert!(!schematic.can_undo());
         assert!(schematic.selection.has_component(component_id));
-        assert!(schematic.buses.is_empty());
-        assert!(schematic.bus_taps.is_empty());
+        assert!(schematic.document.buses.is_empty());
+        assert!(schematic.document.bus_taps.is_empty());
     }
 
     #[test]
@@ -663,9 +678,10 @@ mod tests {
         )
         .unwrap();
         let mut schematic = SchematicState::default();
-        schematic.buses.push(bus);
-        schematic.bus_taps.push(tap);
+        schematic.document.buses.push(bus);
+        schematic.document.bus_taps.push(tap);
         schematic
+            .document
             .wires
             .push(Wire::segment(62, Point::new(0, 10), Point::new(20, 10)));
         schematic.selection.select_only_bus_tap(61);
@@ -679,16 +695,16 @@ mod tests {
             "an external target is a selection boundary, not an implicit copy"
         );
         assert!(schematic.paste_at(Point::new(100, 100)));
-        assert_eq!(schematic.buses.len(), 2);
-        assert_eq!(schematic.bus_taps.len(), 2);
-        assert_eq!(schematic.wires.len(), 1);
+        assert_eq!(schematic.document.buses.len(), 2);
+        assert_eq!(schematic.document.bus_taps.len(), 2);
+        assert_eq!(schematic.document.wires.len(), 1);
     }
 
     #[test]
     fn label_copy_paste_preserves_name_offsets_position_and_remaps_identity() {
         let original = NetLabel::new(70, Point::new(10, 20), "sense_out");
         let mut schematic = SchematicState::default();
-        schematic.net_labels.push(original.clone());
+        schematic.document.net_labels.push(original.clone());
         schematic.recalculate_runtime_state();
         schematic.selection.select_only_net_label(original.id);
         schematic.copy_selection();
@@ -698,8 +714,9 @@ mod tests {
         assert_eq!(schematic.clipboard.origin, original.pos);
         assert!(schematic.paste_at(Point::new(110, 220)));
 
-        assert_eq!(schematic.net_labels.len(), 2);
+        assert_eq!(schematic.document.net_labels.len(), 2);
         let pasted = schematic
+            .document
             .net_labels
             .iter()
             .find(|label| label.id != original.id)
@@ -711,17 +728,17 @@ mod tests {
         assert_eq!(schematic.undo_description(), Some("paste"));
 
         assert!(schematic.undo());
-        assert_eq!(schematic.net_labels, vec![original]);
+        assert_eq!(schematic.document.net_labels, vec![original]);
         assert!(!schematic.can_undo(), "paste must create one undo step");
         assert!(schematic.redo());
-        assert_eq!(schematic.net_labels.len(), 2);
+        assert_eq!(schematic.document.net_labels.len(), 2);
     }
 
     #[test]
     fn label_cut_pattern_updates_clipboard_and_deletes_in_one_undo_step() {
         let label = NetLabel::new(80, Point::new(-5, 15), "cut_me");
         let mut schematic = SchematicState::default();
-        schematic.net_labels.push(label.clone());
+        schematic.document.net_labels.push(label.clone());
         schematic.selection.select_only_net_label(label.id);
         schematic.init_undo_history();
 
@@ -729,10 +746,10 @@ mod tests {
         assert!(schematic.delete_selection());
 
         assert_eq!(schematic.clipboard.net_labels, vec![label.clone()]);
-        assert!(schematic.net_labels.is_empty());
+        assert!(schematic.document.net_labels.is_empty());
         assert_eq!(schematic.undo_description(), Some("delete selection"));
         assert!(schematic.undo());
-        assert_eq!(schematic.net_labels, vec![label]);
+        assert_eq!(schematic.document.net_labels, vec![label]);
         assert!(!schematic.can_undo(), "cut must create one undo step");
     }
 
@@ -740,7 +757,7 @@ mod tests {
     fn label_duplicate_pattern_creates_fresh_identity_in_one_undo_step() {
         let label = NetLabel::new(90, Point::new(3, 7), "duplicated_net");
         let mut schematic = SchematicState::default();
-        schematic.net_labels.push(label.clone());
+        schematic.document.net_labels.push(label.clone());
         schematic.recalculate_runtime_state();
         schematic.selection.select_only_net_label(label.id);
         schematic.init_undo_history();
@@ -748,8 +765,9 @@ mod tests {
         schematic.copy_selection();
         assert!(schematic.paste_at(Point::new(13, 17)));
 
-        assert_eq!(schematic.net_labels.len(), 2);
+        assert_eq!(schematic.document.net_labels.len(), 2);
         let duplicate = schematic
+            .document
             .net_labels
             .iter()
             .find(|candidate| candidate.id != label.id)
@@ -758,7 +776,7 @@ mod tests {
         assert_eq!(duplicate.name, label.name);
         assert_ne!(duplicate.id, label.id);
         assert!(schematic.undo());
-        assert_eq!(schematic.net_labels, vec![label]);
+        assert_eq!(schematic.document.net_labels, vec![label]);
         assert!(!schematic.can_undo(), "duplicate must create one undo step");
     }
 
@@ -776,7 +794,7 @@ mod tests {
         );
 
         assert!(schematic.paste_at(Point::new(123, 456)));
-        assert_eq!(schematic.net_labels[0].pos, Point::new(123, 456));
+        assert_eq!(schematic.document.net_labels[0].pos, Point::new(123, 456));
     }
 
     #[test]
@@ -790,7 +808,10 @@ mod tests {
         )
         .unwrap();
         let mut schematic = SchematicState::default();
-        schematic.documentation_shapes.push(original.clone());
+        schematic
+            .document
+            .documentation_shapes
+            .push(original.clone());
         schematic.recalculate_runtime_state();
         schematic
             .selection
@@ -806,8 +827,8 @@ mod tests {
         );
         assert_eq!(schematic.clipboard.origin, Point::new(20, 30));
         assert!(schematic.paste_at(Point::new(100, 120)));
-        assert_eq!(schematic.documentation_shapes.len(), 2);
-        let pasted = schematic.documentation_shapes.last().unwrap();
+        assert_eq!(schematic.document.documentation_shapes.len(), 2);
+        let pasted = schematic.document.documentation_shapes.last().unwrap();
         assert_ne!(pasted.id, original.id);
         assert_eq!(pasted.layer, original.layer);
         assert_eq!(
@@ -825,7 +846,7 @@ mod tests {
         assert_eq!(schematic.undo_description(), Some("paste"));
 
         assert!(schematic.undo());
-        assert_eq!(schematic.documentation_shapes, vec![original]);
+        assert_eq!(schematic.document.documentation_shapes, vec![original]);
         assert_eq!(schematic.topology_version(), topology);
         assert!(
             !schematic.can_undo(),
@@ -839,7 +860,7 @@ mod tests {
             SchematicProbe::new(120, Point::new(10, 20), "V(out)", Some("V(out)".to_owned()))
                 .unwrap();
         let mut schematic = SchematicState::default();
-        schematic.probes.push(original.clone());
+        schematic.document.probes.push(original.clone());
         schematic.recalculate_runtime_state();
         schematic.selection.select_only_probe(original.id);
         schematic.copy_selection();
@@ -850,8 +871,9 @@ mod tests {
         assert_eq!(schematic.clipboard.origin, original.position);
         assert!(schematic.paste_at(Point::new(110, 220)));
 
-        assert_eq!(schematic.probes.len(), 2);
+        assert_eq!(schematic.document.probes.len(), 2);
         let pasted = schematic
+            .document
             .probes
             .iter()
             .find(|probe| probe.id != original.id)
@@ -864,7 +886,7 @@ mod tests {
         assert_eq!(schematic.undo_description(), Some("paste"));
 
         assert!(schematic.undo());
-        assert_eq!(schematic.probes, vec![original]);
+        assert_eq!(schematic.document.probes, vec![original]);
         assert_eq!(schematic.topology_version(), topology);
         assert!(!schematic.can_undo());
     }

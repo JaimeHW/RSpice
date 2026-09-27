@@ -104,6 +104,7 @@ fn selected_rename_target(state: &AppState) -> Option<RenameSelectionTarget> {
     }
     if let Some(id) = schematic.selection.single_component() {
         return schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == id && !component.kind.spice_prefix().is_empty())
@@ -113,6 +114,7 @@ fn selected_rename_target(state: &AppState) -> Option<RenameSelectionTarget> {
     }
     if let Some(id) = schematic.selection.single_net_label() {
         return schematic
+            .document
             .net_labels
             .iter()
             .find(|label| label.id == id)
@@ -121,6 +123,7 @@ fn selected_rename_target(state: &AppState) -> Option<RenameSelectionTarget> {
     }
     if let Some(id) = schematic.selection.single_bus() {
         return schematic
+            .document
             .buses
             .iter()
             .find(|bus| bus.id == id && bus.declaration.is_some())
@@ -364,6 +367,7 @@ fn reference_summary(schematic: &SchematicState, target: &RenameSelectionTarget)
     match target {
         RenameSelectionTarget::Component(component) => {
             let terminals = schematic
+                .document
                 .connections
                 .iter()
                 .filter(|connection| connection.component_id == component.id)
@@ -374,18 +378,21 @@ fn reference_summary(schematic: &SchematicState, target: &RenameSelectionTarget)
         }
         RenameSelectionTarget::NetLabel(label) => {
             let occurrences = schematic
+                .document
                 .net_labels
                 .iter()
-                .filter(|candidate| match schematic.document_policy.net_naming {
-                    crate::state::NetNamingPolicy::StrictCaseSensitive => {
-                        candidate.name == label.name
-                    }
-                    crate::state::NetNamingPolicy::SpiceCompatibleRelaxed => {
-                        candidate.name.eq_ignore_ascii_case(&label.name)
-                    }
-                })
+                .filter(
+                    |candidate| match schematic.document.document_policy.net_naming {
+                        crate::state::NetNamingPolicy::StrictCaseSensitive => {
+                            candidate.name == label.name
+                        }
+                        crate::state::NetNamingPolicy::SpiceCompatibleRelaxed => {
+                            candidate.name.eq_ignore_ascii_case(&label.name)
+                        }
+                    },
+                )
                 .count();
-            let comparison = match schematic.document_policy.net_naming {
+            let comparison = match schematic.document.document_policy.net_naming {
                 crate::state::NetNamingPolicy::StrictCaseSensitive => "exact-case",
                 crate::state::NetNamingPolicy::SpiceCompatibleRelaxed => "case-insensitive",
             };
@@ -401,6 +408,7 @@ fn reference_summary(schematic: &SchematicState, target: &RenameSelectionTarget)
         ),
         RenameSelectionTarget::Bus(bus) => {
             let taps = schematic
+                .document
                 .bus_taps
                 .iter()
                 .filter(|tap| tap.bus_id == bus.id)
@@ -458,6 +466,7 @@ fn validate_draft(
     match target {
         RenameSelectionTarget::Component(expected) => {
             let Some(current) = schematic
+                .document
                 .components
                 .iter()
                 .find(|component| component.id == expected.id)
@@ -473,7 +482,7 @@ fn validate_draft(
             if let Err(error) = expected.validate_reference_designator(candidate) {
                 return RenameValidation::Invalid(error);
             }
-            if schematic.components.iter().any(|component| {
+            if schematic.document.components.iter().any(|component| {
                 component.id != expected.id && component.name.eq_ignore_ascii_case(candidate)
             }) {
                 return RenameValidation::Invalid(format!(
@@ -487,6 +496,7 @@ fn validate_draft(
         }
         RenameSelectionTarget::NetLabel(expected) => {
             let Some(current) = schematic
+                .document
                 .net_labels
                 .iter()
                 .find(|label| label.id == expected.id)
@@ -501,7 +511,7 @@ fn validate_draft(
             }
             if let Err(reason) = crate::state::NetLabel::validate_name(
                 candidate,
-                schematic.document_policy.net_naming,
+                schematic.document.document_policy.net_naming,
             ) {
                 return RenameValidation::Invalid(format!("Net name: {reason}."));
             }
@@ -526,7 +536,12 @@ fn validate_draft(
             }))
         }
         RenameSelectionTarget::Bus(expected) => {
-            let Some(current) = schematic.buses.iter().find(|bus| bus.id == expected.id) else {
+            let Some(current) = schematic
+                .document
+                .buses
+                .iter()
+                .find(|bus| bus.id == expected.id)
+            else {
                 return stale("The selected bus no longer exists.");
             };
             if current != expected {
@@ -575,6 +590,7 @@ fn apply_commit(state: &mut AppState, commit: RenameCommit) -> Result<bool, Stri
         }
         RenameCommit::NetLabel { expected, name } => {
             let Some(current) = schematic
+                .document
                 .net_labels
                 .iter()
                 .find(|label| label.id == expected.id)
@@ -586,6 +602,7 @@ fn apply_commit(state: &mut AppState, commit: RenameCommit) -> Result<bool, Stri
             }
             Ok(schematic.with_undo("rename net label", move |schematic| {
                 if let Some(label) = schematic
+                    .document
                     .net_labels
                     .iter_mut()
                     .find(|label| label.id == expected.id)
@@ -673,10 +690,12 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state
             .schematic
+            .document
             .wires
             .push(Wire::new(81, vec![Point::new(0, 0), Point::new(40, 0)]));
         app.state
             .schematic
+            .document
             .net_labels
             .push(NetLabel::new(82, Point::new(20, 0), "sense"));
         app.state.schematic.selection.select_only_wire(81);
@@ -690,7 +709,7 @@ mod tests {
 
         let port = Component::new(83, ComponentType::Port, Point::new(0, 0))
             .with_name_value("P83", "sense");
-        app.state.schematic.components.push(port);
+        app.state.schematic.document.components.push(port);
         app.state.schematic.selection.select_only_component(83);
         assert!(open_selected_object_rename(&mut app.state));
         assert!(matches!(
@@ -710,6 +729,7 @@ mod tests {
             .add_component(ComponentType::Resistor, Point::new(10, 0));
         app.state
             .schematic
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == other)
@@ -718,6 +738,7 @@ mod tests {
         let target = app
             .state
             .schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == id)
@@ -753,7 +774,7 @@ mod tests {
     #[test]
     fn successful_component_rename_retains_id_and_is_exactly_one_undo_step() {
         let (mut app, id) = component_app();
-        let original_name = app.state.schematic.components[0].name.clone();
+        let original_name = app.state.schematic.document.components[0].name.clone();
         assert!(open_selected_object_rename(&mut app.state));
         let target = app.state.dialogs.rename_selection.target.clone().unwrap();
         let commit = match validate_draft(&app.state.schematic, &target, "R_GAIN") {
@@ -762,27 +783,30 @@ mod tests {
         };
 
         assert!(apply_commit(&mut app.state, *commit).unwrap());
-        assert_eq!(app.state.schematic.components[0].id, id);
-        assert_eq!(app.state.schematic.components[0].name, "R_GAIN");
+        assert_eq!(app.state.schematic.document.components[0].id, id);
+        assert_eq!(app.state.schematic.document.components[0].name, "R_GAIN");
         app.action_edit_undo();
-        assert_eq!(app.state.schematic.components[0].id, id);
-        assert_eq!(app.state.schematic.components[0].name, original_name);
+        assert_eq!(app.state.schematic.document.components[0].id, id);
+        assert_eq!(
+            app.state.schematic.document.components[0].name,
+            original_name
+        );
         assert!(
             app.state.project_undo_sequence().is_none() && !app.state.schematic.can_undo(),
             "rename created more than one undo step"
         );
         app.action_edit_redo();
-        assert_eq!(app.state.schematic.components[0].name, "R_GAIN");
+        assert_eq!(app.state.schematic.document.components[0].name, "R_GAIN");
     }
 
     #[test]
     fn stale_target_and_cancel_never_mutate() {
         let (mut app, id) = component_app();
-        let original = app.state.schematic.components[0].clone();
+        let original = app.state.schematic.document.components[0].clone();
         assert!(open_selected_object_rename(&mut app.state));
         app.state.dialogs.rename_selection.draft = "R_CANCELLED".to_owned();
         app.state.dialogs.rename_selection.close();
-        assert_eq!(app.state.schematic.components[0], original);
+        assert_eq!(app.state.schematic.document.components[0], original);
         assert!(!app.state.schematic.can_undo());
 
         app.state.schematic.selection.select_only_component(id);
@@ -792,14 +816,14 @@ mod tests {
             RenameValidation::Valid(commit) => commit,
             other => panic!("expected initially valid rename, got {other:?}"),
         };
-        app.state.schematic.components[0].value = "2k".to_owned();
-        let before = app.state.schematic.components[0].clone();
+        app.state.schematic.document.components[0].value = "2k".to_owned();
+        let before = app.state.schematic.document.components[0].clone();
         assert!(matches!(
             validate_draft(&app.state.schematic, &target, "R_STALE"),
             RenameValidation::Invalid(_)
         ));
         assert!(apply_commit(&mut app.state, *pending_commit).is_err());
-        assert_eq!(app.state.schematic.components[0], before);
+        assert_eq!(app.state.schematic.document.components[0], before);
         assert!(!app.state.schematic.can_undo());
     }
 
@@ -809,6 +833,7 @@ mod tests {
         let first = schematic.add_net_label(Point::new(0, 0), "sense".to_owned());
         schematic.add_net_label(Point::new(10, 0), "SENSE".to_owned());
         let expected = schematic
+            .document
             .net_labels
             .iter()
             .find(|label| label.id == first)
@@ -828,6 +853,7 @@ mod tests {
         assert!(apply_commit(&mut state, *commit).unwrap());
         let renamed = state
             .schematic
+            .document
             .net_labels
             .iter()
             .find(|label| label.id == first)
@@ -846,7 +872,7 @@ mod tests {
             Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
         )
         .unwrap();
-        schematic.buses.push(bus.clone());
+        schematic.document.buses.push(bus.clone());
         let commit = match validate_draft(&schematic, &RenameSelectionTarget::Bus(bus), "ADDR") {
             RenameValidation::Valid(commit) => commit,
             other => panic!("expected valid bus rename, got {other:?}"),
@@ -856,14 +882,22 @@ mod tests {
         state.schematic = schematic;
         assert!(apply_commit(&mut state, *commit).unwrap());
         let schematic = &mut state.schematic;
-        assert_eq!(schematic.buses[0].id, 71);
+        assert_eq!(schematic.document.buses[0].id, 71);
         assert_eq!(
-            schematic.buses[0].declaration.as_ref().unwrap().to_string(),
+            schematic.document.buses[0]
+                .declaration
+                .as_ref()
+                .unwrap()
+                .to_string(),
             "ADDR[7:0]"
         );
         assert!(schematic.undo());
         assert_eq!(
-            schematic.buses[0].declaration.as_ref().unwrap().to_string(),
+            schematic.document.buses[0]
+                .declaration
+                .as_ref()
+                .unwrap()
+                .to_string(),
             "DATA[7:0]"
         );
         assert!(!schematic.undo());
@@ -883,8 +917,8 @@ mod tests {
             app.render_rename_selection_dialog(ctx)
         });
         assert!(!app.state.dialogs.rename_selection.open);
-        assert_eq!(app.state.schematic.components[0].id, id);
-        assert_eq!(app.state.schematic.components[0].name, "R_ENTER");
+        assert_eq!(app.state.schematic.document.components[0].id, id);
+        assert_eq!(app.state.schematic.document.components[0].name, "R_ENTER");
 
         app.state.schematic.selection.select_only_component(id);
         assert!(open_selected_object_rename(&mut app.state));
@@ -896,7 +930,7 @@ mod tests {
             app.render_rename_selection_dialog(ctx)
         });
         assert!(!app.state.dialogs.rename_selection.open);
-        assert_eq!(app.state.schematic.components[0].name, "R_ENTER");
+        assert_eq!(app.state.schematic.document.components[0].name, "R_ENTER");
     }
 
     fn saved_output(name: &str, expression: &str) -> crate::state::SavedOutput {
@@ -947,7 +981,7 @@ mod tests {
                 },
             },
         );
-        app.state.schematic.components[0].name = "R1".to_owned();
+        app.state.schematic.document.components[0].name = "R1".to_owned();
         app.state.schematic.selection.select_only_component(id);
         assert!(open_selected_object_rename(&mut app.state));
         let target = app.state.dialogs.rename_selection.target.clone().unwrap();
@@ -987,7 +1021,7 @@ mod tests {
         );
         assert!(app.state.workspace.project_metadata_dirty);
         app.action_edit_undo();
-        assert_eq!(app.state.schematic.components[0].name, "R1");
+        assert_eq!(app.state.schematic.document.components[0].name, "R1");
         assert_eq!(
             app.state
                 .workspace
@@ -1009,7 +1043,7 @@ mod tests {
             "Undo must restore the executable saved output"
         );
         app.action_edit_redo();
-        assert_eq!(app.state.schematic.components[0].name, "RLOAD");
+        assert_eq!(app.state.schematic.document.components[0].name, "RLOAD");
         assert_eq!(
             app.state
                 .workspace

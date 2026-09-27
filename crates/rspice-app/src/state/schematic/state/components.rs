@@ -37,7 +37,7 @@ impl SchematicState {
             component.symbol_variant = armed.variant.clone();
         }
 
-        self.components.push(component);
+        self.document.components.push(component);
         self.is_dirty = true;
         self.bump_topology_version();
         id
@@ -46,6 +46,7 @@ impl SchematicState {
     /// First unused `p<N>` port name in this schematic.
     fn next_port_name(&self) -> String {
         let taken: std::collections::HashSet<String> = self
+            .document
             .components
             .iter()
             .filter(|c| c.kind == ComponentType::Port)
@@ -66,7 +67,7 @@ impl SchematicState {
         let id = self.next_id();
         let preferred_prefix = library_cell.effective_reference_prefix();
         let name = if let Some(prefix) = preferred_prefix {
-            next_library_reference_name(&self.components, prefix)
+            next_library_reference_name(&self.document.components, prefix)
         } else {
             self.generate_name(ComponentType::CellInstance)
         };
@@ -77,7 +78,7 @@ impl SchematicState {
         component.value = library_cell.cell.clone();
         component.library_cell = Some(library_cell);
 
-        self.components.push(component);
+        self.document.components.push(component);
         self.is_dirty = true;
         self.bump_topology_version();
         id
@@ -86,7 +87,7 @@ impl SchematicState {
     /// Find component at grid position
     pub fn component_at(&self, pos: Point) -> Option<u64> {
         // Check terminals first (precise connection points)
-        for comp in &self.components {
+        for comp in &self.document.components {
             let terminals = comp.terminal_positions();
             for (_, term_pos) in terminals {
                 if term_pos == pos {
@@ -95,7 +96,7 @@ impl SchematicState {
             }
         }
         // Then check component bounding boxes (uses symbol_dimensions for accurate hit detection)
-        for comp in &self.components {
+        for comp in &self.document.components {
             if comp.contains_point(pos) {
                 return Some(comp.id);
             }
@@ -171,7 +172,12 @@ impl SchematicState {
         }
         let mut ids: Vec<u64> = self.selection.components.iter().copied().collect();
         ids.sort_unstable();
-        ids.retain(|id| self.components.iter().any(|component| component.id == *id));
+        ids.retain(|id| {
+            self.document
+                .components
+                .iter()
+                .any(|component| component.id == *id)
+        });
         if ids.is_empty() {
             return;
         }
@@ -179,17 +185,25 @@ impl SchematicState {
             let before: Vec<(u64, Vec<Point>)> = ids
                 .iter()
                 .filter_map(|&id| {
-                    let component = s.components.iter().find(|component| component.id == id)?;
+                    let component = s
+                        .document
+                        .components
+                        .iter()
+                        .find(|component| component.id == id)?;
                     Some((id, terminal_points_for(component)))
                 })
                 .collect();
 
             for &id in &ids {
-                let Some(index) = s.components.iter().position(|component| component.id == id)
+                let Some(index) = s
+                    .document
+                    .components
+                    .iter()
+                    .position(|component| component.id == id)
                 else {
                     continue;
                 };
-                transform(&mut s.components[index]);
+                transform(&mut s.document.components[index]);
             }
 
             // Terminal order is positional and stable across transforms.
@@ -198,7 +212,11 @@ impl SchematicState {
             // remap each other's freshly moved endpoints.
             let mut remaps: Vec<(Point, Point)> = Vec::new();
             for (id, before_points) in before {
-                let Some(component) = s.components.iter().find(|component| component.id == id)
+                let Some(component) = s
+                    .document
+                    .components
+                    .iter()
+                    .find(|component| component.id == id)
                 else {
                     continue;
                 };
@@ -211,7 +229,7 @@ impl SchematicState {
             }
 
             let mut updates: Vec<(usize, usize, Point)> = Vec::new();
-            for (wire_index, wire) in s.wires.iter().enumerate() {
+            for (wire_index, wire) in s.document.wires.iter().enumerate() {
                 for (point_index, point) in wire.points.iter().enumerate() {
                     if let Some((_, new_pos)) = remaps.iter().find(|(old_pos, _)| point == old_pos)
                     {
@@ -221,7 +239,7 @@ impl SchematicState {
             }
 
             for (wire_index, point_index, new_pos) in updates {
-                s.wires[wire_index].points[point_index] = new_pos;
+                s.document.wires[wire_index].points[point_index] = new_pos;
             }
             s.is_dirty = true;
             s.bump_topology_version();
@@ -239,6 +257,7 @@ impl SchematicState {
     /// of the field is for.
     pub fn placed_loop_probe_names(&self) -> Vec<String> {
         let mut names: Vec<String> = self
+            .document
             .components
             .iter()
             .filter(|component| component.kind == ComponentType::LoopProbe)
@@ -361,11 +380,12 @@ mod tests {
         ]);
 
         let mut schematic = SchematicState::default();
-        schematic.components.push(
+        schematic.document.components.push(
             Component::new(1, ComponentType::CellInstance, Point::new(100, 50))
                 .with_library_cell(binding),
         );
         schematic
+            .document
             .wires
             .push(Wire::segment(2, Point::new(60, 40), Point::new(60, 0)));
         schematic.selection.select_component(1);
@@ -373,9 +393,9 @@ mod tests {
         schematic
             .rotate_selection_resolved(|component| resolved_terminal_points(component, &resolved));
 
-        assert_eq!(schematic.components[0].rotation, Rotation::R90);
-        assert_eq!(schematic.wires[0].points[0], Point::new(110, 10));
-        assert_eq!(schematic.wires[0].points[1], Point::new(60, 0));
+        assert_eq!(schematic.document.components[0].rotation, Rotation::R90);
+        assert_eq!(schematic.document.wires[0].points[0], Point::new(110, 10));
+        assert_eq!(schematic.document.wires[0].points[1], Point::new(60, 0));
     }
 
     #[test]
@@ -389,15 +409,16 @@ mod tests {
             port("IN", PortDirection::In),
             port("OUT", PortDirection::Out),
         ]);
-        schematic.components.push(
+        schematic.document.components.push(
             Component::new(first_id, ComponentType::CellInstance, Point::new(100, 50))
                 .with_library_cell(binding.clone()),
         );
-        schematic.components.push(
+        schematic.document.components.push(
             Component::new(second_id, ComponentType::CellInstance, Point::new(150, 20))
                 .with_library_cell(binding),
         );
         schematic
+            .document
             .wires
             .push(Wire::segment(9, Point::new(60, 40), Point::new(60, 0)));
 
@@ -405,7 +426,7 @@ mod tests {
             .rotate_selection_resolved(|component| resolved_terminal_points(component, &resolved));
 
         assert_eq!(
-            schematic.wires[0].points[0],
+            schematic.document.wires[0].points[0],
             Point::new(110, 10),
             "wire endpoint should follow the first component's pin once, not then match and follow \
              the second component's old pin"
@@ -422,7 +443,7 @@ mod tests {
 
         assert!(!schematic.is_dirty);
         assert_eq!(schematic.topology_version(), topology_version);
-        assert!(schematic.components.is_empty());
+        assert!(schematic.document.components.is_empty());
     }
 
     #[test]
@@ -439,6 +460,7 @@ mod tests {
 
         let name = |id| {
             schematic
+                .document
                 .components
                 .iter()
                 .find(|component| component.id == id)

@@ -985,6 +985,7 @@ fn soa_device_target(
     }
     state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| {

@@ -46,27 +46,30 @@ fn seeded(
 fn hierarchical_excitations(app: &mut RSpiceApp) {
     use crate::state::{ComponentType, LibraryCellInstance, Point};
 
-    app.state
-        .schematic
-        .components
-        .push(seeded(801, ComponentType::VoltageSource, "VDD", "dc=5"));
+    app.state.schematic.document.components.push(seeded(
+        801,
+        ComponentType::VoltageSource,
+        "VDD",
+        "dc=5",
+    ));
     for (id, name) in [(802, "XA"), (803, "XB")] {
         let mut instance =
             crate::state::Component::new(id, ComponentType::CellInstance, Point::new(80, 80))
                 .with_library_cell(LibraryCellInstance::new("work", "afe", "schematic"));
         instance.name = name.to_owned();
-        app.state.schematic.components.push(instance);
+        app.state.schematic.document.components.push(instance);
     }
     app.state.sync_active_schematic_to_workspace();
 
     let mut child = crate::state::SchematicState::default();
-    child.components.push(seeded(
+    child.document.components.push(seeded(
         811,
         ComponentType::VoltageSourceSin,
         "V1",
         "freq=1k",
     ));
     child
+        .document
         .components
         .push(seeded(812, ComponentType::RfPort, "P1", "port=1 z0=50"));
     add_master(app, "afe", child);

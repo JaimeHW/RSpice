@@ -106,6 +106,7 @@ fn kind_only_fixture() -> (RSpiceApp, u64) {
 fn instance_of(app: &RSpiceApp, id: u64) -> Component {
     app.state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == id)

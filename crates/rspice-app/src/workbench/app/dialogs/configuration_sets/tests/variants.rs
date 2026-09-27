@@ -61,6 +61,7 @@ fn a_retained_receipt_refreshes_when_a_variant_removes_its_dut() {
     let dut = fixture
         .state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.name == "X1")
@@ -119,6 +120,7 @@ fn a_retained_receipt_tracks_live_values_without_topology_counter_changes() {
     fixture
         .state
         .schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.kind == crate::state::ComponentType::VoltageSource)

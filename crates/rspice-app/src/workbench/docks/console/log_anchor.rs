@@ -193,7 +193,11 @@ mod tests {
         let mut state = AppState::default();
         let a = Point::new(0, 0);
         let b = Point::new(40, 0);
-        state.schematic.wires.push(Wire::new(91, vec![a, b]));
+        state
+            .schematic
+            .document
+            .wires
+            .push(Wire::new(91, vec![a, b]));
         state.simulation.cross_probe.update(
             state.workspace.active_view.clone(),
             HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),

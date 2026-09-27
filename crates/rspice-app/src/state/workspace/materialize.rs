@@ -80,6 +80,7 @@ pub(super) fn projected_cross_sheet_anchor(
     let authored_point = match &endpoint.anchor {
         crate::state::CrossSheetPortAnchor::WirePoint { wire_id, point } => {
             let wire = source
+                .document
                 .wires
                 .iter()
                 .find(|wire| wire.id == *wire_id)
@@ -100,6 +101,7 @@ pub(super) fn projected_cross_sheet_anchor(
             terminal_name,
         } => {
             let component = source
+                .document
                 .components
                 .iter()
                 .find(|component| component.id == *component_id)
@@ -113,7 +115,12 @@ pub(super) fn projected_cross_sheet_anchor(
                     identity: format!("{}:{}", component_id, terminal_name),
                 }
             })?;
-            if !source.wires.iter().any(|wire| wire.contains_point(point)) {
+            if !source
+                .document
+                .wires
+                .iter()
+                .any(|wire| wire.contains_point(point))
+            {
                 return Err(crate::state::DesignManagementError::MissingReference {
                     domain: "cross-sheet component terminal connection",
                     identity: format!("{}:{}", component_id, terminal_name),
@@ -126,6 +133,7 @@ pub(super) fn projected_cross_sheet_anchor(
     match &endpoint.anchor {
         crate::state::CrossSheetPortAnchor::WirePoint { wire_id, .. } => {
             if !projected
+                .document
                 .wires
                 .iter()
                 .any(|wire| wire.id == *wire_id && wire.contains_point(anchor))
@@ -138,6 +146,7 @@ pub(super) fn projected_cross_sheet_anchor(
         }
         crate::state::CrossSheetPortAnchor::ComponentTerminal { component_id, .. } => {
             if !projected
+                .document
                 .components
                 .iter()
                 .any(|component| component.id == *component_id)
@@ -687,7 +696,7 @@ mod tests {
         let moved_wire = schematic
             .add_wire(vec![Point::new(140, 0), Point::new(180, 0)])
             .expect("a conductor reaching the moved anode");
-        schematic.connections.clear();
+        schematic.document.connections.clear();
 
         let main = workspace
             .design_management
@@ -748,6 +757,7 @@ mod tests {
 
         assert_eq!(
             projected
+                .document
                 .net_labels
                 .iter()
                 .filter(|label| label.name == "BIAS")
@@ -769,7 +779,7 @@ mod tests {
         let stationary_wire = schematic
             .add_wire(vec![Point::new(20, 0), Point::new(60, 0)])
             .expect("a conductor reaching the stationary cathode");
-        schematic.connections.clear();
+        schematic.document.connections.clear();
 
         let main = workspace
             .design_management

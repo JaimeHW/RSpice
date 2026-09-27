@@ -245,14 +245,14 @@ mod tests {
     fn file_actions_resolve_the_draft_before_saving_or_asking_about_unsaved_changes() {
         use crate::workbench::state::{InlineEditField, InlineEditSession};
         let mut state = AppState::default();
-        state.schematic.components.clear();
+        state.schematic.document.components.clear();
         state.schematic.add_component(
             crate::state::ComponentType::VoltageSource,
             crate::state::Point::origin(),
         );
         state.schematic.clear_undo_history();
         state.schematic.is_dirty = false;
-        let expected = state.schematic.components[0].clone();
+        let expected = state.schematic.document.components[0].clone();
         let mut candidate = expected.clone();
         candidate.name = "V9".to_owned();
         let authority = state.inline_edit_authority();
@@ -270,7 +270,7 @@ mod tests {
         // a failed assertion must never open a native project-save picker.
         state.project_lifecycle.project_open = false;
         dispatch_file_menu_action(&mut state, FileMenuAction::Save, &NoIo, &NoIo);
-        assert_eq!(state.schematic.components[0].name, "V1");
+        assert_eq!(state.schematic.document.components[0].name, "V1");
         assert!(
             state
                 .workbench
@@ -288,7 +288,7 @@ mod tests {
             .inline_edit
             .set_draft("V9".to_owned(), Ok(candidate));
         dispatch_file_menu_action(&mut state, FileMenuAction::NewProject, &NoIo, &NoIo);
-        assert_eq!(state.schematic.components[0].name, "V9");
+        assert_eq!(state.schematic.document.components[0].name, "V9");
         assert!(state.workbench.inline_edit.session().is_none());
         assert_eq!(
             state.dialogs.confirmation_dialog.pending_action,

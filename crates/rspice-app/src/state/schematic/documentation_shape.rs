@@ -104,7 +104,7 @@ impl SchematicState {
             return Err(DocumentationShapeError::ReadOnly);
         }
         if pending.topology_version != self.topology_version()
-            || pending.expected_shapes != self.documentation_shapes
+            || pending.expected_shapes != self.document.documentation_shapes
         {
             return Err(DocumentationShapeError::StaleDocument);
         }
@@ -126,7 +126,7 @@ impl SchematicState {
         let id = self.next_id();
         let shape = DocumentationShape::new(id, geometry)?;
         let changed = self.with_undo("draw documentation shape", |schematic| {
-            schematic.documentation_shapes.push(shape);
+            schematic.document.documentation_shapes.push(shape);
             schematic.selection.clear();
             schematic.selection.select_documentation_shape(id);
             schematic.is_dirty = true;
@@ -150,7 +150,7 @@ mod tests {
         let pending = PendingDocumentationShapePlacement::new(
             DocumentationShapeKind::Rectangle,
             topology,
-            &schematic.documentation_shapes,
+            &schematic.document.documentation_shapes,
         );
         let id = schematic
             .commit_documentation_shape(
@@ -161,12 +161,12 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(schematic.documentation_shapes[0].id, id);
-        assert!(schematic.components.is_empty());
-        assert!(schematic.wires.is_empty());
+        assert_eq!(schematic.document.documentation_shapes[0].id, id);
+        assert!(schematic.document.components.is_empty());
+        assert!(schematic.document.wires.is_empty());
         assert_eq!(schematic.topology_version(), topology);
         assert!(schematic.undo());
-        assert!(schematic.documentation_shapes.is_empty());
+        assert!(schematic.document.documentation_shapes.is_empty());
     }
 
     #[test]
@@ -175,9 +175,9 @@ mod tests {
         let pending = PendingDocumentationShapePlacement::new(
             DocumentationShapeKind::Line,
             schematic.topology_version(),
-            &schematic.documentation_shapes,
+            &schematic.document.documentation_shapes,
         );
-        schematic.documentation_shapes.push(
+        schematic.document.documentation_shapes.push(
             DocumentationShape::new(
                 44,
                 DocumentationShapeGeometry::Line {

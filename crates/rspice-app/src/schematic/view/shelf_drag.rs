@@ -305,8 +305,8 @@ mod tests {
             ShelfDropOutcome::Placed
         );
 
-        assert_eq!(state.schematic.components.len(), 1);
-        let placed = &state.schematic.components[0];
+        assert_eq!(state.schematic.document.components.len(), 1);
+        let placed = &state.schematic.document.components[0];
         assert_eq!(placed.kind, ComponentType::Resistor);
         assert_eq!(placed.pos, Point::new(30, 40));
         assert_eq!(placed.rotation, Rotation::R90);
@@ -315,7 +315,7 @@ mod tests {
         assert!(state.schematic.pending_library_cell.is_none());
         assert!(state.schematic.can_undo());
         state.schematic.undo();
-        assert!(state.schematic.components.is_empty());
+        assert!(state.schematic.document.components.is_empty());
     }
 
     #[test]
@@ -331,7 +331,7 @@ mod tests {
         );
 
         assert_eq!(
-            state.schematic.components[0].library_cell.as_ref(),
+            state.schematic.document.components[0].library_cell.as_ref(),
             Some(&binding)
         );
         assert_eq!(state.schematic.tool, Tool::Wire);
@@ -349,7 +349,7 @@ mod tests {
             commit_shelf_drop(&mut state, &payload, Point::origin()),
             ShelfDropOutcome::ReadOnly
         );
-        assert!(state.schematic.components.is_empty());
+        assert!(state.schematic.document.components.is_empty());
         assert_eq!(state.schematic.tool, Tool::Place(ComponentType::Resistor));
         assert!(!state.schematic.can_undo());
     }
@@ -362,7 +362,7 @@ mod tests {
 
         assert_eq!(schematic.preview_rotation, Rotation::R90);
         assert!(schematic.preview_mirror_h);
-        assert!(schematic.components.is_empty());
+        assert!(schematic.document.components.is_empty());
         assert!(!schematic.is_dirty);
         assert!(!schematic.can_undo());
     }

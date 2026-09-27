@@ -216,7 +216,7 @@ fn state_with_hierarchy_record() -> (AppState, CellViewRef, CellViewRef) {
 #[test]
 fn guarded_history_refuses_to_overwrite_a_modified_child() {
     let (mut state, _, _) = state_with_hierarchy_record();
-    state.schematic.components[0].value = "changed".to_owned();
+    state.schematic.document.components[0].value = "changed".to_owned();
     assert!(!state.can_undo_project_design());
     assert_eq!(state.undo_project_design().expect("guarded"), None);
 }
@@ -270,6 +270,7 @@ fn hierarchy_history_refuses_dangling_external_master_reference() {
     let mut schematic = SchematicState::default();
     let id = schematic.add_component(ComponentType::CellInstance, Point::origin());
     let component = schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == id)
@@ -304,6 +305,7 @@ fn new_hierarchy_target_refuses_to_resolve_an_existing_dangling_instance() {
         .add_component(ComponentType::CellInstance, Point::origin());
     state
         .schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == id)
@@ -508,6 +510,7 @@ fn undo_restores_objects_to_the_sheet_they_were_recorded_on() {
     let before_parent = state.schematic.clone();
     let mut after_parent = before_parent.clone();
     after_parent
+        .document
         .components
         .retain(|component| component.id != extracted);
     let target = CellViewRef::new(&parent_ref.library, "child", "schematic");
@@ -729,6 +732,7 @@ fn placed_binding<'a>(
         .schematic_buffers
         .get(&document.key())
         .expect("the buffer that placed the master")
+        .document
         .components
         .iter()
         .find(|component| component.id == object)

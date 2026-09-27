@@ -69,7 +69,7 @@ fn subflow_edit_and_escape_preserve_fresh_changes_and_reset_discard_confirmation
 #[test]
 fn probe_ids_participate_in_sheet_governance_and_selected_authority() {
     let mut schematic = crate::state::SchematicState::default();
-    schematic.probes.push(
+    schematic.document.probes.push(
         crate::state::SchematicProbe::new(
             81,
             crate::state::Point::new(10, 20),

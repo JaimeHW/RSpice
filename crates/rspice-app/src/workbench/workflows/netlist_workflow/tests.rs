@@ -1270,7 +1270,7 @@ fn importing_a_deck_refuses_read_only_projects_without_mutation() {
 #[test]
 fn text_first_import_validates_and_runs_without_claiming_a_native_save_binding() {
     let mut app = crate::workbench::RSpiceApp::test_instance();
-    app.state.schematic.components.clear();
+    app.state.schematic.document.components.clear();
     let source = "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
 
     assert!(apply_imported_netlist(
@@ -1295,7 +1295,7 @@ fn text_first_import_validates_and_runs_without_claiming_a_native_save_binding()
 #[test]
 fn validated_owned_source_can_run_before_external_source_synchronization() {
     let mut app = crate::workbench::RSpiceApp::test_instance();
-    app.state.schematic.components.clear();
+    app.state.schematic.document.components.clear();
     let imported = "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
     let edited = "standalone edited\nV1 out 0 2\nR1 out 0 2k\n.op\n.end\n";
 

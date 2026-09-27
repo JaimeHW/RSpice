@@ -139,6 +139,7 @@ impl super::SchematicState {
         names: &std::collections::BTreeMap<u64, String>,
     ) -> Result<Vec<Component>, String> {
         let edits = self
+            .document
             .components
             .iter()
             .filter_map(|expected| {
@@ -158,8 +159,9 @@ impl super::SchematicState {
         &self,
         edits: impl IntoIterator<Item = (&'a Component, Component)>,
     ) -> Result<Vec<Component>, String> {
-        let mut components = self.components.clone();
+        let mut components = self.document.components.clone();
         let indices: HashMap<_, _> = self
+            .document
             .components
             .iter()
             .enumerate()
@@ -170,7 +172,7 @@ impl super::SchematicState {
             let index = *indices
                 .get(&expected.id)
                 .ok_or("The selected component no longer exists.")?;
-            if &self.components[index] != expected {
+            if &self.document.components[index] != expected {
                 return Err("The selected component changed before commit.".to_owned());
             }
             if candidate.id != expected.id || candidate.kind != expected.kind {
@@ -221,7 +223,7 @@ impl super::SchematicState {
                     index,
                     std::mem::replace(
                         &mut components[index].name,
-                        self.components[index].name.clone(),
+                        self.document.components[index].name.clone(),
                     ),
                 )
             })

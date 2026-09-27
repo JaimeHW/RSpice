@@ -637,14 +637,14 @@ fn place(state: &mut AppState, components: Vec<crate::state::Component>) {
         .active_schematic()
         .cloned()
         .expect("an active schematic exists");
-    schematic.components = components;
+    schematic.document.components = components;
     // Something unrelated on the sheet, so a card that counted every instance
     // rather than this symbol's would be caught.
     let mut resistor =
         crate::state::Component::new(9_000, ComponentType::Resistor, Point::origin());
     resistor.name = "R1".to_owned();
     resistor.value = "1k".to_owned();
-    schematic.components.push(resistor);
+    schematic.document.components.push(resistor);
     state.workspace.save_active_schematic(&schematic);
 }
 
@@ -768,6 +768,7 @@ fn a_repainted_instances_card_walks_the_sheet_once() {
         .active_schematic()
         .cloned()
         .expect("an active schematic")
+        .document
         .components;
     place(&mut state, existing.into_iter().chain([second]).collect());
     assert_eq!(

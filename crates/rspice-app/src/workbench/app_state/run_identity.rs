@@ -70,21 +70,28 @@ impl AppState {
                 else {
                     continue;
                 };
-                pending.extend(schematic.components.iter().filter_map(|component| {
-                    (component.kind == ComponentType::CellInstance)
-                        .then_some(component.library_cell.as_ref())
-                        .flatten()
-                        .filter(|binding| {
-                            binding.source_path.is_none() && !binding.is_executable_builtin()
-                        })
-                        .map(|binding| {
-                            format!(
-                                "{}/{}/schematic",
-                                binding.library.to_ascii_lowercase(),
-                                binding.cell.to_ascii_lowercase()
-                            )
-                        })
-                }));
+                pending.extend(
+                    schematic
+                        .document
+                        .components
+                        .iter()
+                        .filter_map(|component| {
+                            (component.kind == ComponentType::CellInstance)
+                                .then_some(component.library_cell.as_ref())
+                                .flatten()
+                                .filter(|binding| {
+                                    binding.source_path.is_none()
+                                        && !binding.is_executable_builtin()
+                                })
+                                .map(|binding| {
+                                    format!(
+                                        "{}/{}/schematic",
+                                        binding.library.to_ascii_lowercase(),
+                                        binding.cell.to_ascii_lowercase()
+                                    )
+                                })
+                        }),
+                );
             }
             for reference in references {
                 if let Some((_, schematic)) = projection

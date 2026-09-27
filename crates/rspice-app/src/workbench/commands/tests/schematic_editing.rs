@@ -14,7 +14,7 @@ fn descend_requires_a_resolved_schematic_master() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    app.state.schematic.components.push(Component::new(
+    app.state.schematic.document.components.push(Component::new(
         1,
         ComponentType::Resistor,
         Point::origin(),
@@ -32,8 +32,8 @@ fn descend_requires_a_resolved_schematic_master() {
     library.add_cell(cell);
     app.state.library_manager.add_library(library);
 
-    app.state.schematic.components.clear();
-    app.state.schematic.components.push(
+    app.state.schematic.document.components.clear();
+    app.state.schematic.document.components.push(
         Component::new(2, ComponentType::CellInstance, Point::origin())
             .with_library_cell(LibraryCellInstance::new("work", "child", "schematic")),
     );
@@ -54,7 +54,7 @@ fn descend_requires_a_resolved_schematic_master() {
     );
     app.state.dialogs.descend_hierarchy.close();
 
-    app.state.schematic.components[0]
+    app.state.schematic.document.components[0]
         .library_cell
         .as_mut()
         .expect("binding")
@@ -89,11 +89,11 @@ fn transform_commands_keep_wires_attached_to_authored_symbol_pins() {
         command.execute(&mut app);
 
         assert_eq!(
-            app.state.schematic.wires[0].points[0],
+            app.state.schematic.document.wires[0].points[0],
             expected_wire_endpoint
         );
         assert_eq!(
-            app.state.schematic.components[0].rotation,
+            app.state.schematic.document.components[0].rotation,
             expected_rotation
         );
     }
@@ -131,25 +131,28 @@ fn app_with_every_complete_schematic_object() -> RSpiceApp {
         BusTapOrientation::Down,
     )
     .unwrap();
-    app.state.schematic.components.push(Component::new(
+    app.state.schematic.document.components.push(Component::new(
         1,
         ComponentType::Resistor,
         Point::origin(),
     ));
     app.state
         .schematic
+        .document
         .wires
         .push(Wire::segment(2, Point::new(0, 0), Point::new(20, 0)));
     app.state
         .schematic
+        .document
         .junctions
         .push(Junction::new(3, Point::new(10, 0)));
     app.state
         .schematic
+        .document
         .net_labels
         .push(NetLabel::new(4, Point::new(10, 0), "sense_out"));
-    app.state.schematic.buses.push(bus);
-    app.state.schematic.bus_taps.push(tap);
+    app.state.schematic.document.buses.push(bus);
+    app.state.schematic.document.bus_taps.push(tap);
     app
 }
 
@@ -203,7 +206,7 @@ fn edit_command_enablement_covers_every_complete_schematic_object_class() {
 fn delete_promotes_live_wire_handles_without_enabling_partial_copy_or_cut() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    app.state.schematic.wires.push(Wire::new(
+    app.state.schematic.document.wires.push(Wire::new(
         17,
         vec![
             crate::state::Point::new(0, 0),
@@ -267,17 +270,17 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
 
     Command::Duplicate.execute(&mut app);
     assert!(!app.state.dialogs.application_modal_open());
-    assert_eq!(app.state.schematic.components.len(), 2);
+    assert_eq!(app.state.schematic.document.components.len(), 2);
 
     Command::Cut.execute(&mut app);
     assert!(!app.state.dialogs.application_modal_open());
-    assert_eq!(app.state.schematic.components.len(), 1);
+    assert_eq!(app.state.schematic.document.components.len(), 1);
     assert_eq!(app.state.schematic.clipboard.components.len(), 1);
 
     app.state.schematic.selection.select_only_component(1);
     Command::Delete.execute(&mut app);
     assert!(!app.state.dialogs.application_modal_open());
-    assert!(app.state.schematic.components.is_empty());
+    assert!(app.state.schematic.document.components.is_empty());
 }
 
 #[test]
@@ -402,7 +405,7 @@ fn move_selection_requires_one_live_object_in_an_editable_active_schematic() {
         "a stale selection identity is not a movable object"
     );
 
-    app.state.schematic.components.push(Component::new(
+    app.state.schematic.document.components.push(Component::new(
         404,
         ComponentType::Resistor,
         Point::origin(),
@@ -439,6 +442,7 @@ fn stretch_selection_requires_one_live_eligible_geometry_target() {
 
     app.state
         .schematic
+        .document
         .wires
         .push(Wire::new(17, vec![Point::new(0, 0), Point::new(40, 0)]));
     assert!(Command::StretchSelection.is_enabled(&app));
@@ -471,7 +475,7 @@ fn array_selection_requires_a_live_eligible_editable_selection() {
         "a stale selection identity cannot open the workflow"
     );
 
-    app.state.schematic.components.push(Component::new(
+    app.state.schematic.document.components.push(Component::new(
         404,
         ComponentType::Resistor,
         Point::origin(),
@@ -559,8 +563,8 @@ fn object_properties_dispatches_selected_buses_and_taps_and_refuses_read_only() 
         BusTapOrientation::Down,
     )
     .unwrap();
-    app.state.schematic.buses.push(bus);
-    app.state.schematic.bus_taps.push(tap);
+    app.state.schematic.document.buses.push(bus);
+    app.state.schematic.document.bus_taps.push(tap);
 
     app.state.schematic.selection.select_only_bus(80);
     assert!(Command::ObjectProperties.is_enabled(&app));
@@ -608,7 +612,7 @@ fn object_properties_availability_includes_one_selected_net_label() {
     app.state.schematic.read_only = true;
     assert!(!Command::ObjectProperties.is_enabled(&app));
     app.state.schematic.read_only = false;
-    app.state.schematic.net_labels.clear();
+    app.state.schematic.document.net_labels.clear();
     assert!(app.state.schematic.selection.single_net_label().is_some());
     assert!(!Command::ObjectProperties.is_enabled(&app));
 }
@@ -642,6 +646,7 @@ fn updating_pins_from_contract_needs_an_open_symbol_with_an_interface() {
     let mut schematic = SchematicState::default();
     let port = schematic.add_component(ComponentType::Port, Point::origin());
     schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == port)
@@ -740,6 +745,7 @@ fn app_with_a_placed_cell_instance() -> (RSpiceApp, String) {
     for (name, position) in [("a", Point::new(20, 0)), ("b", Point::new(60, 0))] {
         let id = master.add_component(ComponentType::Port, position);
         master
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == id)
@@ -761,11 +767,12 @@ fn app_with_a_placed_cell_instance() -> (RSpiceApp, String) {
     schematic.add_component(ComponentType::VoltageSource, Point::new(40, 40));
     schematic.add_component(ComponentType::Ground, Point::new(130, 20));
     schematic.add_component(ComponentType::Ground, Point::new(40, 70));
-    schematic.wires.push(Wire::new(
+    schematic.document.wires.push(Wire::new(
         1,
         vec![Point::new(40, 20), Point::new(40, 0), Point::new(70, 0)],
     ));
     schematic
+        .document
         .wires
         .push(Wire::new(2, vec![Point::new(130, 0), Point::new(130, 10)]));
     schematic.recalculate_runtime_state();
@@ -775,6 +782,7 @@ fn app_with_a_placed_cell_instance() -> (RSpiceApp, String) {
 
 fn rename_master_port(master: &mut crate::state::SchematicState, from: &str, to: &str) {
     master
+        .document
         .components
         .iter_mut()
         .find(|component| component.value == from)
@@ -785,6 +793,7 @@ fn rename_master_port(master: &mut crate::state::SchematicState, from: &str, to:
 fn placed_interface(app: &RSpiceApp) -> Vec<String> {
     app.state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.kind == ComponentType::CellInstance)

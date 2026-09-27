@@ -648,14 +648,14 @@ pub(super) fn append_off_sheet_connector_violations(
     let key = |name: &str| name.trim().to_ascii_lowercase();
 
     let mut declarations: HashMap<String, usize> = HashMap::new();
-    for label in &schematic.net_labels {
+    for label in &schematic.document.net_labels {
         if label.kind.off_sheet_direction().is_some() {
             *declarations.entry(key(&label.name)).or_default() += 1;
         }
     }
 
     let mut next_id = result.total_count();
-    for label in &schematic.net_labels {
+    for label in &schematic.document.net_labels {
         if label.kind.off_sheet_direction().is_none()
             || declarations.get(&key(&label.name)).copied() != Some(1)
         {
@@ -737,7 +737,7 @@ pub(super) fn append_case_collision_violations(
     result: &mut DrcResult,
     severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
 ) {
-    let mut labels: Vec<&crate::state::NetLabel> = schematic.net_labels.iter().collect();
+    let mut labels: Vec<&crate::state::NetLabel> = schematic.document.net_labels.iter().collect();
     labels.sort_by_key(|label| label.id);
     let authored = labels
         .into_iter()
@@ -749,16 +749,22 @@ pub(super) fn append_case_collision_violations(
                 },
             )
         })
-        .chain(schematic.components.iter().filter_map(|component| {
-            let spec = component.port_spec()?;
-            Some((
-                spec.name.clone(),
-                DrcLocation::Component {
-                    id: component.id,
-                    name: spec.name,
-                },
-            ))
-        }));
+        .chain(
+            schematic
+                .document
+                .components
+                .iter()
+                .filter_map(|component| {
+                    let spec = component.port_spec()?;
+                    Some((
+                        spec.name.clone(),
+                        DrcLocation::Component {
+                            id: component.id,
+                            name: spec.name,
+                        },
+                    ))
+                }),
+        );
 
     let mut first_spelling: HashMap<String, String> = HashMap::new();
     let mut next_id = result.total_count();

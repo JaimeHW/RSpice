@@ -365,17 +365,17 @@ impl<'a> From<&'a crate::state::SchematicState> for SchematicDocumentContent<'a>
     fn from(schematic: &'a crate::state::SchematicState) -> Self {
         Self {
             schema_version: 5,
-            grid_size: schematic.grid_size,
-            document_policy: schematic.document_policy,
-            components: &schematic.components,
-            wires: &schematic.wires,
-            buses: &schematic.buses,
-            bus_taps: &schematic.bus_taps,
-            net_labels: &schematic.net_labels,
-            design_notes: &schematic.design_notes,
-            documentation_shapes: &schematic.documentation_shapes,
-            junctions: &schematic.junctions,
-            probes: &schematic.probes,
+            grid_size: schematic.document.grid_size,
+            document_policy: schematic.document.document_policy,
+            components: &schematic.document.components,
+            wires: &schematic.document.wires,
+            buses: &schematic.document.buses,
+            bus_taps: &schematic.document.bus_taps,
+            net_labels: &schematic.document.net_labels,
+            design_notes: &schematic.document.design_notes,
+            documentation_shapes: &schematic.document.documentation_shapes,
+            junctions: &schematic.document.junctions,
+            probes: &schematic.document.probes,
         }
     }
 }
@@ -656,7 +656,7 @@ mod tests {
         let mut state = AppState::default();
         let active = state.workspace.active_view.clone();
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
-        state.schematic.design_notes.push(
+        state.schematic.document.design_notes.push(
             DesignNote::new(
                 71,
                 Point::new(4, 6),
@@ -677,7 +677,7 @@ mod tests {
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active.clone())));
 
         let mut edited_state = state;
-        edited_state.schematic.design_notes[0]
+        edited_state.schematic.document.design_notes[0]
             .update(DesignNoteKind::PlainText, "Updated bias network")
             .unwrap();
         let edited = super::super::snapshot(&edited_state).expect("edited snapshot");
@@ -691,7 +691,7 @@ mod tests {
     fn documentation_shape_edits_participate_in_the_schematic_document_digest() {
         let mut state = AppState::default();
         let active = state.workspace.active_view.clone();
-        state.schematic.documentation_shapes.push(
+        state.schematic.document.documentation_shapes.push(
             DocumentationShape::new(
                 72,
                 DocumentationShapeGeometry::Rectangle {
@@ -703,7 +703,7 @@ mod tests {
         );
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
 
-        state.schematic.documentation_shapes[0].translate(Point::new(3, -2));
+        state.schematic.document.documentation_shapes[0].translate(Point::new(3, -2));
         let edited = super::super::snapshot(&state).expect("edited shape snapshot");
         let baseline_digest = document_digests(&baseline)
             .unwrap()

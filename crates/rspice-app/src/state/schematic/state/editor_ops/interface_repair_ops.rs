@@ -38,7 +38,8 @@ impl SchematicState {
         let Some((component_id, master_ports)) = selected_master_interface(self, masters) else {
             return false;
         };
-        self.components
+        self.document
+            .components
             .iter()
             .find(|component| component.id == component_id)
             .and_then(|component| component.library_cell.as_ref())
@@ -51,7 +52,8 @@ impl SchematicState {
     /// A review surface lists these; the repair itself still acts on the
     /// selection, so the two never answer the staleness question differently.
     pub fn stale_instance_interfaces(&self, masters: &HashMap<String, Self>) -> Vec<String> {
-        self.components
+        self.document
+            .components
             .iter()
             .filter(|component| component.kind == ComponentType::CellInstance)
             .filter(|component| {
@@ -82,6 +84,7 @@ impl SchematicState {
         let (component_id, master_ports) = selected_master_interface(self, masters)
             .ok_or(SchematicReplacementError::SelectExactlyOneInstance)?;
         let source = self
+            .document
             .components
             .iter()
             .find(|component| component.id == component_id)
@@ -152,7 +155,7 @@ impl SchematicState {
         // this a repair rather than a refusal.
         let retained = terminal_map.keys().cloned().collect::<HashSet<_>>();
         let mut routed = self.clone();
-        routed.connections.retain(|connection| {
+        routed.document.connections.retain(|connection| {
             connection.component_id != component_id
                 || retained.contains(&normalized(&connection.terminal_name))
         });
@@ -162,18 +165,19 @@ impl SchematicState {
 
         let committed = self.with_undo("update instance interface", move |state| {
             if let Some(component) = state
+                .document
                 .components
                 .iter_mut()
                 .find(|component| component.id == component_id)
             {
                 *component = repaired;
             }
-            state.connections.retain(|connection| {
+            state.document.connections.retain(|connection| {
                 connection.component_id != component_id
                     || retained.contains(&normalized(&connection.terminal_name))
             });
             for replacement_connection in affected_connections {
-                if let Some(connection) = state.connections.iter_mut().find(|connection| {
+                if let Some(connection) = state.document.connections.iter_mut().find(|connection| {
                     connection.component_id == component_id
                         && connection.wire_id == replacement_connection.wire_id
                         && connection.point_index == replacement_connection.point_index
@@ -182,10 +186,16 @@ impl SchematicState {
                 }
             }
             for edit in wire_edits {
-                if let Some(wire) = state.wires.iter_mut().find(|wire| wire.id == edit.wire_id) {
+                if let Some(wire) = state
+                    .document
+                    .wires
+                    .iter_mut()
+                    .find(|wire| wire.id == edit.wire_id)
+                {
                     wire.points = edit.replacement_points;
                 }
                 for connection in state
+                    .document
                     .connections
                     .iter_mut()
                     .filter(|connection| connection.wire_id == edit.wire_id)
@@ -246,6 +256,7 @@ fn selected_master_interface(
 ) -> Option<(u64, Vec<PortSpec>)> {
     let component_id = schematic.selection.single_component()?;
     let component = schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == component_id)?;

@@ -104,7 +104,7 @@ impl AppState {
         let components = self
             .schematic
             .prepare_component_edit(expected, candidate.clone())?;
-        if self.schematic.components == components {
+        if self.schematic.document.components == components {
             return Ok(false);
         }
         if !self.project_lifecycle.project_open || document_read_only(self, &document) {
@@ -120,14 +120,14 @@ impl AppState {
         }
         if candidate.name == expected.name || expected.kind.spice_prefix().is_empty() {
             let before = SchematicSnapshot::capture(&self.schematic);
-            self.schematic.components = components;
+            self.schematic.document.components = components;
             self.schematic.is_dirty = true;
             self.schematic.bump_topology_version();
             self.schematic.commit_undo_from(before, description);
             return Ok(true);
         }
         let mut after_schematic = self.schematic.clone();
-        after_schematic.components = components;
+        after_schematic.document.components = components;
         after_schematic.is_dirty = true;
         after_schematic.bump_topology_version();
         let transaction = self.prepare_schematic_reference_transaction(

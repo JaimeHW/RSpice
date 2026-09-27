@@ -12,7 +12,7 @@ use super::clipboard::ClipboardData;
 use super::component::{Component, LibraryCellInstance};
 use super::component_type::ComponentType;
 use super::design_note::{DesignNote, PendingDesignNotePlacement};
-use super::document_policy::SchematicDocumentPolicy;
+use super::document::SchematicDocument;
 use super::documentation_shape::{
     DocumentationShape, DocumentationShapeDrawing, PendingDocumentationShapePlacement,
 };
@@ -23,7 +23,6 @@ use super::rotation::Rotation;
 use super::selection::Selection;
 use super::snap::SnapEngine;
 use super::tool::Tool;
-use super::validated_revision::ValidatedRevisionJournal;
 use super::wire::{Wire, WireConnection, WireDrawing, WireSegment};
 
 mod components;
@@ -297,81 +296,37 @@ pub struct PendingPartModel {
 // SchematicState
 // =============================================================================
 
-/// Main schematic state
-///
-/// Contains all components, wires, selection state, and interaction state
-/// for a single schematic document.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schematic editor state over one persisted design document.
+#[derive(Debug, Clone)]
 pub struct SchematicState {
-    /// All placed components
-    pub components: Vec<Component>,
-
-    /// All wires
-    pub wires: Vec<Wire>,
-
-    /// Durable multi-conductor bus polylines.
-    #[serde(default)]
-    pub buses: Vec<Bus>,
-
-    /// Typed scalar and slice taps attached to declared buses.
-    #[serde(default)]
-    pub bus_taps: Vec<BusTap>,
-
-    /// Durable non-electrical schematic documentation objects.
-    #[serde(default)]
-    pub design_notes: Vec<DesignNote>,
-
-    /// Durable non-electrical lines, boundaries, arcs, polygons, and callouts.
-    #[serde(default)]
-    pub documentation_shapes: Vec<DocumentationShape>,
-
-    /// Durable crosshair flags created by the schematic Probe tool.
-    #[serde(default)]
-    pub probes: Vec<super::probe::SchematicProbe>,
+    pub document: SchematicDocument,
 
     /// Current selection (runtime state, never part of the design document).
-    #[serde(skip)]
     pub selection: Selection,
 
     /// Current tool (runtime state, not persisted - always starts as Select)
-    #[serde(skip)]
     pub tool: Tool,
 
     /// Unfinished wire gesture (runtime state, never part of the design document).
-    #[serde(skip)]
     pub wire_drawing: WireDrawing,
 
     /// Bus drawing state (runtime only; unfinished gestures never persist).
-    #[serde(skip)]
     pub bus_drawing: BusDrawing,
-
-    /// Grid size in pixels
-    pub grid_size: i32,
-
-    /// Project-portable editor semantics resolved when this document was
-    /// created. Legacy schematics receive the reviewed default policy.
-    #[serde(default)]
-    pub document_policy: SchematicDocumentPolicy,
 
     /// Zoom level (1.0 = 100%) - not part of undo history or saved files
     /// Uses default of 1.0 when deserializing to prevent black screen
-    #[serde(skip, default = "default_zoom")]
     pub zoom: f64,
 
     /// Pan offset in pixels - not part of undo history or saved files
-    #[serde(skip, default)]
     pub pan: (f64, f64),
 
     /// Current schematic file path (for save without dialog)
-    #[serde(skip)]
     pub current_file: Option<PathBuf>,
 
     /// Next component ID (runtime state, not persisted)
-    #[serde(skip)]
     next_id: u64,
 
     /// Component counters for auto-naming (runtime state, not persisted)
-    #[serde(skip)]
     component_counters: HashMap<&'static str, u32>,
 
     /// Clipboard for copy/paste operations.
@@ -379,19 +334,9 @@ pub struct SchematicState {
     /// Clipboard ownership is session-local. Persisting it in a `.rsch` file
     /// made an unrelated document reopen with stale copied design objects and
     /// could retain data that the author had never committed to the drawing.
-    #[serde(skip)]
     pub clipboard: ClipboardData,
 
-    /// Net labels for naming nodes
-    #[serde(default)]
-    pub net_labels: Vec<NetLabel>,
-
-    /// Explicit wire junctions for connecting crossing wires
-    /// Only wires sharing an endpoint OR joined by an explicit junction are connected
-    pub junctions: Vec<Junction>,
-
     /// Preview rotation for component placement (runtime interaction state).
-    #[serde(skip)]
     pub preview_rotation: Rotation,
 
     /// Horizontal mirror for component-placement previews and commits.
@@ -399,13 +344,11 @@ pub struct SchematicState {
     /// Runtime interaction state only. It is shared by click-armed placement
     /// and component-shelf drag placement so the preview always matches the
     /// object that will be committed.
-    #[serde(skip)]
     pub preview_mirror_h: bool,
 
     /// Pending library/cell/view placement payload used with `Tool::Place(CellInstance)`.
     ///
     /// Runtime interaction state only and never persisted to schematic files.
-    #[serde(skip)]
     pub pending_library_cell: Option<LibraryCellInstance>,
 
     /// Model card armed for the next native-device placement.
@@ -414,7 +357,6 @@ pub struct SchematicState {
     /// devices — a zener is a diode — so the card name and the family's symbol
     /// skin ride alongside the armed device kind rather than inside a cell
     /// binding the device does not have.
-    #[serde(skip)]
     pub pending_part_model: Option<PendingPartModel>,
 
     /// Stimulus definition armed for the next independent-source placement.
@@ -423,77 +365,53 @@ pub struct SchematicState {
     /// the instance it becomes is born holding the definition's card and the
     /// receipt for it; the payload rides beside the armed tool exactly as
     /// [`PendingPartModel`] does, and for the same reason.
-    #[serde(skip)]
     pub pending_stimulus: Option<PendingStimulusPlacement>,
 
     /// Validated configuration used while `Tool::BusTap` is armed.
-    #[serde(skip)]
     pub pending_bus_tap: Option<PendingBusTap>,
 
     /// Names still to place, and the contract they share, while the port tool
     /// is armed.
-    #[serde(skip)]
     pub pending_port_sequence: Option<PendingPortSequence>,
 
     /// Validated one-shot documentation object used while the text tool is armed.
-    #[serde(skip)]
     pub pending_design_note: Option<PendingDesignNotePlacement>,
 
     /// Validated shape kind and document authority used while the shape tool is armed.
-    #[serde(skip)]
     pub pending_documentation_shape: Option<PendingDocumentationShapePlacement>,
 
     /// Uncommitted click sequence for the active documentation-shape gesture.
-    #[serde(skip)]
     pub documentation_shape_drawing: DocumentationShapeDrawing,
 
-    /// Wire-to-terminal connections (for rubber-banding)
-    pub connections: Vec<WireConnection>,
-
-    /// Durable, append-only evidence for validated schematic saves.
-    ///
-    /// Legacy schematic documents predate this journal and deserialize with
-    /// an empty history. Records own exact design snapshots; transient editor
-    /// state and undo history are intentionally excluded.
-    #[serde(default)]
-    pub validated_revisions: ValidatedRevisionJournal,
-
     /// Flag indicating unsaved changes (runtime state, not persisted)
-    #[serde(skip)]
     pub is_dirty: bool,
 
     /// Flag indicating zoom_to_fit should be called after next render with actual viewport dimensions.
     /// Set to true when loading a file, cleared after the fit is performed.
-    #[serde(skip)]
     pub needs_fit: bool,
 
     /// One-shot request to frame the authored drawing-sheet paper boundary.
     ///
     /// This is deliberately distinct from [`Self::needs_fit`], which frames
     /// schematic objects and may include content parked off the paper.
-    #[serde(skip)]
     pub needs_drawing_sheet_fit: bool,
 
     /// One-shot request to pan the view so this schematic-space point sits at
     /// the canvas center (violation cycling). Consumed on the next render,
     /// like `needs_fit`; the zoom level is left alone.
-    #[serde(skip)]
     pub center_request: Option<Point>,
 
     /// The open view belongs to a read-only library — inspection only.
     /// Set by the workspace loader; every edit path refuses while it holds.
-    #[serde(skip)]
     pub read_only: bool,
 
     /// Flag indicating the undo history should be reset (e.g., after loading a file).
     /// Set to true when a file is loaded, cleared after history is reset.
-    #[serde(skip)]
     pub needs_history_reset: bool,
 
     /// Topology version counter for cache invalidation (runtime state, not persisted)
     /// Incremented on any structural change (add/remove/move component/wire/junction)
     /// Used by LabelPositionCache and JunctionCache to detect stale data
-    #[serde(skip)]
     topology_version: u64,
 
     /// Content commit counter (runtime state, not persisted). Advances at
@@ -501,65 +419,48 @@ pub struct SchematicState {
     /// moves exactly when the persisted document content moves, including
     /// property edits that `topology_version` deliberately ignores. Live
     /// sessions use it to decide which buffers need rebroadcasting.
-    #[serde(skip)]
     content_version: u64,
 
     /// Snap engine configuration (runtime state, not persisted)
     /// Controls cursor snapping behavior during wire drawing
-    #[serde(skip)]
     pub snap_engine: SnapEngine,
 
     /// Rubber-band box selection rectangle (runtime state, not persisted)
     /// Used for drag-to-select operations
-    #[serde(skip)]
     pub selection_rect: super::selection::SelectionRect,
 
     /// Net highlighting state (runtime state, not persisted)
     /// Tracks which wires are part of the highlighted net
-    #[serde(skip)]
     pub net_highlight: super::net_highlight::NetHighlightState,
 
     /// Undo/redo history (runtime state, not persisted)
     /// Manages snapshots for undo/redo operations
-    #[serde(skip)]
     pub undo_history: super::undo_history::UndoHistory,
 
     /// Frame-coherent canvas geometry (culling bounds, hover hit-test index).
     /// Rebuilt when `topology_version` advances; resets on clone.
-    #[serde(skip)]
     pub(super) canvas_cache: super::canvas_cache::CanvasCache,
 }
 
 impl Default for SchematicState {
     fn default() -> Self {
-        let document_policy = SchematicDocumentPolicy::default();
-        let grid_size = document_policy.grid_pitch.canvas_grid_size();
+        let document = SchematicDocument::default();
         let snap_engine = SnapEngine {
-            grid_size,
+            grid_size: document.grid_size,
             ..SnapEngine::default()
         };
         Self {
-            components: Vec::new(),
-            wires: Vec::new(),
-            buses: Vec::new(),
-            bus_taps: Vec::new(),
-            design_notes: Vec::new(),
-            documentation_shapes: Vec::new(),
-            probes: Vec::new(),
+            document,
             selection: Selection::default(),
             tool: Tool::default(),
             wire_drawing: WireDrawing::default(),
             bus_drawing: BusDrawing::default(),
-            grid_size,
-            document_policy,
             zoom: 1.0,
             pan: (0.0, 0.0),
             current_file: None,
             next_id: 1,
             component_counters: HashMap::new(),
             clipboard: ClipboardData::default(),
-            net_labels: Vec::new(),
-            junctions: Vec::new(),
             preview_rotation: Rotation::default(),
             preview_mirror_h: false,
             pending_library_cell: None,
@@ -570,8 +471,6 @@ impl Default for SchematicState {
             pending_design_note: None,
             pending_documentation_shape: None,
             documentation_shape_drawing: DocumentationShapeDrawing::default(),
-            connections: Vec::new(),
-            validated_revisions: ValidatedRevisionJournal::default(),
             is_dirty: false,
             needs_fit: false,
             needs_drawing_sheet_fit: false,
@@ -589,6 +488,55 @@ impl Default for SchematicState {
     }
 }
 
+// Delegate the unchanged wire layout without copying the document. Runtime
+// fields retain their original serde(skip) defaults when loading saved data.
+impl Serialize for SchematicState {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.document.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SchematicState {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            document: SchematicDocument::deserialize(deserializer)?,
+            selection: Default::default(),
+            tool: Default::default(),
+            wire_drawing: Default::default(),
+            bus_drawing: Default::default(),
+            zoom: default_zoom(),
+            pan: Default::default(),
+            current_file: Default::default(),
+            next_id: Default::default(),
+            component_counters: Default::default(),
+            clipboard: Default::default(),
+            preview_rotation: Default::default(),
+            preview_mirror_h: Default::default(),
+            pending_library_cell: Default::default(),
+            pending_part_model: Default::default(),
+            pending_stimulus: Default::default(),
+            pending_bus_tap: Default::default(),
+            pending_port_sequence: Default::default(),
+            pending_design_note: Default::default(),
+            pending_documentation_shape: Default::default(),
+            documentation_shape_drawing: Default::default(),
+            is_dirty: Default::default(),
+            needs_fit: Default::default(),
+            needs_drawing_sheet_fit: Default::default(),
+            center_request: Default::default(),
+            read_only: Default::default(),
+            needs_history_reset: Default::default(),
+            topology_version: Default::default(),
+            content_version: Default::default(),
+            snap_engine: Default::default(),
+            selection_rect: Default::default(),
+            net_highlight: Default::default(),
+            undo_history: Default::default(),
+            canvas_cache: Default::default(),
+        })
+    }
+}
+
 impl SchematicState {
     /// Reconcile every in-document runtime projection of the authoritative
     /// project-portable grid pitch.
@@ -596,8 +544,8 @@ impl SchematicState {
     /// Call this after restoring history or installing session-owned snap
     /// target preferences into a newly activated document.
     pub(crate) fn reconcile_grid_pitch_runtime(&mut self) {
-        let grid_size = self.document_policy.grid_pitch.canvas_grid_size();
-        self.grid_size = grid_size;
+        let grid_size = self.document.document_policy.grid_pitch.canvas_grid_size();
+        self.document.grid_size = grid_size;
         self.snap_engine.grid_size = grid_size;
     }
 }

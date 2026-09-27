@@ -307,30 +307,37 @@ fn the_reference_top_carries_the_typed_bus_and_its_scalar_tap() {
         .get(&reference.top.key())
         .expect("the testbench buffer is saved");
 
-    let bus = top.buses.first().expect("the testbench declares one bus");
+    let bus = top
+        .document
+        .buses
+        .first()
+        .expect("the testbench declares one bus");
     let declaration = bus
         .declaration
         .as_ref()
         .expect("the bus carries a typed declaration");
     assert_eq!(declaration.name, DATA_BUS);
     assert_eq!(declaration.width(), 4);
-    let tap = top.bus_taps.first().expect("the bus has one tap");
+    let tap = top.document.bus_taps.first().expect("the bus has one tap");
     assert_eq!(tap.bus_id, bus.id);
     assert_eq!(tap.slice.to_string(), DATA_BUS_MEMBER);
     assert!(
-        top.net_labels
+        top.document
+            .net_labels
             .iter()
             .any(|label| label.name == DATA_BUS_MEMBER),
         "the tapped net is unlabelled"
     );
     assert!(
-        top.net_labels
+        top.document
+            .net_labels
             .iter()
             .any(|label| label.name == GLOBAL_SUPPLY_NET),
         "the global supply label is absent"
     );
     assert!(
-        top.net_labels
+        top.document
+            .net_labels
             .iter()
             .any(|label| label.name == TOP_OUTPUT_NET),
         "the labelled output net is absent"

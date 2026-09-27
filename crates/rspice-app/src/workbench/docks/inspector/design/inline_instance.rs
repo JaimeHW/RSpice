@@ -81,6 +81,7 @@ fn prepare_field_edit(
     candidate.validate_reference_designator(&candidate.name)?;
     if state
         .schematic
+        .document
         .components
         .iter()
         .any(|other| other.id != component.id && other.name.eq_ignore_ascii_case(&candidate.name))
@@ -244,6 +245,7 @@ pub(super) fn begin_edit(app: &mut RSpiceApp, component_id: u64, field: InlineEd
     let Some(component) = app
         .state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == component_id)
@@ -589,6 +591,7 @@ pub(super) fn stage_component_tuning(app: &mut RSpiceApp, component_id: u64) -> 
     let component = app
         .state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == component_id)
@@ -898,13 +901,14 @@ pub(super) struct OffSheetDeclaration {
 /// `None` for a net no off-sheet connector names, which is why the three rows
 /// are absent rather than filled with "not applicable".
 pub(super) fn off_sheet_declaration(state: &AppState, name: &str) -> Option<OffSheetDeclaration> {
-    let policy = state.schematic.document_policy.net_naming;
+    let policy = state.schematic.document.document_policy.net_naming;
     let same_name = |candidate: &str| match policy {
         NetNamingPolicy::StrictCaseSensitive => candidate == name,
         NetNamingPolicy::SpiceCompatibleRelaxed => candidate.eq_ignore_ascii_case(name),
     };
     let connectors: Vec<&crate::state::NetLabel> = state
         .schematic
+        .document
         .net_labels
         .iter()
         .filter(|label| label.kind.off_sheet_direction().is_some() && same_name(&label.name))
@@ -1044,6 +1048,7 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
             let value = app
                 .state
                 .schematic
+                .document
                 .components
                 .iter()
                 .find(|component| component.id == terminal.component_id)
@@ -1353,6 +1358,7 @@ pub(super) fn net_name_collision_count(state: &AppState, net: &DesignNet) -> usi
         .collect::<std::collections::HashSet<_>>();
     let mut names = state
         .schematic
+        .document
         .net_labels
         .iter()
         .filter(|label| {
@@ -1363,11 +1369,17 @@ pub(super) fn net_name_collision_count(state: &AppState, net: &DesignNet) -> usi
                 .net_at(label.pos)
                 .is_some_and(|extracted| extracted.wires.iter().any(|id| wire_ids.contains(id)))
         })
-        .map(|label| normalized_net_name(&label.name, state.schematic.document_policy.net_naming))
+        .map(|label| {
+            normalized_net_name(
+                &label.name,
+                state.schematic.document.document_policy.net_naming,
+            )
+        })
         .collect::<std::collections::HashSet<_>>();
     for terminal in &net.terminals {
         if let Some(port) = state
             .schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == terminal.component_id)
@@ -1375,13 +1387,13 @@ pub(super) fn net_name_collision_count(state: &AppState, net: &DesignNet) -> usi
         {
             names.insert(normalized_net_name(
                 &port.name,
-                state.schematic.document_policy.net_naming,
+                state.schematic.document.document_policy.net_naming,
             ));
         }
     }
     names.insert(normalized_net_name(
         &net.name,
-        state.schematic.document_policy.net_naming,
+        state.schematic.document.document_policy.net_naming,
     ));
     names.len().saturating_sub(1)
 }
@@ -1397,6 +1409,7 @@ pub(super) fn select_component(app: &mut RSpiceApp, id: u64) {
     let position = app
         .state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == id)

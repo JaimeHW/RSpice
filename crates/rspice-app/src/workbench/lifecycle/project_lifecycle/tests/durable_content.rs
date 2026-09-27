@@ -260,6 +260,7 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
         assert_eq!(annotations(&saved), annotations(&edited), "{annotation:?}");
         assert!(
             saved.workspace.schematic_buffers[&state.workspace.active_view.key()]
+                .document
                 .components
                 .is_empty()
         );
@@ -306,6 +307,7 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
         );
         assert_eq!(
             all_saved.workspace.schematic_buffers[&state.workspace.active_view.key()]
+                .document
                 .components
                 .len(),
             1
@@ -322,6 +324,7 @@ fn unbound_probe_edits_participate_in_dirty_undo_redo_and_revert() {
     state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, None));
     state.schematic.with_undo("Place probe", |schematic| {
         schematic
+            .document
             .probes
             .push(crate::state::SchematicProbe::new(99, Point::new(0, 0), "P99", None).unwrap());
     });
@@ -337,7 +340,7 @@ fn unbound_probe_edits_participate_in_dirty_undo_redo_and_revert() {
     assert!(has_unsaved_changes(&state));
     let token = prepare_revert_active_document(&state).unwrap();
     confirm_revert_active_document(&mut state, &token).unwrap();
-    assert!(state.schematic.probes.is_empty());
+    assert!(state.schematic.document.probes.is_empty());
     assert!(!has_unsaved_changes(&state));
 }
 
@@ -348,10 +351,10 @@ fn grid_and_document_policy_are_owned_by_the_schematic_document() {
         let baseline = snapshot(&state).unwrap();
         state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, None));
         if edit_policy {
-            state.schematic.document_policy.net_naming =
+            state.schematic.document.document_policy.net_naming =
                 crate::state::NetNamingPolicy::SpiceCompatibleRelaxed;
         } else {
-            state.schematic.grid_size += 1;
+            state.schematic.document.grid_size += 1;
         }
         assert!(has_unsaved_changes(&state));
         assert!(active_document_is_dirty(&state));

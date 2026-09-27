@@ -394,7 +394,8 @@ impl OverviewSnapshot {
                 || usize::from(root_schematic.is_some()),
                 |catalog| catalog.sheets().len(),
             );
-        let root_instance_count = root_schematic.map_or(0, |schematic| schematic.components.len());
+        let root_instance_count =
+            root_schematic.map_or(0, |schematic| schematic.document.components.len());
         let root_net_count = root_schematic.map_or(0, |schematic| {
             crate::simulation::netlist_gen::design_nets(schematic).len()
         });
@@ -602,7 +603,14 @@ impl OverviewSnapshot {
         for schematic in
             std::iter::once(&state.schematic).chain(state.workspace.schematic_buffers.values())
         {
-            for revision in schematic.validated_revisions.records().iter().rev().take(8) {
+            for revision in schematic
+                .document
+                .validated_revisions
+                .records()
+                .iter()
+                .rev()
+                .take(8)
+            {
                 if !retained_revision_ids.insert(revision.id().as_uuid().to_string()) {
                     continue;
                 }
@@ -672,7 +680,7 @@ impl OverviewSnapshot {
         // would describe the cap rather than the project.
         let retained_revision_total = std::iter::once(&state.schematic)
             .chain(state.workspace.schematic_buffers.values())
-            .flat_map(|schematic| schematic.validated_revisions.records().iter())
+            .flat_map(|schematic| schematic.document.validated_revisions.records().iter())
             .map(|revision| revision.id().as_uuid())
             .collect::<BTreeSet<_>>()
             .len();

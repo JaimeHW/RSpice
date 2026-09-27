@@ -45,6 +45,7 @@ impl SchematicState {
             .single_component()
             .ok_or(SchematicReplacementError::SelectExactlyOneInstance)?;
         let component = self
+            .document
             .components
             .iter()
             .find(|component| component.id == component_id)
@@ -69,6 +70,7 @@ impl SchematicState {
             .single_component()
             .ok_or(SchematicReplacementError::SelectExactlyOneInstance)?;
         let source_component = self
+            .document
             .components
             .iter()
             .find(|component| component.id == component_id)
@@ -125,6 +127,7 @@ impl SchematicState {
 
         let committed = self.with_undo("replace instance", move |state| {
             if let Some(component) = state
+                .document
                 .components
                 .iter_mut()
                 .find(|component| component.id == component_id)
@@ -132,7 +135,7 @@ impl SchematicState {
                 *component = replacement;
             }
             for replacement_connection in affected_connections {
-                if let Some(connection) = state.connections.iter_mut().find(|connection| {
+                if let Some(connection) = state.document.connections.iter_mut().find(|connection| {
                     connection.component_id == component_id
                         && connection.wire_id == replacement_connection.wire_id
                         && connection.point_index == replacement_connection.point_index
@@ -141,10 +144,16 @@ impl SchematicState {
                 }
             }
             for edit in wire_edits {
-                if let Some(wire) = state.wires.iter_mut().find(|wire| wire.id == edit.wire_id) {
+                if let Some(wire) = state
+                    .document
+                    .wires
+                    .iter_mut()
+                    .find(|wire| wire.id == edit.wire_id)
+                {
                     wire.points = edit.replacement_points;
                 }
                 for connection in state
+                    .document
                     .connections
                     .iter_mut()
                     .filter(|connection| connection.wire_id == edit.wire_id)
@@ -295,7 +304,7 @@ impl SchematicState {
             netlist_status,
         };
         let connections_changed = wire_result.connections.iter().any(|candidate| {
-            self.connections.iter().find(|connection| {
+            self.document.connections.iter().find(|connection| {
                 connection.component_id == source.id
                     && connection.wire_id == candidate.wire_id
                     && connection.point_index == candidate.point_index
@@ -341,7 +350,7 @@ fn replacement_reference_name(
     (1..=u32::MAX)
         .map(|index| format!("{target_prefix}{index}"))
         .find(|candidate| {
-            state.components.iter().all(|component| {
+            state.document.components.iter().all(|component| {
                 component.id == source.id || !component.name.eq_ignore_ascii_case(candidate)
             })
         })
@@ -502,11 +511,12 @@ pub(super) fn build_wire_edits(
             continue;
         }
         for wire in state
+            .document
             .wires
             .iter()
             .filter(|wire| wire.contains_point(source_terminal.world))
         {
-            let explicitly_owned = state.connections.iter().any(|connection| {
+            let explicitly_owned = state.document.connections.iter().any(|connection| {
                 connection.component_id == source.id
                     && connection.wire_id == wire.id
                     && normalized(&connection.terminal_name) == source_key
@@ -523,6 +533,7 @@ pub(super) fn build_wire_edits(
         }
     }
     for connection in state
+        .document
         .connections
         .iter()
         .filter(|connection| connection.component_id == source.id)
@@ -542,6 +553,7 @@ pub(super) fn build_wire_edits(
             }
         })?;
         let wire = state
+            .document
             .wires
             .iter()
             .find(|wire| wire.id == connection.wire_id)
@@ -568,7 +580,7 @@ pub(super) fn build_wire_edits(
                     point_index: connection.point_index,
                 });
             }
-            if state.connections.iter().any(|other| {
+            if state.document.connections.iter().any(|other| {
                 other.wire_id == connection.wire_id
                     && other.point_index == connection.point_index
                     && other.component_id != source.id
@@ -610,12 +622,15 @@ pub(super) fn build_wire_edits(
     let relocated_points = endpoint_moves.values().map(BTreeMap::len).sum();
     let mut edits = Vec::with_capacity(endpoint_moves.len());
     for (wire_id, moves) in endpoint_moves {
-        let wire = state.wires.iter().find(|wire| wire.id == wire_id).ok_or(
-            SchematicReplacementError::StaleConnection {
+        let wire = state
+            .document
+            .wires
+            .iter()
+            .find(|wire| wire.id == wire_id)
+            .ok_or(SchematicReplacementError::StaleConnection {
                 wire_id,
                 point_index: 0,
-            },
-        )?;
+            })?;
         let mut moved_points = wire.points.clone();
         for (point_index, target) in moves {
             let point = moved_points.get_mut(point_index).ok_or(
@@ -641,7 +656,7 @@ pub(super) fn build_wire_edits(
             return Err(SchematicReplacementError::DegenerateWire { wire_id });
         }
         let replacement_wire = super::super::super::Wire::new(wire_id, replacement_points.clone());
-        for tap in state.bus_taps.iter().filter(|tap| {
+        for tap in state.document.bus_taps.iter().filter(|tap| {
             tap.target_kind() == super::super::super::BusTargetKind::Wire
                 && wire.contains_point(tap.connection_point)
         }) {
@@ -692,12 +707,13 @@ fn validate_target_terminal_contacts(
                 .is_some_and(|mapped| mapped.terminal.name() == target.terminal.name())
         });
         let unsafe_wire_contact = state
+            .document
             .wires
             .iter()
             .filter(|wire| wire.contains_point(target.world))
             .any(|wire| {
                 !mapped_source.is_some_and(|mapped_source| {
-                    state.connections.iter().any(|connection| {
+                    state.document.connections.iter().any(|connection| {
                         if connection.component_id != source.id
                             || connection.wire_id != wire.id
                             || !connection
@@ -722,14 +738,17 @@ fn validate_target_terminal_contacts(
             });
         if unsafe_wire_contact
             || state
+                .document
                 .junctions
                 .iter()
                 .any(|junction| junction.pos == target.world)
             || state
+                .document
                 .net_labels
                 .iter()
                 .any(|label| label.pos == target.world)
             || state
+                .document
                 .bus_taps
                 .iter()
                 .any(|tap| tap.connection_point == target.world || tap.bus_point == target.world)
@@ -739,6 +758,7 @@ fn validate_target_terminal_contacts(
             });
         }
         for other in state
+            .document
             .components
             .iter()
             .filter(|component| component.id != source.id)
@@ -768,6 +788,7 @@ pub(super) fn connected_source_terminals(
         .collect();
     let mut connected = HashSet::new();
     for connection in state
+        .document
         .connections
         .iter()
         .filter(|connection| connection.component_id == source.id)
@@ -785,6 +806,7 @@ pub(super) fn connected_source_terminals(
     }
     for terminal in terminals {
         if state
+            .document
             .wires
             .iter()
             .any(|wire| wire.contains_point(terminal.world))
@@ -801,20 +823,34 @@ fn validate_movable_terminal_anchor(
     owning_wire_id: u64,
     point: Point,
 ) -> Result<(), SchematicReplacementError> {
-    if state.junctions.iter().any(|junction| junction.pos == point)
-        || state.net_labels.iter().any(|label| label.pos == point)
+    if state
+        .document
+        .junctions
+        .iter()
+        .any(|junction| junction.pos == point)
         || state
+            .document
+            .net_labels
+            .iter()
+            .any(|label| label.pos == point)
+        || state
+            .document
             .bus_taps
             .iter()
             .any(|tap| tap.connection_point == point)
     {
         return Err(SchematicReplacementError::FixedElectricalAnchor { point });
     }
-    for wire in state.wires.iter().filter(|wire| wire.id != owning_wire_id) {
+    for wire in state
+        .document
+        .wires
+        .iter()
+        .filter(|wire| wire.id != owning_wire_id)
+    {
         if !wire.contains_point(point) {
             continue;
         }
-        let explicitly_owned = state.connections.iter().any(|connection| {
+        let explicitly_owned = state.document.connections.iter().any(|connection| {
             connection.component_id == source_component_id
                 && connection.wire_id == wire.id
                 && wire
@@ -839,6 +875,7 @@ fn validate_authority(
         return Err(SchematicReplacementError::StaleAuthority);
     }
     let source = state
+        .document
         .components
         .iter()
         .find(|component| component.id == authority.component_id)
@@ -1185,6 +1222,7 @@ pub(super) fn validate_replacement_geometry(
     let source_bounds = checked_component_bounds(source)?;
     let replacement_bounds = checked_component_bounds(replacement)?;
     for other in state
+        .document
         .components
         .iter()
         .filter(|component| component.id != source.id)
@@ -1320,6 +1358,7 @@ mod tests {
         let mut state = SchematicState::default();
         let id = state.add_library_cell_component(Point::new(100, 100), binding);
         let component = state
+            .document
             .components
             .iter_mut()
             .find(|item| item.id == id)
@@ -1351,7 +1390,7 @@ mod tests {
     #[test]
     fn mockup_opamp_contract_reports_five_pins_and_six_of_eight_parameters() {
         let state = selected_opamp();
-        let source = state.components[0].clone();
+        let source = state.document.components[0].clone();
         let source_spec = SchematicReplacementSourceSpec::from_component(&source)
             .unwrap()
             .with_parameter_keys(["gain", "ibias", "vos", "slew", "en", "temp"]);
@@ -1378,16 +1417,19 @@ mod tests {
     fn commit_is_one_undo_step_and_preserves_clipboard_identity_and_placement() {
         let mut state = selected_opamp();
         let authority = state.replacement_authority().unwrap();
-        state.clipboard.components.push(state.components[0].clone());
+        state
+            .clipboard
+            .components
+            .push(state.document.components[0].clone());
         let clipboard = serde_json::to_value(&state.clipboard).unwrap();
-        let before = state.components[0].clone();
+        let before = state.document.components[0].clone();
         let topology = state.topology_version();
 
         let impact = state
             .replace_selected_instance(&authority, &opa188_target())
             .unwrap();
 
-        let after = &state.components[0];
+        let after = &state.document.components[0];
         assert_eq!(after.id, before.id);
         assert_eq!(after.name, before.name);
         assert_eq!(after.pos, before.pos);
@@ -1396,7 +1438,7 @@ mod tests {
         assert_eq!(state.topology_version(), topology.wrapping_add(1));
         assert_eq!(state.undo_description(), Some("replace instance"));
         assert!(state.undo());
-        assert_eq!(state.components[0], before);
+        assert_eq!(state.document.components[0], before);
         assert!(
             !state.can_undo(),
             "replacement must create exactly one undo record"
@@ -1426,11 +1468,12 @@ mod tests {
                 &SchematicReplacementTargetSpec::primitive(ComponentType::Capacitor),
             )
             .unwrap();
-        assert_eq!(state.components[0].id, resistor_id);
-        assert_eq!(state.components[0].name, "C2");
+        assert_eq!(state.document.components[0].id, resistor_id);
+        assert_eq!(state.document.components[0].name, "C2");
         let next = state.add_component(ComponentType::Capacitor, Point::new(200, 0));
         assert_eq!(
             state
+                .document
                 .components
                 .iter()
                 .find(|component| component.id == next)
@@ -1439,7 +1482,7 @@ mod tests {
             "C3"
         );
         assert!(state.undo());
-        assert_eq!(state.components[0].name, "R1");
+        assert_eq!(state.document.components[0].name, "R1");
     }
 
     #[test]
@@ -1447,7 +1490,7 @@ mod tests {
         let mut state = SchematicState::default();
         let id = state.add_component(ComponentType::Resistor, Point::new(100, 100));
         state.selection.select_only_component(id);
-        let terminal = state.components[0]
+        let terminal = state.document.components[0]
             .terminal_positions()
             .into_iter()
             .find(|(name, _)| *name == "+")
@@ -1455,9 +1498,11 @@ mod tests {
             .1;
         let wire_id = state.next_id();
         state
+            .document
             .wires
             .push(Wire::segment(wire_id, terminal, Point::new(20, 100)));
         state
+            .document
             .connections
             .push(WireConnection::new(wire_id, 0, id, "+"));
         state.recalculate_runtime_state();
@@ -1488,8 +1533,8 @@ mod tests {
         state
             .replace_selected_instance(&authority, &target)
             .unwrap();
-        assert_eq!(state.wires[0].points[0], Point::new(70, 100));
-        assert_eq!(state.connections[0].terminal_name, "P");
+        assert_eq!(state.document.wires[0].points[0], Point::new(70, 100));
+        assert_eq!(state.document.connections[0].terminal_name, "P");
     }
 
     #[test]
@@ -1497,12 +1542,14 @@ mod tests {
         let mut state = SchematicState::default();
         let id = state.add_component(ComponentType::Resistor, Point::new(100, 100));
         state.selection.select_only_component(id);
-        let terminal = state.components[0].terminal_positions()[0].1;
+        let terminal = state.document.components[0].terminal_positions()[0].1;
         let wire_id = state.next_id();
         state
+            .document
             .wires
             .push(Wire::segment(wire_id, terminal, Point::new(20, 100)));
         state
+            .document
             .connections
             .push(WireConnection::new(wire_id, 0, id, "+"));
         state.recalculate_runtime_state();
@@ -1526,14 +1573,17 @@ mod tests {
         state
             .replace_selected_instance(&authority, &target)
             .unwrap();
-        assert!(state.wires[0].is_orthogonal());
+        assert!(state.document.wires[0].is_orthogonal());
         assert_eq!(
-            state.wires[0].points[state.connections[0].point_index],
+            state.document.wires[0].points[state.document.connections[0].point_index],
             Point::new(70, 90)
         );
         assert!(state.undo());
-        assert_eq!(state.wires[0].points, [terminal, Point::new(20, 100)]);
-        assert_eq!(state.connections[0].point_index, 0);
+        assert_eq!(
+            state.document.wires[0].points,
+            [terminal, Point::new(20, 100)]
+        );
+        assert_eq!(state.document.connections[0].point_index, 0);
     }
 
     #[test]
@@ -1543,7 +1593,7 @@ mod tests {
         state.selection.select_only_component(id);
         let authority = state.replacement_authority().unwrap();
         let before = SchematicSnapshot::capture(&state);
-        state.components[0].value = "2k".to_owned();
+        state.document.components[0].value = "2k".to_owned();
         assert_eq!(
             state.preview_instance_replacement(
                 &authority,
@@ -1551,15 +1601,17 @@ mod tests {
             ),
             Err(SchematicReplacementError::StaleAuthority)
         );
-        state.components[0] = authority.source_component().clone();
+        state.document.components[0] = authority.source_component().clone();
         assert!(before.is_equal_state(&state));
 
-        let terminal = state.components[0].terminal_positions()[0].1;
+        let terminal = state.document.components[0].terminal_positions()[0].1;
         let wire_id = state.next_id();
         state
+            .document
             .wires
             .push(Wire::segment(wire_id, terminal, Point::new(0, 100)));
         state
+            .document
             .connections
             .push(WireConnection::new(wire_id, 0, id, "+"));
         state.bump_topology_version();
@@ -1593,8 +1645,8 @@ mod tests {
             Err(SchematicReplacementError::CoordinateOverflow)
         );
 
-        state.components[0].pos = Point::origin();
-        state.components[0].params = "gain".to_owned();
+        state.document.components[0].pos = Point::origin();
+        state.document.components[0].params = "gain".to_owned();
         assert!(matches!(
             state.replacement_authority(),
             Err(SchematicReplacementError::MalformedParameterString { .. })

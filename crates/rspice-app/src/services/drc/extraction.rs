@@ -52,7 +52,7 @@ fn extract_components(
     connectivity: &ExtractedConnectivity,
     mut component_known_for: impl FnMut(&Component) -> Option<bool>,
 ) -> Vec<ComponentInfo> {
-    let mut components = Vec::with_capacity(schematic.components.len());
+    let mut components = Vec::with_capacity(schematic.document.components.len());
     let property_registry = PropertyRegistry::new();
 
     // Terminals arrive in placement order and, within a component, in the
@@ -66,7 +66,7 @@ fn extract_components(
             .push(terminal);
     }
 
-    for comp in &schematic.components {
+    for comp in &schematic.document.components {
         let terminals = bound.get(&comp.id).map(Vec::as_slice).unwrap_or_default();
         let mut pins = Vec::with_capacity(terminals.len());
         let declared_output_pins: std::collections::HashSet<String> = comp

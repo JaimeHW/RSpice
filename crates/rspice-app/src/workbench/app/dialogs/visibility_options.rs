@@ -149,6 +149,7 @@ pub(crate) fn publish_visibility_policy(state: &mut AppState, policy: SchematicV
     }
     let selectable_note_ids = state
         .schematic
+        .document
         .design_notes
         .iter()
         .filter(|note| {

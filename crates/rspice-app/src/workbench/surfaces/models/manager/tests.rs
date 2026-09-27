@@ -39,7 +39,7 @@ fn bound_consumers_are_attributed_only_to_the_effective_provider() {
     let mut component = Component::new(1, ComponentType::Nmos, Point::origin());
     component.name = "M1".to_owned();
     component.params = "model=nch model_library=alpha".to_owned();
-    schematic.components.push(component);
+    schematic.document.components.push(component);
     state.workspace.save_active_schematic(&schematic);
 
     let mut pending_actions = Vec::new();
@@ -631,7 +631,7 @@ fn one_model_project() -> RSpiceApp {
     let mut component = Component::new(1, ComponentType::Nmos, Point::origin());
     component.name = "M1".to_owned();
     component.params = "model=nch".to_owned();
-    app.state.schematic.components.push(component);
+    app.state.schematic.document.components.push(component);
     app.state.schematic.selection.select_only_component(1);
     app
 }

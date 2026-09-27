@@ -173,6 +173,7 @@ fn selected_target(state: &AppState) -> Option<SchematicCrossProbeTarget> {
     if let Some(component_id) = selection.single_component() {
         let component = state
             .schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == component_id)?;
@@ -302,7 +303,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
             }
         }
     };
-    for label in &state.schematic.net_labels {
+    for label in &state.schematic.document.net_labels {
         if selection.net_labels.contains(&label.id) && !accept(&label.name) {
             return None;
         }
@@ -327,6 +328,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
     for junction in &selection.junctions {
         let mut names = state
             .schematic
+            .document
             .wires
             .iter()
             .filter(|wire| wire.contains_point(junction.pos))
@@ -678,11 +680,15 @@ mod tests {
     #[test]
     fn selected_net_highlights_only_a_current_exact_retained_trace() {
         let mut state = AppState::default();
-        state.schematic.net_labels.push(crate::state::NetLabel::new(
-            7,
-            crate::state::Point::new(0, 0),
-            "OUT",
-        ));
+        state
+            .schematic
+            .document
+            .net_labels
+            .push(crate::state::NetLabel::new(
+                7,
+                crate::state::Point::new(0, 0),
+                "OUT",
+            ));
         state.schematic.selection.select_net_label(7);
         install_current_map(&mut state, "OUT");
         let revision = state.workspace.project.revision();
@@ -716,11 +722,15 @@ mod tests {
             child.clone(),
             crate::state::ViewType::Schematic,
         );
-        state.schematic.net_labels.push(crate::state::NetLabel::new(
-            7,
-            crate::state::Point::new(0, 0),
-            "n1",
-        ));
+        state
+            .schematic
+            .document
+            .net_labels
+            .push(crate::state::NetLabel::new(
+                7,
+                crate::state::Point::new(0, 0),
+                "n1",
+            ));
         state.schematic.selection.select_net_label(7);
         install_current_map(&mut state, "n1");
         let revision = state.workspace.project.revision();
@@ -756,11 +766,15 @@ mod tests {
             .ui
             .preferences
             .set_toggle(TogglePreference::CrossProbeBehavior, false);
-        state.schematic.net_labels.push(crate::state::NetLabel::new(
-            7,
-            crate::state::Point::new(0, 0),
-            "OUT",
-        ));
+        state
+            .schematic
+            .document
+            .net_labels
+            .push(crate::state::NetLabel::new(
+                7,
+                crate::state::Point::new(0, 0),
+                "OUT",
+            ));
         state.schematic.selection.select_net_label(7);
         install_current_map(&mut state, "OUT");
         let revision = state.workspace.project.revision();
@@ -782,6 +796,7 @@ mod tests {
         );
         let emitted = state
             .schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == component_id)

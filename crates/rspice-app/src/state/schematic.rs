@@ -26,6 +26,7 @@ use rspice_design::schematic::component_type;
 mod design_note;
 mod device_catalog;
 use rspice_design::schematic::device_descriptor;
+mod document;
 use rspice_design::schematic::document_policy;
 mod documentation_shape;
 mod generated_veriloga_catalog;

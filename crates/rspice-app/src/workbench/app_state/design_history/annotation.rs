@@ -98,6 +98,7 @@ impl AppState {
                     )
                 })?;
             let component = projected[key]
+                .document
                 .components
                 .iter()
                 .find(|component| component.id == object.object_id())
@@ -127,7 +128,7 @@ impl AppState {
             let source = projected[&key];
             validate_reference_document(self, &key, source)?;
             let mut candidate = source.clone();
-            candidate.components = source.prepare_component_renames(&names)?;
+            candidate.document.components = source.prepare_component_renames(&names)?;
             candidate.is_dirty = true;
             candidate.bump_topology_version();
             before.insert(key.clone(), source.clone());

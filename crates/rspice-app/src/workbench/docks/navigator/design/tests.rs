@@ -69,13 +69,18 @@ fn recursive_design() -> RSpiceApp {
     let root = app.state.workspace.active_view.clone();
     app.state
         .schematic
+        .document
         .components
         .push(placed(101, "XA", "work", "child"));
     app.state.sync_active_schematic_to_workspace();
 
     let mut child = SchematicState::default();
-    child.components.push(placed(201, "XLEAF", "work", "leaf"));
     child
+        .document
+        .components
+        .push(placed(201, "XLEAF", "work", "leaf"));
+    child
+        .document
         .components
         .push(placed(202, "XLOOP", &root.library, &root.cell));
     add_master(&mut app.state, "work", "child", child);
@@ -98,7 +103,7 @@ fn two_sheet_named_signals() -> RSpiceApp {
             crate::state::Point::new(20, 20),
         );
         source.name = name.to_owned();
-        app.state.schematic.components.push(source);
+        app.state.schematic.document.components.push(source);
     }
     app.state.sync_active_schematic_to_workspace();
 
@@ -722,13 +727,18 @@ fn glyph_canvas(glyph: ShelfGlyph) -> crate::ui::raster::Canvas {
 #[test]
 fn the_nets_section_states_an_unresolved_configuration_instead_of_buffer_nets() {
     let mut app = RSpiceApp::test_instance();
-    app.state.schematic.wires.push(crate::state::Wire::segment(
-        1,
-        crate::state::Point::new(0, 0),
-        crate::state::Point::new(40, 0),
-    ));
     app.state
         .schematic
+        .document
+        .wires
+        .push(crate::state::Wire::segment(
+            1,
+            crate::state::Point::new(0, 0),
+            crate::state::Point::new(40, 0),
+        ));
+    app.state
+        .schematic
+        .document
         .net_labels
         .push(crate::state::NetLabel::new(
             2,
@@ -785,13 +795,18 @@ fn the_nets_section_states_an_unresolved_configuration_instead_of_buffer_nets() 
 #[test]
 fn a_net_row_announces_the_meta_column_it_paints() {
     let mut app = RSpiceApp::test_instance();
-    app.state.schematic.wires.push(crate::state::Wire::segment(
-        1,
-        crate::state::Point::new(0, 0),
-        crate::state::Point::new(40, 0),
-    ));
     app.state
         .schematic
+        .document
+        .wires
+        .push(crate::state::Wire::segment(
+            1,
+            crate::state::Point::new(0, 0),
+            crate::state::Point::new(40, 0),
+        ));
+    app.state
+        .schematic
+        .document
         .net_labels
         .push(crate::state::NetLabel::new(
             2,
@@ -869,7 +884,7 @@ fn interface_design() -> RSpiceApp {
         (402, "ALPHA", 1, PortDirection::In),
         (403, "GAMMA", 3, PortDirection::Out),
     ] {
-        app.state.schematic.components.push(port(
+        app.state.schematic.document.components.push(port(
             id,
             name,
             Some(order),
@@ -1820,7 +1835,7 @@ fn the_ports_rail_lists_the_interface_in_the_order_the_deck_has_it() {
 #[test]
 fn a_vector_pin_states_the_conductors_its_name_declares() {
     let mut app = RSpiceApp::test_instance();
-    app.state.schematic.components.push(port(
+    app.state.schematic.document.components.push(port(
         404,
         "DATA[7:0]",
         Some(1),
@@ -1852,18 +1867,27 @@ fn a_port_name_declared_twice_is_marked_on_both_rows() {
     app.state.workbench.activate(Workspace::Design);
     // Folded for case, because the netlist folds it: `SENSE` and `sense` are
     // one node, declared twice.
-    app.state
-        .schematic
-        .components
-        .push(port(405, "SENSE", Some(1), PortDirection::In, ""));
-    app.state
-        .schematic
-        .components
-        .push(port(406, "sense", Some(2), PortDirection::In, ""));
-    app.state
-        .schematic
-        .components
-        .push(port(407, "CLEAN", Some(3), PortDirection::Out, ""));
+    app.state.schematic.document.components.push(port(
+        405,
+        "SENSE",
+        Some(1),
+        PortDirection::In,
+        "",
+    ));
+    app.state.schematic.document.components.push(port(
+        406,
+        "sense",
+        Some(2),
+        PortDirection::In,
+        "",
+    ));
+    app.state.schematic.document.components.push(port(
+        407,
+        "CLEAN",
+        Some(3),
+        PortDirection::Out,
+        "",
+    ));
     app.state.sync_active_schematic_to_workspace();
 
     let rows = port_rows(&app.state, SheetScope::AllSheets, "");
@@ -1915,7 +1939,7 @@ fn an_excitation_row_stands_for_the_instance_the_object_menu_acts_on() {
         crate::state::Point::new(60, 80),
     );
     source.name = "VIN".to_owned();
-    app.state.schematic.components.push(source);
+    app.state.schematic.document.components.push(source);
     app.state.sync_active_schematic_to_workspace();
 
     let sources = crate::simulation::placed_sources::placed_sources(
@@ -1939,7 +1963,7 @@ fn an_excitation_row_stands_for_the_instance_the_object_menu_acts_on() {
 
     // A source the sheet holds no instance for is offered no menu rather than a
     // menu of commands that would act on nothing.
-    app.state.schematic.components.clear();
+    app.state.schematic.document.components.clear();
     assert_eq!(
         placed_object(&app.state, placed.component_id, &placed.reference),
         None
@@ -1965,7 +1989,7 @@ fn rf_port(id: u64, name: &str, params: &str) -> crate::state::Component {
 fn rf_bench(ports: Vec<crate::state::Component>) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
-    app.state.schematic.components.extend(ports);
+    app.state.schematic.document.components.extend(ports);
     app.state.sync_active_schematic_to_workspace();
     app
 }
@@ -2189,28 +2213,35 @@ fn source(id: u64, kind: ComponentType, name: &str, params: &str) -> crate::stat
 fn hierarchical_excitations() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
+    app.state.schematic.document.components.push(source(
+        701,
+        ComponentType::VoltageSource,
+        "VDD",
+        "dc=5",
+    ));
     app.state
         .schematic
-        .components
-        .push(source(701, ComponentType::VoltageSource, "VDD", "dc=5"));
-    app.state
-        .schematic
+        .document
         .components
         .push(placed(702, "XA", "work", "afe"));
     app.state
         .schematic
+        .document
         .components
         .push(placed(703, "XB", "work", "afe"));
     app.state.sync_active_schematic_to_workspace();
 
     let mut child = SchematicState::default();
-    child.components.push(source(
+    child.document.components.push(source(
         711,
         ComponentType::VoltageSourceSin,
         "V1",
         "freq=1k",
     ));
-    child.components.push(rf_port(712, "P1", "port=1 z0=50"));
+    child
+        .document
+        .components
+        .push(rf_port(712, "P1", "port=1 z0=50"));
     add_master(&mut app.state, "work", "afe", child);
     app
 }
@@ -2319,6 +2350,7 @@ fn the_sheet_scope_leaves_the_rows_of_another_occurrence_alone() {
         .expect("the fixture instance is nameable");
     app.state
         .schematic
+        .document
         .components
         .push(placed(304, "XA", "work", "afe"));
     app.state.sync_active_schematic_to_workspace();

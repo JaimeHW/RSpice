@@ -263,7 +263,7 @@ impl SimulationController {
             selection_mode,
             explicit,
             groups,
-            &root_schematic.probes,
+            &root_schematic.document.probes,
             &occurrences,
             plan.id(),
         )?;
@@ -798,7 +798,7 @@ impl SimulationController {
         let root_schematic = execution_projection
             .root_schematic()
             .expect("a successful execution projection has a materialized root");
-        if root_schematic.components.is_empty() {
+        if root_schematic.document.components.is_empty() {
             return Err(PreparationError::new(
                 PreparationStage::DesignChecks,
                 format!(
@@ -914,7 +914,7 @@ impl SimulationController {
                 state.sim_setup.save_policy.output_selection_mode,
                 &plan_payload.saved_outputs,
                 &plan_payload.capture_groups,
-                &root_schematic.probes,
+                &root_schematic.document.probes,
                 &occurrences,
                 plan.plan_id(),
             )?;

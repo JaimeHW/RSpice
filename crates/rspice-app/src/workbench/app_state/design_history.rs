@@ -1703,6 +1703,7 @@ fn library_cell_keys(state: &AppState) -> BTreeSet<(String, String)> {
 /// that placement is still the same object naming the same master.
 fn restore_placement_binding(schematic: &mut SchematicState, placement: &StrandedPlacement) {
     let Some(binding) = schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == placement.object)
@@ -1723,7 +1724,7 @@ fn restore_placement_binding(schematic: &mut SchematicState, placement: &Strande
 fn placements_of_masters(state: &AppState, masters: &[(String, String)]) -> Vec<StrandedPlacement> {
     let mut stranded = Vec::new();
     for (document, schematic) in &state.workspace.schematic_buffers {
-        for component in &schematic.components {
+        for component in &schematic.document.components {
             if component.kind != ComponentType::CellInstance {
                 continue;
             }
@@ -2477,7 +2478,7 @@ fn schematic_references_master(
     target_library: &str,
     target_cell: &str,
 ) -> bool {
-    schematic.components.iter().any(|component| {
+    schematic.document.components.iter().any(|component| {
         component.kind == ComponentType::CellInstance
             && component.library_cell.as_ref().is_some_and(|binding| {
                 binding.library == target_library && binding.cell == target_cell

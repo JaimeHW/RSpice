@@ -30,15 +30,19 @@ impl SchematicState {
     }
 
     fn live_id_in_use(&self, id: u64) -> bool {
-        self.components.iter().any(|item| item.id == id)
-            || self.wires.iter().any(|item| item.id == id)
-            || self.junctions.iter().any(|item| item.id == id)
-            || self.net_labels.iter().any(|item| item.id == id)
-            || self.buses.iter().any(|item| item.id == id)
-            || self.bus_taps.iter().any(|item| item.id == id)
-            || self.design_notes.iter().any(|item| item.id == id)
-            || self.documentation_shapes.iter().any(|item| item.id == id)
-            || self.probes.iter().any(|item| item.id == id)
+        self.document.components.iter().any(|item| item.id == id)
+            || self.document.wires.iter().any(|item| item.id == id)
+            || self.document.junctions.iter().any(|item| item.id == id)
+            || self.document.net_labels.iter().any(|item| item.id == id)
+            || self.document.buses.iter().any(|item| item.id == id)
+            || self.document.bus_taps.iter().any(|item| item.id == id)
+            || self.document.design_notes.iter().any(|item| item.id == id)
+            || self
+                .document
+                .documentation_shapes
+                .iter()
+                .any(|item| item.id == id)
+            || self.document.probes.iter().any(|item| item.id == id)
     }
 
     /// Get the current topology version
@@ -62,11 +66,12 @@ impl SchematicState {
     /// Recalculate runtime state after loading from file
     /// This MUST be called after deserialization to prevent ID collisions
     pub fn recalculate_runtime_state(&mut self) {
-        let wire_count_before_repair = self.wires.len();
-        self.wires.retain(|wire| wire.points.len() >= 2);
+        let wire_count_before_repair = self.document.wires.len();
+        self.document.wires.retain(|wire| wire.points.len() >= 2);
         self.clipboard.wires.retain(|wire| wire.points.len() >= 2);
         self.clipboard.buses.retain(|bus| bus.validate().is_ok());
-        self.documentation_shapes
+        self.document
+            .documentation_shapes
             .retain(|shape| shape.validate().is_ok());
         self.clipboard
             .documentation_shapes
@@ -74,32 +79,70 @@ impl SchematicState {
         self.clipboard
             .probes
             .retain(|probe| probe.validate().is_ok());
-        if self.wires.len() != wire_count_before_repair {
+        if self.document.wires.len() != wire_count_before_repair {
             self.bump_topology_version();
         }
 
         // Find the maximum ID currently in use across every collection that
         // allocates from the shared counter (components, wires, junctions,
         // and net labels).
-        let max_component_id = self.components.iter().map(|c| c.id).max().unwrap_or(0);
-        let max_wire_id = self.wires.iter().map(|w| w.id).max().unwrap_or(0);
-        let max_junction_id = self.junctions.iter().map(|j| j.id).max().unwrap_or(0);
-        let max_label_id = self.net_labels.iter().map(|l| l.id).max().unwrap_or(0);
-        let max_bus_id = self.buses.iter().map(|bus| bus.id).max().unwrap_or(0);
-        let max_bus_tap_id = self.bus_taps.iter().map(|tap| tap.id).max().unwrap_or(0);
+        let max_component_id = self
+            .document
+            .components
+            .iter()
+            .map(|c| c.id)
+            .max()
+            .unwrap_or(0);
+        let max_wire_id = self.document.wires.iter().map(|w| w.id).max().unwrap_or(0);
+        let max_junction_id = self
+            .document
+            .junctions
+            .iter()
+            .map(|j| j.id)
+            .max()
+            .unwrap_or(0);
+        let max_label_id = self
+            .document
+            .net_labels
+            .iter()
+            .map(|l| l.id)
+            .max()
+            .unwrap_or(0);
+        let max_bus_id = self
+            .document
+            .buses
+            .iter()
+            .map(|bus| bus.id)
+            .max()
+            .unwrap_or(0);
+        let max_bus_tap_id = self
+            .document
+            .bus_taps
+            .iter()
+            .map(|tap| tap.id)
+            .max()
+            .unwrap_or(0);
         let max_design_note_id = self
+            .document
             .design_notes
             .iter()
             .map(|note| note.id)
             .max()
             .unwrap_or(0);
         let max_documentation_shape_id = self
+            .document
             .documentation_shapes
             .iter()
             .map(|shape| shape.id)
             .max()
             .unwrap_or(0);
-        let max_probe_id = self.probes.iter().map(|probe| probe.id).max().unwrap_or(0);
+        let max_probe_id = self
+            .document
+            .probes
+            .iter()
+            .map(|probe| probe.id)
+            .max()
+            .unwrap_or(0);
         let max_id = max_component_id
             .max(max_wire_id)
             .max(max_junction_id)
@@ -115,8 +158,9 @@ impl SchematicState {
         // collisions: later duplicates get fresh IDs. Their wire
         // connections were ambiguous (keyed by the shared ID) and stay
         // with the first occurrence.
-        let mut seen = std::collections::HashSet::with_capacity(self.components.len());
+        let mut seen = std::collections::HashSet::with_capacity(self.document.components.len());
         let duplicates: Vec<usize> = self
+            .document
             .components
             .iter()
             .enumerate()
@@ -124,13 +168,14 @@ impl SchematicState {
             .map(|(index, _)| index)
             .collect();
         for index in duplicates {
-            self.components[index].id = self.next_id();
+            self.document.components[index].id = self.next_id();
         }
 
         // Repair duplicate live wire IDs as well. Wire operations are keyed by
         // ID, so keeping duplicates would make edits apply inconsistently.
-        let mut seen = HashSet::with_capacity(self.wires.len());
+        let mut seen = HashSet::with_capacity(self.document.wires.len());
         let duplicates: Vec<usize> = self
+            .document
             .wires
             .iter()
             .enumerate()
@@ -139,7 +184,7 @@ impl SchematicState {
             .collect();
         if !duplicates.is_empty() {
             for index in duplicates {
-                self.wires[index].id = self.next_id();
+                self.document.wires[index].id = self.next_id();
             }
             self.bump_topology_version();
         }
@@ -148,23 +193,25 @@ impl SchematicState {
         // identity. Preserve the first record at each position, then repair
         // duplicate IDs among the remaining records so ID-based removal can
         // never remove multiple markers or reveal a hidden duplicate.
-        let junction_count_before_repair = self.junctions.len();
-        let mut seen_positions = HashSet::with_capacity(self.junctions.len());
-        self.junctions
+        let junction_count_before_repair = self.document.junctions.len();
+        let mut seen_positions = HashSet::with_capacity(self.document.junctions.len());
+        self.document
+            .junctions
             .retain(|junction| seen_positions.insert(junction.pos));
-        let mut seen_ids = HashSet::with_capacity(self.junctions.len());
+        let mut seen_ids = HashSet::with_capacity(self.document.junctions.len());
         let duplicate_junction_ids: Vec<usize> = self
+            .document
             .junctions
             .iter()
             .enumerate()
             .filter(|(_, junction)| !seen_ids.insert(junction.id))
             .map(|(index, _)| index)
             .collect();
-        let junctions_repaired = self.junctions.len() != junction_count_before_repair
+        let junctions_repaired = self.document.junctions.len() != junction_count_before_repair
             || !duplicate_junction_ids.is_empty();
         for index in duplicate_junction_ids {
             let replacement_id = self.next_id();
-            self.junctions[index].id = replacement_id;
+            self.document.junctions[index].id = replacement_id;
         }
         if junctions_repaired {
             self.bump_topology_version();
@@ -174,14 +221,16 @@ impl SchematicState {
         // and junctions are retained first in the document-wide namespace;
         // repair colliding labels and later label duplicates deterministically.
         let mut occupied_label_ids: HashSet<u64> = self
+            .document
             .components
             .iter()
             .map(|item| item.id)
-            .chain(self.wires.iter().map(|item| item.id))
-            .chain(self.junctions.iter().map(|item| item.id))
+            .chain(self.document.wires.iter().map(|item| item.id))
+            .chain(self.document.junctions.iter().map(|item| item.id))
             .collect();
-        let mut seen_label_ids = HashSet::with_capacity(self.net_labels.len());
+        let mut seen_label_ids = HashSet::with_capacity(self.document.net_labels.len());
         let colliding_label_ids: Vec<usize> = self
+            .document
             .net_labels
             .iter()
             .enumerate()
@@ -193,7 +242,7 @@ impl SchematicState {
         if !colliding_label_ids.is_empty() {
             for index in colliding_label_ids {
                 let replacement = self.next_id();
-                self.net_labels[index].id = replacement;
+                self.document.net_labels[index].id = replacement;
                 occupied_label_ids.insert(replacement);
             }
             self.bump_topology_version();
@@ -203,42 +252,43 @@ impl SchematicState {
         // collisions with legacy object IDs and update tap ownership when the
         // first occurrence of a bus ID is reassigned.
         let mut occupied_ids: HashSet<u64> = self
+            .document
             .components
             .iter()
             .map(|item| item.id)
-            .chain(self.wires.iter().map(|item| item.id))
-            .chain(self.junctions.iter().map(|item| item.id))
-            .chain(self.net_labels.iter().map(|item| item.id))
+            .chain(self.document.wires.iter().map(|item| item.id))
+            .chain(self.document.junctions.iter().map(|item| item.id))
+            .chain(self.document.net_labels.iter().map(|item| item.id))
             .collect();
-        let mut seen_bus_ids = HashSet::with_capacity(self.buses.len());
+        let mut seen_bus_ids = HashSet::with_capacity(self.document.buses.len());
         let mut bus_id_remap = HashMap::new();
         let mut bus_ids_repaired = false;
-        for index in 0..self.buses.len() {
-            let old_id = self.buses[index].id;
+        for index in 0..self.document.buses.len() {
+            let old_id = self.document.buses[index].id;
             let first_bus_with_id = seen_bus_ids.insert(old_id);
             if occupied_ids.insert(old_id) {
                 continue;
             }
             let replacement = self.next_id();
             occupied_ids.insert(replacement);
-            self.buses[index].id = replacement;
+            self.document.buses[index].id = replacement;
             if first_bus_with_id {
                 bus_id_remap.insert(old_id, replacement);
             }
             bus_ids_repaired = true;
         }
-        for tap in &mut self.bus_taps {
+        for tap in &mut self.document.bus_taps {
             if let Some(replacement) = bus_id_remap.get(&tap.bus_id) {
                 tap.bus_id = *replacement;
             }
         }
 
-        for index in 0..self.bus_taps.len() {
-            let id = self.bus_taps[index].id;
+        for index in 0..self.document.bus_taps.len() {
+            let id = self.document.bus_taps[index].id;
             if !occupied_ids.insert(id) {
                 let replacement = self.next_id();
                 occupied_ids.insert(replacement);
-                self.bus_taps[index].id = replacement;
+                self.document.bus_taps[index].id = replacement;
                 bus_ids_repaired = true;
             }
         }
@@ -250,50 +300,55 @@ impl SchematicState {
         // not alter electrical topology. Repair collisions deterministically
         // and keep review record IDs aligned with the repaired object ID.
         let mut occupied_ids: HashSet<u64> = self
+            .document
             .components
             .iter()
             .map(|item| item.id)
-            .chain(self.wires.iter().map(|item| item.id))
-            .chain(self.junctions.iter().map(|item| item.id))
-            .chain(self.net_labels.iter().map(|item| item.id))
-            .chain(self.buses.iter().map(|item| item.id))
-            .chain(self.bus_taps.iter().map(|item| item.id))
+            .chain(self.document.wires.iter().map(|item| item.id))
+            .chain(self.document.junctions.iter().map(|item| item.id))
+            .chain(self.document.net_labels.iter().map(|item| item.id))
+            .chain(self.document.buses.iter().map(|item| item.id))
+            .chain(self.document.bus_taps.iter().map(|item| item.id))
             .collect();
-        for index in 0..self.design_notes.len() {
-            let id = self.design_notes[index].id;
+        for index in 0..self.document.design_notes.len() {
+            let id = self.document.design_notes[index].id;
             if !occupied_ids.insert(id) {
                 let replacement = self.next_id();
                 occupied_ids.insert(replacement);
-                self.design_notes[index].id = replacement;
+                self.document.design_notes[index].id = replacement;
             }
-            let note_id = self.design_notes[index].id;
-            if let Some(review) = self.design_notes[index].review.as_mut() {
+            let note_id = self.document.design_notes[index].id;
+            if let Some(review) = self.document.design_notes[index].review.as_mut() {
                 review.record_id = format!("NOTE-{note_id:04}");
             }
         }
-        self.design_notes.retain(|note| note.validate().is_ok());
+        self.document
+            .design_notes
+            .retain(|note| note.validate().is_ok());
 
-        for index in 0..self.documentation_shapes.len() {
-            let id = self.documentation_shapes[index].id;
+        for index in 0..self.document.documentation_shapes.len() {
+            let id = self.document.documentation_shapes[index].id;
             if !occupied_ids.insert(id) {
                 let replacement = self.next_id();
                 occupied_ids.insert(replacement);
-                self.documentation_shapes[index].id = replacement;
+                self.document.documentation_shapes[index].id = replacement;
             }
         }
-        for index in 0..self.probes.len() {
-            let id = self.probes[index].id;
+        for index in 0..self.document.probes.len() {
+            let id = self.document.probes[index].id;
             if !occupied_ids.insert(id) {
                 let replacement = self.next_id();
                 occupied_ids.insert(replacement);
-                self.probes[index].id = replacement;
+                self.document.probes[index].id = replacement;
             }
         }
-        self.probes.retain(|probe| probe.validate().is_ok());
+        self.document
+            .probes
+            .retain(|probe| probe.validate().is_ok());
 
         // Rebuild component counters from existing component names
         self.component_counters.clear();
-        for comp in &self.components {
+        for comp in &self.document.components {
             let prefix = comp.kind.spice_prefix();
             if !prefix.is_empty() {
                 // Extract number from name like "R1", "C5", etc.
@@ -311,27 +366,44 @@ impl SchematicState {
 
     fn remove_stale_runtime_references(&mut self) {
         let component_ids: HashSet<u64> = self
+            .document
             .components
             .iter()
             .map(|component| component.id)
             .collect();
         let wire_point_counts: HashMap<u64, usize> = self
+            .document
             .wires
             .iter()
             .map(|wire| (wire.id, wire.points.len()))
             .collect();
-        let junction_positions: HashSet<Point> =
-            self.junctions.iter().map(|junction| junction.pos).collect();
-        let net_label_ids: HashSet<u64> = self.net_labels.iter().map(|label| label.id).collect();
-        let bus_ids: HashSet<u64> = self.buses.iter().map(|bus| bus.id).collect();
-        let bus_tap_ids: HashSet<u64> = self.bus_taps.iter().map(|tap| tap.id).collect();
-        let design_note_ids: HashSet<u64> = self.design_notes.iter().map(|note| note.id).collect();
+        let junction_positions: HashSet<Point> = self
+            .document
+            .junctions
+            .iter()
+            .map(|junction| junction.pos)
+            .collect();
+        let net_label_ids: HashSet<u64> = self
+            .document
+            .net_labels
+            .iter()
+            .map(|label| label.id)
+            .collect();
+        let bus_ids: HashSet<u64> = self.document.buses.iter().map(|bus| bus.id).collect();
+        let bus_tap_ids: HashSet<u64> = self.document.bus_taps.iter().map(|tap| tap.id).collect();
+        let design_note_ids: HashSet<u64> = self
+            .document
+            .design_notes
+            .iter()
+            .map(|note| note.id)
+            .collect();
         let documentation_shape_ids: HashSet<u64> = self
+            .document
             .documentation_shapes
             .iter()
             .map(|shape| shape.id)
             .collect();
-        let probe_ids: HashSet<u64> = self.probes.iter().map(|probe| probe.id).collect();
+        let probe_ids: HashSet<u64> = self.document.probes.iter().map(|probe| probe.id).collect();
 
         self.selection
             .components
@@ -367,7 +439,7 @@ impl SchematicState {
             .retain(|id| documentation_shape_ids.contains(id));
         self.selection.probes.retain(|id| probe_ids.contains(id));
 
-        self.connections.retain(|connection| {
+        self.document.connections.retain(|connection| {
             component_ids.contains(&connection.component_id)
                 && wire_point_counts
                     .get(&connection.wire_id)
@@ -409,6 +481,7 @@ mod tests {
 
         let new_id = schematic.add_component(ComponentType::Resistor, Point::new(20, 0));
         let matches = schematic
+            .document
             .components
             .iter()
             .filter(|component| component.id == new_id)
@@ -421,12 +494,13 @@ mod tests {
         let mut schematic = SchematicState::default();
         schematic.add_component(ComponentType::Resistor, Point::new(0, 0));
         schematic.add_component(ComponentType::Capacitor, Point::new(10, 0));
-        let stolen = schematic.components[0].id;
-        schematic.components[1].id = stolen;
+        let stolen = schematic.document.components[0].id;
+        schematic.document.components[1].id = stolen;
 
         schematic.recalculate_runtime_state();
 
         let matches = schematic
+            .document
             .components
             .iter()
             .filter(|component| component.id == stolen)
@@ -437,7 +511,7 @@ mod tests {
     #[test]
     fn recalculate_deduplicates_junction_positions_and_repairs_ids() {
         let mut schematic = SchematicState::default();
-        schematic.junctions = vec![
+        schematic.document.junctions = vec![
             Junction::new(7, Point::new(10, 10)),
             Junction::new(7, Point::new(20, 20)),
             Junction::new(9, Point::new(10, 10)),
@@ -447,14 +521,21 @@ mod tests {
 
         schematic.recalculate_runtime_state();
 
-        assert_eq!(schematic.junctions.len(), 2);
-        assert_eq!(schematic.junctions[0], Junction::new(7, Point::new(10, 10)));
-        assert_ne!(schematic.junctions[0].id, schematic.junctions[1].id);
+        assert_eq!(schematic.document.junctions.len(), 2);
+        assert_eq!(
+            schematic.document.junctions[0],
+            Junction::new(7, Point::new(10, 10))
+        );
+        assert_ne!(
+            schematic.document.junctions[0].id,
+            schematic.document.junctions[1].id
+        );
         assert!(schematic.selection.has_junction(Point::new(10, 10)));
         assert!(schematic.selection.has_junction(Point::new(20, 20)));
         let new_id = schematic.add_junction(Point::new(30, 30));
         assert_eq!(
             schematic
+                .document
                 .junctions
                 .iter()
                 .filter(|junction| junction.id == new_id)
@@ -467,6 +548,7 @@ mod tests {
     fn recalculate_drops_stale_net_label_selection_ids() {
         let mut schematic = SchematicState::default();
         schematic
+            .document
             .net_labels
             .push(NetLabel::new(50, Point::new(1, 2), "live"));
         schematic.selection.select_net_label(50);
@@ -482,10 +564,12 @@ mod tests {
     #[test]
     fn recalculate_repairs_duplicate_and_cross_class_net_label_ids() {
         let mut schematic = SchematicState::default();
-        schematic
-            .components
-            .push(Component::new(59, ComponentType::Resistor, Point::origin()));
-        schematic.net_labels = vec![
+        schematic.document.components.push(Component::new(
+            59,
+            ComponentType::Resistor,
+            Point::origin(),
+        ));
+        schematic.document.net_labels = vec![
             NetLabel::new(60, Point::new(1, 2), "first"),
             NetLabel::new(60, Point::new(3, 4), "second"),
             NetLabel::new(59, Point::new(5, 6), "component_collision"),
@@ -493,21 +577,29 @@ mod tests {
 
         schematic.recalculate_runtime_state();
 
-        assert_eq!(schematic.net_labels[0].id, 60);
-        assert_ne!(schematic.net_labels[1].id, 60);
-        assert_ne!(schematic.net_labels[2].id, 59);
-        assert_ne!(schematic.net_labels[0].id, schematic.net_labels[1].id);
-        assert_ne!(schematic.net_labels[1].id, schematic.net_labels[2].id);
-        assert_eq!(schematic.components[0].id, 59);
+        assert_eq!(schematic.document.net_labels[0].id, 60);
+        assert_ne!(schematic.document.net_labels[1].id, 60);
+        assert_ne!(schematic.document.net_labels[2].id, 59);
+        assert_ne!(
+            schematic.document.net_labels[0].id,
+            schematic.document.net_labels[1].id
+        );
+        assert_ne!(
+            schematic.document.net_labels[1].id,
+            schematic.document.net_labels[2].id
+        );
+        assert_eq!(schematic.document.components[0].id, 59);
     }
 
     #[test]
     fn recalculate_repairs_review_note_identity_and_lifecycle_record_together() {
         let mut schematic = SchematicState::default();
-        schematic
-            .components
-            .push(Component::new(59, ComponentType::Resistor, Point::origin()));
-        schematic.design_notes.push(
+        schematic.document.components.push(Component::new(
+            59,
+            ComponentType::Resistor,
+            Point::origin(),
+        ));
+        schematic.document.design_notes.push(
             DesignNote::new(
                 59,
                 Point::new(5, 6),
@@ -522,7 +614,7 @@ mod tests {
 
         schematic.recalculate_runtime_state();
 
-        let note = &schematic.design_notes[0];
+        let note = &schematic.document.design_notes[0];
         assert_ne!(note.id, 59);
         assert_eq!(
             note.review.as_ref().unwrap().record_id,
@@ -548,14 +640,23 @@ mod tests {
         .unwrap();
         let mut schematic = SchematicState::default();
         schematic.add_component(ComponentType::Resistor, Point::origin());
-        schematic.buses.push(bus);
-        schematic.bus_taps.push(tap);
+        schematic.document.buses.push(bus);
+        schematic.document.bus_taps.push(tap);
 
         schematic.recalculate_runtime_state();
 
-        assert_ne!(schematic.buses[0].id, schematic.components[0].id);
-        assert_eq!(schematic.bus_taps[0].bus_id, schematic.buses[0].id);
-        assert_ne!(schematic.bus_taps[0].id, schematic.buses[0].id);
+        assert_ne!(
+            schematic.document.buses[0].id,
+            schematic.document.components[0].id
+        );
+        assert_eq!(
+            schematic.document.bus_taps[0].bus_id,
+            schematic.document.buses[0].id
+        );
+        assert_ne!(
+            schematic.document.bus_taps[0].id,
+            schematic.document.buses[0].id
+        );
     }
 
     #[test]
@@ -564,7 +665,7 @@ mod tests {
         let mut component =
             crate::state::Component::new(u64::MAX, ComponentType::Resistor, Point::origin());
         component.name = "RMAX".to_owned();
-        schematic.components.push(component);
+        schematic.document.components.push(component);
 
         schematic.recalculate_runtime_state();
         let new_id = schematic.add_component(ComponentType::Capacitor, Point::new(10, 0));
@@ -573,24 +674,25 @@ mod tests {
         assert_eq!(new_id, 1);
         assert_eq!(
             schematic
+                .document
                 .components
                 .iter()
                 .map(|component| component.id)
                 .collect::<HashSet<_>>()
                 .len(),
-            schematic.components.len()
+            schematic.document.components.len()
         );
     }
 
     #[test]
     fn recalculate_preserves_malformed_bus_records_for_recovery_and_drc() {
         let mut schematic = SchematicState::default();
-        schematic.buses.push(Bus {
+        schematic.document.buses.push(Bus {
             id: 70,
             points: vec![Point::new(3, 4)],
             declaration: None,
         });
-        schematic.bus_taps.push(BusTap {
+        schematic.document.bus_taps.push(BusTap {
             id: 71,
             bus_id: 70,
             bus_point: Point::new(3, 4),
@@ -602,8 +704,8 @@ mod tests {
         schematic.recalculate_runtime_state();
         let analysis = crate::schematic::bus_connectivity::analyze_bus_connectivity(&schematic);
 
-        assert_eq!(schematic.buses.len(), 1);
-        assert_eq!(schematic.bus_taps.len(), 1);
+        assert_eq!(schematic.document.buses.len(), 1);
+        assert_eq!(schematic.document.bus_taps.len(), 1);
         assert!(analysis.diagnostics.iter().any(|diagnostic| {
             diagnostic.kind == crate::schematic::bus_connectivity::BusDiagnosticKind::MalformedBus
                 && diagnostic.bus_id == Some(70)
@@ -627,20 +729,22 @@ mod tests {
         object.remove("design_notes");
         object.remove("probes");
         let migrated: SchematicState = serde_json::from_value(value).unwrap();
-        assert!(migrated.buses.is_empty());
-        assert!(migrated.bus_taps.is_empty());
-        assert!(migrated.net_labels.is_empty());
-        assert!(migrated.design_notes.is_empty());
-        assert!(migrated.probes.is_empty());
+        assert!(migrated.document.buses.is_empty());
+        assert!(migrated.document.bus_taps.is_empty());
+        assert!(migrated.document.net_labels.is_empty());
+        assert!(migrated.document.design_notes.is_empty());
+        assert!(migrated.document.probes.is_empty());
     }
 
     #[test]
     fn recalculate_repairs_documentation_shape_collisions_and_stale_selection() {
         let mut schematic = SchematicState::default();
-        schematic
-            .components
-            .push(Component::new(59, ComponentType::Resistor, Point::origin()));
-        schematic.documentation_shapes = vec![
+        schematic.document.components.push(Component::new(
+            59,
+            ComponentType::Resistor,
+            Point::origin(),
+        ));
+        schematic.document.documentation_shapes = vec![
             DocumentationShape::new(
                 59,
                 DocumentationShapeGeometry::Line {
@@ -665,6 +769,7 @@ mod tests {
         schematic.recalculate_runtime_state();
 
         let ids: HashSet<_> = schematic
+            .document
             .documentation_shapes
             .iter()
             .map(|shape| shape.id)
@@ -685,10 +790,12 @@ mod tests {
     #[test]
     fn recalculate_repairs_probe_collisions_and_prunes_stale_probe_selection() {
         let mut schematic = SchematicState::default();
-        schematic
-            .components
-            .push(Component::new(59, ComponentType::Resistor, Point::origin()));
-        schematic.probes = vec![
+        schematic.document.components.push(Component::new(
+            59,
+            ComponentType::Resistor,
+            Point::origin(),
+        ));
+        schematic.document.probes = vec![
             SchematicProbe::new(59, Point::new(10, 20), "V(out)", Some("V(out)".to_owned()))
                 .unwrap(),
             SchematicProbe::new(59, Point::new(30, 40), "V(in)", Some("V(in)".to_owned())).unwrap(),
@@ -699,7 +806,12 @@ mod tests {
 
         schematic.recalculate_runtime_state();
 
-        let ids: HashSet<_> = schematic.probes.iter().map(|probe| probe.id).collect();
+        let ids: HashSet<_> = schematic
+            .document
+            .probes
+            .iter()
+            .map(|probe| probe.id)
+            .collect();
         assert_eq!(ids.len(), 2);
         assert!(!ids.contains(&59), "component identity retains priority");
         assert!(schematic.selection.probes.is_empty());

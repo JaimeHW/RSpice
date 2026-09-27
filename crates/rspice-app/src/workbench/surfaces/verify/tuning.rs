@@ -276,6 +276,7 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
             ));
         }
         let component = schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == binding.component_id)
@@ -300,11 +301,12 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
             );
             let changed = schematic.with_undo(description, move |schematic| {
                 let index = schematic
+                    .document
                     .components
                     .iter()
                     .position(|component| component.id == component_id)
                     .expect("staged component identity was validated before the transaction");
-                schematic.components[index].value = binding_expression;
+                schematic.document.components[index].value = binding_expression;
                 schematic.is_dirty = true;
                 schematic.bump_topology_version();
             });

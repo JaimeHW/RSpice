@@ -30,7 +30,7 @@ pub(super) fn calculate_bounds_with_context(
     let mut max_x = f64::MIN;
     let mut max_y = f64::MIN;
 
-    for comp in &state.components {
+    for comp in &state.document.components {
         let (comp_min_x, comp_min_y, comp_max_x, comp_max_y) = comp.bounding_box();
         min_x = min_x.min(comp_min_x as f64 * config.grid_size);
         min_y = min_y.min(comp_min_y as f64 * config.grid_size);
@@ -38,7 +38,7 @@ pub(super) fn calculate_bounds_with_context(
         max_y = max_y.max(comp_max_y as f64 * config.grid_size);
     }
 
-    for wire in &state.wires {
+    for wire in &state.document.wires {
         for point in &wire.points {
             let x = point.x as f64 * config.grid_size;
             let y = point.y as f64 * config.grid_size;
@@ -79,7 +79,7 @@ pub(super) fn include_documentation_shape_bounds(
     max_x: &mut f64,
     max_y: &mut f64,
 ) {
-    for shape in &state.documentation_shapes {
+    for shape in &state.document.documentation_shapes {
         let (min, max) = shape.bounds();
         *min_x = (*min_x).min(f64::from(min.x) * config.grid_size);
         *min_y = (*min_y).min(f64::from(min.y) * config.grid_size);
@@ -192,8 +192,8 @@ pub(super) fn write_documentation_shape(
 fn design_note_export_text(state: &SchematicState, note: &DesignNote, view_path: &str) -> String {
     note.rendered_text(&DesignNoteRenderContext {
         view_path,
-        component_count: state.components.len(),
-        conductor_count: state.wires.len() + state.buses.len(),
+        component_count: state.document.components.len(),
+        conductor_count: state.document.wires.len() + state.document.buses.len(),
     })
 }
 
@@ -206,7 +206,7 @@ pub(super) fn include_design_note_bounds(
     max_x: &mut f64,
     max_y: &mut f64,
 ) {
-    for note in &state.design_notes {
+    for note in &state.document.design_notes {
         let text = design_note_export_text(state, note, view_path);
         let lines: Vec<&str> = text.split('\n').collect();
         let x = note.pos.x as f64 * config.grid_size + 6.0;
@@ -284,7 +284,7 @@ pub(super) fn include_bus_bounds(
     max_x: &mut f64,
     max_y: &mut f64,
 ) {
-    for bus in &state.buses {
+    for bus in &state.document.buses {
         for point in &bus.points {
             let x = point.x as f64 * config.grid_size;
             let y = point.y as f64 * config.grid_size;
@@ -303,7 +303,7 @@ pub(super) fn include_bus_bounds(
         }
     }
 
-    for tap in &state.bus_taps {
+    for tap in &state.document.bus_taps {
         for point in crate::schematic::bus_geometry::bus_tap_route_points(tap) {
             let x = point.x as f64 * config.grid_size;
             let y = point.y as f64 * config.grid_size;
@@ -334,7 +334,7 @@ pub(super) fn include_junction_bounds(
     max_y: &mut f64,
 ) {
     let radius = junction_radius(config);
-    for junction in &state.junctions {
+    for junction in &state.document.junctions {
         let x = junction.pos.x as f64 * config.grid_size;
         let y = junction.pos.y as f64 * config.grid_size;
         *min_x = (*min_x).min(x - radius);

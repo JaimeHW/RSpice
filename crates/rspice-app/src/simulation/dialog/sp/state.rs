@@ -45,7 +45,7 @@ mod tests {
     /// A placed RF port, resolved exactly as the design would resolve it.
     fn placed(references_and_params: &[(&str, &str)]) -> Vec<PlacedRfPort> {
         let mut schematic = SchematicState::default();
-        schematic.components = references_and_params
+        schematic.document.components = references_and_params
             .iter()
             .enumerate()
             .map(|(index, (name, params))| {

@@ -88,6 +88,7 @@ pub(crate) fn validate_component_model_catalog_binding(
 ) -> Result<(), String> {
     let component = state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == component_id)
@@ -164,6 +165,7 @@ pub(crate) fn bind_component_model_from_catalog(
     let component = app
         .state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == component_id)
@@ -1039,7 +1041,7 @@ fn library_usage(app: &RSpiceApp, reference: &CellViewRef) -> Vec<String> {
         reference: &CellViewRef,
         consumers: &mut Vec<String>,
     ) {
-        if schematic.components.iter().any(|component| {
+        if schematic.document.components.iter().any(|component| {
             component.library_cell.as_ref().is_some_and(|binding| {
                 binding.library.eq_ignore_ascii_case(&reference.library)
                     && binding.cell.eq_ignore_ascii_case(&reference.cell)

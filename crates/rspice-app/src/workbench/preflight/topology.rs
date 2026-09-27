@@ -219,7 +219,7 @@ fn no_dc_path_issue(
         }
     }
 
-    for component in &schematic.components {
+    for component in &schematic.document.components {
         let Some(pins) = terminals.get(&component.id) else {
             continue;
         };
@@ -288,7 +288,7 @@ fn voltage_source_loop_issues(
     let mut placed: Vec<String> = Vec::new();
     let mut issues = Vec::new();
 
-    for component in &schematic.components {
+    for component in &schematic.document.components {
         if !is_independent_voltage_source(component.kind) {
             continue;
         }
@@ -404,6 +404,7 @@ mod tests {
     ) -> &'a mut Component {
         let id = schematic.add_component(kind, at);
         let component = schematic
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == id)
@@ -419,8 +420,8 @@ mod tests {
     }
 
     fn wire(schematic: &mut SchematicState, from: Point, to: Point) {
-        let id = schematic.wires.len() as u64 + 1;
-        schematic.wires.push(Wire::segment(id, from, to));
+        let id = schematic.document.wires.len() as u64 + 1;
+        schematic.document.wires.push(Wire::segment(id, from, to));
     }
 
     /// A biased divider with a grounded source, plus two capacitor-isolated
@@ -453,6 +454,7 @@ mod tests {
         );
         wire(&mut schematic, Point::new(120, -10), Point::new(180, -10));
         schematic
+            .document
             .net_labels
             .push(NetLabel::new(1, Point::new(220, -10), "FLOATB"));
 
@@ -571,6 +573,7 @@ mod tests {
 
         // One source across the same pair is an ordinary drive, not a loop.
         schematic
+            .document
             .components
             .retain(|component| component.name != "V2");
         assert!(

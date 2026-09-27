@@ -28,6 +28,7 @@ fn master_name<'a>(
 fn place_port(state: &mut SchematicState, name: &str, pos: Point) {
     let id = state.add_component(ComponentType::Port, pos);
     let component = state
+        .document
         .components
         .iter_mut()
         .find(|c| c.id == id)
@@ -67,6 +68,7 @@ fn div_master() -> SchematicState {
 fn two_port_master(value: &str) -> SchematicState {
     let mut master = div_master();
     let resistor = master
+        .document
         .components
         .iter_mut()
         .find(|component| component.kind == ComponentType::Resistor)
@@ -82,11 +84,12 @@ fn top_with_instance(terminals: &[&str]) -> SchematicState {
     top.add_component(ComponentType::VoltageSource, Point::new(40, 40));
     top.add_component(ComponentType::Ground, Point::new(130, 20));
     top.add_component(ComponentType::Ground, Point::new(40, 70));
-    top.wires.push(Wire::new(
+    top.document.wires.push(Wire::new(
         1,
         vec![Point::new(40, 20), Point::new(40, 0), Point::new(70, 0)],
     ));
-    top.wires
+    top.document
+        .wires
         .push(Wire::new(2, vec![Point::new(130, 0), Point::new(130, 10)]));
     top
 }
@@ -254,7 +257,7 @@ fn typed_port_order_drives_subckt_header_after_storage_reordering() {
             .place_pending_port(Point::origin(), pending)
             .expect("typed port places");
     }
-    master.components.reverse();
+    master.document.components.reverse();
     let mut hierarchy = HierarchySource::empty();
     hierarchy.insert("work", "ordered", &master);
     let mut top = SchematicState::default();
@@ -341,9 +344,11 @@ fn authored_symbol_pin_positions_define_cell_instance_connectivity() {
 
     let mut top = SchematicState::default();
     top.add_library_cell_component(Point::new(100, 50), binding_with_interface("amp", &ports));
-    top.net_labels
+    top.document
+        .net_labels
         .push(NetLabel::new(1, Point::new(60, 40), "vin"));
-    top.net_labels
+    top.document
+        .net_labels
         .push(NetLabel::new(2, Point::new(170, 70), "vout"));
 
     let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
@@ -578,7 +583,8 @@ fn declared_parameters_reach_the_subckt_header_and_the_deck_parses() {
 
     let mut top = SchematicState::default();
     top.add_library_cell_component(Point::new(100, 0), binding("div", &["a", "b"]));
-    top.components
+    top.document
+        .components
         .iter_mut()
         .find(|component| component.kind == ComponentType::CellInstance)
         .expect("the placed instance is retained")
@@ -963,9 +969,9 @@ fn configured_builtin_xspice_is_a_valid_executable_leaf() {
         .schematic_buffers
         .get_mut(&CellViewRef::default_top().key())
         .expect("top schematic");
-    top.components.clear();
+    top.document.components.clear();
     top.add_library_cell_component(Point::new(100, 100), binding.clone());
-    assert_eq!(top.components[0].name, "A1");
+    assert_eq!(top.document.components[0].name, "A1");
 
     workspace
         .configuration_sets

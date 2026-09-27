@@ -1,6 +1,7 @@
 //! Regression coverage for schematic wire layout and load-time editor defaults.
 
 use super::*;
+use crate::state::SchematicDocumentPolicy;
 
 #[test]
 fn schematic_wire_layout_and_loaded_runtime_defaults_are_stable() {
@@ -93,12 +94,18 @@ fn schematic_readers_preserve_legacy_fields_and_reject_missing_or_duplicate_data
             serde_json::from_str::<SchematicState>(&json(input)).unwrap(),
             ron::from_str::<SchematicState>(&ron(input)).unwrap(),
         ] {
-            assert_eq!(restored.grid_size, 7);
-            assert_eq!(restored.document_policy, SchematicDocumentPolicy::default());
-            assert!(restored.buses.is_empty() && restored.bus_taps.is_empty());
-            assert!(restored.design_notes.is_empty() && restored.documentation_shapes.is_empty());
-            assert!(restored.probes.is_empty() && restored.net_labels.is_empty());
-            assert!(restored.validated_revisions.is_empty());
+            assert_eq!(restored.document.grid_size, 7);
+            assert_eq!(
+                restored.document.document_policy,
+                SchematicDocumentPolicy::default()
+            );
+            assert!(restored.document.buses.is_empty() && restored.document.bus_taps.is_empty());
+            assert!(
+                restored.document.design_notes.is_empty()
+                    && restored.document.documentation_shapes.is_empty()
+            );
+            assert!(restored.document.probes.is_empty() && restored.document.net_labels.is_empty());
+            assert!(restored.document.validated_revisions.is_empty());
             assert_eq!(restored.zoom, 1.0);
             assert_eq!(restored.identity_cursor(), 0);
             assert_eq!(

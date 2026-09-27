@@ -209,10 +209,10 @@ pub(crate) fn open_project_revision_history(state: &mut AppState) {
         ));
         return;
     }
-    if let Err(error) = state.schematic.validated_revisions.validate() {
+    if let Err(error) = state.schematic.document.validated_revisions.validate() {
         state.dialogs.project_revision_history = ProjectRevisionHistoryDialogState {
             open: true,
-            expected_journal: state.schematic.validated_revisions.clone(),
+            expected_journal: state.schematic.document.validated_revisions.clone(),
             authority: Some(SchematicEditAuthority::capture(state)),
             error: Some(format!(
                 "The validated schematic revision journal failed integrity validation: {error}"
@@ -223,6 +223,7 @@ pub(crate) fn open_project_revision_history(state: &mut AppState) {
     }
     let selected = state
         .schematic
+        .document
         .validated_revisions
         .records()
         .last()
@@ -232,7 +233,7 @@ pub(crate) fn open_project_revision_history(state: &mut AppState) {
         open: true,
         selected,
         authority: Some(SchematicEditAuthority::capture(state)),
-        expected_journal: state.schematic.validated_revisions.clone(),
+        expected_journal: state.schematic.document.validated_revisions.clone(),
         ..ProjectRevisionHistoryDialogState::default()
     };
 }
@@ -412,7 +413,7 @@ impl RSpiceApp {
                     "Select exactly one validated schematic revision to restore.".to_owned(),
                 );
             }
-            if dialog.expected_journal != self.state.schematic.validated_revisions {
+            if dialog.expected_journal != self.state.schematic.document.validated_revisions {
                 return Err(
                     "The validated revision journal changed. Close and reopen revision history."
                         .to_owned(),
@@ -441,7 +442,7 @@ impl RSpiceApp {
                 let authority = SchematicEditAuthority::capture(&self.state);
                 let dialog = &mut self.state.dialogs.project_revision_history;
                 dialog.authority = Some(authority);
-                dialog.expected_journal = self.state.schematic.validated_revisions.clone();
+                dialog.expected_journal = self.state.schematic.document.validated_revisions.clone();
                 dialog.restore_confirmation = false;
                 dialog.error = None;
                 dialog.receipt = Some(
@@ -682,7 +683,11 @@ fn visible_rows<'a>(
 
 fn project_audit_rows(state: &AppState) -> Vec<ProjectAuditRow> {
     let mut rows = Vec::new();
-    append_schematic_rows(&mut rows, &state.schematic.validated_revisions, true);
+    append_schematic_rows(
+        &mut rows,
+        &state.schematic.document.validated_revisions,
+        true,
+    );
     let active_key = state.workspace.active_view.key();
     let mut retained_schematics = state
         .workspace
@@ -692,7 +697,7 @@ fn project_audit_rows(state: &AppState) -> Vec<ProjectAuditRow> {
         .collect::<Vec<_>>();
     retained_schematics.sort_by(|(left, _), (right, _)| left.cmp(right));
     for (_, schematic) in retained_schematics {
-        append_schematic_rows(&mut rows, &schematic.validated_revisions, false);
+        append_schematic_rows(&mut rows, &schematic.document.validated_revisions, false);
     }
     append_simulation_plan_rows(&mut rows, state);
     append_model_and_pdk_rows(&mut rows, state);
@@ -706,6 +711,7 @@ fn find_project_schematic_revision(
 ) -> Option<&ValidatedSchematicRevision> {
     state
         .schematic
+        .document
         .validated_revisions
         .records()
         .iter()
@@ -715,7 +721,7 @@ fn find_project_schematic_revision(
                 .workspace
                 .schematic_buffers
                 .values()
-                .flat_map(|schematic| schematic.validated_revisions.records())
+                .flat_map(|schematic| schematic.document.validated_revisions.records())
                 .find(|record| record.id() == id)
         })
 }
@@ -1243,6 +1249,7 @@ mod tests {
         let mut state = crate::state::SchematicState::default();
         append(&mut state, "Update compensation");
         let rows = state
+            .document
             .validated_revisions
             .records()
             .iter()
@@ -1272,19 +1279,19 @@ mod tests {
     fn semantic_compare_and_restore_are_exact_and_undoable() {
         let mut state = crate::state::SchematicState::default();
         append(&mut state, "Empty baseline");
-        let first = state.validated_revisions.records()[0].clone();
+        let first = state.document.validated_revisions.records()[0].clone();
         state.add_component(ComponentType::Resistor, Point::new(10, 20));
         append(&mut state, "Add resistor");
-        let second = state.validated_revisions.records()[1].clone();
+        let second = state.document.validated_revisions.records()[1].clone();
         let delta = first.semantic_delta_to(&second);
         assert_eq!(delta.components.added, 1);
 
         state
             .restore_validated_revision(first.id())
             .expect("validated restore");
-        assert!(state.components.is_empty());
+        assert!(state.document.components.is_empty());
         assert!(state.undo());
-        assert_eq!(state.components.len(), 1);
+        assert_eq!(state.document.components.len(), 1);
     }
 
     #[test]

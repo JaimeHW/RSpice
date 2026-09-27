@@ -34,11 +34,11 @@ fn load_repairs_missing_instance_master() {
         .get(&top.key())
         .expect("the parent drawing loads");
     assert_eq!(
-        restored.components.len(),
+        restored.document.components.len(),
         1,
         "the placement is repaired, not dropped"
     );
-    let binding = restored.components[0]
+    let binding = restored.document.components[0]
         .library_cell
         .as_ref()
         .expect("it still names the master it wants");
@@ -90,9 +90,11 @@ fn load_breaks_an_instantiation_cycle_and_names_both_ends() {
     let loaded = load_project_text(&json, None).expect("a recursive hierarchy still opens");
 
     let placements = loaded.workspace.schematic_buffers[&top.key()]
+        .document
         .components
         .len()
         + loaded.workspace.schematic_buffers[&amp.key()]
+            .document
             .components
             .len();
     assert_eq!(

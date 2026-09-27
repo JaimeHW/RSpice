@@ -906,6 +906,7 @@ impl<'a> HierarchyResolver<'a> {
             return;
         };
         let children = schematic
+            .document
             .components
             .iter()
             .filter(|component| component.kind == ComponentType::CellInstance)

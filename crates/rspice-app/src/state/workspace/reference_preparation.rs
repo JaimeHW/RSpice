@@ -99,7 +99,7 @@ impl ProjectWorkspace {
                 )?);
             }
             for (key, source) in &projected {
-                if source.probes.is_empty() {
+                if source.document.probes.is_empty() {
                     continue;
                 }
                 let root = reference_document_root(self, key)?;
@@ -143,10 +143,10 @@ impl ProjectWorkspace {
             let Some(mappings) = probe_roots.get(&root.key().to_ascii_lowercase()) else {
                 continue;
             };
-            if mappings.is_empty() || source.probes.is_empty() {
+            if mappings.is_empty() || source.document.probes.is_empty() {
                 continue;
             }
-            let mut probes = source.probes.clone();
+            let mut probes = source.document.probes.clone();
             let mut changed = false;
             for probe in &mut probes {
                 if let Some(expression) = &probe.source_expression
@@ -167,7 +167,7 @@ impl ProjectWorkspace {
                 let candidate = after
                     .entry(key.clone())
                     .or_insert_with(|| (*source).clone());
-                candidate.probes = probes;
+                candidate.document.probes = probes;
                 candidate.is_dirty = true;
             }
         }
@@ -178,8 +178,8 @@ impl ProjectWorkspace {
         for (key, source) in &before {
             references.add_instance_renames(
                 &reference_from_key(key)?,
-                &source.components,
-                &after[key].components,
+                &source.document.components,
+                &after[key].document.components,
             );
         }
         let prepared_references = references.prepare(self, true)?;
@@ -237,11 +237,12 @@ fn append_document_paths(
         return Ok(());
     };
     let candidates: BTreeMap<_, _> = after[key]
+        .document
         .components
         .iter()
         .map(|component| (component.id, component))
         .collect();
-    for component in &source.components {
+    for component in &source.document.components {
         let candidate = candidates[&component.id];
         if component.name == candidate.name || component.kind.spice_prefix().is_empty() {
             continue;

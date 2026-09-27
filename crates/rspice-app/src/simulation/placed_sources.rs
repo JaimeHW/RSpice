@@ -321,6 +321,7 @@ fn occurrence_label(occurrence: Option<&InstancePath>) -> String {
 #[must_use]
 pub fn placed_source_count(schematic: &SchematicState) -> usize {
     schematic
+        .document
         .components
         .iter()
         .filter(|component| source_family(component.kind).is_some())
@@ -348,6 +349,7 @@ pub fn placed_sources(
     #[cfg(test)]
     crate::simulation::cost_probe::record(crate::simulation::cost_probe::Derivation::PlacedSources);
     if !schematic
+        .document
         .components
         .iter()
         .any(|component| source_family(component.kind).is_some())
@@ -356,6 +358,7 @@ pub fn placed_sources(
     }
     let nets = net_names_by_terminal(schematic);
     let mut sources: Vec<PlacedSource> = schematic
+        .document
         .components
         .iter()
         .filter_map(|component| {
@@ -660,7 +663,7 @@ fn walk_design(
                 }),
         );
         let occurrence = binding.instance_path().clone();
-        for component in &schematic.components {
+        for component in &schematic.document.components {
             if let Some((mut source, drive)) = placed_source(component, &nets, stimulus_library) {
                 source.occurrence = Some(occurrence.clone());
                 sources.push((source, drive));
@@ -689,7 +692,7 @@ fn walk_design(
 /// net summary is resolved, because resolving it is the expensive half and a
 /// master that places no excitation has no use for it.
 fn places_excitation(schematic: &SchematicState) -> bool {
-    schematic.components.iter().any(|component| {
+    schematic.document.components.iter().any(|component| {
         source_family(component.kind).is_some() || component.kind == ComponentType::RfPort
     })
 }
@@ -829,6 +832,7 @@ pub fn placed_rf_ports(
     plan: Option<&SimulationPlan>,
 ) -> Vec<PlacedRfPort> {
     if !schematic
+        .document
         .components
         .iter()
         .any(|component| component.kind == ComponentType::RfPort)
@@ -841,6 +845,7 @@ pub fn placed_rf_ports(
     // re-derived per port.
     let consumers = plan.map(port_consumers_for).unwrap_or_default();
     let mut ports: Vec<PlacedRfPort> = schematic
+        .document
         .components
         .iter()
         .filter(|component| component.kind == ComponentType::RfPort)
@@ -1451,7 +1456,7 @@ mod tests {
 
     fn schematic_with(components: Vec<Component>) -> SchematicState {
         let mut schematic = SchematicState::default();
-        schematic.components = components;
+        schematic.document.components = components;
         schematic
     }
 
@@ -1576,7 +1581,7 @@ mod tests {
         let listed = placed_rf_ports(&schematic, None);
         assert_eq!(
             listed[0].nets.len(),
-            schematic.components[0].terminal_positions().len()
+            schematic.document.components[0].terminal_positions().len()
         );
         assert!(
             listed[0].nets.iter().all(|net| !net.is_empty()),
@@ -1781,7 +1786,10 @@ mod tests {
         )]);
         let listed = placed_sources(&schematic, &StimulusLibrary::default(), None);
         let pins = listed[0].nets.len();
-        assert_eq!(pins, schematic.components[0].terminal_positions().len());
+        assert_eq!(
+            pins,
+            schematic.document.components[0].terminal_positions().len()
+        );
         assert!(
             listed[0].nets.iter().all(|net| !net.is_empty()),
             "{:?}",
@@ -2214,13 +2222,17 @@ mod tests {
         #[test]
         fn a_source_inside_a_child_master_is_listed_under_the_occurrence_that_reaches_it() {
             let mut root = SchematicState::default();
-            root.components
-                .push(source(1, ComponentType::VoltageSource, "VDD", ""));
-            root.components.push(instance(2, "XAFE", "afe"));
-            let mut child = SchematicState::default();
-            child
+            root.document
                 .components
-                .push(source(10, ComponentType::VoltageSourceSin, "V1", "freq=1k"));
+                .push(source(1, ComponentType::VoltageSource, "VDD", ""));
+            root.document.components.push(instance(2, "XAFE", "afe"));
+            let mut child = SchematicState::default();
+            child.document.components.push(source(
+                10,
+                ComponentType::VoltageSourceSin,
+                "V1",
+                "freq=1k",
+            ));
 
             let design = Design::new(root, &[("afe", child)]);
 
@@ -2241,13 +2253,16 @@ mod tests {
         #[test]
         fn one_drawn_source_reached_twice_is_two_rows() {
             let mut root = SchematicState::default();
-            root.components.push(instance(1, "XA", "afe"));
-            root.components.push(instance(2, "XB", "afe"));
+            root.document.components.push(instance(1, "XA", "afe"));
+            root.document.components.push(instance(2, "XB", "afe"));
             let mut child = SchematicState::default();
-            child
-                .components
-                .push(source(10, ComponentType::VoltageSourceSin, "V1", "freq=1k"));
-            child.components.push(port(11, "P1", "port=1"));
+            child.document.components.push(source(
+                10,
+                ComponentType::VoltageSourceSin,
+                "V1",
+                "freq=1k",
+            ));
+            child.document.components.push(port(11, "P1", "port=1"));
 
             let design = Design::new(root, &[("afe", child)]);
 
@@ -2277,9 +2292,9 @@ mod tests {
         #[test]
         fn a_child_master_source_is_read_by_the_plans_whole_design_analyses() {
             let mut root = SchematicState::default();
-            root.components.push(instance(1, "XAFE", "afe"));
+            root.document.components.push(instance(1, "XAFE", "afe"));
             let mut child = SchematicState::default();
-            child.components.push(source(
+            child.document.components.push(source(
                 10,
                 ComponentType::VoltageSourcePulse,
                 "V1",
@@ -2307,9 +2322,14 @@ mod tests {
         #[test]
         fn a_master_that_places_nothing_contributes_nothing() {
             let mut root = SchematicState::default();
-            root.components.push(instance(1, "XEMPTY", "empty"));
-            root.components.push(instance(2, "XGONE", "absent"));
-            root.components
+            root.document
+                .components
+                .push(instance(1, "XEMPTY", "empty"));
+            root.document
+                .components
+                .push(instance(2, "XGONE", "absent"));
+            root.document
+                .components
                 .push(source(3, ComponentType::VoltageSource, "V1", ""));
 
             let design = Design::new(root, &[("empty", SchematicState::default())]);
@@ -2330,12 +2350,15 @@ mod tests {
         #[test]
         fn the_whole_design_walk_is_not_repeated_for_one_projection() {
             let mut root = SchematicState::default();
-            root.components.push(instance(1, "XA", "afe"));
-            root.components.push(instance(2, "XB", "afe"));
+            root.document.components.push(instance(1, "XA", "afe"));
+            root.document.components.push(instance(2, "XB", "afe"));
             let mut child = SchematicState::default();
-            child
-                .components
-                .push(source(10, ComponentType::VoltageSourceSin, "V1", "freq=1k"));
+            child.document.components.push(source(
+                10,
+                ComponentType::VoltageSourceSin,
+                "V1",
+                "freq=1k",
+            ));
             let design = Design::new(root, &[("afe", child)]);
             let projection = design.projection();
 
@@ -2373,10 +2396,12 @@ mod tests {
             // digests differently is a different projection, and a different
             // projection is a different answer.
             let mut edited = design;
-            edited
-                .root
-                .components
-                .push(source(4, ComponentType::VoltageSource, "VDD", ""));
+            edited.root.document.components.push(source(
+                4,
+                ComponentType::VoltageSource,
+                "VDD",
+                "",
+            ));
             let moved = edited.projection();
             assert!(
                 !Arc::ptr_eq(&projection, &moved),
@@ -2413,8 +2438,12 @@ mod tests {
             use crate::state::stimulus_library::draft::DefinitionDraft;
 
             let mut root = SchematicState::default();
-            root.components
-                .push(source(1, ComponentType::VoltageSourceSin, "V1", "freq=1k"));
+            root.document.components.push(source(
+                1,
+                ComponentType::VoltageSourceSin,
+                "V1",
+                "freq=1k",
+            ));
             let design = Design::new(root, &[]);
             let projection = design.projection();
 

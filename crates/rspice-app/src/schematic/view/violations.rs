@@ -181,12 +181,14 @@ fn anchor(state: &AppState, location: &DrcLocation) -> Option<Point> {
         DrcLocation::Point { x, y } => Some(Point::new(*x as i32, *y as i32)),
         DrcLocation::Component { id, .. } => state
             .schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == *id && object_is_on_active_sheet(state, component.id))
             .map(|c| c.pos),
         DrcLocation::Wire { id } => state
             .schematic
+            .document
             .wires
             .iter()
             .find(|wire| wire.id == *id && object_is_on_active_sheet(state, wire.id))
@@ -200,18 +202,21 @@ fn anchor(state: &AppState, location: &DrcLocation) -> Option<Point> {
             }),
         DrcLocation::Bus { id } => state
             .schematic
+            .document
             .buses
             .iter()
             .find(|bus| bus.id == *id && object_is_on_active_sheet(state, bus.id))
             .and_then(|bus| bus.points.first().copied()),
         DrcLocation::BusTap { id } => state
             .schematic
+            .document
             .bus_taps
             .iter()
             .find(|tap| tap.id == *id && object_is_on_active_sheet(state, tap.id))
             .map(|tap| tap.connection_point),
         DrcLocation::NetLabel { name } => state
             .schematic
+            .document
             .net_labels
             .iter()
             .find(|label| label.name == *name && object_is_on_active_sheet(state, label.id))
@@ -224,7 +229,7 @@ fn anchor(state: &AppState, location: &DrcLocation) -> Option<Point> {
 /// reports each frame.
 fn cursor_screen_pos(state: &AppState, viewport: &Viewport) -> Option<Pos2> {
     let (gx, gy) = state.ui.canvas_hover?;
-    let grid = state.schematic.grid_size.max(1) as f32;
+    let grid = state.schematic.document.grid_size.max(1) as f32;
     Some(pos2(
         viewport.bounds.min.x + viewport.offset.x + (gx as f32) * grid * viewport.zoom,
         viewport.bounds.min.y + viewport.offset.y + (gy as f32) * grid * viewport.zoom,
@@ -367,13 +372,14 @@ mod tests {
     #[test]
     fn hidden_identity_anchor_is_suppressed_but_unowned_point_remains_visible() {
         let mut state = state_with_hidden_object(20);
-        state.schematic.components.push(Component::new(
+        state.schematic.document.components.push(Component::new(
             20,
             ComponentType::Resistor,
             Point::new(10, 10),
         ));
         state
             .schematic
+            .document
             .wires
             .push(Wire::segment(20, Point::origin(), Point::new(20, 0)));
 

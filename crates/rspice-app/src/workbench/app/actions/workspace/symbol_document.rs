@@ -599,6 +599,7 @@ fn rename_instance_terminals(
     renames: &BTreeMap<String, String>,
 ) -> usize {
     let instances: Vec<u64> = schematic
+        .document
         .components
         .iter()
         .filter(|component| {
@@ -614,7 +615,7 @@ fn rename_instance_terminals(
     }
 
     let mut renamed = 0;
-    for component in &mut schematic.components {
+    for component in &mut schematic.document.components {
         let Some(binding) = component.library_cell.as_mut() else {
             continue;
         };
@@ -627,7 +628,7 @@ fn rename_instance_terminals(
             }
         }
     }
-    for connection in &mut schematic.connections {
+    for connection in &mut schematic.document.connections {
         if !instances.contains(&connection.component_id) {
             continue;
         }

@@ -688,6 +688,7 @@ fn acceptance_sequence(
     assert!(
         state
             .schematic
+            .document
             .components
             .iter()
             .any(|component| component.id == id)
@@ -757,6 +758,7 @@ fn a_model_card_part_arms_its_native_device_and_symbol_skin() {
         .add_component(ComponentType::Diode, crate::state::Point::new(100, 100));
     let placed = state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == id)
@@ -775,6 +777,7 @@ fn a_model_card_part_arms_its_native_device_and_symbol_skin() {
         .add_component(ComponentType::Resistor, crate::state::Point::new(200, 200));
     let placed = state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == id)

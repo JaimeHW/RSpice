@@ -34,7 +34,7 @@ pub(super) fn target_acquisition_radius(viewport: &Viewport) -> i32 {
 /// other one, so the attachment always stays on its body.
 pub(super) fn conductor_attachment_pitch(state: &AppState) -> Option<i32> {
     let engine = &state.schematic.snap_engine;
-    (engine.enabled && engine.snap_to_grid).then_some(state.schematic.grid_size)
+    (engine.enabled && engine.snap_to_grid).then_some(state.schematic.document.grid_size)
 }
 
 /// Resolve a pointer for grid-governed placement and geometry editing.
@@ -54,7 +54,11 @@ pub(super) fn resolve_grid_pointer(
     }
 
     SnapResult::grid_only(
-        screen_to_grid(viewport, state.schematic.grid_size, screen_position),
+        screen_to_grid(
+            viewport,
+            state.schematic.document.grid_size,
+            screen_position,
+        ),
         raw,
     )
 }
@@ -72,9 +76,11 @@ pub(super) fn resolve_target_pointer(
         return SnapResult::no_snap(raw);
     }
 
-    let components = objects_on_active_sheet(state, &state.schematic.components, |item| item.id);
-    let wires = objects_on_active_sheet(state, &state.schematic.wires, |item| item.id);
-    let junctions = objects_on_active_sheet(state, &state.schematic.junctions, |item| item.id);
+    let components =
+        objects_on_active_sheet(state, &state.schematic.document.components, |item| item.id);
+    let wires = objects_on_active_sheet(state, &state.schematic.document.wires, |item| item.id);
+    let junctions =
+        objects_on_active_sheet(state, &state.schematic.document.junctions, |item| item.id);
     let mut target_engine = state.schematic.snap_engine.clone();
     target_engine.snap_radius = target_acquisition_radius(viewport);
     // A non-electrical grid fallback is resolved from the original screen
@@ -115,7 +121,7 @@ mod tests {
         let viewport = viewport(1.0);
         let pointer = Pos2::new(17.0, 23.0);
         let mut state = AppState::default();
-        state.schematic.grid_size = 10;
+        state.schematic.document.grid_size = 10;
 
         state.schematic.snap_engine.enabled = false;
         let disabled = resolve_grid_pointer(&state, &viewport, pointer);

@@ -146,18 +146,18 @@ impl SchematicSnapshot {
     pub fn capture(state: &super::state::SchematicState) -> Self {
         Self {
             cancel_state: None,
-            document_policy: state.document_policy,
-            grid_size: state.grid_size,
-            components: state.components.clone(),
-            wires: state.wires.clone(),
-            buses: state.buses.clone(),
-            bus_taps: state.bus_taps.clone(),
-            junctions: state.junctions.clone(),
-            net_labels: state.net_labels.clone(),
-            design_notes: state.design_notes.clone(),
-            documentation_shapes: state.documentation_shapes.clone(),
-            probes: state.probes.clone(),
-            connections: state.connections.clone(),
+            document_policy: state.document.document_policy,
+            grid_size: state.document.grid_size,
+            components: state.document.components.clone(),
+            wires: state.document.wires.clone(),
+            buses: state.document.buses.clone(),
+            bus_taps: state.document.bus_taps.clone(),
+            junctions: state.document.junctions.clone(),
+            net_labels: state.document.net_labels.clone(),
+            design_notes: state.document.design_notes.clone(),
+            documentation_shapes: state.document.documentation_shapes.clone(),
+            probes: state.document.probes.clone(),
+            connections: state.document.connections.clone(),
             sheet_assignments: BTreeMap::new(),
         }
     }
@@ -188,27 +188,27 @@ impl SchematicSnapshot {
     ///
     /// Restores undoable fields without touching view state.
     pub fn apply(&self, state: &mut super::state::SchematicState) {
-        let electrical_changed = self.document_policy != state.document_policy
-            || self.grid_size != state.grid_size
-            || self.components != state.components
-            || self.wires != state.wires
-            || self.buses != state.buses
-            || self.bus_taps != state.bus_taps
-            || self.junctions != state.junctions
-            || self.net_labels != state.net_labels
-            || self.connections != state.connections;
-        state.document_policy = self.document_policy;
-        state.grid_size = self.grid_size;
-        state.components = self.components.clone();
-        state.wires = self.wires.clone();
-        state.buses = self.buses.clone();
-        state.bus_taps = self.bus_taps.clone();
-        state.junctions = self.junctions.clone();
-        state.net_labels = self.net_labels.clone();
-        state.design_notes = self.design_notes.clone();
-        state.documentation_shapes = self.documentation_shapes.clone();
-        state.probes = self.probes.clone();
-        state.connections = self.connections.clone();
+        let electrical_changed = self.document_policy != state.document.document_policy
+            || self.grid_size != state.document.grid_size
+            || self.components != state.document.components
+            || self.wires != state.document.wires
+            || self.buses != state.document.buses
+            || self.bus_taps != state.document.bus_taps
+            || self.junctions != state.document.junctions
+            || self.net_labels != state.document.net_labels
+            || self.connections != state.document.connections;
+        state.document.document_policy = self.document_policy;
+        state.document.grid_size = self.grid_size;
+        state.document.components = self.components.clone();
+        state.document.wires = self.wires.clone();
+        state.document.buses = self.buses.clone();
+        state.document.bus_taps = self.bus_taps.clone();
+        state.document.junctions = self.junctions.clone();
+        state.document.net_labels = self.net_labels.clone();
+        state.document.design_notes = self.design_notes.clone();
+        state.document.documentation_shapes = self.documentation_shapes.clone();
+        state.document.probes = self.probes.clone();
+        state.document.connections = self.connections.clone();
 
         if electrical_changed {
             state.bump_topology_version();
@@ -244,18 +244,18 @@ impl SchematicSnapshot {
     /// every preview frame, so an allocation-free comparison is essential for
     /// large schematics.
     pub fn is_equal_state(&self, state: &super::state::SchematicState) -> bool {
-        self.document_policy == state.document_policy
-            && self.grid_size == state.grid_size
-            && self.components == state.components
-            && self.wires == state.wires
-            && self.buses == state.buses
-            && self.bus_taps == state.bus_taps
-            && self.junctions == state.junctions
-            && self.net_labels == state.net_labels
-            && self.design_notes == state.design_notes
-            && self.documentation_shapes == state.documentation_shapes
-            && self.probes == state.probes
-            && self.connections == state.connections
+        self.document_policy == state.document.document_policy
+            && self.grid_size == state.document.grid_size
+            && self.components == state.document.components
+            && self.wires == state.document.wires
+            && self.buses == state.document.buses
+            && self.bus_taps == state.document.bus_taps
+            && self.junctions == state.document.junctions
+            && self.net_labels == state.document.net_labels
+            && self.design_notes == state.document.design_notes
+            && self.documentation_shapes == state.document.documentation_shapes
+            && self.probes == state.document.probes
+            && self.connections == state.document.connections
     }
 }
 
@@ -939,11 +939,11 @@ mod tests {
             s.add_component(ComponentType::Resistor, Point::new(10, 20));
         });
         assert!(changed);
-        assert_eq!(state.components.len(), 1);
+        assert_eq!(state.document.components.len(), 1);
         assert!(state.can_undo());
 
         assert!(state.undo());
-        assert!(state.components.is_empty());
+        assert!(state.document.components.is_empty());
         assert!(capture(&state).is_equal(&baseline));
         assert!(!state.can_undo());
         assert!(state.can_redo());
@@ -961,7 +961,7 @@ mod tests {
 
         assert!(state.undo());
         assert!(state.redo());
-        assert_eq!(state.components.len(), 1);
+        assert_eq!(state.document.components.len(), 1);
         assert!(capture(&state).is_equal(&after));
         assert!(state.can_undo());
         assert!(!state.can_redo());
@@ -985,6 +985,7 @@ mod tests {
 
         assert!(state.with_undo("Edit component properties", |schematic| {
             let component = schematic
+                .document
                 .components
                 .iter_mut()
                 .find(|component| component.id == id)
@@ -995,6 +996,7 @@ mod tests {
         assert!(state.can_undo());
         assert!(state.undo());
         let component = state
+            .document
             .components
             .iter()
             .find(|component| component.id == id)
@@ -1007,27 +1009,31 @@ mod tests {
     fn project_portable_grid_policy_participates_in_undo_and_redo() {
         let mut state = SchematicState::default();
         state.init_undo_history();
-        let original_policy = state.document_policy;
-        let original_grid_size = state.grid_size;
+        let original_policy = state.document.document_policy;
+        let original_grid_size = state.document.grid_size;
 
         assert!(state.with_undo("change schematic grid pitch", |schematic| {
-            schematic.document_policy.grid_pitch =
+            schematic.document.document_policy.grid_pitch =
                 super::super::document_policy::SchematicGridPitch::Metric;
-            schematic.grid_size = schematic.document_policy.grid_pitch.canvas_grid_size();
+            schematic.document.grid_size = schematic
+                .document
+                .document_policy
+                .grid_pitch
+                .canvas_grid_size();
         }));
-        assert_ne!(state.document_policy, original_policy);
-        assert_ne!(state.grid_size, original_grid_size);
+        assert_ne!(state.document.document_policy, original_policy);
+        assert_ne!(state.document.grid_size, original_grid_size);
 
         assert!(state.undo());
-        assert_eq!(state.document_policy, original_policy);
-        assert_eq!(state.grid_size, original_grid_size);
+        assert_eq!(state.document.document_policy, original_policy);
+        assert_eq!(state.document.grid_size, original_grid_size);
         assert!(state.redo());
         assert_eq!(
-            state.document_policy.grid_pitch,
+            state.document.document_policy.grid_pitch,
             super::super::document_policy::SchematicGridPitch::Metric
         );
         assert_eq!(
-            state.grid_size,
+            state.document.grid_size,
             super::super::document_policy::SchematicGridPitch::Metric.canvas_grid_size()
         );
     }
@@ -1075,7 +1081,7 @@ mod tests {
 
         // The closure must not run at all on a read-only view.
         assert!(!changed);
-        assert!(state.components.is_empty());
+        assert!(state.document.components.is_empty());
         assert!(!state.can_undo());
     }
 
@@ -1138,7 +1144,7 @@ mod tests {
         assert_eq!(state.undo_history.undo_count(), 1);
         assert_eq!(state.undo_description(), Some("outer edit"));
         assert!(state.undo());
-        assert!(state.components.is_empty());
+        assert!(state.document.components.is_empty());
     }
 
     #[test]
@@ -1152,7 +1158,7 @@ mod tests {
 
         assert!(!state.has_pending_operation());
         assert!(!state.can_undo());
-        assert!(state.components.is_empty());
+        assert!(state.document.components.is_empty());
     }
 
     #[test]
@@ -1170,7 +1176,7 @@ mod tests {
             let selection = state.selection.clone();
             let content_version = state.content_version();
             state.begin_operation("drag selection");
-            state.components[0].pos = Point::new(80, 90);
+            state.document.components[0].pos = Point::new(80, 90);
             state.is_dirty = true;
             state.bump_topology_version();
             let dragged_topology = state.topology_version();
@@ -1189,8 +1195,8 @@ mod tests {
             assert!(!state.cancel_operation());
             assert_eq!(state.topology_version(), cancelled_topology);
             assert!(state.redo());
-            assert_eq!(state.components.len(), 2);
-            assert_eq!(state.components[0].pos, Point::new(10, 20));
+            assert_eq!(state.document.components.len(), 2);
+            assert_eq!(state.document.components[0].pos, Point::new(10, 20));
         }
     }
 
@@ -1203,7 +1209,7 @@ mod tests {
         state.begin_operation("nested helper");
         state.add_component(ComponentType::Capacitor, Point::new(50, 0));
         assert!(state.cancel_operation());
-        assert!(state.components.is_empty());
+        assert!(state.document.components.is_empty());
         assert!(!state.is_dirty);
         assert!(!state.has_pending_operation());
         assert!(!state.end_operation());

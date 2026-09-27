@@ -39,7 +39,7 @@ fn independent_ac_data_instances_keep_their_own_parameter_tables() {
             AnalysisKind::AcData,
         ],
     );
-    for component in &mut state.schematic.components {
+    for component in &mut state.schematic.document.components {
         match component.name.as_str() {
             "VCC" => {
                 component.kind = crate::state::ComponentType::VoltageSourceAc;
@@ -208,6 +208,7 @@ fn name_the_fixture_tone_source(plan: &mut SimulationPlan, pss: AnalysisInstance
 fn drive_pss_from_the_fixture_supply(state: &mut AppState) {
     let supply = state
         .schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.name == FIXTURE_TONE_SOURCE)

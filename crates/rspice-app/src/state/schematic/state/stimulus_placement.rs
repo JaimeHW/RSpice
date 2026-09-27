@@ -101,6 +101,7 @@ impl SchematicState {
     ) -> u64 {
         let id = self.add_component(placement.component_type, pos);
         if let Some(component) = self
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == id)
@@ -137,6 +138,7 @@ mod tests {
 
         let id = schematic.add_stimulus_component(&placement, Point::new(10, 20));
         let component = schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == id)
@@ -163,13 +165,15 @@ mod tests {
         schematic.with_undo("place a sine source", |schematic| {
             schematic.add_armed_component(ComponentType::VoltageSourceSin, Point::new(4, 4));
         });
-        assert_eq!(schematic.components.len(), 1);
+        assert_eq!(schematic.document.components.len(), 1);
         assert!(
-            schematic.components[0].stimulus_provenance.is_some(),
+            schematic.document.components[0]
+                .stimulus_provenance
+                .is_some(),
             "the armed definition is on the placed instance"
         );
         assert!(schematic.undo());
-        assert!(schematic.components.is_empty());
+        assert!(schematic.document.components.is_empty());
     }
 
     /// A definition armed for one type says nothing about another: the same
@@ -182,6 +186,7 @@ mod tests {
 
         let id = schematic.add_armed_component(ComponentType::VoltageSourcePulse, Point::new(4, 4));
         let placed = schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == id)

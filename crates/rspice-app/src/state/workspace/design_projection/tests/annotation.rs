@@ -21,6 +21,7 @@ fn retain_annotation(
             .iter()
             .map(|id| {
                 let component = schematic
+                    .document
                     .components
                     .iter()
                     .find(|component| component.id == *id)
@@ -55,6 +56,7 @@ fn unapplied_annotation_projects_controlled_source_references_with_names() {
     set_name(&mut active, voltage, "V42");
     let controlled = active.add_component(ComponentType::Cccs, Point::new(500, 0));
     active
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == controlled)
@@ -67,6 +69,7 @@ fn unapplied_annotation_projects_controlled_source_references_with_names() {
     let projected = projection.root_schematic().unwrap();
     assert_eq!(
         projected
+            .document
             .components
             .iter()
             .find(|component| component.id == voltage)
@@ -75,6 +78,7 @@ fn unapplied_annotation_projects_controlled_source_references_with_names() {
         "V1"
     );
     let controlled = projected
+        .document
         .components
         .iter()
         .find(|component| component.id == controlled)
@@ -90,8 +94,8 @@ fn unapplied_annotation_projects_controlled_source_references_with_names() {
     ));
     let repeated = projection_of(&workspace, &libraries, &reference, projected);
     assert_eq!(
-        repeated.root_schematic().unwrap().components,
-        projected.components
+        repeated.root_schematic().unwrap().document.components,
+        projected.document.components
     );
 }
 
@@ -103,6 +107,7 @@ fn projection_resolves_swapped_windings_from_the_original_names() {
     set_name(&mut active, first, "L1");
     set_name(&mut active, second, "L2");
     active
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == first)
@@ -110,6 +115,7 @@ fn projection_resolves_swapped_windings_from_the_original_names() {
         .params = "coupled_to=L2 coupling_factor=-0.5".to_owned();
     let coupling = active.add_component(ComponentType::CoupledInductor, Point::new(800, 0));
     active
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == coupling)
@@ -118,7 +124,7 @@ fn projection_resolves_swapped_windings_from_the_original_names() {
     retain_annotation(&mut workspace, &reference, &active, &[first, second]);
     let original = crate::state::SchematicSnapshot::capture(&active);
     let projection = projection_of(&workspace, &libraries, &reference, &active);
-    let components = &projection.root_schematic().unwrap().components;
+    let components = &projection.root_schematic().unwrap().document.components;
     let first = components
         .iter()
         .find(|component| component.id == first)
@@ -158,6 +164,7 @@ fn a_failed_annotation_projection_leaves_the_source_and_cached_projection_intact
         if malformed {
             let dependent = active.add_component(ComponentType::Cccs, Point::new(500, 0));
             active
+                .document
                 .components
                 .iter_mut()
                 .find(|component| component.id == dependent)
@@ -193,6 +200,7 @@ fn omitted_variant_components_do_not_participate_in_annotation_references() {
     set_name(&mut active, voltage, "V42");
     let omitted = active.add_component(ComponentType::Cccs, Point::new(500, 0));
     active
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == omitted)
@@ -221,7 +229,7 @@ fn omitted_variant_components_do_not_participate_in_annotation_references() {
         .set_active(variant)
         .unwrap();
     let projection = projection_of(&workspace, &libraries, &reference, &active);
-    let components = &projection.root_schematic().unwrap().components;
+    let components = &projection.root_schematic().unwrap().document.components;
     assert!(!components.iter().any(|component| component.id == omitted));
     assert_eq!(
         components
@@ -233,6 +241,7 @@ fn omitted_variant_components_do_not_participate_in_annotation_references() {
     );
     assert!(
         active
+            .document
             .components
             .iter()
             .any(|component| component.id == omitted)

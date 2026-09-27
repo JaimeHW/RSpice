@@ -521,6 +521,7 @@ impl ProjectFile {
             .iter()
             .map(|key| {
                 let mut masters = self.workspace.schematic_buffers[key]
+                    .document
                     .components
                     .iter()
                     .filter_map(|component| component.library_cell.as_ref())
@@ -548,7 +549,7 @@ impl ProjectFile {
                 .schematic_buffers
                 .get_mut(&owners[owner])
                 .expect("the buffer the cycle graph was built from remains present");
-            schematic.components.retain(|component| {
+            schematic.document.components.retain(|component| {
                 component.library_cell.as_ref().is_none_or(|binding| {
                     CellViewRef::new(&binding.library, &binding.cell, &binding.view).key()
                         != master_key
@@ -1314,7 +1315,7 @@ impl ProjectFile {
                     "workspace schematic buffer '{key}' disappeared during validation"
                 )));
             };
-            schematic.validated_revisions.validate().map_err(|error| {
+            schematic.document.validated_revisions.validate().map_err(|error| {
                 ProjectIoError::InvalidData(format!(
                     "workspace schematic buffer '{key}' has invalid validated revision history: {error}"
                 ))
@@ -1970,7 +1971,7 @@ pub(crate) fn load_project_text(
     let mut migrated_generated_bindings = 0usize;
     let mut unresolved_generated_bindings = 0usize;
     for schematic in project.workspace.schematic_buffers.values_mut() {
-        for component in &mut schematic.components {
+        for component in &mut schematic.document.components {
             let Some(binding) = component.library_cell.as_mut() else {
                 continue;
             };

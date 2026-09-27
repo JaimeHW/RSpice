@@ -40,6 +40,7 @@ fn amp_master() -> SchematicState {
 fn place_port(schematic: &mut SchematicState, name: &str, position: Point) {
     let id = schematic.add_component(ComponentType::Port, position);
     schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == id)
@@ -49,6 +50,7 @@ fn place_port(schematic: &mut SchematicState, name: &str, position: Point) {
 
 fn set_name(schematic: &mut SchematicState, id: u64, name: &str) {
     schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == id)
@@ -60,6 +62,7 @@ fn set_name(schematic: &mut SchematicState, id: u64, name: &str) {
 /// editing surfaces mutate while a session is open.
 fn set_first_resistor_value(schematic: &mut SchematicState, value: &str) {
     schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.kind == ComponentType::Resistor)
@@ -188,6 +191,7 @@ fn unresolved_inspection_retains_diagnostics_and_reuses_the_execution_cache() {
     let (workspace, libraries, reference, mut active) = workspace_with_two_cell_views();
     let original = projection_of(&workspace, &libraries, &reference, &active);
     active
+        .document
         .components
         .retain(|component| component.name != INSTANCE_NAME);
     reset_materialization_count();
@@ -246,6 +250,7 @@ fn projection_names_follow_a_property_rename() {
     let before = projection_of(&workspace, &libraries, &reference, &active);
     let topology_before = active.topology_version();
     active
+        .document
         .components
         .iter_mut()
         .find(|component| component.name == LOAD_NAME)
@@ -266,6 +271,7 @@ fn projection_names_follow_a_property_rename() {
     let names = after
         .root_schematic()
         .expect("the projection carries the root schematic")
+        .document
         .components
         .iter()
         .map(|component| component.name.as_str())
@@ -367,11 +373,11 @@ fn a_memo_hit_carries_what_a_full_rebuild_would_have_produced() {
                 .get(key)
                 .expect("the cell-view sets already matched");
             assert_eq!(
-                schematic.components, fresh.components,
+                schematic.document.components, fresh.document.components,
                 "step {step}: memoized `{key}` disagrees with a full rebuild"
             );
             assert_eq!(
-                schematic.net_labels, fresh.net_labels,
+                schematic.document.net_labels, fresh.document.net_labels,
                 "step {step}: memoized `{key}` disagrees with a full rebuild"
             );
         }

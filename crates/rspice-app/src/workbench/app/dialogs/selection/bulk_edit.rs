@@ -171,8 +171,8 @@ impl SelectionBulkEditAuthority {
         {
             return Some(reopen("The active cell/view changed"));
         }
-        if self.active.grid_size != state.schematic.grid_size
-            || self.active.document_policy != state.schematic.document_policy
+        if self.active.grid_size != state.schematic.document.grid_size
+            || self.active.document_policy != state.schematic.document.document_policy
         {
             return Some(reopen("The schematic grid or editing policy changed"));
         }
@@ -582,7 +582,7 @@ fn preview_impact(
         };
         let mut found = HashSet::new();
         let mut changed = 0;
-        for component in &schematic.components {
+        for component in &schematic.document.components {
             if !editable_ids.contains(&component.id) {
                 continue;
             }
@@ -631,7 +631,7 @@ fn apply_bulk_edit(
     };
     let mut replacements = Vec::new();
     let mut found = HashSet::new();
-    for (index, component) in schematic.components.iter().enumerate() {
+    for (index, component) in schematic.document.components.iter().enumerate() {
         if !target_ids.contains(&component.id) {
             continue;
         }
@@ -660,7 +660,7 @@ fn apply_bulk_edit(
         .map(|(_, component)| component.id)
         .collect::<Vec<_>>();
     for (index, component) in replacements {
-        schematic.components[index] = component;
+        schematic.document.components[index] = component;
     }
     schematic.is_dirty = true;
     let committed = schematic.end_operation();
@@ -1404,7 +1404,7 @@ fn append_buffer_rows(
     };
     match filter.object_kind {
         SelectionBulkObjectKind::InstancesAndParameters | SelectionBulkObjectKind::PortsAndPins => {
-            for component in &schematic.components {
+            for component in &schematic.document.components {
                 let is_port = component.kind == ComponentType::Port;
                 if (filter.object_kind == SelectionBulkObjectKind::InstancesAndParameters
                     && is_port)
@@ -1462,7 +1462,7 @@ fn append_buffer_rows(
             if !filter.model_cell.trim().is_empty() || !filter.current_property.trim().is_empty() {
                 return;
             }
-            for wire in &schematic.wires {
+            for wire in &schematic.document.wires {
                 if on_current_sheet(wire.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1475,7 +1475,7 @@ fn append_buffer_rows(
                     ));
                 }
             }
-            for bus in &schematic.buses {
+            for bus in &schematic.document.buses {
                 if on_current_sheet(bus.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1491,7 +1491,7 @@ fn append_buffer_rows(
                     ));
                 }
             }
-            for tap in &schematic.bus_taps {
+            for tap in &schematic.document.bus_taps {
                 if on_current_sheet(tap.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1504,7 +1504,7 @@ fn append_buffer_rows(
                     ));
                 }
             }
-            for junction in &schematic.junctions {
+            for junction in &schematic.document.junctions {
                 if on_current_sheet(junction.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1517,7 +1517,7 @@ fn append_buffer_rows(
                     ));
                 }
             }
-            for label in &schematic.net_labels {
+            for label in &schematic.document.net_labels {
                 if on_current_sheet(label.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1535,7 +1535,7 @@ fn append_buffer_rows(
             if !filter.model_cell.trim().is_empty() || !filter.current_property.trim().is_empty() {
                 return;
             }
-            for note in &schematic.design_notes {
+            for note in &schematic.document.design_notes {
                 if on_current_sheet(note.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1548,7 +1548,7 @@ fn append_buffer_rows(
                     ));
                 }
             }
-            for shape in &schematic.documentation_shapes {
+            for shape in &schematic.document.documentation_shapes {
                 if on_current_sheet(shape.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1845,7 +1845,7 @@ mod tests {
         let mut state = AppState::default();
         let mut instance = component(1, "U1", Some("tt"));
         instance.params = "gain=100".to_owned();
-        state.schematic.components = vec![instance];
+        state.schematic.document.components = vec![instance];
 
         let mut filter = SelectionBulkFilter {
             query: "gain=100".to_owned(),
@@ -1866,7 +1866,7 @@ mod tests {
     #[test]
     fn exact_mockup_default_section_filter_matches_an_inherited_binding() {
         let mut state = AppState::default();
-        state.schematic.components = vec![component(1, "U1", None)];
+        state.schematic.document.components = vec![component(1, "U1", None)];
         let filter = SelectionBulkFilter {
             model_cell: "OPA189*".to_owned(),
             current_property: "section = default".to_owned(),
@@ -1882,12 +1882,12 @@ mod tests {
     #[test]
     fn invalid_target_preflight_never_partially_mutates() {
         let mut schematic = SchematicState::default();
-        schematic.components = vec![
+        schematic.document.components = vec![
             component(1, "X1", Some("tt")),
             component(2, "X2", Some("tt")),
         ];
-        schematic.components[1].library_cell = None;
-        let before = schematic.components.clone();
+        schematic.document.components[1].library_cell = None;
+        let before = schematic.document.components.clone();
         let ids = BTreeSet::from([1, 2]);
 
         assert!(
@@ -1901,14 +1901,14 @@ mod tests {
             )
             .is_err()
         );
-        assert_eq!(schematic.components, before);
+        assert_eq!(schematic.document.components, before);
         assert!(!schematic.can_undo());
     }
 
     #[test]
     fn model_section_bulk_edit_is_one_undo_boundary() {
         let mut schematic = SchematicState::default();
-        schematic.components = vec![
+        schematic.document.components = vec![
             component(1, "X1", Some("tt")),
             component(2, "X2", Some("tt")),
         ];
@@ -1925,7 +1925,7 @@ mod tests {
         assert_eq!(receipt.changed, 2);
         assert!(schematic.can_undo());
         assert_eq!(
-            schematic.components[0]
+            schematic.document.components[0]
                 .library_cell
                 .as_ref()
                 .and_then(|binding| binding.model_section.as_deref()),
@@ -1933,7 +1933,7 @@ mod tests {
         );
         assert!(schematic.undo());
         assert_eq!(
-            schematic.components[0]
+            schematic.document.components[0]
                 .library_cell
                 .as_ref()
                 .and_then(|binding| binding.model_section.as_deref()),
@@ -1948,7 +1948,7 @@ mod tests {
         let mut first = component(1, "X1", None);
         first.params = "temp=27".to_owned();
         let second = component(2, "X2", None);
-        schematic.components = vec![first, second];
+        schematic.document.components = vec![first, second];
         let ids = BTreeSet::from([1, 2]);
 
         let receipt = apply_bulk_edit(
@@ -1961,8 +1961,8 @@ mod tests {
         )
         .expect("leave unchanged");
         assert_eq!(receipt.changed, 1);
-        assert_eq!(schematic.components[0].params, "temp=85");
-        assert!(schematic.components[1].params.is_empty());
+        assert_eq!(schematic.document.components[0].params, "temp=85");
+        assert!(schematic.document.components[1].params.is_empty());
 
         let receipt = apply_bulk_edit(
             &mut schematic,
@@ -1974,13 +1974,13 @@ mod tests {
         )
         .expect("restore");
         assert_eq!(receipt.changed, 1);
-        assert!(schematic.components[0].params.is_empty());
+        assert!(schematic.document.components[0].params.is_empty());
     }
 
     #[test]
     fn display_override_changes_durable_component_state() {
         let mut schematic = SchematicState::default();
-        schematic.components = vec![component(1, "X1", None)];
+        schematic.document.components = vec![component(1, "X1", None)];
         let ids = BTreeSet::from([1]);
         apply_bulk_edit(
             &mut schematic,
@@ -1992,7 +1992,7 @@ mod tests {
         )
         .expect("display edit");
         assert_eq!(
-            schematic.components[0].display_mode,
+            schematic.document.components[0].display_mode,
             ComponentDisplayMode::Hidden
         );
     }
@@ -2000,7 +2000,7 @@ mod tests {
     #[test]
     fn parameter_override_uses_current_property_key_and_restores_inheritance() {
         let mut schematic = SchematicState::default();
-        schematic.components = vec![component(1, "X1", None)];
+        schematic.document.components = vec![component(1, "X1", None)];
         let ids = BTreeSet::from([1]);
         apply_bulk_edit(
             &mut schematic,
@@ -2011,7 +2011,7 @@ mod tests {
             Some("m=1"),
         )
         .expect("set parameter override");
-        assert_eq!(schematic.components[0].params, "m=4");
+        assert_eq!(schematic.document.components[0].params, "m=4");
 
         apply_bulk_edit(
             &mut schematic,
@@ -2022,14 +2022,14 @@ mod tests {
             Some("m=4"),
         )
         .expect("restore parameter inheritance");
-        assert!(schematic.components[0].params.is_empty());
+        assert!(schematic.document.components[0].params.is_empty());
     }
 
     #[test]
     fn invalid_numeric_value_leaves_document_and_undo_history_unchanged() {
         let mut schematic = SchematicState::default();
-        schematic.components = vec![component(1, "X1", None)];
-        let before = schematic.components.clone();
+        schematic.document.components = vec![component(1, "X1", None)];
+        let before = schematic.document.components.clone();
         let ids = BTreeSet::from([1]);
         assert!(
             apply_bulk_edit(
@@ -2042,14 +2042,14 @@ mod tests {
             )
             .is_err()
         );
-        assert_eq!(schematic.components, before);
+        assert_eq!(schematic.document.components, before);
         assert!(!schematic.can_undo());
     }
 
     #[test]
     fn impact_preview_is_exact_without_cloning_an_undo_transaction() {
         let mut state = AppState::default();
-        state.schematic.components = vec![
+        state.schematic.document.components = vec![
             component(1, "X1", Some("tt")),
             component(2, "X2", Some("tt")),
         ];
@@ -2073,7 +2073,7 @@ mod tests {
         assert_eq!(impact.locked_or_excluded, 0);
         assert!(impact.error.is_none());
         assert!(!state.schematic.can_undo());
-        assert!(state.schematic.components.iter().all(|component| {
+        assert!(state.schematic.document.components.iter().all(|component| {
             component
                 .library_cell
                 .as_ref()
@@ -2085,7 +2085,7 @@ mod tests {
     #[test]
     fn authority_rejects_active_selection_and_external_buffer_drift() {
         let mut state = AppState::default();
-        state.schematic.components = vec![component(1, "X1", Some("tt"))];
+        state.schematic.document.components = vec![component(1, "X1", Some("tt"))];
         state.schematic.selection.select_component(1);
         state
             .workspace
@@ -2102,6 +2102,7 @@ mod tests {
             .schematic_buffers
             .get_mut("user/child/schematic")
             .expect("external buffer")
+            .document
             .components
             .push(component(2, "X2", Some("tt")));
         assert!(authority.stale_reason(&state).is_some());
@@ -2110,9 +2111,9 @@ mod tests {
     #[test]
     fn complete_project_rows_are_visible_but_other_owners_are_locked() {
         let mut state = AppState::default();
-        state.schematic.components = vec![component(1, "X1", Some("tt"))];
+        state.schematic.document.components = vec![component(1, "X1", Some("tt"))];
         let mut external = SchematicState::default();
-        external.components = vec![component(2, "X2", Some("ff"))];
+        external.document.components = vec![component(2, "X2", Some("ff"))];
         state
             .workspace
             .schematic_buffers
@@ -2134,7 +2135,7 @@ mod tests {
     #[test]
     fn port_rows_only_accept_the_display_property() {
         let mut state = AppState::default();
-        state.schematic.components = vec![
+        state.schematic.document.components = vec![
             Component::new(1, ComponentType::Port, Point::new(0, 0)).with_name_value("VIN", ""),
         ];
         let filter = SelectionBulkFilter {
@@ -2157,7 +2158,7 @@ mod tests {
         ctx.enable_accesskit();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        app.state.schematic.components = vec![component(1, "X1", Some("tt"))];
+        app.state.schematic.document.components = vec![component(1, "X1", Some("tt"))];
         open_selection_bulk_edit_dialog(&mut app.state);
 
         let output = ctx.run_ui(

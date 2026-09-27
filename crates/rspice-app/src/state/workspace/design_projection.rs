@@ -500,11 +500,13 @@ impl ProjectWorkspace {
                     .ok_or_else(|| refusal("authored document is unavailable".to_owned()))?
             };
             let source = source_document
+                .document
                 .components
                 .iter()
                 .find(|component| component.id == object.object_id())
                 .ok_or_else(|| refusal("source component is unavailable".to_owned()))?;
             let projected_component = projected_document
+                .document
                 .components
                 .iter()
                 .find(|component| component.id == source.id)
@@ -562,6 +564,7 @@ impl ProjectWorkspace {
             let component = projected
                 .get_mut(&key)
                 .expect("prepared document")
+                .document
                 .components
                 .iter_mut()
                 .find(|component| component.id == component_id)

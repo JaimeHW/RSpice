@@ -78,6 +78,7 @@ pub(crate) fn selected_named_net_target(state: &AppState) -> Option<NamedNetTarg
     let selected_port = selection.single_component().and_then(|id| {
         state
             .schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == id && component.kind == ComponentType::Port)
@@ -177,6 +178,7 @@ fn capture_target(
     let membership = NetMembership::resolve(schematic, &wire_ids, &seeds);
 
     let mut labels = schematic
+        .document
         .net_labels
         .iter()
         .filter(|label| {
@@ -188,6 +190,7 @@ fn capture_target(
     labels.sort_by_key(|label| label.id);
 
     let mut ports = schematic
+        .document
         .components
         .iter()
         .filter(|component| component.kind == ComponentType::Port)
@@ -212,6 +215,7 @@ fn capture_target(
                 .iter()
                 .find_map(|id| {
                     schematic
+                        .document
                         .wires
                         .iter()
                         .find(|wire| wire.id == *id)
@@ -262,7 +266,7 @@ pub(crate) fn validate_named_net_rename(
     if candidate.is_empty() {
         return Err("Enter a non-empty net name.".to_owned());
     }
-    NetLabel::validate_name(candidate, schematic.document_policy.net_naming)
+    NetLabel::validate_name(candidate, schematic.document.document_policy.net_naming)
         .map_err(|reason| format!("Net name: {reason}."))?;
     reject_external_name_collision(schematic, target, candidate)?;
     Ok(candidate.to_owned())
@@ -284,6 +288,7 @@ fn validate_target_is_current(
         .collect::<HashSet<_>>();
     for expected in &target.labels {
         let Some(current) = schematic
+            .document
             .net_labels
             .iter()
             .find(|label| label.id == expected.id)
@@ -296,6 +301,7 @@ fn validate_target_is_current(
     }
     for expected in &target.ports {
         let Some(current) = schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == expected.id)
@@ -311,7 +317,7 @@ fn validate_target_is_current(
     if target
         .wire_ids
         .iter()
-        .any(|id| !schematic.wires.iter().any(|wire| wire.id == *id))
+        .any(|id| !schematic.document.wires.iter().any(|wire| wire.id == *id))
     {
         return Err("The selected conductor geometry changed while editing.".to_owned());
     }
@@ -321,13 +327,13 @@ fn validate_target_is_current(
         .filter_map(port_terminal)
         .collect::<Vec<_>>();
     let membership = NetMembership::resolve(schematic, &target.wire_ids, &seeds);
-    if schematic.net_labels.iter().any(|label| {
+    if schematic.document.net_labels.iter().any(|label| {
         !label_ids.contains(&label.id)
             && (net_name_eq(&label.name, &target.name) || membership.contains(label.pos))
     }) {
         return Err("The naming-label set for the selected net changed while editing.".to_owned());
     }
-    if schematic.components.iter().any(|component| {
+    if schematic.document.components.iter().any(|component| {
         if component.kind != ComponentType::Port || port_ids.contains(&component.id) {
             return false;
         }
@@ -355,6 +361,7 @@ fn reject_external_name_collision(
         .map(|label| label.id)
         .collect::<HashSet<_>>();
     if schematic
+        .document
         .net_labels
         .iter()
         .any(|label| !label_ids.contains(&label.id) && net_name_eq(&label.name, candidate))
@@ -368,7 +375,7 @@ fn reject_external_name_collision(
         .iter()
         .map(|port| port.id)
         .collect::<HashSet<_>>();
-    if schematic.components.iter().any(|component| {
+    if schematic.document.components.iter().any(|component| {
         !port_ids.contains(&component.id)
             && component
                 .port_spec()
@@ -404,12 +411,12 @@ pub(crate) fn apply_named_net_rename(
         .map(|port| port.id)
         .collect::<HashSet<_>>();
     Ok(schematic.with_undo("rename named net", move |schematic| {
-        for label in &mut schematic.net_labels {
+        for label in &mut schematic.document.net_labels {
             if label_ids.contains(&label.id) {
                 label.name = candidate.clone();
             }
         }
-        for component in &mut schematic.components {
+        for component in &mut schematic.document.components {
             if port_ids.contains(&component.id) {
                 component.value = candidate.clone();
             }
@@ -428,10 +435,12 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
+            .document
             .wires
             .push(Wire::new(11, vec![Point::new(0, 0), Point::new(40, 0)]));
         state
             .schematic
+            .document
             .net_labels
             .push(NetLabel::new(21, Point::new(20, 0), name));
         state.schematic.selection.select_only_wire(11);
@@ -456,10 +465,10 @@ mod tests {
         assert!(
             apply_named_net_rename(&mut state.schematic, target, "sense_p".to_owned()).unwrap()
         );
-        assert_eq!(state.schematic.net_labels[0].id, 21);
-        assert_eq!(state.schematic.net_labels[0].name, "sense_p");
+        assert_eq!(state.schematic.document.net_labels[0].id, 21);
+        assert_eq!(state.schematic.document.net_labels[0].name, "sense_p");
         assert!(state.schematic.undo());
-        assert_eq!(state.schematic.net_labels[0].name, "sense");
+        assert_eq!(state.schematic.document.net_labels[0].name, "sense");
         assert!(
             !state.schematic.undo(),
             "rename must be exactly one undo step"
@@ -475,18 +484,22 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
+            .document
             .wires
             .push(Wire::new(11, vec![Point::new(0, 0), Point::new(40, 0)]));
         state
             .schematic
+            .document
             .wires
             .push(Wire::new(12, vec![Point::new(0, 100), Point::new(40, 100)]));
         state
             .schematic
+            .document
             .net_labels
             .push(NetLabel::new(21, Point::new(20, 0), "VDD"));
         state
             .schematic
+            .document
             .net_labels
             .push(NetLabel::new(22, Point::new(20, 100), "VDD"));
         state.schematic.selection.select_only_wire(11);
@@ -510,6 +523,7 @@ mod tests {
         assert!(
             state
                 .schematic
+                .document
                 .net_labels
                 .iter()
                 .all(|label| label.name == "VDD_CORE"),
@@ -519,6 +533,7 @@ mod tests {
         assert!(
             state
                 .schematic
+                .document
                 .net_labels
                 .iter()
                 .all(|label| label.name == "VDD"),
@@ -531,6 +546,7 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
+            .document
             .wires
             .push(Wire::new(1, vec![Point::new(0, 0), Point::new(10, 0)]));
         state.schematic.selection.select_only_wire(1);
@@ -538,14 +554,17 @@ mod tests {
 
         state
             .schematic
+            .document
             .wires
             .push(Wire::new(2, vec![Point::new(0, 20), Point::new(10, 20)]));
         state
             .schematic
+            .document
             .net_labels
             .push(NetLabel::new(10, Point::new(5, 0), "a"));
         state
             .schematic
+            .document
             .net_labels
             .push(NetLabel::new(11, Point::new(5, 20), "b"));
         state.schematic.selection.select_wire(1);
@@ -558,14 +577,16 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
+            .document
             .wires
             .push(Wire::new(3, vec![Point::new(0, 0), Point::new(20, 0)]));
         let mut port =
             Component::new(31, ComponentType::Port, Point::new(0, 0)).with_name_value("P31", "VIN");
         port.params = "dir=in".to_owned();
-        state.schematic.components.push(port);
+        state.schematic.document.components.push(port);
         state
             .schematic
+            .document
             .net_labels
             .push(NetLabel::new(32, Point::new(10, 0), "VIN"));
         state.schematic.selection.select_only_component(31);
@@ -586,32 +607,37 @@ mod tests {
         assert!(
             apply_named_net_rename(&mut state.schematic, target, "VIN_SENSE".to_owned()).unwrap()
         );
-        assert_eq!(state.schematic.components[0].name, "P31");
-        assert_eq!(state.schematic.components[0].value, "VIN_SENSE");
-        assert_eq!(state.schematic.net_labels[0].name, "VIN_SENSE");
+        assert_eq!(state.schematic.document.components[0].name, "P31");
+        assert_eq!(state.schematic.document.components[0].value, "VIN_SENSE");
+        assert_eq!(state.schematic.document.net_labels[0].name, "VIN_SENSE");
     }
 
     #[test]
     fn stale_authority_and_existing_net_name_are_rejected_without_mutation() {
         let mut state = named_wire_state("sense");
         let target = selected_named_net_target(&state).expect("named wire target");
-        state.schematic.net_labels[0].name = "changed_elsewhere".to_owned();
+        state.schematic.document.net_labels[0].name = "changed_elsewhere".to_owned();
         assert!(
             apply_named_net_rename(&mut state.schematic, target, "sense_p".to_owned()).is_err()
         );
-        assert_eq!(state.schematic.net_labels[0].name, "changed_elsewhere");
+        assert_eq!(
+            state.schematic.document.net_labels[0].name,
+            "changed_elsewhere"
+        );
         assert!(!state.schematic.can_undo());
 
         let state = {
             let mut state = named_wire_state("sense");
             state
                 .schematic
+                .document
                 .wires
                 .push(Wire::new(12, vec![Point::new(0, 20), Point::new(40, 20)]));
-            state
-                .schematic
-                .net_labels
-                .push(NetLabel::new(22, Point::new(20, 20), "taken"));
+            state.schematic.document.net_labels.push(NetLabel::new(
+                22,
+                Point::new(20, 20),
+                "taken",
+            ));
             state
         };
         let target = selected_named_net_target(&state).expect("named wire target");

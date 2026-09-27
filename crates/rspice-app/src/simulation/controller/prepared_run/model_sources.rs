@@ -19,7 +19,7 @@ pub(super) fn validate_projected_model_binding_authority(
     use crate::state::model_library::ModelConsumerScope;
 
     for (view, schematic) in projection.schematic_buffers() {
-        for component in &schematic.components {
+        for component in &schematic.document.components {
             let params = crate::state::parse_params_string(&component.params);
             let model_bound_cell = component.library_cell.as_ref().filter(|binding| {
                 binding.netlist_template.is_some() && !binding.is_executable_builtin()

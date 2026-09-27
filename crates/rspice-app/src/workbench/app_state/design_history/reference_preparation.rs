@@ -59,7 +59,10 @@ impl AppState {
             // A probe follows its current occurrence. Restoring a captured
             // expression first would apply the inverse mapping twice or carry
             // an old root's meaning into a newly selected configuration.
-            candidate.probes.clone_from(&source.probes);
+            candidate
+                .document
+                .probes
+                .clone_from(&source.document.probes);
             sources.insert(key.clone(), source.clone());
             candidates.insert(key.clone(), candidate);
         }

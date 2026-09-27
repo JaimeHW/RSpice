@@ -289,8 +289,8 @@ fn discover_candidate(
                     "Checkpoint failed integrity validation: {error}"
                 )),
                 Ok(recovered) => {
-                    let components = recovered.components.len();
-                    let wires = recovered.wires.len();
+                    let components = recovered.document.components.len();
+                    let wires = recovered.document.wires.len();
                     let baseline =
                         read_source_snapshot(&original, &binding).and_then(|(bytes, relation)| {
                             parse_checkpoint_bytes(&bytes, &original)
@@ -349,18 +349,31 @@ fn parse_checkpoint_bytes(bytes: &[u8], checkpoint: &Path) -> Result<SchematicSt
 
 #[cfg(not(target_arch = "wasm32"))]
 fn structural_delta(baseline: &SchematicState, recovered: &SchematicState) -> usize {
-    changed_objects_by_id(&baseline.components, &recovered.components, |item| item.id)
-        + changed_objects_by_id(&baseline.wires, &recovered.wires, |item| item.id)
-        + changed_objects_by_id(&baseline.net_labels, &recovered.net_labels, |item| item.id)
-        + changed_objects_by_id(&baseline.junctions, &recovered.junctions, |item| item.id)
-        + changed_objects_by_id(&baseline.design_notes, &recovered.design_notes, |item| {
-            item.id
-        })
-        + changed_objects_by_id(
-            &baseline.documentation_shapes,
-            &recovered.documentation_shapes,
-            |item| item.id,
-        )
+    changed_objects_by_id(
+        &baseline.document.components,
+        &recovered.document.components,
+        |item| item.id,
+    ) + changed_objects_by_id(
+        &baseline.document.wires,
+        &recovered.document.wires,
+        |item| item.id,
+    ) + changed_objects_by_id(
+        &baseline.document.net_labels,
+        &recovered.document.net_labels,
+        |item| item.id,
+    ) + changed_objects_by_id(
+        &baseline.document.junctions,
+        &recovered.document.junctions,
+        |item| item.id,
+    ) + changed_objects_by_id(
+        &baseline.document.design_notes,
+        &recovered.document.design_notes,
+        |item| item.id,
+    ) + changed_objects_by_id(
+        &baseline.document.documentation_shapes,
+        &recovered.document.documentation_shapes,
+        |item| item.id,
+    )
 }
 
 /// Count semantic additions, removals, and modifications while preserving a
@@ -1090,23 +1103,28 @@ mod tests {
     #[test]
     fn structural_delta_detects_equal_count_object_edits() {
         let mut baseline = SchematicState::default();
-        baseline.components.push(
+        baseline.document.components.push(
             Component::new(1, ComponentType::Resistor, Point::new(10, 10))
                 .with_name_value("R1", "1k"),
         );
         baseline
+            .document
             .wires
             .push(Wire::segment(2, Point::new(0, 0), Point::new(10, 0)));
         baseline
+            .document
             .net_labels
             .push(NetLabel::new(3, Point::new(10, 0), "OUT"));
-        baseline.junctions.push(Junction::new(4, Point::new(10, 0)));
+        baseline
+            .document
+            .junctions
+            .push(Junction::new(4, Point::new(10, 0)));
 
         let mut recovered = baseline.clone();
-        recovered.components[0].value = "2k".to_owned();
-        recovered.wires[0].points[1] = Point::new(20, 0);
-        recovered.net_labels[0].name = "SENSE".to_owned();
-        recovered.junctions[0].pos = Point::new(20, 0);
+        recovered.document.components[0].value = "2k".to_owned();
+        recovered.document.wires[0].points[1] = Point::new(20, 0);
+        recovered.document.net_labels[0].name = "SENSE".to_owned();
+        recovered.document.junctions[0].pos = Point::new(20, 0);
 
         assert_eq!(structural_delta(&baseline, &recovered), 4);
     }
@@ -1115,7 +1133,7 @@ mod tests {
     #[test]
     fn structural_delta_counts_documentation_shape_add_remove_and_edit() {
         let mut baseline = SchematicState::default();
-        baseline.documentation_shapes = vec![
+        baseline.document.documentation_shapes = vec![
             DocumentationShape::new(
                 81,
                 DocumentationShapeGeometry::Rectangle {
@@ -1135,9 +1153,9 @@ mod tests {
         ];
 
         let mut recovered = baseline.clone();
-        recovered.documentation_shapes[0].translate(Point::new(2, 1));
-        recovered.documentation_shapes.remove(1);
-        recovered.documentation_shapes.push(
+        recovered.document.documentation_shapes[0].translate(Point::new(2, 1));
+        recovered.document.documentation_shapes.remove(1);
+        recovered.document.documentation_shapes.push(
             DocumentationShape::new(
                 83,
                 DocumentationShapeGeometry::Polygon {

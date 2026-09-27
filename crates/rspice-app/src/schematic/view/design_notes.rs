@@ -29,8 +29,9 @@ fn resolved_text(note: &DesignNote, state: &AppState) -> String {
     let view_path = state.workspace.active_view.display_path();
     note.rendered_text(&DesignNoteRenderContext {
         view_path: &view_path,
-        component_count: state.schematic.components.len(),
-        conductor_count: state.schematic.wires.len() + state.schematic.buses.len(),
+        component_count: state.schematic.document.components.len(),
+        conductor_count: state.schematic.document.wires.len()
+            + state.schematic.document.buses.len(),
     })
 }
 
@@ -258,14 +259,14 @@ mod tests {
             "Bias network\nKeep clear",
         )
         .unwrap();
-        state.schematic.design_notes.push(note.clone());
+        state.schematic.document.design_notes.push(note.clone());
         let bounds = hit_bounds(&ctx, &viewport, &note, &state).expect("visible note");
 
         assert_eq!(
             design_note_at(
                 &ctx,
                 &viewport,
-                &state.schematic.design_notes,
+                &state.schematic.document.design_notes,
                 &state,
                 bounds.center()
             ),
@@ -275,7 +276,7 @@ mod tests {
             design_note_at(
                 &ctx,
                 &viewport,
-                &state.schematic.design_notes,
+                &state.schematic.document.design_notes,
                 &state,
                 bounds.right_bottom() + egui::Vec2::splat(0.1)
             ),
@@ -292,16 +293,22 @@ mod tests {
             bounds: Rect::from_min_size(Pos2::ZERO, egui::Vec2::splat(500.0)),
         };
         let mut state = AppState::default();
-        state.schematic.design_notes = vec![
+        state.schematic.document.design_notes = vec![
             DesignNote::new(1, Point::new(20, 20), DesignNoteKind::PlainText, "same").unwrap(),
             DesignNote::new(2, Point::new(20, 20), DesignNoteKind::ReviewNote, "same").unwrap(),
         ];
-        let bounds = hit_bounds(&ctx, &viewport, &state.schematic.design_notes[1], &state).unwrap();
+        let bounds = hit_bounds(
+            &ctx,
+            &viewport,
+            &state.schematic.document.design_notes[1],
+            &state,
+        )
+        .unwrap();
         assert_eq!(
             design_note_at(
                 &ctx,
                 &viewport,
-                &state.schematic.design_notes,
+                &state.schematic.document.design_notes,
                 &state,
                 bounds.center()
             ),

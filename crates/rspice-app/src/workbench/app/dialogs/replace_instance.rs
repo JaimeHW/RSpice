@@ -185,6 +185,7 @@ pub(crate) fn replace_instance_available(state: &AppState) -> bool {
     };
     let Some(source) = state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == component_id)
@@ -739,6 +740,7 @@ fn replacement_authority(state: &AppState) -> Result<SchematicReplacementAuthori
         .ok_or_else(|| "Select exactly one complete component instance to replace.".to_owned())?;
     let component = state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == component_id)
@@ -1074,6 +1076,7 @@ mod tests {
             .add_component(ComponentType::VoltageSource, Point::origin());
         state
             .schematic
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == id)

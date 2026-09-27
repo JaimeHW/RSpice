@@ -48,7 +48,7 @@ pub(crate) fn independent_source_card(
 
 impl<'a> NetlistGenerator<'a> {
     pub(super) fn validate_instance_parameters(&mut self) -> bool {
-        for component in &self.schematic.components {
+        for component in &self.schematic.document.components {
             if let Err(error) =
                 crate::state::params_string::validate_parameter_text(&component.params)
             {
@@ -64,7 +64,7 @@ impl<'a> NetlistGenerator<'a> {
     pub(super) fn generate_instances(&mut self) {
         self.lines.push("* Circuit netlist".to_string());
 
-        for component in &self.schematic.components {
+        for component in &self.schematic.document.components {
             if component.kind == ComponentType::Ground
                 || component.kind == ComponentType::CoupledInductor
                 || component.kind == ComponentType::Transformer
@@ -1743,7 +1743,7 @@ mod cell_instance_parameter_tests {
         component.params = params.to_owned();
         component.multiplicity = multiplicity;
         let mut schematic = SchematicState::default();
-        schematic.components.push(component);
+        schematic.document.components.push(component);
         generate_netlist(&schematic)
     }
 
@@ -2006,14 +2006,16 @@ mod loop_probe_contract_tests {
     /// circuit nodes rather than the reference node.
     fn schematic_with_a_placed_probe() -> SchematicState {
         let mut schematic = SchematicState::default();
-        schematic.components.push(
+        schematic.document.components.push(
             Component::new(1, ComponentType::LoopProbe, Point::new(0, 0))
                 .with_name_value("VLOOP1", ""),
         );
         schematic
+            .document
             .wires
             .push(Wire::segment(2, Point::new(-20, 0), Point::new(-40, 0)));
         schematic
+            .document
             .wires
             .push(Wire::segment(3, Point::new(20, 0), Point::new(40, 0)));
         schematic
@@ -2041,12 +2043,15 @@ mod loop_probe_contract_tests {
         let mut schematic = schematic_with_a_placed_probe();
         // A wire joining the two terminals: one conductor, both pins on it.
         schematic
+            .document
             .wires
             .push(Wire::segment(4, Point::new(-40, 0), Point::new(-40, -40)));
         schematic
+            .document
             .wires
             .push(Wire::segment(5, Point::new(-40, -40), Point::new(40, -40)));
         schematic
+            .document
             .wires
             .push(Wire::segment(6, Point::new(40, -40), Point::new(40, 0)));
 

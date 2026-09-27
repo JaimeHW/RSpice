@@ -18,6 +18,7 @@ pub(super) fn component_panel(
     let Some(component) = app
         .state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == id)
@@ -416,6 +417,7 @@ pub(crate) fn apply_bound_model_choice(
     let component = app
         .state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == component_id)
@@ -455,6 +457,7 @@ pub(crate) fn apply_bound_model_choice(
     let component = app
         .state
         .schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == component_id)
@@ -492,6 +495,7 @@ pub(super) fn apply_bound_model_section(
     let Some(component) = app
         .state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == component_id)
@@ -516,6 +520,7 @@ pub(super) fn apply_bound_model_section(
     let Some(binding) = app
         .state
         .schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == component_id)

@@ -29,6 +29,7 @@ fn rename_source(fixture: &mut Fixture, child: &CellViewRef) {
     let expected = fixture
         .state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == fixture.sources[0])
@@ -123,6 +124,7 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
                 .schematic_buffers
                 .get_mut(&other.key())
                 .unwrap()
+                .document
                 .probes
                 .clear();
             rename_source(&mut fixture, &child);
@@ -137,7 +139,7 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
                 .schematic_buffers
                 .get_mut(&other.key())
                 .unwrap();
-            other_source.probes.push(
+            other_source.document.probes.push(
                 SchematicProbe::new(
                     4000,
                     Point::new(23, 57),
@@ -221,7 +223,9 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
                     .iter()
                     .any(|document| document.reference() == &other)
             );
-            let probe = &state.workspace.schematic_buffers[&other.key()].probes[0];
+            let probe = &state.workspace.schematic_buffers[&other.key()]
+                .document
+                .probes[0];
             assert_eq!(probe.id, 4000);
             assert_eq!(probe.position, Point::new(23, 57));
             assert_eq!(
@@ -231,7 +235,9 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
             assert_eq!(probe.reference, format!("I(/X5/{to})"));
             assert!(cross_history(state, !forward).unwrap().is_some());
             assert_eq!(
-                state.workspace.schematic_buffers[&other.key()].probes[0]
+                state.workspace.schematic_buffers[&other.key()]
+                    .document
+                    .probes[0]
                     .source_expression
                     .as_deref(),
                 Some(format!("I(/X5/{from})").as_str())
@@ -365,6 +371,7 @@ fn history_resolves_current_configuration_roots_before_rewriting_shared_output_t
         let mut independent_source = SchematicState::default();
         let id = independent_source.add_component(ComponentType::VoltageSource, Point::origin());
         independent_source
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == id)
@@ -380,6 +387,7 @@ fn history_resolves_current_configuration_roots_before_rewriting_shared_output_t
             LibraryCellInstance::new(&root.library, &independent.cell, "schematic"),
         );
         other_source
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == id)
@@ -461,12 +469,16 @@ fn history_resolves_current_configuration_roots_before_rewriting_shared_output_t
                 expected_output
             );
             assert_eq!(
-                state.workspace.schematic_buffers[&independent.key()].components[0].name,
+                state.workspace.schematic_buffers[&independent.key()]
+                    .document
+                    .components[0]
+                    .name,
                 target_name
             );
             assert_eq!(
                 schematic_for_reference(state, &child)
                     .unwrap()
+                    .document
                     .components
                     .iter()
                     .find(|component| component.id == fixture.sources[0])
@@ -485,6 +497,7 @@ fn new_saved_outputs_follow_both_directions_of_a_past_component_rename() {
     state.activate_history_document(&child, "Edit reused master");
     let expected = state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == fixture.sources[0])

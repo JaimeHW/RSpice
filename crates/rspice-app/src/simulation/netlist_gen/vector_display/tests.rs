@@ -21,7 +21,7 @@ fn drawn_bus(id: u64, declaration: &str) -> Bus {
 /// The lane's fixture: one eight-bit bus, drawn once.
 fn bus_sheet(declaration: &str) -> SchematicState {
     let mut sheet = SchematicState::default();
-    sheet.buses.push(drawn_bus(1, declaration));
+    sheet.document.buses.push(drawn_bus(1, declaration));
     sheet
 }
 
@@ -61,7 +61,7 @@ fn the_engine_scope_a_bit_was_flattened_through_is_kept() {
 #[test]
 fn a_dotted_bus_name_is_preferred_over_the_suffix_it_ends_with() {
     let mut sheet = bus_sheet("afe.data<7:0>");
-    sheet.buses.push(drawn_bus(2, "data[7:0]"));
+    sheet.document.buses.push(drawn_bus(2, "data[7:0]"));
     let notations = BusNotations::of_sheets(std::iter::once(&sheet));
 
     assert_eq!(notations.display("x1.afe.data#3"), "x1.afe.data<3>");
@@ -115,6 +115,7 @@ fn a_vector_interface_pin_declares_its_own_bits() {
     let mut sheet = SchematicState::default();
     let id = sheet.add_component(crate::state::ComponentType::Port, Point::new(0, 0));
     sheet
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == id)

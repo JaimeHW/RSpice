@@ -2377,7 +2377,7 @@ fn strip_schematic_runtime_state(schematic: &mut crate::state::SchematicState) {
     schematic.clipboard = Default::default();
     schematic.preview_rotation = Default::default();
     schematic.preview_mirror_h = false;
-    schematic.connections.clear();
+    schematic.document.connections.clear();
     schematic.is_dirty = false;
 }
 

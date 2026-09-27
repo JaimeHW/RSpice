@@ -8,6 +8,7 @@ pub use rspice_design::schematic::validated_revision::{
     ValidatedSchematicRevisionId, ValidationFindingCounts,
 };
 
+use super::document::SchematicDocument;
 use super::{SchematicSnapshot, SchematicState};
 use crate::product::ContentDigest;
 use crate::time_compat::checked_unix_time_ms;
@@ -15,17 +16,17 @@ use crate::time_compat::checked_unix_time_ms;
 impl SchematicState {
     fn validated_revision_source(&self) -> ValidatedRevisionSource<'_> {
         ValidatedRevisionSource {
-            grid_size: self.grid_size,
-            document_policy: self.document_policy,
-            components: &self.components,
-            wires: &self.wires,
-            buses: &self.buses,
-            bus_taps: &self.bus_taps,
-            junctions: &self.junctions,
-            net_labels: &self.net_labels,
-            design_notes: &self.design_notes,
-            documentation_shapes: &self.documentation_shapes,
-            connections: &self.connections,
+            grid_size: self.document.grid_size,
+            document_policy: self.document.document_policy,
+            components: &self.document.components,
+            wires: &self.document.wires,
+            buses: &self.document.buses,
+            bus_taps: &self.document.bus_taps,
+            junctions: &self.document.junctions,
+            net_labels: &self.document.net_labels,
+            design_notes: &self.document.design_notes,
+            documentation_shapes: &self.document.documentation_shapes,
+            connections: &self.document.connections,
         }
     }
 
@@ -42,20 +43,22 @@ impl SchematicState {
         project_revision: u64,
         view_identity: &str,
     ) -> Result<Option<ValidatedSchematicRevisionId>, ValidatedRevisionError> {
-        self.validated_revisions.seed_accepted_revision_baseline(
-            accepted.validated_revision_source(),
-            project_id,
-            project_revision,
-            view_identity,
-            checked_unix_time_ms,
-        )
+        self.document
+            .validated_revisions
+            .seed_accepted_revision_baseline(
+                accepted.validated_revision_source(),
+                project_id,
+                project_revision,
+                view_identity,
+                checked_unix_time_ms,
+            )
     }
 
     pub fn append_validated_revision(
         &mut self,
         request: ValidatedRevisionRequest,
     ) -> Result<ValidatedSchematicRevisionId, ValidatedRevisionError> {
-        let Self {
+        let SchematicDocument {
             grid_size,
             document_policy,
             components,
@@ -69,7 +72,7 @@ impl SchematicState {
             connections,
             validated_revisions,
             ..
-        } = self;
+        } = &mut self.document;
         let source = ValidatedRevisionSource {
             grid_size: *grid_size,
             document_policy: *document_policy,
@@ -93,7 +96,9 @@ impl SchematicState {
         &mut self,
         id: ValidatedSchematicRevisionId,
     ) -> Result<(), ValidatedRevisionError> {
-        self.validated_revisions.remove_unpublished_tail(id)
+        self.document
+            .validated_revisions
+            .remove_unpublished_tail(id)
     }
 
     pub fn restore_validated_revision(
@@ -103,7 +108,7 @@ impl SchematicState {
         if self.read_only {
             return Err(ValidatedRevisionError::ReadOnly);
         }
-        let snapshot = self.validated_revisions.revision_source(id)?;
+        let snapshot = self.document.validated_revisions.revision_source(id)?;
         let target = SchematicSnapshot {
             cancel_state: None,
             document_policy: snapshot.document_policy,
@@ -120,7 +125,7 @@ impl SchematicState {
             // validated electrical topology. A design revision restore must
             // therefore preserve the live output markers instead of silently
             // deleting them.
-            probes: self.probes.clone(),
+            probes: self.document.probes.clone(),
             connections: snapshot.connections.to_vec(),
             // A stored revision restores the drawing. Sheet membership belongs
             // to the project catalog, which still holds the live one.
@@ -179,7 +184,7 @@ mod tests {
         let mut state = accepted.clone();
         state.add_component(ComponentType::Resistor, Point::new(10, 10));
         let design = state.validated_design_content_digest().unwrap();
-        let journal = state.validated_revisions.clone();
+        let journal = state.document.validated_revisions.clone();
         let dirty = state.is_dirty;
         for epoch in [
             Err("clock unavailable"),
@@ -201,14 +206,14 @@ mod tests {
                     Err(ValidatedRevisionError::ClockUnavailable(_))
                 ));
             });
-            assert_eq!(state.validated_revisions, journal);
+            assert_eq!(state.document.validated_revisions, journal);
             assert_eq!(state.is_dirty, dirty);
             assert_eq!(state.validated_design_content_digest().unwrap(), design);
         }
         state
             .append_validated_revision(request(&state, project_id))
             .unwrap();
-        assert_eq!(state.validated_revisions.records().len(), 1);
+        assert_eq!(state.document.validated_revisions.records().len(), 1);
     }
 
     #[test]
@@ -219,18 +224,22 @@ mod tests {
         let first = state
             .append_validated_revision(request(&state, project_id))
             .expect("first revision");
-        state.components[0].value = "2k".to_owned();
+        state.document.components[0].value = "2k".to_owned();
         let second = state
             .append_validated_revision(request(&state, project_id))
             .expect("second revision");
 
-        state.validated_revisions.validate().expect("valid journal");
-        assert_eq!(state.validated_revisions.records().len(), 2);
+        state
+            .document
+            .validated_revisions
+            .validate()
+            .expect("valid journal");
+        assert_eq!(state.document.validated_revisions.records().len(), 2);
         assert_ne!(first, second);
         state
             .restore_validated_revision(first)
             .expect("restore first");
-        assert_eq!(state.components[0].value, "1k");
+        assert_eq!(state.document.components[0].value, "1k");
     }
 
     #[test]
@@ -238,21 +247,21 @@ mod tests {
         let project_id = Uuid::new_v4();
         let mut state = SchematicState::default();
         state.add_component(ComponentType::Resistor, Point::new(10, 10));
-        state.document_policy.net_naming = NetNamingPolicy::SpiceCompatibleRelaxed;
-        state.grid_size = 4;
+        state.document.document_policy.net_naming = NetNamingPolicy::SpiceCompatibleRelaxed;
+        state.document.grid_size = 4;
         let saved = state
             .append_validated_revision(request(&state, project_id))
             .expect("validated revision");
 
-        state.document_policy.net_naming = NetNamingPolicy::StrictCaseSensitive;
-        state.grid_size = 10;
+        state.document.document_policy.net_naming = NetNamingPolicy::StrictCaseSensitive;
+        state.document.grid_size = 10;
         state.restore_validated_revision(saved).expect("restore");
 
         assert_eq!(
-            state.document_policy.net_naming,
+            state.document.document_policy.net_naming,
             NetNamingPolicy::SpiceCompatibleRelaxed
         );
-        assert_eq!(state.grid_size, 4);
+        assert_eq!(state.document.grid_size, 4);
     }
 
     #[test]
@@ -268,14 +277,14 @@ mod tests {
             Err(ValidatedRevisionError::AlreadyCurrent)
         );
 
-        state.components[0].value = "3k".to_owned();
-        let changed = state.components.clone();
+        state.document.components[0].value = "3k".to_owned();
+        let changed = state.document.components.clone();
         state.read_only = true;
         assert_eq!(
             state.restore_validated_revision(saved),
             Err(ValidatedRevisionError::ReadOnly)
         );
-        assert_eq!(state.components, changed);
+        assert_eq!(state.document.components, changed);
     }
 
     #[test]
@@ -286,19 +295,21 @@ mod tests {
         let first = state
             .append_validated_revision(request(&state, project_id))
             .expect("first revision");
-        state.components[0].value = "2k".to_owned();
+        state.document.components[0].value = "2k".to_owned();
         state.add_component(ComponentType::Capacitor, Point::new(20, 10));
-        state.grid_size = 8;
+        state.document.grid_size = 8;
         let second = state
             .append_validated_revision(request(&state, project_id))
             .expect("second revision");
         let first = state
+            .document
             .validated_revisions
             .records()
             .iter()
             .find(|record| record.id() == first)
             .unwrap();
         let second = state
+            .document
             .validated_revisions
             .records()
             .iter()
@@ -328,7 +339,7 @@ mod tests {
         state
             .remove_unpublished_validated_revision(second)
             .expect("remove exact tail");
-        assert_eq!(state.validated_revisions.records().len(), 1);
+        assert_eq!(state.document.validated_revisions.records().len(), 1);
     }
 
     #[test]
@@ -337,7 +348,7 @@ mod tests {
         let mut accepted = SchematicState::default();
         accepted.add_component(ComponentType::Capacitor, Point::new(20, 20));
         let mut working = accepted.clone();
-        working.components[0].value = "2p".to_owned();
+        working.document.components[0].value = "2p".to_owned();
         let baseline = working
             .seed_accepted_revision_baseline(
                 &accepted,
@@ -353,7 +364,7 @@ mod tests {
         working
             .restore_validated_revision(baseline)
             .expect("restore baseline");
-        assert_eq!(working.components[0].value, "1u");
+        assert_eq!(working.document.components[0].value, "1u");
     }
 
     #[test]

@@ -612,7 +612,7 @@ mod tests {
             component.name = "R1".to_owned();
             component.value = "1k".to_owned();
             component.params = params.to_owned();
-            schematic.components.push(component);
+            schematic.document.components.push(component);
             let mut generator = NetlistGenerator::new(&schematic);
             let deck = generator.generate();
             assert!(
@@ -626,7 +626,7 @@ mod tests {
                     .any(|error| error.contains("R1: invalid parameter text"))
             );
             assert!(!deck.lines().any(|line| line.starts_with("R1 ")));
-            assert_eq!(schematic.components[0].params, params);
+            assert_eq!(schematic.document.components[0].params, params);
         }
     }
 

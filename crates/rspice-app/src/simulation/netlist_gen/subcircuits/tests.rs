@@ -8,6 +8,7 @@ use crate::state::{
 fn place_port(state: &mut SchematicState, name: &str, pos: Point) {
     let id = state.add_component(ComponentType::Port, pos);
     let component = state
+        .document
         .components
         .iter_mut()
         .find(|c| c.id == id)
@@ -50,11 +51,12 @@ fn projection_nets_extract_the_root_once_and_stay_with_the_projection() {
     top.add_component(ComponentType::VoltageSource, Point::new(40, 40));
     top.add_component(ComponentType::Ground, Point::new(130, 20));
     top.add_component(ComponentType::Ground, Point::new(40, 70));
-    top.wires.push(Wire::new(
+    top.document.wires.push(Wire::new(
         1,
         vec![Point::new(40, 20), Point::new(40, 0), Point::new(70, 0)],
     ));
-    top.wires
+    top.document
+        .wires
         .push(Wire::new(2, vec![Point::new(130, 0), Point::new(130, 10)]));
     let active = workspace.active_view.clone();
     workspace

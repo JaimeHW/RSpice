@@ -138,12 +138,12 @@ impl SchematicState {
     /// Returns (min_x, min_y, max_x, max_y) in schematic pixel coordinates, or None if empty.
     /// Note: These are pixel coordinates snapped to grid, not grid cell indices.
     pub fn content_bounds(&self) -> Option<(i32, i32, i32, i32)> {
-        if self.components.is_empty()
-            && self.wires.is_empty()
-            && self.junctions.is_empty()
-            && self.design_notes.is_empty()
-            && self.documentation_shapes.is_empty()
-            && self.probes.is_empty()
+        if self.document.components.is_empty()
+            && self.document.wires.is_empty()
+            && self.document.junctions.is_empty()
+            && self.document.design_notes.is_empty()
+            && self.document.documentation_shapes.is_empty()
+            && self.document.probes.is_empty()
         {
             return None;
         }
@@ -154,7 +154,7 @@ impl SchematicState {
         let mut max_y = i32::MIN;
 
         // Include component bounds (with approximate size for the symbol)
-        for comp in &self.components {
+        for comp in &self.document.components {
             let (comp_min_x, comp_min_y, comp_max_x, comp_max_y) = comp.bounding_box();
             min_x = min_x.min(comp_min_x);
             min_y = min_y.min(comp_min_y);
@@ -163,7 +163,7 @@ impl SchematicState {
         }
 
         // Include wire endpoints
-        for wire in &self.wires {
+        for wire in &self.document.wires {
             for point in &wire.points {
                 min_x = min_x.min(point.x);
                 min_y = min_y.min(point.y);
@@ -173,14 +173,14 @@ impl SchematicState {
         }
 
         // Include junctions
-        for junction in &self.junctions {
+        for junction in &self.document.junctions {
             min_x = min_x.min(junction.pos.x);
             min_y = min_y.min(junction.pos.y);
             max_x = max_x.max(junction.pos.x);
             max_y = max_y.max(junction.pos.y);
         }
 
-        for note in &self.design_notes {
+        for note in &self.document.design_notes {
             let lines = note.text.lines().count().max(1) as i32;
             let columns = note
                 .text
@@ -195,7 +195,7 @@ impl SchematicState {
             max_y = max_y.max(note.pos.y.saturating_add(lines.saturating_mul(15)));
         }
 
-        for shape in &self.documentation_shapes {
+        for shape in &self.document.documentation_shapes {
             let (min, max) = shape.bounds();
             min_x = min_x.min(min.x);
             min_y = min_y.min(min.y);
@@ -203,7 +203,7 @@ impl SchematicState {
             max_y = max_y.max(max.y);
         }
 
-        for probe in &self.probes {
+        for probe in &self.document.probes {
             let (min, max) = probe.world_bounds();
             min_x = min_x.min(min.x);
             min_y = min_y.min(min.y);

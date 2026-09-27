@@ -22,7 +22,7 @@ fn app_with_sheets(count: usize) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.project_open = true;
     app.state.workbench.activate(Workspace::Design);
-    app.state.schematic.components = vec![Component::new(
+    app.state.schematic.document.components = vec![Component::new(
         10,
         ComponentType::Resistor,
         Point::new(20, 20),

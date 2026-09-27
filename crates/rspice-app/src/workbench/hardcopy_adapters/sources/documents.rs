@@ -271,7 +271,7 @@ pub fn resolve_schematic_source(
         drawing_sheet_page_numbering: governed_sheet
             .map(|(catalog, _)| catalog.settings().page_numbering),
         drawing_sheet,
-        grid_pitch_units: source.schematic.grid_size.max(1),
+        grid_pitch_units: source.schematic.document.grid_size.max(1),
         components: Vec::new(),
         wires: Vec::new(),
         buses: Vec::new(),
@@ -281,7 +281,7 @@ pub fn resolve_schematic_source(
         design_notes: Vec::new(),
         documentation_shapes: Vec::new(),
     };
-    for component in &source.schematic.components {
+    for component in &source.schematic.document.components {
         if !object_is_in_scope(component.id) {
             continue;
         }
@@ -331,6 +331,7 @@ pub fn resolve_schematic_source(
     semantic.wires.extend(
         source
             .schematic
+            .document
             .wires
             .iter()
             .filter(|wire| {
@@ -344,6 +345,7 @@ pub fn resolve_schematic_source(
     semantic.buses.extend(
         source
             .schematic
+            .document
             .buses
             .iter()
             .filter(|bus| {
@@ -355,6 +357,7 @@ pub fn resolve_schematic_source(
     semantic.bus_taps.extend(
         source
             .schematic
+            .document
             .bus_taps
             .iter()
             .filter(|tap| {
@@ -366,6 +369,7 @@ pub fn resolve_schematic_source(
     semantic.junctions.extend(
         source
             .schematic
+            .document
             .junctions
             .iter()
             .filter(|junction| {
@@ -383,6 +387,7 @@ pub fn resolve_schematic_source(
     semantic.net_labels.extend(
         source
             .schematic
+            .document
             .net_labels
             .iter()
             .filter(|label| {
@@ -395,6 +400,7 @@ pub fn resolve_schematic_source(
     semantic.design_notes.extend(
         source
             .schematic
+            .document
             .design_notes
             .iter()
             .filter(|note| {
@@ -407,6 +413,7 @@ pub fn resolve_schematic_source(
     semantic.documentation_shapes.extend(
         source
             .schematic
+            .document
             .documentation_shapes
             .iter()
             .filter(|shape| {

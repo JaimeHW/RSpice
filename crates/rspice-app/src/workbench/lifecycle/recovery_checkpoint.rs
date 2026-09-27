@@ -962,9 +962,11 @@ mod tests {
         let first =
             write_checkpoint(&source, &SchematicState::default()).expect("write first generation");
         let mut changed = SchematicState::default();
-        changed
-            .components
-            .push(Component::new(1, ComponentType::Resistor, Point::new(4, 8)));
+        changed.document.components.push(Component::new(
+            1,
+            ComponentType::Resistor,
+            Point::new(4, 8),
+        ));
         let second = write_checkpoint(&source, &changed).expect("write successor generation");
 
         assert_ne!(
@@ -996,7 +998,7 @@ mod tests {
         atomic_write(&legacy, &legacy_bytes).expect("publish legacy checkpoint");
 
         let mut changed = SchematicState::default();
-        changed.components.push(Component::new(
+        changed.document.components.push(Component::new(
             1,
             ComponentType::Capacitor,
             Point::new(9, 3),
@@ -1028,9 +1030,11 @@ mod tests {
         let retained_bytes = std::fs::read(&retained).expect("read retained generation");
 
         let mut changed = SchematicState::default();
-        changed
-            .components
-            .push(Component::new(1, ComponentType::Inductor, Point::new(6, 7)));
+        changed.document.components.push(Component::new(
+            1,
+            ComponentType::Inductor,
+            Point::new(6, 7),
+        ));
         let current = write_checkpoint(&source, &changed).expect("write current generation");
 
         assert_ne!(current, retained);
@@ -1112,7 +1116,7 @@ mod tests {
         };
 
         let mut changed = SchematicState::default();
-        changed.components.push(
+        changed.document.components.push(
             Component::new(1, ComponentType::Resistor, Point::new(10, 10))
                 .with_name_value("R1", "2k"),
         );
@@ -1153,7 +1157,7 @@ mod tests {
         );
 
         let mut changed = SchematicState::default();
-        changed.components.push(Component::new(
+        changed.document.components.push(Component::new(
             1,
             ComponentType::Capacitor,
             Point::new(5, 5),
@@ -1179,9 +1183,11 @@ mod tests {
         orphan_test_checkpoint(&checkpoint).expect("simulate writer crash");
 
         let mut stale_buffer = SchematicState::default();
-        stale_buffer
-            .components
-            .push(Component::new(1, ComponentType::Inductor, Point::new(7, 7)));
+        stale_buffer.document.components.push(Component::new(
+            1,
+            ComponentType::Inductor,
+            Point::new(7, 7),
+        ));
         crate::io::save_schematic(&stale_buffer, &source).expect("save stale buffer");
         let error = cleanup_checkpoint(&source)
             .expect_err("clean save must retain foreign recovery evidence");
@@ -1201,7 +1207,7 @@ mod tests {
             .expect("write managed checkpoint");
 
         let mut replacement_state = SchematicState::default();
-        replacement_state.components.push(Component::new(
+        replacement_state.document.components.push(Component::new(
             1,
             ComponentType::VoltageSource,
             Point::new(11, 9),

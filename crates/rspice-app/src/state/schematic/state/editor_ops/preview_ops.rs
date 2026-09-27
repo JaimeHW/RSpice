@@ -21,7 +21,7 @@ impl SchematicState {
         };
 
         let terminals: Vec<Point> =
-            if let Some(comp) = self.components.iter().find(|c| c.id == comp_id) {
+            if let Some(comp) = self.document.components.iter().find(|c| c.id == comp_id) {
                 comp.terminal_positions()
                     .into_iter()
                     .map(|(_, pos)| pos)
@@ -45,7 +45,7 @@ impl SchematicState {
     /// Snap wire endpoints to nearby terminals and rebuild connections
     pub fn snap_wire_to_terminals(&mut self, wire_id: u64) {
         let (start_pos, end_pos, end_idx) = {
-            if let Some(wire) = self.wires.iter().find(|w| w.id == wire_id) {
+            if let Some(wire) = self.document.wires.iter().find(|w| w.id == wire_id) {
                 if wire.points.is_empty() {
                     return;
                 }
@@ -67,7 +67,7 @@ impl SchematicState {
         let snap_start = start_pos.and_then(|p| self.find_terminal_at(p).map(|(_, _, pos)| pos));
         let snap_end = end_pos.and_then(|p| self.find_terminal_at(p).map(|(_, _, pos)| pos));
 
-        if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id) {
+        if let Some(wire) = self.document.wires.iter_mut().find(|w| w.id == wire_id) {
             if let Some(term_pos) = snap_start {
                 wire.points[0] = term_pos;
             }

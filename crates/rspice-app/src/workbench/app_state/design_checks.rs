@@ -504,16 +504,24 @@ mod tests {
         const SECOND_WIRE: u64 = 102;
 
         let mut state = AppState::default();
-        state.schematic.wires.push(crate::state::Wire::segment(
-            FIRST_WIRE,
-            crate::state::Point::new(0, 0),
-            crate::state::Point::new(40, 0),
-        ));
-        state.schematic.wires.push(crate::state::Wire::segment(
-            SECOND_WIRE,
-            crate::state::Point::new(0, 0),
-            crate::state::Point::new(40, 0),
-        ));
+        state
+            .schematic
+            .document
+            .wires
+            .push(crate::state::Wire::segment(
+                FIRST_WIRE,
+                crate::state::Point::new(0, 0),
+                crate::state::Point::new(40, 0),
+            ));
+        state
+            .schematic
+            .document
+            .wires
+            .push(crate::state::Wire::segment(
+                SECOND_WIRE,
+                crate::state::Point::new(0, 0),
+                crate::state::Point::new(40, 0),
+            ));
         state.sync_active_schematic_to_workspace();
 
         let key = state.workspace.active_schematic_reference().key();

@@ -319,12 +319,12 @@ fn validate_draft(state: &AppState) -> DraftValidation {
                 SchematicArrayPlacement::Center(Point::origin())
             }
             SchematicArrayKind::Linear => SchematicArrayPlacement::Pitch(Point::new(
-                state.schematic.grid_size.max(1),
-                state.schematic.grid_size.max(1),
+                state.schematic.document.grid_size.max(1),
+                state.schematic.document.grid_size.max(1),
             )),
             SchematicArrayKind::Rectangular => SchematicArrayPlacement::Pitch(Point::new(
-                state.schematic.grid_size.max(1),
-                state.schematic.grid_size.max(1),
+                state.schematic.document.grid_size.max(1),
+                state.schematic.document.grid_size.max(1),
             )),
         };
         if let Err(error) = SchematicArrayPlan::new(draft.kind, count, naming.clone(), placement) {
@@ -493,12 +493,12 @@ fn radial_documentation_center(state: &AppState) -> Option<Point> {
         max_x = max_x.max(point.x);
         max_y = max_y.max(point.y);
     };
-    for note in &state.schematic.design_notes {
+    for note in &state.schematic.document.design_notes {
         if selection.has_design_note(note.id) {
             include(note.pos);
         }
     }
-    for shape in &state.schematic.documentation_shapes {
+    for shape in &state.schematic.document.documentation_shapes {
         if selection.has_documentation_shape(shape.id) {
             for point in shape.geometry.points() {
                 include(point);
@@ -539,7 +539,7 @@ mod tests {
     #[test]
     fn open_uses_exact_default_count_and_collision_free_naming() {
         let mut state = AppState::default();
-        state.schematic.components.push(
+        state.schematic.document.components.push(
             Component::new(4, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k"),
         );
         state.schematic.selection.select_only_component(4);
@@ -588,7 +588,7 @@ mod tests {
     #[test]
     fn radial_documentation_accepts_notes_and_starts_at_the_selection_center() {
         let mut state = AppState::default();
-        state.schematic.design_notes.push(
+        state.schematic.document.design_notes.push(
             DesignNote::new(
                 11,
                 Point::new(120, -40),
@@ -612,7 +612,7 @@ mod tests {
     #[test]
     fn rectangular_array_highlights_only_the_incompatible_count_field() {
         let mut state = AppState::default();
-        state.schematic.components.push(
+        state.schematic.document.components.push(
             Component::new(4, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k"),
         );
         state.schematic.selection.select_only_component(4);
@@ -630,7 +630,7 @@ mod tests {
     #[test]
     fn malformed_naming_highlights_only_the_naming_field() {
         let mut state = AppState::default();
-        state.schematic.components.push(
+        state.schematic.document.components.push(
             Component::new(4, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k"),
         );
         state.schematic.selection.select_only_component(4);
@@ -660,7 +660,7 @@ mod tests {
     #[test]
     fn stale_operation_is_not_misrepresented_as_a_field_error() {
         let mut state = AppState::default();
-        state.schematic.components.push(
+        state.schematic.document.components.push(
             Component::new(4, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k"),
         );
         state.schematic.selection.select_only_component(4);

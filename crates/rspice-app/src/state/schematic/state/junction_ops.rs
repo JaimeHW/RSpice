@@ -108,7 +108,7 @@ impl SchematicState {
 
         // Vertex contributions: endpoints are one segment, interior
         // vertices join two.
-        for wire in &self.wires {
+        for wire in &self.document.wires {
             for (i, point) in wire.points.iter().enumerate() {
                 let is_endpoint = i == 0 || i == wire.points.len() - 1;
                 let count = if is_endpoint { 1 } else { 2 };
@@ -118,7 +118,7 @@ impl SchematicState {
 
         // A wire whose segment interior passes through a counted vertex
         // contributes two more segments there (it runs straight through).
-        let index = SegmentIndex::build(&self.wires);
+        let index = SegmentIndex::build(&self.document.wires);
         let mut through: Vec<u64> = Vec::new();
         for (point, count) in segment_counts.iter_mut() {
             index.wires_through(*point, &mut through);
@@ -145,8 +145,8 @@ impl SchematicState {
         let mut detected_points = self.detect_junction_points();
         detected_points.sort_by_key(|point| (point.x, point.y));
         let junction_points: HashSet<Point> = detected_points.iter().copied().collect();
-        let existing: HashSet<Point> = self.junctions.iter().map(|j| j.pos).collect();
-        let index = SegmentIndex::build(&self.wires);
+        let existing: HashSet<Point> = self.document.junctions.iter().map(|j| j.pos).collect();
+        let index = SegmentIndex::build(&self.document.wires);
         let mut touching = Vec::new();
         let mut changes = false;
 
@@ -154,7 +154,7 @@ impl SchematicState {
         for point in detected_points {
             if !existing.contains(&point) {
                 let id = self.next_id();
-                self.junctions.push(Junction::new(id, point));
+                self.document.junctions.push(Junction::new(id, point));
                 changes = true;
             }
         }
@@ -163,12 +163,12 @@ impl SchematicState {
         // existing explicit marker remains valid at a two-wire touch: it is
         // the user's electrical connection intent and must survive routine
         // topology maintenance.
-        let len_before = self.junctions.len();
-        self.junctions.retain(|junction| {
+        let len_before = self.document.junctions.len();
+        self.document.junctions.retain(|junction| {
             junction_points.contains(&junction.pos)
                 || index.at_least_two_wires_touch(junction.pos, &mut touching)
         });
-        if self.junctions.len() != len_before {
+        if self.document.junctions.len() != len_before {
             changes = true;
         }
 
@@ -192,14 +192,15 @@ impl SchematicState {
     /// caches. Composite state operations call this before their single dirty
     /// and topology update.
     pub(super) fn remove_orphan_junctions_untracked(&mut self) -> usize {
-        let initial_count = self.junctions.len();
+        let initial_count = self.document.junctions.len();
         if initial_count > 0 {
-            let index = SegmentIndex::build(&self.wires);
+            let index = SegmentIndex::build(&self.document.wires);
             let mut touching = Vec::new();
-            self.junctions
+            self.document
+                .junctions
                 .retain(|junction| index.at_least_two_wires_touch(junction.pos, &mut touching));
         }
-        initial_count - self.junctions.len()
+        initial_count - self.document.junctions.len()
     }
 
     /// Update junction markers based on current wire topology: orphaned
@@ -218,42 +219,42 @@ mod tests {
     fn explicit_two_wire_junction_survives_automatic_maintenance() {
         let point = Point::new(10, 10);
         let mut schematic = SchematicState::default();
-        schematic.wires = vec![
+        schematic.document.wires = vec![
             Wire::new(1, vec![Point::new(0, 10), point]),
             Wire::new(2, vec![point, Point::new(10, 20)]),
         ];
-        schematic.junctions.push(Junction::new(3, point));
+        schematic.document.junctions.push(Junction::new(3, point));
 
         schematic.auto_place_junctions();
 
-        assert_eq!(schematic.junctions, vec![Junction::new(3, point)]);
+        assert_eq!(schematic.document.junctions, vec![Junction::new(3, point)]);
     }
 
     #[test]
     fn orphan_cleanup_counts_distinct_wires_not_segments() {
         let point = Point::new(10, 10);
         let mut schematic = SchematicState::default();
-        schematic.wires = vec![Wire::new(
+        schematic.document.wires = vec![Wire::new(
             1,
             vec![Point::new(0, 10), point, Point::new(20, 10)],
         )];
-        schematic.junctions.push(Junction::new(2, point));
+        schematic.document.junctions.push(Junction::new(2, point));
 
         assert_eq!(schematic.remove_orphan_junctions(), 1);
-        assert!(schematic.junctions.is_empty());
+        assert!(schematic.document.junctions.is_empty());
     }
 
     #[test]
     fn orphan_cleanup_retains_two_distinct_touching_wires() {
         let point = Point::new(10, 10);
         let mut schematic = SchematicState::default();
-        schematic.wires = vec![
+        schematic.document.wires = vec![
             Wire::new(1, vec![Point::new(0, 10), Point::new(20, 10)]),
             Wire::new(2, vec![Point::new(10, 0), Point::new(10, 20)]),
         ];
-        schematic.junctions.push(Junction::new(3, point));
+        schematic.document.junctions.push(Junction::new(3, point));
 
         assert_eq!(schematic.remove_orphan_junctions(), 0);
-        assert_eq!(schematic.junctions, vec![Junction::new(3, point)]);
+        assert_eq!(schematic.document.junctions, vec![Junction::new(3, point)]);
     }
 }

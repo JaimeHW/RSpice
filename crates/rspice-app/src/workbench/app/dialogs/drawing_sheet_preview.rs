@@ -814,13 +814,15 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
+            .document
             .junctions
             .push(Junction::new(51, Point::new(1_100, 100)));
-        state
-            .schematic
-            .net_labels
-            .push(NetLabel::new(52, Point::new(1_100, 140), "OUTSIDE"));
-        state.schematic.design_notes.push(
+        state.schematic.document.net_labels.push(NetLabel::new(
+            52,
+            Point::new(1_100, 140),
+            "OUTSIDE",
+        ));
+        state.schematic.document.design_notes.push(
             DesignNote::new(
                 53,
                 Point::new(1_100, 180),
@@ -829,7 +831,7 @@ mod tests {
             )
             .expect("valid note"),
         );
-        state.schematic.documentation_shapes.push(
+        state.schematic.document.documentation_shapes.push(
             DocumentationShape::new(
                 54,
                 DocumentationShapeGeometry::Line {
@@ -839,7 +841,7 @@ mod tests {
             )
             .expect("valid documentation line"),
         );
-        state.schematic.probes.push(
+        state.schematic.document.probes.push(
             SchematicProbe::new(
                 55,
                 Point::new(1_100, 260),

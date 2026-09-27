@@ -9,7 +9,7 @@ use crate::state::{
 /// One cell view with two governed sheets, and one component on each.
 fn two_sheet_state() -> (AppState, SheetId, SheetId) {
     let mut state = AppState::default();
-    state.schematic.components = vec![
+    state.schematic.document.components = vec![
         Component::new(10, ComponentType::Resistor, Point::new(10, 10)),
         Component::new(20, ComponentType::Capacitor, Point::new(40, 10)),
     ];

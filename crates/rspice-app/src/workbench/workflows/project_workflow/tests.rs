@@ -30,8 +30,8 @@ fn project_named(path: &str) -> ProjectFile {
 
 fn assert_active_grid_pitch_contract(state: &AppState, pitch: crate::state::SchematicGridPitch) {
     let expected = pitch.canvas_grid_size();
-    assert_eq!(state.schematic.document_policy.grid_pitch, pitch);
-    assert_eq!(state.schematic.grid_size, expected);
+    assert_eq!(state.schematic.document.document_policy.grid_pitch, pitch);
+    assert_eq!(state.schematic.document.grid_size, expected);
     assert_eq!(state.schematic.snap_engine.grid_size, expected);
     assert_eq!(state.ui.schematic_snap.grid_size, expected);
 }

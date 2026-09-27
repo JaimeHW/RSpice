@@ -40,7 +40,7 @@ pub(crate) fn open_grid_snap_routing_dialog(state: &mut AppState) -> bool {
     }
 
     let spacing = if state.schematic.snap_engine.enabled {
-        GridSnapSpacingChoice::from_pitch(state.schematic.document_policy.grid_pitch)
+        GridSnapSpacingChoice::from_pitch(state.schematic.document.document_policy.grid_pitch)
     } else {
         GridSnapSpacingChoice::Free
     };
@@ -131,8 +131,8 @@ fn commit_grid_snap_routing(state: &mut AppState) -> Result<(), GridSnapRoutingC
         .map_err(|message| GridSnapRoutingCommitError::new(message, None))?;
 
     let requested_pitch = transaction.draft.snap_spacing.pitch();
-    let pitch_changed =
-        requested_pitch.is_some_and(|pitch| pitch != state.schematic.document_policy.grid_pitch);
+    let pitch_changed = requested_pitch
+        .is_some_and(|pitch| pitch != state.schematic.document.document_policy.grid_pitch);
     if pitch_changed && state.schematic_edit_read_only() {
         return Err(GridSnapRoutingCommitError::new(
             "Snap spacing is project-owned and cannot be changed in this read-only view.",
@@ -151,7 +151,7 @@ fn commit_grid_snap_routing(state: &mut AppState) -> Result<(), GridSnapRoutingC
     let mut snap_engine = transaction.draft.snap_engine.clone();
     snap_engine.enabled = requested_pitch.is_some();
     snap_engine.grid_size = requested_pitch
-        .unwrap_or(state.schematic.document_policy.grid_pitch)
+        .unwrap_or(state.schematic.document.document_policy.grid_pitch)
         .canvas_grid_size();
     let routing_mode = canonical_routing_mode(
         transaction.draft.wire_routing,
@@ -162,8 +162,8 @@ fn commit_grid_snap_routing(state: &mut AppState) -> Result<(), GridSnapRoutingC
         let changed = state
             .schematic
             .with_undo("change schematic grid pitch", |document| {
-                document.document_policy.grid_pitch = pitch;
-                document.grid_size = pitch.canvas_grid_size();
+                document.document.document_policy.grid_pitch = pitch;
+                document.document.grid_size = pitch.canvas_grid_size();
                 document.is_dirty = true;
                 document.bump_topology_version();
             });
@@ -474,10 +474,10 @@ mod tests {
 
         assert_eq!(state.ui.grid, GridStyle::Lines);
         assert_eq!(
-            state.schematic.document_policy.grid_pitch,
+            state.schematic.document.document_policy.grid_pitch,
             SchematicGridPitch::Mil25
         );
-        assert_eq!(state.schematic.grid_size, 5);
+        assert_eq!(state.schematic.document.grid_size, 5);
         assert!(state.schematic.can_undo());
         assert!(state.schematic.snap_engine.enabled);
         assert_eq!(state.schematic.snap_engine.grid_size, 5);
@@ -507,7 +507,7 @@ mod tests {
     fn free_snap_and_session_only_choices_do_not_dirty_document_history() {
         let mut state = AppState::default();
         let topology = state.schematic.topology_version();
-        let pitch = state.schematic.document_policy.grid_pitch;
+        let pitch = state.schematic.document.document_policy.grid_pitch;
         assert!(open_grid_snap_routing_dialog(&mut state));
         state.dialogs.grid_snap_routing.draft.grid_style = GridStyle::Off;
         state.dialogs.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Free;
@@ -515,7 +515,7 @@ mod tests {
 
         assert!(commit_grid_snap_routing(&mut state).is_ok());
 
-        assert_eq!(state.schematic.document_policy.grid_pitch, pitch);
+        assert_eq!(state.schematic.document.document_policy.grid_pitch, pitch);
         assert_eq!(state.schematic.topology_version(), topology);
         assert!(!state.schematic.can_undo());
         assert!(!state.schematic.snap_engine.enabled);
@@ -556,7 +556,7 @@ mod tests {
         assert_eq!(state.ui.grid, GridStyle::Dots);
         assert_eq!(state.schematic.snap_engine, original_snap);
         assert_eq!(
-            state.schematic.document_policy.grid_pitch,
+            state.schematic.document.document_policy.grid_pitch,
             SchematicGridPitch::Mil50
         );
         assert!(state.dialogs.grid_snap_routing.open);
@@ -589,7 +589,7 @@ mod tests {
         assert_eq!(state.ui.grid, GridStyle::Dots);
         assert_eq!(state.schematic.snap_engine, original_snap);
         assert_eq!(
-            state.schematic.document_policy.grid_pitch,
+            state.schematic.document.document_policy.grid_pitch,
             SchematicGridPitch::Mil50
         );
         assert!(!state.schematic.can_undo());
@@ -634,7 +634,7 @@ mod tests {
         assert_eq!(state.ui.grid, GridStyle::Dots);
         assert_eq!(state.schematic.snap_engine, original_snap);
         assert_eq!(
-            state.schematic.document_policy.grid_pitch,
+            state.schematic.document.document_policy.grid_pitch,
             SchematicGridPitch::Mil50
         );
         assert!(state.dialogs.grid_snap_routing.open);

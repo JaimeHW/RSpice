@@ -39,7 +39,7 @@ fn design_notes_never_change_generated_spice_or_connectivity() {
     load_example("RC Lowpass Filter", &mut baseline);
     let expected = generate_netlist(&baseline);
     let mut documented = baseline;
-    documented.design_notes.push(
+    documented.document.design_notes.push(
         DesignNote::new(
             90_001,
             Point::new(25, 30),
@@ -69,7 +69,7 @@ fn all_documentation_shapes_leave_spice_and_connectivity_byte_for_byte_unchanged
     load_example("RC Lowpass Filter", &mut baseline);
     let expected = generate_netlist(&baseline);
     let mut documented = baseline;
-    documented.documentation_shapes = [
+    documented.document.documentation_shapes = [
         DocumentationShapeGeometry::Rectangle {
             first: Point::new(-80, -40),
             opposite: Point::new(20, 30),

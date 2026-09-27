@@ -354,6 +354,7 @@ fn build_report(
         .collect();
     let buses = state
         .schematic
+        .document
         .buses
         .iter()
         .map(|bus| {
@@ -365,6 +366,7 @@ fn build_report(
                 .collect::<Vec<_>>();
             let taps = state
                 .schematic
+                .document
                 .bus_taps
                 .iter()
                 .filter(|tap| tap.bus_id == bus.id)
@@ -479,6 +481,7 @@ fn endpoint_contract(net: &DesignNet, schematic: &SchematicState) -> (usize, usi
     let mut disciplines = BTreeSet::new();
     for terminal in &net.terminals {
         let Some(component) = schematic
+            .document
             .components
             .iter()
             .find(|component| component.id == terminal.component_id)
@@ -547,7 +550,7 @@ fn build_global_rows(
     for (view_key, schematic) in projection.schematic_buffers() {
         let nets = projection_nets(&state.library_manager, projection, view_key);
         nets_by_view.insert(view_key.clone(), nets);
-        for label in &schematic.net_labels {
+        for label in &schematic.document.net_labels {
             let occurrence = LabelOccurrence {
                 view_key: view_key.clone(),
                 id: label.id,
@@ -827,6 +830,7 @@ fn endpoint_choices_for_violation(
     };
     let Some(component) = state
         .schematic
+        .document
         .components
         .iter()
         .find(|component| component.id == *id)
@@ -843,14 +847,14 @@ fn endpoint_choices_for_violation(
     };
 
     let mut destinations = BTreeMap::<(i32, i32), String>::new();
-    for wire in &state.schematic.wires {
+    for wire in &state.schematic.document.wires {
         for point in &wire.points {
             destinations
                 .entry((point.x, point.y))
                 .or_insert_with(|| format!("Wire #{} at {}, {}", wire.id, point.x, point.y));
         }
     }
-    for junction in &state.schematic.junctions {
+    for junction in &state.schematic.document.junctions {
         destinations
             .entry((junction.pos.x, junction.pos.y))
             .or_insert_with(|| {
@@ -860,12 +864,12 @@ fn endpoint_choices_for_violation(
                 )
             });
     }
-    for label in &state.schematic.net_labels {
+    for label in &state.schematic.document.net_labels {
         destinations
             .entry((label.pos.x, label.pos.y))
             .or_insert_with(|| format!("Net {} at {}, {}", label.name, label.pos.x, label.pos.y));
     }
-    for other in &state.schematic.components {
+    for other in &state.schematic.document.components {
         for (name, point) in symbol_context.named_terminal_points(other) {
             if other.id == *id && point == start {
                 continue;
@@ -1154,7 +1158,7 @@ impl RSpiceApp {
                     .highlight_wires(wire_ids.iter().copied().collect::<HashSet<_>>());
                 schematic.center_request = wire_ids
                     .first()
-                    .and_then(|id| schematic.wires.iter().find(|wire| wire.id == *id))
+                    .and_then(|id| schematic.document.wires.iter().find(|wire| wire.id == *id))
                     .and_then(|wire| wire.points.first().copied());
             }
             RevealTarget::Bus { id, point } => {
@@ -1168,6 +1172,7 @@ impl RSpiceApp {
             RevealTarget::Label { view_key: _, id } => {
                 schematic.selection.select_only_net_label(id);
                 schematic.center_request = schematic
+                    .document
                     .net_labels
                     .iter()
                     .find(|label| label.id == id)
@@ -1332,8 +1337,8 @@ fn connectivity_authority_error(state: &AppState) -> Option<String> {
         || authority.active_schematic_epoch != state.active_schematic_epoch
         || authority.topology_version != state.schematic.topology_version()
         || authority.view_path != state.workspace.active_view.display_path()
-        || authority.grid_size != state.schematic.grid_size
-        || authority.document_policy != state.schematic.document_policy
+        || authority.grid_size != state.schematic.document.grid_size
+        || authority.document_policy != state.schematic.document.document_policy
         || !authority.snapshot.is_equal_state(&state.schematic)
         || state.dialogs.connectivity_manager.contract_at_open != state.workspace.connectivity;
     stale.then(|| {
@@ -1369,10 +1374,14 @@ fn apply_repair_to_candidate(
 ) -> Result<(), String> {
     match repair.action.as_ref() {
         Some(ConnectivityRepairAction::RenameLabels { canonical, labels }) => {
-            crate::state::NetLabel::validate_name(canonical, candidate.document_policy.net_naming)
-                .map_err(|error| format!("Canonical global name is invalid: {error}."))?;
+            crate::state::NetLabel::validate_name(
+                canonical,
+                candidate.document.document_policy.net_naming,
+            )
+            .map_err(|error| format!("Canonical global name is invalid: {error}."))?;
             for (id, expected) in labels {
                 let label = candidate
+                    .document
                     .net_labels
                     .iter_mut()
                     .find(|label| label.id == *id)
@@ -1455,6 +1464,7 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
         DrcLocation::Component { id, .. } => {
             schematic.selection.select_only_component(*id);
             schematic.center_request = schematic
+                .document
                 .components
                 .iter()
                 .find(|component| component.id == *id)
@@ -1463,6 +1473,7 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
         DrcLocation::Wire { id } => {
             schematic.selection.select_only_wire(*id);
             schematic.center_request = schematic
+                .document
                 .wires
                 .iter()
                 .find(|wire| wire.id == *id)
@@ -1471,6 +1482,7 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
         DrcLocation::Bus { id } => {
             schematic.selection.select_only_bus(*id);
             schematic.center_request = schematic
+                .document
                 .buses
                 .iter()
                 .find(|bus| bus.id == *id)
@@ -1479,6 +1491,7 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
         DrcLocation::BusTap { id } => {
             schematic.selection.select_only_bus_tap(*id);
             schematic.center_request = schematic
+                .document
                 .bus_taps
                 .iter()
                 .find(|tap| tap.id == *id)
@@ -1486,6 +1499,7 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
         }
         DrcLocation::NetLabel { name } => {
             if let Some(label) = schematic
+                .document
                 .net_labels
                 .iter()
                 .find(|label| label.name == *name)
@@ -1498,6 +1512,7 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
         }
         DrcLocation::Node { net_name } => {
             if let Some(label) = schematic
+                .document
                 .net_labels
                 .iter()
                 .find(|label| label.name.eq_ignore_ascii_case(net_name))
@@ -2055,10 +2070,12 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
+            .document
             .net_labels
             .push(NetLabel::new(10, Point::new(0, 0), "VDD!"));
         state
             .schematic
+            .document
             .net_labels
             .push(NetLabel::new(11, Point::new(1, 0), "VDD"));
         state.sync_active_schematic_to_workspace();
@@ -2080,6 +2097,7 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
+            .document
             .net_labels
             .push(NetLabel::new(10, Point::new(0, 0), "VCC"));
         state.workspace.connectivity.technology_global_nets =
@@ -2129,8 +2147,9 @@ mod tests {
     #[test]
     fn alias_candidate_rejects_stale_label_identity() {
         let mut state = SchematicState::default();
-        state.document_policy.net_naming = NetNamingPolicy::StrictCaseSensitive;
+        state.document.document_policy.net_naming = NetNamingPolicy::StrictCaseSensitive;
         state
+            .document
             .net_labels
             .push(NetLabel::new(3, Point::origin(), "OLD"));
         let repair = ConnectivityRepair {
@@ -2151,7 +2170,7 @@ mod tests {
             },
         };
         assert!(apply_repair_to_candidate(&mut state, &repair).is_err());
-        assert_eq!(state.net_labels[0].name, "OLD");
+        assert_eq!(state.document.net_labels[0].name, "OLD");
     }
 
     #[test]
@@ -2183,10 +2202,12 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
+            .document
             .net_labels
             .push(NetLabel::new(10, Point::origin(), "SENSE_P"));
         state
             .schematic
+            .document
             .wires
             .push(Wire::segment(11, Point::origin(), Point::new(20, 0)));
         state.sync_active_schematic_to_workspace();
@@ -2194,7 +2215,7 @@ mod tests {
         let report =
             build_report(&state, &ConnectivityPolicy::default()).expect("a resolved design");
 
-        assert_eq!(report.buses.len(), state.schematic.buses.len());
+        assert_eq!(report.buses.len(), state.schematic.document.buses.len());
     }
 
     /// Give the workspace an active configuration that cannot resolve: its DUT
@@ -2227,10 +2248,12 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
+            .document
             .wires
             .push(Wire::segment(1, Point::origin(), Point::new(20, 0)));
         state
             .schematic
+            .document
             .net_labels
             .push(NetLabel::new(2, Point::origin(), "VOUT"));
         state.sync_active_schematic_to_workspace();
@@ -2258,6 +2281,7 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
+            .document
             .net_labels
             .push(NetLabel::new(10, Point::origin(), "VDD!"));
         state.sync_active_schematic_to_workspace();

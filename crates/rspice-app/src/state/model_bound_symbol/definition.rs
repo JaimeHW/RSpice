@@ -427,7 +427,7 @@ pub fn build_symbol_test_fixture(
     let dut = Component::new(1, ComponentType::CellInstance, Point::new(200, 200))
         .with_library_cell(binding)
         .with_name_value(&contract.dut_instance_name, &contract.cell);
-    schematic.components.push(dut);
+    schematic.document.components.push(dut);
 
     let document = materialize_symbol_document(definition);
     let mut ordered_pins = definition.pins.iter().collect::<Vec<_>>();
@@ -472,7 +472,7 @@ pub fn build_symbol_test_fixture(
         );
         let port_id = port.id;
         let (_, port_terminal) = port.terminal_positions()[0];
-        schematic.components.push(port);
+        schematic.document.components.push(port);
         let route = if dut_terminal.x == port_terminal.x || dut_terminal.y == port_terminal.y {
             vec![dut_terminal, port_terminal]
         } else {
@@ -482,11 +482,13 @@ pub fn build_symbol_test_fixture(
                 port_terminal,
             ]
         };
-        schematic.wires.push(Wire::new(wire_id, route));
+        schematic.document.wires.push(Wire::new(wire_id, route));
         schematic
+            .document
             .connections
             .push(WireConnection::new(wire_id, 0, 1, &access.port_name));
         schematic
+            .document
             .connections
             .push(WireConnection::new(wire_id, 1, port_id, "P"));
         component_id += 1;
@@ -500,14 +502,19 @@ pub fn build_symbol_test_fixture(
             );
             let ground_id = ground.id;
             let (_, ground_terminal) = ground.terminal_positions()[0];
-            schematic.components.push(ground);
+            schematic.document.components.push(ground);
             schematic
+                .document
                 .wires
                 .push(Wire::new(wire_id, vec![dut_terminal, ground_terminal]));
+            schematic.document.connections.push(WireConnection::new(
+                wire_id,
+                0,
+                1,
+                &access.port_name,
+            ));
             schematic
-                .connections
-                .push(WireConnection::new(wire_id, 0, 1, &access.port_name));
-            schematic
+                .document
                 .connections
                 .push(WireConnection::new(wire_id, 1, ground_id, "GND"));
             component_id += 1;

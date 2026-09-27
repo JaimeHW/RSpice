@@ -103,6 +103,7 @@ fn removed_marker_id_is_not_reused_after_scoped_save_and_reopen() {
             let expected_components = usize::from(scope == SaveScope::AllDocuments);
             assert_eq!(
                 written.workspace.schematic_buffers[&state.workspace.active_key()]
+                    .document
                     .components
                     .len(),
                 expected_components

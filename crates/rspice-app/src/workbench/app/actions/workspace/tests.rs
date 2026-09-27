@@ -39,6 +39,7 @@ fn generated_symbol_sync_advances_the_catalog_only_for_real_changes() {
         .add_component(ComponentType::Port, Point::origin());
     state
         .schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == port_id)
@@ -70,7 +71,7 @@ fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() 
         .unwrap();
     let created = state.new_schematic_document();
     assert_eq!(
-        created.document_policy.property_commit,
+        created.document.document_policy.property_commit,
         crate::state::PropertyCommitPolicy::ApplyValidFields
     );
 
@@ -81,7 +82,7 @@ fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() 
     library.add_cell(cell);
     state.library_manager.add_library(library);
     let mut existing = SchematicState::default();
-    existing.document_policy.property_commit = crate::state::PropertyCommitPolicy::Atomic;
+    existing.document.document_policy.property_commit = crate::state::PropertyCommitPolicy::Atomic;
     state
         .workspace
         .schematic_buffers
@@ -90,7 +91,7 @@ fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() 
     state.open_workspace_view(reference);
 
     assert_eq!(
-        state.schematic.document_policy.property_commit,
+        state.schematic.document.document_policy.property_commit,
         crate::state::PropertyCommitPolicy::Atomic
     );
 }
@@ -130,10 +131,10 @@ fn new_document_inherits_snap_targets_and_reconciles_the_preferred_pitch() {
     let created = state.new_schematic_document();
 
     assert_eq!(
-        created.document_policy.grid_pitch,
+        created.document.document_policy.grid_pitch,
         crate::state::SchematicGridPitch::Mil25
     );
-    assert_eq!(created.grid_size, expected_snap.grid_size);
+    assert_eq!(created.document.grid_size, expected_snap.grid_size);
     assert_eq!(created.snap_engine, expected_snap);
 }
 
@@ -220,9 +221,10 @@ fn production_copy_uses_authored_symbol_terminal_geometry() {
         Component::new(2, ComponentType::CellInstance, Point::new(200, 0)).with_library_cell(
             amp_binding(&[("IN", PortDirection::In), ("OUT", PortDirection::Out)]),
         );
-    state.schematic.components = vec![left, right];
+    state.schematic.document.components = vec![left, right];
     state
         .schematic
+        .document
         .wires
         .push(Wire::segment(3, Point::new(50, 0), Point::new(150, 0)));
     state.schematic.selection.select_component(1);
@@ -275,6 +277,7 @@ fn state_with_amp_symbol_pin(pin_name: &str, position: Option<Point>) -> AppStat
     let mut schematic = SchematicState::default();
     let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
     schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == port_id)
@@ -309,6 +312,7 @@ fn state_with_unplaced_amp_symbol_pins(count: usize) -> AppState {
     for index in 0..count {
         let port_id = schematic.add_component(ComponentType::Port, Point::new(index as i32, 0));
         schematic
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == port_id)
@@ -363,7 +367,11 @@ fn legacy_primitives_content_migrates_to_user_library() {
         .schematic_buffers
         .get("user/ISource AC/schematic")
         .expect("buffer migrated to the user library");
-    assert_eq!(migrated.components.len(), 1, "drawn content preserved");
+    assert_eq!(
+        migrated.document.components.len(),
+        1,
+        "drawn content preserved"
+    );
     assert!(
         state
             .library_manager
@@ -433,6 +441,7 @@ fn active_symbol_ports_read_the_paired_schematic_contract() {
     let mut schematic = SchematicState::default();
     let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
     schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == port_id)
@@ -464,6 +473,7 @@ fn generating_active_symbol_document_writes_symbol_view_metadata() {
     let mut schematic = SchematicState::default();
     let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
     schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == port_id)
@@ -515,6 +525,7 @@ fn generate_symbol_document_is_one_undoable_transaction() {
     let mut schematic = SchematicState::default();
     let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
     schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == port_id)
@@ -577,6 +588,7 @@ fn undo_generate_symbol_restores_generated_fallback_metadata_state() {
     let mut schematic = SchematicState::default();
     let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
     schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == port_id)
@@ -653,6 +665,7 @@ fn undo_first_manual_symbol_edit_restores_generated_fallback_source() {
     let mut schematic = SchematicState::default();
     let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
     schematic
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == port_id)
@@ -749,11 +762,12 @@ fn storing_symbol_document_remaps_open_instance_wires_by_pin_name() {
     binding.bind_interface(&ports);
 
     let mut parent = SchematicState::default();
-    parent.components.push(
+    parent.document.components.push(
         Component::new(1, ComponentType::CellInstance, Point::new(100, 50))
             .with_library_cell(binding),
     );
     parent
+        .document
         .wires
         .push(Wire::segment(7, Point::new(60, 50), Point::new(0, 50)));
     state
@@ -777,8 +791,8 @@ fn storing_symbol_document_remaps_open_instance_wires_by_pin_name() {
         .schematic_buffers
         .get("work/top/schematic")
         .expect("parent schematic remains open");
-    assert_eq!(parent.wires[0].points[0], Point::new(80, 60));
-    assert_eq!(parent.wires[0].points[1], Point::new(0, 50));
+    assert_eq!(parent.document.wires[0].points[0], Point::new(80, 60));
+    assert_eq!(parent.document.wires[0].points[1], Point::new(0, 50));
 }
 
 #[test]
@@ -795,11 +809,12 @@ fn storing_symbol_document_remaps_instance_wires_when_origin_moves() {
     let mut state = state_with_amp_symbol(before);
 
     let mut parent = SchematicState::default();
-    parent.components.push(
+    parent.document.components.push(
         Component::new(1, ComponentType::CellInstance, Point::new(100, 50))
             .with_library_cell(amp_binding(&[("IN", PortDirection::In)])),
     );
     parent
+        .document
         .wires
         .push(Wire::segment(7, Point::new(110, 50), Point::new(0, 50)));
     state
@@ -824,8 +839,8 @@ fn storing_symbol_document_remaps_instance_wires_when_origin_moves() {
         .schematic_buffers
         .get("work/top/schematic")
         .expect("parent schematic remains open");
-    assert_eq!(parent.wires[0].points[0], Point::new(130, 50));
-    assert_eq!(parent.wires[0].points[1], Point::new(0, 50));
+    assert_eq!(parent.document.wires[0].points[0], Point::new(130, 50));
+    assert_eq!(parent.document.wires[0].points[1], Point::new(0, 50));
 }
 
 #[test]
@@ -836,7 +851,7 @@ fn storing_symbol_document_remaps_rotated_and_mirrored_instance_wires() {
     ]));
 
     let mut parent = SchematicState::default();
-    parent.components.push(
+    parent.document.components.push(
         Component::new(1, ComponentType::CellInstance, Point::new(100, 50))
             .with_rotation(Rotation::R90)
             .with_mirror_h(true)
@@ -846,6 +861,7 @@ fn storing_symbol_document_remaps_rotated_and_mirrored_instance_wires() {
             ])),
     );
     parent
+        .document
         .wires
         .push(Wire::segment(8, Point::new(90, 80), Point::new(90, 120)));
     state
@@ -865,8 +881,8 @@ fn storing_symbol_document_remaps_rotated_and_mirrored_instance_wires() {
         .schematic_buffers
         .get("work/top/schematic")
         .expect("parent schematic remains open");
-    assert_eq!(parent.wires[0].points[0], Point::new(120, 60));
-    assert_eq!(parent.wires[0].points[1], Point::new(90, 120));
+    assert_eq!(parent.document.wires[0].points[0], Point::new(120, 60));
+    assert_eq!(parent.document.wires[0].points[1], Point::new(90, 120));
 }
 
 #[test]
@@ -877,12 +893,13 @@ fn storing_symbol_document_applies_wire_remaps_once() {
     ]));
 
     let mut parent = SchematicState::default();
-    parent.components.push(
+    parent.document.components.push(
         Component::new(1, ComponentType::CellInstance, Point::new(100, 50)).with_library_cell(
             amp_binding(&[("IN", PortDirection::In), ("OUT", PortDirection::Out)]),
         ),
     );
     parent
+        .document
         .wires
         .push(Wire::segment(9, Point::new(100, 50), Point::new(100, 0)));
     state
@@ -903,7 +920,7 @@ fn storing_symbol_document_applies_wire_remaps_once() {
         .get("work/top/schematic")
         .expect("parent schematic remains open");
     assert_eq!(
-        parent.wires[0].points[0],
+        parent.document.wires[0].points[0],
         Point::new(110, 50),
         "the IN endpoint must stop at IN's new location, not then match OUT's old location"
     );
@@ -918,17 +935,19 @@ fn storing_symbol_document_remaps_all_open_parent_buffers() {
     let binding = amp_binding(&[("IN", PortDirection::In), ("OUT", PortDirection::Out)]);
 
     let mut top = SchematicState::default();
-    top.components.push(
+    top.document.components.push(
         Component::new(1, ComponentType::CellInstance, Point::new(100, 50))
             .with_library_cell(binding.clone()),
     );
-    top.components.push(
+    top.document.components.push(
         Component::new(2, ComponentType::CellInstance, Point::new(200, 0))
             .with_library_cell(binding.clone()),
     );
-    top.wires
+    top.document
+        .wires
         .push(Wire::segment(10, Point::new(60, 50), Point::new(0, 50)));
-    top.wires
+    top.document
+        .wires
         .push(Wire::segment(11, Point::new(160, 0), Point::new(160, -50)));
     state
         .workspace
@@ -936,11 +955,12 @@ fn storing_symbol_document_remaps_all_open_parent_buffers() {
         .insert(CellViewRef::new("work", "top", "schematic").key(), top);
 
     let mut tb = SchematicState::default();
-    tb.components.push(
+    tb.document.components.push(
         Component::new(3, ComponentType::CellInstance, Point::new(-10, 20))
             .with_library_cell(binding),
     );
-    tb.wires
+    tb.document
+        .wires
         .push(Wire::segment(12, Point::new(-50, 20), Point::new(-90, 20)));
     state
         .workspace
@@ -959,15 +979,15 @@ fn storing_symbol_document_remaps_all_open_parent_buffers() {
         .schematic_buffers
         .get("work/top/schematic")
         .expect("top schematic remains open");
-    assert_eq!(top.wires[0].points[0], Point::new(80, 60));
-    assert_eq!(top.wires[1].points[0], Point::new(180, 10));
+    assert_eq!(top.document.wires[0].points[0], Point::new(80, 60));
+    assert_eq!(top.document.wires[1].points[0], Point::new(180, 10));
 
     let tb = state
         .workspace
         .schematic_buffers
         .get("work/tb/schematic")
         .expect("testbench schematic remains open");
-    assert_eq!(tb.wires[0].points[0], Point::new(-30, 30));
+    assert_eq!(tb.document.wires[0].points[0], Point::new(-30, 30));
 }
 
 #[test]
@@ -1041,8 +1061,8 @@ fn copy_cell_flushes_live_active_schematic_before_copying_buffers() {
         .get("work/amp_copy/schematic")
         .expect("copy buffer exists");
     assert_eq!(copied, 1);
-    assert_eq!(copy.components.len(), 1);
-    assert_eq!(copy.components[0].kind, ComponentType::Resistor);
+    assert_eq!(copy.document.components.len(), 1);
+    assert_eq!(copy.document.components[0].kind, ComponentType::Resistor);
     assert_eq!(
         state.workspace.project.revision().get(),
         project_revision_before + 1
@@ -1205,6 +1225,7 @@ fn canonical_cell_collisions_reject_copy_and_rename_without_partial_mutation() {
             .schematic_buffers
             .get(&persisted_key)
             .expect("source buffer remains")
+            .document
             .components
             .len(),
         0,
@@ -1481,6 +1502,7 @@ fn opening_symbol_view_loads_the_paired_schematic_context() {
     let mut paired = SchematicState::default();
     let port_id = paired.add_component(ComponentType::Port, Point::new(0, 0));
     paired
+        .document
         .components
         .iter_mut()
         .find(|component| component.id == port_id)
@@ -2051,7 +2073,7 @@ fn rename_library_propagation_matrix() {
             .all(|reference| reference.library == "project_lib")
     );
     assert_eq!(
-        state.schematic.components[0]
+        state.schematic.document.components[0]
             .library_cell
             .as_ref()
             .expect("instance binding")
@@ -2300,7 +2322,7 @@ fn rename_view_moves_the_buffer_source_and_view_exact_bindings() {
             .contains_key(&CellViewRef::new("user", "amp", "schematic").key())
     );
     assert_eq!(
-        state.schematic.components[0]
+        state.schematic.document.components[0]
             .library_cell
             .as_ref()
             .expect("instance binding")
@@ -2352,10 +2374,12 @@ fn state_with_probed_conductors() -> AppState {
     let mid_b = Point::new(40, 40);
     state
         .schematic
+        .document
         .wires
         .push(Wire::new(91, vec![out_a, out_b]));
     state
         .schematic
+        .document
         .wires
         .push(Wire::new(92, vec![mid_a, mid_b]));
     state.simulation.cross_probe.update(

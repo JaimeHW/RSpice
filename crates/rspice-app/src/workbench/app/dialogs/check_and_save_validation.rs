@@ -282,6 +282,7 @@ impl CheckAndSaveValidationReport {
                 ),
                 state
                     .schematic
+                    .document
                     .components
                     .iter()
                     .find(|component| component.name == *instance)
@@ -409,7 +410,7 @@ impl CheckAndSaveValidationReport {
         let root_schematic_key = state.workspace.simulation_root_reference().key();
         let symbol_resolver = SymbolResolver::new(&state.library_manager, &buffers);
         for (key, schematic) in &documents {
-            if let Err(error) = schematic.validated_revisions.validate() {
+            if let Err(error) = schematic.document.validated_revisions.validate() {
                 insert_finding(
                     &mut findings,
                     CheckAndSaveFindingLevel::Blocker,
@@ -755,7 +756,7 @@ fn validate_component_contracts(
         })
     };
     let mut designators = BTreeMap::<String, Vec<u64>>::new();
-    for component in &schematic.components {
+    for component in &schematic.document.components {
         let component_identity = format!("{document_key}:{}", component.id);
         if !component.kind.spice_prefix().is_empty() {
             if let Err(error) = component.validate_reference_designator(component.name.trim()) {
@@ -987,6 +988,7 @@ mod tests {
             .add_component(ComponentType::Resistor, Point::new(40, 40));
         let placed = state
             .schematic
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == resistor)
@@ -1049,6 +1051,7 @@ mod tests {
         let mut master = crate::state::SchematicState::default();
         let port = master.add_component(ComponentType::Port, Point::new(20, 0));
         master
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == port)
@@ -1069,6 +1072,7 @@ mod tests {
             .add_library_cell_component(Point::new(100, 0), binding);
         state
             .schematic
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == instance)
@@ -1117,6 +1121,7 @@ mod tests {
             .add_library_cell_component(Point::new(100, 0), binding);
         state
             .schematic
+            .document
             .components
             .iter_mut()
             .find(|component| component.id == instance)

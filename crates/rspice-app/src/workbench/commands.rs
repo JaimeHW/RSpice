@@ -496,7 +496,7 @@ impl Command {
                     && state.schematic.selection.components.iter().any(|id| {
                         state
                             .schematic
-                            .components
+                            .document.components
                             .iter()
                             .any(|component| component.id == *id)
                     })
@@ -1508,7 +1508,7 @@ impl Command {
                 let active_schematic_epoch = app.state.active_schematic_epoch;
                 let topology_version = app.state.schematic.topology_version();
                 let view_path = app.state.workspace.active_view.display_path();
-                let expected_shapes = app.state.schematic.documentation_shapes.clone();
+                let expected_shapes = app.state.schematic.document.documentation_shapes.clone();
                 app.state.dialogs.documentation_shape.open(
                     design_execution_epoch,
                     active_schematic_epoch,
