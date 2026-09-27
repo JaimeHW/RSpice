@@ -2,6 +2,8 @@
 //!
 //! A placed component on the schematic with position, rotation, and properties.
 
+mod variant;
+
 pub use rspice_model_library::symbol::validate_library_netlist_template;
 
 use super::component_type::ComponentType;
@@ -50,7 +52,7 @@ pub struct LibraryCellInstance {
     /// view defaults, but an explicit configuration override still wins.
     /// Persisted placement metadata cannot acquire this authority.
     #[serde(skip)]
-    pub(crate) variant_model_section: Option<String>,
+    variant_model_section: Option<String>,
     /// Preferred reference-designator prefix for newly placed instances.
     /// This does not rewrite existing instances when a library definition is
     /// revised.
@@ -470,7 +472,7 @@ pub struct Component {
     /// a variant replaces this component's master. These never enter authored
     /// documents; replacement artwork must not move an existing connection.
     #[serde(skip)]
-    pub(crate) execution_terminal_layout: Option<Vec<(String, Point)>>,
+    execution_terminal_layout: Option<Vec<(String, Point)>>,
 
     /// Typed instance multiplicity emitted as `m=` on a cell instance line.
     ///

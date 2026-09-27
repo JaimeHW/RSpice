@@ -262,10 +262,8 @@ fn undo_does_not_cross_a_blocked_rename_into_older_local_history() {
     app.state.schematic.with_undo("change value", |schematic| {
         schematic.components[0].value = "2".to_owned();
     });
-    let expected = Component {
-        value: "2".to_owned(),
-        ..expected
-    };
+    let mut expected = expected;
+    expected.value = "2".to_owned();
     app.state
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();

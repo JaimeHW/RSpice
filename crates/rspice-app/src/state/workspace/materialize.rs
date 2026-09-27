@@ -239,15 +239,16 @@ pub(super) fn materialize_authoritative_source_binding(
         [&view.metadata, &cell.metadata],
         &["netlist.template", "netlist_template"],
     );
-    materialized
-        .variant_model_section
-        .clone_from(&placed.variant_model_section);
-    materialized.model_section = placed.variant_model_section.clone().or_else(|| {
-        metadata_value(
-            [&view.metadata, &cell.metadata],
-            &["netlist.section", "model.section"],
-        )
-    });
+    materialized.inherit_variant_model_section(placed);
+    materialized.model_section = placed
+        .variant_model_section()
+        .map(str::to_owned)
+        .or_else(|| {
+            metadata_value(
+                [&view.metadata, &cell.metadata],
+                &["netlist.section", "model.section"],
+            )
+        });
     materialized.reference_prefix = metadata_value(
         [&view.metadata, &cell.metadata],
         &["reference.prefix", "reference_prefix"],

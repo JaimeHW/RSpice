@@ -223,7 +223,7 @@ fn source_replacement_uses_the_requested_corner(
         assert!(encoded.get("variant_model_section").is_none());
         encoded["variant_model_section"] = serde_json::json!("forged");
         let restored: LibraryCellInstance = serde_json::from_value(encoded).unwrap();
-        assert!(restored.variant_model_section.is_none());
+        assert!(restored.variant_model_section().is_none());
         assert_eq!(binding.parameter_order, ["scale"]);
         assert_eq!(binding.reference_prefix.as_deref(), Some("X"));
         assert_eq!(
@@ -412,7 +412,7 @@ fn a_live_master_interface_owns_the_source_pins_during_replacement() {
         placed.library_cell.as_ref().unwrap().terminal_order,
         ["a", "b", "bias"]
     );
-    assert_eq!(placed.execution_terminal_layout.as_ref().unwrap().len(), 3);
+    assert_eq!(placed.execution_terminal_layout().unwrap().len(), 3);
     assert_eq!(
         serde_json::to_value(&workspace.schematic_buffers).unwrap(),
         raw_buffers
@@ -651,17 +651,17 @@ fn replacement_pin_layout_is_rebuilt_when_the_authored_symbol_changes() {
         .design_projection(&libraries, &active, &top)
         .unwrap();
     assert!(!std::sync::Arc::ptr_eq(&original, &updated));
-    let layout = &updated.root_schematic().unwrap().components[0].execution_terminal_layout;
+    let layout = updated.root_schematic().unwrap().components[0].execution_terminal_layout();
     assert_eq!(
-        layout.as_deref().unwrap(),
+        layout.unwrap(),
         &[
             ("a".to_owned(), Point::new(-90, 10)),
             ("b".to_owned(), Point::new(80, -50))
         ]
     );
     assert_ne!(
-        *layout,
-        original.root_schematic().unwrap().components[0].execution_terminal_layout
+        layout,
+        original.root_schematic().unwrap().components[0].execution_terminal_layout()
     );
     connect_testbench(&mut top, &workspace, &libraries);
     let rewired = workspace
@@ -763,11 +763,11 @@ fn variant_replacements_preserve_the_electrical_load_through_all_orientations() 
                                 .iter()
                                 .find(|component| component.id == source_id)
                                 .unwrap();
-                            assert!(placed.execution_terminal_layout.is_some());
+                            assert!(placed.execution_terminal_layout().is_some());
                             let encoded = serde_json::to_value(placed).unwrap();
                             assert!(encoded.get("execution_terminal_layout").is_none());
                             let restored: Component = serde_json::from_value(encoded).unwrap();
-                            assert!(restored.execution_terminal_layout.is_none());
+                            assert!(restored.execution_terminal_layout().is_none());
                             assert_eq!(serde_json::to_value(&top).unwrap(), source_top);
                             assert_eq!(
                                 serde_json::to_value(&workspace.schematic_buffers).unwrap(),

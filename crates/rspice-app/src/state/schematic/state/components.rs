@@ -433,10 +433,8 @@ mod tests {
 
         let first = schematic.add_library_cell_component(Point::origin(), model.clone());
         let second = schematic.add_library_cell_component(Point::new(40, 0), model);
-        let invalid = LibraryCellInstance {
-            reference_prefix: Some("M;drop".to_owned()),
-            ..LibraryCellInstance::new("models", "unsafe", "spice")
-        };
+        let mut invalid = LibraryCellInstance::new("models", "unsafe", "spice");
+        invalid.reference_prefix = Some("M;drop".to_owned());
         let third = schematic.add_library_cell_component(Point::new(80, 0), invalid);
 
         let name = |id| {

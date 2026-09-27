@@ -464,9 +464,7 @@ impl ProjectWorkspace {
         active_schematic: &SchematicState,
         projected: &mut HashMap<String, SchematicState>,
     ) -> Result<(), ConfigurationExecutionPlanError> {
-        use crate::state::{
-            ComponentType, Point, PortSpec, Rotation, SymbolResolver, VariantObjectOverride,
-        };
+        use crate::state::{SymbolResolver, VariantObjectOverride};
 
         let variants = self.design_management.variants();
         let Some(active_variant) = variants.active_variant_id() else {
@@ -506,36 +504,18 @@ impl ProjectWorkspace {
                 .iter()
                 .find(|component| component.id == object.object_id())
                 .ok_or_else(|| refusal("source component is unavailable".to_owned()))?;
-            if !projected_document
+            let projected_component = projected_document
                 .components
                 .iter()
-                .any(|component| component.id == source.id)
-            {
-                return Err(refusal("projected component is unavailable".to_owned()));
-            }
+                .find(|component| component.id == source.id)
+                .ok_or_else(|| refusal("projected component is unavailable".to_owned()))?;
             let source_symbol = source
                 .library_cell
                 .as_ref()
                 .and_then(|binding| source_symbols.resolve_binding(binding));
-            if source.kind == ComponentType::CellInstance
-                && source_symbol.is_none()
-                && source
-                    .library_cell
-                    .as_ref()
-                    .is_none_or(|binding| binding.terminal_order.is_empty())
-            {
-                return Err(refusal(
-                    "source instance has no resolved pin contract".to_owned(),
-                ));
-            }
-            if let Some(symbol) = &source_symbol
-                && !symbol.issues().is_empty()
-            {
-                return Err(refusal(format!(
-                    "source symbol has invalid pin metadata: {:?}",
-                    symbol.issues()
-                )));
-            }
+            let variant_source = source
+                .variant_source(source_symbol.as_ref())
+                .map_err(&refusal)?;
             let target_reference =
                 CellViewRef::new(&replacement.library, &replacement.cell, &replacement.view);
             let mut target_binding = LibraryCellInstance::new(
@@ -543,6 +523,7 @@ impl ProjectWorkspace {
                 &target_reference.cell,
                 &target_reference.view,
             );
+            let mut target_view_type = None;
             if let Some(library) = find_library(libraries, &target_reference.library)
                 && let Some(cell) = find_cell(library, &target_reference.cell)
                 && let Some(view) = find_view(cell, &target_reference.view)
@@ -558,23 +539,11 @@ impl ProjectWorkspace {
                     )
                     .map_err(&refusal)?;
                 }
-                if replacement.model_section.is_some()
-                    && !matches!(view.view_type, ViewType::Spice | ViewType::Extracted)
-                {
-                    return Err(refusal(
-                        "a model section requires a source-backed SPICE or extracted view"
-                            .to_owned(),
-                    ));
-                }
+                target_view_type = Some(view.view_type);
             }
-            target_binding
-                .variant_model_section
-                .clone_from(&replacement.model_section);
-            if replacement.model_section.is_some() {
-                target_binding
-                    .model_section
-                    .clone_from(&replacement.model_section);
-            }
+            target_binding = target_binding
+                .with_variant_model_section(replacement.model_section.as_deref(), target_view_type)
+                .map_err(&refusal)?;
             let target_symbol =
                 target_symbols
                     .resolve_binding(&target_binding)
@@ -584,84 +553,12 @@ impl ProjectWorkspace {
                             target_reference.display_path()
                         ))
                     })?;
-            if !target_symbol.issues().is_empty() {
-                return Err(refusal(format!(
-                    "replacement symbol has invalid pin metadata: {:?}",
-                    target_symbol.issues()
-                )));
-            }
-            // Resolve local offsets, so the projected occurrence applies its
-            // own rotation, mirrors and sheet translation exactly once.
-            let mut local_source = source.clone();
-            local_source.pos = Point::origin();
-            local_source.rotation = Rotation::R0;
-            local_source.mirror_h = false;
-            local_source.mirror_v = false;
-            local_source.execution_terminal_layout = None;
-            let mut source_pins = local_source.terminal_positions_resolved(source_symbol.as_ref());
-            if source_symbol.is_none()
-                && let Some(binding) = &source.library_cell
-                && binding.terminal_order.len() == source_pins.len()
-            {
-                for ((name, _), bound) in source_pins.iter_mut().zip(&binding.terminal_order) {
-                    name.clone_from(bound);
-                }
-            }
-            let target_pins = target_symbol.connectable_pins().collect::<Vec<_>>();
-            if source_pins.len() != target_pins.len() {
-                return Err(refusal(format!(
-                    "source has {} terminals but replacement has {}",
-                    source_pins.len(),
-                    target_pins.len()
-                )));
-            }
-            let named = source.kind == ComponentType::CellInstance
-                && (source_symbol.is_some()
-                    || source
-                        .library_cell
-                        .as_ref()
-                        .is_some_and(|binding| !binding.terminal_order.is_empty()));
-            let mut used = std::collections::HashSet::new();
-            let mut target_names = std::collections::HashSet::new();
-            let mut layout = Vec::with_capacity(target_pins.len());
-            let mut ports = Vec::with_capacity(target_pins.len());
-            for (index, pin) in target_pins.into_iter().enumerate() {
-                let source_index = if named {
-                    source_pins
-                        .iter()
-                        .position(|(name, _)| name.eq_ignore_ascii_case(&pin.name))
-                        .ok_or_else(|| {
-                            refusal(format!(
-                                "replacement terminal '{}' has no matching source terminal",
-                                pin.name
-                            ))
-                        })?
-                } else {
-                    index
-                };
-                let (source_name, offset) = &source_pins[source_index];
-                if !used.insert(source_index) || !target_names.insert(pin.name.to_ascii_lowercase())
-                {
-                    return Err(refusal("terminal mapping is not one-to-one".to_owned()));
-                }
-                if crate::state::declared_width(source_name)
-                    != crate::state::declared_width(&pin.name)
-                {
-                    return Err(refusal(format!(
-                        "terminal '{}' changes conductor width",
-                        pin.name
-                    )));
-                }
-                layout.push((pin.name.clone(), *offset));
-                ports.push(PortSpec {
-                    name: pin.name.clone(),
-                    direction: pin.direction,
-                });
-            }
-            target_binding.bind_interface(&ports);
-            updates.push((key.clone(), source.id, layout, target_binding));
+            let replacement = variant_source
+                .prepare_replacement(projected_component, target_binding, &target_symbol)
+                .map_err(&refusal)?;
+            updates.push((key.clone(), source.id, replacement));
         }
-        for (key, component_id, layout, binding) in updates {
+        for (key, component_id, replacement) in updates {
             let component = projected
                 .get_mut(&key)
                 .expect("prepared document")
@@ -669,8 +566,7 @@ impl ProjectWorkspace {
                 .iter_mut()
                 .find(|component| component.id == component_id)
                 .expect("prepared component");
-            component.library_cell = Some(binding);
-            component.execution_terminal_layout = Some(layout);
+            *component = replacement;
         }
         Ok(())
     }
