@@ -3,6 +3,9 @@
 //! These value types, scoring rules, and evidence checks are shared by the
 //! optimizer and persisted result model. They do not depend on execution state.
 
+#[cfg(feature = "engine-evidence")]
+pub mod history;
+
 mod constraint;
 mod objective;
 
