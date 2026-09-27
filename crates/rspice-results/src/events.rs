@@ -3,6 +3,8 @@
 use crate::current_impulses::CurrentImpulseHistoryEvidence;
 use crate::simulation_values::{DigitalEventPoint, EventNodeHistory, RealEventPoint};
 use crate::validation::require_non_empty;
+use rspice_core::engine::{DigitalTrace, DigitalTracePoint, RealTrace, RealTracePoint};
+use rspice_core::xspice::DigitalValue;
 
 /// One committed digital event on an XSPICE event node.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -118,6 +120,54 @@ impl From<&DigitalBusEvidence> for rspice_core::engine::DigitalBusDeclaration {
             source: value.source.into(),
         }
     }
+}
+
+/// Build the core event traces this crate's retained evidence stands for.
+///
+/// Refuses an unrecognised event code by name. The retained-evidence check
+/// already bounds `value_code` at 12, so reaching this is a corrupted
+/// dataset — which is exactly the case that must not be written out as if it
+/// were a level.
+pub fn core_event_traces(
+    digital_traces: &[DigitalEventTraceEvidence],
+    real_traces: &[RealEventTraceEvidence],
+) -> Result<(Vec<DigitalTrace>, Vec<RealTrace>), String> {
+    let mut digital = Vec::with_capacity(digital_traces.len());
+    for trace in digital_traces {
+        let mut points = Vec::with_capacity(trace.points.len());
+        for point in &trace.points {
+            let value = DigitalValue::from_event_code(point.value_code).ok_or_else(|| {
+                format!(
+                    "node '{}' records event code {} at {} s, which is not one of the thirteen \
+                     XSPICE event codes",
+                    trace.node_name, point.value_code, point.time_s
+                )
+            })?;
+            points.push(DigitalTracePoint {
+                time: point.time_s,
+                value,
+            });
+        }
+        digital.push(DigitalTrace {
+            node_name: trace.node_name.clone(),
+            points,
+        });
+    }
+    let real = real_traces
+        .iter()
+        .map(|trace| RealTrace {
+            node_name: trace.node_name.clone(),
+            points: trace
+                .points
+                .iter()
+                .map(|point| RealTracePoint {
+                    time: point.time_s,
+                    value: point.value,
+                })
+                .collect(),
+        })
+        .collect();
+    Ok((digital, real))
 }
 
 /// Committed digital and real events, and exact signed current impulses.

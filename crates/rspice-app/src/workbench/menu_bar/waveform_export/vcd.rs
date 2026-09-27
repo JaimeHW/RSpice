@@ -28,10 +28,9 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
-use rspice_core::engine::{DigitalTrace, DigitalTracePoint, RealTrace, RealTracePoint};
 use rspice_core::execution::event_vcd_document;
 use rspice_core::io::write_vcd;
-use rspice_core::xspice::DigitalValue;
+use rspice_results::events::core_event_traces;
 
 /// The single scope every RSpice dump declares. `rspice-cli`'s `vcd_io.rs`
 /// uses this exact string; the two exports differ the moment they disagree.
@@ -57,54 +56,6 @@ pub(super) struct PreparedVcd {
     pub(super) change_count: usize,
 }
 
-/// Build the core event traces this crate's retained evidence stands for.
-///
-/// Refuses an unrecognised event code by name. The retained-evidence check
-/// already bounds `value_code` at 12, so reaching this is a corrupted
-/// dataset — which is exactly the case that must not be written out as if it
-/// were a level.
-fn core_traces(
-    digital_traces: &[crate::state::DigitalEventTraceEvidence],
-    real_traces: &[crate::state::RealEventTraceEvidence],
-) -> Result<(Vec<DigitalTrace>, Vec<RealTrace>), String> {
-    let mut digital = Vec::with_capacity(digital_traces.len());
-    for trace in digital_traces {
-        let mut points = Vec::with_capacity(trace.points.len());
-        for point in &trace.points {
-            let value = DigitalValue::from_event_code(point.value_code).ok_or_else(|| {
-                format!(
-                    "node '{}' records event code {} at {} s, which is not one of the thirteen \
-                     XSPICE event codes",
-                    trace.node_name, point.value_code, point.time_s
-                )
-            })?;
-            points.push(DigitalTracePoint {
-                time: point.time_s,
-                value,
-            });
-        }
-        digital.push(DigitalTrace {
-            node_name: trace.node_name.clone(),
-            points,
-        });
-    }
-    let real = real_traces
-        .iter()
-        .map(|trace| RealTrace {
-            node_name: trace.node_name.clone(),
-            points: trace
-                .points
-                .iter()
-                .map(|point| RealTracePoint {
-                    time: point.time_s,
-                    value: point.value,
-                })
-                .collect(),
-        })
-        .collect();
-    Ok((digital, real))
-}
-
 /// Serialise one analysis's retained event history as a dump.
 ///
 /// Everything that can refuse does so before a save picker is opened, so a
@@ -122,7 +73,7 @@ pub(super) fn prepare_vcd(analysis: &crate::state::AnalysisResult) -> Result<Pre
     if digital_traces.is_empty() && real_traces.is_empty() {
         return Err(EMPTY_EVENT_EVIDENCE_MESSAGE.to_owned());
     }
-    let (digital, real) = core_traces(digital_traces, real_traces)?;
+    let (digital, real) = core_event_traces(digital_traces, real_traces)?;
     // The declarations go through as the result holds them. A bus is one
     // `$var wire N` in place of its members' scalars — the projection decides
     // that, not this arm — which is why passing an empty table here wrote a
@@ -279,7 +230,8 @@ mod tests {
         // The same events, projected by the core the way `rspice run -f vcd`
         // projects them. Anything but equality means the two exports of one
         // run disagree.
-        let (digital, real) = core_traces(&digital_evidence, &real_evidence).expect("valid codes");
+        let (digital, real) =
+            core_event_traces(&digital_evidence, &real_evidence).expect("valid codes");
         let document = event_vcd_document(EVENT_SCOPE, &digital, &real, &[]).expect("projects");
         let mut expected = Vec::new();
         write_vcd(&mut expected, &document).expect("writes");
