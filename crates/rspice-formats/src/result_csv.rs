@@ -4,6 +4,7 @@
 
 mod analysis_stack;
 mod manifest;
+mod network_matrix;
 mod noise_report;
 mod operating_point_report;
 mod optimization;
@@ -11,6 +12,7 @@ mod specifications;
 mod typed;
 pub use analysis_stack::{AnalysisStackCsv, AnalysisStackCsvError};
 pub use manifest::encode_manifest_csv;
+pub use network_matrix::encode_network_matrix_csv;
 pub use noise_report::NoiseReportCsv;
 pub use operating_point_report::OperatingPointReportCsv;
 pub use optimization::{EncodedOptimizationCsv, encode_optimization_csv};
