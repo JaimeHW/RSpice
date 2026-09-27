@@ -1,8 +1,11 @@
 //! Component field mapping, exact property serialization, and source contracts.
 
-use crate::state::{Component, ComponentType, InstanceMultiplicity, PropertySheet, PropertyValue};
-use crate::state::{format_params_string, parse_params_string};
 use std::collections::HashMap;
+
+use super::{PropertySheet, PropertyValue};
+use crate::parameters::{format_params_string, parse_params_string};
+use crate::schematic::component::{Component, InstanceMultiplicity};
+use crate::schematic::component_type::ComponentType;
 
 /// Returns the primary property name for a given component type.
 ///
@@ -196,20 +199,20 @@ pub fn collect_properties_with_sheet(
 
 /// Everything the engine will do with this source's fields, at both strengths.
 ///
-/// The rules live in `state::property_types::source_contract`; this is the one
+/// The rules live in `super::source_contract`; this is the one
 /// place a placed component is resolved into the field set they read, so no
 /// surface can assemble a different view of the same instance. A component that
 /// is not an independent source resolves to an empty list.
 pub fn component_source_contract(
     component: &Component,
     values: &HashMap<String, PropertyValue>,
-    sheet: &crate::state::PropertySheet,
-) -> Vec<crate::state::SourceContractFinding> {
+    sheet: &crate::properties::PropertySheet,
+) -> Vec<crate::properties::SourceContractFinding> {
     let params = parse_params_string(&component.params);
     let primary = get_primary_property_name(component.kind);
-    let fields = crate::state::SourceFields::new(values, sheet, &params)
+    let fields = crate::properties::SourceFields::new(values, sheet, &params)
         .with_primary(primary, &component.value);
-    crate::state::source_contract_findings(component.kind, &fields)
+    crate::properties::source_contract_findings(component.kind, &fields)
 }
 
 /// Why this source's fields may not be committed to the design, if they may not.
@@ -221,11 +224,11 @@ pub fn component_source_contract(
 pub fn source_commit_refusal(
     component: &Component,
     values: &HashMap<String, PropertyValue>,
-    sheet: &crate::state::PropertySheet,
+    sheet: &crate::properties::PropertySheet,
 ) -> Option<String> {
     component_source_contract(component, values, sheet)
         .into_iter()
-        .find(|finding| finding.strength == crate::state::ContractStrength::Refusal)
+        .find(|finding| finding.strength == crate::properties::ContractStrength::Refusal)
         .map(|finding| finding.message)
 }
 
@@ -251,7 +254,7 @@ pub fn apply_properties_with_sheet(
     properties: &HashMap<String, PropertyValue>,
     sheet: Option<&PropertySheet>,
 ) -> Result<(), String> {
-    crate::state::params_string::validate_parameter_text(&component.params)?;
+    crate::parameters::validate_parameter_text(&component.params)?;
     let primary_prop = get_primary_property_name(component.kind);
 
     // Update instance name
@@ -382,7 +385,7 @@ fn property_value_from_schema(
 
     match &definition.default_value {
         PropertyValue::Number { .. } => {
-            if let Ok(number) = crate::quantity::parse_engineering_value(&value) {
+            if let Ok(number) = rspice_app_types::quantity::parse_engineering_value(&value) {
                 PropertyValue::Number {
                     value: number,
                     unit: definition.unit.clone(),

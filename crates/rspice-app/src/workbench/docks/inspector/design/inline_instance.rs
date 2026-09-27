@@ -155,7 +155,7 @@ fn parameter_source_value(
     }
     let value = match definition.prop_type {
         PropertyType::Number | PropertyType::Expression => {
-            return crate::properties::tabbed_dialog::parse_expression_source(
+            return rspice_design::properties::value::parse_expression_source(
                 definition,
                 candidate,
                 state.ui.preferences.quantity_presentation_policy(),

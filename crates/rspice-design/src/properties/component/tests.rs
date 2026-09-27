@@ -1,8 +1,8 @@
 //! Component property mapping scenarios.
 
 use super::*;
-use crate::state::Point;
-use rspice_design::properties::PropertyCatalog;
+use crate::properties::PropertyCatalog;
+use rspice_design_model::Point;
 
 #[test]
 fn numeric_serialization_is_shortest_and_round_trips_exactly() {

@@ -7,7 +7,6 @@
 
 use egui::{Sense, Stroke, Ui, pos2, vec2};
 
-use super::super::value::{parse_expression_source, parse_number_source, property_quantity_kind};
 use super::state::numeric_source_text;
 use crate::quantity::{
     QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, format_engineering_value,
@@ -16,6 +15,9 @@ use crate::state::property_types::{DisplayMode, PropertyDefinition, PropertyType
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, mono_input, select_mono_with_response};
+use rspice_design::properties::value::{
+    parse_expression_source, parse_number_source, property_quantity_kind,
+};
 
 pub(super) struct ValueEditorOutput {
     pub changed: Option<PropertyValue>,

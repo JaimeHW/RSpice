@@ -149,7 +149,7 @@ fn effective_component_properties<'a>(
     let sheet = registry.get(component.kind)?;
     Some((
         sheet,
-        crate::properties::property_bridge::collect_properties_with_sheet(component, Some(sheet)),
+        rspice_design::properties::component::collect_properties_with_sheet(component, Some(sheet)),
     ))
 }
 
@@ -237,7 +237,7 @@ fn exact_numeric_constant(definition: &PropertyDefinition, value: &PropertyValue
     let mut unconstrained = definition.clone();
     unconstrained.min_value = None;
     unconstrained.max_value = None;
-    crate::properties::tabbed_dialog::parse_expression_source(
+    rspice_design::properties::value::parse_expression_source(
         &unconstrained,
         source,
         crate::quantity::QuantityPresentationPolicy::default(),

@@ -6,7 +6,6 @@ mod editors;
 mod render;
 mod state;
 
-pub(crate) use super::value::parse_expression_source;
 /// The one route that attaches a waveform data file to a project. The
 /// component editor and the Stimulus Library both import through it, so a file
 /// lands in the same place whichever surface asked for it.

@@ -213,7 +213,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // Result aggregation, optimization execution, netlisting and materialized
     // OP dispatch remain app-owned until R04/R11 finish their extraction.
     ("services", "simulation", 7),
-    ("services", "properties", 2),
 ];
 
 /// Whole-application mutable access, frozen at its current level.

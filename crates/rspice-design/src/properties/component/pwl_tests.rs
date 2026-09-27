@@ -1,8 +1,8 @@
 //! Component property mapping scenarios.
 
 use super::*;
-use crate::state::Point;
-use rspice_design::properties::PropertyCatalog;
+use crate::properties::PropertyCatalog;
+use rspice_design_model::Point;
 
 #[test]
 fn new_pwl_sources_seed_the_registry_waveform_default() {
@@ -55,7 +55,11 @@ fn a_number_field_authored_with_its_unit_stays_a_number() {
 #[test]
 fn property_round_trip_retains_flags_quoted_extensions_and_expression_groups() {
     let registry = PropertyCatalog::new();
-    let mut component = Component::new(1, ComponentType::Diode, crate::state::Point::origin());
+    let mut component = Component::new(
+        1,
+        ComponentType::Diode,
+        rspice_design_model::Point::origin(),
+    );
     component.params = r#"off note="[\"a  b\" \"C:\\my data\"]" expr={V(a,b) + 1}"#.to_owned();
     let original = parse_params_string(&component.params);
     let mut properties = collect_properties_with_sheet(&component, registry.get(component.kind));

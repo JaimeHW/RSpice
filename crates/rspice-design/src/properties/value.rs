@@ -1,9 +1,9 @@
 //! Schema-aware quantity and expression parsing, independent of editor state.
 
-use crate::quantity::{
+use crate::properties::{PropertyDefinition, PropertyValue};
+use rspice_app_types::quantity::{
     QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
 };
-use crate::state::property_types::{PropertyDefinition, PropertyValue};
 
 pub fn parse_number_source(
     def: &PropertyDefinition,
@@ -132,7 +132,7 @@ fn value_for_property_schema(def: &PropertyDefinition, value_si: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::property_types::PropertyType;
+    use crate::properties::PropertyType;
 
     #[test]
     fn registry_units_select_safe_interactive_quantity_kinds() {
@@ -199,9 +199,9 @@ mod tests {
 
     #[test]
     fn expression_parser_enforces_real_registry_phase_units_and_range() {
-        let registry = crate::properties::PropertyEditorSchema::new();
+        let registry = crate::properties::PropertyCatalog::new();
         let phase = registry
-            .get(crate::state::ComponentType::VoltageSource)
+            .get(crate::schematic::component_type::ComponentType::VoltageSource)
             .and_then(|sheet| sheet.get("acphase"))
             .expect("voltage-source AC phase definition");
         let policy = QuantityPresentationPolicy::default();

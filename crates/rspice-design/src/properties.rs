@@ -21,7 +21,9 @@ pub use rspice_app_types::property::{
 use crate::schematic::component_type::ComponentType;
 
 mod catalog;
+pub mod component;
 mod source_contract;
+pub mod value;
 
 pub use source_contract::{
     ContractStrength, SourceContractFinding, SourceFields, TRRANDOM_DISTRIBUTIONS,

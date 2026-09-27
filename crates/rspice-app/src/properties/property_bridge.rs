@@ -4,11 +4,12 @@ use super::PropertyEditorSchema;
 use crate::state::{Component, PropertySheet, PropertyValue};
 use std::collections::HashMap;
 
-use super::component_fields::apply_properties_with_sheet;
-pub use super::component_fields::get_primary_property_name;
-pub(crate) use super::component_fields::{
-    collect_properties_with_sheet, component_source_contract, property_value_to_string,
-    source_commit_refusal,
+pub use rspice_design::properties::component::get_primary_property_name;
+use rspice_design::properties::component::{
+    apply_properties_with_sheet, collect_properties_with_sheet,
+};
+pub(crate) use rspice_design::properties::component::{
+    component_source_contract, property_value_to_string, source_commit_refusal,
 };
 
 /// Collects properties from a Component into a PropertyValue HashMap.

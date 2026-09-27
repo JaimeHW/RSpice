@@ -842,7 +842,7 @@ fn validate_property_expression(
             Err(format!("{} expression is empty", definition.display_name))
         };
     }
-    super::super::value::parse_expression_source(
+    rspice_design::properties::value::parse_expression_source(
         definition,
         source,
         crate::quantity::QuantityPresentationPolicy::default(),
