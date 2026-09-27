@@ -1,5 +1,7 @@
 //! Source attribution for external datasets, independent of prepared solver receipts.
 
+pub mod waveforms;
+
 /// Every import identifier declared by the neutral result-data contract.
 ///
 /// Being present here means the format can be identified and governed. It

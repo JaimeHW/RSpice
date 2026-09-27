@@ -6,6 +6,7 @@
 
 use super::*;
 use rspice_formats::numeric::MAX_EXACT_F64_INTEGER;
+use rspice_results::result_import::waveforms::ImportedSignal;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Cursor;
 
@@ -13,14 +14,6 @@ const MAX_ARCHIVE_MEMBERS: usize = 1_024;
 const MAX_ARCHIVE_EXPANDED_BYTES: u64 = MAX_RESULT_DATASET_BYTES;
 const MAX_SIGNAL_NAME_BYTES: usize = 1_024;
 const MAX_RESULT_VALUES: usize = MAX_RESULT_DATASET_BYTES as usize / std::mem::size_of::<f64>();
-
-#[derive(Debug)]
-struct ImportedSignal {
-    name: String,
-    real: Vec<f64>,
-    imag: Option<Vec<f64>>,
-    unit: Option<String>,
-}
 
 fn adapter_error(format: ResultImportFormat, detail: impl std::fmt::Display) -> String {
     format!("{} import: {detail}", format.canonical_id())
@@ -37,6 +30,16 @@ fn parse_analysis(format: ResultImportFormat, value: &str) -> Result<AnalysisTyp
         .map_err(|error| adapter_error(format, error))
 }
 
+fn waveform_import_limits() -> rspice_results::result_import::waveforms::WaveformImportLimits {
+    rspice_results::result_import::waveforms::WaveformImportLimits {
+        min_rows: MIN_RESULT_ROWS,
+        max_rows: MAX_RESULT_ROWS,
+        max_columns: MAX_RESULT_COLUMNS,
+        max_values: MAX_RESULT_VALUES,
+        max_signal_name_bytes: MAX_SIGNAL_NAME_BYTES,
+    }
+}
+
 fn finish_dataset(
     format: ResultImportFormat,
     analysis_type: AnalysisType,
@@ -44,211 +47,52 @@ fn finish_dataset(
     coordinate: Vec<f64>,
     signals: Vec<ImportedSignal>,
 ) -> Result<ParsedResultDataset, String> {
-    let coordinate_name = coordinate_name.into();
-    validate_name(format, "coordinate", &coordinate_name)?;
-    if coordinate.len() < MIN_RESULT_ROWS {
-        return Err(adapter_error(
-            format,
-            format_args!(
-                "the '{coordinate_name}' coordinate carries no samples, so the source holds no \
-                 result to import"
-            ),
-        ));
-    }
-    if coordinate.len() > MAX_RESULT_ROWS {
-        return Err(adapter_error(
-            format,
-            format_args!(
-                "the coordinate contains {} samples; the limit is {MAX_RESULT_ROWS}",
-                coordinate.len()
-            ),
-        ));
-    }
-    if signals.is_empty() {
-        return Err(adapter_error(
-            format,
-            "the source contains no importable signals",
-        ));
-    }
-    if signals.len() + 1 > MAX_RESULT_COLUMNS {
-        return Err(adapter_error(
-            format,
-            format_args!(
-                "the source contains {} columns; the limit is {MAX_RESULT_COLUMNS}",
-                signals.len() + 1
-            ),
-        ));
-    }
-    validate_finite(format, &coordinate_name, &coordinate)?;
-    validate_coordinate(format, analysis_type, &coordinate)?;
-
-    let retained_values = coordinate
-        .len()
-        .checked_mul(1 + signals.len().saturating_mul(2))
-        .ok_or_else(|| adapter_error(format, "retained-value count overflow"))?;
-    if retained_values > MAX_RESULT_VALUES {
-        return Err(adapter_error(
-            format,
-            format_args!(
-                "the source expands to {retained_values} numeric values; the limit is {MAX_RESULT_VALUES}"
-            ),
-        ));
-    }
-
-    let coordinate = Arc::new(coordinate);
-    let mut names = HashSet::with_capacity(signals.len());
-    let mut waveforms = Vec::with_capacity(signals.len());
-    for (index, signal) in signals.into_iter().enumerate() {
-        validate_name(format, "signal", &signal.name)?;
-        if !names.insert(signal.name.to_ascii_lowercase()) {
-            return Err(adapter_error(
-                format,
-                format_args!("duplicate signal identity '{}'", signal.name),
-            ));
-        }
-        if signal.real.len() != coordinate.len() {
-            return Err(adapter_error(
-                format,
-                format_args!(
-                    "signal '{}' has {} samples; expected {}",
-                    signal.name,
-                    signal.real.len(),
-                    coordinate.len()
-                ),
-            ));
-        }
-        validate_finite(format, &signal.name, &signal.real)?;
-        let mut waveform = if let Some(imag) = signal.imag {
-            if imag.len() != coordinate.len() {
-                return Err(adapter_error(
-                    format,
-                    format_args!(
-                        "signal '{}' imaginary component has {} samples; expected {}",
-                        signal.name,
-                        imag.len(),
-                        coordinate.len()
-                    ),
-                ));
-            }
-            validate_finite(
-                format,
-                &format!("{} imaginary component", signal.name),
-                &imag,
-            )?;
-            let magnitude = signal
-                .real
-                .iter()
-                .zip(&imag)
-                .map(|(real, imag)| real.hypot(*imag))
-                .collect::<Vec<_>>();
-            WaveformData::new(
-                format!("|{}|", signal.name),
-                Arc::clone(&coordinate),
-                magnitude,
-                trace_color(index),
-            )
-            .with_complex_components(signal.name, signal.real, imag)
-        } else {
-            WaveformData::new(
-                signal.name,
-                Arc::clone(&coordinate),
-                signal.real,
-                trace_color(index),
-            )
-        };
-        if let Some(unit) = signal.unit {
-            waveform = waveform.with_unit(unit);
-        }
-        waveforms.push(waveform);
-    }
-
-    Ok(ParsedResultDataset {
-        source_format: format,
+    let imported = rspice_results::result_import::waveforms::assemble_imported_waveforms(
+        format,
         analysis_type,
         coordinate_name,
-        sample_count: coordinate.len(),
-        waveforms,
+        coordinate,
+        signals,
+        waveform_import_limits(),
+    )?;
+    Ok(present_imported_waveforms(format, analysis_type, imported))
+}
+
+fn present_imported_waveforms(
+    format: ResultImportFormat,
+    analysis_type: AnalysisType,
+    imported: rspice_results::result_import::waveforms::ImportedWaveforms,
+) -> ParsedResultDataset {
+    ParsedResultDataset {
+        source_format: format,
+        analysis_type,
+        coordinate_name: imported.coordinate_name,
+        sample_count: imported.sample_count,
+        waveforms: imported
+            .waveforms
+            .into_iter()
+            .enumerate()
+            .map(|(index, data)| WaveformData {
+                data,
+                color: trace_color(index).to_owned(),
+                visible: true,
+                display_cache: None,
+            })
+            .collect(),
         family_metadata: None,
         delimiter: 0,
         notes: Vec::new(),
         event_payload: None,
-    })
+    }
 }
 
 fn validate_name(format: ResultImportFormat, kind: &str, name: &str) -> Result<(), String> {
-    if name.trim().is_empty() {
-        return Err(adapter_error(format, format_args!("{kind} name is empty")));
-    }
-    if name.len() > MAX_SIGNAL_NAME_BYTES {
-        return Err(adapter_error(
-            format,
-            format_args!("{kind} name exceeds {MAX_SIGNAL_NAME_BYTES} bytes"),
-        ));
-    }
-    if name.chars().any(char::is_control) {
-        return Err(adapter_error(
-            format,
-            format_args!("{kind} name contains a control character"),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_finite(
-    format: ResultImportFormat,
-    identity: &str,
-    values: &[f64],
-) -> Result<(), String> {
-    if let Some((index, value)) = values
-        .iter()
-        .enumerate()
-        .find(|(_, value)| !value.is_finite())
-    {
-        return Err(adapter_error(
-            format,
-            format_args!("'{identity}' contains non-finite value {value} at sample {index}"),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_coordinate(
-    format: ResultImportFormat,
-    analysis_type: AnalysisType,
-    coordinate: &[f64],
-) -> Result<(), String> {
-    let mut direction = None;
-    for (index, pair) in coordinate.windows(2).enumerate() {
-        let step = pair[1].total_cmp(&pair[0]);
-        if step.is_eq() {
-            return Err(adapter_error(
-                format,
-                format_args!(
-                    "coordinate repeats {} at samples {} and {}",
-                    pair[0],
-                    index,
-                    index + 1
-                ),
-            ));
-        }
-        if let Some(expected) = direction {
-            if step != expected {
-                return Err(adapter_error(
-                    format,
-                    format_args!("coordinate reverses direction at sample {}", index + 1),
-                ));
-            }
-        } else {
-            direction = Some(step);
-        }
-    }
-    if analysis_type == AnalysisType::Ac && coordinate.iter().any(|value| *value <= 0.0) {
-        return Err(adapter_error(
-            format,
-            "frequency coordinates must all be greater than zero",
-        ));
-    }
-    Ok(())
+    rspice_results::result_import::waveforms::validate_name(
+        format,
+        kind,
+        name,
+        MAX_SIGNAL_NAME_BYTES,
+    )
 }
 
 // -------------------------------------------------------------------------
