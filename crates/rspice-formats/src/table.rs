@@ -60,6 +60,19 @@ pub fn escape_csv_field(value: &str) -> String {
     }
 }
 
+/// Normalize a waveform label for existing CSV export diagnostics.
+pub fn sanitize_column_label(label: &str) -> String {
+    let sanitized = label
+        .trim()
+        .chars()
+        .map(|ch| match ch {
+            ',' | '\t' | '\r' | '\n' => ' ',
+            _ => ch,
+        })
+        .collect::<String>();
+    sanitized.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Convert a validated typed-result CSV document into TSV without changing its cells.
 pub fn csv_to_tsv(contents: &str) -> Result<String, String> {
     let mut reader = csv::ReaderBuilder::new()

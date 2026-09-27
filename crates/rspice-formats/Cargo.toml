@@ -13,7 +13,7 @@ workspace = true
 
 [features]
 # Reuse canonical retained spectra and eye measurements without enabling the engine in default codecs.
-result-csv = ["dep:rspice-core", "dep:rspice-results"]
+result-csv = ["dep:rspice-app-types", "dep:rspice-core", "dep:rspice-results"]
 native-bundle = ["dep:serde_json", "dep:sha2"]
 monte-carlo-checkpoint = ["dep:rspice-results", "dep:serde_json"]
 columnar = ["dep:arrow-array", "dep:arrow-ipc", "dep:arrow-schema", "dep:bytes", "dep:parquet"]
@@ -36,6 +36,7 @@ npyz = { version = "0.9", features = ["complex"] }
 parquet = { version = "59", default-features = false, features = ["arrow"], optional = true }
 rustyhdf5 = { version = "1.93", default-features = false, optional = true }
 rust_xlsxwriter = { version = "0.92", default-features = false, optional = true }
+rspice-app-types = { workspace = true, optional = true }
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, optional = true }
 rspice-results = { workspace = true, optional = true, features = ["engine-evidence"] }
 serde.workspace = true

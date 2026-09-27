@@ -11,7 +11,7 @@ use crate::analysis::eye_diagram::EyeTimebaseProvenance;
 use crate::workbench::EngineeringExportFormat;
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
-use rspice_formats::table::{csv_to_tsv, escape_csv_field as csv_text};
+use rspice_formats::table::{csv_to_tsv, escape_csv_field as csv_text, sanitize_column_label};
 use typed_csv::prepare_typed_result_csv;
 
 const NO_ACTIVE_ANALYSIS_MESSAGE: &str = "No active result analysis is selected for export.";
@@ -1240,94 +1240,51 @@ fn prepare_displayed_analysis_stack_csv(
     if analyses.is_empty() {
         return Err(NO_SAMPLES_MESSAGE.to_owned());
     }
-    let mut contents = String::from(
-        "dataset_id,analysis_sequence,analysis_label,analysis_type,trace,component,sample_index,x,y\n",
-    );
-    let mut rows = 0_usize;
+    let mut csv = rspice_formats::result_csv::AnalysisStackCsv::new();
     let mut traces = 0_usize;
     for analysis in analyses {
         for waveform in exported_waveforms(state, displayed.dataset_id, analysis) {
-            append_long_form_component(
-                &mut contents,
+            csv.append_component(
                 displayed.dataset_id,
                 analysis,
                 &waveform.name,
                 "display",
                 waveform.x.as_ref(),
                 waveform.y.as_ref(),
-                &mut rows,
-            )?;
+            )
+            .map_err(|error| error.to_string())?;
             traces += 1;
             if let Some(complex) = &waveform.complex {
-                append_long_form_component(
-                    &mut contents,
+                csv.append_component(
                     displayed.dataset_id,
                     analysis,
                     &complex.source_name,
                     "real",
                     waveform.x.as_ref(),
                     complex.real.as_ref(),
-                    &mut rows,
-                )?;
-                append_long_form_component(
-                    &mut contents,
+                )
+                .map_err(|error| error.to_string())?;
+                csv.append_component(
                     displayed.dataset_id,
                     analysis,
                     &complex.source_name,
                     "imaginary",
                     waveform.x.as_ref(),
                     complex.imag.as_ref(),
-                    &mut rows,
-                )?;
+                )
+                .map_err(|error| error.to_string())?;
             }
         }
     }
+    let rows = csv.row_count();
     if rows == 0 {
         return Err(NO_SAMPLES_MESSAGE.to_owned());
     }
     Ok(PreparedTypedResultCsv {
         default_name: "rspice-displayed-results.csv",
-        contents,
+        contents: csv.into_string(),
         detail: format!("{traces} visible traces, {rows} exported samples"),
     })
-}
-
-fn append_long_form_component(
-    contents: &mut String,
-    dataset_id: crate::product::DatasetId,
-    analysis: &crate::state::AnalysisResult,
-    trace: &str,
-    component: &str,
-    x: &[f64],
-    y: &[f64],
-    rows: &mut usize,
-) -> Result<(), String> {
-    if x.len() != y.len() {
-        return Err(format!(
-            "Displayed trace '{}' has {} coordinates and {} {component} samples; export refused instead of truncating evidence.",
-            sanitize_column_label(trace),
-            x.len(),
-            y.len(),
-        ));
-    }
-    let dataset = dataset_id.to_string();
-    let label = csv_text(&analysis.label);
-    let analysis_type = csv_text(analysis.analysis_type.short_label());
-    let trace = csv_text(trace);
-    for (sample_index, (&x, &y)) in x.iter().zip(y).enumerate() {
-        if !x.is_finite() || !y.is_finite() {
-            return Err(format!(
-                "Displayed trace {} contains a non-finite {component} sample at index {sample_index}.",
-                sanitize_column_label(&trace),
-            ));
-        }
-        contents.push_str(&format!(
-            "{dataset},{},{label},{analysis_type},{trace},{component},{sample_index},{x:.17e},{y:.17e}\n",
-            analysis.id,
-        ));
-        *rows += 1;
-    }
-    Ok(())
 }
 
 fn prepare_single_analysis_dataset(
@@ -1680,18 +1637,6 @@ fn append_signal_values(
     dataset.add_signal(export_signal);
     let _ = warnings;
     Ok(())
-}
-
-fn sanitize_column_label(label: &str) -> String {
-    let sanitized = label
-        .trim()
-        .chars()
-        .map(|ch| match ch {
-            ',' | '\t' | '\r' | '\n' => ' ',
-            _ => ch,
-        })
-        .collect::<String>();
-    sanitized.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn signal_type_from_waveform_name(name: &str) -> crate::io::SignalType {

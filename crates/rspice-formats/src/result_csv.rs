@@ -2,6 +2,9 @@
 //!
 //! The application owns view/cache admission, filenames and publication.
 
+mod analysis_stack;
+pub use analysis_stack::{AnalysisStackCsv, AnalysisStackCsvError};
+
 use crate::table::escape_csv_field as csv_text;
 use rspice_core::analysis::signal_integrity::EyeMeasurements;
 use rspice_results::fft::data::FftData;

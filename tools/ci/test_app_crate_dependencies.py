@@ -16,8 +16,8 @@ class DependencyPolicyTests(unittest.TestCase):
         )
         self.assertEqual(
             violations(
-                {"rspice-formats": {"rspice-results", "rspice-core"}},
-                {"rspice-formats": {"rspice-results", "rspice-core"}},
+                {"rspice-formats": {"rspice-app-types", "rspice-results", "rspice-core"}},
+                {"rspice-formats": {"rspice-app-types", "rspice-results", "rspice-core"}},
                 {"rspice-formats", "csv", "serde"},
                 {"rspice-formats", "serde_json", "sha2"},
             ),
