@@ -2,6 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+pub mod report;
+
 mod prepared;
 pub use prepared::{PreparedSpecification, PreparedSpecificationPolicy};
 

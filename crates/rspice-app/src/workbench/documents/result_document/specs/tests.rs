@@ -7,7 +7,7 @@
 use super::AppState;
 use super::{
     SpecDraft, SpecResultStatus, apply_drafts, result_row, result_rows, row_accessibility_label,
-    signed_margin, spec_table_row_height, summarize_rows, table_width,
+    spec_table_row_height, summarize_rows, table_width,
 };
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::state::{
@@ -112,32 +112,6 @@ fn legacy_specification_deserialization_does_not_invent_an_expression() {
             .expect("migrated specification serializes")
             .contains("expression")
     );
-}
-
-#[test]
-fn signed_margin_is_positive_inside_and_negative_outside_each_bound_shape() {
-    let two_sided = SpecEntry {
-        measurement: "gain".to_owned(),
-        expression: "max V(out)".to_owned(),
-        min: Some(10.0),
-        max: Some(20.0),
-        unit: "dB".to_owned(),
-        scope: crate::state::SpecPointScope::AllPoints,
-    };
-    assert_eq!(signed_margin(&two_sided, 12.0), Some(2.0));
-    assert_eq!(signed_margin(&two_sided, 22.5), Some(-2.5));
-
-    let minimum = SpecEntry {
-        max: None,
-        ..two_sided.clone()
-    };
-    assert_eq!(signed_margin(&minimum, 13.0), Some(3.0));
-    let maximum = SpecEntry {
-        min: None,
-        max: Some(20.0),
-        ..two_sided
-    };
-    assert_eq!(signed_margin(&maximum, 18.0), Some(2.0));
 }
 
 #[test]
