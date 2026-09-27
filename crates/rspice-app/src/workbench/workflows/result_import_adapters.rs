@@ -750,106 +750,20 @@ pub(super) fn parse_psf_ascii(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
-    let text = std::str::from_utf8(bytes)
-        .map_err(|error| adapter_error(format, format_args!("source is not UTF-8: {error}")))?;
-    let mut analysis = None;
-    let mut coordinate_name = None;
-    let mut signal_names = Vec::new();
-    let mut value_lines = Vec::new();
-    let mut section = "";
-    for (index, raw_line) in text.lines().enumerate() {
-        let line_number = index + 1;
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with("//") || line.starts_with('#') {
-            continue;
-        }
-        match line.to_ascii_uppercase().as_str() {
-            "HEADER" | "TYPE" | "SWEEP" | "TRACE" | "VALUE" | "END" => {
-                section = line;
-                continue;
-            }
-            _ => {}
-        }
-        if section.eq_ignore_ascii_case("HEADER") {
-            let fields = psf_tokens(line, format, line_number)?;
-            if fields.len() >= 2
-                && matches!(
-                    fields[0].to_ascii_lowercase().as_str(),
-                    "analysis" | "type" | "sweepmode"
-                )
-            {
-                analysis = Some(parse_analysis(format, &fields[1])?);
-            }
-        } else if section.eq_ignore_ascii_case("SWEEP") {
-            let fields = psf_tokens(line, format, line_number)?;
-            if fields.is_empty() {
-                continue;
-            }
-            if coordinate_name.replace(fields[0].clone()).is_some() {
-                return Err(adapter_error(
-                    format,
-                    "PSF ASCII declares multiple sweep axes",
-                ));
-            }
-        } else if section.eq_ignore_ascii_case("TRACE") {
-            let fields = psf_tokens(line, format, line_number)?;
-            if fields.is_empty() {
-                continue;
-            }
-            signal_names.push(fields[0].clone());
-        } else if section.eq_ignore_ascii_case("VALUE") {
-            value_lines.push((line_number, line));
-        }
-    }
-    let coordinate_name = coordinate_name
-        .ok_or_else(|| adapter_error(format, "PSF ASCII is missing a SWEEP axis declaration"))?;
-    if signal_names.is_empty() {
-        return Err(adapter_error(
-            format,
-            "PSF ASCII is missing TRACE declarations",
-        ));
-    }
-    if signal_names.len() + 1 > MAX_RESULT_COLUMNS {
-        return Err(adapter_error(
-            format,
-            "PSF ASCII trace-count limit exceeded",
-        ));
-    }
-    let mut coordinate = Vec::new();
-    let mut components = vec![Vec::new(); signal_names.len()];
-    for (line_number, line) in value_lines {
-        if coordinate.len() >= MAX_RESULT_ROWS {
-            return Err(adapter_error(format, "PSF ASCII row limit exceeded"));
-        }
-        let fields = psf_tokens(line, format, line_number)?;
-        if fields.len() != signal_names.len() + 1 {
-            return Err(adapter_error(
-                format,
-                format_args!(
-                    "VALUE row {line_number} has {} fields; expected {}",
-                    fields.len(),
-                    signal_names.len() + 1
-                ),
-            ));
-        }
-        coordinate.push(parse_psf_number(
-            format,
-            &fields[0],
-            line_number,
-            &coordinate_name,
-        )?);
-        for (index, signal) in signal_names.iter().enumerate() {
-            components[index].push(parse_psf_number(
-                format,
-                &fields[index + 1],
-                line_number,
-                signal,
-            )?);
-        }
-    }
-    let signals = signal_names
+    use rspice_formats::psf::{PsfReadLimits, decode_psf_ascii};
+
+    let decoded = decode_psf_ascii(
+        bytes,
+        PsfReadLimits {
+            max_columns: MAX_RESULT_COLUMNS,
+            max_rows: MAX_RESULT_ROWS,
+        },
+    )
+    .map_err(|error| adapter_error(format, error))?;
+    let signals = decoded
+        .signal_names
         .into_iter()
-        .zip(components)
+        .zip(decoded.signal_values)
         .map(|(name, real)| ImportedSignal {
             name,
             real,
@@ -859,75 +773,11 @@ pub(super) fn parse_psf_ascii(
         .collect();
     finish_dataset(
         format,
-        analysis.unwrap_or_else(|| analysis_from_coordinate(&coordinate_name)),
-        coordinate_name,
-        coordinate,
+        imported_analysis_type(decoded.domain),
+        decoded.coordinate_name,
+        decoded.coordinate,
         signals,
     )
-}
-
-fn psf_tokens(
-    line: &str,
-    format: ResultImportFormat,
-    line_number: usize,
-) -> Result<Vec<String>, String> {
-    let mut tokens = Vec::new();
-    let mut token = String::new();
-    let mut quoted = false;
-    let mut chars = line.chars();
-    while let Some(character) = chars.next() {
-        if quoted {
-            match character {
-                '"' => quoted = false,
-                '\\' => {
-                    let escaped = chars.next().ok_or_else(|| {
-                        adapter_error(format, format_args!("line {line_number} ends in an escape"))
-                    })?;
-                    token.push(escaped);
-                }
-                _ => token.push(character),
-            }
-        } else if character == '"' {
-            quoted = true;
-        } else if character.is_whitespace() || character == '(' || character == ')' {
-            if !token.is_empty() {
-                tokens.push(std::mem::take(&mut token));
-            }
-        } else {
-            token.push(character);
-        }
-    }
-    if quoted {
-        return Err(adapter_error(
-            format,
-            format_args!("line {line_number} has an unterminated quoted token"),
-        ));
-    }
-    if !token.is_empty() {
-        tokens.push(token);
-    }
-    Ok(tokens)
-}
-
-fn parse_psf_number(
-    format: ResultImportFormat,
-    token: &str,
-    line: usize,
-    identity: &str,
-) -> Result<f64, String> {
-    let value = token.parse::<f64>().map_err(|_| {
-        adapter_error(
-            format,
-            format_args!("line {line} has invalid numeric token '{token}' for '{identity}'"),
-        )
-    })?;
-    if !value.is_finite() {
-        return Err(adapter_error(
-            format,
-            format_args!("line {line} has non-finite value for '{identity}'"),
-        ));
-    }
-    Ok(value)
 }
 
 // -------------------------------------------------------------------------

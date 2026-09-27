@@ -13,6 +13,7 @@ pub mod monte_carlo_checkpoint;
 pub mod native_bundle;
 pub mod numeric;
 pub mod numpy;
+pub mod psf;
 pub mod table;
 pub mod waveform_io;
 #[cfg(feature = "xlsx")]
