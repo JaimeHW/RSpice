@@ -142,8 +142,7 @@ pub use state::{
 #[cfg(test)]
 pub use symbol_gen::GENERATED_WIDTH;
 pub use symbol_gen::{
-    GENERATED_PIN_LABEL_SIZE, fit_pin_name, generate_symbol, inward_step, lead_inner,
-    pin_label_anchor,
+    GENERATED_PIN_LABEL_SIZE, fit_pin_name, inward_step, lead_inner, pin_label_anchor,
 };
 pub use tool::Tool;
 pub use undo_history::{SchematicSnapshot, UndoSequence, next_undo_sequence};

@@ -30,13 +30,38 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as ShaDigest, Sha256};
 
-use crate::product::ContentDigest;
+use rspice_app_types::product::ContentDigest;
 
 pub use rspice_design_model::symbol_geometry::{
     SymbolShape, SymbolTextAlign, SymbolTextPlacement, SymbolTextSize, symbol_text_bounds,
 };
 
-use super::{Point, PortDirection, PortSpec, SymbolElectricalType, SymbolPinSide, View};
+use crate::library::View;
+use crate::symbol_generation::generate_symbol;
+use rspice_design_model::{
+    Point,
+    bus::{BusDeclaration, declared_vector, declared_width},
+    port::{PortDirection, PortSpec},
+    symbol_pin::{SymbolElectricalType, SymbolPinSide},
+};
+
+#[cfg(any(test, feature = "symbol-test-observation"))]
+thread_local! {
+    /// How many symbol cellviews have been deserialized on this thread.
+    ///
+    /// A symbol cellview keeps its typed model binding and its artwork as two
+    /// JSON documents in the view's metadata, and reading either one costs a
+    /// deserialization plus a validation pass. That is the expensive half of
+    /// deriving anything about a symbol, it depends only on the view, and a
+    /// surface that derives its rows from the whole registry on every frame
+    /// pays it per symbol in the corpus rather than per row on screen — which
+    /// is what the Symbols page did. Counting is the only way to state that as
+    /// a test: the work is invisible in the result, and a timing assertion on a
+    /// fixture small enough to build is noise.
+    pub static SYMBOL_VIEW_PARSES: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+
+}
 
 /// Metadata key used by `View::metadata` for the symbol document JSON.
 pub const SYMBOL_DOCUMENT_METADATA_KEY: &str = "rspice.symbol.document.v1";
@@ -168,13 +193,13 @@ impl SymbolPin {
     /// port it stands for: the name. One terminal drawn `DATA[7:0]` is one
     /// pin of eight conductors, so the symbol and the schematic cannot come to
     /// different conclusions about how many nodes an instance carries.
-    pub fn vector(&self) -> Option<super::BusDeclaration> {
-        super::declared_vector(&self.name)
+    pub fn vector(&self) -> Option<BusDeclaration> {
+        declared_vector(&self.name)
     }
 
     /// Conductors this pin carries: the declared width, or one.
     pub fn width(&self) -> usize {
-        super::declared_width(&self.name)
+        declared_width(&self.name)
     }
 }
 
@@ -723,7 +748,7 @@ impl Default for SymbolDocument {
 
 impl SymbolDocument {
     pub fn generated_from_ports(ports: &[PortSpec]) -> Self {
-        let generated = super::generate_symbol(ports);
+        let generated = generate_symbol(ports);
         let body_half_width = generated.body_half_width();
         let body_half_height = generated.body_half_height();
         // The generator already knows which edge every pin belongs to; record
@@ -772,8 +797,8 @@ impl SymbolDocument {
         // Counted unconditionally: a view carrying no document still builds the
         // default artwork, adopts any legacy editor text, and validates the
         // result, which is the same derivation as the parse it replaces.
-        #[cfg(test)]
-        crate::state::SYMBOL_VIEW_PARSES.with(|count| count.set(count.get() + 1));
+        #[cfg(any(test, feature = "symbol-test-observation"))]
+        SYMBOL_VIEW_PARSES.with(|count| count.set(count.get() + 1));
 
         let mut document = match view.metadata.get(SYMBOL_DOCUMENT_METADATA_KEY) {
             Some(raw) if raw.len() > MAX_SYMBOL_DOCUMENT_BYTES => {
@@ -1309,7 +1334,7 @@ fn port_name_set(ports: &[PortSpec]) -> HashSet<String> {
 #[cfg(test)]
 mod validation_tests {
     use super::*;
-    use crate::state::ViewType;
+    use crate::library::ViewType;
 
     #[test]
     fn a_pins_name_declares_how_many_conductors_it_carries() {

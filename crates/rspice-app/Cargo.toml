@@ -112,6 +112,7 @@ rfd = { version = "0.17", features = ["file-handle-inner"] }
 dirs = "6.0"
 
 [dev-dependencies]
+rspice-design = { workspace = true, features = ["symbol-test-observation"] }
 zip = { version = "7.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 rustyhdf5 = { version = "1.93", default-features = false }
 arrow-array = "59"

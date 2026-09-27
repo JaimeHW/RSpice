@@ -11,6 +11,10 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Enabled by the app dev-dependency to retain parser/cache regression coverage.
+symbol-test-observation = []
+
 [dependencies]
 regex.workspace = true
 rspice-app-types.workspace = true

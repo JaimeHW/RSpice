@@ -6,4 +6,5 @@ pub mod library;
 pub mod netlist_document;
 pub mod physical_layout;
 pub mod project_sources;
+pub mod symbol;
 pub mod symbol_generation;
