@@ -8,5 +8,6 @@ pub mod hierarchy_path;
 pub mod product;
 pub mod property;
 pub mod quantity;
+pub mod raw_probe;
 pub mod source_revision;
 pub mod text_validation;
