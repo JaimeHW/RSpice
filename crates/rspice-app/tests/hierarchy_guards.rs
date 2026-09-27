@@ -943,12 +943,12 @@ struct PolicyRecord {
 const POLICY_RECORDS: &[PolicyRecord] = &[
     PolicyRecord {
         struct_name: "ConnectivityContract",
-        declared_in: "state/connectivity_contract.rs",
+        declared_in: "design/connectivity_contract.rs",
         receivers: &["connectivity", "contract"],
     },
     PolicyRecord {
         struct_name: "ConnectivityPolicy",
-        declared_in: "state/connectivity_contract.rs",
+        declared_in: "design/connectivity_contract.rs",
         receivers: &["policy"],
     },
     PolicyRecord {
@@ -1100,13 +1100,17 @@ fn reads_field(code: &str, receivers: &[&str], field: &str) -> bool {
 
 #[test]
 fn persisted_policies_reach_a_projection() {
-    // Both crates are scanned: the connectivity contract is the GUI crate's,
-    // the sheet catalog is the design-management authority's, and both are
-    // persisted by the same project file.
+    // The design crates own these persisted contracts; the app still supplies
+    // their project and netlist projections.
     let mut declarations: BTreeMap<String, String> = BTreeMap::new();
     let mut projections: Vec<(String, String, String)> = Vec::new();
-    for root in [src_dir(), design_model_src_dir()] {
+    for (prefix, root) in [
+        ("", src_dir()),
+        ("", design_model_src_dir()),
+        ("design/", design_src_dir()),
+    ] {
         for (path, file) in production_files(&root) {
+            let path = format!("{prefix}{path}");
             let declares = POLICY_RECORDS
                 .iter()
                 .any(|record| record.declared_in == path);

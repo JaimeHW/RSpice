@@ -604,21 +604,23 @@ mod tests {
 
     #[test]
     fn optional_authority_catalogs_are_exact_bounded_and_backward_compatible() {
-        let mut contract = ConnectivityContract::default();
-        contract.technology_global_nets = Some(TechnologyGlobalNetCatalog {
-            authority: "demo-pdk@1.0".to_owned(),
-            nets: vec![ConnectivityAliasGroup {
-                canonical_name: "VDD".to_owned(),
-                aliases: vec!["vdd".to_owned(), "VCC".to_owned()],
-            }],
-        });
-        contract.dialect_aliases = Some(DialectAliasCatalog {
-            authority: "commercial-spice-2026".to_owned(),
-            groups: vec![ConnectivityAliasGroup {
-                canonical_name: "0".to_owned(),
-                aliases: vec!["GND".to_owned()],
-            }],
-        });
+        let contract = ConnectivityContract {
+            technology_global_nets: Some(TechnologyGlobalNetCatalog {
+                authority: "demo-pdk@1.0".to_owned(),
+                nets: vec![ConnectivityAliasGroup {
+                    canonical_name: "VDD".to_owned(),
+                    aliases: vec!["vdd".to_owned(), "VCC".to_owned()],
+                }],
+            }),
+            dialect_aliases: Some(DialectAliasCatalog {
+                authority: "commercial-spice-2026".to_owned(),
+                groups: vec![ConnectivityAliasGroup {
+                    canonical_name: "0".to_owned(),
+                    aliases: vec!["GND".to_owned()],
+                }],
+            }),
+            ..ConnectivityContract::default()
+        };
         contract.validate().unwrap();
         assert_eq!(
             contract.technology_global_canonical_name("VCC!"),

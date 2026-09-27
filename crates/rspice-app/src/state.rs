@@ -4,7 +4,7 @@
 //! Core data structures that are shared across multiple modules.
 
 use rspice_design::configuration_set;
-mod connectivity_contract;
+use rspice_design::connectivity_contract;
 pub(crate) mod engineering_table;
 mod hierarchy_path;
 pub(crate) use hierarchy_path::remap_instance_probes_many;
