@@ -30,7 +30,7 @@ use rspice_design::schematic::component_references as reference_edit;
 use rspice_design::schematic::component_type;
 use rspice_design::schematic::deletion;
 mod design_note;
-mod device_catalog;
+use rspice_design::schematic::device_catalog;
 use rspice_design::schematic::device_descriptor;
 use rspice_design::schematic::document;
 use rspice_design::schematic::document_policy;
@@ -71,9 +71,9 @@ pub use bus::{
     BusTap, BusTapOrientation, BusTargetKind, PendingBusTap, declared_vector, declared_width,
 };
 pub use component::{
-    BuiltinXspiceInstance, BuiltinXspicePortBinding, BuiltinXspicePortDirection,
-    BuiltinXspicePortType, Component, ComponentDisplayMode, InstanceMultiplicity,
-    LibraryCellInstance, explicit_component_model, validate_library_netlist_template,
+    BuiltinXspicePortBinding, BuiltinXspicePortType, Component, ComponentDisplayMode,
+    InstanceMultiplicity, LibraryCellInstance, explicit_component_model,
+    validate_library_netlist_template,
 };
 pub use component_type::ComponentType;
 pub use design_note::{

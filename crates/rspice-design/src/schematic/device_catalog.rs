@@ -15,12 +15,15 @@ use rspice_core::xspice::{
 };
 
 use super::{
-    BuiltinXspiceInstance, BuiltinXspicePortBinding, BuiltinXspicePortDirection,
-    BuiltinXspicePortType, LibraryCellInstance, PortDirection, PortSpec,
+    component::{
+        BuiltinXspiceInstance, BuiltinXspicePortBinding, BuiltinXspicePortDirection,
+        BuiltinXspicePortType, LibraryCellInstance,
+    },
+    port::{PortDirection, PortSpec},
 };
 
 #[cfg(test)]
-use super::ComponentType;
+use super::component_type::ComponentType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CatalogXspiceDeviceDescriptor {
@@ -44,7 +47,7 @@ pub struct CatalogXspiceVectorPort {
 /// Product safety ceiling for unbounded registry vector ports. This prevents
 /// malformed project data from requesting unbounded terminal and symbol
 /// allocation while remaining far above practical schematic fan-out.
-pub const MAX_BUILTIN_XSPICE_VECTOR_WIDTH: usize = 4096;
+const MAX_BUILTIN_XSPICE_VECTOR_WIDTH: usize = 4096;
 
 macro_rules! xspice_device {
     ($id:literal, $model:literal, $name:literal, $symbol:literal) => {
@@ -69,7 +72,7 @@ macro_rules! xspice_device {
 
 /// Canonical placeable XSPICE devices that do not have a legacy enum variant.
 /// Aliases intentionally share the canonical symbol and placement contract.
-pub const ENGINE_ONLY_XSPICE_DEVICES: &[CatalogXspiceDeviceDescriptor] = &[
+const ENGINE_ONLY_XSPICE_DEVICES: &[CatalogXspiceDeviceDescriptor] = &[
     xspice_device!(
         "rspice.xspice.astate",
         "astate",
@@ -901,7 +904,7 @@ mod tests {
     use rspice_core::xspice::CodeModelRegistry;
 
     use super::*;
-    use crate::state::DeviceImplementation;
+    use crate::schematic::device_descriptor::DeviceImplementation;
 
     #[test]
     fn every_registered_xspice_name_has_one_reviewed_gui_disposition() {
