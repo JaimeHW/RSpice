@@ -444,7 +444,14 @@ pub struct SchematicState {
 
 impl Default for SchematicState {
     fn default() -> Self {
-        let document = SchematicDocument::default();
+        Self::from_document(SchematicDocument::default())
+    }
+}
+
+impl SchematicState {
+    /// Create fresh editor state around an owned document. Saved-file loading
+    /// retains its separate legacy runtime defaults in Deserialize.
+    pub(crate) fn from_document(document: SchematicDocument) -> Self {
         let snap_engine = SnapEngine {
             grid_size: document.grid_size,
             ..SnapEngine::default()
