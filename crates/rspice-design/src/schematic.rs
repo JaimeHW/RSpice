@@ -1,6 +1,7 @@
 //! Schematic document records and geometry, independent of editor gestures.
 
 pub mod bus;
+pub mod bus_edit;
 pub mod component;
 pub mod component_display;
 pub mod component_edit;

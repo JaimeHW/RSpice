@@ -1,9 +1,15 @@
 //! Validated bus and tap edits bound to their borrowed document.
 
-use super::super::{
-    BusDeclaration, BusParseError, BusPropertyImpact, BusSlice, BusTapOrientation, BusTargetKind,
+use super::{
+    bus::{
+        Bus, BusDeclaration, BusParseError, BusPropertyImpact, BusSlice, BusTap, BusTapOrientation,
+        BusTargetKind,
+    },
+    document::SchematicDocument,
+    identity::SchematicIdentity,
+    wire::Wire,
 };
-use super::{Bus, BusTap, Point, SchematicDocument, SchematicIdentity, Wire};
+use rspice_design_model::Point;
 
 /// Source attachment, destination and orientation for a tap request.
 #[derive(Debug, Clone, Copy)]
@@ -546,4 +552,84 @@ fn destination_matches_slice(destination_buses: &[&Bus], slice: &BusSlice) -> bo
     destination_buses
         .iter()
         .any(|bus| bus.declaration.as_ref() == Some(&expected))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discarded_preparations_preserve_document_and_identity() {
+        let mut document = SchematicDocument::default();
+        let mut identity = SchematicIdentity::with_cursor(41);
+        let points = vec![Point::origin(), Point::new(20, 0)];
+        drop(BusPlacement::prepare(&mut document, &mut identity, points.clone(), None).unwrap());
+        assert!(document.buses.is_empty());
+        assert_eq!(identity.cursor(), 41);
+
+        let bus_id = BusPlacement::prepare(&mut document, &mut identity, points, None)
+            .unwrap()
+            .commit();
+        assert_eq!(bus_id, 41);
+        let before_buses = document.buses.clone();
+        let declaration = BusDeclaration::parse("DATA[7:0]").unwrap();
+        let slice = BusSlice::parse("DATA[3]").unwrap();
+        let geometry = BusTapGeometry {
+            bus_id,
+            bus_point: Point::new(10, 0),
+            connection_point: Point::new(10, 5),
+            orientation: BusTapOrientation::Down,
+        };
+        drop(
+            BusTapPlacement::prepare_configured(
+                &mut document,
+                &mut identity,
+                geometry,
+                &declaration,
+                &slice,
+            )
+            .unwrap(),
+        );
+        assert_eq!(document.buses, before_buses);
+        assert!(document.bus_taps.is_empty());
+        assert_eq!(identity.cursor(), 42);
+
+        drop(
+            BusPropertyEdit::prepare(&mut document, &before_buses[0], Some(&declaration))
+                .unwrap()
+                .unwrap(),
+        );
+        assert_eq!(document.buses, before_buses);
+        assert!(document.bus_taps.is_empty());
+        assert_eq!(identity.cursor(), 42);
+
+        let tap_id = BusTapPlacement::prepare_configured(
+            &mut document,
+            &mut identity,
+            geometry,
+            &declaration,
+            &slice,
+        )
+        .unwrap()
+        .commit();
+        assert_eq!(tap_id, 42);
+        let before_buses = document.buses.clone();
+        let before_taps = document.bus_taps.clone();
+        drop(
+            BusTapPropertyEdit::prepare(
+                &mut document,
+                &before_taps[0],
+                BusTapGeometry {
+                    connection_point: Point::new(10, 6),
+                    ..geometry
+                },
+                slice,
+            )
+            .unwrap()
+            .unwrap(),
+        );
+        assert_eq!(document.buses, before_buses);
+        assert_eq!(document.bus_taps, before_taps);
+        assert_eq!(identity.cursor(), 43);
+    }
 }

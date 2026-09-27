@@ -7,10 +7,10 @@
 use super::super::super::{
     BusDeclaration, BusParseError, BusPropertyImpact, BusSlice, BusTapOrientation, PendingBusTap,
 };
-use super::super::bus_edit::{
+use super::super::*;
+use rspice_design::schematic::bus_edit::{
     self, BusPlacement, BusPropertyEdit, BusTapGeometry, BusTapPlacement, BusTapPropertyEdit,
 };
-use super::super::*;
 
 impl SchematicState {
     /// Add a validated bus as one read-only-safe undo transaction.
