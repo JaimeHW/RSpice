@@ -1,7 +1,13 @@
 //! Selection movement, guarded translation and bounded wire shove.
 
-use super::super::{BusTargetKind, clamped_documentation_shape_translation};
-use super::{Component, Point, SchematicDocument, Wire, WireSegment};
+use super::{
+    bus::BusTargetKind,
+    component::Component,
+    document::SchematicDocument,
+    documentation_shape::clamped_documentation_shape_translation,
+    wire::{Wire, WireSegment},
+};
+use rspice_design_model::Point;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -1223,7 +1229,7 @@ fn translated_terminal_points(
     terminal_points_by_component
         .iter()
         .map(|(component_id, points)| {
-            let moved = original.selection.components.contains(&*component_id);
+            let moved = original.selection.components.contains(component_id);
             let points = points
                 .iter()
                 .map(|point| {
@@ -2012,9 +2018,9 @@ fn exact_offset(point: Point, delta: Point) -> Point {
 
 #[cfg(test)]
 mod tests {
+    use super::super::component_edit::legacy_terminal_points as component_terminal_points;
+    use super::super::component_type::ComponentType;
     use super::*;
-    use rspice_design::schematic::component_edit::legacy_terminal_points as component_terminal_points;
-    use rspice_design::schematic::component_type::ComponentType;
 
     #[test]
     fn shove_routes_around_component_bodies() {

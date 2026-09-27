@@ -23,13 +23,12 @@ use super::rotation::Rotation;
 use super::selection::Selection;
 use super::snap::SnapEngine;
 use super::tool::Tool;
-use super::wire::{Wire, WireConnection, WireDrawing, WireSegment};
+use super::wire::{Wire, WireConnection, WireDrawing};
 
 mod components;
 mod editor_ops;
 mod identity;
 mod junction_ops;
-mod movement;
 mod selection_ops;
 #[cfg(test)]
 mod serialization_tests;
@@ -48,7 +47,7 @@ fn default_zoom() -> f64 {
     1.0
 }
 
-pub use movement::{MoveSelectionError, MoveSelectionMode};
+pub use rspice_design::schematic::movement::{MoveSelectionError, MoveSelectionMode};
 
 /// Geometry policy applied while stretching one selected schematic segment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

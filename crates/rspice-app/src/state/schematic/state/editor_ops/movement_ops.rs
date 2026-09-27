@@ -5,9 +5,9 @@
 //! editor is judged on. A wire with one end inside the selection stretches;
 //! a wire wholly inside travels.
 
-use super::super::movement::{self, MovementImpact, MovementSelection};
 use super::super::*;
 use rspice_design::schematic::component_edit::legacy_terminal_points;
+use rspice_design::schematic::movement::{self, MovementImpact, MovementSelection};
 
 impl SchematicState {
     fn apply_movement_impact(&mut self, impact: MovementImpact) {
