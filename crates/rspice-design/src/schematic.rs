@@ -1,5 +1,6 @@
 //! Schematic document records and geometry, independent of editor gestures.
 
+pub mod design_note;
 pub mod document_policy;
 pub mod documentation_shape;
 pub mod ground_names;

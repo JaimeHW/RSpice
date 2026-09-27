@@ -27,10 +27,11 @@ struct DesignNoteScreenLayout {
 
 fn resolved_text(note: &DesignNote, state: &AppState) -> String {
     let view_path = state.workspace.active_view.display_path();
-    note.rendered_text(&DesignNoteRenderContext::for_schematic(
-        &view_path,
-        &state.schematic,
-    ))
+    note.rendered_text(&DesignNoteRenderContext {
+        view_path: &view_path,
+        component_count: state.schematic.components.len(),
+        conductor_count: state.schematic.wires.len() + state.schematic.buses.len(),
+    })
 }
 
 fn screen_layout(

@@ -157,10 +157,11 @@ fn design_note_preview_text(state: &AppState) -> String {
         return source.to_owned();
     };
     let view_path = state.workspace.active_view.display_path();
-    note.rendered_text(&DesignNoteRenderContext::for_schematic(
-        &view_path,
-        &state.schematic,
-    ))
+    note.rendered_text(&DesignNoteRenderContext {
+        view_path: &view_path,
+        component_count: state.schematic.components.len(),
+        conductor_count: state.schematic.wires.len() + state.schematic.buses.len(),
+    })
 }
 
 fn workflow_body(

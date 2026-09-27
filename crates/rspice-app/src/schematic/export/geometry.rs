@@ -190,7 +190,11 @@ pub(super) fn write_documentation_shape(
 }
 
 fn design_note_export_text(state: &SchematicState, note: &DesignNote, view_path: &str) -> String {
-    note.rendered_text(&DesignNoteRenderContext::for_schematic(view_path, state))
+    note.rendered_text(&DesignNoteRenderContext {
+        view_path,
+        component_count: state.components.len(),
+        conductor_count: state.wires.len() + state.buses.len(),
+    })
 }
 
 pub(super) fn include_design_note_bounds(
