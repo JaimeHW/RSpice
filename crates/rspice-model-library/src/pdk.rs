@@ -5,6 +5,7 @@
 use rspice_app_types::product::ContentDigest;
 use sha2::{Digest as _, Sha256};
 
+pub mod callback;
 pub mod contracts;
 mod trust;
 pub use trust::{

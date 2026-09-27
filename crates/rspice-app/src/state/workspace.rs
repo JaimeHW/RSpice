@@ -1589,22 +1589,27 @@ impl ProjectWorkspace {
                     "callback receipt sequence is exhausted".to_owned(),
                 )
             })?;
-        let receipt = ProjectPdkCallbackReceipt::issue(
+        let receipt = ProjectPdkCallbackReceipt {
+            schema_version:
+                rspice_model_library::pdk::callback::PROJECT_PDK_CALLBACK_RECEIPT_SCHEMA_VERSION,
             sequence,
-            self.project.id(),
+            project_id: self.project.id(),
             from_project_revision,
             to_project_revision,
             plan_id,
             plan_revision,
-            authority.actor_id.trim().to_owned(),
-            authority.authority_id.trim().to_owned(),
-            reason.trim().to_owned(),
+            actor_id: authority.actor_id.trim().to_owned(),
+            authority_id: authority.authority_id.trim().to_owned(),
+            reason: reason.trim().to_owned(),
             input,
             execution,
-            self.pdk_callback_receipts
+            previous_receipt_digest: self
+                .pdk_callback_receipts
                 .last()
                 .map(|receipt| receipt.receipt_digest),
-        )?;
+            receipt_digest: ContentDigest::from_bytes([0; 32]),
+        }
+        .with_validated_digest()?;
 
         let mut candidate = self.clone();
         let committed_revision = candidate

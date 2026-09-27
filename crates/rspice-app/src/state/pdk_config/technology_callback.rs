@@ -9,34 +9,31 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest as _, Sha256};
 use wasmi::{
     Caller, Config, EnforcedLimits, Engine, Extern, ExternType, Linker, Module, Store, StoreLimits,
     StoreLimitsBuilder, ValType,
 };
 
-use crate::product::{ContentDigest, ObjectRevision, ProjectId, SimulationPlanId};
+use crate::product::ContentDigest;
+use rspice_model_library::pdk::callback::{
+    MAX_PDK_CALLBACK_METADATA_ENTRIES, MAX_PDK_CALLBACK_METADATA_KEY_BYTES,
+    MAX_PDK_CALLBACK_METADATA_TOTAL_BYTES, MAX_PDK_CALLBACK_METADATA_VALUE_BYTES,
+    MAX_PDK_CALLBACK_PARAMETER_KEY_BYTES, PDK_CALLBACK_EXECUTION_RECEIPT_SCHEMA_VERSION,
+    PDK_CALLBACK_FUEL_LIMIT, PDK_CALLBACK_MEMORY_LIMIT_BYTES, digest_metadata, validate_host_key,
+    validate_host_text, validate_metadata,
+};
+pub use rspice_model_library::pdk::callback::{
+    MAX_PROJECT_PDK_CALLBACK_RECEIPTS, PdkCallbackError, PdkCallbackExecutionInput,
+    PdkCallbackExecutionReceipt, ProjectPdkCallbackReceipt,
+};
+use rspice_model_library::pdk::content_digest;
 
 use super::technology_package::{
     MAX_PDK_ARTIFACT_BYTES, MAX_PDK_CALLBACK_ARTIFACT_BYTES, MAX_PDK_TOTAL_ARTIFACT_BYTES,
-    PDK_CALLBACK_ABI_VERSION, PdkCallbackCapability, PdkCallbackContract, PdkExecutionTarget,
-    PdkTechnologyArtifact, PdkTechnologyBinding, PdkTechnologyError, SignedPdkTechnologyArchive,
-    ValidatedPdkTechnologyPackage, current_execution_target,
+    PDK_CALLBACK_ABI_VERSION, PdkCallbackCapability, PdkCallbackContract, PdkTechnologyArtifact,
+    PdkTechnologyError, SignedPdkTechnologyArchive, ValidatedPdkTechnologyPackage,
+    current_execution_target,
 };
-
-pub const PDK_CALLBACK_EXECUTION_RECEIPT_SCHEMA_VERSION: u32 = 1;
-pub const PROJECT_PDK_CALLBACK_RECEIPT_SCHEMA_VERSION: u32 = 1;
-pub const MAX_PROJECT_PDK_CALLBACK_RECEIPTS: usize = 4_096;
-pub const PDK_CALLBACK_FUEL_LIMIT: u64 = 10_000_000;
-pub const PDK_CALLBACK_MEMORY_LIMIT_BYTES: usize = 8 * 1024 * 1024;
-pub const MAX_PDK_CALLBACK_PROJECT_PARAMETERS: usize = 1_024;
-pub const MAX_PDK_CALLBACK_PARAMETER_KEY_BYTES: usize = 256;
-pub const MAX_PDK_CALLBACK_PARAMETER_VALUE_BYTES: usize = 16 * 1024;
-pub const MAX_PDK_CALLBACK_METADATA_ENTRIES: usize = 256;
-pub const MAX_PDK_CALLBACK_METADATA_KEY_BYTES: usize = 256;
-pub const MAX_PDK_CALLBACK_METADATA_VALUE_BYTES: usize = 64 * 1024;
-pub const MAX_PDK_CALLBACK_METADATA_TOTAL_BYTES: usize = 256 * 1024;
 
 const HOST_ABI_MODULE: &str = "rspice";
 const GUEST_MEMORY_EXPORT: &str = "memory";
@@ -45,323 +42,6 @@ const HOST_ERROR_NOT_FOUND: i32 = -2;
 const HOST_ERROR_BUFFER_TOO_SMALL: i32 = -3;
 const HOST_ERROR_FORBIDDEN: i32 = -4;
 const HOST_ERROR_LIMIT: i32 = -5;
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PdkCallbackExecutionInput {
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub project_parameters: BTreeMap<String, String>,
-}
-
-impl PdkCallbackExecutionInput {
-    pub fn validate(&self) -> Result<(), PdkCallbackError> {
-        if self.project_parameters.len() > MAX_PDK_CALLBACK_PROJECT_PARAMETERS {
-            return Err(PdkCallbackError::InvalidInput(format!(
-                "project parameter count exceeds {MAX_PDK_CALLBACK_PROJECT_PARAMETERS}"
-            )));
-        }
-        for (key, value) in &self.project_parameters {
-            validate_host_key(
-                "project parameter key",
-                key,
-                MAX_PDK_CALLBACK_PARAMETER_KEY_BYTES,
-            )?;
-            validate_host_text(
-                "project parameter value",
-                value,
-                MAX_PDK_CALLBACK_PARAMETER_VALUE_BYTES,
-            )?;
-        }
-        Ok(())
-    }
-
-    pub fn content_digest(&self) -> Result<ContentDigest, PdkCallbackError> {
-        self.validate()?;
-        let bytes = serde_json::to_vec(self)
-            .map_err(|error| PdkCallbackError::Serialization(error.to_string()))?;
-        Ok(content_digest(&bytes))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PdkCallbackExecutionReceipt {
-    pub schema_version: u32,
-    pub package_binding: PdkTechnologyBinding,
-    pub archive_digest: ContentDigest,
-    pub callback_id: String,
-    pub callback_artifact_path: String,
-    pub callback_artifact_digest: ContentDigest,
-    pub abi_version: u32,
-    pub execution_target: PdkExecutionTarget,
-    pub input_digest: ContentDigest,
-    pub output_digest: ContentDigest,
-    pub fuel_limit: u64,
-    pub fuel_consumed: u64,
-    pub derived_metadata: BTreeMap<String, String>,
-    pub receipt_digest: ContentDigest,
-}
-
-#[derive(Serialize)]
-struct CallbackReceiptPayload<'a> {
-    schema_version: u32,
-    package_binding: &'a PdkTechnologyBinding,
-    archive_digest: ContentDigest,
-    callback_id: &'a str,
-    callback_artifact_path: &'a str,
-    callback_artifact_digest: ContentDigest,
-    abi_version: u32,
-    execution_target: PdkExecutionTarget,
-    input_digest: ContentDigest,
-    output_digest: ContentDigest,
-    fuel_limit: u64,
-    fuel_consumed: u64,
-    derived_metadata: &'a BTreeMap<String, String>,
-}
-
-impl PdkCallbackExecutionReceipt {
-    pub fn validate(&self) -> Result<(), PdkCallbackError> {
-        if self.schema_version != PDK_CALLBACK_EXECUTION_RECEIPT_SCHEMA_VERSION {
-            return Err(PdkCallbackError::InvalidReceipt(format!(
-                "unsupported receipt schema {}",
-                self.schema_version
-            )));
-        }
-        validate_host_key("callback id", &self.callback_id, 256)?;
-        validate_host_key(
-            "callback artifact path",
-            &self.callback_artifact_path,
-            1_024,
-        )?;
-        if self.abi_version != PDK_CALLBACK_ABI_VERSION {
-            return Err(PdkCallbackError::InvalidReceipt(format!(
-                "callback ABI {} is not supported",
-                self.abi_version
-            )));
-        }
-        if self.fuel_limit != PDK_CALLBACK_FUEL_LIMIT || self.fuel_consumed > self.fuel_limit {
-            return Err(PdkCallbackError::InvalidReceipt(
-                "fuel identity is outside the callback execution contract".to_owned(),
-            ));
-        }
-        validate_metadata(&self.derived_metadata)?;
-        if digest_metadata(&self.derived_metadata)? != self.output_digest {
-            return Err(PdkCallbackError::InvalidReceipt(
-                "derived metadata digest does not match its payload".to_owned(),
-            ));
-        }
-        if self.calculate_digest()? != self.receipt_digest {
-            return Err(PdkCallbackError::InvalidReceipt(
-                "receipt digest does not match its payload".to_owned(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn calculate_digest(&self) -> Result<ContentDigest, PdkCallbackError> {
-        let payload = CallbackReceiptPayload {
-            schema_version: self.schema_version,
-            package_binding: &self.package_binding,
-            archive_digest: self.archive_digest,
-            callback_id: &self.callback_id,
-            callback_artifact_path: &self.callback_artifact_path,
-            callback_artifact_digest: self.callback_artifact_digest,
-            abi_version: self.abi_version,
-            execution_target: self.execution_target,
-            input_digest: self.input_digest,
-            output_digest: self.output_digest,
-            fuel_limit: self.fuel_limit,
-            fuel_consumed: self.fuel_consumed,
-            derived_metadata: &self.derived_metadata,
-        };
-        let bytes = serde_json::to_vec(&payload)
-            .map_err(|error| PdkCallbackError::Serialization(error.to_string()))?;
-        Ok(content_digest(&bytes))
-    }
-}
-
-/// Project-owned evidence for one exact signed callback invocation.
-///
-/// The embedded execution receipt proves the sandbox/package boundary. This
-/// outer receipt additionally binds the canonical input payload, active plan,
-/// project revision transaction, operator identity, and append-only project
-/// ledger position so derived metadata cannot be mistaken for ambient or
-/// administrator-active state.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProjectPdkCallbackReceipt {
-    pub schema_version: u32,
-    pub sequence: u64,
-    pub project_id: ProjectId,
-    pub from_project_revision: ObjectRevision,
-    pub to_project_revision: ObjectRevision,
-    pub plan_id: SimulationPlanId,
-    pub plan_revision: ObjectRevision,
-    pub actor_id: String,
-    pub authority_id: String,
-    pub reason: String,
-    pub input: PdkCallbackExecutionInput,
-    pub execution: PdkCallbackExecutionReceipt,
-    pub previous_receipt_digest: Option<ContentDigest>,
-    pub receipt_digest: ContentDigest,
-}
-
-#[derive(Serialize)]
-struct ProjectPdkCallbackReceiptPayload<'a> {
-    schema_version: u32,
-    sequence: u64,
-    project_id: ProjectId,
-    from_project_revision: ObjectRevision,
-    to_project_revision: ObjectRevision,
-    plan_id: SimulationPlanId,
-    plan_revision: ObjectRevision,
-    actor_id: &'a str,
-    authority_id: &'a str,
-    reason: &'a str,
-    input: &'a PdkCallbackExecutionInput,
-    execution: &'a PdkCallbackExecutionReceipt,
-    previous_receipt_digest: Option<ContentDigest>,
-}
-
-impl ProjectPdkCallbackReceipt {
-    pub(crate) fn issue(
-        sequence: u64,
-        project_id: ProjectId,
-        from_project_revision: ObjectRevision,
-        to_project_revision: ObjectRevision,
-        plan_id: SimulationPlanId,
-        plan_revision: ObjectRevision,
-        actor_id: String,
-        authority_id: String,
-        reason: String,
-        input: PdkCallbackExecutionInput,
-        execution: PdkCallbackExecutionReceipt,
-        previous_receipt_digest: Option<ContentDigest>,
-    ) -> Result<Self, PdkCallbackError> {
-        let mut receipt = Self {
-            schema_version: PROJECT_PDK_CALLBACK_RECEIPT_SCHEMA_VERSION,
-            sequence,
-            project_id,
-            from_project_revision,
-            to_project_revision,
-            plan_id,
-            plan_revision,
-            actor_id,
-            authority_id,
-            reason,
-            input,
-            execution,
-            previous_receipt_digest,
-            receipt_digest: ContentDigest::from_bytes([0; 32]),
-        };
-        receipt.receipt_digest = receipt.calculate_digest()?;
-        receipt.validate()?;
-        Ok(receipt)
-    }
-
-    pub fn validate(&self) -> Result<(), PdkCallbackError> {
-        if self.schema_version != PROJECT_PDK_CALLBACK_RECEIPT_SCHEMA_VERSION {
-            return Err(PdkCallbackError::InvalidReceipt(format!(
-                "unsupported project callback receipt schema {}",
-                self.schema_version
-            )));
-        }
-        if self.sequence == 0 {
-            return Err(PdkCallbackError::InvalidReceipt(
-                "project callback receipt sequence is zero".to_owned(),
-            ));
-        }
-        if self.project_id.as_uuid().is_nil() {
-            return Err(PdkCallbackError::InvalidReceipt(
-                "project callback receipt has a nil project identity".to_owned(),
-            ));
-        }
-        if self.from_project_revision.next().ok() != Some(self.to_project_revision) {
-            return Err(PdkCallbackError::InvalidReceipt(
-                "project callback receipt does not advance exactly one project revision".to_owned(),
-            ));
-        }
-        validate_receipt_text("actor ID", &self.actor_id, 256)?;
-        validate_receipt_text("authority ID", &self.authority_id, 256)?;
-        validate_receipt_text("reason", &self.reason, 2_048)?;
-        self.input.validate()?;
-        self.execution.validate()?;
-        if self.input.content_digest()? != self.execution.input_digest {
-            return Err(PdkCallbackError::InvalidReceipt(
-                "project callback input payload does not match the sandbox input digest".to_owned(),
-            ));
-        }
-        if self.calculate_digest()? != self.receipt_digest {
-            return Err(PdkCallbackError::InvalidReceipt(
-                "project callback receipt digest does not match its payload".to_owned(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn calculate_digest(&self) -> Result<ContentDigest, PdkCallbackError> {
-        let payload = ProjectPdkCallbackReceiptPayload {
-            schema_version: self.schema_version,
-            sequence: self.sequence,
-            project_id: self.project_id,
-            from_project_revision: self.from_project_revision,
-            to_project_revision: self.to_project_revision,
-            plan_id: self.plan_id,
-            plan_revision: self.plan_revision,
-            actor_id: &self.actor_id,
-            authority_id: &self.authority_id,
-            reason: &self.reason,
-            input: &self.input,
-            execution: &self.execution,
-            previous_receipt_digest: self.previous_receipt_digest,
-        };
-        let bytes = serde_json::to_vec(&payload)
-            .map_err(|error| PdkCallbackError::Serialization(error.to_string()))?;
-        Ok(content_digest(&bytes))
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum PdkCallbackError {
-    #[error(transparent)]
-    Technology(#[from] PdkTechnologyError),
-    #[error("project PDK callback transaction failed: {0}")]
-    ProjectTransaction(String),
-    #[error("invalid PDK callback input: {0}")]
-    InvalidInput(String),
-    #[error("signed PDK callback '{0}' is not declared")]
-    CallbackNotFound(String),
-    #[error("signed PDK callback module is invalid: {0}")]
-    InvalidModule(String),
-    #[error("signed PDK callback capability violation: {0}")]
-    CapabilityViolation(String),
-    #[error("signed PDK callback could not be instantiated: {0}")]
-    Instantiation(String),
-    #[error("signed PDK callback execution failed: {0}")]
-    Execution(String),
-    #[error("signed PDK callback returned status {0}")]
-    GuestStatus(i32),
-    #[error("signed PDK callback host contract was violated: {0}")]
-    HostViolation(String),
-    #[error("invalid PDK callback receipt: {0}")]
-    InvalidReceipt(String),
-    #[error("PDK callback serialization failed: {0}")]
-    Serialization(String),
-}
-
-fn validate_receipt_text(field: &str, value: &str, maximum: usize) -> Result<(), PdkCallbackError> {
-    if value.is_empty() || value != value.trim() {
-        return Err(PdkCallbackError::InvalidReceipt(format!(
-            "project callback {field} must be nonempty and trimmed"
-        )));
-    }
-    if value.len() > maximum || value.chars().any(char::is_control) {
-        return Err(PdkCallbackError::InvalidReceipt(format!(
-            "project callback {field} exceeds {maximum} bytes or contains control characters"
-        )));
-    }
-    Ok(())
-}
 
 #[derive(Debug)]
 struct SealedCallback {
@@ -421,7 +101,7 @@ pub(super) fn execute_signed_callback(
     let callback = seal_callback(package, contract, &package_files)?;
     let (metadata, fuel_consumed) = execute_module(&callback, input, package_files)?;
     let output_digest = digest_metadata(&metadata)?;
-    let mut receipt = PdkCallbackExecutionReceipt {
+    let receipt = PdkCallbackExecutionReceipt {
         schema_version: PDK_CALLBACK_EXECUTION_RECEIPT_SCHEMA_VERSION,
         package_binding: package.binding(),
         archive_digest: package.archive_digest(),
@@ -437,9 +117,7 @@ pub(super) fn execute_signed_callback(
         derived_metadata: metadata,
         receipt_digest: ContentDigest::from_bytes([0; 32]),
     };
-    receipt.receipt_digest = receipt.calculate_digest()?;
-    receipt.validate()?;
-    Ok(receipt)
+    receipt.with_validated_digest()
 }
 
 fn seal_archive_files(
@@ -1038,69 +716,9 @@ fn set_host_fault(caller: &mut Caller<'_, CallbackHostState>, detail: String) {
     }
 }
 
-fn validate_metadata(metadata: &BTreeMap<String, String>) -> Result<(), PdkCallbackError> {
-    if metadata.len() > MAX_PDK_CALLBACK_METADATA_ENTRIES {
-        return Err(PdkCallbackError::InvalidReceipt(format!(
-            "derived metadata contains more than {MAX_PDK_CALLBACK_METADATA_ENTRIES} entries"
-        )));
-    }
-    let mut total = 0usize;
-    for (key, value) in metadata {
-        validate_host_key(
-            "derived metadata key",
-            key,
-            MAX_PDK_CALLBACK_METADATA_KEY_BYTES,
-        )?;
-        validate_host_text(
-            "derived metadata value",
-            value,
-            MAX_PDK_CALLBACK_METADATA_VALUE_BYTES,
-        )?;
-        total = total.saturating_add(key.len()).saturating_add(value.len());
-    }
-    if total > MAX_PDK_CALLBACK_METADATA_TOTAL_BYTES {
-        return Err(PdkCallbackError::InvalidReceipt(format!(
-            "derived metadata exceeds {MAX_PDK_CALLBACK_METADATA_TOTAL_BYTES} bytes"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_host_key(field: &str, value: &str, maximum: usize) -> Result<(), PdkCallbackError> {
-    validate_host_text(field, value, maximum)?;
-    if !value.bytes().all(|byte| {
-        byte.is_ascii_alphanumeric()
-            || matches!(byte, b'_' | b'-' | b'.' | b':' | b'/' | b'[' | b']' | b'@')
-    }) {
-        return Err(PdkCallbackError::InvalidInput(format!(
-            "{field} contains unsupported characters"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_host_text(field: &str, value: &str, maximum: usize) -> Result<(), PdkCallbackError> {
-    if value.is_empty() || value.len() > maximum || value.chars().any(char::is_control) {
-        return Err(PdkCallbackError::InvalidInput(format!(
-            "{field} must contain 1..={maximum} non-control UTF-8 bytes"
-        )));
-    }
-    Ok(())
-}
-
-fn digest_metadata(metadata: &BTreeMap<String, String>) -> Result<ContentDigest, PdkCallbackError> {
-    validate_metadata(metadata)?;
-    let bytes = serde_json::to_vec(metadata)
-        .map_err(|error| PdkCallbackError::Serialization(error.to_string()))?;
-    Ok(content_digest(&bytes))
-}
-
-fn content_digest(bytes: &[u8]) -> ContentDigest {
-    ContentDigest::from_bytes(Sha256::digest(bytes).into())
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::technology_package::PdkTechnologyBinding;
     use super::*;
     use crate::state::pdk_config::{
         PdkAdministrativeAuthority, PdkPublisherTrustStore, PdkTechnologyRegistry,
