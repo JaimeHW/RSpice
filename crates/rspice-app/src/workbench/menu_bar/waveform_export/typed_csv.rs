@@ -1,1405 +1,162 @@
-//! The table an analysis whose result is a report rather than a waveform
-//! publishes.
-//!
-//! An operating point, a sensitivity table, a periodic-orbit certificate, a
-//! SOA observation and their kin each retain evidence with its own
-//! shape, and each spells that evidence as its own rows. Those spellings are
-//! one concern — what a family's table looks like — and they live here
-//! so that the routing in the parent reads as routing.
-//!
-//! The result is a [`PreparedTypedResultCsv`], which the parent publishes as
-//! CSV or, delimiter-translated, as TSV.
+//! Application filenames and messages for retained result tables.
 
-use super::{PreparedTypedResultCsv, csv_text};
-mod qpac;
-mod qpnoise;
-mod qpxf;
+use super::PreparedTypedResultCsv;
+use rspice_formats::result_csv::{TypedCsvSummary, encode_typed_result_csv};
 
 pub(super) fn prepare_typed_result_csv(
     analysis: &crate::state::AnalysisResult,
 ) -> Option<PreparedTypedResultCsv> {
-    let payload = analysis.result_payload.as_ref()?;
-    if !analysis.success || analysis.validate_retained_evidence().is_err() {
-        return None;
-    }
-
-    use crate::state::{AnalysisResultPayload, SensitivityResultMode};
-    match payload {
-        AnalysisResultPayload::Qpac { response } => qpac::prepare(response),
-        AnalysisResultPayload::Qpxf { response } => qpxf::prepare(response),
-        AnalysisResultPayload::Qpnoise { response } => qpnoise::prepare(response),
-        AnalysisResultPayload::Qpss { operating_point } => {
-            let grid = operating_point
-                .validate_retained_payload_with_abort(
-                    &rspice_core::ResourceLimits::default(),
-                    &rspice_core::NoAbort,
-                )
-                .ok()?;
-            let mut contents = String::from(
-                "signal,unit,tone_tuple,frequency_hz,fourier_real,fourier_imaginary\n",
-            );
-            for (row, coefficients) in operating_point.spectra().iter().enumerate() {
-                let (signal, unit) = if row < operating_point.node_names().len() {
-                    (format!("V({})", operating_point.node_names()[row]), "V")
-                } else {
-                    (
-                        format!(
-                            "I({})",
-                            operating_point.branch_names()
-                                [row - operating_point.node_names().len()]
-                        ),
-                        "A",
-                    )
-                };
-                for (index, coefficient) in coefficients.iter().enumerate() {
-                    let tuple = grid.indices()[index]
-                        .iter()
-                        .map(i32::to_string)
-                        .collect::<Vec<_>>()
-                        .join(";");
-                    contents.push_str(&format!(
-                        "{},{},{},{:.17e},{:.17e},{:.17e}\n",
-                        csv_text(&signal),
-                        unit,
-                        csv_text(&tuple),
-                        grid.frequencies_hz()[index],
-                        coefficient.re,
-                        coefficient.im
-                    ));
-                }
-            }
-            Some(PreparedTypedResultCsv {
-                default_name: "qpss-spectrum.csv",
-                contents,
-                detail: format!(
-                    "{} MNA coordinates, {} signed tone tuples; complex Fourier coefficients",
-                    operating_point.spectra().len(),
-                    grid.len()
-                ),
-            })
-        }
-
-        // DC exports its sampled curves through the ordinary waveform CSV path.
-        AnalysisResultPayload::DcSweep { .. } => None,
-        // One row per retained contributor, with the run's own facts repeated
-        // in trailing columns: a contributor table read without the spread it
-        // divides, or without the limits that trimmed it, says nothing. The
-        // signs are kept — a negative share reduces the variance — and every
-        // number is exact, because this file is what a reader takes away.
-        AnalysisResultPayload::DcMismatch { evidence } => {
-            let cumulative = evidence.cumulative_shares();
-            let output = csv_text(&evidence.output);
-            let unit = csv_text(&evidence.output_unit);
-            let mut contents = String::from(
-                "rank,instance,parameter,scope,sigma_parameter,sensitivity,contribution,share,\
-                 cumulative_share,output,output_unit,nominal_value,sigma_total,sigma_mismatch,\
-                 sigma_process,sigma_multiplier,quoted_sigma,evaluated_contributors,\
-                 applied_correlations_mismatch,applied_correlations_process\n",
-            );
-            for (rank, (row, running)) in evidence.contributors.iter().zip(&cumulative).enumerate()
-            {
-                contents.push_str(&format!(
-                    "{},{},{},{},{:.17e},{:.17e},{:.17e},{:.17e},{:.17e},{output},{unit},\
-                     {:.17e},{:.17e},{:.17e},{:.17e},{:.17e},{:.17e},{},{},{}\n",
-                    rank + 1,
-                    csv_text(&row.instance),
-                    csv_text(&row.parameter),
-                    row.scope.tag(),
-                    row.sigma_parameter,
-                    row.sensitivity,
-                    row.contribution,
-                    row.share,
-                    running,
-                    evidence.nominal_value,
-                    evidence.sigma_total,
-                    evidence.sigma_mismatch,
-                    evidence.sigma_process,
-                    evidence.sigma_multiplier,
-                    evidence.quoted_sigma(),
-                    evidence.evaluated_contributors,
-                    evidence.applied_correlations_mismatch,
-                    evidence.applied_correlations_process,
-                ));
-            }
-            Some(PreparedTypedResultCsv {
-                default_name: "dc-mismatch.csv",
-                contents,
-                detail: format!(
-                    "{} of {} exact DC mismatch contributors",
-                    evidence.retained_contributors(),
-                    evidence.evaluated_contributors
-                ),
-            })
-        }
-        AnalysisResultPayload::OperatingPoint {
-            temperature_mode,
-            temperature_celsius,
-            initial_guess,
-            node_initialization,
-            homotopy,
-            annotation,
-            device_detail,
-            save_device_op,
-            accuracy,
-            selected_devices,
-            violation_devices,
-            violation_source_content_digest,
-            validated_startup_directives,
-            mna_node_names,
-            mna_branch_names,
-            mna_solution,
-            effective_source_content_digest,
-            previous_state,
-            run_point_index,
-            run_point_count,
-            run_point_process,
-            run_point_supply_voltage,
-            run_point_nominal_supply_voltage,
-        } => {
-            let mut contents = String::from("field,value,unit\n");
-            for (field, value, unit) in [
-                (
-                    "temperature_mode",
-                    serialized_enum_name(temperature_mode),
-                    "",
-                ),
-                (
-                    "temperature_celsius",
-                    format!("{temperature_celsius:.17e}"),
-                    "degC",
-                ),
-                ("initial_guess", serialized_enum_name(initial_guess), ""),
-                (
-                    "node_initialization",
-                    serialized_enum_name(node_initialization),
-                    "",
-                ),
-                ("homotopy", serialized_enum_name(homotopy), ""),
-                ("annotation", serialized_enum_name(annotation), ""),
-                ("device_detail", serialized_enum_name(device_detail), ""),
-                ("save_device_op", serialized_enum_name(save_device_op), ""),
-                ("accuracy", serialized_enum_name(accuracy), ""),
-                (
-                    "validated_startup_directives",
-                    validated_startup_directives.to_string(),
-                    "count",
-                ),
-                ("selected_devices", selected_devices.join(";"), ""),
-                ("violation_devices", violation_devices.join(";"), ""),
-                (
-                    "violation_source_content_digest",
-                    violation_source_content_digest
-                        .map_or_else(String::new, |digest| digest.to_string()),
-                    "sha256",
-                ),
-                ("mna_nodes", mna_node_names.len().to_string(), "count"),
-                ("mna_branches", mna_branch_names.len().to_string(), "count"),
-                ("mna_values", mna_solution.len().to_string(), "count"),
-                (
-                    "effective_source_content_digest",
-                    effective_source_content_digest
-                        .map_or_else(String::new, |digest| digest.to_string()),
-                    "sha256",
-                ),
-                (
-                    "previous_source_content_digest",
-                    previous_state
-                        .as_ref()
-                        .map_or_else(String::new, |state| state.source_content_digest.to_string()),
-                    "sha256",
-                ),
-                (
-                    "previous_snapshot_digest",
-                    previous_state.as_ref().map_or_else(String::new, |state| {
-                        state.producer_snapshot_digest.to_string()
-                    }),
-                    "sha256",
-                ),
-                (
-                    "previous_result_digest",
-                    previous_state.as_ref().map_or_else(String::new, |state| {
-                        state.producer_result_digest.to_string()
-                    }),
-                    "sha256",
-                ),
-                ("run_point_index", run_point_index.to_string(), "zero_based"),
-                ("run_point_count", run_point_count.to_string(), "count"),
-                (
-                    "run_point_process",
-                    serialized_enum_name(run_point_process),
-                    "",
-                ),
-                (
-                    "run_point_supply_voltage",
-                    run_point_supply_voltage
-                        .map(|voltage| format!("{voltage:.17e}"))
-                        .unwrap_or_default(),
-                    "V",
-                ),
-                (
-                    "run_point_nominal_supply_voltage",
-                    run_point_nominal_supply_voltage
-                        .map(|voltage| format!("{voltage:.17e}"))
-                        .unwrap_or_default(),
-                    "V",
-                ),
-            ] {
-                contents.push_str(&format!(
-                    "{},{},{}\n",
-                    csv_text(field),
-                    csv_text(&value),
-                    csv_text(unit)
-                ));
-            }
-            Some(PreparedTypedResultCsv {
-                default_name: "operating-point-contract.csv",
-                contents,
-                detail: "exact operating-point execution and retention contract".to_owned(),
-            })
-        }
-        AnalysisResultPayload::PoleZero {
-            poles,
-            zeros,
-            pole_evidence,
-            zero_evidence,
-            gain,
-        } => {
-            let mut contents =
-                String::from("record,index,real_rad_per_s,imaginary_rad_per_s,value\n");
-            let gain = gain
-                .map(|gain| format!("{gain:.17e}"))
-                .unwrap_or_else(|| "unavailable".to_owned());
-            contents.push_str(&format!("gain,,,,{gain}\n"));
-            append_pole_zero_evidence_csv(&mut contents, "pole", pole_evidence);
-            append_pole_zero_evidence_csv(&mut contents, "zero", zero_evidence);
-            for (kind, roots) in [("pole", poles), ("zero", zeros)] {
-                for (index, root) in roots.iter().enumerate() {
-                    contents.push_str(&format!(
-                        "{kind},{index},{:.17e},{:.17e},\n",
-                        root.real, root.imaginary
-                    ));
-                }
-            }
-            Some(PreparedTypedResultCsv {
-                default_name: "pole-zero.csv",
-                contents,
-                detail: format!(
-                    "{} poles ({}), {} zeros ({}), DC gain {}",
-                    poles.len(),
-                    pole_evidence.label(),
-                    zeros.len(),
-                    zero_evidence.label(),
-                    if gain == "unavailable" {
-                        "unavailable"
-                    } else {
-                        "retained"
-                    }
-                ),
-            })
-        }
-        AnalysisResultPayload::PssFloquet {
-            period_s,
-            fundamental_frequency_hz,
-            iterations,
-            residual_norm,
-            multipliers,
-            floquet_evidence,
-            orbit_kind,
-            trivial_multiplier_index,
-            stability_verdict,
-        } => {
-            let mut contents = periodic_csv_header();
-            for (field, value, unit) in [
-                ("period_s", optional_f64_csv(*period_s), "s"),
-                (
-                    "fundamental_frequency_hz",
-                    optional_f64_csv(*fundamental_frequency_hz),
-                    "Hz",
-                ),
-                ("iterations", optional_u64_csv(*iterations), "count"),
-                ("residual_norm", optional_f64_csv(*residual_norm), ""),
-                (
-                    "retained_multiplier_count",
-                    multipliers.len().to_string(),
-                    "count",
-                ),
-                (
-                    "authenticated_complete_multiplier_count",
-                    authenticated_floquet_count_csv(multipliers.len(), floquet_evidence),
-                    "count",
-                ),
-                (
-                    "floquet_evidence_json",
-                    serde_json::to_string(floquet_evidence)
-                        .expect("Floquet evidence is JSON-serializable"),
-                    "",
-                ),
-                ("orbit_kind", serialized_enum_name(orbit_kind), ""),
-                (
-                    "trivial_multiplier_index",
-                    optional_u64_csv(*trivial_multiplier_index),
-                    "zero_based",
-                ),
-                (
-                    "stability_verdict",
-                    serialized_enum_name(stability_verdict),
-                    "",
-                ),
-            ] {
-                append_periodic_metadata_csv(&mut contents, field, &value, unit);
-            }
-            append_floquet_certificate_csv(&mut contents, floquet_evidence);
-            for (index, multiplier) in multipliers.iter().enumerate() {
-                append_periodic_csv_row(
-                    &mut contents,
-                    [
-                        "multiplier".to_owned(),
-                        index.to_string(),
-                        format!("{:.17e}", multiplier.multiplier.real),
-                        format!("{:.17e}", multiplier.multiplier.imaginary),
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                    ],
-                );
-            }
-            Some(PreparedTypedResultCsv {
-                default_name: "pss-floquet-evidence.csv",
-                contents,
-                detail: format!(
-                    "{} with retained qualification evidence",
-                    floquet_export_count_label(
-                        multipliers.len(),
-                        floquet_evidence,
-                        "PSS Floquet multipliers"
-                    )
-                ),
-            })
-        }
-        AnalysisResultPayload::Pstb {
-            period_s,
-            fundamental_frequency_hz,
-            stability_threshold,
-            probe_instance,
-            detect_subharmonics,
-            modes,
-            floquet_evidence,
-            orbit_kind,
-            trivial_multiplier_index,
-            stability_verdict,
-            stability_classification,
-            min_stability_margin_db,
-            max_multiplier_magnitude,
-            num_unstable,
-            subharmonics,
-            converged,
-            iterations,
-        } => {
-            let mut contents = periodic_csv_header();
-            for (field, value, unit) in [
-                ("period_s", optional_f64_csv(*period_s), "s"),
-                (
-                    "fundamental_frequency_hz",
-                    optional_f64_csv(*fundamental_frequency_hz),
-                    "Hz",
-                ),
-                (
-                    "stability_threshold",
-                    optional_f64_csv(*stability_threshold),
-                    "multiplier_magnitude",
-                ),
-                (
-                    "probe_instance",
-                    probe_instance.clone().unwrap_or_default(),
-                    "",
-                ),
-                (
-                    "detect_subharmonics",
-                    optional_bool_csv(*detect_subharmonics),
-                    "",
-                ),
-                ("retained_mode_count", modes.len().to_string(), "count"),
-                (
-                    "authenticated_complete_mode_count",
-                    authenticated_floquet_count_csv(modes.len(), floquet_evidence),
-                    "count",
-                ),
-                (
-                    "floquet_evidence_json",
-                    serde_json::to_string(floquet_evidence)
-                        .expect("Floquet evidence is JSON-serializable"),
-                    "",
-                ),
-                ("orbit_kind", serialized_enum_name(orbit_kind), ""),
-                (
-                    "trivial_multiplier_index",
-                    optional_u64_csv(*trivial_multiplier_index),
-                    "zero_based",
-                ),
-                (
-                    "stability_verdict",
-                    serialized_enum_name(stability_verdict),
-                    "",
-                ),
-                (
-                    "stability_classification",
-                    serialized_enum_name(stability_classification),
-                    "",
-                ),
-                (
-                    "min_stability_margin_db",
-                    optional_f64_csv(*min_stability_margin_db),
-                    "dB",
-                ),
-                (
-                    "max_multiplier_magnitude",
-                    optional_f64_csv(*max_multiplier_magnitude),
-                    "",
-                ),
-                ("num_unstable", optional_u64_csv(*num_unstable), "count"),
-                (
-                    "subharmonics",
-                    subharmonics
-                        .iter()
-                        .map(u64::to_string)
-                        .collect::<Vec<_>>()
-                        .join(";"),
-                    "orders",
-                ),
-                ("converged", optional_bool_csv(*converged), ""),
-                ("iterations", optional_u64_csv(*iterations), "count"),
-            ] {
-                append_periodic_metadata_csv(&mut contents, field, &value, unit);
-            }
-            append_floquet_certificate_csv(&mut contents, floquet_evidence);
-            for (index, mode) in modes.iter().enumerate() {
-                append_periodic_csv_row(
-                    &mut contents,
-                    [
-                        "mode".to_owned(),
-                        index.to_string(),
-                        format!("{:.17e}", mode.multiplier.real),
-                        format!("{:.17e}", mode.multiplier.imaginary),
-                        format!("{:.17e}", mode.exponent.real),
-                        format!("{:.17e}", mode.exponent.imaginary),
-                        format!("{:.17e}", mode.probe_participation),
-                        mode.is_unstable.to_string(),
-                        mode.is_trivial.to_string(),
-                        mode.subharmonic_order
-                            .map_or_else(String::new, |order| order.to_string()),
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                    ],
-                );
-            }
-            Some(PreparedTypedResultCsv {
-                default_name: "pstb-floquet-evidence.csv",
-                contents,
-                detail: format!(
-                    "{} with retained qualification and stability evidence",
-                    floquet_export_count_label(modes.len(), floquet_evidence, "PSTB Floquet modes")
-                ),
-            })
-        }
-        AnalysisResultPayload::Sensitivity {
-            output,
-            result_mode,
-            rows,
-        } => {
-            let (mode, frequency) = match result_mode {
-                SensitivityResultMode::Dc => ("dc", String::new()),
-                SensitivityResultMode::Ac { frequency_hz } => {
-                    ("ac", format!("{frequency_hz:.17e}"))
-                }
-            };
-            let escaped_output = csv_text(output);
-            let mut contents = String::from(SENSITIVITY_CSV_HEADER);
-            for row in rows {
-                let (raw, raw_status) = sensitivity_csv_value(row.raw);
-                let (normalized, normalized_status) = sensitivity_csv_value(row.normalized);
-                // A single-point payload has no phase column to export: the
-                // two trailing fields are blank rather than zero, which would
-                // read as a measured derivative of nothing.
-                contents.push_str(&format!(
-                    "{},{raw},{normalized},{escaped_output},{mode},{frequency},{raw_status},{normalized_status},,\n",
-                    csv_text(&row.parameter),
-                ));
-            }
-            Some(PreparedTypedResultCsv {
-                default_name: "sensitivity.csv",
-                contents,
-                detail: format!("{} exact sensitivity rows", rows.len()),
-            })
-        }
-        // One row per variable per point, long form: a study of sixty-one
-        // frequencies is sixty-one answers about each variable, and a wide
-        // table keyed by frequency would make the column set depend on the
-        // sweep. The filter that chose the variables is repeated on every row
-        // for the same reason it travels with the evidence.
-        AnalysisResultPayload::SensitivityStudy { evidence } => {
-            let escaped_output = csv_text(&evidence.output);
-            let mode = evidence.basis.mode_tag();
-            let mut contents = String::from(SENSITIVITY_CSV_HEADER);
-            let points = evidence.point_count();
-            for row in &evidence.rows {
-                let parameter = csv_text(&row.parameter);
-                for point in 0..points {
-                    let frequency = evidence
-                        .frequency_at(point)
-                        .map_or_else(String::new, |frequency| format!("{frequency:.17e}"));
-                    let (raw, raw_status) = sensitivity_csv_value(row.raw[point]);
-                    let (normalized, normalized_status) =
-                        sensitivity_csv_value(row.normalized[point]);
-                    let (phase, phase_status) = row.phase.get(point).map_or_else(
-                        || (String::new(), ""),
-                        |value| sensitivity_csv_value(*value),
-                    );
-                    contents.push_str(&format!(
-                        "{parameter},{raw},{normalized},{escaped_output},{mode},{frequency},\
-                         {raw_status},{normalized_status},{phase},{phase_status}\n",
-                    ));
-                }
-            }
-            Some(PreparedTypedResultCsv {
-                default_name: "sensitivity.csv",
-                contents,
-                detail: format!(
-                    "{} exact sensitivity rows",
-                    evidence.rows.len().saturating_mul(points)
-                ),
-            })
-        }
-        AnalysisResultPayload::ScalarMeasurements { values } => {
-            let mut contents = String::from("name,value\n");
-            for (name, value) in values {
-                contents.push_str(&format!("{},{value:.17e}\n", csv_text(name)));
-            }
-            Some(PreparedTypedResultCsv {
-                default_name: "scalar-results.csv",
-                contents,
-                detail: format!("{} exact scalar values", values.len()),
-            })
-        }
-        AnalysisResultPayload::TransferFunction {
-            input_source,
-            output_expression,
-            input_quantity,
-            output_quantity,
-            input_unit,
-            output_unit,
-            normalization,
-            accuracy,
-            gain,
-            input_resistance,
-            output_resistance,
-            nominal_input,
-            nominal_output,
-        } => {
-            let normalization_label = match normalization {
-                crate::state::TransferFunctionNormalizationEvidence::None => "disabled",
-                crate::state::TransferFunctionNormalizationEvidence::RelativeToNominal => {
-                    "relative_to_nominal"
-                }
-                crate::state::TransferFunctionNormalizationEvidence::PerSourceUnit => {
-                    "per_source_unit"
-                }
-            };
-            let accuracy_label = match accuracy {
-                crate::state::TransferFunctionAccuracyEvidence::Fast => "fast",
-                crate::state::TransferFunctionAccuracyEvidence::Balanced => "balanced",
-                crate::state::TransferFunctionAccuracyEvidence::Accurate => "accurate",
-                crate::state::TransferFunctionAccuracyEvidence::Robust => "robust",
-            };
-            let gain_unit = if matches!(
-                normalization,
-                crate::state::TransferFunctionNormalizationEvidence::RelativeToNominal
-            ) {
-                "1"
-            } else {
-                match (input_quantity, output_quantity) {
-                    (
-                        crate::state::TransferFunctionQuantityEvidence::Voltage,
-                        crate::state::TransferFunctionQuantityEvidence::Voltage,
-                    ) => "V/V",
-                    (
-                        crate::state::TransferFunctionQuantityEvidence::Voltage,
-                        crate::state::TransferFunctionQuantityEvidence::Current,
-                    ) => "A/V",
-                    (
-                        crate::state::TransferFunctionQuantityEvidence::Current,
-                        crate::state::TransferFunctionQuantityEvidence::Voltage,
-                    ) => "V/A",
-                    (
-                        crate::state::TransferFunctionQuantityEvidence::Current,
-                        crate::state::TransferFunctionQuantityEvidence::Current,
-                    ) => "A/A",
-                }
-            };
-            let mut contents = String::from(
-                "quantity,value,unit,input_source,output_expression,normalization,accuracy,solve_point\n",
-            );
-            let mut rows = 0usize;
-            let mut push_scalar = |quantity: &str,
-                                   value: &crate::state::TransferFunctionScalarEvidence,
-                                   unit: &str| {
-                let value = match value {
-                    crate::state::TransferFunctionScalarEvidence::Finite(value) => {
-                        format!("{value:.17e}")
-                    }
-                    crate::state::TransferFunctionScalarEvidence::PositiveInfinity => {
-                        "+infinity".to_owned()
-                    }
-                    crate::state::TransferFunctionScalarEvidence::NegativeInfinity => {
-                        "-infinity".to_owned()
-                    }
-                };
-                contents.push_str(&format!(
-                    "{quantity},{value},{},{},{},{normalization_label},{accuracy_label},dc_operating_point\n",
-                    csv_text(unit),
-                    csv_text(input_source),
-                    csv_text(output_expression),
-                ));
-                rows += 1;
-            };
-            if let Some(gain) = gain {
-                push_scalar("transfer_gain", gain, gain_unit);
-            }
-            if let Some(input_resistance) = input_resistance {
-                push_scalar("input_resistance", input_resistance, "ohm");
-            }
-            if let Some(output_resistance) = output_resistance {
-                push_scalar("output_resistance", output_resistance, "ohm");
-            }
-            if let Some(value) = nominal_input {
-                contents.push_str(&format!(
-                    "nominal_input,{value:.17e},{},{},{},{normalization_label},{accuracy_label},dc_operating_point\n",
-                    csv_text(input_unit), csv_text(input_source), csv_text(output_expression)
-                ));
-                rows += 1;
-            }
-            if let Some(value) = nominal_output {
-                contents.push_str(&format!(
-                    "nominal_output,{value:.17e},{},{},{},{normalization_label},{accuracy_label},dc_operating_point\n",
-                    csv_text(output_unit), csv_text(input_source), csv_text(output_expression)
-                ));
-                rows += 1;
-            }
-            Some(PreparedTypedResultCsv {
-                default_name: "transfer-function.csv",
-                contents,
-                detail: format!("{rows} exact transfer-function values"),
-            })
-        }
-        AnalysisResultPayload::Soa {
-            source_history,
-            evaluations,
-            violations,
-        } => {
-            let dynamic = evaluations
-                .iter()
-                .any(|evaluation| evaluation.derating.is_some());
-            let has_envelope = evaluations.iter().any(|e| e.envelope.is_some());
-            let append_envelope = |contents: &mut String,
-                                   evaluation: &crate::state::SoaEvaluationEvidence,
-                                   voltage: Option<f64>,
-                                   definition: bool|
-             -> Option<()> {
-                if has_envelope {
-                    contents.push(',');
-                    if let Some(voltage) = voltage {
-                        contents.push_str(&format!("{voltage:.17e}"));
-                    }
-                    contents.push(',');
-                    if let Some(envelope) = &evaluation.envelope {
-                        contents.push_str(&format!("{:.17e}", envelope.maximum_current_a));
-                    }
-                    contents.push(',');
-                    if definition && let Some(envelope) = &evaluation.envelope {
-                        contents.push_str(&csv_text(&serde_json::to_string(&envelope.curve).ok()?));
-                    }
-                }
-                Some(())
-            };
-            let has_duration = evaluations
-                .iter()
-                .any(|evaluation| evaluation.duration.is_some());
-            let has_cumulative = evaluations.iter().any(|evaluation| {
-                evaluation
-                    .duration
-                    .and_then(|duration| duration.cumulative)
-                    .is_some()
-            });
-            let custom_thresholds = evaluations
-                .iter()
-                .any(|evaluation| !evaluation.thresholds.is_default());
-            let policies = evaluations
-                .iter()
-                .map(|evaluation| {
-                    (
-                        (evaluation.device_id.as_str(), evaluation.parameter),
-                        (evaluation.thresholds, evaluation.duration),
-                    )
-                })
-                .collect::<std::collections::BTreeMap<_, _>>();
-            let append_thresholds =
-                |contents: &mut String, thresholds: crate::results::safety::SoaThresholds| {
-                    if custom_thresholds {
-                        for fraction in [thresholds.warning_fraction, thresholds.critical_fraction]
-                        {
-                            contents.push(',');
-                            contents.push_str(
-                                &fraction
-                                    .map(|value| format!("{value:.17e}"))
-                                    .unwrap_or_else(|| "off".into()),
-                            );
-                        }
-                    }
-                };
-            let append_duration = |contents: &mut String,
-                                   duration: Option<
-                crate::results::safety::SoaDurationEvidence,
-            >| {
-                if has_duration {
-                    if let Some(duration) = duration {
-                        contents.push_str(&format!(
-                            ",{:.17e},{:.17e},{:.17e},{},{},{}",
-                            duration.minimum_duration_s,
-                            duration.total_exceedance_s,
-                            duration.longest_excursion_s,
-                            duration.qualified_excursions,
-                            duration.rejected_excursions,
-                            duration.clipped_excursions
-                        ));
-                    } else {
-                        contents.push_str(",,,,,,");
-                    }
-                }
-                if has_cumulative {
-                    if let Some(cumulative) = duration.and_then(|duration| duration.cumulative) {
-                        contents.push_str(&format!(
-                            ",cumulative,{},{:.17e},{:.17e}",
-                            cumulative
-                                .recovery_time_s
-                                .map(|value| format!("{value:.17e}"))
-                                .unwrap_or_else(|| "off".into()),
-                            cumulative.peak_exposure_s,
-                            cumulative.final_exposure_s
-                        ));
-                    } else {
-                        contents.push_str(if duration.is_some() {
-                            ",per_excursion,,,"
-                        } else {
-                            ",instantaneous,,,"
-                        });
-                    }
-                }
-            };
-            let mut contents = String::from(
-                "record,device,parameter,limit_value,actual_value,time_s,sample_count,unit,description,verdict",
-            );
-            if dynamic {
-                contents.push_str(",temperature_kelvin,rated_power_w,reference_temperature_kelvin,watts_per_kelvin");
-            }
-            if custom_thresholds {
-                contents.push_str(",warning_fraction,critical_fraction");
-            }
-            if has_duration {
-                contents.push_str(",minimum_duration_s,total_exceedance_s,longest_excursion_s,qualified_excursions");
-                contents.push_str(if has_cumulative {
-                    ",unqualified_excursions"
-                } else {
-                    ",short_excursions"
-                });
-                contents.push_str(",clipped_excursions");
-            }
-            if has_cumulative {
-                contents
-                    .push_str(",duration_policy,recovery_time_s,peak_exposure_s,final_exposure_s");
-            }
-            if has_envelope {
-                contents.push_str(",curve_voltage_v,curve_maximum_current_a,curve_definition_json");
-            }
-            contents.push('\n');
-            for evaluation in evaluations {
-                contents.push_str(&format!(
-                    "evaluation,{},{},{:.17e},{:.17e},{:.17e},{},{},{},{}",
-                    csv_text(&evaluation.device_id),
-                    soa_parameter_csv(evaluation.parameter),
-                    evaluation.limit_value,
-                    evaluation.worst_actual_value,
-                    evaluation.worst_time_s,
-                    evaluation.sample_count,
-                    csv_text(&evaluation.unit),
-                    csv_text(&evaluation.description),
-                    soa_verdict_csv(evaluation.verdict),
-                ));
-                if dynamic {
-                    if let Some(derating) = evaluation.derating {
-                        contents.push_str(&format!(
-                            ",,{:.17e},{:.17e},{:.17e}",
-                            derating.rated_power_w,
-                            derating.curve.reference_temperature_kelvin,
-                            derating.curve.watts_per_kelvin
-                        ));
-                    } else {
-                        contents.push_str(",,,,");
-                    }
-                }
-                append_thresholds(&mut contents, evaluation.thresholds);
-                append_duration(&mut contents, evaluation.duration);
-                append_envelope(&mut contents, evaluation, None, true)?;
-                contents.push('\n');
-                if evaluation.derating.is_some()
-                    || evaluation.envelope.is_some()
-                    || evaluation.duration.is_some()
-                {
-                    #[derive(Clone, Copy)]
-                    struct Samples<'a> {
-                        x: &'a [f64],
-                        y: &'a [f64],
-                    }
-                    let find = |name: String| {
-                        if let Some(source) = source_history {
-                            let wave = source.waveforms.iter().find(|wave| wave.name == name)?;
-                            Some(Samples {
-                                x: &source.time,
-                                y: &wave.values,
-                            })
-                        } else {
-                            let wave = analysis.waveforms.iter().find(|wave| wave.name == name)?;
-                            Some(Samples {
-                                x: &wave.x,
-                                y: &wave.y,
-                            })
-                        }
-                    };
-                    let stress = find(crate::results::safety::soa_stress_waveform_name(
-                        &evaluation.device_id,
-                        evaluation.parameter.runtime_parameter(),
-                    ))?;
-                    let limits = evaluation
-                        .derating
-                        .and_then(|_| {
-                            find(crate::results::safety::soa_power_limit_waveform_name(
-                                &evaluation.device_id,
-                            ))
-                        })
-                        .or_else(|| {
-                            evaluation.envelope.as_ref().and_then(|_| {
-                                find(crate::results::safety::soa_envelope_limit_waveform_name(
-                                    &evaluation.device_id,
-                                    evaluation.parameter.runtime_parameter(),
-                                ))
-                            })
-                        });
-                    let curve_voltages = evaluation.envelope.as_ref().and_then(|_| {
-                        find(crate::results::safety::soa_envelope_voltage_waveform_name(
-                            &evaluation.device_id,
-                            evaluation.parameter.runtime_parameter(),
-                        ))
-                    });
-                    let temperatures = evaluation.derating.and_then(|_| {
-                        find(
-                            crate::results::safety::soa_derating_temperature_waveform_name(
-                                &evaluation.device_id,
-                            ),
-                        )
-                    });
-                    for i in 0..stress.x.len() {
-                        let row = [
-                            "sample".into(),
-                            csv_text(&evaluation.device_id),
-                            soa_parameter_csv(evaluation.parameter).into(),
-                            format!(
-                                "{:.17e}",
-                                limits.map_or(evaluation.limit_value, |wave| wave.y[i])
-                            ),
-                            format!("{:.17e}", stress.y[i]),
-                            format!("{:.17e}", stress.x[i]),
-                            "1".into(),
-                            csv_text(&evaluation.unit),
-                            if evaluation.envelope.is_some() {
-                                "Current/voltage SOA curve".into()
-                            } else if evaluation.derating.is_some() {
-                                "Temperature-derated power".into()
-                            } else {
-                                "Duration-qualified stress".into()
-                            },
-                            String::new(),
-                        ];
-                        contents.push_str(&row.join(","));
-                        if dynamic {
-                            if let Some(derating) = evaluation.derating {
-                                contents.push_str(&format!(
-                                    ",{:.17e},{:.17e},{:.17e},{:.17e}",
-                                    temperatures?.y[i],
-                                    derating.rated_power_w,
-                                    derating.curve.reference_temperature_kelvin,
-                                    derating.curve.watts_per_kelvin
-                                ));
-                            } else {
-                                contents.push_str(",,,,");
-                            }
-                        }
-                        append_thresholds(&mut contents, evaluation.thresholds);
-                        append_duration(&mut contents, evaluation.duration);
-                        append_envelope(
-                            &mut contents,
-                            evaluation,
-                            curve_voltages.map(|v| v.y[i]),
-                            false,
-                        )?;
-                        contents.push('\n');
-                    }
-                }
-            }
-            for violation in violations {
-                contents.push_str(&format!(
-                    "event,{},{},{:.17e},{:.17e},{:.17e},,,,{}",
-                    csv_text(&violation.device_id),
-                    soa_parameter_csv(violation.parameter),
-                    violation.limit_value,
-                    violation.actual_value,
-                    violation.time_s,
-                    soa_violation_severity_csv(violation.severity),
-                ));
-                if dynamic {
-                    contents.push_str(",,,,");
-                }
-                append_thresholds(
-                    &mut contents,
-                    policies
-                        .get(&(violation.device_id.as_str(), violation.parameter))?
-                        .0,
-                );
-                append_duration(
-                    &mut contents,
-                    policies
-                        .get(&(violation.device_id.as_str(), violation.parameter))?
-                        .1,
-                );
-                if has_envelope {
-                    contents.push_str(",,,");
-                }
-                contents.push('\n');
-            }
-            Some(PreparedTypedResultCsv {
-                default_name: "soa-evidence.csv",
-                contents,
-                detail: format!(
-                    "{} evaluated rules, {} warning/violation events",
-                    evaluations.len(),
-                    violations.len()
-                ),
-            })
-        }
-        // A recorded spectrum exports through the ordinary complex waveform
-        // CSV path; its payload states the transform, not a table.
-        AnalysisResultPayload::FftSpectrum { .. } => None,
-        AnalysisResultPayload::TransientEvents {
-            digital_traces,
-            real_traces,
-            current_impulses,
-            ..
-        } => {
-            if let Some(history) = current_impulses {
-                return Some(current_event_csv(digital_traces, real_traces, history));
-            }
-            let mut contents = String::from("node,domain,time_s,value_code,value\n");
-            for trace in digital_traces {
-                for point in &trace.points {
-                    contents.push_str(&format!(
-                        "{},digital,{:.17e},{},\n",
-                        csv_text(&trace.node_name),
-                        point.time_s,
-                        point.value_code,
-                    ));
-                }
-            }
-            for trace in real_traces {
-                for point in &trace.points {
-                    contents.push_str(&format!(
-                        "{},real,{:.17e},,{:.17e}\n",
-                        csv_text(&trace.node_name),
-                        point.time_s,
-                        point.value,
-                    ));
-                }
-            }
-            let events: usize = digital_traces
-                .iter()
-                .map(|trace| trace.points.len())
-                .chain(real_traces.iter().map(|trace| trace.points.len()))
-                .sum();
-            Some(PreparedTypedResultCsv {
-                default_name: "event-history.csv",
-                contents,
-                detail: format!(
-                    "{} event nodes, {events} committed events",
-                    digital_traces.len() + real_traces.len()
-                ),
-            })
-        }
-    }
-}
-
-fn current_event_csv(
-    digital: &[crate::state::DigitalEventTraceEvidence],
-    real: &[crate::state::RealEventTraceEvidence],
-    history: &crate::state::CurrentImpulseHistoryEvidence,
-) -> PreparedTypedResultCsv {
-    let mut contents = String::from(
-        "node,domain,time_s,value_code,value,record,owner_kind,parameter,charge_coulombs,start_time_s,stop_time_s,coverage_complete,delivery_complete\n",
-    );
-    let mut append = |fields: [String; 13]| {
-        contents.push_str(
-            &fields
-                .iter()
-                .map(|field| csv_text(field))
-                .collect::<Vec<_>>()
-                .join(","),
-        );
-        contents.push('\n');
-    };
-    for trace in digital {
-        for point in &trace.points {
-            let mut row = std::array::from_fn(|_| String::new());
-            row[0] = trace.node_name.clone();
-            row[1] = "digital".into();
-            row[2] = format!("{:.17e}", point.time_s);
-            row[3] = point.value_code.to_string();
-            row[5] = "event".into();
-            append(row);
-        }
-    }
-    for trace in real {
-        for point in &trace.points {
-            let mut row = std::array::from_fn(|_| String::new());
-            row[0] = trace.node_name.clone();
-            row[1] = "real".into();
-            row[2] = format!("{:.17e}", point.time_s);
-            row[4] = format!("{:.17e}", point.value);
-            row[5] = "event".into();
-            append(row);
-        }
-    }
-    // The section row preserves recorded-but-empty histories without claiming
-    // coverage for an omitted current. Coverage rows also survive zero events.
-    let mut section = std::array::from_fn(|_| String::new());
-    section[1] = "current_impulse".into();
-    section[5] = "section".into();
-    section[9] = format!("{:.17e}", history.start_time_s);
-    section[10] = format!("{:.17e}", history.stop_time_s);
-    section[12] = history.delivery_complete.to_string();
-    append(section.clone());
-    let mut impulses = 0usize;
-    for trace in &history.traces {
-        let mut row = section.clone();
-        row[5] = "coverage".into();
-        match &trace.owner {
-            rspice_core::CurrentImpulseOwner::Branch { branch_name } => {
-                row[0] = branch_name.clone();
-                row[6] = "branch".into();
-            }
-            rspice_core::CurrentImpulseOwner::DeviceLead {
-                device_name,
-                parameter,
-            } => {
-                row[0] = device_name.clone();
-                row[6] = "device_lead".into();
-                row[7] = parameter.clone();
-            }
-        }
-        row[11] = trace.complete.to_string();
-        append(row.clone());
-        for point in &trace.points {
-            row[5] = "event".into();
-            row[2] = format!("{:.17e}", point.time);
-            row[8] = format!("{:.17e}", point.charge_coulombs);
-            append(row.clone());
-            impulses += 1;
-        }
-    }
-    PreparedTypedResultCsv {
-        default_name: "event-history.csv",
-        contents,
-        detail: format!(
-            "{} event nodes, {} current histories, {impulses} current impulses",
-            digital.len() + real.len(),
-            history.traces.len()
+    let encoded = encode_typed_result_csv(analysis)?;
+    let (default_name, detail) = match encoded.summary {
+        TypedCsvSummary::Qpss {
+            coordinate_count,
+            tuple_count,
+        } => (
+            "qpss-spectrum.csv",
+            format!(
+                "{} MNA coordinates, {} signed tone tuples; complex Fourier coefficients",
+                coordinate_count, tuple_count
+            ),
         ),
-    }
-}
-
-fn periodic_csv_header() -> String {
-    "record,index,multiplier_real,multiplier_imaginary,exponent_real_per_s,exponent_imaginary_per_s,probe_participation,is_unstable,is_trivial,subharmonic_order,field,value,unit\n".to_owned()
-}
-
-fn append_periodic_csv_row(contents: &mut String, fields: [String; 13]) {
-    contents.push_str(
-        &fields
-            .iter()
-            .map(|field| csv_text(field))
-            .collect::<Vec<_>>()
-            .join(","),
-    );
-    contents.push('\n');
-}
-
-fn append_periodic_metadata_csv(contents: &mut String, field: &str, value: &str, unit: &str) {
-    append_periodic_csv_row(
-        contents,
-        [
-            "metadata".to_owned(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            field.to_owned(),
-            value.to_owned(),
-            unit.to_owned(),
-        ],
-    );
-}
-
-fn append_floquet_certificate_csv(
-    contents: &mut String,
-    evidence: &crate::state::FloquetSpectrumEvidence,
-) {
-    if let Some(certificate) = evidence.certificate() {
-        for (field, value) in [
-            (
-                "certificate_problem_order",
-                certificate.problem_order.to_string(),
+        TypedCsvSummary::DcMismatch {
+            retained_contributors,
+            evaluated_contributors,
+        } => (
+            "dc-mismatch.csv",
+            format!(
+                "{} of {} exact DC mismatch contributors",
+                retained_contributors, evaluated_contributors
             ),
-            (
-                "certificate_max_backward_error",
-                format!("{:.17e}", certificate.max_backward_error),
+        ),
+        TypedCsvSummary::OperatingPoint => (
+            "operating-point-contract.csv",
+            "exact operating-point execution and retention contract".to_owned(),
+        ),
+        TypedCsvSummary::PoleZero {
+            pole_count,
+            pole_status,
+            zero_count,
+            zero_status,
+            gain_retained,
+        } => (
+            "pole-zero.csv",
+            format!(
+                "{} poles ({}), {} zeros ({}), DC gain {}",
+                pole_count,
+                pole_status,
+                zero_count,
+                zero_status,
+                if gain_retained {
+                    "retained"
+                } else {
+                    "unavailable"
+                }
             ),
-            (
-                "certificate_qualification_tolerance",
-                format!("{:.17e}", certificate.qualification_tolerance),
+        ),
+        TypedCsvSummary::PssFloquet {
+            multiplier_count,
+            complete,
+        } => (
+            "pss-floquet-evidence.csv",
+            format!(
+                "{} with retained qualification evidence",
+                floquet_export_count_label(multiplier_count, complete, "PSS Floquet multipliers")
             ),
-        ] {
-            append_periodic_metadata_csv(contents, field, &value, "");
-        }
-    }
+        ),
+        TypedCsvSummary::PstbFloquet {
+            mode_count,
+            complete,
+        } => (
+            "pstb-floquet-evidence.csv",
+            format!(
+                "{} with retained qualification and stability evidence",
+                floquet_export_count_label(mode_count, complete, "PSTB Floquet modes")
+            ),
+        ),
+        TypedCsvSummary::Sensitivity { row_count } => (
+            "sensitivity.csv",
+            format!("{} exact sensitivity rows", row_count),
+        ),
+        TypedCsvSummary::Scalars { value_count } => (
+            "scalar-results.csv",
+            format!("{} exact scalar values", value_count),
+        ),
+        TypedCsvSummary::TransferFunction { value_count } => (
+            "transfer-function.csv",
+            format!("{value_count} exact transfer-function values"),
+        ),
+        TypedCsvSummary::Soa {
+            rule_count,
+            event_count,
+        } => (
+            "soa-evidence.csv",
+            format!(
+                "{} evaluated rules, {} warning/violation events",
+                rule_count, event_count
+            ),
+        ),
+        TypedCsvSummary::Events {
+            node_count,
+            event_count,
+        } => (
+            "event-history.csv",
+            format!("{} event nodes, {event_count} committed events", node_count),
+        ),
+        TypedCsvSummary::CurrentEvents {
+            node_count,
+            current_history_count,
+            impulse_count,
+        } => (
+            "event-history.csv",
+            format!(
+                "{} event nodes, {} current histories, {impulse_count} current impulses",
+                node_count, current_history_count
+            ),
+        ),
+        TypedCsvSummary::Qpac {
+            probe_offset_count,
+            tuple_count,
+        } => (
+            "qpac-response.csv",
+            format!(
+                "{} probe offsets × {} signed tuples; full complex MNA response and selected differential transfer",
+                probe_offset_count, tuple_count
+            ),
+        ),
+        TypedCsvSummary::Qpnoise {
+            output_count,
+            frequency_count,
+            mechanism_count,
+        } => (
+            "qpnoise-results.csv",
+            format!(
+                "{} outputs; {} frequencies; {} noise mechanisms; PSD, referral, integration, ranking, covariance and complete adjoints",
+                output_count, frequency_count, mechanism_count
+            ),
+        ),
+        TypedCsvSummary::Qpxf {
+            source_count,
+            input_tuple_count,
+            output_frequency_count,
+        } => (
+            "qpxf-transfers.csv",
+            format!(
+                "{} sources × {} input tuples × {} output frequencies; unit transfers, sampled delay statuses and complete complex adjoints",
+                source_count, input_tuple_count, output_frequency_count
+            ),
+        ),
+    };
+    Some(PreparedTypedResultCsv {
+        default_name,
+        contents: encoded.contents,
+        detail,
+    })
 }
 
-fn authenticated_floquet_count_csv(
-    count: usize,
-    evidence: &crate::state::FloquetSpectrumEvidence,
-) -> String {
-    matches!(
-        evidence,
-        crate::state::FloquetSpectrumEvidence::Qualified { .. }
-            | crate::state::FloquetSpectrumEvidence::NoDynamicModes
-    )
-    .then(|| count.to_string())
-    .unwrap_or_default()
-}
-
-fn floquet_export_count_label(
-    count: usize,
-    evidence: &crate::state::FloquetSpectrumEvidence,
-    noun: &str,
-) -> String {
-    if matches!(
-        evidence,
-        crate::state::FloquetSpectrumEvidence::Qualified { .. }
-            | crate::state::FloquetSpectrumEvidence::NoDynamicModes
-    ) {
+fn floquet_export_count_label(count: usize, complete: bool, noun: &str) -> String {
+    if complete {
         format!("{count} complete {noun}")
     } else {
         format!("{count} retained {noun}; completeness unavailable")
-    }
-}
-
-fn optional_f64_csv(value: Option<f64>) -> String {
-    value.map_or_else(String::new, |value| format!("{value:.17e}"))
-}
-
-fn optional_u64_csv(value: Option<u64>) -> String {
-    value.map_or_else(String::new, |value| value.to_string())
-}
-
-fn optional_bool_csv(value: Option<bool>) -> String {
-    value.map_or_else(String::new, |value| value.to_string())
-}
-
-fn soa_parameter_csv(parameter: crate::state::SoaParameterEvidence) -> &'static str {
-    use crate::state::SoaParameterEvidence;
-    match parameter {
-        SoaParameterEvidence::GateSourceVoltage => "vgs",
-        SoaParameterEvidence::DrainSourceVoltage => "vds",
-        SoaParameterEvidence::GateDrainVoltage => "vgd",
-        SoaParameterEvidence::BaseEmitterVoltage => "vbe",
-        SoaParameterEvidence::CollectorEmitterVoltage => "vce",
-        SoaParameterEvidence::BaseCollectorVoltage => "vbc",
-        SoaParameterEvidence::DrainCurrent => "id",
-        SoaParameterEvidence::CollectorCurrent => "ic",
-        SoaParameterEvidence::PowerDissipation => "pdiss",
-        SoaParameterEvidence::Temperature => "temperature",
-        SoaParameterEvidence::GateSourceVoltagePositive => "vgs_positive",
-        SoaParameterEvidence::GateSourceVoltageNegative => "vgs_negative",
-        SoaParameterEvidence::DrainSourceVoltagePositive => "vds_positive",
-        SoaParameterEvidence::DrainSourceVoltageNegative => "vds_negative",
-        SoaParameterEvidence::GateDrainVoltagePositive => "vgd_positive",
-        SoaParameterEvidence::GateDrainVoltageNegative => "vgd_negative",
-        SoaParameterEvidence::BaseEmitterVoltagePositive => "vbe_positive",
-        SoaParameterEvidence::BaseEmitterVoltageNegative => "vbe_negative",
-        SoaParameterEvidence::CollectorEmitterVoltagePositive => "vce_positive",
-        SoaParameterEvidence::CollectorEmitterVoltageNegative => "vce_negative",
-        SoaParameterEvidence::BaseCollectorVoltagePositive => "vbc_positive",
-        SoaParameterEvidence::BaseCollectorVoltageNegative => "vbc_negative",
-        SoaParameterEvidence::DrainCurrentPositive => "id_positive",
-        SoaParameterEvidence::DrainCurrentNegative => "id_negative",
-        SoaParameterEvidence::CollectorCurrentPositive => "ic_positive",
-        SoaParameterEvidence::CollectorCurrentNegative => "ic_negative",
-        SoaParameterEvidence::GateCurrent => "ig",
-        SoaParameterEvidence::GateCurrentPositive => "ig_positive",
-        SoaParameterEvidence::GateCurrentNegative => "ig_negative",
-        SoaParameterEvidence::SourceCurrent => "is",
-        SoaParameterEvidence::SourceCurrentPositive => "is_positive",
-        SoaParameterEvidence::SourceCurrentNegative => "is_negative",
-        SoaParameterEvidence::BaseCurrent => "ib",
-        SoaParameterEvidence::BaseCurrentPositive => "ib_positive",
-        SoaParameterEvidence::BaseCurrentNegative => "ib_negative",
-        SoaParameterEvidence::EmitterCurrent => "ie",
-        SoaParameterEvidence::EmitterCurrentPositive => "ie_positive",
-        SoaParameterEvidence::EmitterCurrentNegative => "ie_negative",
-        SoaParameterEvidence::CollectorSubstrateVoltage => "vcsub",
-        SoaParameterEvidence::CollectorSubstrateVoltagePositive => "vcsub_positive",
-        SoaParameterEvidence::CollectorSubstrateVoltageNegative => "vcsub_negative",
-        SoaParameterEvidence::BaseSubstrateVoltage => "vbsub",
-        SoaParameterEvidence::BaseSubstrateVoltagePositive => "vbsub_positive",
-        SoaParameterEvidence::BaseSubstrateVoltageNegative => "vbsub_negative",
-        SoaParameterEvidence::EmitterSubstrateVoltage => "vesub",
-        SoaParameterEvidence::EmitterSubstrateVoltagePositive => "vesub_positive",
-        SoaParameterEvidence::EmitterSubstrateVoltageNegative => "vesub_negative",
-        SoaParameterEvidence::SubstrateCurrent => "isub",
-        SoaParameterEvidence::SubstrateCurrentPositive => "isub_positive",
-        SoaParameterEvidence::SubstrateCurrentNegative => "isub_negative",
-        SoaParameterEvidence::AnodeCathodeVoltage => "vak",
-        SoaParameterEvidence::AnodeCathodeVoltagePositive => "vak_positive",
-        SoaParameterEvidence::AnodeCathodeVoltageNegative => "vak_negative",
-        SoaParameterEvidence::AnodeCurrent => "ia",
-        SoaParameterEvidence::AnodeCurrentPositive => "ia_positive",
-        SoaParameterEvidence::AnodeCurrentNegative => "ia_negative",
-
-        SoaParameterEvidence::BodySourceVoltage => "vbs",
-        SoaParameterEvidence::BodySourceVoltagePositive => "vbs_positive",
-        SoaParameterEvidence::BodySourceVoltageNegative => "vbs_negative",
-        SoaParameterEvidence::BodyDrainVoltage => "vbd",
-        SoaParameterEvidence::BodyDrainVoltagePositive => "vbd_positive",
-        SoaParameterEvidence::BodyDrainVoltageNegative => "vbd_negative",
-        SoaParameterEvidence::GateBodyVoltage => "vgb",
-        SoaParameterEvidence::GateBodyVoltagePositive => "vgb_positive",
-        SoaParameterEvidence::GateBodyVoltageNegative => "vgb_negative",
-        SoaParameterEvidence::BulkCurrent => "ibulk",
-        SoaParameterEvidence::BulkCurrentPositive => "ibulk_positive",
-        SoaParameterEvidence::BulkCurrentNegative => "ibulk_negative",
-        SoaParameterEvidence::BackgateSourceVoltage => "ves",
-        SoaParameterEvidence::BackgateSourceVoltagePositive => "ves_positive",
-        SoaParameterEvidence::BackgateSourceVoltageNegative => "ves_negative",
-        SoaParameterEvidence::BackgateDrainVoltage => "ved",
-        SoaParameterEvidence::BackgateDrainVoltagePositive => "ved_positive",
-        SoaParameterEvidence::BackgateDrainVoltageNegative => "ved_negative",
-        SoaParameterEvidence::GateBackgateVoltage => "vge",
-        SoaParameterEvidence::GateBackgateVoltagePositive => "vge_positive",
-        SoaParameterEvidence::GateBackgateVoltageNegative => "vge_negative",
-        SoaParameterEvidence::BackgateCurrent => "ibackgate",
-        SoaParameterEvidence::BackgateCurrentPositive => "ibackgate_positive",
-        SoaParameterEvidence::BackgateCurrentNegative => "ibackgate_negative",
-        SoaParameterEvidence::BodyBackgateVoltage => "vbody_backgate",
-        SoaParameterEvidence::BodyBackgateVoltagePositive => "vbody_backgate_positive",
-        SoaParameterEvidence::BodyBackgateVoltageNegative => "vbody_backgate_negative",
-    }
-}
-
-fn soa_verdict_csv(verdict: crate::state::SoaRuleVerdictEvidence) -> &'static str {
-    use crate::state::SoaRuleVerdictEvidence;
-    match verdict {
-        SoaRuleVerdictEvidence::Pass => "pass",
-        SoaRuleVerdictEvidence::Warning => "warning",
-        SoaRuleVerdictEvidence::Violation => "violation",
-        SoaRuleVerdictEvidence::Critical => "critical",
-    }
-}
-
-fn soa_violation_severity_csv(
-    severity: crate::state::SoaViolationSeverityEvidence,
-) -> &'static str {
-    use crate::state::SoaViolationSeverityEvidence;
-    match severity {
-        SoaViolationSeverityEvidence::Warning => "warning",
-        SoaViolationSeverityEvidence::Violation => "violation",
-        SoaViolationSeverityEvidence::Critical => "critical",
-    }
-}
-
-fn append_pole_zero_evidence_csv(
-    contents: &mut String,
-    root_kind: &str,
-    evidence: &crate::state::PoleZeroRootSetEvidence,
-) {
-    contents.push_str(&format!("{root_kind}_evidence,,,,{}\n", evidence.label()));
-    if let Some(certificate) = evidence.certificate() {
-        for (field, value) in [
-            ("problem_order", certificate.problem_order.to_string()),
-            ("infinite_count", certificate.infinite_count.to_string()),
-            (
-                "max_backward_error",
-                format!("{:.17e}", certificate.max_backward_error),
-            ),
-            (
-                "qualification_tolerance",
-                format!("{:.17e}", certificate.qualification_tolerance),
-            ),
-        ] {
-            contents.push_str(&format!("{root_kind}_{field},,,,{value}\n"));
-        }
-    }
-}
-
-fn serialized_enum_name<T: serde::Serialize>(value: &T) -> String {
-    serde_json::to_string(value)
-        .expect("retained evidence enums are JSON-serializable")
-        .trim_matches('"')
-        .to_owned()
-}
-
-/// One header for both sensitivity payloads.
-///
-/// A reader with two files open is reading the same report of the same deck,
-/// and a column set that changed with the era the result was recorded in
-/// would make them two formats. The single-point payload leaves the two phase
-/// columns blank, which is what it has.
-const SENSITIVITY_CSV_HEADER: &str = "parameter,raw_sensitivity,normalized_sensitivity,output,\
-                                      mode,frequency_hz,raw_status,normalized_status,\
-                                      phase_sensitivity,phase_status\n";
-
-fn sensitivity_csv_value(
-    value: rspice_core::analysis::sensitivity::SensitivityValue<f64>,
-) -> (String, &'static str) {
-    match value {
-        rspice_core::analysis::sensitivity::SensitivityValue::Available(value) => {
-            (format!("{value:.17e}"), "available")
-        }
-        rspice_core::analysis::sensitivity::SensitivityValue::Unavailable { unavailable } => {
-            (String::new(), unavailable.as_str())
-        }
     }
 }

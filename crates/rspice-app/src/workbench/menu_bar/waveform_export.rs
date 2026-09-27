@@ -11,7 +11,7 @@ use crate::analysis::eye_diagram::EyeTimebaseProvenance;
 use crate::workbench::EngineeringExportFormat;
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
-use rspice_formats::table::{csv_to_tsv, escape_csv_field as csv_text, sanitize_column_label};
+use rspice_formats::table::{csv_to_tsv, sanitize_column_label};
 use typed_csv::prepare_typed_result_csv;
 
 const NO_ACTIVE_ANALYSIS_MESSAGE: &str = "No active result analysis is selected for export.";

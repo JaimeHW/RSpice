@@ -9,6 +9,7 @@ use super::*;
 
 mod periodic_noise;
 mod soa;
+mod typed_csv;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
