@@ -936,7 +936,7 @@ mod tests {
         for index in 0..7 {
             ports.push(port(&format!("data_in[{index}]"), PortDirection::In));
         }
-        let symbol = ResolvedCellSymbol::from_ports_for_test(&ports);
+        let symbol = ResolvedCellSymbol::from_generated(&ports);
         let (min, max) = symbol
             .document()
             .drawn_body_bounds()
@@ -978,7 +978,7 @@ mod tests {
             port("write_en", PortDirection::In),
             port("data_out[0]", PortDirection::Out),
         ];
-        let symbol = ResolvedCellSymbol::from_ports_for_test(&ports);
+        let symbol = ResolvedCellSymbol::from_generated(&ports);
         let advance = 3; // symbol units per monospace character at the pin size
 
         let mut left_end = i32::MIN;

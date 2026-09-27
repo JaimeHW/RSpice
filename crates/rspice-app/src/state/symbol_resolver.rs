@@ -5,214 +5,16 @@
 //! reports which source it used and any issue it found, so the canvas can
 //! show an unresolved instance as unresolved rather than as a default.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::{
-    Cell, CellViewRef, LibraryCellInstance, LibraryManager, Point, PortDirection, PortSpec,
-    SYMBOL_DOCUMENT_METADATA_KEY, SchematicState, SymbolDocument, SymbolPinSide, View, ViewType,
+    Cell, CellViewRef, LibraryCellInstance, LibraryManager, PortDirection, PortSpec,
+    SYMBOL_DOCUMENT_METADATA_KEY, SchematicState, SymbolDocument, View, ViewType,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResolvedSymbolSource {
-    Authored,
-    Generated,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResolvedSymbolIssueKind {
-    UnplacedPin,
-    OrphanedPin,
-    PinOffGrid,
-    InvalidMetadata,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedSymbolIssue {
-    pub kind: ResolvedSymbolIssueKind,
-    pub pin_name: String,
-    pub point: Option<Point>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedSymbolPin {
-    pub name: String,
-    pub direction: PortDirection,
-    /// Body edge the pin is drawn against. Its lead and its name both follow
-    /// this, so neither can be inferred from the terminal coordinate alone.
-    pub side: SymbolPinSide,
-    pub offset: Point,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedCellSymbol {
-    source: ResolvedSymbolSource,
-    document: SymbolDocument,
-    pins: Vec<ResolvedSymbolPin>,
-    issues: Vec<ResolvedSymbolIssue>,
-}
-
-impl ResolvedCellSymbol {
-    pub fn from_authored_document(document: SymbolDocument, ports: &[PortSpec]) -> Self {
-        Self::from_authored(document, ports)
-    }
-
-    /// The generated block for an interface, without a library to resolve
-    /// against. Renderer tests need the exact symbol a placed instance draws.
-    #[cfg(test)]
-    pub fn from_ports_for_test(ports: &[PortSpec]) -> Self {
-        Self::from_generated(ports)
-    }
-
-    pub fn source(&self) -> ResolvedSymbolSource {
-        self.source
-    }
-
-    pub fn document(&self) -> &SymbolDocument {
-        &self.document
-    }
-
-    pub fn issues(&self) -> &[ResolvedSymbolIssue] {
-        &self.issues
-    }
-
-    pub fn connectable_pins(&self) -> impl Iterator<Item = &ResolvedSymbolPin> {
-        self.pins.iter()
-    }
-
-    pub fn effective_point(&self, point: Point) -> Point {
-        point - self.document.origin
-    }
-
-    pub fn effective_pin_offset(&self, pin: &ResolvedSymbolPin) -> Point {
-        self.effective_point(pin.offset)
-    }
-
-    /// Inner end of a pin's lead, where it meets the body outline.
-    pub fn pin_lead_inner(&self, pin: &ResolvedSymbolPin) -> Point {
-        self.effective_point(crate::state::lead_inner(
-            pin.offset,
-            pin.side,
-            self.document.drawn_body_bounds(),
-        ))
-    }
-
-    /// Where a pin's name is drawn: inside the body, clear of the outline.
-    pub fn pin_label_anchor(&self, pin: &ResolvedSymbolPin) -> Point {
-        self.effective_point(crate::state::pin_label_anchor(
-            pin.offset,
-            pin.side,
-            self.document.drawn_body_bounds(),
-        ))
-    }
-
-    fn from_authored(document: SymbolDocument, ports: &[PortSpec]) -> Self {
-        let mut pins = Vec::new();
-        let mut issues = Vec::new();
-
-        if ports.is_empty() {
-            for pin in &document.pins {
-                match pin.position {
-                    Some(offset) => pins.push(ResolvedSymbolPin {
-                        name: pin.name.clone(),
-                        direction: pin.direction,
-                        side: document.pin_side(pin),
-                        offset,
-                    }),
-                    None => issues.push(ResolvedSymbolIssue {
-                        kind: ResolvedSymbolIssueKind::UnplacedPin,
-                        pin_name: pin.name.clone(),
-                        point: None,
-                    }),
-                }
-            }
-        } else {
-            let port_names = port_name_set(ports);
-            for port in ports {
-                match document
-                    .pin(&port.name)
-                    .and_then(|pin| pin.position.map(|offset| (pin, offset)))
-                {
-                    Some((pin, offset)) => pins.push(ResolvedSymbolPin {
-                        name: port.name.clone(),
-                        direction: port.direction,
-                        side: document.pin_side(pin),
-                        offset,
-                    }),
-                    None => issues.push(ResolvedSymbolIssue {
-                        kind: ResolvedSymbolIssueKind::UnplacedPin,
-                        pin_name: port.name.clone(),
-                        point: None,
-                    }),
-                }
-            }
-
-            for pin in document
-                .pins
-                .iter()
-                .filter(|pin| !port_names.contains(&pin.name.to_ascii_lowercase()))
-            {
-                issues.push(ResolvedSymbolIssue {
-                    kind: ResolvedSymbolIssueKind::OrphanedPin,
-                    pin_name: pin.name.clone(),
-                    point: pin.position,
-                });
-            }
-        }
-
-        for pin in document
-            .pins
-            .iter()
-            .filter(|pin| pin.position.is_some() && !pin.terminal_on_grid())
-        {
-            issues.push(ResolvedSymbolIssue {
-                kind: ResolvedSymbolIssueKind::PinOffGrid,
-                pin_name: pin.name.clone(),
-                point: pin.position,
-            });
-        }
-
-        Self {
-            source: ResolvedSymbolSource::Authored,
-            document,
-            pins,
-            issues,
-        }
-    }
-
-    fn from_generated(ports: &[PortSpec]) -> Self {
-        let document = SymbolDocument::generated_from_ports(ports);
-        let pins = ports
-            .iter()
-            .filter_map(|port| {
-                document.pin(&port.name).and_then(|pin| {
-                    pin.position.map(|offset| ResolvedSymbolPin {
-                        name: port.name.clone(),
-                        direction: port.direction,
-                        side: document.pin_side(pin),
-                        offset,
-                    })
-                })
-            })
-            .collect();
-
-        Self {
-            source: ResolvedSymbolSource::Generated,
-            document,
-            pins,
-            issues: Vec::new(),
-        }
-    }
-
-    fn from_invalid_metadata(ports: &[PortSpec], _message: String) -> Self {
-        let mut resolved = Self::from_generated(ports);
-        resolved.issues.push(ResolvedSymbolIssue {
-            kind: ResolvedSymbolIssueKind::InvalidMetadata,
-            pin_name: "symbol".to_owned(),
-            point: None,
-        });
-        resolved
-    }
-}
+pub use rspice_design::resolved_symbol::{
+    ResolvedCellSymbol, ResolvedSymbolIssueKind, ResolvedSymbolSource,
+};
 
 pub struct SymbolResolver<'a> {
     libraries: &'a LibraryManager,
@@ -287,7 +89,7 @@ impl<'a> SymbolResolver<'a> {
         match authored_document(symbol_view) {
             AuthoredDocument::Loaded(document) => {
                 let ports = ports.unwrap_or_default();
-                return Some(ResolvedCellSymbol::from_authored(document, &ports));
+                return Some(ResolvedCellSymbol::from_authored_document(document, &ports));
             }
             AuthoredDocument::Invalid(message) => {
                 let ports = ports.unwrap_or_default();
@@ -433,13 +235,6 @@ fn legacy_ports_from_view(view: &View) -> Option<Vec<PortSpec>> {
             })
             .collect()
     })
-}
-
-fn port_name_set(ports: &[PortSpec]) -> HashSet<String> {
-    ports
-        .iter()
-        .map(|port| port.name.to_ascii_lowercase())
-        .collect()
 }
 
 #[cfg(test)]
