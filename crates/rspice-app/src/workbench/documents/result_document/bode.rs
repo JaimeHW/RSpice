@@ -42,54 +42,11 @@ struct NoiseSpectrumModel {
     band: Option<(f64, f64)>,
 }
 
-/// Which retained traces one analysis' ordinary-noise spectrum is made of.
-///
-/// Resolving it walks every sample of every candidate density — each value
-/// finite and nonnegative, each frequency positive and strictly ascending — and
-/// compares each contributor's frequency axis against the anchor's. That is
-/// the whole structural half of the noise sheet, and the tab strip, the
-/// spectrum card and the contributor table each asked for it independently,
-/// on every frame.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct NoiseSpectrumShape {
-    /// The density the sheet anchors its frequency axis on: the
-    /// input-referred spectrum when one is retained, else the
-    /// output-referred one.
-    anchor: usize,
-    /// Renderable densities sharing that axis. An input-referred spectrum
-    /// stands alone, so it counts one.
-    trace_count: usize,
-}
+pub(super) use rspice_results::noise_spectrum::NoiseSpectrumShape;
 
 fn resolve_noise_spectrum_shape(analysis: &AnalysisResult) -> Option<NoiseSpectrumShape> {
-    let input_referred = analysis.waveforms.iter().position(|waveform| {
-        is_input_noise_name(&waveform.name) && noise_waveform_is_renderable(waveform)
-    });
-    let anchor = match input_referred {
-        Some(index) => index,
-        None => analysis.waveforms.iter().position(|waveform| {
-            is_output_noise_name(&waveform.name) && noise_waveform_is_renderable(waveform)
-        })?,
-    };
-    let frequency = &analysis.waveforms[anchor].x;
-    let trace_count = if input_referred.is_some() {
-        1
-    } else {
-        analysis
-            .waveforms
-            .iter()
-            .filter(|waveform| {
-                !is_input_noise_name(&waveform.name)
-                    && (is_output_noise_name(&waveform.name)
-                        || is_noise_contributor_name(&waveform.name))
-                    && noise_waveform_is_renderable(waveform)
-                    && waveform.x.as_slice() == frequency.as_slice()
-            })
-            .count()
-    };
-    Some(NoiseSpectrumShape {
-        anchor,
-        trace_count,
+    rspice_results::noise_spectrum::resolve_noise_spectrum_shape(&analysis.waveforms, || {
+        super::frame_work::note(super::frame_work::DatasetWalk::NoiseSpectrumScan);
     })
 }
 
@@ -132,33 +89,6 @@ fn is_ordinary_noise_result(analysis: &AnalysisResult) -> bool {
             analysis.analysis_type,
             AnalysisType::Noise | AnalysisType::Hbnoise
         )
-}
-
-fn noise_waveform_is_renderable(waveform: &crate::state::WaveformData) -> bool {
-    if waveform.x.len() != waveform.y.len() || waveform.x.is_empty() {
-        return false;
-    }
-    super::frame_work::note(super::frame_work::DatasetWalk::NoiseSpectrumScan);
-    if waveform
-        .y
-        .iter()
-        .any(|value| !value.is_finite() || *value < 0.0)
-    {
-        return false;
-    }
-    let mut previous = None;
-    let mut positive_count = 0_usize;
-    for frequency in waveform.x.iter().copied() {
-        if !frequency.is_finite() || frequency <= 0.0 {
-            return false;
-        }
-        if previous.is_some_and(|previous| frequency <= previous) {
-            return false;
-        }
-        previous = Some(frequency);
-        positive_count += 1;
-    }
-    positive_count >= 1
 }
 
 /// The same question without a session to memoize against, for the printed
@@ -265,37 +195,6 @@ fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
     };
 
     Ok(BodeModel { phase_deg, margins })
-}
-
-fn normalized_noise_name(name: &str) -> String {
-    name.trim()
-        .to_ascii_lowercase()
-        .replace([' ', '-', '.'], "")
-}
-
-fn is_input_noise_name(name: &str) -> bool {
-    let name = normalized_noise_name(name);
-    name == "inoise"
-        || name == "inoise_spectrum"
-        || name == "inoisespectrum"
-        || name == "v(inoise)"
-        || name == "v(inoise_spectrum)"
-        || name == "v(inoisespectrum)"
-}
-
-fn is_output_noise_name(name: &str) -> bool {
-    let name = normalized_noise_name(name);
-    name == "onoise"
-        || name == "onoise_spectrum"
-        || name == "onoisespectrum"
-        || name == "v(onoise)"
-        || name == "v(onoise_spectrum)"
-        || name == "v(onoisespectrum)"
-}
-
-fn is_noise_contributor_name(name: &str) -> bool {
-    let name = name.trim().to_ascii_lowercase();
-    name.starts_with("noise(") && name.ends_with(')')
 }
 
 /// Analyses whose selection states which noise result the reader means. A

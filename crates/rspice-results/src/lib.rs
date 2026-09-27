@@ -35,6 +35,7 @@ pub mod monte_carlo;
 pub mod monte_carlo_checkpoint;
 #[cfg(feature = "engine-evidence")]
 pub mod noise;
+pub mod noise_spectrum;
 pub mod nyquist;
 pub mod operating_point;
 pub mod optimization;
