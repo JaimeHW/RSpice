@@ -24,43 +24,43 @@ pub struct SealedModelExecutionSources {
     edges: Vec<rspice_core::netlist::SealedSourceEdge>,
     model_library_source_paths: Vec<PathBuf>,
     libraries: Vec<SealedExecutionLibrary>,
-    pdk_process_bindings: Vec<crate::state::pdk_config::SealedPdkModelProcessBinding>,
-    pdk_veriloga_artifacts: Vec<crate::state::pdk_config::SealedPdkVerilogAArtifact>,
-    pdk_veriloga_bindings: Vec<crate::state::pdk_config::SealedPdkVerilogABinding>,
+    pdk_process_bindings: Vec<crate::pdk::SealedPdkModelProcessBinding>,
+    pdk_veriloga_artifacts: Vec<crate::pdk::SealedPdkVerilogAArtifact>,
+    pdk_veriloga_bindings: Vec<crate::pdk::SealedPdkVerilogABinding>,
     pdk_identity: Option<(
-        crate::state::pdk_config::PdkTechnologyBinding,
+        rspice_model_library::pdk::contracts::PdkTechnologyBinding,
         ContentDigest,
     )>,
     resolution_records: Vec<ModelResolutionRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SealedModelLibraryVerilogARoot {
-    pub(crate) path: PathBuf,
-    pub(crate) netlist_alias: Option<String>,
-    pub(crate) selected_module: Option<String>,
+pub struct SealedModelLibraryVerilogARoot {
+    pub path: PathBuf,
+    pub netlist_alias: Option<String>,
+    pub selected_module: Option<String>,
 }
 
 /// Exact model-library bytes and AHDL roots authenticated by one run seal.
 /// Signed-PDK artifacts are intentionally excluded; they have their own
 /// manifest-governed authority and compiler path.
 #[derive(Debug, Clone)]
-pub(crate) struct SealedModelLibraryVerilogAAuthority {
+pub struct SealedModelLibraryVerilogAAuthority {
     closure_digest: ContentDigest,
     sources: Vec<(PathBuf, String)>,
     roots: Vec<SealedModelLibraryVerilogARoot>,
 }
 
 impl SealedModelLibraryVerilogAAuthority {
-    pub(crate) fn closure_digest(&self) -> ContentDigest {
+    pub fn closure_digest(&self) -> ContentDigest {
         self.closure_digest
     }
 
-    pub(crate) fn sources(&self) -> &[(PathBuf, String)] {
+    pub fn sources(&self) -> &[(PathBuf, String)] {
         &self.sources
     }
 
-    pub(crate) fn roots(&self) -> &[SealedModelLibraryVerilogARoot] {
+    pub fn roots(&self) -> &[SealedModelLibraryVerilogARoot] {
         &self.roots
     }
 }
@@ -87,21 +87,23 @@ struct MaterializedCornerSection {
     materialized_model_cards: String,
 }
 
-const fn pdk_model_process(process: CornerProcess) -> crate::state::pdk_config::PdkModelProcess {
+const fn pdk_model_process(
+    process: CornerProcess,
+) -> rspice_model_library::pdk::contracts::PdkModelProcess {
     match process {
-        CornerProcess::TT => crate::state::pdk_config::PdkModelProcess::Tt,
-        CornerProcess::SS => crate::state::pdk_config::PdkModelProcess::Ss,
-        CornerProcess::FF => crate::state::pdk_config::PdkModelProcess::Ff,
-        CornerProcess::SF => crate::state::pdk_config::PdkModelProcess::Sf,
-        CornerProcess::FS => crate::state::pdk_config::PdkModelProcess::Fs,
+        CornerProcess::TT => rspice_model_library::pdk::contracts::PdkModelProcess::Tt,
+        CornerProcess::SS => rspice_model_library::pdk::contracts::PdkModelProcess::Ss,
+        CornerProcess::FF => rspice_model_library::pdk::contracts::PdkModelProcess::Ff,
+        CornerProcess::SF => rspice_model_library::pdk::contracts::PdkModelProcess::Sf,
+        CornerProcess::FS => rspice_model_library::pdk::contracts::PdkModelProcess::Fs,
     }
 }
 
 impl SealedModelExecutionSources {
     /// Merge an authenticated signed PDK closure into this source snapshot.
-    pub(crate) fn with_pdk_model_sources(
+    pub fn with_pdk_model_sources(
         mut self,
-        pdk: crate::state::pdk_config::SealedPdkModelSources,
+        pdk: crate::pdk::SealedPdkModelSources,
     ) -> Result<Self, String> {
         let pdk = pdk.into_parts();
         if self.pdk_identity.is_some() {
@@ -182,7 +184,7 @@ impl SealedModelExecutionSources {
 
     /// Exact signed package identity participating in this model snapshot.
     #[must_use]
-    pub(crate) fn pdk_model_identity(&self) -> Option<(String, ContentDigest)> {
+    pub fn pdk_model_identity(&self) -> Option<(String, ContentDigest)> {
         self.pdk_identity.as_ref().map(|(binding, archive_digest)| {
             (
                 format!(
@@ -195,13 +197,13 @@ impl SealedModelExecutionSources {
     }
 
     #[must_use]
-    pub(crate) fn pdk_veriloga_authority(
+    pub fn pdk_veriloga_authority(
         &self,
     ) -> Option<(
-        &crate::state::pdk_config::PdkTechnologyBinding,
+        &rspice_model_library::pdk::contracts::PdkTechnologyBinding,
         ContentDigest,
-        &[crate::state::pdk_config::SealedPdkVerilogAArtifact],
-        &[crate::state::pdk_config::SealedPdkVerilogABinding],
+        &[crate::pdk::SealedPdkVerilogAArtifact],
+        &[crate::pdk::SealedPdkVerilogABinding],
     )> {
         let (binding, archive_digest) = self.pdk_identity.as_ref()?;
         Some((
@@ -214,7 +216,7 @@ impl SealedModelExecutionSources {
 
     /// Add the active root using exact portable identities from this sealed closure.
     /// Unresolved or ambiguous dependencies fail without consulting host search paths.
-    pub(crate) fn bundle_for_root(
+    pub fn bundle_for_root(
         &self,
         root_path: &Path,
         root_source: &str,
@@ -663,7 +665,7 @@ fn root_external_source_paths(source: &str) -> Vec<String> {
 /// The caller validates live catalog decisions and plan bindings before selecting
 /// libraries. This checks the complete pinned byte closure through the supplied
 /// host reader; it does not authorize publication or dispatch into a live project.
-pub(crate) fn seal_model_sources<F>(
+pub fn seal_model_sources<F>(
     libraries: Vec<(&ModelLibrary, Option<String>)>,
     resolution_records: &BTreeMap<String, ModelResolutionRecord>,
     mut read_external: F,
@@ -1005,7 +1007,7 @@ where
 }
 
 impl SealedModelExecutionSources {
-    pub(crate) fn model_library_veriloga_authority(
+    pub fn model_library_veriloga_authority(
         &self,
     ) -> Result<Option<SealedModelLibraryVerilogAAuthority>, String> {
         let model_paths = self

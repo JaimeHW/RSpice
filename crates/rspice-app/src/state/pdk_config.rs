@@ -84,17 +84,14 @@ pub use technology_package::{
     MAX_PDK_ARCHIVE_BYTES, MAX_PDK_ARTIFACT_BYTES, MAX_PDK_ARTIFACTS, MAX_PDK_TOTAL_ARTIFACT_BYTES,
     PdkAdministrativeAuthority, PdkConnectivityEdge, PdkExecutionTarget, PdkExtractionContract,
     PdkExtractionQualificationVector, PdkExtractionQuantity, PdkLayerAlias, PdkLayerKind,
-    PdkLayerPurposeRef, PdkModelProcess, PdkPublisherTrustStore, PdkRecognitionContract,
+    PdkLayerPurposeRef, PdkPublisherTrustStore, PdkRecognitionContract,
     PdkRecognitionQualificationVector, PdkRecognitionTerminal, PdkStreamMapEntry,
     PdkTechnologyArtifactKind, PdkTechnologyAuditAction, PdkTechnologyAuditReceipt,
     PdkTechnologyBinding, PdkTechnologyLayer, PdkTechnologyManifest, PdkTechnologyRegistry,
     PdkTrustAuditAction, PdkTrustAuditReceipt, PdkViaDefinition, TrustedPdkPublisherKey,
     ValidatedPdkTechnologyPackage,
 };
-pub(crate) use technology_package::{
-    SealedPdkModelProcessBinding, SealedPdkModelSources, SealedPdkVerilogAArtifact,
-    SealedPdkVerilogABinding,
-};
+pub(crate) use technology_package::{SealedPdkVerilogAArtifact, SealedPdkVerilogABinding};
 // =============================================================================
 // Constants
 // =============================================================================

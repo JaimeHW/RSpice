@@ -62,18 +62,24 @@ impl ModelLibraryManager {
         libraries.sort_by(|(left, _), (right, _)| left.name.cmp(&right.name));
         #[cfg(not(target_arch = "wasm32"))]
         {
-            execution_sources::seal_model_sources(libraries, &self.resolution_records, |path| {
-                std::fs::read(path).map_err(|error| error.to_string())
-            })
+            rspice_simulation::model_sources::seal_model_sources(
+                libraries,
+                &self.resolution_records,
+                |path| std::fs::read(path).map_err(|error| error.to_string()),
+            )
         }
         #[cfg(target_arch = "wasm32")]
         {
-            execution_sources::seal_model_sources(libraries, &self.resolution_records, |path| {
-                Err(format!(
-                    "browser execution cannot authenticate external model path '{}'",
-                    path.display()
-                ))
-            })
+            rspice_simulation::model_sources::seal_model_sources(
+                libraries,
+                &self.resolution_records,
+                |path| {
+                    Err(format!(
+                        "browser execution cannot authenticate external model path '{}'",
+                        path.display()
+                    ))
+                },
+            )
         }
     }
 
@@ -130,18 +136,24 @@ impl ModelLibraryManager {
         let libraries = self.resolve_simulation_plan_bindings(bindings)?;
         #[cfg(not(target_arch = "wasm32"))]
         {
-            execution_sources::seal_model_sources(libraries, &self.resolution_records, |path| {
-                std::fs::read(path).map_err(|error| error.to_string())
-            })
+            rspice_simulation::model_sources::seal_model_sources(
+                libraries,
+                &self.resolution_records,
+                |path| std::fs::read(path).map_err(|error| error.to_string()),
+            )
         }
         #[cfg(target_arch = "wasm32")]
         {
-            execution_sources::seal_model_sources(libraries, &self.resolution_records, |path| {
-                Err(format!(
-                    "browser execution cannot authenticate external model path '{}'",
-                    path.display()
-                ))
-            })
+            rspice_simulation::model_sources::seal_model_sources(
+                libraries,
+                &self.resolution_records,
+                |path| {
+                    Err(format!(
+                        "browser execution cannot authenticate external model path '{}'",
+                        path.display()
+                    ))
+                },
+            )
         }
     }
 

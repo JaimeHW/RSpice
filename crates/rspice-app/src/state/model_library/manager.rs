@@ -6,15 +6,14 @@
 //! than silently assumed identical.
 
 mod catalog_identity;
-mod execution_sources;
 mod project_models;
 mod sealing;
 mod source_bundle;
 
 pub(crate) use catalog_identity::model_library_source_digest;
-pub use execution_sources::SealedModelExecutionSources;
-pub(crate) use execution_sources::SealedModelLibraryVerilogAAuthority;
 use rspice_model_library::source_paths::portable_path_key;
+pub use rspice_simulation::model_sources::SealedModelExecutionSources;
+pub(crate) use rspice_simulation::model_sources::SealedModelLibraryVerilogAAuthority;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};

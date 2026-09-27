@@ -20,4 +20,5 @@ rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 wasmi.workspace = true
