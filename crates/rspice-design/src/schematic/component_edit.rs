@@ -1,9 +1,13 @@
 //! Component placement, committed orientation edits, and terminal geometry.
 
 use super::{
-    Component, ComponentType, LibraryCellInstance, Point, Rotation, SchematicDocument,
-    SchematicIdentity,
+    component::{Component, LibraryCellInstance},
+    component_type::ComponentType,
+    document::SchematicDocument,
+    identity::SchematicIdentity,
+    rotation::Rotation,
 };
+use rspice_design_model::Point;
 
 /// Placement geometry supplied by the caller's current tool or command.
 #[derive(Debug, Clone, Copy)]

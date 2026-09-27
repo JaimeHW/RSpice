@@ -3,6 +3,7 @@
 pub mod bus;
 pub mod component;
 pub mod component_display;
+pub mod component_edit;
 pub mod component_type;
 pub mod design_note;
 pub mod device_descriptor;

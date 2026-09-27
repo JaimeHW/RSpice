@@ -1,9 +1,9 @@
 //! Placing and removing components.
 
-use super::component_edit::{
+use super::*;
+use rspice_design::schematic::component_edit::{
     self, ComponentModelOverride, ComponentPlacement, ComponentTransform, legacy_terminal_points,
 };
-use super::*;
 
 impl SchematicState {
     // =========================================================================

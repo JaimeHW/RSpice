@@ -6,8 +6,8 @@
 //! a wire wholly inside travels.
 
 use super::super::super::{BusTargetKind, clamped_documentation_shape_translation};
-use super::super::component_edit::legacy_terminal_points;
 use super::super::*;
+use rspice_design::schematic::component_edit::legacy_terminal_points;
 
 const MAX_SHOVE_LANES: i32 = 8;
 
