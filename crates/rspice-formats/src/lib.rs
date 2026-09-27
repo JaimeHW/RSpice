@@ -3,6 +3,8 @@
 #[cfg(feature = "columnar")]
 pub mod columnar;
 pub mod delimited;
+#[cfg(feature = "result-digital")]
+pub mod digital;
 pub mod fst;
 #[cfg(feature = "hdf5")]
 pub mod hdf5;

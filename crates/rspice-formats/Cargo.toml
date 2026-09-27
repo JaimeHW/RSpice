@@ -15,6 +15,7 @@ workspace = true
 table-schema = ["dep:serde_json"]
 # Reuse canonical retained results without enabling the engine in default codecs.
 result-csv = ["dep:rspice-app-types", "dep:rspice-core", "dep:rspice-results", "dep:serde_json"]
+result-digital = ["dep:rspice-core", "dep:rspice-results"]
 result-vcd = ["dep:rspice-core", "dep:rspice-results"]
 native-bundle = ["dep:serde_json", "dep:sha2"]
 monte-carlo-checkpoint = ["dep:rspice-results", "dep:serde_json"]
