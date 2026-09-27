@@ -29,6 +29,7 @@ mod reference_preparation;
 // The two functions are renamed on export: bare `normalize` and
 // `collation_key` say nothing about what they normalize outside their module,
 // and analysis names have functions by exactly those names.
+pub use super::library_browser::ProjectLibraryMutation;
 pub use capture_group::{
     CaptureGroup, CaptureGroupError, CaptureGroupMembership, CaptureGroupRule, MembershipMove,
     UNGROUPED_NAME, collation_key as capture_group_collation_key, group_namer,

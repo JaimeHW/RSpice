@@ -14,7 +14,8 @@ use uuid::Uuid;
 
 use crate::product::{ContentDigest, ObjectRevision, ProjectId};
 
-use super::{ProjectDescriptor, ProjectDescriptorError, validate_library_audit_text};
+use super::{ProjectDescriptor, ProjectDescriptorError};
+use crate::state::library_browser::validate_library_audit_text;
 
 pub const PROJECT_LIBRARY_PUBLICATION_RECEIPT_SCHEMA_VERSION: u16 = 1;
 pub const MAX_PROJECT_LIBRARY_PUBLICATION_RECEIPTS: usize = 4_096;
@@ -47,7 +48,8 @@ impl ProjectLibraryPublicationDraft {
             ("publication.authority_id", self.authority_id.as_str()),
             ("publication.reason", self.reason.as_str()),
         ] {
-            validate_library_audit_text(field, value)?;
+            validate_library_audit_text(field, value)
+                .map_err(ProjectDescriptorError::LibraryAuditCorrupted)?;
         }
         if self.created_unix_ms == 0 {
             return Err(ProjectDescriptorError::LibraryPublicationCorrupted(
@@ -330,7 +332,8 @@ impl ProjectDescriptor {
                 ("publication.authority_id", receipt.authority_id.as_str()),
                 ("publication.reason", receipt.reason.as_str()),
             ] {
-                validate_library_audit_text(field, value)?;
+                validate_library_audit_text(field, value)
+                    .map_err(ProjectDescriptorError::LibraryAuditCorrupted)?;
             }
             if receipt.created_unix_ms == 0
                 || receipt.snapshot_byte_len == 0

@@ -28,6 +28,7 @@ mod cell;
 mod library;
 mod locks;
 mod manager;
+mod mutation;
 mod placement;
 mod primitives;
 mod view;
@@ -39,6 +40,8 @@ pub use locks::{
     ProjectLibraryLockSnapshot,
 };
 pub use manager::LibraryManager;
+pub use mutation::ProjectLibraryMutation;
+pub(crate) use mutation::validate_library_audit_text;
 pub(crate) use placement::cell_parameter_contract;
 pub use placement::{LibraryCellPlacementCandidate, library_cell_placement_candidates};
 pub use view::{View, ViewType};
