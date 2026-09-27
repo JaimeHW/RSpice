@@ -3,14 +3,13 @@
 //! A periodic sideband block is kept separate from every other block. Missing
 //! cells, ambiguous names, and differing grids cannot become zero coefficients.
 
-use std::borrow::Cow;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use egui::Ui;
+use rspice_results::network_matrix::{NetworkLayout, channel_label, channel_reference, resolve};
 
 use super::{AnalysisPresentationKey, AppState, ResultSheetTable, SheetContext, well_hint};
-use crate::state::{AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType};
+use crate::state::{AnalysisResult, AnalysisType};
 
 #[derive(Debug, Clone)]
 pub(super) struct NetworkMatrixState {
@@ -61,179 +60,12 @@ impl NetworkMatrixState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct BlockKey {
-    mixed: bool,
-    sidebands: Option<(i32, i32)>,
-}
-
-impl BlockKey {
-    fn label(&self) -> String {
-        let basis = if self.mixed {
-            "Differential / common"
-        } else {
-            "Single-ended"
-        };
-        match self.sidebands {
-            Some((output, input)) => format!("{basis} · k={output:+}, m={input:+}"),
-            None => basis.to_owned(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct MatrixBlock {
-    key: BlockKey,
-    /// Row-major indexes into the immutable analysis waveform inventory.
-    cells: Vec<usize>,
-}
-
-struct NetworkMatrix<'a> {
-    analysis: &'a AnalysisResult,
-    references: &'a [f64],
-    blocks: Cow<'a, [MatrixBlock]>,
-}
-
-#[derive(Debug)]
-struct NetworkLayout {
-    references: Vec<f64>,
-    blocks: Vec<MatrixBlock>,
-}
-
-fn term(name: &str, ports: usize) -> Option<(BlockKey, usize, usize)> {
-    let name = name.trim().trim_matches('|');
-    let (base, sidebands) = if let Some((base, tail)) = name.split_once('[') {
-        let (output, input) = tail.strip_suffix(']')?.split_once(',')?;
-        (
-            base,
-            Some((
-                output.strip_prefix("k=")?.parse().ok()?,
-                input.strip_prefix("m=")?.parse().ok()?,
-            )),
-        )
-    } else {
-        (name, None)
-    };
-    let identity = super::smith::trace_identity(base)?;
-    let mixed = !identity.physical_ports;
-    let (row, column) = if mixed {
-        if !ports.is_multiple_of(2) {
-            return None;
-        }
-        let pairs = ports / 2;
-        if identity.output_port > pairs || identity.input_port > pairs {
-            return None;
-        }
-        let prefix = base.get(1..3)?.to_ascii_lowercase();
-        let modes = prefix.as_bytes();
-        (
-            identity.output_port - 1 + usize::from(modes[0] == b'c') * pairs,
-            identity.input_port - 1 + usize::from(modes[1] == b'c') * pairs,
-        )
-    } else {
-        if identity.output_port > ports || identity.input_port > ports {
-            return None;
-        }
-        (identity.output_port - 1, identity.input_port - 1)
-    };
-    Some((BlockKey { mixed, sidebands }, row, column))
-}
-
-/// Shape resolution is cheap enough for rendering; full grids are checked by
-/// the retained structural memo once per source generation.
-fn resolve(analysis: &AnalysisResult) -> Option<NetworkMatrix<'_>> {
-    if !analysis.success
-        || !matches!(
-            analysis.analysis_type,
-            AnalysisType::SParameter | AnalysisType::Psp | AnalysisType::Hbsp
-        )
-    {
-        return None;
-    }
-    let Some(AnalysisResultFamilyMetadata::SParameter {
-        reference_impedances_ohm: references,
-        ..
-    }) = &analysis.family_metadata
-    else {
-        return None;
-    };
-    let ports = references.len();
-    let cells = ports.checked_mul(ports)?;
-    if ports == 0 || references.iter().any(|z| !z.is_finite() || *z <= 0.0) {
-        return None;
-    }
-    let mut blocks: BTreeMap<BlockKey, BTreeMap<usize, usize>> = BTreeMap::new();
-    for (index, waveform) in analysis.waveforms.iter().enumerate() {
-        let Some(complex) = &waveform.complex else {
-            continue;
-        };
-        let name = if complex.source_name.trim().is_empty() {
-            &waveform.name
-        } else {
-            &complex.source_name
-        };
-        let Some((key, row, column)) = term(name, ports) else {
-            continue;
-        };
-        if waveform.x.is_empty()
-            || waveform.x.len() != complex.real.len()
-            || waveform.x.len() != complex.imag.len()
-        {
-            return None;
-        }
-        if key.mixed
-            && references.chunks_exact(2).any(|pair| {
-                pair[0] != pair[1] || !(pair[0] * 2.0).is_finite() || pair[0] / 2.0 <= 0.0
-            })
-        {
-            return None;
-        }
-        if blocks
-            .entry(key)
-            .or_default()
-            .insert(row * ports + column, index)
-            .is_some()
-        {
-            return None;
-        }
-    }
-    // Every advertised block must be complete. A partial matrix cannot prove
-    // mode conversion, reciprocity, or the absence of a coupling term.
-    if blocks.is_empty() || blocks.values().any(|block| block.len() != cells) {
-        return None;
-    }
-    let blocks = blocks
-        .into_iter()
-        .map(|(key, cells)| MatrixBlock {
-            key,
-            cells: cells.into_values().collect(),
-        })
-        .collect();
-    Some(NetworkMatrix {
-        analysis,
-        references,
-        blocks: Cow::Owned(blocks),
-    })
-}
-
 pub(super) fn structure_is_renderable(analysis: &AnalysisResult) -> bool {
     let Some(matrix) = resolve(analysis) else {
         return false;
     };
     super::frame_work::note(super::frame_work::DatasetWalk::SParameterTraceScan);
-    matrix.blocks.iter().all(|block| {
-        let grid = &analysis.waveforms[block.cells[0]].x;
-        grid.iter().all(|x| x.is_finite() && *x >= 0.0)
-            && grid.windows(2).all(|pair| pair[0] < pair[1])
-            && block.cells.iter().all(|&index| {
-                let waveform = &analysis.waveforms[index];
-                waveform.x.as_ref() == grid.as_ref()
-                    && waveform
-                        .complex
-                        .as_ref()
-                        .is_some_and(|c| c.real.iter().chain(c.imag.iter()).all(|v| v.is_finite()))
-            })
-    })
+    matrix.samples_are_finite_and_aligned(analysis)
 }
 
 /// What the tab strip says about this sheet, in the sheet's own words.
@@ -266,28 +98,6 @@ pub(super) fn right_panel(ui: &mut Ui) {
         ui,
         "Exact retained power-wave coefficients. Select a frequency and sideband block in the matrix. Hover or copy for full numerical precision.",
     );
-}
-
-fn channel_label(index: usize, ports: usize, mixed: bool) -> String {
-    if mixed {
-        let pairs = ports / 2;
-        format!(
-            "{}{}",
-            if index < pairs { "D" } else { "C" },
-            index % pairs + 1
-        )
-    } else {
-        format!("P{}", index + 1)
-    }
-}
-
-fn channel_reference(index: usize, references: &[f64], mixed: bool) -> f64 {
-    if mixed {
-        let pairs = references.len() / 2;
-        references[2 * (index % pairs)] * if index < pairs { 2.0 } else { 0.5 }
-    } else {
-        references[index]
-    }
 }
 
 fn formatted(real: f64, imaginary: f64, representation: usize) -> String {
@@ -413,25 +223,17 @@ pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
             );
             return;
         };
-        controls.layout = Some(Arc::new(NetworkLayout {
-            references: matrix.references.to_vec(),
-            blocks: matrix.blocks.into_owned(),
-        }));
+        controls.layout = Some(Arc::new(matrix));
     }
-    let layout = controls.layout.as_ref().expect("resolved layout").clone();
-    let matrix = NetworkMatrix {
-        analysis,
-        references: &layout.references,
-        blocks: Cow::Borrowed(&layout.blocks),
-    };
+    let matrix = controls.layout.as_ref().expect("resolved layout").clone();
     let tokens = crate::ui::tokens::Tokens::get(ui.ctx());
-    controls.block = controls.block.min(matrix.blocks.len() - 1);
+    controls.block = controls.block.min(matrix.blocks().len() - 1);
     ui.horizontal_wrapped(|ui| {
         egui::ComboBox::from_id_salt("network-matrix-block")
-            .selected_text(matrix.blocks[controls.block].key.label())
+            .selected_text(matrix.blocks()[controls.block].label())
             .show_ui(ui, |ui| {
-                for (index, block) in matrix.blocks.iter().enumerate() {
-                    ui.selectable_value(&mut controls.block, index, block.key.label());
+                for (index, block) in matrix.blocks().iter().enumerate() {
+                    ui.selectable_value(&mut controls.block, index, block.label());
                 }
             });
         for (index, label) in ["Real / imaginary", "Magnitude / phase", "dB / phase"]
@@ -446,8 +248,8 @@ pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
     if controls.heatmap {
         heat_legend(ui, &mut controls.floor_db, &tokens.color);
     }
-    let block = &matrix.blocks[controls.block];
-    let grid = &analysis.waveforms[block.cells[0]].x;
+    let block = &matrix.blocks()[controls.block];
+    let grid = &analysis.waveforms[block.cells()[0]].x;
     controls.sample = controls.sample.min(grid.len() - 1);
     ui.horizontal_wrapped(|ui| {
         ui.label("Frequency sample");
@@ -463,8 +265,12 @@ pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
             grid[controls.sample]
         ));
         if ui.button("Copy exact matrix").clicked() {
-            ui.ctx()
-                .copy_text(matrix_csv(&matrix, controls.block, controls.sample));
+            ui.ctx().copy_text(matrix_csv(
+                &matrix,
+                analysis,
+                controls.block,
+                controls.sample,
+            ));
         }
     });
     ui.label(if controls.transpose {
@@ -472,25 +278,25 @@ pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
     } else {
         "Rows: outgoing waves · Columns: incident waves"
     });
-    if block.key.mixed {
+    if block.is_mixed() {
         ui.label("Adjacent physical ports form (+, −) pairs. Differential and common power waves use (a+ − a−)/√2 and (a+ + a−)/√2.");
     }
     if analysis.analysis_type == AnalysisType::SParameter {
         if ui
             .add_enabled(
-                matrix.references.len()
+                matrix.references().len()
                     <= rspice_core::analysis::s_param::MAX_NETWORK_DIAGNOSTIC_PORTS,
                 egui::Button::new("Check sampled passivity / reciprocity"),
             )
             .on_disabled_hover_text("Interactive dense diagnostics support up to 128 ports")
             .clicked()
         {
-            let ports = matrix.references.len();
+            let ports = matrix.references().len();
             let values = (0..ports)
                 .map(|row| {
                     (0..ports)
                         .map(|column| {
-                            let complex = analysis.waveforms[block.cells[row * ports + column]]
+                            let complex = analysis.waveforms[block.cells()[row * ports + column]]
                                 .complex
                                 .as_ref()
                                 .expect("resolved coefficient");
@@ -528,7 +334,7 @@ pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
     } else {
         ui.label("This is a periodic conversion block. Passivity and reciprocity require the complete lifted network and its wave-frequency convention.");
     }
-    let ports = matrix.references.len();
+    let ports = matrix.references().len();
     let row_height = ui.spacing().interact_size.y.max(32.0);
     egui::ScrollArea::horizontal().id_salt("network-matrix-scroll").auto_shrink([false, false]).show(ui, |ui| {
         egui_extras::TableBuilder::new(ui).id_salt("network-matrix-cells").striped(true)
@@ -536,15 +342,15 @@ pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
             .header(row_height, |mut header| {
                 header.col(|ui| { ui.strong("Wave channel / reference"); });
                 for column in 0..ports {
-                    header.col(|ui| { ui.strong(format!("{} · {:.8e} Ω", channel_label(column, ports, block.key.mixed), channel_reference(column, matrix.references, block.key.mixed))); });
+                    header.col(|ui| { ui.strong(format!("{} · {:.8e} Ω", channel_label(column, ports, block.is_mixed()), channel_reference(column, matrix.references(), block.is_mixed()))); });
                 }
             }).body(|body| body.rows(row_height, ports, |mut table_row| {
                 let row = table_row.index();
-                table_row.col(|ui| { ui.strong(format!("{} · {:.8e} Ω", channel_label(row, ports, block.key.mixed), channel_reference(row, matrix.references, block.key.mixed))); });
+                table_row.col(|ui| { ui.strong(format!("{} · {:.8e} Ω", channel_label(row, ports, block.is_mixed()), channel_reference(row, matrix.references(), block.is_mixed()))); });
                 for column in 0..ports {
                     table_row.col(|ui| {
                     let (out, input) = if controls.transpose { (column, row) } else { (row, column) };
-                    let waveform = &analysis.waveforms[block.cells[out * ports + input]];
+                    let waveform = &analysis.waveforms[block.cells()[out * ports + input]];
                     let complex = waveform.complex.as_ref().expect("resolved complex coefficient");
                     let real = complex.real[controls.sample];
                     let imaginary = complex.imag[controls.sample];
@@ -589,8 +395,13 @@ pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
     context.results.network_matrix.open_trace = open_trace;
 }
 
-fn matrix_csv(matrix: &NetworkMatrix<'_>, block_index: usize, sample: usize) -> String {
-    let table = exact_table(matrix, block_index, sample);
+fn matrix_csv(
+    matrix: &NetworkLayout,
+    analysis: &AnalysisResult,
+    block_index: usize,
+    sample: usize,
+) -> String {
+    let table = exact_table(matrix, analysis, block_index, sample);
     let mut csv = table.columns.join(",");
     csv.push('\n');
     for row in table.rows {
@@ -605,52 +416,19 @@ fn matrix_csv(matrix: &NetworkMatrix<'_>, block_index: usize, sample: usize) -> 
     csv
 }
 
-fn exact_table(matrix: &NetworkMatrix<'_>, block_index: usize, sample: usize) -> ResultSheetTable {
-    let block = &matrix.blocks[block_index];
-    let ports = matrix.references.len();
-    let rows = block
-        .cells
-        .iter()
-        .enumerate()
-        .map(|(cell, &index)| {
-            let waveform = &matrix.analysis.waveforms[index];
-            let complex = waveform
-                .complex
-                .as_ref()
-                .expect("resolved complex coefficient");
-            vec![
-                complex.source_name.clone(),
-                format!("{:.17e}", waveform.x[sample]),
-                channel_label(cell / ports, ports, block.key.mixed),
-                channel_label(cell % ports, ports, block.key.mixed),
-                format!(
-                    "{:.17e}",
-                    channel_reference(cell / ports, matrix.references, block.key.mixed)
-                ),
-                format!(
-                    "{:.17e}",
-                    channel_reference(cell % ports, matrix.references, block.key.mixed)
-                ),
-                format!("{:.17e}", complex.real[sample]),
-                format!("{:.17e}", complex.imag[sample]),
-            ]
-        })
-        .collect();
+fn exact_table(
+    matrix: &NetworkLayout,
+    analysis: &AnalysisResult,
+    block_index: usize,
+    sample: usize,
+) -> ResultSheetTable {
+    let table = matrix
+        .exact_table(analysis, block_index, sample)
+        .expect("resolved complex coefficient sample");
     ResultSheetTable {
-        title: format!("Network matrix · {}", block.key.label()),
-        columns: [
-            "Coefficient",
-            "Frequency (Hz)",
-            "Output",
-            "Input",
-            "Output reference (ohm)",
-            "Input reference (ohm)",
-            "Real",
-            "Imaginary",
-        ]
-        .map(str::to_owned)
-        .to_vec(),
-        rows,
+        title: table.title,
+        columns: table.columns,
+        rows: table.rows,
     }
 }
 
@@ -663,12 +441,12 @@ pub(crate) fn hardcopy_tables(
     let matrix = resolve(analysis).ok_or("requires a complete finite network matrix")?;
     // Check before allocating formatted strings. The hardcopy worker transports
     // at most 64 MiB, and report tables themselves permit at most 100,000 rows.
-    let rows = matrix.blocks.iter().try_fold(0usize, |total, block| {
+    let rows = matrix.blocks().iter().try_fold(0usize, |total, block| {
         total.checked_add(
             block
-                .cells
+                .cells()
                 .len()
-                .checked_mul(analysis.waveforms[block.cells[0]].x.len())?,
+                .checked_mul(analysis.waveforms[block.cells()[0]].x.len())?,
         )
     });
     if rows.is_none_or(|rows| rows > 100_000) {
@@ -677,10 +455,12 @@ pub(crate) fn hardcopy_tables(
         );
     }
     let mut tables = Vec::new();
-    for (index, block) in matrix.blocks.iter().enumerate() {
-        let mut table = exact_table(&matrix, index, 0);
-        for sample in 1..analysis.waveforms[block.cells[0]].x.len() {
-            table.rows.extend(exact_table(&matrix, index, sample).rows);
+    for (index, block) in matrix.blocks().iter().enumerate() {
+        let mut table = exact_table(&matrix, analysis, index, 0);
+        for sample in 1..analysis.waveforms[block.cells()[0]].x.len() {
+            table
+                .rows
+                .extend(exact_table(&matrix, analysis, index, sample).rows);
         }
         tables.push(table);
     }
@@ -690,7 +470,7 @@ pub(crate) fn hardcopy_tables(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::state::{SimulationRun, WaveformData};
+    use crate::state::{AnalysisResultFamilyMetadata, SimulationRun, WaveformData};
 
     pub(crate) fn fixture(mixed: bool) -> AnalysisResult {
         let mut traces = Vec::new();
@@ -738,17 +518,17 @@ pub(crate) mod tests {
             let analysis = fixture(mixed);
             assert!(structure_is_renderable(&analysis));
             let matrix = resolve(&analysis).unwrap();
-            let csv = matrix_csv(&matrix, 0, 1);
+            let csv = matrix_csv(&matrix, &analysis, 0, 1);
             assert!(csv.contains("2.00000000000000000e6"));
             let tables = hardcopy_tables(&analysis).unwrap();
             assert_eq!(tables.len(), 1);
-            assert_eq!(tables[0].rows.len(), 2 * matrix.references.len().pow(2));
+            assert_eq!(tables[0].rows.len(), 2 * matrix.references().len().pow(2));
             assert_eq!(
-                channel_reference(0, matrix.references, mixed),
+                channel_reference(0, matrix.references(), mixed),
                 if mixed { 100.0 } else { 50.0 }
             );
             if mixed {
-                assert_eq!(channel_reference(2, matrix.references, mixed), 25.0);
+                assert_eq!(channel_reference(2, matrix.references(), mixed), 25.0);
             }
         }
     }
@@ -793,19 +573,6 @@ pub(crate) mod tests {
 
     #[test]
     fn translated_blocks_and_large_port_indexes_keep_their_identity() {
-        assert_eq!(
-            term("S12_10[k=-2,m=+3]", 12),
-            Some((
-                BlockKey {
-                    mixed: false,
-                    sidebands: Some((-2, 3))
-                },
-                11,
-                9
-            ))
-        );
-        assert!(term("S12[k=0]", 2).is_none());
-        assert!(term("S00", 2).is_none());
         let mut periodic = fixture(false);
         periodic.analysis_type = AnalysisType::Psp;
         let mut second = periodic.waveforms.clone();
@@ -816,7 +583,7 @@ pub(crate) mod tests {
         }
         periodic.waveforms.extend(second);
         assert!(structure_is_renderable(&periodic));
-        assert_eq!(resolve(&periodic).unwrap().blocks.len(), 2);
+        assert_eq!(resolve(&periodic).unwrap().blocks().len(), 2);
     }
 
     #[test]
@@ -837,9 +604,9 @@ pub(crate) mod tests {
     fn exact_export_round_trips_complex_components() {
         let analysis = fixture(false);
         let matrix = resolve(&analysis).unwrap();
-        let table = exact_table(&matrix, 0, 1);
+        let table = exact_table(&matrix, &analysis, 0, 1);
         for (index, row) in table.rows.iter().enumerate() {
-            let complex = analysis.waveforms[matrix.blocks[0].cells[index]]
+            let complex = analysis.waveforms[matrix.blocks()[0].cells()[index]]
                 .complex
                 .as_ref()
                 .unwrap();

@@ -176,8 +176,9 @@ pub(super) fn quantities(analysis: &AnalysisResult) -> Vec<PolarQuantity> {
             .expect("plottability checked the complex components");
         match network.as_ref() {
             Some(reference_impedances_ohm) => {
-                let Some(identity) = super::smith::trace_identity(&complex.source_name)
-                    .or_else(|| super::smith::trace_identity(&waveform.name))
+                let Some(identity) =
+                    rspice_results::network_matrix::trace_identity(&complex.source_name)
+                        .or_else(|| rspice_results::network_matrix::trace_identity(&waveform.name))
                 else {
                     continue;
                 };

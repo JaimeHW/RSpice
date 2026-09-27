@@ -37,6 +37,8 @@ pub mod monte_carlo;
 #[cfg(feature = "engine-evidence")]
 pub mod monte_carlo_checkpoint;
 #[cfg(feature = "engine-evidence")]
+pub mod network_matrix;
+#[cfg(feature = "engine-evidence")]
 pub mod noise;
 pub mod noise_spectrum;
 pub mod nyquist;

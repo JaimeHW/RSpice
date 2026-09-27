@@ -5,6 +5,7 @@
 //! from the token cycle like every other viewer.
 
 use egui::Ui;
+use rspice_results::network_matrix::trace_identity;
 
 use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si};
 use crate::ui::tokens::Tokens;
@@ -17,51 +18,6 @@ use crate::workbench::app_state::{
 use super::frame_work::{self, DatasetWalk};
 use super::strip::{self, LegendChip};
 use super::well_hint;
-
-/// The network term one retained trace name spells.
-///
-/// Shared with the polar sheet: both read the same S-parameter naming
-/// contract, and a second parser would be a second answer to what `Sdd21`
-/// means.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct SParameterTraceIdentity {
-    pub(super) output_port: usize,
-    pub(super) input_port: usize,
-    pub(super) physical_ports: bool,
-}
-
-pub(super) fn trace_identity(name: &str) -> Option<SParameterTraceIdentity> {
-    let core = name
-        .trim()
-        .trim_matches('|')
-        .split_once('[')
-        .map_or_else(|| name.trim().trim_matches('|'), |(core, _)| core);
-    let suffix = core.strip_prefix('S').or_else(|| core.strip_prefix('s'))?;
-    let (physical_ports, indices) = match suffix.get(..2) {
-        Some(prefix)
-            if matches!(
-                prefix.to_ascii_lowercase().as_str(),
-                "dd" | "dc" | "cd" | "cc"
-            ) =>
-        {
-            (false, &suffix[2..])
-        }
-        _ => (true, suffix),
-    };
-    let (output_port, input_port) = if let Some((output, input)) = indices.split_once('_') {
-        (output.parse().ok()?, input.parse().ok()?)
-    } else if indices.len() == 2 && indices.bytes().all(|byte| byte.is_ascii_digit()) {
-        let bytes = indices.as_bytes();
-        ((bytes[0] - b'0') as usize, (bytes[1] - b'0') as usize)
-    } else {
-        return None;
-    };
-    (output_port > 0 && input_port > 0).then_some(SParameterTraceIdentity {
-        output_port,
-        input_port,
-        physical_ports,
-    })
-}
 
 fn trace_is_well_formed(waveform: &crate::state::WaveformData) -> bool {
     let Some(complex) = waveform.complex.as_ref() else {
@@ -670,34 +626,6 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn trace_identity_distinguishes_reflection_transmission_and_mixed_mode() {
-        assert_eq!(
-            trace_identity("S22"),
-            Some(SParameterTraceIdentity {
-                output_port: 2,
-                input_port: 2,
-                physical_ports: true,
-            })
-        );
-        assert_eq!(
-            trace_identity("S2_10[k=+0,m=+0]"),
-            Some(SParameterTraceIdentity {
-                output_port: 2,
-                input_port: 10,
-                physical_ports: true,
-            })
-        );
-        assert_eq!(
-            trace_identity("Sdd11"),
-            Some(SParameterTraceIdentity {
-                output_port: 1,
-                input_port: 1,
-                physical_ports: false,
-            })
-        );
-    }
 
     #[test]
     fn nondefault_reference_impedance_controls_impedance_conversion() {
