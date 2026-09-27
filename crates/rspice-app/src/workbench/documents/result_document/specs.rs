@@ -294,46 +294,11 @@ pub(crate) fn export_csv(
     run: &SimulationRun,
     workspace_specs: &[SpecEntry],
 ) -> super::ResultSheetCsv {
-    let specs = resolved_specifications(run, workspace_specs);
-    let rows = result_rows(run, &specs);
-    let mut contents = String::from(
-        "measurement,expression,value,minimum,maximum,limit,margin,unit,scope,worst_corner,status,detail\n",
-    );
-    for row in &rows {
-        let spec = specs
-            .iter()
-            .find(|spec| spec.measurement.eq_ignore_ascii_case(&row.measurement));
-        let value = row.value.map(|value| format!("{value:.17e}"));
-        let minimum = spec
-            .and_then(|spec| spec.min)
-            .map(|value| format!("{value:.17e}"));
-        let maximum = spec
-            .and_then(|spec| spec.max)
-            .map(|value| format!("{value:.17e}"));
-        let margin = row.margin.map(|value| format!("{value:.17e}"));
-        let scope = spec
-            .map(|spec| serde_json::to_string(&spec.scope).unwrap_or_else(|_| "null".to_owned()))
-            .unwrap_or_default();
-        contents.push_str(&format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{}\n",
-            super::csv_field(&row.measurement),
-            super::csv_field(&row.expression),
-            super::csv_field(value.as_deref().unwrap_or_default()),
-            super::csv_field(minimum.as_deref().unwrap_or_default()),
-            super::csv_field(maximum.as_deref().unwrap_or_default()),
-            super::csv_field(&row.limit),
-            super::csv_field(margin.as_deref().unwrap_or_default()),
-            super::csv_field(&row.unit),
-            super::csv_field(&scope),
-            super::csv_field(row.worst_corner.as_deref().unwrap_or_default()),
-            row.status.label(),
-            super::csv_field(&row.detail),
-        ));
-    }
+    let encoded = rspice_formats::result_csv::encode_specification_csv(run, workspace_specs);
     super::ResultSheetCsv {
         default_name: "rspice-specifications.csv",
-        detail: format!("{} specification rows", rows.len()),
-        contents,
+        detail: format!("{} specification rows", encoded.row_count),
+        contents: encoded.contents,
     }
 }
 
