@@ -16,10 +16,8 @@
 //!
 //! Follows Cadence Spectre's spectral analysis approach.
 
-pub(crate) mod data;
-pub(crate) mod pipeline;
+pub(crate) use rspice_results::fft::{data, pipeline, window};
 pub(crate) mod state;
-pub(crate) mod window;
 
 #[cfg(test)]
 pub use data::FftData;

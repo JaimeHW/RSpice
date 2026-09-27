@@ -11,7 +11,7 @@ use rspice_core::numerics::rustfft_qualification::qualify_rustfft_forward_length
 use rustfft::{Fft, FftPlanner};
 
 use super::{FftAllocationStage, FftBuildError};
-use crate::analysis::fft::window::{WindowFunction, try_generate_window};
+use crate::fft::window::{WindowFunction, try_generate_window};
 
 const MAX_RETAINED_WINDOW_ENTRIES: usize = 16;
 // 2,097,152 f64 coefficients retain at most 16 MiB of cache-owned coefficient

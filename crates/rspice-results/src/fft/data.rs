@@ -2,8 +2,6 @@
 //!
 //! Core data types for FFT and spectrum analysis.
 
-#![allow(clippy::type_complexity)]
-
 mod analysis;
 mod cache;
 mod error;

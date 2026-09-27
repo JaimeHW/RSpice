@@ -10,7 +10,7 @@ use super::{
     cache::{cached_fft_plan, cached_window},
     error::MIN_FFT_DATA_SAMPLES,
 };
-use crate::analysis::fft::window::WindowFunction;
+use crate::fft::window::WindowFunction;
 // =============================================================================
 // FFT Data
 // =============================================================================

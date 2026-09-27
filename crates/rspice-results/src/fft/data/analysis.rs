@@ -7,7 +7,7 @@ use super::{
     FftData, SpectrumAnalysisAllocationStage, SpectrumAnalysisError, SpectrumNormalization,
     error::MAX_SPECTRUM_HARMONIC_ORDER,
 };
-use crate::analysis::fft::window::WindowFunction;
+use crate::fft::window::WindowFunction;
 // =============================================================================
 // Spectrum Analysis
 // =============================================================================
@@ -875,8 +875,8 @@ fn validate_analysis_input(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::fft::data::FftPoint;
-    use crate::analysis::fft::data::SpectrumNormalization;
+    use crate::fft::data::FftPoint;
+    use crate::fft::data::SpectrumNormalization;
 
     fn spectrum_from_magnitudes(
         magnitudes: &[f64],

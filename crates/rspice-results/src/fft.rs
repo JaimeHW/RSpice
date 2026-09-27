@@ -1,6 +1,10 @@
 //! FFT formats, retained spectrum evidence, and exact coefficient storage.
 
 #[cfg(feature = "engine-evidence")]
+pub mod data;
+#[cfg(feature = "engine-evidence")]
+pub mod pipeline;
+#[cfg(feature = "engine-evidence")]
 pub mod recorded;
 #[cfg(feature = "engine-evidence")]
 pub mod spectrum;
