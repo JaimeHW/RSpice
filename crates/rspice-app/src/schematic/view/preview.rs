@@ -332,7 +332,7 @@ fn draw_stretch_selection_preview(
         }
     };
 
-    for wire in candidate.document.wires.iter().filter(|candidate_wire| {
+    for wire in candidate.wires.iter().filter(|candidate_wire| {
         state
             .schematic
             .document
@@ -343,7 +343,7 @@ fn draw_stretch_selection_preview(
     }) {
         draw_wire(painter, viewport, wire, true, None);
     }
-    for bus in candidate.document.buses.iter().filter(|candidate_bus| {
+    for bus in candidate.buses.iter().filter(|candidate_bus| {
         state
             .schematic
             .document
@@ -354,7 +354,7 @@ fn draw_stretch_selection_preview(
     }) {
         draw_bus(painter, viewport, bus, true);
     }
-    for tap in candidate.document.bus_taps.iter().filter(|candidate_tap| {
+    for tap in candidate.bus_taps.iter().filter(|candidate_tap| {
         state
             .schematic
             .document
@@ -366,7 +366,6 @@ fn draw_stretch_selection_preview(
         draw_bus_tap(painter, viewport, tap, true);
     }
     for shape in candidate
-        .document
         .documentation_shapes
         .iter()
         .filter(|candidate_shape| {

@@ -4,7 +4,7 @@
 //! operation that resizes a shape or reroutes one leg of a wire without
 //! detaching either end.
 
-use super::super::super::{BusTargetKind, DocumentationShapeGeometry, WireSegment};
+use super::super::stretch;
 use super::super::*;
 
 impl SchematicState {
@@ -27,7 +27,7 @@ impl SchematicState {
             .any(|bus| self.selection.has_bus(bus.id) && bus.points.len() >= 2)
             || self.document.documentation_shapes.iter().any(|shape| {
                 self.selection.has_documentation_shape(shape.id)
-                    && documentation_shape_point_count(&shape.geometry) != 0
+                    && stretch::documentation_shape_point_count(&shape.geometry) != 0
             })
     }
 
@@ -107,7 +107,7 @@ impl SchematicState {
 
     /// Prove that an exact live handle belongs to the current frozen selection.
     pub fn is_stretch_target_eligible(&self, target: StretchTarget) -> bool {
-        target_is_live(self, target) && selection_authorizes_target(self, target)
+        stretch::target_is_live(&self.document, target) && selection_authorizes_target(self, target)
     }
 
     /// Stretch one exact selected segment or typed shape control point.
@@ -143,7 +143,7 @@ impl SchematicState {
         delta: Point,
         target: StretchTarget,
         policy: StretchOrthogonalPolicy,
-    ) -> Result<Option<SchematicState>, StretchSelectionError> {
+    ) -> Result<Option<SchematicDocument>, StretchSelectionError> {
         self.preview_stretch_target_resolved(
             delta,
             target,
@@ -159,11 +159,25 @@ impl SchematicState {
         )
     }
 
-    /// Stretch using caller-resolved component terminal geometry.
-    ///
-    /// The application supplies authored library-symbol pin positions through
-    /// this boundary. Core callers retain the durable generated/primitive
-    /// terminal geometry through [`Self::stretch_target`].
+    /// Preserve editor eligibility and error precedence before document editing.
+    fn stretch_request_is_selected(
+        &self,
+        delta: Point,
+        target: StretchTarget,
+    ) -> Result<bool, StretchSelectionError> {
+        if self.read_only || delta == Point::origin() {
+            return Ok(false);
+        }
+        if !self.selection.probes.is_empty() {
+            return Err(StretchSelectionError::ProbeSelectionUnsupported);
+        }
+        if !stretch::target_is_live(&self.document, target) {
+            return Err(StretchSelectionError::StaleTarget);
+        }
+        Ok(selection_authorizes_target(self, target))
+    }
+
+    /// Stretch using caller-resolved component geometry.
     pub fn stretch_target_resolved(
         &mut self,
         delta: Point,
@@ -172,261 +186,49 @@ impl SchematicState {
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
         component_bounds_for: impl FnMut(&Component) -> (i32, i32, i32, i32),
     ) -> Result<bool, StretchSelectionError> {
-        let Some(candidate) = self.preview_stretch_target_resolved(
+        if !self.stretch_request_is_selected(delta, target)? {
+            return Ok(false);
+        }
+        let changed = stretch::stretch_target_resolved(
+            &mut self.document,
             delta,
             target,
             policy,
             terminal_points_for,
             component_bounds_for,
-        )?
-        else {
-            return Ok(false);
-        };
-        self.commit_stretch_candidate(candidate, target)?;
-        Ok(true)
+        )?;
+        if changed {
+            if matches!(
+                target,
+                StretchTarget::WireSegment { .. } | StretchTarget::BusSegment { .. }
+            ) {
+                self.bump_topology_version();
+            }
+            self.is_dirty = true;
+        }
+        Ok(changed)
     }
 
-    /// Build and validate the exact candidate rendered by a stretch preview.
-    ///
-    /// This is the single candidate construction/validation authority used by
-    /// commit. It performs at most one full schematic clone; callers must not
-    /// pre-clone the state before invoking it.
+    /// Build the validated document preview without cloning editor state.
     pub fn preview_stretch_target_resolved(
         &self,
         delta: Point,
         target: StretchTarget,
         policy: StretchOrthogonalPolicy,
-        mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
-        mut component_bounds_for: impl FnMut(&Component) -> (i32, i32, i32, i32),
-    ) -> Result<Option<SchematicState>, StretchSelectionError> {
-        if self.read_only || delta == Point::origin() {
+        terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+        component_bounds_for: impl FnMut(&Component) -> (i32, i32, i32, i32),
+    ) -> Result<Option<SchematicDocument>, StretchSelectionError> {
+        if !self.stretch_request_is_selected(delta, target)? {
             return Ok(None);
         }
-        if !self.selection.probes.is_empty() {
-            return Err(StretchSelectionError::ProbeSelectionUnsupported);
-        }
-        if !target_is_live(self, target) {
-            return Err(StretchSelectionError::StaleTarget);
-        }
-        if !selection_authorizes_target(self, target) {
-            return Ok(None);
-        }
-        let terminal_points_by_component = self
-            .document
-            .components
-            .iter()
-            .map(|component| (component.id, terminal_points_for(component)))
-            .collect::<std::collections::HashMap<_, _>>();
-        let component_bounds_by_component = self
-            .document
-            .components
-            .iter()
-            .map(|component| (component.id, component_bounds_for(component)))
-            .collect::<std::collections::HashMap<_, _>>();
-
-        let candidate = match target {
-            StretchTarget::DocumentationShapePoint {
-                shape_id,
-                point_index,
-            } => self.documentation_shape_stretch_candidate(shape_id, point_index, delta)?,
-            StretchTarget::WireSegment {
-                wire_id,
-                segment_index,
-            } => self.conductor_stretch_candidate(
-                delta,
-                ConductorTarget::Wire(wire_id),
-                segment_index,
-                policy,
-                &terminal_points_by_component,
-                &component_bounds_by_component,
-            )?,
-            StretchTarget::BusSegment {
-                bus_id,
-                segment_index,
-            } => self.conductor_stretch_candidate(
-                delta,
-                ConductorTarget::Bus(bus_id),
-                segment_index,
-                policy,
-                &terminal_points_by_component,
-                &component_bounds_by_component,
-            )?,
-        };
-        Ok(Some(candidate))
-    }
-
-    fn documentation_shape_stretch_candidate(
-        &self,
-        shape_id: u64,
-        point_index: usize,
-        delta: Point,
-    ) -> Result<SchematicState, StretchSelectionError> {
-        let mut candidate = self.clone();
-        let shape = candidate
-            .document
-            .documentation_shapes
-            .iter_mut()
-            .find(|shape| shape.id == shape_id)
-            .ok_or(StretchSelectionError::StaleTarget)?;
-        let point = documentation_shape_point_mut(&mut shape.geometry, point_index)
-            .ok_or(StretchSelectionError::StaleTarget)?;
-        *point = checked_offset(*point, delta)?;
-        if shape.validate().is_err() {
-            return Err(StretchSelectionError::InvalidDocumentationGeometry { shape_id });
-        }
-        Ok(candidate)
-    }
-
-    fn conductor_stretch_candidate(
-        &self,
-        delta: Point,
-        target: ConductorTarget,
-        segment_index: usize,
-        policy: StretchOrthogonalPolicy,
-        terminal_points_by_component: &std::collections::HashMap<u64, Vec<Point>>,
-        component_bounds_by_component: &std::collections::HashMap<u64, (i32, i32, i32, i32)>,
-    ) -> Result<SchematicState, StretchSelectionError> {
-        let source_points = conductor_points(self, target)
-            .ok_or(StretchSelectionError::StaleTarget)?
-            .to_vec();
-        let source_segment = source_points
-            .get(segment_index..=segment_index + 1)
-            .filter(|points| points.len() == 2)
-            .map(|points| WireSegment::new(points[0], points[1]))
-            .ok_or(StretchSelectionError::StaleTarget)?;
-        let object_id = target.object_id();
-        if source_segment.is_zero_length() {
-            return Err(StretchSelectionError::DegenerateGeometry { object_id });
-        }
-
-        let affected_indices = affected_segment_indices(source_points.len(), segment_index);
-        let source_affected = indexed_segments(&source_points, &affected_indices);
-        validate_orthogonal_policy(object_id, source_segment, &source_affected, delta, policy)?;
-        reject_source_anchors(
-            self,
+        stretch::preview_stretch_target_resolved(
+            &self.document,
+            delta,
             target,
-            segment_index,
-            source_segment,
-            terminal_points_by_component,
-        )?;
-
-        let mut candidate = self.clone();
-        {
-            let points = conductor_points_mut(&mut candidate, target)
-                .ok_or(StretchSelectionError::StaleTarget)?;
-            points[segment_index] = checked_offset(points[segment_index], delta)?;
-            points[segment_index + 1] = checked_offset(points[segment_index + 1], delta)?;
-        }
-        translate_attached_taps(self, &mut candidate, target, source_segment, delta)?;
-
-        let candidate_points =
-            conductor_points(&candidate, target).ok_or(StretchSelectionError::StaleTarget)?;
-        let candidate_affected = indexed_segments(candidate_points, &affected_indices);
-        if candidate_affected
-            .iter()
-            .any(|(_, segment)| segment.is_zero_length())
-        {
-            return Err(StretchSelectionError::DegenerateGeometry { object_id });
-        }
-        if policy == StretchOrthogonalPolicy::PreserveOrthogonal
-            && candidate_affected
-                .iter()
-                .any(|(_, segment)| !segment.is_orthogonal())
-        {
-            return Err(StretchSelectionError::NonOrthogonalSource { object_id });
-        }
-        match target {
-            ConductorTarget::Wire(_) => {}
-            ConductorTarget::Bus(_) => {
-                let bus = candidate
-                    .document
-                    .buses
-                    .iter()
-                    .find(|bus| bus.id == object_id)
-                    .ok_or(StretchSelectionError::StaleTarget)?;
-                if bus.validate().is_err() {
-                    return Err(StretchSelectionError::DegenerateGeometry { object_id });
-                }
-            }
-        }
-        validate_all_tap_attachments(&candidate)?;
-        validate_new_conductor_conflicts(
-            self,
-            &candidate,
-            target,
-            segment_index,
-            &affected_indices,
-        )?;
-        validate_new_terminal_and_body_contacts(
-            &candidate,
-            target,
-            &source_affected,
-            &candidate_affected,
-            terminal_points_by_component,
-            component_bounds_by_component,
-        )?;
-
-        Ok(candidate)
-    }
-
-    fn commit_stretch_candidate(
-        &mut self,
-        candidate: SchematicState,
-        target: StretchTarget,
-    ) -> Result<(), StretchSelectionError> {
-        match target {
-            StretchTarget::WireSegment { wire_id, .. } => {
-                let points = candidate
-                    .document
-                    .wires
-                    .iter()
-                    .find(|wire| wire.id == wire_id)
-                    .map(|wire| wire.points.clone())
-                    .ok_or(StretchSelectionError::StaleTarget)?;
-                self.document
-                    .wires
-                    .iter_mut()
-                    .find(|wire| wire.id == wire_id)
-                    .ok_or(StretchSelectionError::StaleTarget)?
-                    .points = points;
-                self.document.bus_taps = candidate.document.bus_taps;
-                self.bump_topology_version();
-            }
-            StretchTarget::BusSegment { bus_id, .. } => {
-                let points = candidate
-                    .document
-                    .buses
-                    .iter()
-                    .find(|bus| bus.id == bus_id)
-                    .map(|bus| bus.points.clone())
-                    .ok_or(StretchSelectionError::StaleTarget)?;
-                self.document
-                    .buses
-                    .iter_mut()
-                    .find(|bus| bus.id == bus_id)
-                    .ok_or(StretchSelectionError::StaleTarget)?
-                    .points = points;
-                self.document.bus_taps = candidate.document.bus_taps;
-                self.bump_topology_version();
-            }
-            StretchTarget::DocumentationShapePoint { shape_id, .. } => {
-                let geometry = candidate
-                    .document
-                    .documentation_shapes
-                    .iter()
-                    .find(|shape| shape.id == shape_id)
-                    .map(|shape| shape.geometry.clone())
-                    .ok_or(StretchSelectionError::StaleTarget)?;
-                self.document
-                    .documentation_shapes
-                    .iter_mut()
-                    .find(|shape| shape.id == shape_id)
-                    .ok_or(StretchSelectionError::StaleTarget)?
-                    .geometry = geometry;
-            }
-        }
-        self.is_dirty = true;
-        Ok(())
+            policy,
+            terminal_points_for,
+            component_bounds_for,
+        )
     }
 }
 
@@ -437,38 +239,6 @@ fn push_unique_target(
 ) {
     if state.is_stretch_target_eligible(target) && !targets.contains(&target) {
         targets.push(target);
-    }
-}
-
-fn target_is_live(state: &SchematicState, target: StretchTarget) -> bool {
-    match target {
-        StretchTarget::WireSegment {
-            wire_id,
-            segment_index,
-        } => state
-            .document
-            .wires
-            .iter()
-            .find(|wire| wire.id == wire_id)
-            .is_some_and(|wire| segment_index < wire.segment_count()),
-        StretchTarget::BusSegment {
-            bus_id,
-            segment_index,
-        } => state
-            .document
-            .buses
-            .iter()
-            .find(|bus| bus.id == bus_id)
-            .is_some_and(|bus| segment_index < bus.points.len().saturating_sub(1)),
-        StretchTarget::DocumentationShapePoint {
-            shape_id,
-            point_index,
-        } => state
-            .document
-            .documentation_shapes
-            .iter()
-            .find(|shape| shape.id == shape_id)
-            .is_some_and(|shape| point_index < documentation_shape_point_count(&shape.geometry)),
     }
 }
 
@@ -490,662 +260,9 @@ fn selection_authorizes_target(state: &SchematicState, target: StretchTarget) ->
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ConductorTarget {
-    Wire(u64),
-    Bus(u64),
-}
-
-impl ConductorTarget {
-    const fn object_id(self) -> u64 {
-        match self {
-            Self::Wire(id) | Self::Bus(id) => id,
-        }
-    }
-}
-
-fn conductor_points(state: &SchematicState, target: ConductorTarget) -> Option<&[Point]> {
-    match target {
-        ConductorTarget::Wire(id) => state
-            .document
-            .wires
-            .iter()
-            .find(|wire| wire.id == id)
-            .map(|wire| wire.points.as_slice()),
-        ConductorTarget::Bus(id) => state
-            .document
-            .buses
-            .iter()
-            .find(|bus| bus.id == id)
-            .map(|bus| bus.points.as_slice()),
-    }
-}
-
-fn conductor_points_mut(
-    state: &mut SchematicState,
-    target: ConductorTarget,
-) -> Option<&mut Vec<Point>> {
-    match target {
-        ConductorTarget::Wire(id) => state
-            .document
-            .wires
-            .iter_mut()
-            .find(|wire| wire.id == id)
-            .map(|wire| &mut wire.points),
-        ConductorTarget::Bus(id) => state
-            .document
-            .buses
-            .iter_mut()
-            .find(|bus| bus.id == id)
-            .map(|bus| &mut bus.points),
-    }
-}
-
-fn affected_segment_indices(point_count: usize, selected: usize) -> Vec<usize> {
-    let mut indices = Vec::with_capacity(3);
-    if selected != 0 {
-        indices.push(selected - 1);
-    }
-    indices.push(selected);
-    if selected + 1 < point_count.saturating_sub(1) {
-        indices.push(selected + 1);
-    }
-    indices
-}
-
-fn indexed_segments(points: &[Point], indices: &[usize]) -> Vec<(usize, WireSegment)> {
-    indices
-        .iter()
-        .filter_map(|&index| {
-            points
-                .get(index..=index + 1)
-                .filter(|points| points.len() == 2)
-                .map(|points| (index, WireSegment::new(points[0], points[1])))
-        })
-        .collect()
-}
-
-fn checked_offset(point: Point, delta: Point) -> Result<Point, StretchSelectionError> {
-    Ok(Point::new(
-        point
-            .x
-            .checked_add(delta.x)
-            .ok_or(StretchSelectionError::CoordinateOverflow)?,
-        point
-            .y
-            .checked_add(delta.y)
-            .ok_or(StretchSelectionError::CoordinateOverflow)?,
-    ))
-}
-
-fn validate_orthogonal_policy(
-    object_id: u64,
-    selected: WireSegment,
-    affected: &[(usize, WireSegment)],
-    delta: Point,
-    policy: StretchOrthogonalPolicy,
-) -> Result<(), StretchSelectionError> {
-    if policy == StretchOrthogonalPolicy::AllowDiagonal {
-        return Ok(());
-    }
-    if affected.iter().any(|(_, segment)| !segment.is_orthogonal()) {
-        return Err(StretchSelectionError::NonOrthogonalSource { object_id });
-    }
-    let perpendicular = if selected.is_horizontal() {
-        delta.x == 0 && delta.y != 0
-    } else if selected.is_vertical() {
-        delta.y == 0 && delta.x != 0
-    } else {
-        false
-    };
-    if !perpendicular {
-        return Err(StretchSelectionError::PerpendicularDeltaRequired);
-    }
-    Ok(())
-}
-
-fn reject_source_anchors(
-    state: &SchematicState,
-    target: ConductorTarget,
-    segment_index: usize,
-    selected: WireSegment,
-    terminal_points_by_component: &std::collections::HashMap<u64, Vec<Point>>,
-) -> Result<(), StretchSelectionError> {
-    if let ConductorTarget::Wire(wire_id) = target
-        && state.document.connections.iter().any(|connection| {
-            connection.wire_id == wire_id
-                && (connection.point_index == segment_index
-                    || connection.point_index == segment_index + 1)
-        })
-    {
-        let connection = state
-            .document
-            .connections
-            .iter()
-            .find(|connection| {
-                connection.wire_id == wire_id
-                    && (connection.point_index == segment_index
-                        || connection.point_index == segment_index + 1)
-            })
-            .expect("matching connection was just proven");
-        let point = conductor_points(state, target)
-            .and_then(|points| points.get(connection.point_index))
-            .copied()
-            .unwrap_or(selected.start);
-        return Err(StretchSelectionError::ConnectedTerminal {
-            component_id: connection.component_id,
-            point,
-        });
-    }
-
-    for component in &state.document.components {
-        if let Some(point) = terminal_points_by_component
-            .get(&component.id)
-            .into_iter()
-            .flatten()
-            .copied()
-            .find(|point| selected.contains_point(*point))
-        {
-            return Err(StretchSelectionError::ConnectedTerminal {
-                component_id: component.id,
-                point,
-            });
-        }
-    }
-    if let Some(junction) = state
-        .document
-        .junctions
-        .iter()
-        .find(|junction| selected.contains_point(junction.pos))
-    {
-        return Err(StretchSelectionError::FixedAnchor {
-            point: junction.pos,
-        });
-    }
-    if let Some(label) = state
-        .document
-        .net_labels
-        .iter()
-        .find(|label| selected.contains_point(label.pos))
-    {
-        return Err(StretchSelectionError::NetLabelAnchor {
-            label_id: label.id,
-            point: label.pos,
-        });
-    }
-
-    for wire in &state.document.wires {
-        if target == ConductorTarget::Wire(wire.id) {
-            continue;
-        }
-        if let Some(point) = unrelated_anchor_point(&wire.points, selected) {
-            return Err(StretchSelectionError::FixedAnchor { point });
-        }
-    }
-    for bus in &state.document.buses {
-        if target == ConductorTarget::Bus(bus.id) {
-            continue;
-        }
-        if let Some(point) = unrelated_anchor_point(&bus.points, selected) {
-            return Err(StretchSelectionError::FixedAnchor { point });
-        }
-    }
-    Ok(())
-}
-
-fn unrelated_anchor_point(points: &[Point], selected: WireSegment) -> Option<Point> {
-    points
-        .iter()
-        .copied()
-        .find(|point| selected.contains_point(*point))
-        .or_else(|| {
-            [selected.start, selected.end]
-                .into_iter()
-                .find(|point| polyline_contains_point(points, *point))
-        })
-}
-
-fn translate_attached_taps(
-    original: &SchematicState,
-    candidate: &mut SchematicState,
-    target: ConductorTarget,
-    selected: WireSegment,
-    delta: Point,
-) -> Result<(), StretchSelectionError> {
-    for (index, old_tap) in original.document.bus_taps.iter().enumerate() {
-        let source_moves = matches!(target, ConductorTarget::Bus(bus_id) if old_tap.bus_id == bus_id)
-            && selected.contains_point(old_tap.bus_point);
-        let target_moves = match target {
-            ConductorTarget::Wire(_) => {
-                old_tap.target_kind() == BusTargetKind::Wire
-                    && selected.contains_point(old_tap.connection_point)
-            }
-            ConductorTarget::Bus(bus_id) => {
-                old_tap.bus_id != bus_id
-                    && old_tap.target_kind() == BusTargetKind::Bus
-                    && selected.contains_point(old_tap.connection_point)
-            }
-        };
-        if source_moves {
-            candidate.document.bus_taps[index].bus_point =
-                checked_offset(old_tap.bus_point, delta)?;
-        }
-        if target_moves {
-            candidate.document.bus_taps[index].connection_point =
-                checked_offset(old_tap.connection_point, delta)?;
-        }
-    }
-    Ok(())
-}
-
-fn validate_all_tap_attachments(state: &SchematicState) -> Result<(), StretchSelectionError> {
-    for tap in &state.document.bus_taps {
-        let source_valid = state
-            .document
-            .buses
-            .iter()
-            .find(|bus| bus.id == tap.bus_id)
-            .is_some_and(|bus| tap.validate_against_bus(bus).is_ok());
-        let target_valid = match tap.target_kind() {
-            BusTargetKind::Wire => state
-                .document
-                .wires
-                .iter()
-                .any(|wire| wire.contains_point(tap.connection_point)),
-            BusTargetKind::Bus => state
-                .document
-                .buses
-                .iter()
-                .filter(|bus| bus.id != tap.bus_id)
-                .any(|bus| bus.contains_point(tap.connection_point)),
-        };
-        if !source_valid || !target_valid {
-            return Err(StretchSelectionError::InvalidTapAttachment { tap_id: tap.id });
-        }
-    }
-    Ok(())
-}
-
-fn validate_new_conductor_conflicts(
-    original: &SchematicState,
-    candidate: &SchematicState,
-    target: ConductorTarget,
-    selected_index: usize,
-    affected_indices: &[usize],
-) -> Result<(), StretchSelectionError> {
-    let object_id = target.object_id();
-    let original_points = conductor_points(original, target).expect("target was preflighted");
-    let candidate_points = conductor_points(candidate, target).expect("candidate preserves target");
-    let original_affected = indexed_segments(original_points, affected_indices);
-    let candidate_affected = indexed_segments(candidate_points, affected_indices);
-    let old_moved = [
-        original_points[selected_index],
-        original_points[selected_index + 1],
-    ];
-    let new_moved = [
-        candidate_points[selected_index],
-        candidate_points[selected_index + 1],
-    ];
-
-    for left in 0..candidate_affected.len() {
-        for right in left + 1..candidate_affected.len() {
-            if candidate_affected[left]
-                .0
-                .abs_diff(candidate_affected[right].0)
-                <= 1
-            {
-                continue;
-            }
-            let overlaps =
-                positive_length_overlap(candidate_affected[left].1, candidate_affected[right].1);
-            let existed =
-                positive_length_overlap(original_affected[left].1, original_affected[right].1);
-            if overlaps && !existed {
-                return Err(StretchSelectionError::ConductorOverlap {
-                    object_id,
-                    other_id: object_id,
-                });
-            }
-        }
-    }
-
-    for wire in &candidate.document.wires {
-        let same = target == ConductorTarget::Wire(wire.id);
-        let obstacle_indices = obstacle_indices(wire.points.len(), same, affected_indices);
-        if obstacle_indices.is_empty() {
-            continue;
-        }
-        let old_wire = original
-            .document
-            .wires
-            .iter()
-            .find(|old| old.id == wire.id)
-            .expect("candidate preserves wire identities");
-        validate_against_obstacle(
-            object_id,
-            wire.id,
-            &original_affected,
-            &candidate_affected,
-            old_moved,
-            new_moved,
-            &old_wire.points,
-            &wire.points,
-            &obstacle_indices,
-        )?;
-    }
-    for bus in &candidate.document.buses {
-        let same = target == ConductorTarget::Bus(bus.id);
-        let obstacle_indices = obstacle_indices(bus.points.len(), same, affected_indices);
-        if obstacle_indices.is_empty() {
-            continue;
-        }
-        let old_bus = original
-            .document
-            .buses
-            .iter()
-            .find(|old| old.id == bus.id)
-            .expect("candidate preserves bus identities");
-        validate_against_obstacle(
-            object_id,
-            bus.id,
-            &original_affected,
-            &candidate_affected,
-            old_moved,
-            new_moved,
-            &old_bus.points,
-            &bus.points,
-            &obstacle_indices,
-        )?;
-    }
-
-    for junction in &candidate.document.junctions {
-        let new_contact = candidate_affected
-            .iter()
-            .any(|(_, segment)| segment.contains_point(junction.pos));
-        let old_contact = original_affected
-            .iter()
-            .any(|(_, segment)| segment.contains_point(junction.pos));
-        if new_contact != old_contact {
-            return Err(StretchSelectionError::FixedAnchor {
-                point: junction.pos,
-            });
-        }
-    }
-    for label in &candidate.document.net_labels {
-        let new_contact = candidate_affected
-            .iter()
-            .any(|(_, segment)| segment.contains_point(label.pos));
-        let old_contact = original_affected
-            .iter()
-            .any(|(_, segment)| segment.contains_point(label.pos));
-        if new_contact != old_contact {
-            return Err(StretchSelectionError::NetLabelAnchor {
-                label_id: label.id,
-                point: label.pos,
-            });
-        }
-    }
-    Ok(())
-}
-
-fn validate_against_obstacle(
-    object_id: u64,
-    other_id: u64,
-    original_affected: &[(usize, WireSegment)],
-    candidate_affected: &[(usize, WireSegment)],
-    old_moved: [Point; 2],
-    new_moved: [Point; 2],
-    original_obstacle_points: &[Point],
-    candidate_obstacle_points: &[Point],
-    obstacle_indices: &[usize],
-) -> Result<(), StretchSelectionError> {
-    let original_obstacles = indexed_segments(original_obstacle_points, obstacle_indices);
-    let candidate_obstacles = indexed_segments(candidate_obstacle_points, obstacle_indices);
-    for (affected_index, (_, candidate_segment)) in candidate_affected.iter().enumerate() {
-        for (obstacle_index, (_, candidate_obstacle)) in candidate_obstacles.iter().enumerate() {
-            if positive_length_overlap(*candidate_segment, *candidate_obstacle)
-                && !positive_length_overlap(
-                    original_affected[affected_index].1,
-                    original_obstacles[obstacle_index].1,
-                )
-            {
-                return Err(StretchSelectionError::ConductorOverlap {
-                    object_id,
-                    other_id,
-                });
-            }
-        }
-    }
-
-    let obstacle_point_indices = obstacle_indices
-        .iter()
-        .flat_map(|index| [*index, *index + 1])
-        .collect::<std::collections::HashSet<_>>();
-    for point_index in obstacle_point_indices {
-        let Some(&point) = candidate_obstacle_points.get(point_index) else {
-            continue;
-        };
-        let new_contact = candidate_affected
-            .iter()
-            .any(|(_, segment)| segment.contains_point(point));
-        let old_contact = original_affected
-            .iter()
-            .any(|(_, segment)| segment.contains_point(point));
-        if new_contact && !old_contact {
-            return Err(StretchSelectionError::UnintendedConductorContact {
-                object_id,
-                other_id,
-            });
-        }
-    }
-    for index in 0..2 {
-        let new_contact = candidate_obstacles
-            .iter()
-            .any(|(_, segment)| segment.contains_point(new_moved[index]));
-        let old_contact = original_obstacles
-            .iter()
-            .any(|(_, segment)| segment.contains_point(old_moved[index]));
-        if new_contact && !old_contact {
-            return Err(StretchSelectionError::UnintendedConductorContact {
-                object_id,
-                other_id,
-            });
-        }
-    }
-    Ok(())
-}
-
-fn obstacle_indices(
-    point_count: usize,
-    same_target: bool,
-    affected_indices: &[usize],
-) -> Vec<usize> {
-    (0..point_count.saturating_sub(1))
-        .filter(|index| !same_target || !affected_indices.contains(index))
-        .collect()
-}
-
-fn validate_new_terminal_and_body_contacts(
-    candidate: &SchematicState,
-    target: ConductorTarget,
-    original_affected: &[(usize, WireSegment)],
-    candidate_affected: &[(usize, WireSegment)],
-    terminal_points_by_component: &std::collections::HashMap<u64, Vec<Point>>,
-    component_bounds_by_component: &std::collections::HashMap<u64, (i32, i32, i32, i32)>,
-) -> Result<(), StretchSelectionError> {
-    let object_id = target.object_id();
-    for component in &candidate.document.components {
-        let terminals = terminal_points_by_component
-            .get(&component.id)
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        for &terminal in terminals {
-            let new_contact = candidate_affected
-                .iter()
-                .any(|(_, segment)| segment.contains_point(terminal));
-            let old_contact = original_affected
-                .iter()
-                .any(|(_, segment)| segment.contains_point(terminal));
-            if new_contact && !old_contact {
-                return Err(StretchSelectionError::UnintendedTerminalContact {
-                    object_id,
-                    component_id: component.id,
-                });
-            }
-        }
-        let bounds = extended_component_bounds(
-            component_bounds_by_component
-                .get(&component.id)
-                .copied()
-                .unwrap_or_else(|| component.bounding_box()),
-            terminals,
-        );
-        let enters_now = candidate_affected
-            .iter()
-            .any(|(_, segment)| segment_enters_open_rect(*segment, bounds));
-        let entered_before = original_affected
-            .iter()
-            .any(|(_, segment)| segment_enters_open_rect(*segment, bounds));
-        if enters_now && !entered_before {
-            return Err(StretchSelectionError::ComponentBodyEntry {
-                object_id,
-                component_id: component.id,
-            });
-        }
-    }
-    Ok(())
-}
-
-fn extended_component_bounds(
-    (mut min_x, mut min_y, mut max_x, mut max_y): (i32, i32, i32, i32),
-    terminals: &[Point],
-) -> (i32, i32, i32, i32) {
-    for terminal in terminals {
-        min_x = min_x.min(terminal.x);
-        min_y = min_y.min(terminal.y);
-        max_x = max_x.max(terminal.x);
-        max_y = max_y.max(terminal.y);
-    }
-    (min_x, min_y, max_x, max_y)
-}
-
-fn positive_length_overlap(left: WireSegment, right: WireSegment) -> bool {
-    if left.is_zero_length() || right.is_zero_length() {
-        return false;
-    }
-    let left_dx = i128::from(left.end.x) - i128::from(left.start.x);
-    let left_dy = i128::from(left.end.y) - i128::from(left.start.y);
-    let right_dx = i128::from(right.end.x) - i128::from(right.start.x);
-    let right_dy = i128::from(right.end.y) - i128::from(right.start.y);
-    if left_dx * right_dy != left_dy * right_dx {
-        return false;
-    }
-    let offset_x = i128::from(right.start.x) - i128::from(left.start.x);
-    let offset_y = i128::from(right.start.y) - i128::from(left.start.y);
-    if left_dx * offset_y != left_dy * offset_x {
-        return false;
-    }
-    if left_dx != 0 {
-        i128::from(left.start.x.min(left.end.x)).max(i128::from(right.start.x.min(right.end.x)))
-            < i128::from(left.start.x.max(left.end.x))
-                .min(i128::from(right.start.x.max(right.end.x)))
-    } else {
-        i128::from(left.start.y.min(left.end.y)).max(i128::from(right.start.y.min(right.end.y)))
-            < i128::from(left.start.y.max(left.end.y))
-                .min(i128::from(right.start.y.max(right.end.y)))
-    }
-}
-
-fn polyline_contains_point(points: &[Point], point: Point) -> bool {
-    points
-        .windows(2)
-        .any(|pair| WireSegment::new(pair[0], pair[1]).contains_point(point))
-}
-
-fn segment_enters_open_rect(segment: WireSegment, bounds: (i32, i32, i32, i32)) -> bool {
-    let (min_x, min_y, max_x, max_y) = bounds;
-    if min_x >= max_x || min_y >= max_y {
-        return false;
-    }
-    let start_x = f64::from(segment.start.x);
-    let start_y = f64::from(segment.start.y);
-    let dx = f64::from(segment.end.x) - start_x;
-    let dy = f64::from(segment.end.y) - start_y;
-    let mut enter: f64 = 0.0;
-    let mut exit: f64 = 1.0;
-    for (origin, direction, lower, upper) in [
-        (start_x, dx, f64::from(min_x), f64::from(max_x)),
-        (start_y, dy, f64::from(min_y), f64::from(max_y)),
-    ] {
-        if direction == 0.0 {
-            if origin <= lower || origin >= upper {
-                return false;
-            }
-            continue;
-        }
-        let first = (lower - origin) / direction;
-        let second = (upper - origin) / direction;
-        enter = enter.max(first.min(second));
-        exit = exit.min(first.max(second));
-        if enter > exit {
-            return false;
-        }
-    }
-    let sample = ((enter.max(0.0) + exit.min(1.0)) / 2.0).clamp(0.0, 1.0);
-    let x = start_x + sample * dx;
-    let y = start_y + sample * dy;
-    x > f64::from(min_x) && x < f64::from(max_x) && y > f64::from(min_y) && y < f64::from(max_y)
-}
-
-fn documentation_shape_point_count(geometry: &DocumentationShapeGeometry) -> usize {
-    match geometry {
-        DocumentationShapeGeometry::Rectangle { .. } | DocumentationShapeGeometry::Line { .. } => 2,
-        DocumentationShapeGeometry::Polygon { points } => points.len(),
-        DocumentationShapeGeometry::Arc { .. } | DocumentationShapeGeometry::Callout { .. } => 3,
-    }
-}
-
-fn documentation_shape_point_mut(
-    geometry: &mut DocumentationShapeGeometry,
-    point_index: usize,
-) -> Option<&mut Point> {
-    match geometry {
-        DocumentationShapeGeometry::Rectangle { first, opposite } => match point_index {
-            0 => Some(first),
-            1 => Some(opposite),
-            _ => None,
-        },
-        DocumentationShapeGeometry::Line { start, end } => match point_index {
-            0 => Some(start),
-            1 => Some(end),
-            _ => None,
-        },
-        DocumentationShapeGeometry::Polygon { points } => points.get_mut(point_index),
-        DocumentationShapeGeometry::Arc {
-            start,
-            through,
-            end,
-        } => match point_index {
-            0 => Some(start),
-            1 => Some(through),
-            2 => Some(end),
-            _ => None,
-        },
-        DocumentationShapeGeometry::Callout {
-            tip,
-            elbow,
-            box_corner,
-        } => match point_index {
-            0 => Some(tip),
-            1 => Some(elbow),
-            2 => Some(box_corner),
-            _ => None,
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::super::super::DocumentationShapeGeometry;
     use super::*;
     use crate::state::{
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
@@ -1378,11 +495,8 @@ mod tests {
                 StretchOrthogonalPolicy::PreserveOrthogonal,
             )
             .unwrap();
-        assert_eq!(
-            state.document.wires[0].points,
-            preview.document.wires[0].points
-        );
-        assert_eq!(state.document.bus_taps, preview.document.bus_taps);
+        assert_eq!(state.document.wires[0].points, preview.wires[0].points);
+        assert_eq!(state.document.bus_taps, preview.bus_taps);
     }
 
     #[test]
