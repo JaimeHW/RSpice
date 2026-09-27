@@ -15,4 +15,5 @@ pub mod port;
 pub mod probe;
 pub mod rotation;
 pub mod stimulus_provenance;
+pub mod validated_revision;
 pub mod wire;

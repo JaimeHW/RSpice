@@ -10,12 +10,15 @@ use sha2::{Digest as _, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::product::ContentDigest;
+use rspice_app_types::product::ContentDigest;
 
-use crate::state::{
-    Bus, BusTap, Component, DesignNote, DocumentationShape, Junction, NetLabel,
-    SchematicDocumentPolicy, Wire, WireConnection,
-};
+use super::bus::{Bus, BusTap};
+use super::component::Component;
+use super::design_note::DesignNote;
+use super::document_policy::SchematicDocumentPolicy;
+use super::documentation_shape::DocumentationShape;
+use super::net_label::{Junction, NetLabel};
+use super::wire::{Wire, WireConnection};
 
 pub const MAX_VALIDATED_REVISION_NOTE_LEN: usize = 240;
 pub const MAX_VALIDATED_REVISION_IDENTITY_LEN: usize = 512;

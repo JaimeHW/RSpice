@@ -1,8 +1,7 @@
 //! App coordination for validated-save history, undo and live probe preservation.
 
-mod journal;
-use journal::ValidatedRevisionSource;
-pub use journal::{
+use rspice_design::schematic::validated_revision::ValidatedRevisionSource;
+pub use rspice_design::schematic::validated_revision::{
     AdvisoryDisposition, MAX_VALIDATED_REVISION_NOTE_LEN, ValidatedRevisionDependency,
     ValidatedRevisionError, ValidatedRevisionJournal, ValidatedRevisionObjectDelta,
     ValidatedRevisionRequest, ValidatedRevisionSemanticDelta, ValidatedSchematicRevision,
