@@ -226,7 +226,7 @@ pub(super) fn parse_generated_netlist_bundle(
     let expanded = if dependencies.is_empty() {
         source.clone()
     } else {
-        crate::simulation::netlist_sources::expand_retained_netlist_dependencies(document_id, &source, &dependencies)?
+        rspice_simulation::netlist_sources::expand_retained_netlist_dependencies(document_id, &source, &dependencies)?
             .source
     };
     rspice_core::Netlist::parse(&expanded)

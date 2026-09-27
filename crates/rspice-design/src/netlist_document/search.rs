@@ -206,7 +206,7 @@ fn find_all_in_source_range_bounded(
     find_all_in_source_range_bounded_filter(source, range, query, options, limit, |_| true)
 }
 
-pub(crate) fn find_all_in_source_range_bounded_filter(
+pub fn find_all_in_source_range_bounded_filter(
     source: &str,
     range: Range<usize>,
     query: &str,
@@ -935,7 +935,7 @@ mod tests {
                 match_case,
                 ..FindOptions::default()
             };
-            let started = crate::time_compat::Instant::now();
+            let started = web_time::Instant::now();
             let found =
                 find_all_in_source_bounded(&source, "1", options, 500).expect("valid search");
             let elapsed = started.elapsed();
@@ -956,7 +956,7 @@ mod tests {
         }
 
         // A query that matches nothing still has to read the deck exactly once.
-        let started = crate::time_compat::Instant::now();
+        let started = web_time::Instant::now();
         let missing = find_all_in_source_bounded(&source, "zzz", FindOptions::default(), 500)
             .expect("valid search");
         let elapsed = started.elapsed();

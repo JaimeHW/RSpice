@@ -5480,6 +5480,7 @@ dependencies = [
 name = "rspice-design"
 version = "0.1.0"
 dependencies = [
+ "regex",
  "rspice-app-types",
  "rspice-design-model",
  "serde",
@@ -5488,6 +5489,7 @@ dependencies = [
  "thiserror 2.0.20",
  "unicode-normalization",
  "uuid",
+ "web-time",
 ]
 
 [[package]]
@@ -5691,6 +5693,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "toml",
+ "uuid",
  "wasmi",
 ]
 

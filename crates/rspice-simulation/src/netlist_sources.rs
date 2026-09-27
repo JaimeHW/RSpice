@@ -10,14 +10,14 @@ use std::path::PathBuf;
 
 use rspice_core::netlist::{IncludeProcessor, SealedSourceBundle, SealedSourceEdge};
 
-use crate::state::{DependencyMetadata, NetlistDocumentId};
+use rspice_design::netlist_document::{DependencyMetadata, NetlistDocumentId};
 
 #[derive(Debug)]
-pub(crate) struct ExpandedRetainedNetlist {
+pub struct ExpandedRetainedNetlist {
     pub source: String,
 }
 
-pub(crate) fn expand_retained_netlist_dependencies(
+pub fn expand_retained_netlist_dependencies(
     document_id: NetlistDocumentId,
     root_source: &str,
     dependencies: &[DependencyMetadata],

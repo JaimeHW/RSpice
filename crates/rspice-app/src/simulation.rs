@@ -17,7 +17,6 @@ pub(crate) mod execution;
 pub(crate) mod measurement_references;
 pub(crate) mod multi_run;
 pub(crate) mod netlist_gen;
-pub(crate) mod netlist_sources;
 pub(crate) mod optimizer;
 pub(crate) mod output_contract;
 pub use output_contract::{

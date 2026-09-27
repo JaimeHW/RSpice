@@ -10,7 +10,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
-use crate::product::{ContentDigest, ObjectRevision, RevisionError};
+use rspice_app_types::product::{ContentDigest, ObjectRevision, RevisionError};
 
 use super::outline::{IncludeDirective, parse_include_directives};
 use super::search::{FindError, FindOptions, ReplaceOutcome, ReplaceScope, replace_in_source};
@@ -967,7 +967,7 @@ impl TransitionReceipt {
 ///
 /// The navigable outline is not held here. It was rebuilt on every transition
 /// — which is every keystroke on an owned deck — and read by nobody: the
-/// navigator projects [`crate::state::NetlistSourceIndex`] from the visible
+/// navigator projects [`super::NetlistSourceIndex`] from the visible
 /// buffer, which is not this document's source while an edit is uncommitted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetlistDocument {

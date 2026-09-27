@@ -73,12 +73,12 @@ rspice-publication-contract.workspace = true
 csv.workspace = true
 thiserror.workspace = true
 sha2 = "0.10"
-regex = "1.12"
+regex.workspace = true
 similar = "2.7"
 
 # Logging
 log = "0.4"
-web-time = "1.1"
+web-time.workspace = true
 
 # Complex number support
 num-complex = "0.4"

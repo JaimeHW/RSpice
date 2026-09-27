@@ -12,6 +12,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+regex.workspace = true
 rspice-app-types.workspace = true
 rspice-design-model.workspace = true
 serde.workspace = true
@@ -23,3 +24,6 @@ uuid = { workspace = true, features = ["v5"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 uuid = { workspace = true, features = ["js", "v5"] }
+
+[dev-dependencies]
+web-time.workspace = true

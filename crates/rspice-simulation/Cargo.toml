@@ -27,4 +27,5 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 toml.workspace = true
+uuid = { workspace = true, features = ["v5"] }
 wasmi.workspace = true

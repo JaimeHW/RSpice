@@ -368,7 +368,7 @@ impl IncludeDirective {
 /// direct-include index pointing at the same card, which is what an in-place
 /// source replacement needs in order to keep the closure it already resolved.
 #[must_use]
-pub(crate) fn same_include_graph(left: &[IncludeDirective], right: &[IncludeDirective]) -> bool {
+pub fn same_include_graph(left: &[IncludeDirective], right: &[IncludeDirective]) -> bool {
     left.len() == right.len()
         && std::iter::zip(left, right).all(|(left, right)| {
             left.kind == right.kind
@@ -392,7 +392,7 @@ struct CardToken {
     column: usize,
 }
 
-pub(crate) fn parse_include_directives(source: &str) -> Vec<IncludeDirective> {
+pub fn parse_include_directives(source: &str) -> Vec<IncludeDirective> {
     source
         .lines()
         .enumerate()
@@ -434,7 +434,7 @@ pub(crate) fn parse_include_directives(source: &str) -> Vec<IncludeDirective> {
 /// is enough to name a declaration and not enough to describe it — a navigator
 /// that wants the model a device binds to reads the card through here rather
 /// than tokenizing SPICE a second time.
-pub(crate) fn card_tokens(card: &str) -> Vec<String> {
+pub fn card_tokens(card: &str) -> Vec<String> {
     tokenize_card(card.trim_start())
         .into_iter()
         .map(|token| token.text)
@@ -444,7 +444,7 @@ pub(crate) fn card_tokens(card: &str) -> Vec<String> {
 /// Token text and one-based Unicode column for source-intelligence actions
 /// that must identify the exact declaration/reference token without
 /// retokenizing SPICE differently from the outline.
-pub(crate) fn card_tokens_with_columns(card: &str) -> Vec<(String, usize)> {
+pub fn card_tokens_with_columns(card: &str) -> Vec<(String, usize)> {
     let trimmed = card.trim_start();
     let leading_columns = card.chars().take_while(|ch| ch.is_whitespace()).count();
     tokenize_card(trimmed)
