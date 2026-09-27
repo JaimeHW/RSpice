@@ -58,7 +58,7 @@ pub struct PdkTechnologyManifest {
     /// Read-only symbol, pin, netlist, and typed parameter-form contracts
     /// supplied by this exact signed technology revision.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub symbol_definitions: Vec<crate::state::ModelBoundSymbolDefinition>,
+    pub symbol_definitions: Vec<rspice_model_library::symbol::ModelBoundSymbolDefinition>,
     pub layers: Vec<PdkTechnologyLayer>,
     /// Portable alternate names for exact layer-purpose identities. Aliases
     /// are normalized case-insensitively and never replace the canonical
@@ -87,7 +87,7 @@ pub struct ValidatedPdkTechnologyPackage {
     manifest_digest: ContentDigest,
     archive_digest: ContentDigest,
     artifact_digests: BTreeMap<String, ContentDigest>,
-    symbol_definitions: Vec<crate::state::ModelBoundSymbolDefinition>,
+    symbol_definitions: Vec<rspice_model_library::symbol::ModelBoundSymbolDefinition>,
 }
 
 impl ValidatedPdkTechnologyPackage {
@@ -114,7 +114,9 @@ impl ValidatedPdkTechnologyPackage {
     /// Signed technology symbols materialized against this archive's exact
     /// content-addressed model-source paths.
     #[must_use]
-    pub fn symbol_definitions(&self) -> &[crate::state::ModelBoundSymbolDefinition] {
+    pub fn symbol_definitions(
+        &self,
+    ) -> &[rspice_model_library::symbol::ModelBoundSymbolDefinition] {
         &self.symbol_definitions
     }
 
@@ -1036,12 +1038,14 @@ pub fn validate_archive(
 fn materialize_signed_symbol_definitions(
     manifest: &PdkTechnologyManifest,
     archive_digest: ContentDigest,
-) -> Result<Vec<crate::state::ModelBoundSymbolDefinition>, PdkTechnologyError> {
+) -> Result<Vec<rspice_model_library::symbol::ModelBoundSymbolDefinition>, PdkTechnologyError> {
     let virtual_root = signed_model_virtual_root(&archive_digest.to_string());
     let mut definitions = Vec::with_capacity(manifest.symbol_definitions.len());
     for (index, signed) in manifest.symbol_definitions.iter().enumerate() {
         let mut definition = signed.clone();
-        let crate::state::SymbolSourceContract::Model { model, .. } = &mut definition.source else {
+        let rspice_model_library::symbol::SymbolSourceContract::Model { model, .. } =
+            &mut definition.source
+        else {
             return Err(PdkTechnologyError::InvalidField(format!(
                 "manifest.symbol_definitions[{index}] is not model-bound"
             )));
@@ -1927,7 +1931,9 @@ pub(super) fn validate_manifest(
                 definition.identity.library, definition.identity.cell
             )));
         }
-        let crate::state::SymbolSourceContract::Model { model, .. } = &definition.source else {
+        let rspice_model_library::symbol::SymbolSourceContract::Model { model, .. } =
+            &definition.source
+        else {
             return Err(PdkTechnologyError::InvalidField(format!(
                 "manifest.symbol_definitions[{index}] must use an executable model source contract"
             )));
@@ -1937,7 +1943,9 @@ pub(super) fn validate_manifest(
                 "manifest.symbol_definitions[{index}] source and netlist model identities differ"
             )));
         }
-        if model.implementation_view != crate::state::SymbolImplementationView::Spice {
+        if model.implementation_view
+            != rspice_model_library::symbol::SymbolImplementationView::Spice
+        {
             return Err(PdkTechnologyError::InvalidField(format!(
                 "manifest.symbol_definitions[{index}] must bind a signed SPICE model source; use veriloga_sources for Verilog-A authority"
             )));
@@ -1987,7 +1995,9 @@ pub(super) fn validate_manifest(
             .join(package_path_to_host_path(source_path))
             .to_string_lossy()
             .into_owned();
-        let crate::state::SymbolSourceContract::Model { model, .. } = &mut executable.source else {
+        let rspice_model_library::symbol::SymbolSourceContract::Model { model, .. } =
+            &mut executable.source
+        else {
             unreachable!("model source was required above")
         };
         model.source_path = Some(virtual_source.clone());
@@ -2875,24 +2885,26 @@ endmodule
 
     pub(crate) fn fixture_signed_symbol(
         manifest: &PdkTechnologyManifest,
-    ) -> crate::state::ModelBoundSymbolDefinition {
-        let mut model =
-            crate::state::SymbolModelReference::new("signed-pdk:demo-models-tt", "nmos_demo")
-                .with_source_path("models/demo.lib");
+    ) -> rspice_model_library::symbol::ModelBoundSymbolDefinition {
+        let mut model = rspice_model_library::symbol::SymbolModelReference::new(
+            "signed-pdk:demo-models-tt",
+            "nmos_demo",
+        )
+        .with_source_path("models/demo.lib");
         model.section = Some("TT".to_owned());
         model.revision = Some(manifest.revision.clone());
         let pins = [
-            ("D", crate::state::SymbolPinSide::Right),
-            ("G", crate::state::SymbolPinSide::Left),
-            ("S", crate::state::SymbolPinSide::Right),
-            ("B", crate::state::SymbolPinSide::Bottom),
+            ("D", rspice_model_library::symbol::SymbolPinSide::Right),
+            ("G", rspice_model_library::symbol::SymbolPinSide::Left),
+            ("S", rspice_model_library::symbol::SymbolPinSide::Right),
+            ("B", rspice_model_library::symbol::SymbolPinSide::Bottom),
         ]
         .into_iter()
         .enumerate()
         .map(|(index, (name, side))| {
-            crate::state::SymbolPinDefinition::new(
+            rspice_model_library::symbol::SymbolPinDefinition::new(
                 name,
-                crate::state::SymbolElectricalType::Analog,
+                rspice_model_library::symbol::SymbolElectricalType::Analog,
                 crate::state::PortDirection::InOut,
                 side,
                 index + 1,
@@ -2901,29 +2913,29 @@ endmodule
         .collect::<Vec<_>>();
         let ports = pins
             .iter()
-            .map(crate::state::SymbolPinDefinition::port_spec)
+            .map(rspice_model_library::symbol::SymbolPinDefinition::port_spec)
             .collect();
-        crate::state::ModelBoundSymbolDefinition::new(
-            crate::state::SymbolIdentity::new(
+        rspice_model_library::symbol::ModelBoundSymbolDefinition::new(
+            rspice_model_library::symbol::SymbolIdentity::new(
                 &manifest.package_id,
                 "nmos_demo",
                 1,
                 "signed-pdk:demo180/nmos_demo",
             ),
-            crate::state::SymbolSourceContract::model(model.clone(), ports),
+            rspice_model_library::symbol::SymbolSourceContract::model(model.clone(), ports),
             pins,
-            crate::state::SymbolGraphicTemplate::RectangularIc,
-            crate::state::SymbolParameterForm {
+            rspice_model_library::symbol::SymbolGraphicTemplate::RectangularIc,
+            rspice_model_library::symbol::SymbolParameterForm {
                 revision: 1,
                 sections: Vec::new(),
             },
-            crate::state::SymbolNetlistBinding {
+            rspice_model_library::symbol::SymbolNetlistBinding {
                 device_prefix: "M".to_owned(),
                 model: Some(model),
                 template: "M{name} {nodes} {model} {params}".to_owned(),
                 parameter_order: Vec::new(),
             },
-            crate::state::GeneratedSymbolViews::default(),
+            rspice_model_library::symbol::GeneratedSymbolViews::default(),
         )
     }
 
@@ -2983,7 +2995,9 @@ endmodule
         let mut manifest: PdkTechnologyManifest =
             serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
         let definition = manifest.symbol_definitions.first_mut().unwrap();
-        let crate::state::SymbolSourceContract::Model { model, .. } = &mut definition.source else {
+        let rspice_model_library::symbol::SymbolSourceContract::Model { model, .. } =
+            &mut definition.source
+        else {
             unreachable!()
         };
         model.library = "signed-pdk:unrelated-provider".to_owned();

@@ -174,7 +174,7 @@ pub(super) fn validate_source(
             // source identities: by the path syntax of any desktop host RSpice
             // supports, not only the one doing the loading.
             if source_path.trim().is_empty()
-                || !super::super::model_library::is_portable_absolute_path(Path::new(source_path))
+                || !crate::is_portable_absolute_path(Path::new(source_path))
             {
                 return Err(SymbolDefinitionError::SourcePinMismatch(
                     "model source path must be absolute".to_owned(),
@@ -278,7 +278,7 @@ pub(super) fn validate_executable_template(
             "device prefix must contain ASCII letters".to_owned(),
         ));
     }
-    crate::state::validate_library_netlist_template(&netlist.template)
+    validate_library_netlist_template(&netlist.template)
         .map_err(SymbolDefinitionError::InvalidNetlist)?;
     if let Some(prefix) = netlist
         .template
@@ -516,7 +516,7 @@ pub(super) fn validate_key(value: &str) -> Result<(), ()> {
 }
 
 pub(super) fn parse_engineering(value: &str) -> Result<f64, SymbolDefinitionError> {
-    crate::quantity::parse_engineering_value(value).map_err(|error| {
+    rspice_app_types::quantity::parse_engineering_value(value).map_err(|error| {
         SymbolDefinitionError::InvalidForm(format!("invalid engineering value `{value}`: {error}"))
     })
 }

@@ -6,27 +6,6 @@
 
 use super::*;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SymbolTestFixtureAccess {
-    pub port_name: String,
-    pub order: usize,
-    pub electrical_type: SymbolElectricalType,
-    pub direction: PortDirection,
-    pub ground: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SymbolTestFixtureContract {
-    pub schema_version: u32,
-    pub library: String,
-    pub cell: String,
-    pub implementation_view: String,
-    pub dut_instance_name: String,
-    pub accesses: Vec<SymbolTestFixtureAccess>,
-}
-
 #[derive(Debug, Clone)]
 pub struct SymbolConstructionPlan {
     pub(super) library: String,

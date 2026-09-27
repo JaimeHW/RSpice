@@ -1,6 +1,7 @@
 //! Model-bound symbol tests.
 
 use super::*;
+use crate::state::{DisplayMode, PropertyType};
 
 fn definition(revision: u64) -> ModelBoundSymbolDefinition {
     let model = SymbolModelReference::new("vendor", "OPA189_A").with_source_path(
@@ -101,7 +102,7 @@ fn definition(revision: u64) -> ModelBoundSymbolDefinition {
 #[test]
 fn strict_definition_round_trip_preserves_contract_and_metadata_projection() {
     let definition = definition(1);
-    let encoded = definition.to_json_pretty().unwrap();
+    let encoded = to_json_pretty(&definition).unwrap();
     let restored =
         ModelBoundSymbolDefinition::from_json_bytes(encoded.as_bytes(), "opamp.json").unwrap();
     assert_eq!(restored, definition);
@@ -142,7 +143,7 @@ fn duplicate_names_orders_and_gaps_are_rejected() {
 
 #[test]
 fn malformed_or_extended_import_is_rejected_without_coercion() {
-    let encoded = definition(1).to_json_pretty().unwrap();
+    let encoded = to_json_pretty(&definition(1)).unwrap();
     let with_unknown = encoded.replacen(
         "\"schema_version\": 1,",
         "\"schema_version\": 1, \"future_behavior\": true,",
@@ -338,60 +339,8 @@ fn svg_import_retains_geometry_but_never_infers_electrical_semantics() {
 }
 
 #[test]
-fn netlist_render_strips_only_the_declared_reference_prefix() {
-    let mut definition = definition(1);
-    definition.netlist.device_prefix = "M".to_owned();
-    definition.netlist.template = "M{name} {nodes} {model} {params}".to_owned();
-    let nodes = ["d", "g", "s", "b", "bulk"].map(str::to_owned).to_vec();
-    let parameters = HashMap::from([("gain".to_owned(), "10".to_owned())]);
-
-    let rendered = definition
-        .netlist
-        .render(
-            "MFOO",
-            &definition.pins,
-            &nodes,
-            &parameters,
-            &definition.parameter_form,
-        )
-        .unwrap();
-    assert_eq!(rendered, "MFOO d g s b bulk OPA189_A gain=10");
-    assert!(
-        definition
-            .netlist
-            .render(
-                "FOO",
-                &definition.pins,
-                &nodes,
-                &parameters,
-                &definition.parameter_form,
-            )
-            .is_err()
-    );
-    assert!(
-        definition
-            .netlist
-            .render(
-                "M",
-                &definition.pins,
-                &nodes,
-                &parameters,
-                &definition.parameter_form,
-            )
-            .is_err()
-    );
-    assert_eq!(
-        definition
-            .test_fixture_contract()
-            .unwrap()
-            .dut_instance_name,
-        "MDUT"
-    );
-}
-
-#[test]
 fn canonical_extension_and_ltspice_review_anchors_are_preserved() {
-    let encoded = definition(1).to_json_pretty().unwrap();
+    let encoded = to_json_pretty(&definition(1)).unwrap();
     let canonical =
         SymbolDefinitionImport::from_bytes(encoded.as_bytes(), "opamp.rspicesym", None).unwrap();
     assert_eq!(canonical.report.format, SymbolImportFormat::RSpiceJson);
@@ -414,4 +363,26 @@ fn canonical_extension_and_ltspice_review_anchors_are_preserved() {
     assert_eq!(document.pins.len(), 1);
     assert_eq!(document.pins[0].name, "IN");
     assert_eq!(document.pins[0].position, Some(Point::new(0, 16)));
+}
+
+#[test]
+fn test_fixture_uses_the_declared_reference_prefix() {
+    let mut definition = definition(1);
+    definition.netlist.device_prefix = "M".to_owned();
+    definition.netlist.template = "M{name} {nodes} {model} {params}".to_owned();
+    assert_eq!(
+        definition
+            .test_fixture_contract()
+            .unwrap()
+            .dut_instance_name,
+        "MDUT"
+    );
+}
+
+fn to_json_pretty(
+    definition: &ModelBoundSymbolDefinition,
+) -> Result<String, SymbolDefinitionError> {
+    definition.validate()?;
+    serde_json::to_string_pretty(definition)
+        .map_err(|error| SymbolDefinitionError::Serialization(error.to_string()))
 }

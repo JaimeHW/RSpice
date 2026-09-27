@@ -20,6 +20,7 @@ mod projection;
 pub mod qualification;
 mod resolution;
 pub mod source_bundle;
+pub mod symbol;
 mod types;
 mod validation;
 
