@@ -19,6 +19,8 @@ pub mod result_csv;
 pub mod table;
 #[cfg(feature = "table-schema")]
 pub mod table_schema;
+#[cfg(feature = "result-vcd")]
+pub mod vcd;
 pub mod waveform_io;
 #[cfg(feature = "xlsx")]
 pub mod xlsx;

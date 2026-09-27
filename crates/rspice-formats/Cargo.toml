@@ -15,6 +15,7 @@ workspace = true
 table-schema = ["dep:serde_json"]
 # Reuse canonical retained results without enabling the engine in default codecs.
 result-csv = ["dep:rspice-app-types", "dep:rspice-core", "dep:rspice-results", "dep:serde_json"]
+result-vcd = ["dep:rspice-core", "dep:rspice-results"]
 native-bundle = ["dep:serde_json", "dep:sha2"]
 monte-carlo-checkpoint = ["dep:rspice-results", "dep:serde_json"]
 columnar = ["dep:arrow-array", "dep:arrow-ipc", "dep:arrow-schema", "dep:bytes", "dep:parquet"]
@@ -45,6 +46,9 @@ serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 time.workspace = true
 zip = { version = "7.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[dev-dependencies]
+sha2.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 fst-writer = "0.3"

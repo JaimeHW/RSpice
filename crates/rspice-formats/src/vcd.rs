@@ -1,0 +1,323 @@
+//! Value Change Dump encoding of retained digital and real event evidence.
+//!
+//! The core projection and writer also serve the command line, keeping event
+//! times, bus declarations, four-state conversion and bytes identical.
+
+use rspice_core::execution::event_vcd_document;
+use rspice_core::io::write_vcd;
+use rspice_results::analysis_payload::AnalysisResultPayload;
+use rspice_results::analysis_result::AnalysisResult;
+use rspice_results::events::core_event_traces;
+
+/// The single scope every RSpice dump declares. `rspice-cli`'s `vcd_io.rs`
+/// uses this exact string; the two exports differ the moment they disagree.
+const EVENT_SCOPE: &str = "events";
+
+const NO_EVENT_EVIDENCE_MESSAGE: &str = "A Value Change Dump carries the digital and real event timelines a transient's event \
+     solver accepted. The active result retains none, so there is nothing to dump. Select CSV, \
+     TSV, or an RSpice bundle to publish its waveform table instead.";
+
+const EMPTY_EVENT_EVIDENCE_MESSAGE: &str = "This transient retained an event history with no node in it, so a Value Change Dump would \
+     declare no signal and record no change. Publishing it would be indistinguishable from a \
+     failed export.";
+
+/// What a published dump contains, for the completion message.
+#[derive(Debug)]
+pub struct EncodedVcd {
+    pub bytes: Vec<u8>,
+    pub node_count: usize,
+    pub change_count: usize,
+}
+
+/// Serialise one analysis's retained event history as a dump.
+///
+/// Missing or empty histories, invalid event codes and event times that VCD
+/// cannot represent are refused before bytes are returned.
+pub fn encode_result_vcd<W>(analysis: &AnalysisResult<W>) -> Result<EncodedVcd, String> {
+    let Some(AnalysisResultPayload::TransientEvents {
+        digital_traces,
+        real_traces,
+        digital_buses,
+        ..
+    }) = analysis.result_payload.as_ref()
+    else {
+        return Err(NO_EVENT_EVIDENCE_MESSAGE.to_owned());
+    };
+    if digital_traces.is_empty() && real_traces.is_empty() {
+        return Err(EMPTY_EVENT_EVIDENCE_MESSAGE.to_owned());
+    }
+    let (digital, real) = core_event_traces(digital_traces, real_traces)?;
+    // The declarations go through as the result holds them. A bus is one
+    // `$var wire N` in place of its members' scalars — the projection decides
+    // that, not this arm — which is why passing an empty table here wrote a
+    // different dump from the command line's for the same run.
+    let buses = digital_buses
+        .iter()
+        .map(rspice_core::engine::DigitalBusDeclaration::from)
+        .collect::<Vec<_>>();
+    let document = event_vcd_document(EVENT_SCOPE, &digital, &real, &buses)
+        .map_err(|error| format!("The event history cannot be dumped exactly: {error}"))?;
+    let node_count = document.signals.len();
+    let change_count = document
+        .signals
+        .iter()
+        .map(|signal| signal.changes.len())
+        .sum();
+    let mut bytes = Vec::new();
+    write_vcd(&mut bytes, &document)
+        .map_err(|error| format!("The Value Change Dump could not be written: {error}"))?;
+    Ok(EncodedVcd {
+        bytes,
+        node_count,
+        change_count,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rspice_results::analysis_type::AnalysisType;
+    use rspice_results::events::{
+        DigitalEventPointEvidence, DigitalEventTraceEvidence, RealEventPointEvidence,
+        RealEventTraceEvidence,
+    };
+
+    /// `with_result_payload` debug-asserts the payload is valid for the
+    /// analysis, which is exactly what the corrupt-code test has to defeat, so
+    /// the field is set directly.
+    fn analysis(payload: Option<AnalysisResultPayload>) -> AnalysisResult {
+        let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0);
+        analysis.result_payload = payload;
+        analysis
+    }
+
+    fn digital(node: &str, points: &[(f64, u8)]) -> DigitalEventTraceEvidence {
+        DigitalEventTraceEvidence {
+            node_name: node.to_owned(),
+            points: points
+                .iter()
+                .map(|(time_s, value_code)| DigitalEventPointEvidence {
+                    time_s: *time_s,
+                    value_code: *value_code,
+                })
+                .collect(),
+        }
+    }
+
+    fn real(node: &str, points: &[(f64, f64)]) -> RealEventTraceEvidence {
+        RealEventTraceEvidence {
+            node_name: node.to_owned(),
+            points: points
+                .iter()
+                .map(|(time_s, value)| RealEventPointEvidence {
+                    time_s: *time_s,
+                    value: *value,
+                })
+                .collect(),
+        }
+    }
+
+    fn events(
+        digital_traces: Vec<DigitalEventTraceEvidence>,
+        real_traces: Vec<RealEventTraceEvidence>,
+    ) -> AnalysisResultPayload {
+        AnalysisResultPayload::TransientEvents {
+            current_impulses: None,
+            digital_traces,
+            real_traces,
+            digital_buses: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_dump_is_byte_identical_to_the_core_projection_of_the_same_events() {
+        let digital_evidence = vec![
+            digital("d", &[(0.0, 0), (1e-8, 1), (2e-8, 2), (3e-8, 12)]),
+            digital("clk", &[(0.0, 1), (1e-8, 0)]),
+        ];
+        let real_evidence = vec![real("rnode", &[(0.0, 0.0), (2e-8, 1.5)])];
+        let prepared = encode_result_vcd(&analysis(Some(events(
+            digital_evidence.clone(),
+            real_evidence.clone(),
+        ))))
+        .expect("a transient with event evidence dumps");
+
+        // The same events, projected by the core the way `rspice run -f vcd`
+        // projects them. Anything but equality means the two exports of one
+        // run disagree.
+        let (digital, real) =
+            core_event_traces(&digital_evidence, &real_evidence).expect("valid codes");
+        let document = event_vcd_document(EVENT_SCOPE, &digital, &real, &[]).expect("projects");
+        let mut expected = Vec::new();
+        write_vcd(&mut expected, &document).expect("writes");
+        assert_eq!(prepared.bytes, expected);
+
+        let text = String::from_utf8(prepared.bytes).expect("a dump is ASCII text");
+        assert!(text.contains("$scope module events $end"), "{text}");
+        assert!(text.contains("$var wire 1 ! d $end"), "{text}");
+        assert!(text.contains("$var wire 1 \" clk $end"), "{text}");
+        assert!(text.contains("$var real 64 # rnode $end"), "{text}");
+        assert!(text.contains("$timescale\n\t10 ns\n$end"), "{text}");
+        assert_eq!(prepared.node_count, 3);
+        assert_eq!(prepared.change_count, 8);
+    }
+
+    #[test]
+    fn every_strength_band_collapses_onto_the_bit_its_level_names() {
+        // Zero at four strengths, one at four, unknown at four, then high-Z.
+        let codes = [0_u8, 3, 6, 9, 1, 4, 7, 10, 2, 5, 8, 11, 12];
+        let points = codes
+            .iter()
+            .enumerate()
+            .map(|(index, code)| (index as f64 * 1e-9, *code))
+            .collect::<Vec<_>>();
+        let prepared = encode_result_vcd(&analysis(Some(events(
+            vec![digital("n", &points)],
+            Vec::new(),
+        ))))
+        .expect("dumps");
+        let text = String::from_utf8(prepared.bytes).expect("ASCII");
+        let bits = text
+            .lines()
+            .filter(|line| line.len() == 2 && line.ends_with('!'))
+            .map(|line| &line[..1])
+            .collect::<Vec<_>>();
+        assert_eq!(
+            bits,
+            [
+                "0", "0", "0", "0", "1", "1", "1", "1", "x", "x", "x", "x", "z"
+            ]
+        );
+    }
+
+    #[test]
+    fn the_same_events_publish_the_same_bytes_twice() {
+        let payload = events(
+            vec![digital("d", &[(0.0, 0), (5e-9, 1)])],
+            vec![real("r", &[(0.0, 2.5)])],
+        );
+        let first = encode_result_vcd(&analysis(Some(payload.clone()))).expect("dumps");
+        let second = encode_result_vcd(&analysis(Some(payload))).expect("dumps");
+        assert_eq!(first.bytes, second.bytes);
+    }
+
+    #[test]
+    fn a_result_with_no_event_history_is_refused_by_what_a_dump_carries() {
+        let error = encode_result_vcd(&analysis(None)).expect_err("nothing to dump");
+        assert_eq!(error, NO_EVENT_EVIDENCE_MESSAGE);
+        assert!(error.contains("event timelines"), "{error}");
+    }
+
+    #[test]
+    fn an_event_history_with_no_node_is_refused_rather_than_written_empty() {
+        let error = encode_result_vcd(&analysis(Some(events(Vec::new(), Vec::new()))))
+            .expect_err("an empty dump is not an export");
+        assert_eq!(error, EMPTY_EVENT_EVIDENCE_MESSAGE);
+    }
+
+    #[test]
+    fn an_unrecognised_event_code_is_refused_by_node_and_time() {
+        let error = encode_result_vcd(&analysis(Some(events(
+            vec![digital("d", &[(0.0, 0), (1e-9, 13)])],
+            Vec::new(),
+        ))))
+        .expect_err("13 is not an event code");
+        assert!(error.contains("node 'd'"), "{error}");
+        assert!(error.contains("event code 13"), "{error}");
+    }
+
+    #[test]
+    fn an_event_time_no_timescale_carries_is_refused_rather_than_quantised() {
+        let error = encode_result_vcd(&analysis(Some(events(
+            vec![digital("d", &[(0.0, 0), (1.5e-16, 1)])],
+            Vec::new(),
+        ))))
+        .expect_err("half a femtosecond has no tick");
+        assert!(error.contains("cannot be dumped exactly"), "{error}");
+    }
+
+    /// BUS-L2's `vector_mixed` counter, as the GUI retains it: two member
+    /// traces and the `x1.count[1:0]` declaration over them, over `.tran 1n
+    /// 15n`. The command line runs the deck itself; the GUI cannot run a
+    /// mixed Verilog-A module from a unit test, so the same history is stated
+    /// as the retained evidence a completed run would leave.
+    fn bus_declaring_events() -> AnalysisResultPayload {
+        AnalysisResultPayload::TransientEvents {
+            current_impulses: None,
+            digital_traces: vec![
+                digital("count#1", &[(0.0, 0), (10.0e-9, 1)]),
+                digital(
+                    "count#0",
+                    &[(0.0, 0), (5.0e-9, 1), (10.0e-9, 0), (15.0e-9, 1)],
+                ),
+            ],
+            real_traces: Vec::new(),
+            digital_buses: vec![rspice_results::events::DigitalBusEvidence {
+                name: "x1.count".to_owned(),
+                msb: 1,
+                lsb: 0,
+                members: vec!["count#1".to_owned(), "count#0".to_owned()],
+                source: rspice_results::events::DigitalBusSourceEvidence::Engine,
+            }],
+        }
+    }
+
+    /// The GUI's dump of a bus-declaring run is the command line's, byte for
+    /// byte.
+    ///
+    /// The number is BUS-L3's: `rspice run bus.sp -o run.vcd -f vcd` on the
+    /// `vector_mixed` deck writes 220 bytes whose SHA-256 begins
+    /// `cf5eb916…`, and the Python and browser routes write the same bytes.
+    /// This arm passed `&[]` where the table belongs, so it wrote the members
+    /// as two scalars — a different file for the same run, and one that no
+    /// longer said which two conductors were one word.
+    #[test]
+    fn a_bus_declaring_dump_is_the_bytes_the_command_line_writes() {
+        use sha2::{Digest as _, Sha256};
+
+        let prepared = encode_result_vcd(&analysis(Some(bus_declaring_events())))
+            .expect("a transient that declares a bus dumps");
+
+        assert_eq!(prepared.bytes.len(), 220);
+        let digest = Sha256::digest(&prepared.bytes);
+        assert_eq!(
+            digest
+                .iter()
+                .take(16)
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>(),
+            "cf5eb91631523b1ceb714b716fb74afc",
+            "the GUI and the command line publish one dump of one run"
+        );
+
+        let text = String::from_utf8(prepared.bytes).expect("a dump is ASCII text");
+        assert!(text.contains("$var wire 2 ! x1.count [1:0] $end"), "{text}");
+        assert!(
+            !text.contains("count#1"),
+            "a declared member is a bit of the vector, not a scalar beside it: {text}"
+        );
+        assert!(text.contains("\n#5\nb01 !\n"), "{text}");
+        assert!(text.contains("\n#15\nb11 !\n"), "{text}");
+        assert_eq!(
+            prepared.node_count, 1,
+            "two members declared as one bus are one signal in the dump"
+        );
+        assert_eq!(prepared.change_count, 4);
+    }
+
+    /// The same members with no declaration are the two scalars they were
+    /// before, so nothing about this arm changed for a run without a bus.
+    #[test]
+    fn undeclared_members_still_dump_as_the_scalars_they_are() {
+        let AnalysisResultPayload::TransientEvents { digital_traces, .. } = bus_declaring_events()
+        else {
+            unreachable!("the fixture is an event payload")
+        };
+        let prepared = encode_result_vcd(&analysis(Some(events(digital_traces, Vec::new()))))
+            .expect("a transient with event evidence dumps");
+        let text = String::from_utf8(prepared.bytes).expect("a dump is ASCII text");
+        assert!(text.contains("$var wire 1 ! count#1 $end"), "{text}");
+        assert!(text.contains("$var wire 1 \" count#0 $end"), "{text}");
+        assert!(!text.contains("[1:0]"), "{text}");
+    }
+}
