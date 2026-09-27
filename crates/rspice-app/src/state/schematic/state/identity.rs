@@ -702,7 +702,8 @@ mod tests {
         });
 
         schematic.recalculate_runtime_state();
-        let analysis = crate::schematic::bus_connectivity::analyze_bus_connectivity(&schematic);
+        let analysis =
+            crate::schematic::bus_connectivity::analyze_bus_connectivity(&schematic.document);
 
         assert_eq!(schematic.document.buses.len(), 1);
         assert_eq!(schematic.document.bus_taps.len(), 1);

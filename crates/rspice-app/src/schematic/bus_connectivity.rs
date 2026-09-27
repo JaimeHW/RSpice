@@ -29,7 +29,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::simulation::netlist_gen::deck_bit_name;
-use crate::state::{Bus, BusDeclaration, BusNotation, BusTargetKind, Point, SchematicState};
+use crate::state::{Bus, BusDeclaration, BusNotation, BusTargetKind, Point};
+use rspice_design::schematic::document::SchematicDocument;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BusDiagnosticKind {
@@ -66,16 +67,11 @@ pub(crate) struct BusConnectivityAnalysis {
     pub diagnostics: Vec<BusDiagnostic>,
 }
 
-pub(crate) fn analyze_bus_connectivity(schematic: &SchematicState) -> BusConnectivityAnalysis {
+pub(crate) fn analyze_bus_connectivity(schematic: &SchematicDocument) -> BusConnectivityAnalysis {
     let mut analysis = BusConnectivityAnalysis::default();
-    let buses_by_id: HashMap<u64, &Bus> = schematic
-        .document
-        .buses
-        .iter()
-        .map(|bus| (bus.id, bus))
-        .collect();
+    let buses_by_id: HashMap<u64, &Bus> = schematic.buses.iter().map(|bus| (bus.id, bus)).collect();
 
-    for bus in &schematic.document.buses {
+    for bus in &schematic.buses {
         if let Err(error) = bus.validate() {
             analysis.diagnostics.push(BusDiagnostic {
                 kind: BusDiagnosticKind::MalformedBus,
@@ -101,8 +97,8 @@ pub(crate) fn analyze_bus_connectivity(schematic: &SchematicState) -> BusConnect
     // Touching bus geometry is one vector connection and therefore requires
     // exactly identical declarations.
     let mut stems_conflicting_where_they_touch: HashSet<&str> = HashSet::new();
-    for (index, left) in schematic.document.buses.iter().enumerate() {
-        for right in &schematic.document.buses[index + 1..] {
+    for (index, left) in schematic.buses.iter().enumerate() {
+        for right in &schematic.buses[index + 1..] {
             let Some(point) = bus_intersection(left, right) else {
                 continue;
             };
@@ -132,11 +128,11 @@ pub(crate) fn analyze_bus_connectivity(schematic: &SchematicState) -> BusConnect
     }
 
     analysis.diagnostics.extend(two_notation_stem_diagnostics(
-        &schematic.document.buses,
+        &schematic.buses,
         &stems_conflicting_where_they_touch,
     ));
 
-    for tap in &schematic.document.bus_taps {
+    for tap in &schematic.bus_taps {
         let Some(source) = buses_by_id.get(&tap.bus_id).copied() else {
             analysis.diagnostics.push(BusDiagnostic {
                 kind: BusDiagnosticKind::DanglingTap,
@@ -159,12 +155,10 @@ pub(crate) fn analyze_bus_connectivity(schematic: &SchematicState) -> BusConnect
         }
 
         let touches_wire = schematic
-            .document
             .wires
             .iter()
             .any(|wire| wire.contains_point(tap.connection_point));
         let destination_buses: Vec<&Bus> = schematic
-            .document
             .buses
             .iter()
             .filter(|bus| bus.id != source.id && bus.contains_point(tap.connection_point))
@@ -440,9 +434,9 @@ mod tests {
             BusTapOrientation::Down,
         )
         .unwrap();
-        let mut schematic = SchematicState::default();
-        schematic.document.buses.push(bus);
-        schematic.document.bus_taps.push(tap);
+        let mut schematic = SchematicDocument::default();
+        schematic.buses.push(bus);
+        schematic.bus_taps.push(tap);
 
         let dangling = analyze_bus_connectivity(&schematic);
         assert!(dangling.scalar_taps.is_empty());
@@ -453,7 +447,6 @@ mod tests {
         }));
 
         schematic
-            .document
             .wires
             .push(Wire::segment(3, Point::new(20, 10), Point::new(40, 10)));
         let connected = analyze_bus_connectivity(&schematic);
@@ -477,9 +470,9 @@ mod tests {
             BusTapOrientation::Down,
         )
         .unwrap();
-        let mut schematic = SchematicState::default();
-        schematic.document.buses = vec![source, destination];
-        schematic.document.bus_taps.push(tap);
+        let mut schematic = SchematicDocument::default();
+        schematic.buses = vec![source, destination];
+        schematic.bus_taps.push(tap);
 
         let analysis = analyze_bus_connectivity(&schematic);
 
@@ -494,8 +487,8 @@ mod tests {
 
     #[test]
     fn touching_same_name_with_conflicting_range_is_reported() {
-        let mut schematic = SchematicState::default();
-        schematic.document.buses = vec![
+        let mut schematic = SchematicDocument::default();
+        schematic.buses = vec![
             declared_bus(1, "DATA[7:0]", 0),
             declared_bus(2, "DATA[15:0]", 0),
         ];
@@ -512,8 +505,8 @@ mod tests {
     /// judgement is not doubled by the stem rule.
     #[test]
     fn touching_two_notation_buses_keep_exactly_the_connection_finding() {
-        let mut schematic = SchematicState::default();
-        schematic.document.buses = vec![
+        let mut schematic = SchematicDocument::default();
+        schematic.buses = vec![
             declared_bus(1, "DATA[3:0]", 0),
             declared_bus(2, "DATA<3:0>", 0),
         ];
@@ -535,8 +528,8 @@ mod tests {
     /// design, and `deck_bit_name` joins them anyway.
     #[test]
     fn a_stem_declared_in_two_notations_is_reported_even_where_nothing_touches() {
-        let mut schematic = SchematicState::default();
-        schematic.document.buses = vec![
+        let mut schematic = SchematicDocument::default();
+        schematic.buses = vec![
             declared_bus(1, "DATA[3:0]", 0),
             declared_bus(2, "DATA<3:0>", 40),
         ];
@@ -564,8 +557,8 @@ mod tests {
     /// single finding — as two disconnected buses on one sheet.
     #[test]
     fn two_notation_stems_are_reported_once_however_far_apart_they_are_drawn() {
-        let mut schematic = SchematicState::default();
-        schematic.document.buses = vec![
+        let mut schematic = SchematicDocument::default();
+        schematic.buses = vec![
             declared_bus(1, "DATA[7:0]", 0),
             declared_bus(2, "DATA[7:0]", 40),
             declared_bus(3, "DATA<3:0>", 80),
@@ -586,8 +579,8 @@ mod tests {
     /// how a bus is drawn across a design, and say nothing on their own.
     #[test]
     fn one_notation_across_the_design_reports_nothing() {
-        let mut schematic = SchematicState::default();
-        schematic.document.buses = vec![
+        let mut schematic = SchematicDocument::default();
+        schematic.buses = vec![
             declared_bus(1, "DATA[7:0]", 0),
             declared_bus(2, "DATA[3:0]", 40),
             declared_bus(3, "ADDR<7:0>", 80),
@@ -612,8 +605,8 @@ mod tests {
             Some(BusDeclaration::parse("DATA[15:0]").unwrap()),
         )
         .unwrap();
-        let mut schematic = SchematicState::default();
-        schematic.document.buses = vec![left, right];
+        let mut schematic = SchematicDocument::default();
+        schematic.buses = vec![left, right];
 
         let analysis = analyze_bus_connectivity(&schematic);
 
@@ -636,8 +629,8 @@ mod tests {
             Some(BusDeclaration::parse("DATA[15:0]").unwrap()),
         )
         .unwrap();
-        let mut schematic = SchematicState::default();
-        schematic.document.buses = vec![left, right];
+        let mut schematic = SchematicDocument::default();
+        schematic.buses = vec![left, right];
 
         let analysis = analyze_bus_connectivity(&schematic);
 
@@ -662,8 +655,8 @@ mod tests {
             Some(BusDeclaration::parse("DATA[15:0]").unwrap()),
         )
         .unwrap();
-        let mut schematic = SchematicState::default();
-        schematic.document.buses = vec![left, right];
+        let mut schematic = SchematicDocument::default();
+        schematic.buses = vec![left, right];
 
         assert!(analyze_bus_connectivity(&schematic).diagnostics.is_empty());
     }

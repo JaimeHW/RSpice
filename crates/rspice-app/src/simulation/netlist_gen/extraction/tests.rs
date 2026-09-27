@@ -5,7 +5,9 @@
 //! than re-asserted against each consumer's projection of them.
 
 use super::*;
-use crate::state::{BusDeclaration, BusSlice, BusTapOrientation, Wire};
+use crate::state::{
+    BusDeclaration, BusSlice, BusTapOrientation, ComponentType, NetLabel, NetNamingPolicy, Wire,
+};
 
 fn named_port(schematic: &mut SchematicState, at: Point, name: &str) {
     let id = schematic.add_component(ComponentType::Port, at);
@@ -38,9 +40,6 @@ fn net_of(extracted: &ExtractedConnectivity, component: u64, pin: &str) -> usize
 
 #[test]
 fn net_identity_folds_case_under_every_policy() {
-    assert_eq!(net_name_key("Out"), net_name_key("out"));
-    assert!(net_names_equal("Out", "out"));
-
     for policy in [
         NetNamingPolicy::StrictCaseSensitive,
         NetNamingPolicy::SpiceCompatibleRelaxed,

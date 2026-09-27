@@ -347,7 +347,7 @@ fn build_report(
     // the document the canvas paints: a materialized page carries namespaced
     // coordinates that would scroll the editor off the design.
     let bus_analysis =
-        crate::schematic::bus_connectivity::analyze_bus_connectivity(&state.schematic);
+        crate::schematic::bus_connectivity::analyze_bus_connectivity(&state.schematic.document);
     let nets = design_nets
         .iter()
         .map(|net| build_net_row(net, subject, &drc))
@@ -1431,12 +1431,14 @@ fn validate_repair_candidate(
             ));
         }
     }
-    let before_bus = crate::schematic::bus_connectivity::analyze_bus_connectivity(&state.schematic)
-        .diagnostics
-        .len();
-    let after_bus = crate::schematic::bus_connectivity::analyze_bus_connectivity(candidate)
-        .diagnostics
-        .len();
+    let before_bus =
+        crate::schematic::bus_connectivity::analyze_bus_connectivity(&state.schematic.document)
+            .diagnostics
+            .len();
+    let after_bus =
+        crate::schematic::bus_connectivity::analyze_bus_connectivity(&candidate.document)
+            .diagnostics
+            .len();
     if after_bus > before_bus {
         return Err(
             "Candidate validation introduced a new typed-bus diagnostic; no changes were applied."
