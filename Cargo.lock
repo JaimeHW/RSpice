@@ -5562,8 +5562,10 @@ name = "rspice-model-library"
 version = "0.1.0"
 dependencies = [
  "csv",
+ "ed25519-dalek",
  "rspice-app-types",
  "rspice-core",
+ "rspice-design-model",
  "serde",
  "serde_json",
  "sha2 0.10.9",

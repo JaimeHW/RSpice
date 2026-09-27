@@ -14,6 +14,7 @@ mod execution;
 mod facts;
 mod library;
 mod model;
+pub mod pdk;
 mod project_revision;
 mod projection;
 pub mod qualification;
