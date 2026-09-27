@@ -7,7 +7,7 @@
 //! with an intermediate instance in the undo history that nobody authored.
 //!
 //! The payload is the receipt itself rather than a second copy of the four
-//! fields. [`StimulusProvenance::of`] is the one place that decides what a
+//! fields. [`StimulusDefinition::provenance`] is the one place that decides what a
 //! receipt records, so carrying the receipt is what keeps a placed adopter and
 //! a dialog adopter provably identical: both stamp the same value.
 
@@ -41,7 +41,7 @@ impl PendingStimulusPlacement {
     pub fn of(definition: &StimulusDefinition) -> Self {
         Self {
             component_type: definition.component_type(),
-            receipt: StimulusProvenance::of(definition),
+            receipt: definition.provenance(),
         }
     }
 

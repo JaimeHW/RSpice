@@ -1,5 +1,6 @@
 //! Schematic document records and geometry, independent of editor gestures.
 
+pub mod component;
 pub mod component_display;
 pub mod component_type;
 pub mod design_note;
@@ -9,5 +10,7 @@ pub mod documentation_shape;
 pub mod ground_names;
 pub mod label_position;
 pub mod net_label;
+pub mod port;
 pub mod rotation;
+pub mod stimulus_provenance;
 pub mod wire;

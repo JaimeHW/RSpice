@@ -5481,6 +5481,7 @@ name = "rspice-design"
 version = "0.1.0"
 dependencies = [
  "regex",
+ "ron",
  "rspice-app-types",
  "rspice-core",
  "rspice-design-model",

@@ -32,4 +32,5 @@ uuid = { workspace = true, features = ["v5"] }
 uuid = { workspace = true, features = ["js", "v5"] }
 
 [dev-dependencies]
+ron = { version = "0.12.2", features = ["integer128"] }
 web-time.workspace = true

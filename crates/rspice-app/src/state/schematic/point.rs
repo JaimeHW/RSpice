@@ -1,4 +1,3 @@
-//! Canonical grid coordinates and persisted component label placement.
+//! Canonical grid coordinates used by schematic consumers.
 
-pub use rspice_design::schematic::label_position::LabelPosition;
 pub use rspice_design_model::Point;

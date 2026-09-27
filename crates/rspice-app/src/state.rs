@@ -205,7 +205,6 @@ pub(crate) use workspace::{device_current_probe, saved_output_references};
 // `extract` say nothing on their own, and a `use` list is not where a reader
 // should have to learn what they act on.
 pub use stimulus_library::library::StimulusLibrary;
-pub use stimulus_library::provenance::StimulusProvenance;
 pub use symbol::{
     MAX_SYMBOL_DOCUMENT_BYTES, MAX_SYMBOL_PIN_NAME_BYTES, MAX_SYMBOL_TEXT_BYTES, PinFindingKind,
     PinSummary, SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY, SYMBOL_TERMINAL_GRID,

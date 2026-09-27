@@ -1,16 +1,18 @@
 //! Checked, owned variant replacements for an immutable execution projection.
 
 use super::{Component, ComponentType, LibraryCellInstance, Point, Rotation};
-use crate::state::{PortSpec, ResolvedCellSymbol, ViewType};
+use crate::library::ViewType;
+use crate::resolved_symbol::ResolvedCellSymbol;
+use rspice_design_model::port::PortSpec;
 
 /// A source pin contract validated before resolving its replacement master.
-pub(crate) struct VariantSource<'a> {
+pub struct VariantSource<'a> {
     source: &'a Component,
     symbol: Option<&'a ResolvedCellSymbol>,
 }
 
 impl Component {
-    pub(crate) fn variant_source<'a>(
+    pub fn variant_source<'a>(
         &'a self,
         source_symbol: Option<&'a ResolvedCellSymbol>,
     ) -> Result<VariantSource<'a>, String> {
@@ -39,7 +41,7 @@ impl Component {
     }
 
     /// Read the local terminal geometry retained by this execution projection.
-    pub(crate) fn execution_terminal_layout(&self) -> Option<&[(String, Point)]> {
+    pub fn execution_terminal_layout(&self) -> Option<&[(String, Point)]> {
         self.execution_terminal_layout.as_deref()
     }
 }
@@ -47,7 +49,7 @@ impl Component {
 impl VariantSource<'_> {
     /// Build a replacement without changing its projected occurrence. Callers
     /// collect every successful candidate before publishing the batch.
-    pub(crate) fn prepare_replacement(
+    pub fn prepare_replacement(
         self,
         projected: &Component,
         mut target_binding: LibraryCellInstance,
@@ -114,7 +116,8 @@ impl VariantSource<'_> {
             if !used.insert(source_index) || !target_names.insert(pin.name.to_ascii_lowercase()) {
                 return Err("terminal mapping is not one-to-one".to_owned());
             }
-            if crate::state::declared_width(source_name) != crate::state::declared_width(&pin.name)
+            if rspice_design_model::bus::declared_width(source_name)
+                != rspice_design_model::bus::declared_width(&pin.name)
             {
                 return Err(format!("terminal '{}' changes conductor width", pin.name));
             }
@@ -135,7 +138,7 @@ impl VariantSource<'_> {
 impl LibraryCellInstance {
     /// Bind a variant section after checking the resolved view's source kind.
     /// An absent view retains the resolver's existing fallback behavior.
-    pub(crate) fn with_variant_model_section(
+    pub fn with_variant_model_section(
         mut self,
         section: Option<&str>,
         view_type: Option<ViewType>,
@@ -157,12 +160,12 @@ impl LibraryCellInstance {
     }
 
     /// Carry the checked variant section through source materialization.
-    pub(crate) fn inherit_variant_model_section(&mut self, placed: &Self) {
+    pub fn inherit_variant_model_section(&mut self, placed: &Self) {
         self.variant_model_section
             .clone_from(&placed.variant_model_section);
     }
 
-    pub(crate) fn variant_model_section(&self) -> Option<&str> {
+    pub fn variant_model_section(&self) -> Option<&str> {
         self.variant_model_section.as_deref()
     }
 }

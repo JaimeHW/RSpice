@@ -18,49 +18,24 @@
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
-
 use super::definition::{
     RetainedPwlFile, StimulusDefinition, StimulusDefinitionError, StimulusFamily, StimulusKind,
-    normalize_params,
 };
 use super::library::StimulusLibrary;
 use crate::state::{Component, ComponentType};
 
-/// The copy a placed source took when it adopted a definition.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StimulusProvenance {
-    /// The definition's name, as the library spells it.
-    pub definition: String,
-    /// The revision that was copied.
-    pub revision: u32,
-    /// `Component::value` as it was copied.
-    pub value: String,
-    /// `Component::params` as it was copied.
-    pub params: String,
-}
+pub use rspice_design::schematic::stimulus_provenance::StimulusProvenance;
 
-impl StimulusProvenance {
+impl StimulusDefinition {
     /// The receipt for copying this definition onto an instance.
     #[must_use]
-    pub fn of(definition: &StimulusDefinition) -> Self {
-        Self {
-            definition: definition.name().to_owned(),
-            revision: definition.revision(),
-            value: definition.value.clone(),
-            params: definition.params.clone(),
+    pub fn provenance(&self) -> StimulusProvenance {
+        StimulusProvenance {
+            definition: self.name().to_owned(),
+            revision: self.revision(),
+            value: self.value.clone(),
+            params: self.params.clone(),
         }
-    }
-
-    /// Whether the component still carries exactly the card it copied.
-    ///
-    /// Both sides are normalized, so a parameter string someone re-ordered by
-    /// editing an unrelated field does not read as an edit to the waveform.
-    #[must_use]
-    pub fn matches_card(&self, component: &Component) -> bool {
-        component.value.trim() == self.value.trim()
-            && normalize_params(&component.params) == normalize_params(&self.params)
     }
 }
 
@@ -244,7 +219,7 @@ impl StimulusDefinition {
             AdoptionFit::Same => {
                 component.value = self.value.clone();
                 component.params = self.params.clone();
-                component.stimulus_provenance = Some(StimulusProvenance::of(self));
+                component.stimulus_provenance = Some(self.provenance());
                 Ok(())
             }
             fit @ AdoptionFit::Replace { .. } => Err(fit
@@ -290,7 +265,7 @@ impl StimulusDefinition {
         definition.value = component.value.clone();
         definition.params = component.params.clone();
         definition.purpose = purpose.into();
-        component.stimulus_provenance = Some(StimulusProvenance::of(&definition));
+        component.stimulus_provenance = Some(definition.provenance());
         Ok(definition)
     }
 }
