@@ -1,97 +1,20 @@
-//! Deterministic native RSpice waveform bundle publication.
-//!
-//! Both public bundle identities deliberately share one embedded waveform
-//! dataset schema. The manifest schema distinguishes the artifact contract;
-//! its digest binds the exact canonical `dataset.json` bytes.
+//! Deterministic native waveform bundle encoding over borrowed exact samples.
 
+use super::{
+    NativeBundleAnalysis, NativeBundleDataset, NativeBundleError, NativeBundleKind,
+    NativeBundleSignalValues,
+};
 use serde::Serialize;
 use sha2::Digest as _;
 use std::collections::HashSet;
 use std::io::{Cursor, Write as _};
-
-use super::result_import_workflow::MAX_RESULT_DATASET_BYTES;
 
 const DATASET_SCHEMA: &str = "rspice-waveform-dataset/1";
 const DATASET_MEMBER: &str = "dataset.json";
 const MANIFEST_MEMBER: &str = "manifest.json";
 const MAX_COLUMNS: usize = 1_024;
 const MAX_ROWS: usize = 1_000_000;
-const MAX_VALUES: usize = MAX_RESULT_DATASET_BYTES as usize / std::mem::size_of::<f64>();
 const MAX_NAME_BYTES: usize = 1_024;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NativeBundleKind {
-    Result,
-    Dataset,
-}
-
-impl NativeBundleKind {
-    pub(crate) const fn manifest_schema(self) -> &'static str {
-        match self {
-            Self::Result => "rspice-result-bundle/1",
-            Self::Dataset => "rspice-dataset-bundle/1",
-        }
-    }
-
-    pub(crate) const fn extension(self) -> &'static str {
-        match self {
-            Self::Result => "rspiceresult",
-            Self::Dataset => "rspicedata",
-        }
-    }
-
-    pub(crate) const fn media_type(self) -> &'static str {
-        match self {
-            Self::Result => "application/vnd.rspice.result+zip",
-            Self::Dataset => "application/vnd.rspice.dataset+zip",
-        }
-    }
-
-    pub(crate) const fn display_name(self) -> &'static str {
-        match self {
-            Self::Result => "RSpice Result Bundle",
-            Self::Dataset => "RSpice Dataset Bundle",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NativeBundleAnalysis {
-    Transient,
-    Ac,
-    DcSweep,
-}
-
-impl NativeBundleAnalysis {
-    const fn schema_name(self) -> &'static str {
-        match self {
-            Self::Transient => "transient",
-            Self::Ac => "ac",
-            Self::DcSweep => "dc_sweep",
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct NativeBundleDataset<'a> {
-    pub(crate) analysis: NativeBundleAnalysis,
-    pub(crate) coordinate_name: &'a str,
-    pub(crate) coordinate: &'a [f64],
-    pub(crate) signals: Vec<NativeBundleSignal<'a>>,
-}
-
-#[derive(Debug)]
-pub(crate) struct NativeBundleSignal<'a> {
-    pub(crate) name: &'a str,
-    pub(crate) unit: Option<&'a str>,
-    pub(crate) values: NativeBundleSignalValues<'a>,
-}
-
-#[derive(Debug)]
-pub(crate) enum NativeBundleSignalValues<'a> {
-    Real(&'a [f64]),
-    Complex { real: &'a [f64], imag: &'a [f64] },
-}
 
 #[derive(Serialize)]
 struct Manifest<'a> {
@@ -133,11 +56,14 @@ enum SignalDocument<'a> {
 }
 
 /// Encode a deterministic, self-verifying native bundle.
-pub(crate) fn encode_native_bundle(
+pub fn encode_native_bundle(
     kind: NativeBundleKind,
     dataset: &NativeBundleDataset<'_>,
-) -> Result<Vec<u8>, String> {
-    validate_dataset(dataset)?;
+    max_bytes: u64,
+) -> Result<Vec<u8>, NativeBundleError> {
+    let max_values =
+        usize::try_from(max_bytes / std::mem::size_of::<f64>() as u64).unwrap_or(usize::MAX);
+    validate_dataset(dataset, max_values).map_err(NativeBundleError::InvalidData)?;
     let signals = dataset
         .signals
         .iter()
@@ -164,21 +90,27 @@ pub(crate) fn encode_native_bundle(
         },
         signals,
     };
-    let dataset_bytes = serde_json::to_vec(&document)
-        .map_err(|error| format!("native dataset serialization failed: {error}"))?;
-    if dataset_bytes.len() as u64 > MAX_RESULT_DATASET_BYTES {
-        return Err(format!(
-            "native dataset JSON is {} bytes; the limit is {MAX_RESULT_DATASET_BYTES}",
+    let dataset_bytes =
+        serde_json::to_vec(&document).map_err(|source| NativeBundleError::Json {
+            context: "native dataset serialization failed",
+            source,
+        })?;
+    if dataset_bytes.len() as u64 > max_bytes {
+        return Err(NativeBundleError::InvalidData(format!(
+            "native dataset JSON is {} bytes; the limit is {max_bytes}",
             dataset_bytes.len()
-        ));
+        )));
     }
     let manifest = Manifest {
         schema: kind.manifest_schema(),
         dataset_member: DATASET_MEMBER,
         dataset_sha256: format!("{:x}", sha2::Sha256::digest(&dataset_bytes)),
     };
-    let manifest_bytes = serde_json::to_vec(&manifest)
-        .map_err(|error| format!("native manifest serialization failed: {error}"))?;
+    let manifest_bytes =
+        serde_json::to_vec(&manifest).map_err(|source| NativeBundleError::Json {
+            context: "native manifest serialization failed",
+            source,
+        })?;
 
     let cursor = Cursor::new(Vec::new());
     let mut archive = zip::ZipWriter::new(cursor);
@@ -189,30 +121,45 @@ pub(crate) fn encode_native_bundle(
         .unix_permissions(0o644);
     archive
         .start_file(MANIFEST_MEMBER, options)
-        .map_err(|error| format!("could not begin native manifest member: {error}"))?;
+        .map_err(|source| NativeBundleError::Zip {
+            context: "could not begin native manifest member".into(),
+            source,
+        })?;
     archive
         .write_all(&manifest_bytes)
-        .map_err(|error| format!("could not write native manifest member: {error}"))?;
+        .map_err(|source| NativeBundleError::Io {
+            context: "could not write native manifest member".into(),
+            source,
+        })?;
     archive
         .start_file(DATASET_MEMBER, options)
-        .map_err(|error| format!("could not begin native dataset member: {error}"))?;
+        .map_err(|source| NativeBundleError::Zip {
+            context: "could not begin native dataset member".into(),
+            source,
+        })?;
     archive
         .write_all(&dataset_bytes)
-        .map_err(|error| format!("could not write native dataset member: {error}"))?;
+        .map_err(|source| NativeBundleError::Io {
+            context: "could not write native dataset member".into(),
+            source,
+        })?;
     let bytes = archive
         .finish()
-        .map_err(|error| format!("could not finish native bundle: {error}"))?
+        .map_err(|source| NativeBundleError::Zip {
+            context: "could not finish native bundle".into(),
+            source,
+        })?
         .into_inner();
-    if bytes.len() as u64 > MAX_RESULT_DATASET_BYTES {
-        return Err(format!(
-            "native bundle is {} bytes; the import limit is {MAX_RESULT_DATASET_BYTES}",
+    if bytes.len() as u64 > max_bytes {
+        return Err(NativeBundleError::InvalidData(format!(
+            "native bundle is {} bytes; the import limit is {max_bytes}",
             bytes.len()
-        ));
+        )));
     }
     Ok(bytes)
 }
 
-fn validate_dataset(dataset: &NativeBundleDataset<'_>) -> Result<(), String> {
+fn validate_dataset(dataset: &NativeBundleDataset<'_>, max_values: usize) -> Result<(), String> {
     validate_identity("coordinate", dataset.coordinate_name)?;
     if !(2..=MAX_ROWS).contains(&dataset.coordinate.len()) {
         return Err(format!(
@@ -266,9 +213,9 @@ fn validate_dataset(dataset: &NativeBundleDataset<'_>) -> Result<(), String> {
                     })?;
             }
         }
-        if value_count > MAX_VALUES {
+        if value_count > max_values {
             return Err(format!(
-                "native bundle retains {value_count} numeric values; the limit is {MAX_VALUES}"
+                "native bundle retains {value_count} numeric values; the limit is {max_values}"
             ));
         }
     }

@@ -253,10 +253,10 @@ pub(crate) fn action_export_csv_with_io(
     }
     if let Some(kind) = match export_format {
         EngineeringExportFormat::RSpiceResultBundle => {
-            Some(crate::workbench::workflows::native_result_bundle::NativeBundleKind::Result)
+            Some(rspice_formats::native_bundle::NativeBundleKind::Result)
         }
         EngineeringExportFormat::RSpiceDatasetBundle => {
-            Some(crate::workbench::workflows::native_result_bundle::NativeBundleKind::Dataset)
+            Some(rspice_formats::native_bundle::NativeBundleKind::Dataset)
         }
         _ => None,
     } {
@@ -876,9 +876,9 @@ fn export_native_result_bundle(
     state: &mut AppState,
     io: &(impl ExportWorkflowIo + ?Sized),
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
-    kind: crate::workbench::workflows::native_result_bundle::NativeBundleKind,
+    kind: rspice_formats::native_bundle::NativeBundleKind,
 ) {
-    use crate::workbench::workflows::native_result_bundle::{
+    use rspice_formats::native_bundle::{
         NativeBundleAnalysis, NativeBundleDataset, NativeBundleSignal, NativeBundleSignalValues,
         encode_native_bundle,
     };
@@ -970,7 +970,11 @@ fn export_native_result_bundle(
         coordinate: reference,
         signals,
     };
-    let bytes = match encode_native_bundle(kind, &native_dataset) {
+    let bytes = match encode_native_bundle(
+        kind,
+        &native_dataset,
+        crate::workbench::workflows::result_import_workflow::MAX_RESULT_DATASET_BYTES,
+    ) {
         Ok(bytes) => bytes,
         Err(error) => {
             note_result_export_failure(
@@ -993,10 +997,10 @@ fn export_native_result_bundle(
     let filter_extensions = [extension];
     let (published_path, export) = match io.show_save_dialog(SaveDialogConfig {
         title: match kind {
-            crate::workbench::workflows::native_result_bundle::NativeBundleKind::Result => {
+            rspice_formats::native_bundle::NativeBundleKind::Result => {
                 "Export RSpice Result Bundle"
             }
-            crate::workbench::workflows::native_result_bundle::NativeBundleKind::Dataset => {
+            rspice_formats::native_bundle::NativeBundleKind::Dataset => {
                 "Export RSpice Dataset Bundle"
             }
         },

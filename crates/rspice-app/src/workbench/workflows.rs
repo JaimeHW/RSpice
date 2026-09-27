@@ -11,7 +11,6 @@ pub(crate) mod capability_workflow;
 pub(crate) mod export_workflow;
 pub(crate) mod file_actions;
 pub(crate) mod file_workflow;
-pub(crate) mod native_result_bundle;
 pub(crate) mod netlist_workflow;
 pub(crate) mod project_workflow;
 pub(crate) mod result_import_workflow;

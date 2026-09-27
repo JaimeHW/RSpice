@@ -1,0 +1,123 @@
+//! Deterministic native RSpice waveform bundle publication.
+//!
+//! Both public bundle identities deliberately share one embedded waveform
+//! dataset schema. The manifest schema distinguishes the artifact contract;
+//! its digest binds the exact canonical `dataset.json` bytes.
+
+mod writer;
+
+pub use writer::encode_native_bundle;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeBundleKind {
+    Result,
+    Dataset,
+}
+
+impl NativeBundleKind {
+    pub const fn manifest_schema(self) -> &'static str {
+        match self {
+            Self::Result => "rspice-result-bundle/1",
+            Self::Dataset => "rspice-dataset-bundle/1",
+        }
+    }
+
+    pub const fn extension(self) -> &'static str {
+        match self {
+            Self::Result => "rspiceresult",
+            Self::Dataset => "rspicedata",
+        }
+    }
+
+    pub const fn media_type(self) -> &'static str {
+        match self {
+            Self::Result => "application/vnd.rspice.result+zip",
+            Self::Dataset => "application/vnd.rspice.dataset+zip",
+        }
+    }
+
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Result => "RSpice Result Bundle",
+            Self::Dataset => "RSpice Dataset Bundle",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeBundleAnalysis {
+    Transient,
+    Ac,
+    DcSweep,
+}
+
+impl NativeBundleAnalysis {
+    const fn schema_name(self) -> &'static str {
+        match self {
+            Self::Transient => "transient",
+            Self::Ac => "ac",
+            Self::DcSweep => "dc_sweep",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct NativeBundleDataset<'a> {
+    pub analysis: NativeBundleAnalysis,
+    pub coordinate_name: &'a str,
+    pub coordinate: &'a [f64],
+    pub signals: Vec<NativeBundleSignal<'a>>,
+}
+
+#[derive(Debug)]
+pub struct NativeBundleSignal<'a> {
+    pub name: &'a str,
+    pub unit: Option<&'a str>,
+    pub values: NativeBundleSignalValues<'a>,
+}
+
+#[derive(Debug)]
+pub enum NativeBundleSignalValues<'a> {
+    Real(&'a [f64]),
+    Complex { real: &'a [f64], imag: &'a [f64] },
+}
+
+/// A native bundle validation or encoding/decoding failure.
+#[derive(Debug)]
+pub enum NativeBundleError {
+    InvalidData(String),
+    Json {
+        context: &'static str,
+        source: serde_json::Error,
+    },
+    Zip {
+        context: String,
+        source: zip::result::ZipError,
+    },
+    Io {
+        context: String,
+        source: std::io::Error,
+    },
+}
+
+impl std::fmt::Display for NativeBundleError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidData(detail) => formatter.write_str(detail),
+            Self::Json { context, source } => write!(formatter, "{context}: {source}"),
+            Self::Zip { context, source } => write!(formatter, "{context}: {source}"),
+            Self::Io { context, source } => write!(formatter, "{context}: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for NativeBundleError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidData(_) => None,
+            Self::Json { source, .. } => Some(source),
+            Self::Zip { source, .. } => Some(source),
+            Self::Io { source, .. } => Some(source),
+        }
+    }
+}

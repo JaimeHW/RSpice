@@ -63,7 +63,7 @@ fn native_result_and_dataset_bundles_verify_digest_and_complex_samples() {
 
 #[test]
 fn native_export_schema_is_deterministic_and_round_trips_real_and_complex() {
-    use crate::workbench::workflows::native_result_bundle::{
+    use rspice_formats::native_bundle::{
         NativeBundleAnalysis, NativeBundleDataset, NativeBundleKind, NativeBundleSignal,
         NativeBundleSignalValues, encode_native_bundle,
     };
@@ -103,10 +103,12 @@ fn native_export_schema_is_deterministic_and_round_trips_real_and_complex() {
             ResultImportFormat::RSpiceDatasetBundle,
         ),
     ] {
-        let bytes = encode_native_bundle(kind, &dataset).expect("native bundle encode");
+        let bytes = encode_native_bundle(kind, &dataset, MAX_RESULT_DATASET_BYTES)
+            .expect("native bundle encode");
         assert_eq!(
             bytes,
-            encode_native_bundle(kind, &dataset).expect("repeat deterministic encode")
+            encode_native_bundle(kind, &dataset, MAX_RESULT_DATASET_BYTES)
+                .expect("repeat deterministic encode")
         );
 
         let mut archive = zip::ZipArchive::new(Cursor::new(bytes.as_slice())).unwrap();

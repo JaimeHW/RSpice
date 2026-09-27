@@ -8,6 +8,8 @@ pub mod hdf5;
 pub mod matlab;
 #[cfg(feature = "monte-carlo-checkpoint")]
 pub mod monte_carlo_checkpoint;
+#[cfg(feature = "native-bundle")]
+pub mod native_bundle;
 pub mod numeric;
 pub mod numpy;
 pub mod table;
