@@ -1,41 +1,65 @@
-//! The library/cell/view hierarchy.
-//!
-//! The three-column navigation model every commercial EDA tool uses, and the
-//! resolution rules behind it: a cell is addressed by library and name, and
-//! a view by all three, so the same cell name in two libraries is two cells.
+//! Browser selection and filtering over the governed library catalog.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use std::collections::HashMap;
 
+use super::catalog::LibraryCatalog;
 use super::{Cell, Library, View};
 
 #[cfg(test)]
 mod tests;
 
-// Library Manager
-// =============================================================================
-
-/// Central manager for all libraries
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// Browser session and its single library catalog.
+#[derive(Debug, Clone, Default)]
 pub struct LibraryManager {
-    /// All libraries indexed by name
-    libraries: HashMap<String, Library>,
-    /// Currently selected library name
+    catalog: LibraryCatalog,
     pub selected_library: Option<String>,
-    /// Currently selected cell name
     pub selected_cell: Option<String>,
-    /// Currently selected view name
     pub selected_view: Option<String>,
-    /// Search/filter text
     pub filter_text: String,
-    /// Whether to show read-only libraries
     pub show_read_only: bool,
-    /// Governed persisted catalog revision. Engineering mutations advance it;
-    /// runtime presentation projections and persistence sanitization do not.
-    /// `get_library_mut` advances pessimistically because callers receive
-    /// unrestricted access to persisted engineering content.
-    #[serde(default)]
-    revision: u64,
+}
+
+// Preserve the existing project JSON and session RON layout and field order.
+// Serialization borrows the catalog; it does not clone engineering content.
+impl Serialize for LibraryManager {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut record = serializer.serialize_struct("LibraryManager", 7)?;
+        record.serialize_field("libraries", self.catalog.libraries())?;
+        record.serialize_field("selected_library", &self.selected_library)?;
+        record.serialize_field("selected_cell", &self.selected_cell)?;
+        record.serialize_field("selected_view", &self.selected_view)?;
+        record.serialize_field("filter_text", &self.filter_text)?;
+        record.serialize_field("show_read_only", &self.show_read_only)?;
+        record.serialize_field("revision", &self.catalog.revision())?;
+        record.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for LibraryManager {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename = "LibraryManager")]
+        struct Record {
+            libraries: HashMap<String, Library>,
+            selected_library: Option<String>,
+            selected_cell: Option<String>,
+            selected_view: Option<String>,
+            filter_text: String,
+            show_read_only: bool,
+            #[serde(default)]
+            revision: u64,
+        }
+        let record = Record::deserialize(deserializer)?;
+        Ok(Self {
+            catalog: LibraryCatalog::from_persisted(record.libraries, record.revision),
+            selected_library: record.selected_library,
+            selected_cell: record.selected_cell,
+            selected_view: record.selected_view,
+            filter_text: record.filter_text,
+            show_read_only: record.show_read_only,
+        })
+    }
 }
 
 impl LibraryManager {
@@ -49,54 +73,48 @@ impl LibraryManager {
 
     /// Content revision, for caches over library listings.
     pub fn revision(&self) -> u64 {
-        self.revision
+        self.catalog.revision()
     }
 
     /// Add a library
     pub fn add_library(&mut self, library: Library) {
-        self.libraries.insert(library.name.clone(), library);
-        self.revision = self.revision.wrapping_add(1);
+        self.catalog.add_library(library);
     }
 
     /// Remove a library
     pub fn remove_library(&mut self, name: &str) -> Option<Library> {
-        self.revision = self.revision.wrapping_add(1);
-        self.libraries.remove(name)
+        self.catalog.remove_library(name)
     }
 
     /// Get a library by name
     pub fn get_library(&self, name: &str) -> Option<&Library> {
-        self.libraries.get(name)
+        self.catalog.get_library(name)
     }
 
     /// Iterate libraries with their canonical map keys.
     pub fn libraries_by_key(&self) -> impl Iterator<Item = (&str, &Library)> {
-        self.libraries
-            .iter()
-            .map(|(key, library)| (key.as_str(), library))
+        self.catalog.libraries_by_key()
     }
 
     /// Get mutable library by name (assumes mutation: bumps the revision)
     pub fn get_library_mut(&mut self, name: &str) -> Option<&mut Library> {
-        self.revision = self.revision.wrapping_add(1);
-        self.libraries.get_mut(name)
+        self.catalog.get_library_mut(name)
     }
 
     /// Get libraries sorted by name
     pub fn libraries_sorted(&self) -> Vec<&Library> {
-        let mut libs: Vec<_> = self.libraries.values().collect();
-        libs.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut libraries = self.catalog.libraries_sorted();
         if !self.show_read_only {
-            libs.retain(|l| !l.read_only);
+            libraries.retain(|library| !library.read_only);
         }
-        libs
+        libraries
     }
 
     /// Get the currently selected library
     pub fn current_library(&self) -> Option<&Library> {
         self.selected_library
             .as_ref()
-            .and_then(|name| self.libraries.get(name))
+            .and_then(|name| self.catalog.get_library(name))
     }
 
     /// Get the currently selected cell
@@ -119,7 +137,7 @@ impl LibraryManager {
 
     /// Select a library
     pub fn select_library(&mut self, name: &str) {
-        if self.libraries.contains_key(name) {
+        if self.catalog.get_library(name).is_some() {
             self.selected_library = Some(name.to_string());
             self.selected_cell = None;
             self.selected_view = None;
@@ -128,7 +146,7 @@ impl LibraryManager {
 
     /// Select a cell
     pub fn select_cell(&mut self, library: &str, cell: &str) {
-        if let Some(lib) = self.libraries.get(library)
+        if let Some(lib) = self.catalog.get_library(library)
             && lib.cells.contains_key(cell)
         {
             self.selected_library = Some(library.to_string());
@@ -139,7 +157,7 @@ impl LibraryManager {
 
     /// Select a view
     pub fn select_view(&mut self, library: &str, cell: &str, view: &str) {
-        if let Some(lib) = self.libraries.get(library)
+        if let Some(lib) = self.catalog.get_library(library)
             && let Some(c) = lib.cells.get(cell)
             && c.views.contains_key(view)
         {
@@ -163,45 +181,27 @@ impl LibraryManager {
         }
     }
 
-    /// Get all open views across all libraries
-    pub fn open_views(&self) -> Vec<(&Library, &Cell, &View)> {
-        let mut results = Vec::new();
-
-        for lib in self.libraries.values() {
-            for cell in lib.cells.values() {
-                for view in cell.views.values() {
-                    if view.is_open {
-                        results.push((lib, cell, view));
-                    }
-                }
-            }
-        }
-
-        results
-    }
-
     /// Count total libraries
     pub fn library_count(&self) -> usize {
-        self.libraries.len()
+        self.catalog.library_count()
     }
 
     /// Count total cells across all libraries
     pub fn total_cell_count(&self) -> usize {
-        self.libraries.values().map(|l| l.cell_count()).sum()
+        self.catalog.total_cell_count()
     }
 
     /// Count total views across all libraries
     pub fn total_view_count(&self) -> usize {
-        self.libraries.values().map(|l| l.total_view_count()).sum()
+        self.catalog.total_view_count()
     }
 
     /// Clear all libraries
     pub fn clear(&mut self) {
-        self.libraries.clear();
+        self.catalog.clear();
         self.selected_library = None;
         self.selected_cell = None;
         self.selected_view = None;
-        self.revision = self.revision.wrapping_add(1);
     }
 
     /// Replace the complete governed library catalog from a validated
@@ -209,14 +209,11 @@ impl LibraryManager {
     /// preferences and advancing, never rewinding, its content revision.
     pub(crate) fn replace_catalog_from_snapshot(&mut self, snapshot: &Self) -> Result<u64, String> {
         let revision = self
-            .revision
-            .checked_add(1)
-            .ok_or_else(|| "project library content revision is exhausted".to_owned())?;
-        self.libraries = snapshot.libraries.clone();
+            .catalog
+            .replace_catalog_from_snapshot(&snapshot.catalog)?;
         self.selected_library = snapshot.selected_library.clone();
         self.selected_cell = snapshot.selected_cell.clone();
         self.selected_view = snapshot.selected_view.clone();
-        self.revision = revision;
         Ok(revision)
     }
 
@@ -224,19 +221,13 @@ impl LibraryManager {
     /// mutation. Save acceptance must not advance the persisted content
     /// revision merely because editor presentation state became clean.
     pub(crate) fn mark_all_views_clean_runtime(&mut self) {
-        self.set_all_views_modified_runtime(false);
+        self.catalog.mark_all_views_clean_runtime();
     }
 
     /// Project a known-clean or unverified registry into runtime markers
     /// without changing the engineering catalog revision.
     pub(crate) fn set_all_views_modified_runtime(&mut self, modified: bool) {
-        for library in self.libraries.values_mut() {
-            for cell in library.cells.values_mut() {
-                for view in cell.views.values_mut() {
-                    view.modified = modified;
-                }
-            }
-        }
+        self.catalog.set_all_views_modified_runtime(modified);
     }
 
     /// Clear one view's runtime dirty marker without advancing the governed
@@ -248,7 +239,7 @@ impl LibraryManager {
         cell: &str,
         view: &str,
     ) -> bool {
-        self.set_view_modified_runtime(library, cell, view, false)
+        self.catalog.mark_view_clean_runtime(library, cell, view)
     }
 
     /// Project one document-registry dirty bit into presentation state
@@ -260,31 +251,14 @@ impl LibraryManager {
         view: &str,
         modified: bool,
     ) -> bool {
-        let Some(view) = self
-            .libraries
-            .get_mut(library)
-            .and_then(|library| library.cells.get_mut(cell))
-            .and_then(|cell| cell.views.get_mut(view))
-        else {
-            return false;
-        };
-        view.modified = modified;
-        true
+        self.catalog
+            .set_view_modified_runtime(library, cell, view, modified)
     }
 
     /// Strip runtime-only view presentation from a serialization clone while
     /// preserving the exact governed catalog revision.
     pub(crate) fn sanitize_views_for_persistence(&mut self) {
-        self.mark_all_views_clean_runtime();
-        for library in self.libraries.values_mut() {
-            for cell in library.cells.values_mut() {
-                for view in cell.views.values_mut() {
-                    view.is_open = false;
-                    view.file_path = None;
-                    view.modified_time = None;
-                }
-            }
-        }
+        self.catalog.sanitize_views_for_persistence();
     }
 
     /// Overlay one cell-view document from an already-snapshotted working
@@ -302,70 +276,11 @@ impl LibraryManager {
         cell_name: &str,
         view_name: &str,
     ) -> Result<(), String> {
-        if self.revision > source.revision {
-            return Err(
-                "accepted library revision is newer than the working document snapshot".to_owned(),
-            );
-        }
-
-        let source_library = source
-            .libraries
-            .get(library_name)
-            .ok_or_else(|| format!("missing library '{library_name}'"))?;
-        let source_cell = source_library
-            .cells
-            .get(cell_name)
-            .ok_or_else(|| format!("missing cell '{cell_name}'"))?;
-        let source_view = source_cell
-            .views
-            .get(view_name)
-            .ok_or_else(|| format!("missing view '{view_name}'"))?
-            .clone();
-        let generated_symbol = view_name.eq_ignore_ascii_case("schematic").then(|| {
-            source_cell
-                .views
-                .get("symbol")
-                .filter(|view| view.metadata.contains_key("generated"))
-                .cloned()
-        });
-
-        if !self.libraries.contains_key(library_name) {
-            let mut library = source_library.clone();
-            library.cells.clear();
-            self.libraries.insert(library_name.to_owned(), library);
-        }
-        let target_library = self
-            .libraries
-            .get_mut(library_name)
-            .expect("library was inserted above");
-        if !target_library.cells.contains_key(cell_name) {
-            let mut cell = source_cell.clone();
-            cell.views.clear();
-            target_library.cells.insert(cell_name.to_owned(), cell);
-        }
-        let target_cell = target_library
-            .cells
-            .get_mut(cell_name)
-            .expect("cell was inserted above");
-        target_cell.views.insert(view_name.to_owned(), source_view);
-
-        if let Some(generated_symbol) = generated_symbol {
-            match generated_symbol {
-                Some(symbol) => {
-                    target_cell.views.insert("symbol".to_owned(), symbol);
-                }
-                None if target_cell
-                    .views
-                    .get("symbol")
-                    .is_some_and(|view| view.metadata.contains_key("generated")) =>
-                {
-                    target_cell.views.remove("symbol");
-                }
-                None => {}
-            }
-        }
-
-        self.revision = source.revision;
-        Ok(())
+        self.catalog.overlay_cell_view_document_from_snapshot(
+            &source.catalog,
+            library_name,
+            cell_name,
+            view_name,
+        )
     }
 }

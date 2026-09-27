@@ -24,6 +24,7 @@
 //!     └── symbol
 //! ```
 
+mod catalog;
 mod cell;
 mod library;
 mod manager;
