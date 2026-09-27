@@ -25,6 +25,8 @@
 //!   always drawn, so a hidden legacy text becomes a drawn one; hiding it
 //!   again means deleting it.
 
+pub mod edit;
+
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};

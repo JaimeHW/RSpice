@@ -1,11 +1,12 @@
 //! Committed symbol history, metadata snapshots, and placed-instance edits.
 
-use crate::state::{
-    CellViewRef, Component, Point, SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY,
-    SymbolDocument, View,
-};
-use rspice_design::schematic::document::SchematicDocument;
 use std::collections::{BTreeMap, HashMap};
+
+use super::{SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY, SymbolDocument};
+use crate::library::View;
+use crate::schematic::component::Component;
+use crate::schematic::document::SchematicDocument;
+use rspice_design_model::{Point, cell_view::CellViewRef};
 
 /// What an author meant by a symbol edit, beyond the geometry it produced.
 ///
@@ -21,7 +22,7 @@ pub struct SymbolCommitIntent {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolDocumentSnapshot {
-    pub document: crate::state::SymbolDocument,
+    pub document: SymbolDocument,
     pub symbol_document_metadata: Option<String>,
     pub symbol_editor_metadata: Option<String>,
     pub generated_metadata: Option<String>,
@@ -37,7 +38,7 @@ pub struct SymbolDocumentSnapshot {
 }
 
 impl SymbolDocumentSnapshot {
-    pub fn from_document(document: &crate::state::SymbolDocument) -> Self {
+    pub fn from_document(document: &SymbolDocument) -> Self {
         Self {
             document: document.clone(),
             symbol_document_metadata: None,

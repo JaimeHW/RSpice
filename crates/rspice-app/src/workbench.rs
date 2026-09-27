@@ -81,9 +81,9 @@ pub use documents::result_document::ResultViewer;
 pub(crate) use lifecycle::session::SchematicVisibilityRecovery;
 pub use lifecycle::session::{
     SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind, SymbolClipboard,
-    SymbolCommitIntent, SymbolDocumentSnapshot, SymbolGridSpacing, SymbolSelection, SymbolTool,
-    UiSessionState, UiSessionStateSer, mirror_point_h_about, mirror_point_v_about,
-    mirror_shape_h_about, mirror_shape_v_about, rotate_point_cw_about, rotate_shape_cw_about,
+    SymbolGridSpacing, SymbolSelection, SymbolTool, UiSessionState, UiSessionStateSer,
+    mirror_point_h_about, mirror_point_v_about, mirror_shape_h_about, mirror_shape_v_about,
+    rotate_point_cw_about, rotate_shape_cw_about,
 };
 pub use lifecycle::window_session::ApplicationWindowId;
 pub use localization::UiTextLocale;
@@ -102,6 +102,7 @@ pub use routing::navigation::BrowserHistoryEffect;
 pub use routing::navigation::{RouteTransition, RouteTransitionSource, SurfaceNavigation};
 pub use routing::surface_catalog::{SurfaceArchetype, SurfaceId};
 pub use routing::surface_route::SurfaceRoute;
+pub use rspice_design::symbol::edit::{SymbolCommitIntent, SymbolDocumentSnapshot};
 pub use shortcuts::{
     ChordTimeoutPolicy, ContextPrecedencePolicy, ProtectedShortcutPolicy, ShortcutBindingSlot,
     ShortcutPreferences, ShortcutProfileAudit, ShortcutProfileIssue, ShortcutProfileIssueCode,

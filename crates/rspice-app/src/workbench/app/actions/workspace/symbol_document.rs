@@ -24,7 +24,7 @@ use crate::state::{
 use crate::workbench::app_state::AppState;
 use crate::workbench::{SymbolCommitIntent, SymbolDocumentSnapshot};
 
-use crate::workbench::lifecycle::symbol_edit::{
+use rspice_design::symbol::edit::{
     restore_symbol_snapshot_in_view, symbol_metadata_snapshot_from_view,
     symbol_pin_position_remaps, symbol_snapshot_from_view,
 };
@@ -568,7 +568,7 @@ fn remap_symbol_instance_wires(
     reference: &CellViewRef,
     pin_remaps: &std::collections::HashMap<String, (crate::state::Point, crate::state::Point)>,
 ) -> bool {
-    if !crate::workbench::lifecycle::symbol_edit::remap_symbol_instance_wires(
+    if !rspice_design::symbol::edit::remap_symbol_instance_wires(
         &mut schematic.document,
         reference,
         pin_remaps,
@@ -585,7 +585,7 @@ fn rename_instance_terminals(
     reference: &CellViewRef,
     renames: &BTreeMap<String, String>,
 ) -> usize {
-    let renamed = crate::workbench::lifecycle::symbol_edit::rename_instance_terminals(
+    let renamed = rspice_design::symbol::edit::rename_instance_terminals(
         &mut schematic.document,
         reference,
         renames,

@@ -4,8 +4,7 @@
 //! [`crate::workbench::WorkbenchState`]. This module contains only cross-frame document
 //! interaction state and durable presentation preferences.
 
-use super::symbol_edit::SymbolHistory;
-pub use super::symbol_edit::{SymbolCommitIntent, SymbolDocumentSnapshot};
+use rspice_design::symbol::edit::SymbolHistory;
 use serde::{Deserialize, Serialize};
 
 use crate::state::{GridStyle, SchematicVisibilityPolicy, SchematicWireRoutingStyle};
