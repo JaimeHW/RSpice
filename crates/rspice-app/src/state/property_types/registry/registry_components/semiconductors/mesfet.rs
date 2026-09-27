@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// Register MESFET/HFET (N/P) property sheets. Level selection (legacy,
     /// MESA, HFET1/2) rides on the bound model card, not the instance.
     pub(super) fn register_mesfet(&mut self) {

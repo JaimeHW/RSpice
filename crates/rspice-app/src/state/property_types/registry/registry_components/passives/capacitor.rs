@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// Register Capacitor with commercial-grade parameters
     pub(super) fn register_capacitor(&mut self) {
         let mut sheet = PropertySheet::new();

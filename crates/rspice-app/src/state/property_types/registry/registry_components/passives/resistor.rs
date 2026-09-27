@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// Register Resistor with commercial-grade parameters
     pub(super) fn register_resistor(&mut self) {
         let mut sheet = PropertySheet::new();

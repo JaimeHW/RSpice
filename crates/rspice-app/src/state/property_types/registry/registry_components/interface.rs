@@ -3,7 +3,7 @@
 
 use super::*;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     pub(in super::super) fn register_interface_components(&mut self) {
         let mut sheet = PropertySheet::new();
         sheet.add(
@@ -116,7 +116,7 @@ mod tests {
 
     #[test]
     fn port_sheet_keeps_refdes_optional_and_exposes_the_typed_contract() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyCatalog::new();
         let sheet = registry
             .get(ComponentType::Port)
             .expect("interface component sheet");

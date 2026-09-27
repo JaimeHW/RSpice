@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// Register DC Current Source with Spectre-parity parameters.
     ///
     /// Mirror of vsource DC parameters but with current units (A instead of V).

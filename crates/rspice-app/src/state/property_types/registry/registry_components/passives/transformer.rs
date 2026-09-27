@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// Register schematic transformer properties.
     ///
     /// Transformers are authored as a single 4-pin schematic component and

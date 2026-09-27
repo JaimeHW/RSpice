@@ -290,7 +290,7 @@ fn checked_variant(
     variant: &str,
     part_id: &str,
 ) -> Result<String, String> {
-    let registry = crate::state::PropertyRegistry::new();
+    let registry = crate::state::property_types::PropertyCatalog::new();
     let options = registry
         .get(component_type)
         .and_then(|sheet| sheet.iter().find(|property| property.name == "symbol"))

@@ -23,9 +23,8 @@
 //! apply_properties_to_component(&mut component, &properties, &registry)?;
 //! ```
 
-use crate::state::{
-    Component, ComponentType, InstanceMultiplicity, PropertyRegistry, PropertySheet, PropertyValue,
-};
+use crate::properties::PropertyEditorSchema;
+use crate::state::{Component, ComponentType, InstanceMultiplicity, PropertySheet, PropertyValue};
 use crate::state::{format_params_string, parse_params_string};
 use std::collections::HashMap;
 
@@ -131,12 +130,12 @@ pub fn get_primary_property_name(kind: ComponentType) -> &'static str {
 /// Build the component editor's typed draft map.
 pub fn collect_properties_from_component(
     component: &Component,
-    registry: &PropertyRegistry,
+    registry: &PropertyEditorSchema,
 ) -> HashMap<String, PropertyValue> {
     collect_properties_with_sheet(component, registry.get(component.kind))
 }
 
-fn collect_properties_with_sheet(
+pub(crate) fn collect_properties_with_sheet(
     component: &Component,
     sheet: Option<&PropertySheet>,
 ) -> HashMap<String, PropertyValue> {
@@ -357,7 +356,7 @@ pub(crate) fn source_commit_refusal(
 pub fn apply_properties_to_component(
     component: &mut Component,
     properties: &HashMap<String, PropertyValue>,
-    registry: &PropertyRegistry,
+    registry: &PropertyEditorSchema,
 ) -> Result<(), String> {
     crate::state::params_string::validate_parameter_text(&component.params)?;
     let primary_prop = get_primary_property_name(component.kind);
@@ -581,7 +580,7 @@ mod tests {
 
     #[test]
     fn component_bridge_preserves_high_precision_primary_values() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
         let value = 1.234_567_890_123_456_7e-6;
         let mut component = Component::new(1, ComponentType::Resistor, Point::origin());
         let properties = HashMap::from([("r".to_owned(), PropertyValue::number(value))]);
@@ -599,7 +598,7 @@ mod tests {
 
     #[test]
     fn component_bridge_persists_the_normalized_reference_identity() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
         let mut component = Component::new(1, ComponentType::Resistor, Point::origin());
         let properties = HashMap::from([(
             "name".to_owned(),
@@ -613,7 +612,7 @@ mod tests {
 
     #[test]
     fn component_bridge_does_not_drop_a_small_nonzero_default_delta() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
         let value = 5.0e-16;
         let mut component = Component::new(1, ComponentType::Resistor, Point::origin());
         let properties = HashMap::from([("tc1".to_owned(), PropertyValue::number(value))]);
@@ -631,7 +630,7 @@ mod tests {
 
     #[test]
     fn ac_source_magnitude_updates_the_emitted_primary_value() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
         for kind in [
             ComponentType::VoltageSourceAc,
             ComponentType::CurrentSourceAc,
@@ -650,7 +649,7 @@ mod tests {
 
     #[test]
     fn mos_width_never_replaces_the_model_binding() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
         for kind in [ComponentType::Nmos, ComponentType::Pmos] {
             let mut component =
                 Component::new(1, kind, Point::origin()).with_name_value("M1", "core_model");
@@ -671,7 +670,7 @@ mod tests {
 
     #[test]
     fn op_amp_gain_is_the_positional_primary_value() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
         let mut component = Component::new(1, ComponentType::OpAmp, Point::origin())
             .with_name_value("E1", "100000");
         let mut properties = collect_properties_from_component(&component, &registry);
@@ -685,7 +684,7 @@ mod tests {
 
     #[test]
     fn blank_optional_source_defaults_are_omitted_from_durable_parameters() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
         let mut component = Component::new(1, ComponentType::VoltageSource, Point::origin());
         let properties = HashMap::from([
             (
@@ -703,7 +702,7 @@ mod tests {
 
     #[test]
     fn detached_validation_uses_the_production_property_contract() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
         let valid =
             Component::new(1, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k");
         let invalid = Component::new(2, ComponentType::Resistor, Point::origin())
@@ -719,7 +718,7 @@ mod tests {
 
     #[test]
     fn legacy_port_contract_is_materialized_without_losing_extension_metadata() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
         let mut component =
             Component::new(7, ComponentType::Port, Point::origin()).with_name_value("", "BIAS_EN");
         component.params = "dir=input vendor_role=calibration".to_owned();
@@ -766,7 +765,7 @@ mod tests {
 
     #[test]
     fn typed_port_property_edit_preserves_order_and_updates_the_complete_contract() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
         let mut state = crate::state::SchematicState::default();
         let pending = crate::state::PendingPortPlacement::new(
             "OUT",
@@ -817,7 +816,7 @@ mod tests {
     /// be removed rather than merely left uninserted.
     #[test]
     fn interface_order_is_editable_and_clears_back_to_document_order() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
         let mut state = crate::state::SchematicState::default();
         let pending = crate::state::PendingPortPlacement::new(
             "OUT",
@@ -874,7 +873,7 @@ mod tests {
 
     #[test]
     fn cell_instance_multiplicity_round_trips_through_the_typed_field() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
         let mut component = Component::new(1, ComponentType::CellInstance, Point::origin());
         component.params = "wp=2u".to_owned();
 
@@ -922,7 +921,7 @@ mod tests {
 
     #[test]
     fn a_primitive_keeps_its_own_m_parameter_in_parameter_text() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
         let mut component = Component::new(1, ComponentType::Nmos, Point::origin());
         let properties = HashMap::from([(
             InstanceMultiplicity::PARAMETER_NAME.to_owned(),
@@ -949,7 +948,7 @@ mod pwl_tests {
 
     #[test]
     fn new_pwl_sources_seed_the_registry_waveform_default() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
 
         for (kind, expected) in [
             (ComponentType::VoltageSourcePwl, "0 0 1u 1 2u 0"),
@@ -967,7 +966,7 @@ mod pwl_tests {
 
     #[test]
     fn authored_pwl_source_uses_the_schema_string_type() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
         let component = Component::new(1, ComponentType::VoltageSourcePwl, Point::origin())
             .with_name_value("V1", "0 0 2n 1");
 
@@ -985,7 +984,7 @@ mod pwl_tests {
     /// every deck uses stopped being a quantity the moment it was written.
     #[test]
     fn a_number_field_authored_with_its_unit_stays_a_number() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
         let parsed = property_value_from_schema(
             "per",
             "1ms".to_owned(),
@@ -997,7 +996,7 @@ mod pwl_tests {
 
     #[test]
     fn property_round_trip_retains_flags_quoted_extensions_and_expression_groups() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
         let mut component = Component::new(1, ComponentType::Diode, crate::state::Point::origin());
         component.params = r#"off note="[\"a  b\" \"C:\\my data\"]" expr={V(a,b) + 1}"#.to_owned();
         let original = parse_params_string(&component.params);
@@ -1015,7 +1014,7 @@ mod pwl_tests {
 
     #[test]
     fn property_application_refuses_malformed_or_ambiguous_text_before_any_mutation() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyEditorSchema::new();
         for source in ["note='unterminated", "temp=27 TEMP=85"] {
             let mut component =
                 Component::new(1, ComponentType::Resistor, crate::state::Point::origin());

@@ -11,7 +11,7 @@ use crate::state::DeviceImplementation;
 /// sixty-eight parameters across seventeen blocks had no editor field at all —
 /// and deriving both from one source is what keeps them in step. The test at
 /// the bottom of this file is the guard.
-impl PropertyRegistry {
+impl PropertyCatalog {
     pub(in super::super) fn register_xspice_components(&mut self) {
         let models = rspice_core::xspice::CodeModelRegistry::with_builtins();
         for kind in ComponentType::ALL {
@@ -294,7 +294,7 @@ mod tests {
     /// anyone reintroduces a hand-written sheet.
     #[test]
     fn every_code_model_parameter_is_reachable_from_its_property_sheet() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyCatalog::new();
         let models = rspice_core::xspice::CodeModelRegistry::with_builtins();
         let mut unreachable = Vec::new();
 
@@ -330,7 +330,7 @@ mod tests {
     /// labelled, grouped, and — where the quantity has one — carrying a unit.
     #[test]
     fn generated_sheets_are_labelled_grouped_and_united() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyCatalog::new();
         let sheet = registry
             .get(ComponentType::XspiceDFlipFlop)
             .expect("D flip-flop sheet");

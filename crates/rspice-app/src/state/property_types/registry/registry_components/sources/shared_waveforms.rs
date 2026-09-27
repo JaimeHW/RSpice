@@ -56,7 +56,7 @@ fn instance_name(driven: Driven) -> PropertyDefinition {
         .required()
 }
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// SFFM(VO VA FC MDI FM TD PHASEM PHASEC).
     ///
     /// The fifth field is `fm`, which is what `SourceSpec::Sffm` and ngspice

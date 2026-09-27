@@ -633,9 +633,10 @@ mod tests {
 
     #[test]
     fn inductor_coupling_property_accepts_signed_values_and_keeps_absence_distinct() {
-        use crate::state::property_types::{PropertyRegistry, PropertyValue};
+        use crate::state::property_types::PropertyCatalog;
+        use crate::state::property_types::PropertyValue;
 
-        let registry = PropertyRegistry::new();
+        let registry = PropertyCatalog::new();
         let definition = registry
             .get(ComponentType::Inductor)
             .unwrap()

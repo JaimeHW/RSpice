@@ -1,9 +1,10 @@
 //! What the bridge has to agree with: the deck, the parser, and the evaluator.
 
 use super::*;
+use crate::state::property_types::PropertyCatalog;
 
 use crate::state::stimulus_library::definition::{StimulusFamily, StimulusKind};
-use crate::state::{PropertyRegistry, SchematicState, Wire};
+use crate::state::{SchematicState, Wire};
 
 /// The samples of a trace the window can carry, or a failure naming the band
 /// it produced instead.
@@ -37,7 +38,7 @@ fn seeded(kind: ComponentType) -> Component {
 
 #[test]
 fn every_placeable_source_seeded_from_its_sheet_parses_as_the_engine_reads_it() {
-    let registry = PropertyRegistry::new();
+    let registry = PropertyCatalog::new();
     for family in StimulusFamily::ALL {
         for kind in [StimulusKind::Voltage, StimulusKind::Current] {
             let component_type = family.component_type(kind);

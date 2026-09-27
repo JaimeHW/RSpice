@@ -21,7 +21,7 @@ pub(super) fn source_symbol_property(
         .with_category("Appearance")
 }
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// Add AC small-signal parameters to a source sheet.
     ///
     /// Parameters: ac (magnitude), acphase (phase in degrees)

@@ -14,7 +14,8 @@ use super::netlist_gen::extraction::{
     ConnectivityDiagnosticKind, ExtractedConnectivity, ExtractedTerminal,
 };
 use super::types::{DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
-use crate::state::{Component, ComponentType, PropertyDefinition, PropertyRegistry, PropertyValue};
+use crate::state::property_types::PropertyCatalog;
+use crate::state::{Component, ComponentType, PropertyDefinition, PropertyValue};
 
 /// Resolve the design once, and bind every placed component to it.
 pub(super) fn extract_checked_design(
@@ -53,7 +54,7 @@ fn extract_components(
     mut component_known_for: impl FnMut(&Component) -> Option<bool>,
 ) -> Vec<ComponentInfo> {
     let mut components = Vec::with_capacity(schematic.document.components.len());
-    let property_registry = PropertyRegistry::new();
+    let property_registry = PropertyCatalog::new();
 
     // Terminals arrive in placement order and, within a component, in the
     // order the symbol declares its pins. Grouping preserves both.
@@ -134,7 +135,7 @@ fn extract_components(
 
 fn effective_component_properties<'a>(
     component: &Component,
-    registry: &'a PropertyRegistry,
+    registry: &'a PropertyCatalog,
 ) -> Option<(
     &'a crate::state::PropertySheet,
     std::collections::HashMap<String, PropertyValue>,
@@ -148,11 +149,11 @@ fn effective_component_properties<'a>(
     let sheet = registry.get(component.kind)?;
     Some((
         sheet,
-        crate::properties::property_bridge::collect_properties_from_component(component, registry),
+        crate::properties::property_bridge::collect_properties_with_sheet(component, Some(sheet)),
     ))
 }
 
-fn missing_parameters(component: &Component, registry: &PropertyRegistry) -> Vec<String> {
+fn missing_parameters(component: &Component, registry: &PropertyCatalog) -> Vec<String> {
     let Some((sheet, values)) = effective_component_properties(component, registry) else {
         return Vec::new();
     };
@@ -189,7 +190,7 @@ fn property_value_is_missing(definition: &PropertyDefinition, value: &PropertyVa
 
 fn out_of_range_parameters(
     component: &Component,
-    registry: &PropertyRegistry,
+    registry: &PropertyCatalog,
 ) -> Vec<ParameterRangeIssue> {
     let Some((sheet, values)) = effective_component_properties(component, registry) else {
         return Vec::new();

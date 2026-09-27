@@ -10,7 +10,7 @@ mod resistor;
 mod saturable_inductor;
 mod transformer;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     pub(in super::super) fn register_passive_components(&mut self) {
         self.register_resistor();
         self.register_capacitor();

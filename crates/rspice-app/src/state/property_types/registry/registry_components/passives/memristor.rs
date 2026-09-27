@@ -127,7 +127,7 @@ fn team_property(param: &TeamParam, order: i32, category: &str) -> PropertyDefin
     definition
 }
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// Register the memristor (Xyce YMEMRISTOR + TEAM LEVEL=2 model card).
     ///
     /// `LEVEL=4` (PEM) is deliberately absent: it is parameterized by external

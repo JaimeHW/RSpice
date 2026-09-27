@@ -4,7 +4,7 @@
 
 use super::*;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// Register Pulse Current Source
     pub(super) fn register_isource_pulse(&mut self) {
         let mut sheet = PropertySheet::new();

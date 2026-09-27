@@ -1,7 +1,7 @@
 //! Property dialog host.
 //!
 //! The floating schema-driven component editor backed by the
-//! `PropertyRegistry`. Inline inspection lives in the workbench inspector
+//! `PropertyEditorSchema`. Inline inspection lives in the workbench inspector
 //! (`crate::workbench::docks::inspector`).
 
 use std::collections::HashMap;
@@ -1080,7 +1080,7 @@ mod tests {
 
     #[test]
     fn cross_field_validation_includes_unserialized_schema_defaults() {
-        let registry = crate::state::PropertyRegistry::new();
+        let registry = crate::properties::PropertyEditorSchema::new();
         let sheet = registry
             .get(ComponentType::Memristor)
             .expect("memristor schema");

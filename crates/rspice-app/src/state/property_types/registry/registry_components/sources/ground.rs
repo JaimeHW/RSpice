@@ -3,7 +3,7 @@
 use super::shared::source_symbol_property;
 use super::*;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     pub(super) fn register_ground(&mut self) {
         let mut sheet = PropertySheet::new();
         sheet.add(

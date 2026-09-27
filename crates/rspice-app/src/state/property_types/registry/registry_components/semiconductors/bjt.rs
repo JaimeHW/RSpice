@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// Register BJT (NPN/PNP) with commercial-grade parameters
     pub(super) fn register_bjt(&mut self) {
         let mut npn = self.create_bjt_sheet("Q1", "npn");

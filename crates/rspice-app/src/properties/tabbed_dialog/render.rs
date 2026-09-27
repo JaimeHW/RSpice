@@ -9,12 +9,11 @@
 //! model-bound family gains model browsing, and source families gain a live
 //! preview. The shell follows the mockup's Cancel, Apply, and OK lifecycle.
 
+use crate::properties::PropertyEditorSchema;
 use egui::{Align, Id, Layout, Margin, Sense, Stroke, Ui, pos2, vec2};
 
 use crate::quantity::{QuantityPresentationPolicy, UiNumberLocale};
-use crate::state::property_types::{
-    DisplayMode, PropertyDefinition, PropertyRegistry, PropertyValue,
-};
+use crate::state::property_types::{DisplayMode, PropertyDefinition, PropertyValue};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
@@ -37,7 +36,7 @@ pub fn render_tabbed_property_dialog(
     ctx: &egui::Context,
     state: &mut TabbedPropertyDialogState,
     context: &ComponentEditorContext,
-    registry: &PropertyRegistry,
+    registry: &PropertyEditorSchema,
     model_library_manager: &crate::state::ModelLibraryManager,
     quantity_policy: QuantityPresentationPolicy,
     number_locale: UiNumberLocale,
@@ -705,7 +704,7 @@ fn evidence_pane(
     state: &TabbedPropertyDialogState,
     context: &ComponentEditorContext,
     component_type: crate::state::ComponentType,
-    registry: &PropertyRegistry,
+    registry: &PropertyEditorSchema,
     action: &mut TabbedDialogResult,
 ) {
     egui::Frame::NONE
@@ -725,7 +724,7 @@ fn evidence_contents(
     state: &TabbedPropertyDialogState,
     context: &ComponentEditorContext,
     component_type: crate::state::ComponentType,
-    registry: &PropertyRegistry,
+    registry: &PropertyEditorSchema,
     action: &mut TabbedDialogResult,
 ) {
     model_binding_card(ui, state, context, action);
@@ -1290,7 +1289,7 @@ fn source_preview_card(
     state: &TabbedPropertyDialogState,
     context: &ComponentEditorContext,
     kind: crate::state::ComponentType,
-    registry: &PropertyRegistry,
+    registry: &PropertyEditorSchema,
 ) {
     let timing = state.preview_timing();
     section_band(ui, "Transient stimulus preview", "engine evaluator");
@@ -1333,7 +1332,7 @@ fn source_preview_card(
 fn preview_component(
     state: &TabbedPropertyDialogState,
     kind: crate::state::ComponentType,
-    registry: &PropertyRegistry,
+    registry: &PropertyEditorSchema,
 ) -> Option<crate::state::Component> {
     let mut component = state.component_baseline.clone().or_else(|| {
         state
@@ -1791,8 +1790,8 @@ mod tests {
     use crate::simulation::stimulus_realize;
     use crate::state::{Component, ComponentType, Point};
 
-    fn editor(kind: ComponentType) -> (TabbedPropertyDialogState, PropertyRegistry) {
-        let registry = PropertyRegistry::new();
+    fn editor(kind: ComponentType) -> (TabbedPropertyDialogState, PropertyEditorSchema) {
+        let registry = PropertyEditorSchema::new();
         let mut component = Component::new(4, kind, Point::origin());
         component.name = format!("{}4", kind.spice_prefix());
         let values = crate::properties::property_bridge::collect_properties_from_component(
@@ -1820,7 +1819,7 @@ mod tests {
     fn trace_of(
         state: &TabbedPropertyDialogState,
         kind: ComponentType,
-        registry: &PropertyRegistry,
+        registry: &PropertyEditorSchema,
     ) -> stimulus_realize::WaveformTrace {
         let component = preview_component(state, kind, registry).expect("a component");
         // Through the shared painter's own evaluation, so a test cannot agree

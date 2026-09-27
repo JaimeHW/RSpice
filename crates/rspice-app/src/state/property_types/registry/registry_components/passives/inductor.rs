@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// Register Inductor with commercial-grade parameters
     pub(super) fn register_inductor(&mut self) {
         let mut sheet = PropertySheet::new();

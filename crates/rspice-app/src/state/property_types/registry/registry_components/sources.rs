@@ -14,7 +14,7 @@ mod voltage_transient;
 
 use shared_waveforms::Driven;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     pub(in super::super) fn register_sources(&mut self) {
         self.register_vsource_dc();
         self.register_vsource_ac();
@@ -83,7 +83,7 @@ mod tests {
     /// for an omitted field (`netlist/parser/source_specs.rs:683-691`).
     #[test]
     fn both_trrandom_sheets_carry_the_parsers_own_defaults() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyCatalog::new();
         for kind in [
             ComponentType::VoltageSourceRandom,
             ComponentType::CurrentSourceRandom,
@@ -127,7 +127,7 @@ mod tests {
     /// spellings on both kinds, so even the first positional is the same field.
     #[test]
     fn the_two_trrandom_sheets_differ_only_where_the_quantity_does() {
-        let registry = PropertyRegistry::new();
+        let registry = PropertyCatalog::new();
         let voltage = registry
             .get(ComponentType::VoltageSourceRandom)
             .expect("the voltage sheet");

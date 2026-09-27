@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// Register diode with all SPICE-standard parameters
     pub(super) fn register_diode(&mut self) {
         let mut diode = PropertySheet::new();

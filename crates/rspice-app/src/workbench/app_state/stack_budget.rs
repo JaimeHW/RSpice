@@ -56,7 +56,7 @@ fn field_sizes() -> Vec<(&'static str, usize)> {
         ),
         (
             "property_registry",
-            size_of::<crate::state::PropertyRegistry>(),
+            size_of::<crate::properties::PropertyEditorSchema>(),
         ),
         (
             "calculator_panel",

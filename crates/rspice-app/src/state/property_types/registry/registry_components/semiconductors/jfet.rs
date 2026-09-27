@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// Register JFET (NJFET/PJFET) with commercial-grade parameters
     pub(super) fn register_jfet(&mut self) {
         let mut njfet = self.create_jfet_sheet("J1", "njfet");

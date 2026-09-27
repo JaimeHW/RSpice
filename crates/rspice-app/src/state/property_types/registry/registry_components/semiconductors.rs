@@ -27,7 +27,7 @@ fn symbol_variant_property(
         .with_category("Appearance")
 }
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     pub(in super::super) fn register_semiconductors(&mut self) {
         // Diode with commercial-grade parameters
         self.register_diode();

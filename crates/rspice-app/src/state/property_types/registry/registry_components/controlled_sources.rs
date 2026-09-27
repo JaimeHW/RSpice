@@ -19,7 +19,7 @@ fn smoothness_property(order: i32) -> PropertyDefinition {
         .advanced()
 }
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     pub(in super::super) fn register_controlled_sources(&mut self) {
         self.register_vcvs();
         self.register_vccs();

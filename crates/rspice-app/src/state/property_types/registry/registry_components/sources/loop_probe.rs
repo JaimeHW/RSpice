@@ -10,7 +10,7 @@
 
 use super::*;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     pub(super) fn register_loop_probe(&mut self) {
         let mut sheet = PropertySheet::new();
         sheet.add(

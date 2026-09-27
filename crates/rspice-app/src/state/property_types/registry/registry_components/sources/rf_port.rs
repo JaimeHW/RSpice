@@ -3,7 +3,7 @@
 
 use super::*;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// Register the RF port (Xyce P element). With no source spec the port
     /// is a Z0 terminator; with DC/AC values it becomes a Thevenin source
     /// behind Z0.

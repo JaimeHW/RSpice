@@ -675,7 +675,7 @@ mod tests {
 
     #[test]
     fn expression_parser_enforces_real_registry_phase_units_and_range() {
-        let registry = crate::state::PropertyRegistry::new();
+        let registry = crate::properties::PropertyEditorSchema::new();
         let phase = registry
             .get(crate::state::ComponentType::VoltageSource)
             .and_then(|sheet| sheet.get("acphase"))
@@ -731,7 +731,7 @@ mod tests {
 
     #[test]
     fn expression_numeric_fallback_uses_lossless_retained_source() {
-        let registry = crate::state::PropertyRegistry::new();
+        let registry = crate::properties::PropertyEditorSchema::new();
         let phase = registry
             .get(crate::state::ComponentType::VoltageSource)
             .and_then(|sheet| sheet.get("acphase"))
@@ -754,7 +754,7 @@ mod tests {
 
     #[test]
     fn optional_source_sentinels_are_blank_valid_expression_drafts() {
-        let registry = crate::state::PropertyRegistry::new();
+        let registry = crate::properties::PropertyEditorSchema::new();
         let policy = QuantityPresentationPolicy::default();
         let locale = UiNumberLocale::default();
 

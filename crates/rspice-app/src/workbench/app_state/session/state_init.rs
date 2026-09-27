@@ -201,7 +201,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         pending_delete_cell: None,
         pending_delete_view: None,
         tabbed_property_dialog: crate::properties::TabbedPropertyDialogState::default(),
-        property_registry: crate::state::PropertyRegistry::new(),
+        property_registry: crate::properties::PropertyEditorSchema::new(),
         calculator_panel: super::calculator::CalculatorPanel::new(),
         pdk_settings_dialog: super::pdk_settings::PdkSettingsDialogState::new(),
         pdk_config,

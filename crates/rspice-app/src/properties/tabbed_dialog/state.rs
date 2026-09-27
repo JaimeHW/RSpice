@@ -953,7 +953,7 @@ mod tests {
 
     #[test]
     fn new_pwl_component_opens_on_registry_default_as_a_clean_valid_transaction() {
-        let registry = crate::state::PropertyRegistry::new();
+        let registry = crate::properties::PropertyEditorSchema::new();
         let component = Component::new(
             9,
             ComponentType::VoltageSourcePwl,
@@ -1196,7 +1196,7 @@ mod tests {
 
     #[test]
     fn real_registry_phase_expression_cannot_bypass_units_or_range() {
-        let registry = crate::state::PropertyRegistry::new();
+        let registry = crate::properties::PropertyEditorSchema::new();
         let phase = registry
             .get(ComponentType::VoltageSource)
             .and_then(|sheet| sheet.get("acphase"))
@@ -1215,7 +1215,7 @@ mod tests {
 
     #[test]
     fn expression_capable_fields_initialize_a_lossless_retained_draft() {
-        let registry = crate::state::PropertyRegistry::new();
+        let registry = crate::properties::PropertyEditorSchema::new();
         let sheet = registry.get(ComponentType::VoltageSource).unwrap();
         let stored = 89.123_456_789_012_3;
         let values = HashMap::from([("acphase".to_owned(), PropertyValue::number(stored))]);

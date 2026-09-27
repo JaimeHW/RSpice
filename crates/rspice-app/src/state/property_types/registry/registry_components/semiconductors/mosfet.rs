@@ -10,7 +10,7 @@ enum Bulk {
     Soi,
 }
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// Register MOSFET (NMOS/PMOS) with all Spectre-compatible parameters
     pub(super) fn register_mosfet(&mut self) {
         let nmos = self.create_mosfet_sheet("M1", "nmos", Bulk::Bulk);

@@ -221,7 +221,7 @@ pub struct AppState {
     /// Tabbed property dialog state (commercial-grade property editing)
     pub(crate) tabbed_property_dialog: crate::properties::TabbedPropertyDialogState,
     /// Property registry (component property schemas)
-    pub(crate) property_registry: crate::state::PropertyRegistry,
+    pub(crate) property_registry: crate::properties::PropertyEditorSchema,
     /// Calculator panel state
     pub(crate) calculator_panel: session::calculator::CalculatorPanel,
     /// PDK Settings dialog state

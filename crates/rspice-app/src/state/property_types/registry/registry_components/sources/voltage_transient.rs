@@ -4,7 +4,7 @@
 
 use super::*;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// Register Pulse Voltage Source with all SPICE PULSE parameters
     pub(super) fn register_vsource_pulse(&mut self) {
         let mut sheet = PropertySheet::new();

@@ -3,7 +3,7 @@
 use super::shared::source_symbol_property;
 use super::*;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// Register DC Voltage Source with Spectre-parity parameters.
     ///
     /// Implements the complete vsource parameter set matching Cadence Spectre:

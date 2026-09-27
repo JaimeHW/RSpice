@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl PropertyRegistry {
+impl PropertyCatalog {
     /// Register the saturable (Jiles-Atherton magnetic-core) inductor.
     ///
     /// The winding's inductance target is the primary value; the core
