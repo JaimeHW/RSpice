@@ -19,6 +19,6 @@ pub mod xlsx;
 pub mod zip;
 
 pub use waveform_io::{
-    SignalType, WaveformDataset, WaveformFormat, WaveformSignal, WaveformWriter,
+    SignalType, WaveformDataset, WaveformDomain, WaveformFormat, WaveformSignal, WaveformWriter,
     read_touchstone_bytes,
 };

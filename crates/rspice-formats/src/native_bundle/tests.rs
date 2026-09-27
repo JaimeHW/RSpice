@@ -33,7 +33,7 @@ fn native_export_schema_is_deterministic_and_round_trips_real_and_complex() {
     let complex_real = [1.0, -2.0, 0.5];
     let complex_imag = [0.125, 0.25, -0.75];
     let dataset = NativeBundleDataset {
-        analysis: NativeBundleAnalysis::Ac,
+        analysis: crate::WaveformDomain::Ac,
         coordinate_name: "frequency",
         coordinate: &coordinate,
         signals: vec![

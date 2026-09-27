@@ -27,26 +27,14 @@ fn adapter_error(format: ResultImportFormat, detail: impl std::fmt::Display) -> 
 }
 
 fn analysis_from_coordinate(name: &str) -> AnalysisType {
-    let lower = name.to_ascii_lowercase();
-    if lower.contains("freq") || lower == "hz" {
-        AnalysisType::Ac
-    } else if lower.contains("time") || lower == "t" {
-        AnalysisType::Transient
-    } else {
-        AnalysisType::DcSweep
-    }
+    imported_analysis_type(rspice_formats::WaveformDomain::from_coordinate_name(name))
 }
 
 fn parse_analysis(format: ResultImportFormat, value: &str) -> Result<AnalysisType, String> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "tran" | "transient" | "time" => Ok(AnalysisType::Transient),
-        "ac" | "frequency" | "freq" => Ok(AnalysisType::Ac),
-        "dc" | "dc_sweep" | "dc-sweep" | "sweep" => Ok(AnalysisType::DcSweep),
-        other => Err(adapter_error(
-            format,
-            format_args!("unsupported analysis domain '{other}'"),
-        )),
-    }
+    value
+        .parse::<rspice_formats::WaveformDomain>()
+        .map(imported_analysis_type)
+        .map_err(|error| adapter_error(format, error))
 }
 
 fn finish_dataset(

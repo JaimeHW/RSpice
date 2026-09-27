@@ -48,26 +48,9 @@ impl NativeBundleKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NativeBundleAnalysis {
-    Transient,
-    Ac,
-    DcSweep,
-}
-
-impl NativeBundleAnalysis {
-    const fn schema_name(self) -> &'static str {
-        match self {
-            Self::Transient => "transient",
-            Self::Ac => "ac",
-            Self::DcSweep => "dc_sweep",
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct NativeBundleDataset<'a> {
-    pub analysis: NativeBundleAnalysis,
+    pub analysis: crate::WaveformDomain,
     pub coordinate_name: &'a str,
     pub coordinate: &'a [f64],
     pub signals: Vec<NativeBundleSignal<'a>>,

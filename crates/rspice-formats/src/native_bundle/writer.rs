@@ -1,9 +1,7 @@
 //! Deterministic native waveform bundle encoding over borrowed exact samples.
 
-use super::{
-    NativeBundleAnalysis, NativeBundleDataset, NativeBundleError, NativeBundleKind,
-    NativeBundleSignalValues,
-};
+use super::{NativeBundleDataset, NativeBundleError, NativeBundleKind, NativeBundleSignalValues};
+use crate::WaveformDomain;
 use serde::Serialize;
 use sha2::Digest as _;
 use std::collections::HashSet;
@@ -253,7 +251,7 @@ fn validate_component(
     Ok(())
 }
 
-fn validate_coordinate(analysis: NativeBundleAnalysis, coordinate: &[f64]) -> Result<(), String> {
+fn validate_coordinate(analysis: WaveformDomain, coordinate: &[f64]) -> Result<(), String> {
     if let Some(index) = coordinate.iter().position(|value| !value.is_finite()) {
         return Err(format!(
             "native bundle coordinate has a non-finite sample at index {index}"
@@ -279,7 +277,7 @@ fn validate_coordinate(analysis: NativeBundleAnalysis, coordinate: &[f64]) -> Re
             direction = Some(step);
         }
     }
-    if analysis == NativeBundleAnalysis::Ac && coordinate.iter().any(|value| *value <= 0.0) {
+    if analysis == WaveformDomain::Ac && coordinate.iter().any(|value| *value <= 0.0) {
         return Err("native AC bundle requires positive frequency coordinates".to_owned());
     }
     Ok(())

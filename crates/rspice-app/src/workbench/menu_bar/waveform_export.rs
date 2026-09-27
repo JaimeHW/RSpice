@@ -879,8 +879,7 @@ fn export_native_result_bundle(
     kind: rspice_formats::native_bundle::NativeBundleKind,
 ) {
     use rspice_formats::native_bundle::{
-        NativeBundleAnalysis, NativeBundleDataset, NativeBundleSignal, NativeBundleSignalValues,
-        encode_native_bundle,
+        NativeBundleDataset, NativeBundleSignal, NativeBundleSignalValues, encode_native_bundle,
     };
 
     let analysis = match displayed.primary_analysis(state) {
@@ -893,9 +892,9 @@ fn export_native_result_bundle(
         }
     };
     let native_analysis = match analysis.analysis_type {
-        crate::state::AnalysisType::Transient => NativeBundleAnalysis::Transient,
-        crate::state::AnalysisType::Ac => NativeBundleAnalysis::Ac,
-        crate::state::AnalysisType::DcSweep => NativeBundleAnalysis::DcSweep,
+        crate::state::AnalysisType::Transient => rspice_formats::WaveformDomain::Transient,
+        crate::state::AnalysisType::Ac => rspice_formats::WaveformDomain::Ac,
+        crate::state::AnalysisType::DcSweep => rspice_formats::WaveformDomain::DcSweep,
         other => {
             state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                 "{} export currently preserves transient, AC, and DC-sweep waveform domains; the active {} analysis cannot be represented by the version-1 native waveform schema.",

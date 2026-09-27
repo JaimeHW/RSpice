@@ -2,6 +2,49 @@
 
 use super::*;
 
+/// Coordinate domain represented by waveform interchange formats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaveformDomain {
+    Transient,
+    Ac,
+    DcSweep,
+}
+
+impl WaveformDomain {
+    #[cfg(feature = "native-bundle")]
+    pub(crate) const fn schema_name(self) -> &'static str {
+        match self {
+            Self::Transient => "transient",
+            Self::Ac => "ac",
+            Self::DcSweep => "dc_sweep",
+        }
+    }
+    /// Infer a domain when a source supplies only its coordinate name.
+    pub fn from_coordinate_name(name: &str) -> Self {
+        let lower = name.to_ascii_lowercase();
+        if lower.contains("freq") || lower == "hz" {
+            Self::Ac
+        } else if lower.contains("time") || lower == "t" {
+            Self::Transient
+        } else {
+            Self::DcSweep
+        }
+    }
+}
+
+impl std::str::FromStr for WaveformDomain {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "tran" | "transient" | "time" => Ok(Self::Transient),
+            "ac" | "frequency" | "freq" => Ok(Self::Ac),
+            "dc" | "dc_sweep" | "dc-sweep" | "sweep" => Ok(Self::DcSweep),
+            other => Err(format!("unsupported analysis domain '{other}'")),
+        }
+    }
+}
+
 // =============================================================================
 // Waveform Format
 // =============================================================================

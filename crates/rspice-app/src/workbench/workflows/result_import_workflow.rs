@@ -1540,6 +1540,14 @@ fn csv_error(context: &str, error: csv::Error) -> String {
     }
 }
 
+fn imported_analysis_type(domain: rspice_formats::WaveformDomain) -> AnalysisType {
+    match domain {
+        rspice_formats::WaveformDomain::Transient => AnalysisType::Transient,
+        rspice_formats::WaveformDomain::Ac => AnalysisType::Ac,
+        rspice_formats::WaveformDomain::DcSweep => AnalysisType::DcSweep,
+    }
+}
+
 fn trace_color(index: usize) -> &'static str {
     const COLORS: &[&str] = &[
         "#4FC3F7", "#FFB74D", "#81C784", "#BA68C8", "#E57373", "#4DB6AC", "#FFF176", "#7986CB",
