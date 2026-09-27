@@ -6,6 +6,7 @@
 //! a wire wholly inside travels.
 
 use super::super::super::{BusTargetKind, clamped_documentation_shape_translation};
+use super::super::component_edit::legacy_terminal_points;
 use super::super::*;
 
 const MAX_SHOVE_LANES: i32 = 8;
@@ -767,14 +768,6 @@ fn offset_point(point: Point, delta: Point) -> Point {
         point.x.saturating_add(delta.x),
         point.y.saturating_add(delta.y),
     )
-}
-
-fn legacy_terminal_points(component: &Component) -> Vec<Point> {
-    component
-        .terminal_positions()
-        .into_iter()
-        .map(|(_, pos)| pos)
-        .collect()
 }
 
 #[derive(Debug, Clone, Copy, Default)]

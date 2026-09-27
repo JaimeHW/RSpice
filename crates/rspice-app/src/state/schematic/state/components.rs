@@ -1,5 +1,8 @@
 //! Placing and removing components.
 
+use super::component_edit::{
+    self, ComponentModelOverride, ComponentPlacement, ComponentTransform, legacy_terminal_points,
+};
 use super::*;
 
 impl SchematicState {
@@ -9,53 +12,29 @@ impl SchematicState {
 
     /// Add a component at the given position
     pub fn add_component(&mut self, kind: ComponentType, pos: Point) -> u64 {
-        let id = self.next_id();
-        let name = self.generate_name(kind);
-        let mut component = Component::new(id, kind, pos);
-        component.name = name;
-        component.rotation = self.preview_rotation;
-        component.mirror_h = self.preview_mirror_h;
-
-        // Set default values
-        component.value = kind.default_value().to_string();
-
-        // A port's value IS its interface name — every placement gets a
-        // fresh one so two new ports never silently short their nets.
-        if kind == ComponentType::Port {
-            component.value = self.next_port_name();
-        }
-
-        // A native device armed from a model pack carries that pack's card
-        // instead of the family default, and wears the skin the part named.
-        // The armed tool is checked rather than trusted: `arm_tool` already
-        // retires a card when the kind changes, and this is the second half
-        // of that guarantee at the moment it would matter.
-        if let Some(armed) = self.pending_part_model.as_ref()
-            && armed.tool == Tool::Place(kind)
-        {
-            component.value = armed.model.clone();
-            component.symbol_variant = armed.variant.clone();
-        }
-
-        self.document.components.push(component);
+        // A pending card applies only while its exact device tool is armed.
+        let model_override = self
+            .pending_part_model
+            .as_ref()
+            .filter(|armed| armed.tool == Tool::Place(kind))
+            .map(|armed| ComponentModelOverride {
+                model: &armed.model,
+                symbol_variant: armed.variant.as_deref(),
+            });
+        let id = component_edit::add_component(
+            &mut self.document,
+            &mut self.identity,
+            kind,
+            ComponentPlacement {
+                position: pos,
+                rotation: self.preview_rotation,
+                mirror_h: self.preview_mirror_h,
+            },
+            model_override,
+        );
         self.is_dirty = true;
         self.bump_topology_version();
         id
-    }
-
-    /// First unused `p<N>` port name in this schematic.
-    fn next_port_name(&self) -> String {
-        let taken: std::collections::HashSet<String> = self
-            .document
-            .components
-            .iter()
-            .filter(|c| c.kind == ComponentType::Port)
-            .map(|c| c.value.trim().to_ascii_lowercase())
-            .collect();
-        (1..)
-            .map(|n| format!("p{n}"))
-            .find(|candidate| !taken.contains(candidate))
-            .expect("unbounded name space")
     }
 
     /// Add a generic library/cell/view instance at the given position.
@@ -64,44 +43,19 @@ impl SchematicState {
         pos: Point,
         library_cell: LibraryCellInstance,
     ) -> u64 {
-        let id = self.next_id();
-        let preferred_prefix = library_cell.effective_reference_prefix();
-        let name = if let Some(prefix) = preferred_prefix {
-            next_library_reference_name(&self.document.components, prefix)
-        } else {
-            self.generate_name(ComponentType::CellInstance)
-        };
-        let mut component = Component::new(id, ComponentType::CellInstance, pos);
-        component.name = name;
-        component.rotation = self.preview_rotation;
-        component.mirror_h = self.preview_mirror_h;
-        component.value = library_cell.cell.clone();
-        component.library_cell = Some(library_cell);
-
-        self.document.components.push(component);
+        let id = component_edit::add_library_cell_component(
+            &mut self.document,
+            &mut self.identity,
+            ComponentPlacement {
+                position: pos,
+                rotation: self.preview_rotation,
+                mirror_h: self.preview_mirror_h,
+            },
+            library_cell,
+        );
         self.is_dirty = true;
         self.bump_topology_version();
         id
-    }
-
-    /// Find component at grid position
-    pub fn component_at(&self, pos: Point) -> Option<u64> {
-        // Check terminals first (precise connection points)
-        for comp in &self.document.components {
-            let terminals = comp.terminal_positions();
-            for (_, term_pos) in terminals {
-                if term_pos == pos {
-                    return Some(comp.id);
-                }
-            }
-        }
-        // Then check component bounding boxes (uses symbol_dimensions for accurate hit detection)
-        for comp in &self.document.components {
-            if comp.contains_point(pos) {
-                return Some(comp.id);
-            }
-        }
-        None
     }
 
     /// Rotate selected components
@@ -114,9 +68,11 @@ impl SchematicState {
         &mut self,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
     ) {
-        self.transform_selection_resolved("rotate selection", terminal_points_for, |c| {
-            c.rotation = c.rotation.rotate_cw()
-        });
+        self.transform_selection_resolved(
+            "rotate selection",
+            terminal_points_for,
+            ComponentTransform::RotateClockwise,
+        );
     }
 
     /// Mirror selected components horizontally (flip about Y-axis)
@@ -133,9 +89,11 @@ impl SchematicState {
         &mut self,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
     ) {
-        self.transform_selection_resolved("mirror horizontally", terminal_points_for, |c| {
-            c.toggle_mirror_h()
-        });
+        self.transform_selection_resolved(
+            "mirror horizontally",
+            terminal_points_for,
+            ComponentTransform::MirrorHorizontal,
+        );
     }
 
     /// Mirror selected components vertically (flip about X-axis)
@@ -151,9 +109,11 @@ impl SchematicState {
         &mut self,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
     ) {
-        self.transform_selection_resolved("mirror vertically", terminal_points_for, |c| {
-            c.toggle_mirror_v()
-        });
+        self.transform_selection_resolved(
+            "mirror vertically",
+            terminal_points_for,
+            ComponentTransform::MirrorVertical,
+        );
     }
 
     /// Apply an in-place transform (rotate/mirror) to every selected
@@ -164,8 +124,8 @@ impl SchematicState {
     fn transform_selection_resolved(
         &mut self,
         description: &str,
-        mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
-        transform: impl Fn(&mut Component),
+        terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+        transform: ComponentTransform,
     ) {
         if self.selection.components.is_empty() {
             return;
@@ -182,116 +142,21 @@ impl SchematicState {
             return;
         }
         self.with_undo(description, move |s| {
-            let before: Vec<(u64, Vec<Point>)> = ids
-                .iter()
-                .filter_map(|&id| {
-                    let component = s
-                        .document
-                        .components
-                        .iter()
-                        .find(|component| component.id == id)?;
-                    Some((id, terminal_points_for(component)))
-                })
-                .collect();
-
-            for &id in &ids {
-                let Some(index) = s
-                    .document
-                    .components
-                    .iter()
-                    .position(|component| component.id == id)
-                else {
-                    continue;
-                };
-                transform(&mut s.document.components[index]);
-            }
-
-            // Terminal order is positional and stable across transforms.
-            // Build one old->new table for the whole selection, then apply it
-            // once to the original wire state so selected components cannot
-            // remap each other's freshly moved endpoints.
-            let mut remaps: Vec<(Point, Point)> = Vec::new();
-            for (id, before_points) in before {
-                let Some(component) = s
-                    .document
-                    .components
-                    .iter()
-                    .find(|component| component.id == id)
-                else {
-                    continue;
-                };
-                let after_points = terminal_points_for(component);
-                for (old_pos, new_pos) in before_points.into_iter().zip(after_points) {
-                    if old_pos != new_pos {
-                        remaps.push((old_pos, new_pos));
-                    }
-                }
-            }
-
-            let mut updates: Vec<(usize, usize, Point)> = Vec::new();
-            for (wire_index, wire) in s.document.wires.iter().enumerate() {
-                for (point_index, point) in wire.points.iter().enumerate() {
-                    if let Some((_, new_pos)) = remaps.iter().find(|(old_pos, _)| point == old_pos)
-                    {
-                        updates.push((wire_index, point_index, *new_pos));
-                    }
-                }
-            }
-
-            for (wire_index, point_index, new_pos) in updates {
-                s.document.wires[wire_index].points[point_index] = new_pos;
-            }
+            component_edit::transform_components_resolved(
+                &mut s.document,
+                &ids,
+                terminal_points_for,
+                transform,
+            );
             s.is_dirty = true;
             s.bump_topology_version();
         });
     }
 
-    /// The emitted names of every loop probe drawn on this sheet, in the
-    /// spelling the deck will carry.
-    ///
-    /// This reads the drawing, not an elaborated circuit, so it answers for
-    /// the sheet the engineer is looking at. A probe placed inside a
-    /// hierarchical cell is emitted under its flattened path and is
-    /// deliberately absent here rather than offered under a name the deck
-    /// will not contain; naming that probe by hand is what the entered form
-    /// of the field is for.
+    /// Emitted loop-probe names in the current sheet.
     pub fn placed_loop_probe_names(&self) -> Vec<String> {
-        let mut names: Vec<String> = self
-            .document
-            .components
-            .iter()
-            .filter(|component| component.kind == ComponentType::LoopProbe)
-            .map(Component::spice_instance_name)
-            .filter(|name| !name.is_empty())
-            .collect();
-        names.sort_by(|left, right| {
-            left.to_ascii_uppercase()
-                .cmp(&right.to_ascii_uppercase())
-                .then_with(|| left.cmp(right))
-        });
-        names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
-        names
+        component_edit::placed_loop_probe_names(&self.document)
     }
-}
-
-fn next_library_reference_name(components: &[Component], prefix: &str) -> String {
-    let prefix = prefix.trim().to_ascii_uppercase();
-    (1_u64..)
-        .map(|ordinal| format!("{prefix}{ordinal}"))
-        .find(|candidate| {
-            components
-                .iter()
-                .all(|component| !component.name.eq_ignore_ascii_case(candidate))
-        })
-        .expect("library reference-designator namespace is unbounded")
-}
-
-fn legacy_terminal_points(component: &Component) -> Vec<Point> {
-    component
-        .terminal_positions()
-        .into_iter()
-        .map(|(_, pos)| pos)
-        .collect()
 }
 
 #[cfg(test)]
