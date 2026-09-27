@@ -472,7 +472,8 @@ mod tests {
             .expect("valid Smith fixture");
 
         let mut pz = PoleZeroData::new("old pz");
-        pz.add_real_pole(-1.0);
+        pz.roots
+            .push(crate::analysis::pole_zero::ComplexRoot::pole(-1.0, 0.0));
         state.analysis.pole_zero_state.load_data(pz);
 
         let mut eye = EyeData::new(1e-9, 2);
@@ -683,7 +684,9 @@ mod tests {
     fn pole_zero_capability_uses_only_the_active_retained_payload() {
         let mut state = AppState::default();
         let mut stale = PoleZeroData::new("stale cache");
-        stale.add_real_pole(-99.0);
+        stale
+            .roots
+            .push(crate::analysis::pole_zero::ComplexRoot::pole(-99.0, 0.0));
         state.analysis.pole_zero_state.load_data(stale);
 
         let mut run = crate::state::SimulationRun::new(1);

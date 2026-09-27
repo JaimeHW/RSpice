@@ -1,19 +1,6 @@
-//! Pole-zero data: the roots of a transfer function and how to describe one.
-//!
-//! `result_document::pz` builds a [`PoleZeroData`] from a run's roots and reads
-//! `roots` and `name` off it, asking each root for `is_real`,
-//! `natural_frequency`, and `damping_ratio` in the table beside the plot. That
-//! is the whole surface.
-//!
-//! What used to sit here was a small control-theory library on top of it:
-//! z-domain construction, conjugate-pair and zero-adding helpers, stability and
-//! marginal-stability predicates in both domains, dominant-pole ranking, Q
-//! factor, system order, relative degree, and axis-range queries the viewer
-//! computes for itself. None of it had a caller. The z-domain flag went with
-//! the predicates that were its only readers — pole-zero runs here are
-//! continuous-time.
+//! Pole-zero root data and exact natural-frequency/damping queries.
 
-use crate::state::PoleZeroRootSetEvidence;
+use super::PoleZeroRootSetEvidence;
 
 /// Type of complex root
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,12 +44,6 @@ impl ComplexRoot {
     /// Is this a pole?
     pub fn is_pole(&self) -> bool {
         self.root_type == RootType::Pole
-    }
-
-    /// Is this a zero?
-    #[cfg(test)]
-    pub fn is_zero(&self) -> bool {
-        self.root_type == RootType::Zero
     }
 
     /// Is this root purely real?
@@ -130,11 +111,5 @@ impl PoleZeroData {
             name: name.to_string(),
             ..Default::default()
         }
-    }
-
-    /// Add a real pole
-    #[cfg(test)]
-    pub fn add_real_pole(&mut self, sigma: f64) {
-        self.roots.push(ComplexRoot::pole(sigma, 0.0));
     }
 }

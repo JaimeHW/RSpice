@@ -316,7 +316,8 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
         .expect("valid Smith fixture");
 
     let mut pz = PoleZeroData::new("old pz");
-    pz.add_real_pole(-1.0);
+    pz.roots
+        .push(crate::analysis::pole_zero::ComplexRoot::pole(-1.0, 0.0));
     state.analysis.pole_zero_state.load_data(pz);
 
     let mut eye = EyeData::new(1e-9, 2);

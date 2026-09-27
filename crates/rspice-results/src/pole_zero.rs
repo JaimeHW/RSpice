@@ -1,5 +1,8 @@
 //! Retained pole-zero qualification certificates and complete root-set accounting.
 
+pub mod data;
+pub mod metrics;
+
 /// Exact finite/infinite accounting and residual certificate retained for one
 /// computed pole or zero spectrum.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
