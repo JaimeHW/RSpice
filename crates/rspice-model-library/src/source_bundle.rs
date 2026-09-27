@@ -32,6 +32,7 @@ use crate::{
     ModelLibrary, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourcePin,
 };
 use rspice_app_types::product::ContentDigest;
+use rspice_core::library::{LibParser, ResolvedLibDependency};
 
 /// Bounds supplied by the importing project or host.
 #[derive(Debug, Clone, Copy)]
@@ -51,6 +52,21 @@ pub struct HdlSourceInclude {
     pub including_path: String,
     pub requested_path: String,
     pub included_path: String,
+}
+
+/// A captured source closure ready for compiler preparation and catalog construction.
+///
+/// Members cannot change between the borrowed HDL inputs and consuming catalog build.
+/// This is import data, not permission to execute or publish a model library.
+pub struct SourceBundlePreparation<'a> {
+    members: BTreeMap<String, Vec<u8>>,
+    case_folded: HashMap<String, String>,
+    member_paths: HashMap<String, PathBuf>,
+    decoded_members: BTreeMap<String, String>,
+    veriloga_roots: BTreeSet<String>,
+    dependencies: Vec<ResolvedLibDependency>,
+    selected_root: String,
+    section: Option<&'a str>,
 }
 
 pub fn normalize_member_path(path: &str) -> Result<String, String> {
@@ -256,7 +272,7 @@ fn reachable_browser_bundle_members(
     Ok(reachable)
 }
 
-/// Authenticate a named set of in-memory sources into one library value.
+/// Capture and authenticate the reachable members of an in-memory source bundle.
 ///
 /// This owns everything an import decides — which member is the root, which
 /// members it can reach, what the retained closure and its resolution edges
@@ -265,18 +281,15 @@ fn reachable_browser_bundle_members(
 /// differently: a browser upload refuses to replace a library it did not
 /// import, while re-adding the same pinned pack part is the same bytes
 /// under the same identity and reuses what it already produced.
-/// The HDL adapter must validate every supplied entry point before returning its
-/// captured include edges. Its failure aborts the import before catalog construction.
-pub fn import(
+/// The runtime service prepares every HDL entry point before building the catalog
+/// with the captured compiler include edges.
+pub fn prepare<'a>(
     display_name: &str,
     root_member: Option<&str>,
     files: Vec<(String, Vec<u8>)>,
-    section: Option<&str>,
+    section: Option<&'a str>,
     limits: ImportLimits,
-    validate_hdl: impl FnOnce(HdlSourceInputs<'_>) -> Result<Vec<HdlSourceInclude>, String>,
-) -> Result<(String, ModelLibrary), String> {
-    use rspice_core::library::{LibParser, ResolvedLibDependency};
-
+) -> Result<SourceBundlePreparation<'a>, String> {
     if files.is_empty() {
         return Err("Model source bundle contains no files".to_owned());
     }
@@ -427,106 +440,145 @@ pub fn import(
         }
     }
 
-    for include in validate_hdl(HdlSourceInputs {
-        sources: &decoded_members,
-        roots: &veriloga_roots,
-    })? {
-        let Some(owner_name) = case_folded.get(&include.including_path.to_ascii_lowercase()) else {
-            // Compiler-owned standard headers never become project
-            // model-library artifacts.
-            continue;
-        };
-        let Some(target_name) = case_folded.get(&include.included_path.to_ascii_lowercase()) else {
-            continue;
-        };
-        let owner = member_paths
-            .get(owner_name)
-            .expect("Verilog-A owner belongs to the selected bundle");
-        let target = member_paths
-            .get(target_name)
-            .expect("Verilog-A dependency belongs to the selected bundle");
-        dependencies.push(ResolvedLibDependency {
-            owner: owner.clone(),
-            requested_path: include.requested_path,
-            target: target.clone(),
-        });
-    }
-    dependencies.sort();
-    dependencies.dedup();
+    Ok(SourceBundlePreparation {
+        members,
+        case_folded,
+        member_paths,
+        decoded_members,
+        veriloga_roots,
+        dependencies,
+        selected_root,
+        section,
+    })
+}
 
-    let sources = members
-        .iter()
-        .map(|(name, bytes)| (member_paths[name].clone(), bytes.clone()))
-        .collect::<Vec<_>>();
-    let root_name = selected_root;
-    let root = member_paths[&root_name].clone();
-    let root_bytes = sources
-        .iter()
-        .find_map(|(path, bytes)| (path == &root).then_some(bytes))
-        .expect("the authenticated bundle contains its root");
-    let root_digest = ContentDigest::from_bytes(Sha256::digest(root_bytes).into());
-    let lib_name = Path::new(&root_name)
-        .file_stem()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("uploaded-models")
-        .to_owned();
-
-    let authenticated_dependencies = dependencies.clone();
-    let mut parser = LibParser::new(root.parent().unwrap_or(Path::new("/")));
-    let result = parser
-        .parse_authenticated_closure(root.clone(), sources.clone(), dependencies)
-        .map_err(|error| format!("Uploaded model bundle could not be authenticated: {error}"))?;
-    if !result.is_ok() {
-        return Err(format!(
-            "Uploaded model bundle contains parse or unresolved dependency errors: {}",
-            result
-                .errors
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("; ")
-        ));
+impl SourceBundlePreparation<'_> {
+    /// Borrow the exact decoded members and entry points captured during preparation.
+    pub fn hdl_inputs(&self) -> HdlSourceInputs<'_> {
+        HdlSourceInputs {
+            sources: &self.decoded_members,
+            roots: &self.veriloga_roots,
+        }
     }
 
-    let mut library = ModelLibrary::new(&lib_name);
-    library.root_path = Some(root.clone());
-    // Imported bytes the project retained, not a definition the project
-    // authored. The distinction is load-bearing: a project-owned library
-    // carries a revision and typed definition metadata, and
-    // `project_model_definition_identities` fails closed when a
-    // project-owned model has none. An import has neither, so recording it
-    // as project-owned makes that check demand metadata that cannot exist.
-    library.source_authority = ModelSourceAuthority::RetainedImport {
-        source_id: rspice_app_types::product::ModelSourceId::new(),
-        digest: root_digest,
-    };
-    library.source_closure = sources
-        .iter()
-        .map(|(path, bytes)| ModelSourcePin {
-            path: path.clone(),
-            digest: ContentDigest::from_bytes(Sha256::digest(bytes).into()),
-        })
-        .collect();
-    library
-        .source_closure
-        .sort_by(|left, right| left.path.cmp(&right.path));
-    library.source_contents = sources
-        .into_iter()
-        .map(|(path, bytes)| ModelSourceContent { path, bytes })
-        .collect();
-    library
-        .source_contents
-        .sort_by(|left, right| left.path.cmp(&right.path));
-    library.source_edges = authenticated_dependencies
-        .iter()
-        .map(|dependency| ModelSourceEdge {
-            owner: dependency.owner.clone(),
-            requested_path: dependency.requested_path.clone(),
-            target: dependency.target.clone(),
-        })
-        .collect();
-    library.source_edges.sort();
-    let library = library.with_parsed_catalog(&result, &root, section, &lib_name)?;
-    Ok((lib_name, library))
+    /// Build retained catalog data using include edges captured by the runtime service.
+    ///
+    /// The returned library is not an execution permit; its caller owns publication.
+    pub fn into_model_library(
+        self,
+        includes: Vec<HdlSourceInclude>,
+    ) -> Result<(String, ModelLibrary), String> {
+        let Self {
+            members,
+            case_folded,
+            member_paths,
+            mut dependencies,
+            selected_root,
+            section,
+            ..
+        } = self;
+        for include in includes {
+            let Some(owner_name) = case_folded.get(&include.including_path.to_ascii_lowercase())
+            else {
+                // Compiler-owned standard headers never become project
+                // model-library artifacts.
+                continue;
+            };
+            let Some(target_name) = case_folded.get(&include.included_path.to_ascii_lowercase())
+            else {
+                continue;
+            };
+            let owner = member_paths
+                .get(owner_name)
+                .expect("Verilog-A owner belongs to the selected bundle");
+            let target = member_paths
+                .get(target_name)
+                .expect("Verilog-A dependency belongs to the selected bundle");
+            dependencies.push(ResolvedLibDependency {
+                owner: owner.clone(),
+                requested_path: include.requested_path,
+                target: target.clone(),
+            });
+        }
+        dependencies.sort();
+        dependencies.dedup();
+
+        let sources = members
+            .iter()
+            .map(|(name, bytes)| (member_paths[name].clone(), bytes.clone()))
+            .collect::<Vec<_>>();
+        let root_name = selected_root;
+        let root = member_paths[&root_name].clone();
+        let root_bytes = sources
+            .iter()
+            .find_map(|(path, bytes)| (path == &root).then_some(bytes))
+            .expect("the authenticated bundle contains its root");
+        let root_digest = ContentDigest::from_bytes(Sha256::digest(root_bytes).into());
+        let lib_name = Path::new(&root_name)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("uploaded-models")
+            .to_owned();
+
+        let authenticated_dependencies = dependencies.clone();
+        let mut parser = LibParser::new(root.parent().unwrap_or(Path::new("/")));
+        let result = parser
+            .parse_authenticated_closure(root.clone(), sources.clone(), dependencies)
+            .map_err(|error| {
+                format!("Uploaded model bundle could not be authenticated: {error}")
+            })?;
+        if !result.is_ok() {
+            return Err(format!(
+                "Uploaded model bundle contains parse or unresolved dependency errors: {}",
+                result
+                    .errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ));
+        }
+
+        let mut library = ModelLibrary::new(&lib_name);
+        library.root_path = Some(root.clone());
+        // Imported bytes the project retained, not a definition the project
+        // authored. The distinction is load-bearing: a project-owned library
+        // carries a revision and typed definition metadata, and
+        // `project_model_definition_identities` fails closed when a
+        // project-owned model has none. An import has neither, so recording it
+        // as project-owned makes that check demand metadata that cannot exist.
+        library.source_authority = ModelSourceAuthority::RetainedImport {
+            source_id: rspice_app_types::product::ModelSourceId::new(),
+            digest: root_digest,
+        };
+        library.source_closure = sources
+            .iter()
+            .map(|(path, bytes)| ModelSourcePin {
+                path: path.clone(),
+                digest: ContentDigest::from_bytes(Sha256::digest(bytes).into()),
+            })
+            .collect();
+        library
+            .source_closure
+            .sort_by(|left, right| left.path.cmp(&right.path));
+        library.source_contents = sources
+            .into_iter()
+            .map(|(path, bytes)| ModelSourceContent { path, bytes })
+            .collect();
+        library
+            .source_contents
+            .sort_by(|left, right| left.path.cmp(&right.path));
+        library.source_edges = authenticated_dependencies
+            .iter()
+            .map(|dependency| ModelSourceEdge {
+                owner: dependency.owner.clone(),
+                requested_path: dependency.requested_path.clone(),
+                target: dependency.target.clone(),
+            })
+            .collect();
+        library.source_edges.sort();
+        let library = library.with_parsed_catalog(&result, &root, section, &lib_name)?;
+        Ok((lib_name, library))
+    }
 }

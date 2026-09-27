@@ -14,14 +14,9 @@ pub(super) fn build(
     files: Vec<(String, Vec<u8>)>,
     section: Option<&str>,
 ) -> Result<(String, ModelLibrary), String> {
-    source_bundle::import(
-        display_name,
-        root_member,
-        files,
-        section,
-        limits(),
-        validate_hdl_sources,
-    )
+    let prepared = source_bundle::prepare(display_name, root_member, files, section, limits())?;
+    let includes = validate_hdl_sources(prepared.hdl_inputs())?;
+    prepared.into_model_library(includes)
 }
 
 fn validate_hdl_sources(input: HdlSourceInputs<'_>) -> Result<Vec<HdlSourceInclude>, String> {
