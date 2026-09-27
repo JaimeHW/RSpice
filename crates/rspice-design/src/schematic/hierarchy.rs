@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
-use rspice_design::schematic::{
+use super::{
     component::{Component, LibraryCellInstance},
     component_edit::{self, ComponentPlacement},
     component_type::ComponentType,
@@ -1929,7 +1929,7 @@ fn segments_intersect(a: (Point, Point), b: (Point, Point)) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_design::schematic::history::SchematicSnapshot;
+    use crate::schematic::history::SchematicSnapshot;
 
     #[test]
     fn hierarchy_candidates_are_headless_and_leave_source_and_allocator_unchanged() {

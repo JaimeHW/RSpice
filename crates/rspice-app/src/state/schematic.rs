@@ -38,7 +38,7 @@ mod documentation_shape;
 mod generated_veriloga_catalog;
 mod ground_names;
 mod hierarchy;
-mod hierarchy_edit;
+use rspice_design::schematic::hierarchy as hierarchy_edit;
 mod net_highlight;
 use rspice_design::schematic::net_label;
 mod placement_authority;

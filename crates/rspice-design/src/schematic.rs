@@ -18,6 +18,7 @@ pub mod document;
 pub mod document_policy;
 pub mod documentation_shape;
 pub mod ground_names;
+pub mod hierarchy;
 pub mod history;
 pub mod identity;
 pub mod interface_repair;
