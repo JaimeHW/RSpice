@@ -10,6 +10,7 @@ pub mod document;
 pub mod document_policy;
 pub mod documentation_shape;
 pub mod ground_names;
+pub mod history;
 pub mod label_position;
 pub mod net_label;
 pub mod port;
