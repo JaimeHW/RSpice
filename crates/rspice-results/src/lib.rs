@@ -45,6 +45,7 @@ pub mod report_document;
 #[cfg(feature = "engine-evidence")]
 pub mod result_digest;
 pub mod result_import;
+pub mod result_presentation;
 #[cfg(feature = "engine-evidence")]
 pub mod run;
 #[cfg(feature = "engine-evidence")]

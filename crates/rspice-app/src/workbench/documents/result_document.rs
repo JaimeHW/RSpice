@@ -1408,35 +1408,6 @@ impl CursorTool {
     }
 }
 
-impl MarkerKind {
-    /// Every kind a marker may be given.
-    pub const ALL: [MarkerKind; 3] = [MarkerKind::Note, MarkerKind::Peak, MarkerKind::Spec];
-
-    /// Short label used on the chip and in the marker list.
-    pub const fn label(self) -> &'static str {
-        match self {
-            MarkerKind::Note => "note",
-            MarkerKind::Peak => "peak",
-            MarkerKind::Spec => "spec",
-        }
-    }
-
-    /// What choosing this kind asserts, spelled out in the edit dialog.
-    pub const fn dialog_label(self) -> &'static str {
-        match self {
-            MarkerKind::Note => "Note — a remark about this point on the curve",
-            MarkerKind::Peak => "Peak — a called-out extremum or feature",
-            MarkerKind::Spec => "Spec — a limit line the design is measured against",
-        }
-    }
-
-    /// A spec marker constrains the X position alone and so carries no
-    /// trace value in the readout.
-    pub const fn rides_a_trace(self) -> bool {
-        !matches!(self, MarkerKind::Spec)
-    }
-}
-
 /// Which store owns one marker, and where in it.
 ///
 /// The two stores are genuinely different objects: a quick marker is a

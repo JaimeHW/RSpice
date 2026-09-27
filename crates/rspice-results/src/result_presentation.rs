@@ -7,8 +7,9 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use super::{AnalysisResult, SimulationRun};
-use crate::product::{AnalysisInstanceId, DatasetId};
+#[cfg(feature = "engine-evidence")]
+use crate::{analysis_result::AnalysisResult, run::SimulationRun, waveform::RetainedWaveform};
+use rspice_app_types::product::{AnalysisInstanceId, DatasetId};
 
 /// Stable identity of one retained analysis within one immutable dataset.
 ///
@@ -18,7 +19,7 @@ use crate::product::{AnalysisInstanceId, DatasetId};
 /// position, which prevents presentation state from moving to another
 /// analysis when retained results are reordered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) struct AnalysisPresentationKey {
+pub struct AnalysisPresentationKey {
     dataset_id: DatasetId,
     source: AnalysisPresentationSource,
 }
@@ -26,13 +27,17 @@ pub(crate) struct AnalysisPresentationKey {
 /// Which authored analysis a result came from, independent of the dataset it
 /// was solved into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) enum AnalysisPresentationSource {
+pub enum AnalysisPresentationSource {
     Prepared(AnalysisInstanceId),
     Legacy(u64),
 }
 
 impl AnalysisPresentationKey {
-    pub(crate) fn new(dataset_id: DatasetId, analysis: &AnalysisResult) -> Self {
+    #[cfg(feature = "engine-evidence")]
+    pub fn new<W: AsRef<RetainedWaveform>>(
+        dataset_id: DatasetId,
+        analysis: &AnalysisResult<W>,
+    ) -> Self {
         let source = analysis.provenance().map_or(
             AnalysisPresentationSource::Legacy(analysis.id),
             |provenance| AnalysisPresentationSource::Prepared(provenance.source_instance_id()),
@@ -40,7 +45,7 @@ impl AnalysisPresentationKey {
         Self { dataset_id, source }
     }
 
-    pub(crate) const fn dataset_id(self) -> DatasetId {
+    pub const fn dataset_id(self) -> DatasetId {
         self.dataset_id
     }
 
@@ -50,12 +55,12 @@ impl AnalysisPresentationKey {
     /// Presentation decisions the reader makes about "the transient" are
     /// about the analysis, not about the one solve of it that happened to be
     /// on screen when they made them.
-    pub(crate) const fn authored(self) -> AnalysisPresentationSource {
+    pub const fn authored(self) -> AnalysisPresentationSource {
         self.source
     }
 
     /// Analysis identity used by retained visualization-document bindings.
-    pub(crate) fn retained_instance_id(self) -> AnalysisInstanceId {
+    pub fn retained_instance_id(self) -> AnalysisInstanceId {
         match self.source {
             AnalysisPresentationSource::Prepared(id) => id,
             AnalysisPresentationSource::Legacy(id) => AnalysisInstanceId::from_namespace(
@@ -65,7 +70,7 @@ impl AnalysisPresentationKey {
         }
     }
 
-    pub(crate) fn order_key(self) -> (uuid::Uuid, u8, [u8; 16]) {
+    pub fn order_key(self) -> (uuid::Uuid, u8, [u8; 16]) {
         let (kind, source) = match self.source {
             AnalysisPresentationSource::Prepared(id) => (0, *id.as_uuid().as_bytes()),
             AnalysisPresentationSource::Legacy(id) => {
@@ -77,13 +82,17 @@ impl AnalysisPresentationKey {
         (self.dataset_id.as_uuid(), kind, source)
     }
 
-    pub(crate) fn resolve(self, run: &SimulationRun) -> Option<(usize, &AnalysisResult)> {
+    #[cfg(feature = "engine-evidence")]
+    pub fn resolve<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWaveform>>(
+        self,
+        run: &SimulationRun<A>,
+    ) -> Option<(usize, &A)> {
         (run.dataset_id == self.dataset_id)
             .then(|| {
                 run.analyses
                     .iter()
                     .enumerate()
-                    .find(|(_, analysis)| Self::new(run.dataset_id, analysis) == self)
+                    .find(|(_, analysis)| Self::new(run.dataset_id, analysis.as_ref()) == self)
             })
             .flatten()
     }
@@ -95,17 +104,17 @@ impl AnalysisPresentationKey {
 /// `family_group` distinguish real/imaginary, magnitude/phase, and projected
 /// family traces that intentionally share the same source waveform.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) struct TracePresentationKey {
-    pub(crate) source_name: String,
-    pub(crate) kind: u8,
-    pub(crate) family_group: u64,
+pub struct TracePresentationKey {
+    pub source_name: String,
+    pub kind: u8,
+    pub family_group: u64,
 }
 
 /// Fully dataset-bound identity of one presented waveform.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) struct WaveformPresentationKey {
-    pub(crate) analysis: AnalysisPresentationKey,
-    pub(crate) trace: TracePresentationKey,
+pub struct WaveformPresentationKey {
+    pub analysis: AnalysisPresentationKey,
+    pub trace: TracePresentationKey,
 }
 
 /// What a result marker asserts, and therefore how it draws.
@@ -119,6 +128,35 @@ pub enum MarkerKind {
     /// A limit the design is measured against. Drawn as a limit line,
     /// because a spec constrains the axis position, not one curve.
     Spec,
+}
+
+impl MarkerKind {
+    /// Every kind a marker may be given.
+    pub const ALL: [MarkerKind; 3] = [MarkerKind::Note, MarkerKind::Peak, MarkerKind::Spec];
+
+    /// Short label used on the chip and in the marker list.
+    pub const fn label(self) -> &'static str {
+        match self {
+            MarkerKind::Note => "note",
+            MarkerKind::Peak => "peak",
+            MarkerKind::Spec => "spec",
+        }
+    }
+
+    /// What choosing this kind asserts, spelled out in the edit dialog.
+    pub const fn dialog_label(self) -> &'static str {
+        match self {
+            MarkerKind::Note => "Note — a remark about this point on the curve",
+            MarkerKind::Peak => "Peak — a called-out extremum or feature",
+            MarkerKind::Spec => "Spec — a limit line the design is measured against",
+        }
+    }
+
+    /// A spec marker constrains the X position alone and so carries no
+    /// trace value in the readout.
+    pub const fn rides_a_trace(self) -> bool {
+        !matches!(self, MarkerKind::Spec)
+    }
 }
 
 /// A user-placed marker on a waveform strip.
@@ -144,7 +182,7 @@ pub struct ResultMarker {
 }
 
 impl ResultMarker {
-    pub(crate) fn validate_placement(
+    pub fn validate_placement(
         analysis: AnalysisPresentationKey,
         anchor: &WaveformPresentationKey,
         x: f64,
@@ -176,9 +214,9 @@ pub struct ExprTrace {
     pub text: String,
     #[serde(
         default,
-        skip_serializing_if = "crate::state::ComplexExpressionPolicy::is_legacy"
+        skip_serializing_if = "crate::saved_output::ComplexExpressionPolicy::is_legacy"
     )]
-    pub complex_policy: crate::state::ComplexExpressionPolicy,
+    pub complex_policy: crate::saved_output::ComplexExpressionPolicy,
     /// Legend-chip visibility.
     #[serde(default = "default_visible")]
     pub visible: bool,
@@ -189,7 +227,7 @@ fn default_visible() -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct ResultExpressionGroup {
+pub struct ResultExpressionGroup {
     pub analysis: AnalysisPresentationKey,
     pub traces: Vec<ExprTrace>,
 }
@@ -214,7 +252,7 @@ pub struct ResultPresentation {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_marker_id_high_water"
     )]
-    pub(crate) marker_id_high_water: Option<u32>,
+    pub marker_id_high_water: Option<u32>,
     #[serde(
         default,
         rename = "result_log_y_panes",
@@ -227,7 +265,7 @@ pub struct ResultPresentation {
         rename = "result_expression_groups",
         skip_serializing_if = "Vec::is_empty"
     )]
-    pub(crate) expression_groups: Vec<ResultExpressionGroup>,
+    pub expression_groups: Vec<ResultExpressionGroup>,
 }
 
 fn deserialize_marker_id_high_water<'de, D: serde::Deserializer<'de>>(
@@ -239,7 +277,7 @@ fn deserialize_marker_id_high_water<'de, D: serde::Deserializer<'de>>(
 }
 
 /// Borrowed compatibility fields and the additional durable allocation limit.
-pub(crate) struct ResultFingerprintFields<'a> {
+pub struct ResultFingerprintFields<'a> {
     pub markers: &'a [ResultMarker],
     pub log_y_panes: &'a [WavePanePresentationKey],
     pub expression_groups: &'a [ResultExpressionGroup],
@@ -248,7 +286,7 @@ pub(crate) struct ResultFingerprintFields<'a> {
 
 /// Pane choices are a set, but project files and content fingerprints encode
 /// an array. Normalize both captured and loaded content to the same order.
-pub(crate) fn canonicalize_log_y_panes(panes: &mut Vec<WavePanePresentationKey>) {
+pub fn canonicalize_log_y_panes(panes: &mut Vec<WavePanePresentationKey>) {
     panes.sort_by(|left, right| {
         left.analysis
             .order_key()
@@ -267,7 +305,7 @@ fn deserialize_log_y_panes<'de, D: serde::Deserializer<'de>>(
 }
 
 impl ResultPresentation {
-    pub(crate) fn validate_markers(&self) -> Result<(), String> {
+    pub fn validate_markers(&self) -> Result<(), String> {
         self.marker_allocation_history()?;
         let mut ids = HashSet::new();
         for marker in &self.markers {
@@ -287,7 +325,7 @@ impl ResultPresentation {
     /// annotation's exact payload, assigning unused IDs only to duplicates.
     /// No persisted object refers to quick IDs; their edit selectors are runtime
     /// state. The loader reports this deterministic repair to the reader.
-    pub(crate) fn repair_duplicate_marker_ids(&mut self) -> Result<usize, String> {
+    pub fn repair_duplicate_marker_ids(&mut self) -> Result<usize, String> {
         self.marker_allocation_history()?;
         let mut reserved = self
             .markers
@@ -347,7 +385,7 @@ impl ResultPresentation {
     /// adopting a legacy list's implied maximum does not change its identity.
     /// Exhaustive destructuring makes a new durable field require an explicit
     /// fingerprint/migration decision instead of silently bypassing dirty state.
-    pub(crate) fn fingerprint_fields(&self) -> Result<ResultFingerprintFields<'_>, String> {
+    pub fn fingerprint_fields(&self) -> Result<ResultFingerprintFields<'_>, String> {
         let Self {
             markers,
             marker_id_high_water: _,
