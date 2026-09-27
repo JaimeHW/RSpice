@@ -17,19 +17,12 @@ impl SchematicState {
 
     /// Remove junctions that no longer connect at least two distinct wires.
     pub fn remove_orphan_junctions(&mut self) -> usize {
-        let removed = self.remove_orphan_junctions_untracked();
+        let removed = junction_edit::remove_orphan_junctions(&mut self.document);
         if removed > 0 {
             self.is_dirty = true;
             self.bump_topology_version();
         }
         removed
-    }
-
-    /// Remove invalid junctions without opening a transaction or invalidating
-    /// caches. Composite state operations call this before their single dirty
-    /// and topology update.
-    pub(super) fn remove_orphan_junctions_untracked(&mut self) -> usize {
-        junction_edit::remove_orphan_junctions(&mut self.document)
     }
 
     /// Update junction markers based on current wire topology: orphaned

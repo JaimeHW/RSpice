@@ -3,6 +3,7 @@
 //! What is selected, and the set operations over it — rubber band, add,
 //! toggle, and select-all-of-kind.
 
+use super::super::deletion::{DeletionSelection, ObjectDeletion};
 #[cfg(test)]
 use super::super::{BusDeclaration, BusSlice, BusTapOrientation, DesignNoteKind};
 use super::*;
@@ -239,140 +240,31 @@ impl SchematicState {
         }
 
         let selection = self.selection.clone();
-        let has_live_object = self
-            .document
-            .components
-            .iter()
-            .any(|component| selection.has_component(component.id))
-            || self
-                .document
-                .wires
-                .iter()
-                .any(|wire| selection.has_wire(wire.id))
-            || self
-                .document
-                .junctions
-                .iter()
-                .any(|junction| selection.has_junction(junction.pos))
-            || self
-                .document
-                .net_labels
-                .iter()
-                .any(|label| selection.has_net_label(label.id))
-            || self
-                .document
-                .buses
-                .iter()
-                .any(|bus| selection.has_bus(bus.id))
-            || self
-                .document
-                .bus_taps
-                .iter()
-                .any(|tap| selection.has_bus_tap(tap.id))
-            || self
-                .document
-                .design_notes
-                .iter()
-                .any(|note| selection.has_design_note(note.id))
-            || self
-                .document
-                .documentation_shapes
-                .iter()
-                .any(|shape| selection.has_documentation_shape(shape.id))
-            || self
-                .document
-                .probes
-                .iter()
-                .any(|probe| selection.has_probe(probe.id));
-        if !has_live_object {
+        let (document, _, _, mut edit) = self.document_edit_parts();
+        let Some(deletion) = ObjectDeletion::prepare(
+            document,
+            DeletionSelection {
+                components: &selection.components,
+                wires: &selection.wires,
+                junctions: selection.junctions.iter().map(|junction| junction.pos),
+                net_labels: &selection.net_labels,
+                buses: &selection.buses,
+                bus_taps: &selection.bus_taps,
+                design_notes: &selection.design_notes,
+                documentation_shapes: &selection.documentation_shapes,
+                probes: &selection.probes,
+            },
+        ) else {
             return false;
+        };
+        edit.begin(deletion.document(), "delete selection");
+        let removes_electrical_object = deletion.commit();
+        edit.selection.clear();
+        edit.mark_dirty();
+        if removes_electrical_object {
+            edit.mark_topology_changed();
         }
-        let removes_electrical_object = self
-            .document
-            .components
-            .iter()
-            .any(|component| selection.has_component(component.id))
-            || self
-                .document
-                .wires
-                .iter()
-                .any(|wire| selection.has_wire(wire.id))
-            || self
-                .document
-                .junctions
-                .iter()
-                .any(|junction| selection.has_junction(junction.pos))
-            || self
-                .document
-                .net_labels
-                .iter()
-                .any(|label| selection.has_net_label(label.id))
-            || self
-                .document
-                .buses
-                .iter()
-                .any(|bus| selection.has_bus(bus.id))
-            || self
-                .document
-                .bus_taps
-                .iter()
-                .any(|tap| selection.has_bus_tap(tap.id));
-
-        self.with_undo("delete selection", move |schematic| {
-            schematic
-                .document
-                .components
-                .retain(|component| !selection.has_component(component.id));
-            schematic
-                .document
-                .wires
-                .retain(|wire| !selection.has_wire(wire.id));
-            let removed_bus_ids: std::collections::HashSet<u64> = schematic
-                .document
-                .buses
-                .iter()
-                .filter(|bus| selection.has_bus(bus.id))
-                .map(|bus| bus.id)
-                .collect();
-            schematic
-                .document
-                .buses
-                .retain(|bus| !removed_bus_ids.contains(&bus.id));
-            schematic.document.bus_taps.retain(|tap| {
-                !removed_bus_ids.contains(&tap.bus_id) && !selection.has_bus_tap(tap.id)
-            });
-            // A wire deletion may invalidate connection markers that were not
-            // explicitly selected. Keep that lifecycle cleanup inside this
-            // same undo transaction and topology update.
-            if removes_electrical_object {
-                schematic.remove_orphan_junctions_untracked();
-            }
-            schematic
-                .document
-                .junctions
-                .retain(|junction| !selection.has_junction(junction.pos));
-            schematic
-                .document
-                .net_labels
-                .retain(|label| !selection.has_net_label(label.id));
-            schematic
-                .document
-                .design_notes
-                .retain(|note| !selection.has_design_note(note.id));
-            schematic
-                .document
-                .documentation_shapes
-                .retain(|shape| !selection.has_documentation_shape(shape.id));
-            schematic
-                .document
-                .probes
-                .retain(|probe| !selection.has_probe(probe.id));
-            schematic.selection.clear();
-            schematic.is_dirty = true;
-            if removes_electrical_object {
-                schematic.bump_topology_version();
-            }
-        })
+        edit.end(document)
     }
 
     /// Select every complete design object in the schematic.
@@ -502,6 +394,46 @@ mod tests {
 
         assert!(!schematic.delete_selection());
         assert!(!schematic.can_undo());
+    }
+
+    #[test]
+    fn deletion_preserves_read_only_state_and_joins_outer_cancellation() {
+        let label = NetLabel::new(1, Point::new(2, 2), "remove");
+        let mut schematic = SchematicState::default();
+        schematic.document.net_labels.push(label.clone());
+        schematic.selection.select_only_net_label(label.id);
+        schematic.is_dirty = false;
+        schematic.init_undo_history();
+        let selection = schematic.selection.clone();
+        let topology = schematic.topology_version();
+        let content = schematic.content_version();
+
+        schematic.read_only = true;
+        assert!(!schematic.delete_selection());
+        assert_eq!(schematic.document.net_labels, vec![label.clone()]);
+        assert_eq!(schematic.selection, selection);
+        assert_eq!(schematic.topology_version(), topology);
+        assert_eq!(schematic.content_version(), content);
+        assert!(!schematic.is_dirty);
+        assert!(!schematic.can_undo());
+        assert!(!schematic.has_pending_operation());
+
+        schematic.read_only = false;
+        schematic.begin_operation("outer edit");
+        assert!(!schematic.delete_selection(), "the outer scope owns commit");
+        assert!(schematic.document.net_labels.is_empty());
+        assert!(schematic.selection.is_empty());
+        assert_eq!(schematic.topology_version(), topology + 1);
+        assert_eq!(schematic.content_version(), content);
+        assert!(schematic.is_dirty);
+        assert!(schematic.has_pending_operation());
+        assert!(!schematic.can_undo());
+        assert!(schematic.cancel_operation());
+        assert_eq!(schematic.document.net_labels, vec![label]);
+        assert_eq!(schematic.selection, selection);
+        assert!(!schematic.is_dirty);
+        assert!(!schematic.can_undo());
+        assert!(!schematic.has_pending_operation());
     }
 
     #[test]
