@@ -3,8 +3,12 @@
 //! The application owns view/cache admission, filenames and publication.
 
 mod analysis_stack;
+mod noise_report;
+mod operating_point_report;
 mod typed;
 pub use analysis_stack::{AnalysisStackCsv, AnalysisStackCsvError};
+pub use noise_report::NoiseReportCsv;
+pub use operating_point_report::OperatingPointReportCsv;
 pub use typed::{EncodedTypedCsv, TypedCsvSummary, encode_typed_result_csv};
 
 use crate::table::escape_csv_field as csv_text;
