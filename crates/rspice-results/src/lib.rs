@@ -39,6 +39,7 @@ pub mod noise_spectrum;
 pub mod nyquist;
 pub mod operating_point;
 pub mod optimization;
+pub mod phase_noise;
 #[cfg(feature = "engine-evidence")]
 pub mod pole_zero;
 pub mod provenance;

@@ -12,10 +12,14 @@ use std::sync::Arc;
 
 use egui::Ui;
 
-use crate::state::{
-    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, PeriodicNoiseOutputQuantity,
-    SharedWaveformValues, WaveformData,
+use rspice_results::phase_noise::{
+    exact_retained_value_at, retained_device_noise_shares, retained_measurement,
+    retained_phase_noise_carrier,
 };
+
+use crate::state::{AnalysisResult, AnalysisType, SharedWaveformValues, WaveformData};
+#[cfg(test)]
+use crate::state::{AnalysisResultFamilyMetadata, PeriodicNoiseOutputQuantity};
 use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
@@ -35,72 +39,20 @@ struct PhaseNoiseModel {
     level_dbc_per_hz: SharedWaveformValues,
 }
 
-fn retained_phase_noise_carrier(analysis: &AnalysisResult) -> Option<f64> {
-    let metadata = analysis.family_metadata.as_ref()?;
-    if metadata.validate_for(analysis.analysis_type).is_err() {
-        return None;
-    }
-    let AnalysisResultFamilyMetadata::PeriodicNoise {
-        output_quantity: PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz,
-        carrier_frequency_hz: Some(carrier_frequency_hz),
-    } = metadata
-    else {
-        return None;
-    };
-    Some(*carrier_frequency_hz)
-}
-
-/// A waveform name is phase-noise evidence only when it says so directly.
-///
-/// `onoise` and `inoise` deliberately do *not* qualify: the retained result
-/// adapter uses those names for ordinary periodic noise too, and assigning a
-/// dBc/Hz meaning to them would invent a carrier normalization.
-fn is_explicit_phase_noise_name(name: &str) -> bool {
-    let compact = name
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .collect::<String>()
-        .to_ascii_lowercase();
-    compact.contains("phasenoise") || compact == "lf"
-}
-
 pub(super) fn phase_noise_waveform_is_renderable(waveform: &WaveformData) -> bool {
-    if !is_explicit_phase_noise_name(&waveform.name)
-        || waveform.x.len() != waveform.y.len()
-        || waveform.x.len() < 2
-    {
-        return false;
-    }
-    super::frame_work::note(super::frame_work::DatasetWalk::PhaseNoiseSpectrumScan);
-
-    waveform
-        .x
-        .iter()
-        .zip(waveform.y.iter())
-        .try_fold(None, |previous, (&offset, &level)| {
-            (offset.is_finite()
-                && offset > 0.0
-                && level.is_finite()
-                && previous.is_none_or(|previous| offset > previous))
-            .then_some(Some(offset))
-        })
-        .is_some()
+    rspice_results::phase_noise::phase_noise_waveform_is_renderable(waveform.as_ref(), || {
+        super::frame_work::note(super::frame_work::DatasetWalk::PhaseNoiseSpectrumScan);
+    })
 }
 
-/// `true` if this analysis contains a usable, explicitly-labelled retained
-/// phase-noise trace.  Callers use this for viewer availability; it never
-/// widens PNOISE into a phase-noise assertion by analysis type alone.
 pub(super) fn phase_noise_is_renderable(analysis: &AnalysisResult) -> bool {
-    analysis.success
-        && matches!(
-            analysis.analysis_type,
-            AnalysisType::Pnoise | AnalysisType::Qpnoise
-        )
-        && retained_phase_noise_carrier(analysis).is_some()
-        && analysis
-            .waveforms
-            .iter()
-            .any(phase_noise_waveform_is_renderable)
+    rspice_results::phase_noise::phase_noise_is_renderable(
+        analysis.success,
+        analysis.analysis_type,
+        analysis.family_metadata.as_ref(),
+        &analysis.waveforms,
+        || super::frame_work::note(super::frame_work::DatasetWalk::PhaseNoiseSpectrumScan),
+    )
 }
 
 fn selected_phase_noise_analysis_index(state: &AppState) -> Option<usize> {
@@ -139,7 +91,10 @@ fn model_from_analysis(
         waveform_index,
         label: analysis.label.clone(),
         source: waveform.name.clone(),
-        carrier_frequency_hz: retained_phase_noise_carrier(analysis)?,
+        carrier_frequency_hz: retained_phase_noise_carrier(
+            analysis.analysis_type,
+            analysis.family_metadata.as_ref(),
+        )?,
         offset_hz: Arc::clone(&waveform.x),
         level_dbc_per_hz: Arc::clone(&waveform.y),
     })
@@ -169,17 +124,6 @@ fn active_periodic_noise_without_phase_trace(state: &AppState) -> bool {
 
 fn finite_range(values: &[f64]) -> Option<(f64, f64)> {
     super::finite_extremes(values)
-}
-
-/// Return the exact retained value at the requested offset.  This intentionally
-/// refuses interpolation: a displayed 1 MHz spot value is an assertion that
-/// the analysis retained that sample, not an invented crossing.
-fn exact_retained_value_at(offsets: &[f64], levels: &[f64], target_offset: f64) -> Option<f64> {
-    offsets
-        .iter()
-        .position(|offset| *offset == target_offset)
-        .and_then(|index| levels.get(index).copied())
-        .filter(|level| level.is_finite())
 }
 
 fn format_offset_range(
@@ -332,10 +276,10 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 
     let offset_range = format_offset_range(finite_range(&model.offset_hz), &quantities);
     let analysis = &state.simulation.active_run().unwrap().analyses[model.analysis_index];
-    let phase = retained_measurement(analysis, "phase_error_rms_rad")
+    let phase = retained_measurement(&analysis.data, "phase_error_rms_rad")
         .map(|value| format!("{value:.6e} rad RMS"))
         .unwrap_or_else(|| "Not retained".into());
-    let jitter = retained_measurement(analysis, "timing_jitter_rms_s")
+    let jitter = retained_measurement(&analysis.data, "timing_jitter_rms_s")
         .map(|value| crate::ui::plot::fmt_si(value, "s RMS", 6))
         .unwrap_or_else(|| "Not retained".into());
     let spot = exact_retained_value_at(&model.offset_hz, &model.level_dbc_per_hz, 1.0e6)
@@ -362,22 +306,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     ];
     super::stat_table(ui, &rows);
     ui.collapsing("Device noise shares", |ui| {
-        let shares: Vec<_> = analysis
-            .measurements
-            .iter()
-            .filter_map(|measurement| {
-                let name = measurement
-                    .name
-                    .strip_prefix("noise_share_percent(")?
-                    .strip_suffix(')')?;
-                let value = measurement.value?;
-                (measurement.passed
-                    && measurement.error.is_none()
-                    && value.is_finite()
-                    && value >= 0.0)
-                    .then_some((name, value))
-            })
-            .collect();
+        let shares: Vec<_> = retained_device_noise_shares(&analysis.measurements).collect();
         if shares.is_empty() {
             super::panel_note(ui, "No per-device noise shares were retained.");
         } else {
@@ -402,21 +331,6 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     );
 }
 
-fn retained_measurement(analysis: &AnalysisResult, name: &str) -> Option<f64> {
-    let mut matching = analysis
-        .measurements
-        .iter()
-        .filter(|measurement| measurement.name == name);
-    let measurement = matching.next()?;
-    let value = measurement.value?;
-    (matching.next().is_none()
-        && measurement.passed
-        && measurement.error.is_none()
-        && value.is_finite()
-        && value >= 0.0)
-        .then_some(value)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,20 +343,26 @@ mod tests {
             rspice_core::MeasureResult::success("timing_jitter_rms_s", 3e-12),
         ];
         assert_eq!(
-            retained_measurement(&analysis, "phase_error_rms_rad"),
+            retained_measurement(&analysis.data, "phase_error_rms_rad"),
             Some(0.02)
         );
         assert_eq!(
-            retained_measurement(&analysis, "timing_jitter_rms_s"),
+            retained_measurement(&analysis.data, "timing_jitter_rms_s"),
             Some(3e-12)
         );
         analysis.measurements[1].passed = false;
-        assert_eq!(retained_measurement(&analysis, "timing_jitter_rms_s"), None);
+        assert_eq!(
+            retained_measurement(&analysis.data, "timing_jitter_rms_s"),
+            None
+        );
         analysis
             .data
             .measurements
             .push(analysis.data.measurements[0].clone());
-        assert_eq!(retained_measurement(&analysis, "phase_error_rms_rad"), None);
+        assert_eq!(
+            retained_measurement(&analysis.data, "phase_error_rms_rad"),
+            None
+        );
     }
 
     fn waveform(name: &str) -> WaveformData {
@@ -518,23 +438,5 @@ mod tests {
             carrier_frequency_hz: None,
         });
         assert!(!phase_noise_is_renderable(&missing_carrier));
-    }
-
-    #[test]
-    fn phase_noise_rejects_invalid_log_axis_and_spot_requires_retained_sample() {
-        let invalid = WaveformData::new(
-            "phase_noise",
-            vec![1.0, 0.0, 1.0e6],
-            vec![-80.0, -100.0, -130.0],
-            "#f5b700",
-        );
-        assert!(!phase_noise_waveform_is_renderable(&invalid));
-
-        let trace = waveform("phase_noise");
-        assert_eq!(
-            exact_retained_value_at(&trace.x, &trace.y, 1.0e6),
-            Some(-132.0)
-        );
-        assert_eq!(exact_retained_value_at(&trace.x, &trace.y, 10.0), None);
     }
 }
