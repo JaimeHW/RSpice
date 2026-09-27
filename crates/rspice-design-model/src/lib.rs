@@ -22,6 +22,7 @@ pub mod port;
 pub mod primitives;
 pub mod sheet_authoring;
 pub mod sheet_package;
+pub mod symbol_geometry;
 
 pub use design_management::*;
 pub use primitives::*;
