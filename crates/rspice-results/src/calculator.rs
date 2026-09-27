@@ -9,6 +9,8 @@ mod complex_ops;
 pub mod evaluator;
 pub mod functions;
 pub mod parser;
+#[cfg(feature = "engine-evidence")]
+pub mod spice_parser;
 pub mod value;
 
 use crate::interpolation;

@@ -1,9 +1,9 @@
 //! Bind result-owned expression syntax to the canonical deck numeric reader.
 
-use rspice_results::calculator::ast::CalculatorExpr;
-use rspice_results::calculator::parser as syntax;
-pub use rspice_results::calculator::parser::ParseError;
-use rspice_simulation_contract::spice_value::parse_spice_value_checked;
+use crate::calculator::ast::CalculatorExpr;
+use crate::calculator::parser as syntax;
+pub use crate::calculator::parser::ParseError;
+use crate::spice_value::parse_spice_value_checked;
 
 pub struct Parser<'a>(syntax::Parser<'a>);
 
@@ -24,7 +24,7 @@ pub fn try_parse(input: &str) -> Result<CalculatorExpr, ParseError> {
 #[cfg(test)]
 mod tests {
     use super::try_parse;
-    use rspice_results::calculator::ast::{BinaryOp, CalculatorConstant, CalculatorExpr};
+    use crate::calculator::ast::{BinaryOp, CalculatorConstant, CalculatorExpr};
 
     #[test]
     fn parses_spice_suffix_numeric_literals() {

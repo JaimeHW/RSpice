@@ -8,9 +8,9 @@
 //! - Vector arithmetic handling
 //! - Automatic interpolation for mismatched time bases
 
+pub(crate) use rspice_results::calculator::spice_parser as parser;
 pub(crate) use rspice_results::calculator::{ast, evaluator, functions, value};
 pub(crate) use rspice_results::interpolation;
-pub(crate) mod parser;
 mod sample_projection;
 
 use rspice_results::calculator::{dispatch_function, finite_or_hole};
