@@ -31,6 +31,8 @@ mod editor_ops;
 mod identity;
 mod junction_ops;
 mod selection_ops;
+#[cfg(test)]
+mod serialization_tests;
 mod stimulus_placement;
 mod undo;
 mod viewport;
