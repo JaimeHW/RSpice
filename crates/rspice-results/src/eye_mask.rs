@@ -71,6 +71,36 @@ impl Default for EyeMask {
 }
 
 impl EyeMask {
+    /// Count how many samples fall inside the compliance mask.
+    ///
+    /// Trace samples are already display-space (unit intervals, volts) — the
+    /// same space the absolute mask maps into. The polygon is mapped once
+    /// rather than per sample; its times scale by the UI ratio while its
+    /// voltages stay absolute (see [`EyeMask::inner_in_ui_volts`]).
+    pub fn test_traces<'a>(
+        &mut self,
+        traces: impl Iterator<Item = (&'a [f64], &'a [f64])> + Clone,
+    ) {
+        self.violation_count = 0;
+        self.total_samples = 0;
+        self.margin = None;
+        if !self.enabled {
+            return;
+        }
+
+        let inner = self.inner_in_ui_volts();
+        for (time, amplitude) in traces.clone() {
+            let n = time.len().min(amplitude.len());
+            for i in 0..n {
+                if inner.contains(time[i], amplitude[i]) {
+                    self.violation_count += 1;
+                }
+                self.total_samples += 1;
+            }
+        }
+        self.margin = geometric_margin(&inner, traces);
+    }
+
     /// One unit interval in seconds at the authoring rate (guarded against
     /// degenerate stored rates).
     fn reference_ui_seconds(&self) -> f64 {
@@ -110,15 +140,6 @@ impl EyeMask {
         }
     }
 
-    /// Check if a display-space point — time in unit intervals, voltage in
-    /// volts — violates (falls inside) the inner mask. Batch tests should
-    /// map the polygon once via [`EyeMask::inner_in_ui_volts`] instead of
-    /// calling this per sample.
-    #[cfg(test)]
-    pub fn check_violation(&self, t_ui: f64, volts: f64) -> bool {
-        self.inner_in_ui_volts().contains(t_ui, volts)
-    }
-
     /// Fraction of tested samples that stayed out of the mask.
     ///
     /// This is a pass rate, not a margin, and it is labelled as one. The
@@ -144,9 +165,9 @@ impl EyeMask {
 /// is asking when they ask how close this eye is to failing.
 ///
 /// `None` when there is nothing to test against.
-pub(super) fn geometric_margin(
+fn geometric_margin<'a>(
     inner: &MaskPolygon,
-    traces: &[rspice_core::analysis::signal_integrity::EyeTrace],
+    traces: impl Iterator<Item = (&'a [f64], &'a [f64])> + Clone,
 ) -> Option<f64> {
     /// Largest scaling searched. Beyond this the mask has left the eye
     /// entirely and the exact number stops being informative.
@@ -159,17 +180,17 @@ pub(super) fn geometric_margin(
     }
     let center = inner.centroid()?;
     let has_samples = traces
-        .iter()
-        .any(|trace| trace.time.len().min(trace.amplitude.len()) > 0);
+        .clone()
+        .any(|(time, amplitude)| time.len().min(amplitude.len()) > 0);
     if !has_samples {
         return None;
     }
 
     let violates = |scale: f64| {
         let scaled = inner.scaled_about(center, scale);
-        traces.iter().any(|trace| {
-            let n = trace.time.len().min(trace.amplitude.len());
-            (0..n).any(|i| scaled.contains(trace.time[i], trace.amplitude[i]))
+        traces.clone().any(|(time, amplitude)| {
+            let n = time.len().min(amplitude.len());
+            (0..n).any(|i| scaled.contains(time[i], amplitude[i]))
         })
     };
 
@@ -429,7 +450,7 @@ mod tests {
         assert!((ui.points[3].0 - 1.30).abs() < 1e-12);
         assert!(ui.contains(1.0, 0.0));
         assert!(!ui.contains(0.2, 0.0));
-        assert!(mask.check_violation(1.0, 0.1));
-        assert!(!mask.check_violation(1.0, 0.5));
+        assert!(mask.inner_in_ui_volts().contains(1.0, 0.1));
+        assert!(!mask.inner_in_ui_volts().contains(1.0, 0.5));
     }
 }

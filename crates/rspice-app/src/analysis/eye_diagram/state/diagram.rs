@@ -102,31 +102,14 @@ impl EyeDiagramState {
         self.measurements = super::super::calculate_eye_measurements(&self.data);
     }
 
-    /// Count how many samples fall inside the compliance mask.
-    ///
-    /// Trace samples are already display-space (unit intervals, volts) — the
-    /// same space the absolute mask maps into. The polygon is mapped once
-    /// rather than per sample; its times scale by the UI ratio while its
-    /// voltages stay absolute (see [`EyeMask::inner_in_ui_volts`]).
+    /// Update the mask verdict for the currently loaded acquisitions.
     pub fn run_mask_test(&mut self) {
-        self.mask.violation_count = 0;
-        self.mask.total_samples = 0;
-        self.mask.margin = None;
-        if !self.mask.enabled {
-            return;
-        }
-
-        let inner = self.mask.inner_in_ui_volts();
-        for trace in &self.data.traces {
-            let n = trace.time.len().min(trace.amplitude.len());
-            for i in 0..n {
-                if inner.contains(trace.time[i], trace.amplitude[i]) {
-                    self.mask.violation_count += 1;
-                }
-                self.mask.total_samples += 1;
-            }
-        }
-        self.mask.margin = super::mask::geometric_margin(&inner, &self.data.traces);
+        self.mask.test_traces(
+            self.data
+                .traces
+                .iter()
+                .map(|trace| (trace.time.as_slice(), trace.amplitude.as_slice())),
+        );
     }
 
     /// Number of traces in the loaded data

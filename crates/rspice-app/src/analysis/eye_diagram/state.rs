@@ -9,9 +9,8 @@
 //! with the controls that would have driven them; none had a caller.
 
 mod diagram;
-mod mask;
 mod timebase;
 
 pub use diagram::{EyeDiagramState, EyeRateEditor};
-pub use mask::EyeMask;
+pub use rspice_results::eye_mask::EyeMask;
 pub use timebase::{EyeTimebase, EyeTimebaseKey, EyeTimebaseProvenance, parse_eye_timebase};

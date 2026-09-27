@@ -22,6 +22,7 @@ pub mod dc_sweep;
 #[cfg(feature = "engine-evidence")]
 pub mod events;
 pub mod executed_deck;
+pub mod eye_mask;
 pub mod family_measurements;
 pub mod family_metadata;
 pub mod fft;
