@@ -1246,7 +1246,6 @@ fn historical_pole_zero_binding_uses_its_retained_payload_without_derived_state(
     let mut app = app_with_exact_source();
     let (dataset_id, analysis_sequence) = append_retained_pole_zero_run(&mut app);
     assert_eq!(app.state.simulation.active_run_idx, Some(0));
-    assert!(app.state.analysis.pole_zero_state.is_empty());
 
     let definition = viewer_document("viewer-pz").expect("registered PZ viewer");
     assert_eq!(

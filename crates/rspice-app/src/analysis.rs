@@ -7,7 +7,6 @@
 //! - `fft` - FFT spectrum analyzer for time-domain signals
 //! - `histogram` - Statistical histogram for Monte Carlo and corners
 //! - `nyquist` - Nyquist stability plots for control systems
-//! - `pole_zero` - Pole-zero diagrams for transfer functions
 //! - `smith_chart` - RF Smith chart for impedance matching
 //! - `eye_diagram` - High-speed signal integrity eye diagrams
 //!
@@ -24,12 +23,11 @@ pub(crate) mod fft;
 pub(crate) mod histogram;
 pub(crate) use rspice_results::measurements;
 pub(crate) mod nyquist;
-pub(crate) mod pole_zero;
 pub(crate) mod smith_chart;
 
 // These re-exports were "for convenience (optional -- users can also access via
 // submodule)", and every caller took the submodule. Bode, Nyquist, Smith chart,
-// eye diagram, and pole-zero are all reached as `analysis::<module>::Type`, so
+// and eye diagram are all reached as `analysis::<module>::Type`, so
 // only the handful of names below were ever used flattened.
 // The `*Data` types below are reached through this flattened path only by
 // tests; the product code uses `analysis::<module>::Type`. The lib build
@@ -47,6 +45,6 @@ pub use fft::{FftState, InputFidelity, WindowFunction};
 // modules, so these aliases are the only path to the types.
 pub use histogram::{HistogramBuilder, HistogramDisplayMode};
 #[cfg(test)]
-pub use {bode::BodeData, eye_diagram::EyeData, eye_diagram::EyeTrace, fft::FftData};
+pub use nyquist::NyquistData;
 #[cfg(test)]
-pub use {nyquist::NyquistData, pole_zero::PoleZeroData};
+pub use {bode::BodeData, eye_diagram::EyeData, eye_diagram::EyeTrace, fft::FftData};

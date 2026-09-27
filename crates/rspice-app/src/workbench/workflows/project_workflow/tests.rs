@@ -13,7 +13,6 @@ use crate::analysis::bode::BodeData;
 use crate::analysis::eye_diagram::{EyeData, EyeTrace};
 use crate::analysis::fft::{FftData, window::WindowFunction};
 use crate::analysis::nyquist::NyquistData;
-use crate::analysis::pole_zero::PoleZeroData;
 use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
 use crate::workbench::app_state::ActiveViewer;
 
@@ -315,11 +314,6 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
         .load_sparam_data("S11", &[1.0], &[0.25], &[0.0], Some(50.0))
         .expect("valid Smith fixture");
 
-    let mut pz = PoleZeroData::new("old pz");
-    pz.roots
-        .push(crate::analysis::pole_zero::ComplexRoot::pole(-1.0, 0.0));
-    state.analysis.pole_zero_state.load_data(pz);
-
     let mut eye = EyeData::new(1e-9, 2);
     eye.add_trace(EyeTrace::new(vec![0.0, 0.5, 1.0], vec![0.0, 1.0, 0.0]));
     state.analysis.eye_diagram_state.load_data(eye);
@@ -368,10 +362,6 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
 
 fn assert_specialized_viewer_caches_cleared(state: &AppState) {
     assert_eq!(state.analysis.histogram_state.selected, None);
-    assert!(
-        state.analysis.pole_zero_state.is_empty(),
-        "legacy pole-zero presentation cache should be cleared"
-    );
     for viewer in [
         ActiveViewer::SmithChart,
         ActiveViewer::EyeDiagram,

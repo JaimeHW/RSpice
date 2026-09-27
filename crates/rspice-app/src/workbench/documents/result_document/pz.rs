@@ -4,12 +4,12 @@
 use egui::Ui;
 use rspice_results::pole_zero::metrics::{pole_stability, summarize_roots};
 
-use crate::analysis::pole_zero::{ComplexRoot, PoleZeroData};
 use crate::state::{AnalysisResultPayload, AnalysisType};
 use crate::ui::plot::{self, Axis, PlotSpec, XScale, fmt_si};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
+use rspice_results::pole_zero::data::{ComplexRoot, PoleZeroData};
 
 use super::strip::{self, LegendChip};
 use super::well_hint;
@@ -476,12 +476,6 @@ mod tests {
     #[test]
     fn retained_payload_is_the_only_pole_zero_viewer_authority() {
         let mut state = AppState::default();
-        let mut stale = PoleZeroData::new("stale");
-        stale
-            .roots
-            .push(crate::analysis::pole_zero::ComplexRoot::pole(-99.0, 0.0));
-        state.analysis.pole_zero_state.load_data(stale);
-
         let mut run = SimulationRun::new(1);
         run.add_analysis(AnalysisResult::new(7, AnalysisType::PoleZero, "PZ 7"));
         state.simulation.runs = vec![run].into();

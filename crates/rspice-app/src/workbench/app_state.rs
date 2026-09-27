@@ -113,8 +113,6 @@ pub(crate) struct SpecializedViewerCacheAuthority {
 /// Analysis viewer state grouped behind a dedicated workspace surface.
 #[derive(Clone, Default)]
 pub struct AnalysisWorkspaceState {
-    /// Pole-Zero viewer state
-    pub(crate) pole_zero_state: crate::analysis::pole_zero::PoleZeroState,
     /// Bode viewer state
     pub(crate) bode_plot_state: crate::analysis::bode::BodePlotState,
     /// Nyquist viewer state

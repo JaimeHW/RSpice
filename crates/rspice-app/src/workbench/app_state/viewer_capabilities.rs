@@ -108,7 +108,6 @@ impl AppState {
             .load_data(crate::analysis::bode::BodeData::new());
         self.analysis.nyquist_state.clear();
         self.analysis.smith_chart_state.clear_traces();
-        self.analysis.pole_zero_state.clear();
         self.analysis.cache_authority = Default::default();
     }
 
@@ -422,9 +421,7 @@ fn eye_timebase_key(provenance: SpecializedViewerCacheProvenance) -> EyeTimebase
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::{
-        BodeData, EyeData, EyeTrace, FftData, NyquistData, PoleZeroData, WindowFunction,
-    };
+    use crate::analysis::{BodeData, EyeData, EyeTrace, FftData, NyquistData, WindowFunction};
     use crate::diagnostics::{LogSeverity, LogSource};
     use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
     use crate::workbench::app_state::SpecializedViewerCacheAuthority;
@@ -470,11 +467,6 @@ mod tests {
             .smith_chart_state
             .load_sparam_data("S11", &[1.0], &[0.25], &[0.0], Some(50.0))
             .expect("valid Smith fixture");
-
-        let mut pz = PoleZeroData::new("old pz");
-        pz.roots
-            .push(crate::analysis::pole_zero::ComplexRoot::pole(-1.0, 0.0));
-        state.analysis.pole_zero_state.load_data(pz);
 
         let mut eye = EyeData::new(1e-9, 2);
         eye.add_trace(EyeTrace::new(vec![0.0, 0.5, 1.0], vec![0.0, 1.0, 0.0]));
@@ -683,12 +675,6 @@ mod tests {
     #[test]
     fn pole_zero_capability_uses_only_the_active_retained_payload() {
         let mut state = AppState::default();
-        let mut stale = PoleZeroData::new("stale cache");
-        stale
-            .roots
-            .push(crate::analysis::pole_zero::ComplexRoot::pole(-99.0, 0.0));
-        state.analysis.pole_zero_state.load_data(stale);
-
         let mut run = crate::state::SimulationRun::new(1);
         run.add_analysis(crate::state::AnalysisResult::new(
             1,
@@ -699,7 +685,7 @@ mod tests {
         assert!(state.simulation.select_run(0));
         assert!(
             !state.viewer_is_available(ActiveViewer::PoleZero),
-            "an unbound viewer cache must never enable the pole-zero viewer"
+            "an analysis without retained pole-zero evidence must not enable the viewer"
         );
 
         state.simulation.runs[0].analyses[0] = crate::state::AnalysisResult::new(
@@ -717,7 +703,6 @@ mod tests {
             zero_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
             gain: Some(3.5),
         });
-        state.analysis.pole_zero_state.clear();
 
         assert!(
             state.viewer_is_available(ActiveViewer::PoleZero),

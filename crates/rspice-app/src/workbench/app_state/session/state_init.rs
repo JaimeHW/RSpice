@@ -47,7 +47,6 @@ pub(crate) fn restore_session_model_library_manager(
 
 pub(in crate::workbench) fn default_analysis_viewers() -> AnalysisWorkspaceState {
     AnalysisWorkspaceState {
-        pole_zero_state: crate::analysis::pole_zero::PoleZeroState::default(),
         bode_plot_state: crate::analysis::bode::BodePlotState::default(),
         nyquist_state: crate::analysis::nyquist::NyquistState::default(),
         eye_diagram_state: crate::analysis::eye_diagram::EyeDiagramState::default(),
