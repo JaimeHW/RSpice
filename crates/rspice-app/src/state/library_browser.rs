@@ -24,21 +24,14 @@
 //!     └── symbol
 //! ```
 
-mod catalog;
-mod cell;
-mod library;
 mod manager;
 mod placement;
 mod primitives;
-mod view;
 
-pub use cell::Cell;
-pub use library::Library;
 pub use manager::LibraryManager;
 pub(crate) use placement::cell_parameter_contract;
 pub use placement::{LibraryCellPlacementCandidate, library_cell_placement_candidates};
 pub use rspice_design::library::{
-    ProjectLibraryEditLock, ProjectLibraryEditLockScope, ProjectLibraryLockAuthority,
-    ProjectLibraryLockSnapshot,
+    Cell, Library, ProjectLibraryEditLock, ProjectLibraryEditLockScope,
+    ProjectLibraryLockAuthority, ProjectLibraryLockSnapshot, View, ViewType,
 };
-pub use view::{View, ViewType};

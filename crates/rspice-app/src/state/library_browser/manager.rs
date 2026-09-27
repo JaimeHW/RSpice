@@ -3,8 +3,8 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use std::collections::HashMap;
 
-use super::catalog::LibraryCatalog;
 use super::{Cell, Library, View};
+use rspice_design::library::LibraryCatalog;
 
 #[cfg(test)]
 mod tests;
