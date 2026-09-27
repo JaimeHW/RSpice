@@ -8,7 +8,72 @@ use super::*;
 
 use crate::state::LibraryManager;
 
+/// Editor history and invalidation fields borrowed separately from the document.
+pub(super) struct DocumentEditState<'a> {
+    history: &'a mut super::super::undo_history::UndoHistory,
+    pub(super) selection: &'a mut Selection,
+    is_dirty: &'a mut bool,
+    topology_version: &'a mut u64,
+    content_version: &'a mut u64,
+}
+
+impl DocumentEditState<'_> {
+    pub(super) fn begin(&mut self, document: &SchematicDocument, description: impl Into<String>) {
+        if !self.history.committed.is_initialized() {
+            self.history.initialize();
+        }
+        let snapshot = super::super::undo_history::SchematicSnapshot::capture(document);
+        let cancel_state = super::super::undo_history::OperationCancelState::capture(
+            self.selection,
+            *self.is_dirty,
+        );
+        self.history
+            .begin_operation(snapshot, description, Some(cancel_state));
+    }
+
+    pub(super) fn end(&mut self, document: &SchematicDocument) -> bool {
+        let snapshot = super::super::undo_history::SchematicSnapshot::capture(document);
+        let was_dirty = self.history.pending_was_dirty();
+        let committed = self.history.end_operation(snapshot);
+        if committed {
+            *self.is_dirty = true;
+            *self.content_version = self.content_version.wrapping_add(1);
+        } else if !self.history.has_pending_operation()
+            && let Some(was_dirty) = was_dirty
+        {
+            // A nested scope keeps the outer cancellation baseline.
+            *self.is_dirty = was_dirty;
+        }
+        committed
+    }
+
+    pub(super) fn mark_topology_changed(&mut self) {
+        *self.is_dirty = true;
+        *self.topology_version = self.topology_version.wrapping_add(1);
+    }
+}
+
 impl SchematicState {
+    pub(super) fn document_edit_parts(
+        &mut self,
+    ) -> (
+        &mut SchematicDocument,
+        &mut SchematicIdentity,
+        DocumentEditState<'_>,
+    ) {
+        (
+            &mut self.document,
+            &mut self.identity,
+            DocumentEditState {
+                history: &mut self.undo_history,
+                selection: &mut self.selection,
+                is_dirty: &mut self.is_dirty,
+                topology_version: &mut self.topology_version,
+                content_version: &mut self.content_version,
+            },
+        )
+    }
+
     /// Restore document history while updating editor invalidation and selection.
     pub fn apply_snapshot(&mut self, snapshot: &super::super::undo_history::SchematicSnapshot) {
         if snapshot.apply(&mut self.document) {
@@ -42,15 +107,8 @@ impl SchematicState {
     /// state.end_operation();
     /// ```
     pub fn begin_operation(&mut self, description: impl Into<String>) {
-        // Auto-initialize if needed
-        if !self.undo_history.committed.is_initialized() {
-            self.init_undo_history();
-        }
-
-        let snapshot = super::super::undo_history::SchematicSnapshot::capture(&self.document);
-        let cancel_state = super::super::undo_history::OperationCancelState::capture(self);
-        self.undo_history
-            .begin_operation(snapshot, description, Some(cancel_state));
+        let (document, _, mut edit) = self.document_edit_parts();
+        edit.begin(document, description);
     }
 
     /// End an undoable operation
@@ -61,20 +119,8 @@ impl SchematicState {
     /// # Returns
     /// `true` if an undo entry was created, `false` if nothing changed.
     pub fn end_operation(&mut self) -> bool {
-        let snapshot = super::super::undo_history::SchematicSnapshot::capture(&self.document);
-        let was_dirty = self.undo_history.pending_was_dirty();
-        let committed = self.undo_history.end_operation(snapshot);
-        if committed {
-            self.is_dirty = true;
-            self.content_version = self.content_version.wrapping_add(1);
-        } else if !self.has_pending_operation()
-            && let Some(was_dirty) = was_dirty
-        {
-            // Moving back to the starting position is a no-op, even though
-            // the intermediate preview marked the document as modified.
-            self.is_dirty = was_dirty;
-        }
-        committed
+        let (document, _, mut edit) = self.document_edit_parts();
+        edit.end(document)
     }
 
     /// Monotonic count of committed content changes: every `end_operation`

@@ -14,10 +14,10 @@ pub(super) struct OperationCancelState {
 }
 
 impl OperationCancelState {
-    pub(super) fn capture(state: &super::state::SchematicState) -> Self {
+    pub(super) fn capture(selection: &super::selection::Selection, was_dirty: bool) -> Self {
         Self {
-            selection: state.selection.clone(),
-            was_dirty: state.is_dirty,
+            selection: selection.clone(),
+            was_dirty,
         }
     }
 }

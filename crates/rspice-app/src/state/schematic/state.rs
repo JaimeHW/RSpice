@@ -25,6 +25,7 @@ use super::snap::SnapEngine;
 use super::tool::Tool;
 use super::wire::{Wire, WireConnection, WireDrawing, WireSegment};
 
+mod bus_edit;
 mod components;
 mod editor_ops;
 mod identity;

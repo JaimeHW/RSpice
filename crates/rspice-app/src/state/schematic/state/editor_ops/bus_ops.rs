@@ -5,8 +5,10 @@
 //! nets, so adding or removing a tap changes connectivity, not just drawing.
 
 use super::super::super::{
-    BusDeclaration, BusParseError, BusPropertyImpact, BusSlice, BusTapOrientation, BusTargetKind,
-    PendingBusTap,
+    BusDeclaration, BusParseError, BusPropertyImpact, BusSlice, BusTapOrientation, PendingBusTap,
+};
+use super::super::bus_edit::{
+    self, BusPlacement, BusPropertyEdit, BusTapGeometry, BusTapPlacement, BusTapPropertyEdit,
 };
 use super::super::*;
 
@@ -20,41 +22,15 @@ impl SchematicState {
         if self.read_only {
             return Err(BusParseError::ReadOnly);
         }
-        let candidate = Bus::new(0, points, declaration)?;
-        let mut created_id = None;
-        self.with_undo("draw bus", |schematic| {
-            let id = schematic.next_id();
-            schematic.document.buses.push(Bus { id, ..candidate });
-            schematic.selection.clear();
-            schematic.selection.select_bus(id);
-            schematic.is_dirty = true;
-            schematic.bump_topology_version();
-            created_id = Some(id);
-        });
-        created_id.ok_or(BusParseError::ReadOnly)
-    }
-
-    /// Find the first bus whose polyline contains an exact grid position.
-    pub fn bus_at(&self, position: Point) -> Option<u64> {
-        self.document
-            .buses
-            .iter()
-            .find(|bus| bus.contains_point(position))
-            .map(|bus| bus.id)
-    }
-
-    /// Find the nearest source point on any bus within a grid-unit radius.
-    pub fn nearest_bus_at(&self, position: Point, radius: i32) -> Option<(u64, Point)> {
-        let max_distance = i128::from(radius.max(0)).pow(2);
-        self.document
-            .buses
-            .iter()
-            .filter_map(|bus| {
-                let (point, distance) = bus.nearest_point(position)?;
-                (distance <= max_distance).then_some((bus.id, point, distance))
-            })
-            .min_by_key(|(_, _, distance)| *distance)
-            .map(|(id, point, _)| (id, point))
+        let (document, identity, mut edit) = self.document_edit_parts();
+        let placement = BusPlacement::prepare(document, identity, points, declaration)?;
+        edit.begin(placement.document(), "draw bus");
+        let id = placement.commit();
+        edit.selection.clear();
+        edit.selection.select_bus(id);
+        edit.mark_topology_changed();
+        edit.end(document);
+        Ok(id)
     }
 
     /// Begin an interactive bus route.
@@ -98,7 +74,7 @@ impl SchematicState {
         let points = std::mem::take(&mut self.bus_drawing.points);
         let declaration = self.bus_drawing.declaration.take();
         self.bus_drawing.cancel();
-        let points = simplify_polyline(points);
+        let points = bus_edit::simplify_polyline(points);
         if points.len() < 2 {
             return Ok(None);
         }
@@ -128,24 +104,25 @@ impl SchematicState {
         if self.read_only {
             return Err(BusParseError::ReadOnly);
         }
-        let bus = self
-            .document
-            .buses
-            .iter()
-            .find(|bus| bus.id == bus_id)
-            .ok_or(BusParseError::InvalidBusReference)?;
-        let candidate = BusTap::new(0, bus, bus_point, connection_point, slice, orientation)?;
-        let mut created_id = None;
-        self.with_undo("place bus tap", |schematic| {
-            let id = schematic.next_id();
-            schematic.document.bus_taps.push(BusTap { id, ..candidate });
-            schematic.selection.clear();
-            schematic.selection.select_bus_tap(id);
-            schematic.is_dirty = true;
-            schematic.bump_topology_version();
-            created_id = Some(id);
-        });
-        created_id.ok_or(BusParseError::ReadOnly)
+        let (document, identity, mut edit) = self.document_edit_parts();
+        let placement = BusTapPlacement::prepare(
+            document,
+            identity,
+            BusTapGeometry {
+                bus_id,
+                bus_point,
+                connection_point,
+                orientation,
+            },
+            slice,
+        )?;
+        edit.begin(placement.document(), "place bus tap");
+        let id = placement.commit();
+        edit.selection.clear();
+        edit.selection.select_bus_tap(id);
+        edit.mark_topology_changed();
+        edit.end(document);
+        Ok(id)
     }
 
     /// Place a pending tap configuration, assigning its declaration to an
@@ -161,128 +138,26 @@ impl SchematicState {
         if self.read_only {
             return Err(BusParseError::ReadOnly);
         }
-        let source = self
-            .document
-            .buses
-            .iter()
-            .find(|bus| bus.id == bus_id)
-            .ok_or(BusParseError::InvalidBusReference)?;
-        if let Some(existing) = &source.declaration
-            && existing != &pending.bus_declaration
-        {
-            return Err(BusParseError::DeclarationMismatch);
-        }
-        let mut typed_source = source.clone();
-        typed_source.declaration = Some(pending.bus_declaration.clone());
-        let candidate = BusTap::new(
-            0,
-            &typed_source,
-            bus_point,
-            connection_point,
-            pending.slice.clone(),
-            pending.orientation,
+        let (document, identity, mut edit) = self.document_edit_parts();
+        let placement = BusTapPlacement::prepare_configured(
+            document,
+            identity,
+            BusTapGeometry {
+                bus_id,
+                bus_point,
+                connection_point,
+                orientation: pending.orientation,
+            },
+            &pending.bus_declaration,
+            &pending.slice,
         )?;
-
-        let mut created_id = None;
-        self.with_undo("place bus tap", |schematic| {
-            if let Some(source) = schematic
-                .document
-                .buses
-                .iter_mut()
-                .find(|bus| bus.id == bus_id)
-            {
-                source
-                    .declaration
-                    .get_or_insert_with(|| pending.bus_declaration.clone());
-            }
-            let id = schematic.next_id();
-            schematic.document.bus_taps.push(BusTap { id, ..candidate });
-            schematic.selection.clear();
-            schematic.selection.select_bus_tap(id);
-            schematic.is_dirty = true;
-            schematic.bump_topology_version();
-            created_id = Some(id);
-        });
-        created_id.ok_or(BusParseError::ReadOnly)
-    }
-
-    /// Move a bus while preserving tap attachment at both ends.
-    pub fn move_bus(&mut self, bus_id: u64, delta: Point) -> bool {
-        if self.read_only
-            || delta == Point::origin()
-            || !self.document.buses.iter().any(|b| b.id == bus_id)
-        {
-            return false;
-        }
-        let target_taps: std::collections::HashSet<u64> = self
-            .document
-            .buses
-            .iter()
-            .find(|bus| bus.id == bus_id)
-            .map(|bus| {
-                self.document
-                    .bus_taps
-                    .iter()
-                    .filter(|tap| {
-                        tap.target_kind() == BusTargetKind::Bus
-                            && bus.contains_point(tap.connection_point)
-                    })
-                    .map(|tap| tap.id)
-                    .collect()
-            })
-            .unwrap_or_default();
-        self.with_undo("move bus", |schematic| {
-            if let Some(bus) = schematic
-                .document
-                .buses
-                .iter_mut()
-                .find(|bus| bus.id == bus_id)
-            {
-                bus.translate(delta);
-            }
-            for tap in &mut schematic.document.bus_taps {
-                if tap.bus_id == bus_id {
-                    tap.bus_point = offset_point(tap.bus_point, delta);
-                }
-                if target_taps.contains(&tap.id) {
-                    tap.connection_point = offset_point(tap.connection_point, delta);
-                }
-            }
-            schematic.is_dirty = true;
-            schematic.bump_topology_version();
-        })
-    }
-
-    /// Move a tap's geometry while preserving its source relationship.
-    pub fn move_bus_tap(&mut self, tap_id: u64, delta: Point) -> bool {
-        if self.read_only
-            || delta == Point::origin()
-            || !self.document.bus_taps.iter().any(|tap| tap.id == tap_id)
-        {
-            return false;
-        }
-        let Some(tap) = self.document.bus_taps.iter().find(|tap| tap.id == tap_id) else {
-            return false;
-        };
-        let moved_source = offset_point(tap.bus_point, delta);
-        let Some(bus) = self.document.buses.iter().find(|bus| bus.id == tap.bus_id) else {
-            return false;
-        };
-        if !bus.contains_point(moved_source) {
-            return false;
-        }
-        self.with_undo("move bus tap", |schematic| {
-            if let Some(tap) = schematic
-                .document
-                .bus_taps
-                .iter_mut()
-                .find(|tap| tap.id == tap_id)
-            {
-                tap.translate(delta);
-            }
-            schematic.is_dirty = true;
-            schematic.bump_topology_version();
-        })
+        edit.begin(placement.document(), "place bus tap");
+        let id = placement.commit();
+        edit.selection.clear();
+        edit.selection.select_bus_tap(id);
+        edit.mark_topology_changed();
+        edit.end(document);
+        Ok(id)
     }
 
     /// Apply the complete editable bus-property contract as one guarded undo
@@ -295,19 +170,18 @@ impl SchematicState {
         expected: &Bus,
         declaration: Option<BusDeclaration>,
     ) -> Result<bool, BusParseError> {
-        let (candidate_buses, candidate_taps, impact) =
-            build_bus_property_candidates(self, expected, declaration.as_ref())?;
-        if !impact.has_changes() {
-            return Ok(false);
+        if self.read_only {
+            return Err(BusParseError::ReadOnly);
         }
-
-        let changed = self.with_undo("edit bus properties", move |schematic| {
-            schematic.document.buses = candidate_buses;
-            schematic.document.bus_taps = candidate_taps;
-            schematic.is_dirty = true;
-            schematic.bump_topology_version();
-        });
-        Ok(changed)
+        let (document, _, mut edit) = self.document_edit_parts();
+        let Some(change) = BusPropertyEdit::prepare(document, expected, declaration.as_ref())?
+        else {
+            return Ok(false);
+        };
+        edit.begin(change.document(), "edit bus properties");
+        change.commit();
+        edit.mark_topology_changed();
+        Ok(edit.end(document))
     }
 
     /// Validate and resolve the exact bus-network refactor without cloning
@@ -317,8 +191,10 @@ impl SchematicState {
         expected: &Bus,
         declaration: Option<&BusDeclaration>,
     ) -> Result<BusPropertyImpact, BusParseError> {
-        let (_, _, impact) = build_bus_property_candidates(self, expected, declaration)?;
-        Ok(impact)
+        if self.read_only {
+            return Err(BusParseError::ReadOnly);
+        }
+        bus_edit::validate_bus_properties(&self.document, expected, declaration)
     }
 
     /// Apply a complete bus-tap property contract atomically. The guarded
@@ -334,33 +210,28 @@ impl SchematicState {
         slice: BusSlice,
         orientation: BusTapOrientation,
     ) -> Result<bool, BusParseError> {
-        let candidate = build_bus_tap_property_candidate(
-            self,
-            expected,
-            bus_id,
-            bus_point,
-            connection_point,
-            slice,
-            orientation,
-        )?;
-        if &candidate == expected {
-            return Ok(false);
+        if self.read_only {
+            return Err(BusParseError::ReadOnly);
         }
-
-        let tap_id = candidate.id;
-        let changed = self.with_undo("edit bus tap properties", move |schematic| {
-            if let Some(tap) = schematic
-                .document
-                .bus_taps
-                .iter_mut()
-                .find(|tap| tap.id == tap_id)
-            {
-                *tap = candidate;
-            }
-            schematic.is_dirty = true;
-            schematic.bump_topology_version();
-        });
-        Ok(changed)
+        let (document, _, mut edit) = self.document_edit_parts();
+        let Some(change) = BusTapPropertyEdit::prepare(
+            document,
+            expected,
+            BusTapGeometry {
+                bus_id,
+                bus_point,
+                connection_point,
+                orientation,
+            },
+            slice,
+        )?
+        else {
+            return Ok(false);
+        };
+        edit.begin(change.document(), "edit bus tap properties");
+        change.commit();
+        edit.mark_topology_changed();
+        Ok(edit.end(document))
     }
 
     pub fn validate_bus_tap_properties(
@@ -372,358 +243,21 @@ impl SchematicState {
         slice: BusSlice,
         orientation: BusTapOrientation,
     ) -> Result<bool, BusParseError> {
-        let candidate = build_bus_tap_property_candidate(
-            self,
+        if self.read_only {
+            return Err(BusParseError::ReadOnly);
+        }
+        bus_edit::validate_bus_tap_properties(
+            &self.document,
             expected,
-            bus_id,
-            bus_point,
-            connection_point,
+            BusTapGeometry {
+                bus_id,
+                bus_point,
+                connection_point,
+                orientation,
+            },
             slice,
-            orientation,
-        )?;
-        Ok(&candidate != expected)
+        )
     }
-}
-
-fn build_bus_property_candidates(
-    schematic: &SchematicState,
-    expected: &Bus,
-    declaration: Option<&BusDeclaration>,
-) -> Result<(Vec<Bus>, Vec<BusTap>, BusPropertyImpact), BusParseError> {
-    if schematic.read_only {
-        return Err(BusParseError::ReadOnly);
-    }
-    let current = schematic
-        .document
-        .buses
-        .iter()
-        .find(|bus| bus.id == expected.id)
-        .ok_or(BusParseError::InvalidBusReference)?;
-    if current != expected {
-        return Err(BusParseError::StaleObject);
-    }
-    let selected_direction_reversed = current
-        .declaration
-        .as_ref()
-        .zip(declaration)
-        .is_some_and(|(before, after)| before.direction() != after.direction());
-    let mut candidate_buses = schematic.document.buses.clone();
-    let candidate = candidate_buses
-        .iter_mut()
-        .find(|bus| bus.id == expected.id)
-        .expect("validated bus identity remains present");
-    candidate.declaration = declaration.cloned();
-    candidate.validate()?;
-
-    let connectivity = bus_connectivity(schematic, expected.id);
-    let connected = &connectivity.connected;
-    let mut candidate_taps = schematic.document.bus_taps.clone();
-    let Some(selected_declaration) = declaration else {
-        let has_dependency = schematic.document.bus_taps.iter().any(|tap| {
-            tap.bus_id == expected.id
-                || (tap.target_kind() == BusTargetKind::Bus
-                    && connectivity
-                        .targets_by_tap
-                        .get(&tap.id)
-                        .is_some_and(|targets| targets.contains(&expected.id)))
-        });
-        if has_dependency {
-            return Err(BusParseError::UndeclaredBus);
-        }
-        let impact = property_impact(
-            schematic,
-            &candidate_buses,
-            &candidate_taps,
-            connected.len(),
-        );
-        return Ok((candidate_buses, candidate_taps, impact));
-    };
-
-    for bus in &mut candidate_buses {
-        if bus.id == expected.id || !connected.contains(&bus.id) {
-            continue;
-        }
-        let declaration = bus
-            .declaration
-            .as_mut()
-            .ok_or(BusParseError::UndeclaredBus)?;
-        declaration.name.clone_from(&selected_declaration.name);
-        declaration.notation = selected_declaration.notation;
-        // Apply the selected bus's direction *delta* to the whole connected
-        // vector network. A pure rename/notation edit must preserve each
-        // connected declaration's own orientation; an intentional reversal
-        // reverses every connected declaration exactly once.
-        if selected_direction_reversed {
-            std::mem::swap(&mut declaration.msb, &mut declaration.lsb);
-        }
-        declaration.validate()?;
-    }
-
-    let bus_indices: std::collections::HashMap<u64, usize> = candidate_buses
-        .iter()
-        .enumerate()
-        .map(|(index, bus)| (bus.id, index))
-        .collect();
-    for tap in &mut candidate_taps {
-        if !connected.contains(&tap.bus_id) {
-            continue;
-        }
-        let source = bus_indices
-            .get(&tap.bus_id)
-            .map(|index| &candidate_buses[*index])
-            .ok_or(BusParseError::InvalidBusReference)?;
-        let source_before = schematic
-            .document
-            .buses
-            .iter()
-            .find(|bus| bus.id == tap.bus_id)
-            .ok_or(BusParseError::InvalidBusReference)?;
-        let source_declaration = source
-            .declaration
-            .as_ref()
-            .ok_or(BusParseError::UndeclaredBus)?;
-        if tap.target_kind() == BusTargetKind::Bus {
-            let targets = connectivity
-                .targets_by_tap
-                .get(&tap.id)
-                .map(Vec::as_slice)
-                .unwrap_or_default();
-            match targets {
-                [] => {
-                    let source_direction_reversed = source_before
-                        .declaration
-                        .as_ref()
-                        .is_some_and(|before| before.direction() != source_declaration.direction());
-                    tap.slice.name.clone_from(&source_declaration.name);
-                    tap.slice.notation = source_declaration.notation;
-                    if source_direction_reversed {
-                        std::mem::swap(&mut tap.slice.msb, &mut tap.slice.lsb);
-                    }
-                }
-                [target_id] => {
-                    let target_declaration = bus_indices
-                        .get(target_id)
-                        .map(|index| &candidate_buses[*index])
-                        .ok_or(BusParseError::InvalidDestination)?
-                        .declaration
-                        .as_ref()
-                        .ok_or(BusParseError::InvalidDestination)?;
-                    tap.slice.name.clone_from(&target_declaration.name);
-                    tap.slice.msb = target_declaration.msb;
-                    tap.slice.lsb = target_declaration.lsb;
-                    tap.slice.notation = target_declaration.notation;
-                }
-                _ => return Err(BusParseError::InvalidDestination),
-            }
-        } else {
-            tap.slice.name.clone_from(&source_declaration.name);
-            tap.slice.notation = source_declaration.notation;
-        }
-        tap.validate_against_bus(source)?;
-        validate_tap_destination(&schematic.document.wires, &candidate_buses, tap)?;
-    }
-    let impact = property_impact(
-        schematic,
-        &candidate_buses,
-        &candidate_taps,
-        connected.len(),
-    );
-    Ok((candidate_buses, candidate_taps, impact))
-}
-
-fn build_bus_tap_property_candidate(
-    schematic: &SchematicState,
-    expected: &BusTap,
-    bus_id: u64,
-    bus_point: Point,
-    connection_point: Point,
-    slice: BusSlice,
-    orientation: BusTapOrientation,
-) -> Result<BusTap, BusParseError> {
-    if schematic.read_only {
-        return Err(BusParseError::ReadOnly);
-    }
-    let current = schematic
-        .document
-        .bus_taps
-        .iter()
-        .find(|tap| tap.id == expected.id)
-        .ok_or(BusParseError::InvalidBusReference)?;
-    if current != expected {
-        return Err(BusParseError::StaleObject);
-    }
-    let bus = schematic
-        .document
-        .buses
-        .iter()
-        .find(|bus| bus.id == bus_id)
-        .ok_or(BusParseError::InvalidBusReference)?;
-    let candidate = BusTap::new(
-        expected.id,
-        bus,
-        bus_point,
-        connection_point,
-        slice,
-        orientation,
-    )?;
-    validate_tap_destination(
-        &schematic.document.wires,
-        &schematic.document.buses,
-        &candidate,
-    )?;
-    Ok(candidate)
-}
-
-fn simplify_polyline(points: Vec<Point>) -> Vec<Point> {
-    let mut result = Vec::with_capacity(points.len());
-    for point in points {
-        if result.last() == Some(&point) {
-            continue;
-        }
-        while result.len() >= 2 {
-            let a: Point = result[result.len() - 2];
-            let b: Point = result[result.len() - 1];
-            let collinear = (i128::from(b.x) - i128::from(a.x))
-                * (i128::from(point.y) - i128::from(b.y))
-                == (i128::from(b.y) - i128::from(a.y)) * (i128::from(point.x) - i128::from(b.x));
-            if !collinear {
-                break;
-            }
-            result.pop();
-        }
-        result.push(point);
-    }
-    result
-}
-
-fn offset_point(point: Point, delta: Point) -> Point {
-    Point::new(
-        point.x.saturating_add(delta.x),
-        point.y.saturating_add(delta.y),
-    )
-}
-
-#[derive(Debug, Default)]
-struct BusConnectivity {
-    connected: std::collections::HashSet<u64>,
-    targets_by_tap: std::collections::HashMap<u64, Vec<u64>>,
-}
-
-fn bus_connectivity(schematic: &SchematicState, seed: u64) -> BusConnectivity {
-    let mut adjacency: std::collections::HashMap<u64, Vec<u64>> = schematic
-        .document
-        .buses
-        .iter()
-        .map(|bus| (bus.id, Vec::new()))
-        .collect();
-    let mut targets_by_tap = std::collections::HashMap::new();
-    for tap in &schematic.document.bus_taps {
-        if tap.target_kind() != BusTargetKind::Bus {
-            continue;
-        }
-        let targets: Vec<u64> = schematic
-            .document
-            .buses
-            .iter()
-            .filter(|bus| bus.id != tap.bus_id && bus.contains_point(tap.connection_point))
-            .map(|bus| bus.id)
-            .collect();
-        for target in &targets {
-            adjacency.entry(tap.bus_id).or_default().push(*target);
-            adjacency.entry(*target).or_default().push(tap.bus_id);
-        }
-        targets_by_tap.insert(tap.id, targets);
-    }
-
-    let mut connected = std::collections::HashSet::new();
-    let mut pending = std::collections::VecDeque::from([seed]);
-    while let Some(bus_id) = pending.pop_front() {
-        if !connected.insert(bus_id) {
-            continue;
-        }
-        if let Some(neighbors) = adjacency.get(&bus_id) {
-            pending.extend(neighbors.iter().copied());
-        }
-    }
-    BusConnectivity {
-        connected,
-        targets_by_tap,
-    }
-}
-
-fn property_impact(
-    schematic: &SchematicState,
-    candidate_buses: &[Bus],
-    candidate_taps: &[BusTap],
-    connected_buses: usize,
-) -> BusPropertyImpact {
-    BusPropertyImpact {
-        connected_buses,
-        buses_changed: schematic
-            .document
-            .buses
-            .iter()
-            .zip(candidate_buses)
-            .filter(|(stored, candidate)| stored != candidate)
-            .count(),
-        taps_changed: schematic
-            .document
-            .bus_taps
-            .iter()
-            .zip(candidate_taps)
-            .filter(|(stored, candidate)| stored != candidate)
-            .count(),
-    }
-}
-
-fn validate_tap_destination(
-    wires: &[Wire],
-    buses: &[Bus],
-    candidate: &BusTap,
-) -> Result<(), BusParseError> {
-    let touches_wire = wires
-        .iter()
-        .any(|wire| wire.contains_point(candidate.connection_point));
-    let buses_at_destination: Vec<&Bus> = buses
-        .iter()
-        .filter(|bus| bus.contains_point(candidate.connection_point))
-        .collect();
-    let source_collision = buses_at_destination
-        .iter()
-        .any(|bus| bus.id == candidate.bus_id);
-    let destination_buses: Vec<&Bus> = buses_at_destination
-        .into_iter()
-        .filter(|bus| bus.id != candidate.bus_id)
-        .collect();
-
-    if source_collision {
-        return Err(BusParseError::InvalidDestination);
-    }
-
-    match candidate.target_kind() {
-        BusTargetKind::Wire if !touches_wire && destination_buses.is_empty() => Ok(()),
-        BusTargetKind::Wire if touches_wire && destination_buses.is_empty() => Ok(()),
-        BusTargetKind::Bus if !touches_wire && destination_buses.is_empty() => Ok(()),
-        BusTargetKind::Bus
-            if !touches_wire
-                && destination_buses.len() == 1
-                && destination_matches_slice(&destination_buses, &candidate.slice) =>
-        {
-            Ok(())
-        }
-        BusTargetKind::Wire | BusTargetKind::Bus => Err(BusParseError::InvalidDestination),
-    }
-}
-
-fn destination_matches_slice(destination_buses: &[&Bus], slice: &BusSlice) -> bool {
-    let Ok(expected) =
-        BusDeclaration::new(slice.name.clone(), slice.msb, slice.lsb, slice.notation)
-    else {
-        return false;
-    };
-    destination_buses
-        .iter()
-        .any(|bus| bus.declaration.as_ref() == Some(&expected))
 }
 
 #[cfg(test)]
@@ -819,17 +353,6 @@ mod tests {
         );
         assert!(state.document.buses.is_empty());
         assert!(!state.can_undo());
-    }
-
-    #[test]
-    fn nearest_bus_returns_projected_source_point() {
-        let mut state = SchematicState::default();
-        let bus_id = declared_bus(&mut state);
-        assert_eq!(
-            state.nearest_bus_at(Point::new(7, 2), 2),
-            Some((bus_id, Point::new(7, 0)))
-        );
-        assert_eq!(state.nearest_bus_at(Point::new(7, 3), 2), None);
     }
 
     #[test]
