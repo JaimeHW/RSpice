@@ -1,41 +1,7 @@
 //! Distribution presentation settings. Samples belong to retained results;
 //! derived bins and descriptive moments belong to the result view plan.
 
-/// Histogram display mode
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum HistogramDisplayMode {
-    /// Bar chart (count per bin)
-    #[default]
-    Count,
-    /// Probability density function
-    Pdf,
-    /// Empirical cumulative distribution from exact retained observations
-    Cdf,
-    /// Percent of total
-    Percent,
-}
-
-impl HistogramDisplayMode {
-    pub const ALL: [Self; 4] = [Self::Count, Self::Pdf, Self::Cdf, Self::Percent];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Count => "Count",
-            Self::Pdf => "Probability density",
-            Self::Cdf => "Empirical CDF",
-            Self::Percent => "Percent",
-        }
-    }
-
-    pub fn unit(self) -> &'static str {
-        match self {
-            Self::Count => "n",
-            Self::Pdf => "1/x",
-            Self::Cdf => "P(X ≤ x)",
-            Self::Percent => "%",
-        }
-    }
-}
+use super::HistogramDisplayMode;
 
 /// Histogram presentation settings, independent of the active population.
 #[derive(Debug, Clone)]
