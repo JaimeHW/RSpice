@@ -36,7 +36,7 @@ impl SchematicState {
     ///
     /// Call this after any structural change to invalidate caches.
     /// This is automatically called by mutation methods like add_component,
-    /// add_wire, move_component_with_wires, etc.
+    /// add_wire, move_component_with_wires_resolved, etc.
     pub fn bump_topology_version(&mut self) {
         self.topology_version = self.topology_version.wrapping_add(1);
     }
