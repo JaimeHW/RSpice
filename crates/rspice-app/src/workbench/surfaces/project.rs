@@ -1069,15 +1069,15 @@ mod tests {
                 crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
             );
             let mut result = DrcResult::new();
-            result.add_violation(
-                DrcViolation::new(
+            result.add_violation(DrcViolation {
+                severity: DrcSeverity::Warning,
+                ..DrcViolation::new(
                     7,
                     DrcViolationType::MissingGround,
                     "Net vbias1 has no DC path to ground",
                     DrcLocation::Global,
                 )
-                .with_severity(DrcSeverity::Warning),
-            );
+            });
             result.completed = true;
             app.state
                 .publish_active_design_check_result(result)

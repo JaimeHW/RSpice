@@ -260,13 +260,6 @@ impl DrcViolation {
         self.related_items = items;
         self
     }
-
-    /// Override severity
-    #[cfg(test)]
-    pub fn with_severity(mut self, severity: DrcSeverity) -> Self {
-        self.severity = severity;
-        self
-    }
 }
 
 /// Location of a DRC violation.

@@ -639,7 +639,7 @@ impl DrcChecker {
 /// is why this is stated rather than failed. The rule counts declarations
 /// rather than sheets because the name, not the page, is what joins nets.
 pub(super) fn append_off_sheet_connector_violations(
-    schematic: &crate::state::SchematicState,
+    schematic: &rspice_design::schematic::document::SchematicDocument,
     result: &mut DrcResult,
     severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
 ) {
@@ -648,14 +648,14 @@ pub(super) fn append_off_sheet_connector_violations(
     let key = |name: &str| name.trim().to_ascii_lowercase();
 
     let mut declarations: HashMap<String, usize> = HashMap::new();
-    for label in &schematic.document.net_labels {
+    for label in &schematic.net_labels {
         if label.kind.off_sheet_direction().is_some() {
             *declarations.entry(key(&label.name)).or_default() += 1;
         }
     }
 
     let mut next_id = result.total_count();
-    for label in &schematic.document.net_labels {
+    for label in &schematic.net_labels {
         if label.kind.off_sheet_direction().is_none()
             || declarations.get(&key(&label.name)).copied() != Some(1)
         {
@@ -733,11 +733,11 @@ pub(super) fn append_vector_width_violations(
 /// ports — and the finding is located on the second of the two, which is the
 /// one that arrived after the name was already taken.
 pub(super) fn append_case_collision_violations(
-    schematic: &crate::state::SchematicState,
+    schematic: &rspice_design::schematic::document::SchematicDocument,
     result: &mut DrcResult,
     severity_overrides: &HashMap<DrcViolationType, DrcSeverity>,
 ) {
-    let mut labels: Vec<&crate::state::NetLabel> = schematic.document.net_labels.iter().collect();
+    let mut labels: Vec<&crate::state::NetLabel> = schematic.net_labels.iter().collect();
     labels.sort_by_key(|label| label.id);
     let authored = labels
         .into_iter()
@@ -749,22 +749,16 @@ pub(super) fn append_case_collision_violations(
                 },
             )
         })
-        .chain(
-            schematic
-                .document
-                .components
-                .iter()
-                .filter_map(|component| {
-                    let spec = component.port_spec()?;
-                    Some((
-                        spec.name.clone(),
-                        DrcLocation::Component {
-                            id: component.id,
-                            name: spec.name,
-                        },
-                    ))
-                }),
-        );
+        .chain(schematic.components.iter().filter_map(|component| {
+            let spec = component.port_spec()?;
+            Some((
+                spec.name.clone(),
+                DrcLocation::Component {
+                    id: component.id,
+                    name: spec.name,
+                },
+            ))
+        }));
 
     let mut first_spelling: HashMap<String, String> = HashMap::new();
     let mut next_id = result.total_count();

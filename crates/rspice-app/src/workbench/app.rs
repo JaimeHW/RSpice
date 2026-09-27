@@ -1735,7 +1735,7 @@ mod tests {
             DrcLocation::Global,
         );
         if let Some(severity) = severity {
-            violation = violation.with_severity(severity);
+            violation.severity = severity;
         }
         result.add_violation(violation);
         result.completed = true;

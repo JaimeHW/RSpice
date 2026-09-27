@@ -11,6 +11,7 @@
 use crate::simulation::netlist_gen;
 
 mod checker;
+mod domain;
 mod extraction;
 mod input;
 mod net;

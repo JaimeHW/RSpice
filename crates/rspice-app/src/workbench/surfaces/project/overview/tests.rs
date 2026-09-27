@@ -332,24 +332,24 @@ fn project_problem_selects_the_highest_severity_finding() {
         crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
     let mut result = DrcResult::new();
-    result.add_violation(
-        DrcViolation::new(
+    result.add_violation(DrcViolation {
+        severity: DrcSeverity::Info,
+        ..DrcViolation::new(
             1,
             DrcViolationType::EmptyName,
             "informational finding",
             DrcLocation::Global,
         )
-        .with_severity(DrcSeverity::Info),
-    );
-    result.add_violation(
-        DrcViolation::new(
+    });
+    result.add_violation(DrcViolation {
+        severity: DrcSeverity::Critical,
+        ..DrcViolation::new(
             2,
             DrcViolationType::MissingGround,
             "critical finding",
             DrcLocation::Global,
         )
-        .with_severity(DrcSeverity::Critical),
-    );
+    });
     result.completed = true;
     app.state
         .publish_active_design_check_result(result)

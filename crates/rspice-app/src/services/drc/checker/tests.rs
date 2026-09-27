@@ -10,6 +10,7 @@
 use super::*;
 use crate::services::drc::input::{ParameterRangeIssue, PinInfo};
 use crate::state::Point;
+use rspice_design::schematic::document::SchematicDocument;
 
 /// A terminal that something else in the drawing meets.
 fn pin(name: &str, net: &str) -> PinInfo {
@@ -611,11 +612,11 @@ fn configured_severity_override_is_applied_to_checker_findings() {
 
 /// A four-bit port standing on a two-bit bus, plus the wider case that no
 /// slice can rescue.
-fn width_mismatch_schematic(bus: &str, port: &str) -> crate::state::SchematicState {
+fn width_mismatch_schematic(bus: &str, port: &str) -> SchematicDocument {
     use crate::state::{Bus, BusDeclaration, ComponentType};
 
-    let mut schematic = crate::state::SchematicState::default();
-    schematic.document.buses.push(
+    let mut schematic = SchematicDocument::default();
+    schematic.buses.push(
         Bus::segment(
             1,
             Point::new(90, 0),
@@ -624,19 +625,15 @@ fn width_mismatch_schematic(bus: &str, port: &str) -> crate::state::SchematicSta
         )
         .expect("fixture bus geometry"),
     );
-    let id = schematic.add_component(ComponentType::Port, Point::new(100, 0));
-    schematic
-        .document
-        .components
-        .iter_mut()
-        .find(|component| component.id == id)
-        .expect("placed port")
-        .value = port.to_owned();
+    schematic.components.push(
+        crate::state::Component::new(2, ComponentType::Port, Point::new(100, 0))
+            .with_name_value("", port),
+    );
     schematic
 }
 
 fn width_findings(
-    schematic: &crate::state::SchematicState,
+    schematic: &SchematicDocument,
     width_mismatch: crate::state::BundleWidthMismatchPolicy,
 ) -> Vec<DrcViolation> {
     let mut result = DrcResult::new();
@@ -644,7 +641,7 @@ fn width_findings(
         width_mismatch,
         ..crate::state::ConnectivityPolicy::default()
     };
-    let connectivity = super::super::netlist_gen::extraction::extract(schematic, None);
+    let connectivity = rspice_design::connectivity::extract(schematic, |_| None, |_| None);
     append_vector_width_violations(&connectivity, &policy, &mut result, &HashMap::new());
     result.violations().to_vec()
 }
@@ -682,7 +679,7 @@ fn the_width_mismatch_policy_decides_whether_a_narrow_bus_blocks() {
     }
 }
 
-fn off_sheet_findings(schematic: &crate::state::SchematicState) -> Vec<DrcViolation> {
+fn off_sheet_findings(schematic: &SchematicDocument) -> Vec<DrcViolation> {
     let mut result = DrcResult::new();
     append_off_sheet_connector_violations(schematic, &mut result, &HashMap::new());
     result.violations().to_vec()
@@ -692,20 +689,20 @@ fn off_sheet_findings(schematic: &crate::state::SchematicState) -> Vec<DrcViolat
 fn a_lone_off_sheet_connector_is_advised_and_a_paired_one_is_not() {
     use crate::state::{CrossSheetPortDirection, NetLabel};
 
-    let mut schematic = crate::state::SchematicState::default();
-    schematic.document.net_labels.push(NetLabel::off_sheet(
+    let mut schematic = SchematicDocument::default();
+    schematic.net_labels.push(NetLabel::off_sheet(
         1,
         Point::origin(),
         "BIAS",
         CrossSheetPortDirection::Output,
     ));
-    schematic.document.net_labels.push(NetLabel::off_sheet(
+    schematic.net_labels.push(NetLabel::off_sheet(
         2,
         Point::new(1_000_000, 0),
         "SENSE",
         CrossSheetPortDirection::Input,
     ));
-    schematic.document.net_labels.push(NetLabel::off_sheet(
+    schematic.net_labels.push(NetLabel::off_sheet(
         3,
         Point::new(2_000_000, 0),
         "SENSE",
@@ -714,7 +711,6 @@ fn a_lone_off_sheet_connector_is_advised_and_a_paired_one_is_not() {
     // A local label of the same name is not a partner: it makes no
     // crossing claim of its own.
     schematic
-        .document
         .net_labels
         .push(NetLabel::new(4, Point::new(40, 0), "BIAS"));
 
@@ -741,14 +737,14 @@ fn a_lone_off_sheet_connector_is_advised_and_a_paired_one_is_not() {
 fn partner_matching_folds_case_under_every_policy_and_honors_severity_overrides() {
     use crate::state::{CrossSheetPortDirection, NetLabel, NetNamingPolicy};
 
-    let mut schematic = crate::state::SchematicState::default();
-    schematic.document.net_labels.push(NetLabel::off_sheet(
+    let mut schematic = SchematicDocument::default();
+    schematic.net_labels.push(NetLabel::off_sheet(
         1,
         Point::origin(),
         "bias",
         CrossSheetPortDirection::Output,
     ));
-    schematic.document.net_labels.push(NetLabel::off_sheet(
+    schematic.net_labels.push(NetLabel::off_sheet(
         2,
         Point::new(1_000_000, 0),
         "BIAS",
@@ -759,14 +755,14 @@ fn partner_matching_folds_case_under_every_policy_and_honors_severity_overrides(
         NetNamingPolicy::StrictCaseSensitive,
         NetNamingPolicy::SpiceCompatibleRelaxed,
     ] {
-        schematic.document.document_policy.net_naming = policy;
+        schematic.document_policy.net_naming = policy;
         assert!(
             off_sheet_findings(&schematic).is_empty(),
             "{policy:?}: the netlister pairs these two, so the crossing is complete"
         );
     }
 
-    schematic.document.net_labels.pop();
+    schematic.net_labels.pop();
     let mut result = DrcResult::new();
     let overrides = HashMap::from([(
         DrcViolationType::OffSheetConnectorWithoutPartner,
@@ -778,31 +774,25 @@ fn partner_matching_folds_case_under_every_policy_and_honors_severity_overrides(
 
 #[test]
 fn case_colliding_net_names_are_a_drc_error() {
-    use crate::state::{ComponentType, NetLabel, NetNamingPolicy, SchematicState};
+    use crate::state::{ComponentType, NetLabel, NetNamingPolicy};
 
-    let named_port = |schematic: &mut SchematicState, name: &str| {
-        let id = schematic.add_component(ComponentType::Port, Point::new(200, 0));
-        schematic
-            .document
-            .components
-            .iter_mut()
-            .find(|component| component.id == id)
-            .expect("placed port")
-            .value = name.to_owned();
+    let named_port = |schematic: &mut SchematicDocument, name: &str| {
+        schematic.components.push(
+            crate::state::Component::new(2, ComponentType::Port, Point::new(200, 0))
+                .with_name_value("", name),
+        );
     };
 
     for policy in [
         NetNamingPolicy::StrictCaseSensitive,
         NetNamingPolicy::SpiceCompatibleRelaxed,
     ] {
-        let mut schematic = SchematicState::default();
-        schematic.document.document_policy.net_naming = policy;
+        let mut schematic = SchematicDocument::default();
+        schematic.document_policy.net_naming = policy;
         schematic
-            .document
             .net_labels
             .push(NetLabel::new(1, Point::origin(), "Out"));
         schematic
-            .document
             .net_labels
             .push(NetLabel::new(2, Point::new(40, 0), "out"));
 
@@ -828,13 +818,11 @@ fn case_colliding_net_names_are_a_drc_error() {
     }
 
     // One name, however often it is written, is one net.
-    let mut repeated = SchematicState::default();
+    let mut repeated = SchematicDocument::default();
     repeated
-        .document
         .net_labels
         .push(NetLabel::new(1, Point::origin(), "Out"));
     repeated
-        .document
         .net_labels
         .push(NetLabel::new(2, Point::new(40, 0), "Out"));
     let mut result = DrcResult::new();
@@ -842,9 +830,8 @@ fn case_colliding_net_names_are_a_drc_error() {
     assert!(result.violations().is_empty());
 
     // A lone name collides with nothing.
-    let mut lone = SchematicState::default();
-    lone.document
-        .net_labels
+    let mut lone = SchematicDocument::default();
+    lone.net_labels
         .push(NetLabel::new(1, Point::origin(), "Out"));
     let mut result = DrcResult::new();
     append_case_collision_violations(&lone, &mut result, &HashMap::new());
@@ -852,9 +839,8 @@ fn case_colliding_net_names_are_a_drc_error() {
 
     // An interface port carries an authored name too, and is reported on
     // the port rather than on the label that named the net first.
-    let mut mixed = SchematicState::default();
+    let mut mixed = SchematicDocument::default();
     mixed
-        .document
         .net_labels
         .push(NetLabel::new(1, Point::origin(), "Bias"));
     named_port(&mut mixed, "BIAS");
@@ -876,8 +862,8 @@ fn case_colliding_net_names_are_a_drc_error() {
 fn the_advisory_continues_the_result_id_sequence_it_is_appended_to() {
     use crate::state::{CrossSheetPortDirection, NetLabel};
 
-    let mut schematic = crate::state::SchematicState::default();
-    schematic.document.net_labels.push(NetLabel::off_sheet(
+    let mut schematic = SchematicDocument::default();
+    schematic.net_labels.push(NetLabel::off_sheet(
         1,
         Point::origin(),
         "BIAS",
