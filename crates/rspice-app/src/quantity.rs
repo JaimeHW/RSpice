@@ -5,7 +5,6 @@
 
 mod locale;
 pub(crate) use rspice_simulation_contract::spice_value;
-pub(crate) mod unit;
 
 pub use locale::platform_number_locale;
 pub(crate) use rspice_app_types::quantity::engineering;

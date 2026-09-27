@@ -2,6 +2,7 @@
 
 #[cfg(feature = "columnar")]
 pub mod columnar;
+pub mod delimited;
 pub mod fst;
 #[cfg(feature = "hdf5")]
 pub mod hdf5;

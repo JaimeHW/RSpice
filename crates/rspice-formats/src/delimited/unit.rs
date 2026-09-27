@@ -4,7 +4,7 @@
 //! (the result viewer's phase convention); absolute temperatures use kelvin.
 //! Missing metadata is not a dimensionless declaration.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum UnitDimension {
+pub(super) enum UnitDimension {
     Dimensionless,
     Time,
     Frequency,
@@ -21,14 +21,14 @@ pub(crate) enum UnitDimension {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct EngineeringUnit {
-    pub(crate) dimension: UnitDimension,
+pub(super) struct EngineeringUnit {
+    pub(super) dimension: UnitDimension,
     scale: f64,
     bias: f64,
 }
 
 impl EngineeringUnit {
-    pub(crate) fn parse(raw: &str) -> Result<Self, String> {
+    pub(super) fn parse(raw: &str) -> Result<Self, String> {
         let symbol = raw
             .trim()
             .replace(['µ', 'μ'], "u")
@@ -116,7 +116,7 @@ impl EngineeringUnit {
         })
     }
 
-    pub(crate) fn canonical_symbol(self) -> &'static str {
+    pub(super) fn canonical_symbol(self) -> &'static str {
         match self.dimension {
             UnitDimension::Dimensionless => "1",
             UnitDimension::Time => "s",
@@ -136,7 +136,7 @@ impl EngineeringUnit {
 
     /// Convert a parsed decimal sample without double-rounding SI prefixes.
     /// The caller validates both the input and the converted result.
-    pub(crate) fn normalize_decimal(self, decimal: &str, value: f64) -> f64 {
+    pub(super) fn normalize_decimal(self, decimal: &str, value: f64) -> f64 {
         if self.bias == 0.0 {
             decimal_power_scaled(decimal, self.scale).unwrap_or(value * self.scale)
         } else {

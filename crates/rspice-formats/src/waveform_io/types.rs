@@ -30,6 +30,13 @@ impl WaveformDomain {
             Self::DcSweep
         }
     }
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Transient => "transient",
+            Self::Ac => "AC",
+            Self::DcSweep => "DC sweep",
+        }
+    }
 }
 
 impl std::str::FromStr for WaveformDomain {
