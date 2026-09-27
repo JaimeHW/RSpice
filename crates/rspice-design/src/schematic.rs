@@ -6,6 +6,7 @@ pub mod component_display;
 pub mod component_type;
 pub mod design_note;
 pub mod device_descriptor;
+pub mod document;
 pub mod document_policy;
 pub mod documentation_shape;
 pub mod ground_names;
