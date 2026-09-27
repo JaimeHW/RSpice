@@ -585,15 +585,18 @@ mod tests {
     /// rasterizing it.
     fn announced(points: Vec<crate::analysis::fft::data::FftPoint>, name: &str) -> Vec<String> {
         let mut state = AppState::default();
-        state.analysis.fft_state.data = Some(FftData {
-            name: name.to_owned(),
-            points,
-            sample_rate: 8.0,
-            fft_size: 1024,
-            window: WindowFunction::Hanning,
-            normalization: SpectrumNormalization::Peak,
-            equivalent_noise_bandwidth_bins: 1.0,
-        });
+        let mut data = crate::analysis::fft::spectrum_fixture(
+            name,
+            &[],
+            &[],
+            &[],
+            8.0,
+            SpectrumNormalization::Peak,
+        );
+        data.points = points;
+        data.fft_size = 1024;
+        data.window = WindowFunction::Hanning;
+        state.analysis.fft_state.data = Some(data);
         // The viewer accepts only the complete FFT transaction.  A curve
         // without its matching metrics is deliberately fail-closed, so this
         // rendering fixture must provide both halves even though these tests
@@ -633,8 +636,16 @@ mod tests {
     fn the_legend_names_the_transformed_signal_rather_than_repeating_the_axis() {
         let announced = announced(
             vec![
-                crate::analysis::fft::data::FftPoint::new(1.0, 1.0, 0.0),
-                crate::analysis::fft::data::FftPoint::new(2.0, 0.5, 0.0),
+                crate::analysis::fft::data::FftPoint {
+                    frequency: 1.0,
+                    magnitude: 1.0,
+                    phase: 0.0,
+                },
+                crate::analysis::fft::data::FftPoint {
+                    frequency: 2.0,
+                    magnitude: 0.5,
+                    phase: 0.0,
+                },
             ],
             "V(out)",
         );
@@ -665,7 +676,11 @@ mod tests {
     fn the_two_degenerate_spectra_are_told_apart() {
         // Every bin sits at zero, so the abscissa has no positive extent.
         let no_span = announced(
-            vec![crate::analysis::fft::data::FftPoint::new(0.0, 1.0, 0.0)],
+            vec![crate::analysis::fft::data::FftPoint {
+                frequency: 0.0,
+                magnitude: 1.0,
+                phase: 0.0,
+            }],
             "V(out)",
         );
         assert!(
@@ -680,8 +695,16 @@ mod tests {
         // A real band, with no finite level anywhere in it.
         let no_level = announced(
             vec![
-                crate::analysis::fft::data::FftPoint::new(1.0, f64::NAN, 0.0),
-                crate::analysis::fft::data::FftPoint::new(2.0, f64::NAN, 0.0),
+                crate::analysis::fft::data::FftPoint {
+                    frequency: 1.0,
+                    magnitude: f64::NAN,
+                    phase: 0.0,
+                },
+                crate::analysis::fft::data::FftPoint {
+                    frequency: 2.0,
+                    magnitude: f64::NAN,
+                    phase: 0.0,
+                },
             ],
             "V(out)",
         );

@@ -465,11 +465,12 @@ fn large_state() -> AppState {
         })
         .collect();
     state.analysis.fft_state.load_data(
-        crate::analysis::fft::FftData::from_time_domain(
+        crate::analysis::fft::FftData::from_time_domain_with_normalization(
             "V(n0)",
             &samples,
             FFT_SAMPLES as f64,
             crate::analysis::fft::WindowFunction::Hanning,
+            crate::analysis::fft::data::SpectrumNormalization::Peak,
         )
         .expect("finite qualified FFT frame fixture"),
     );

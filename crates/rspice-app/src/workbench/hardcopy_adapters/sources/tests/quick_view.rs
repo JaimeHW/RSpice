@@ -215,12 +215,13 @@ fn fft_quick_view_ignores_stale_cache_and_global_data_version() {
         ]);
     let mut state = quick_view_state(analysis, ResultViewer::Fft);
     state.analysis.fft_state.selected_source = Some("V(active)".to_owned());
-    state.analysis.fft_state.data = Some(crate::analysis::FftData::from_spectrum(
+    state.analysis.fft_state.data = Some(crate::analysis::fft::spectrum_fixture(
         "stale",
         &[9_999.0, 10_000.0],
         &[8_888.0, 7_777.0],
         &[0.0, 0.0],
         20_000.0,
+        crate::analysis::fft::data::SpectrumNormalization::Peak,
     ));
     state.simulation.data_version = 9;
 
@@ -237,12 +238,13 @@ fn fft_quick_view_ignores_stale_cache_and_global_data_version() {
     );
 
     state.simulation.data_version = 10_000;
-    state.analysis.fft_state.data = Some(crate::analysis::FftData::from_spectrum(
+    state.analysis.fft_state.data = Some(crate::analysis::fft::spectrum_fixture(
         "different stale cache",
         &[123_456.0],
         &[654_321.0],
         &[0.0],
         1.0,
+        crate::analysis::fft::data::SpectrumNormalization::Peak,
     ));
     let second = resolve_quick_view(&state).unwrap();
     assert_eq!(

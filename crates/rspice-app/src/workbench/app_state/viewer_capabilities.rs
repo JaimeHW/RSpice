@@ -480,7 +480,7 @@ mod tests {
         state.analysis.eye_diagram_state.load_data(eye);
 
         state.analysis.fft_state.load_data(
-            FftData::from_time_domain(
+            FftData::from_time_domain_with_normalization(
                 "old fft",
                 &[
                     0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0,
@@ -488,6 +488,7 @@ mod tests {
                 ],
                 16.0,
                 WindowFunction::Rectangular,
+                crate::analysis::fft::data::SpectrumNormalization::Peak,
             )
             .expect("finite qualified prior FFT fixture"),
         );

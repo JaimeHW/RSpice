@@ -302,7 +302,7 @@ fn report_and_table_sheets_export_the_evidence_they_render() {
 /// the three is retained anywhere the payload path can see.
 #[test]
 fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
-    use crate::analysis::fft::data::{FftData, SpectrumNormalization};
+    use crate::analysis::fft::data::SpectrumNormalization;
 
     let transient = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
         .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.0])]);
@@ -311,7 +311,7 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
     state
         .analysis
         .fft_state
-        .load_data(FftData::from_spectrum_with_normalization(
+        .load_data(crate::analysis::fft::spectrum_fixture(
             "V(out)",
             &[0.0, 1.0e3, 2.0e3],
             &[1.0, 0.5, 0.25],
@@ -414,13 +414,13 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
 
 #[test]
 fn unavailable_fft_export_never_falls_through_to_the_source_transient() {
-    use crate::analysis::fft::data::{FftData, SpectrumNormalization};
+    use crate::analysis::fft::data::SpectrumNormalization;
 
     let transient = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
         .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.0])]);
     let mut state = state_with_typed_result(transient);
     // A data-only partial transaction must not count as an exportable FFT.
-    state.analysis.fft_state.data = Some(FftData::from_spectrum_with_normalization(
+    state.analysis.fft_state.data = Some(crate::analysis::fft::spectrum_fixture(
         "partial",
         &[0.0, 1.0e3, 2.0e3],
         &[1.0, 0.5, 0.25],
@@ -441,7 +441,7 @@ fn unavailable_fft_export_never_falls_through_to_the_source_transient() {
 
 #[test]
 fn fft_export_rejects_complete_but_unbound_or_stale_cache_evidence() {
-    use crate::analysis::fft::data::{FftData, SpectrumNormalization};
+    use crate::analysis::fft::data::SpectrumNormalization;
 
     for stale in [false, true] {
         let transient = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
@@ -450,7 +450,7 @@ fn fft_export_rejects_complete_but_unbound_or_stale_cache_evidence() {
         state
             .analysis
             .fft_state
-            .load_data(FftData::from_spectrum_with_normalization(
+            .load_data(crate::analysis::fft::spectrum_fixture(
                 "V(stale)",
                 &[0.0, 1.0e3, 2.0e3],
                 &[1.0, 0.5, 0.25],

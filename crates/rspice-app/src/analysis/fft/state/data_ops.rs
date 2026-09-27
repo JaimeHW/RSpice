@@ -372,12 +372,13 @@ mod tests {
 
     #[test]
     fn readiness_requires_a_complete_error_free_transaction() {
-        let data = FftData::from_spectrum(
+        let data = crate::analysis::fft::spectrum_fixture(
             "fixture",
             &[0.0, 1.0, 2.0],
             &[0.0, 1.0, 0.0],
             &[0.0, 0.0, 0.0],
             4.0,
+            crate::analysis::fft::data::SpectrumNormalization::Peak,
         );
         let mut state = FftState::default();
         state.data = Some(data);
@@ -387,12 +388,13 @@ mod tests {
         state.analysis = Some(SpectrumAnalysis::default());
         assert!(!state.has_data(), "metrics without a curve are not ready");
 
-        state.data = Some(FftData::from_spectrum(
+        state.data = Some(crate::analysis::fft::spectrum_fixture(
             "fixture",
             &[0.0, 1.0, 2.0],
             &[0.0, 1.0, 0.0],
             &[0.0, 0.0, 0.0],
             4.0,
+            crate::analysis::fft::data::SpectrumNormalization::Peak,
         ));
         state.last_error = Some(FftFailure::WorkerDisconnected);
         assert!(!state.has_data(), "a retained failure revokes readiness");

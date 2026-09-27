@@ -31,3 +31,34 @@ pub use pipeline::{
 pub use state::FftFailure;
 pub use state::{FftState, InputFidelity};
 pub use window::WindowFunction;
+
+/// Build arbitrary spectrum fixtures while retaining calibrated rectangular metadata.
+#[cfg(test)]
+pub(crate) fn spectrum_fixture(
+    name: &str,
+    frequencies: &[f64],
+    magnitudes: &[f64],
+    phases: &[f64],
+    sample_rate: f64,
+    normalization: data::SpectrumNormalization,
+) -> FftData {
+    let mut data = FftData::from_time_domain_with_normalization(
+        name,
+        &[0.0; MIN_FFT_SAMPLES],
+        1.0,
+        WindowFunction::Rectangular,
+        normalization,
+    )
+    .expect("qualified zero-spectrum fixture");
+    let n = frequencies.len().min(magnitudes.len()).min(phases.len());
+    data.points = (0..n)
+        .map(|i| data::FftPoint {
+            frequency: frequencies[i],
+            magnitude: magnitudes[i],
+            phase: phases[i],
+        })
+        .collect();
+    data.sample_rate = sample_rate;
+    data.fft_size = n.saturating_sub(1).saturating_mul(2);
+    data
+}
