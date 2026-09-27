@@ -15,8 +15,10 @@
 //! computing base down to serde, SHA-256, and Ed25519 rather than the whole
 //! desktop application.
 
+pub mod bus;
 pub mod cell_view;
 pub mod design_management;
+pub mod port;
 pub mod primitives;
 pub mod sheet_authoring;
 pub mod sheet_package;
