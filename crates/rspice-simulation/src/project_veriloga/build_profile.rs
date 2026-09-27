@@ -10,13 +10,13 @@ use rspice_veriloga::{CompilerOptions, InterpreterFallbackPolicy, RuntimeQualifi
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use crate::product::ContentDigest;
-use crate::state::{
+use rspice_app_types::product::ContentDigest;
+use rspice_design::project_sources::{
     MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES, ProjectSourceBundle, ProjectSourceLanguage,
     ProjectSourceRole,
 };
 
-pub(crate) const VERILOGA_BUILD_PROFILE_SCHEMA: &str = "rspice.veriloga-build/v1";
+const VERILOGA_BUILD_PROFILE_SCHEMA: &str = "rspice.veriloga-build/v1";
 const MAX_BUILD_PROFILE_BYTES: usize = 1024 * 1024;
 const MAX_ENTRY_MODULES: usize = 4096;
 const MAX_INCLUDE_PATHS: usize = 4096;
@@ -24,7 +24,7 @@ const MAX_PREPROCESSOR_SYMBOLS: usize = 16_384;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct VerilogABuildProfile {
+pub struct VerilogABuildProfile {
     pub schema: String,
     pub package: VerilogAPackage,
     #[serde(default)]
@@ -43,14 +43,14 @@ pub(crate) struct VerilogABuildProfile {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct VerilogAPackage {
+pub struct VerilogAPackage {
     pub name: String,
     pub version: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct VerilogAPreprocessorProfile {
+pub struct VerilogAPreprocessorProfile {
     #[serde(default)]
     pub defines: BTreeMap<String, String>,
     #[serde(default)]
@@ -59,7 +59,7 @@ pub(crate) struct VerilogAPreprocessorProfile {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct VerilogATargetProfile {
+pub struct VerilogATargetProfile {
     #[serde(default = "enabled")]
     pub portable_interpreter: bool,
     #[serde(default)]
@@ -87,7 +87,7 @@ const fn enabled() -> bool {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub(crate) enum VerilogAFallbackPolicy {
+pub enum VerilogAFallbackPolicy {
     #[default]
     Allow,
     Reject,
@@ -95,7 +95,7 @@ pub(crate) enum VerilogAFallbackPolicy {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct VerilogACheckProfile {
+pub struct VerilogACheckProfile {
     #[serde(default = "enabled")]
     pub hidden_state: bool,
     #[serde(default = "enabled")]
@@ -121,7 +121,7 @@ impl Default for VerilogACheckProfile {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ResolvedVerilogABuildProfile {
+pub struct ResolvedVerilogABuildProfile {
     pub profile: VerilogABuildProfile,
     pub logical_path: Option<String>,
     pub digest: ContentDigest,
@@ -129,7 +129,7 @@ pub(crate) struct ResolvedVerilogABuildProfile {
 }
 
 impl VerilogABuildProfile {
-    pub(crate) fn starter(module: &str) -> Self {
+    pub fn starter(module: &str) -> Self {
         Self {
             schema: VERILOGA_BUILD_PROFILE_SCHEMA.to_owned(),
             package: VerilogAPackage {
@@ -145,7 +145,7 @@ impl VerilogABuildProfile {
         }
     }
 
-    pub(crate) fn parse(source: &str) -> Result<Self, String> {
+    fn parse(source: &str) -> Result<Self, String> {
         if source.len() > MAX_BUILD_PROFILE_BYTES {
             return Err(format!(
                 "Verilog-A build profile exceeds the {MAX_BUILD_PROFILE_BYTES}-byte limit."
@@ -157,13 +157,13 @@ impl VerilogABuildProfile {
         Ok(profile)
     }
 
-    pub(crate) fn to_toml(&self) -> Result<String, String> {
+    pub fn to_toml(&self) -> Result<String, String> {
         self.validate()?;
         toml::to_string_pretty(self)
             .map_err(|error| format!("Could not encode Verilog-A build profile: {error}"))
     }
 
-    pub(crate) fn compiler_options(&self) -> CompilerOptions {
+    pub(super) fn compiler_options(&self) -> CompilerOptions {
         CompilerOptions {
             defines: self
                 .preprocessor
@@ -172,11 +172,11 @@ impl VerilogABuildProfile {
                 .map(|(name, value)| (name.clone(), Some(value.clone())))
                 .collect(),
             undefines: self.preprocessor.undefines.clone(),
-            ..rspice_simulation::compilation::unified_runtime_compiler_options()
+            ..crate::compilation::unified_runtime_compiler_options()
         }
     }
 
-    pub(crate) fn validate_selected_module(&self, module: &str) -> Result<(), String> {
+    pub(super) fn validate_selected_module(&self, module: &str) -> Result<(), String> {
         if !self.entry_modules.is_empty() && !self.entry_modules.iter().any(|entry| entry == module)
         {
             return Err(format!(
@@ -186,7 +186,7 @@ impl VerilogABuildProfile {
         Ok(())
     }
 
-    pub(crate) const fn qualification_options(&self) -> RuntimeQualificationOptions {
+    pub(super) const fn qualification_options(&self) -> RuntimeQualificationOptions {
         RuntimeQualificationOptions {
             generated_rust: self.targets.generated_rust,
             native_x64_jit: self.targets.native_x64_jit,
@@ -251,7 +251,7 @@ impl VerilogABuildProfile {
     }
 }
 
-pub(crate) fn project_bundle_as_virtual_with_profile(
+pub(super) fn project_bundle_as_virtual_with_profile(
     bundle: &ProjectSourceBundle,
     profile: &VerilogABuildProfile,
 ) -> Result<rspice_veriloga::VirtualSourceBundle, String> {
@@ -279,7 +279,7 @@ pub(crate) fn project_bundle_as_virtual_with_profile(
     .map_err(|error| error.to_string())
 }
 
-pub(crate) fn validate_profile_cell_bindings(
+pub(super) fn validate_profile_cell_bindings(
     report: &rspice_veriloga::RuntimeCompileReport,
     profile: &VerilogABuildProfile,
 ) -> Result<(), String> {
@@ -306,7 +306,7 @@ pub(crate) fn validate_profile_cell_bindings(
     Ok(())
 }
 
-pub(crate) fn resolve_veriloga_build_profile(
+pub fn resolve_veriloga_build_profile(
     bundle: &ProjectSourceBundle,
 ) -> Result<ResolvedVerilogABuildProfile, String> {
     if bundle.language() != ProjectSourceLanguage::VerilogA {
@@ -463,7 +463,7 @@ fn validate_binding_path(value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{
+    use rspice_design::project_sources::{
         ProjectSourceDependency, ProjectSourceFile, ProjectSourceOwner, ProjectSourceRoleBinding,
     };
     use rspice_veriloga::{RuntimeCompileReport, VerilogACompiler};

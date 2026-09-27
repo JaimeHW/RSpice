@@ -132,7 +132,7 @@ pub use project_sources::{
     ProjectSourceOwner, ProjectSourceQualificationAttempt, ProjectSourceQualificationCheck,
     ProjectSourceQualificationDisposition,
     ProjectSourceQualificationTarget, ProjectSourceRegistry,
-    ProjectSourceRole, ProjectSourceRoleBinding, project_veriloga_bundle_alias,
+    ProjectSourceRole, ProjectSourceRoleBinding,
     project_veriloga_bundle_source_key,
 };
 pub(crate) use project_sources::{
