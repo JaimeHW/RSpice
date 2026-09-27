@@ -42,7 +42,7 @@ mod rotation;
 mod selection;
 mod snap;
 mod state;
-mod symbol_gen;
+use rspice_design::symbol_generation as symbol_gen;
 mod tool;
 mod undo_history;
 mod validated_revision;

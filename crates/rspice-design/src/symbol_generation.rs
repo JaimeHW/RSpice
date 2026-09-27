@@ -14,10 +14,10 @@
 //! lead ends, where its name goes — is published here, so the canvas, the
 //! SVG export, and the printed sheet cannot drift apart.
 
-use crate::state::SymbolPinSide;
+use rspice_design_model::symbol_pin::SymbolPinSide;
 
-use super::point::Point;
-use super::port::{PortDirection, PortSpec};
+use rspice_design_model::Point;
+use rspice_design_model::port::{PortDirection, PortSpec};
 
 /// Minimum generated block width in grid units (terminals at ±width/2).
 pub const GENERATED_WIDTH: i32 = 60;
