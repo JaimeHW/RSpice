@@ -1,6 +1,9 @@
 //! Exact frequency-response and Bode margin mathematics over retained numeric slices.
 //!
-//! Trace selection and run lookup remain with the application adapter.
+//! Retained projection accepts the application's magnitude preference; run selection
+//! remains with the application adapter.
+
+pub mod retained;
 
 /// Stability numbers derived from one magnitude/phase pair.
 ///
