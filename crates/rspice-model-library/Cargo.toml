@@ -12,6 +12,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+base64.workspace = true
 csv.workspace = true
 rspice-app-types.workspace = true
 rspice-design-model.workspace = true

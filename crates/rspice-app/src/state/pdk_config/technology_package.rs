@@ -16,6 +16,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+#[cfg(test)]
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 
@@ -30,41 +31,40 @@ pub(super) use rspice_model_library::pdk::manifest::validate_manifest;
 use rspice_model_library::pdk::manifest::{
     package_path_to_host_path, signed_model_virtual_root, validate_package_path, validate_version,
 };
+use rspice_model_library::pdk::package::{
+    PdkTechnologyPackageMetadata, authenticate_archive, decode_bounded,
+};
 pub use rspice_model_library::pdk::{
     PdkAdministrativeAuthority, PdkPublisherTrustStore, PdkTechnologyError, PdkTrustAuditAction,
     PdkTrustAuditReceipt, TrustedPdkPublisherKey,
 };
 use rspice_model_library::pdk::{content_digest, validate_identifier, validate_text};
 
+/// Package whose callbacks and executable source closures passed installation
+/// validation. Registry deserialization still drops the runtime validation cache.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ValidatedPdkTechnologyPackage {
-    manifest: PdkTechnologyManifest,
-    manifest_digest: ContentDigest,
-    archive_digest: ContentDigest,
-    artifact_digests: BTreeMap<String, ContentDigest>,
-    symbol_definitions: Vec<rspice_model_library::symbol::ModelBoundSymbolDefinition>,
-}
+#[serde(transparent)]
+pub struct ValidatedPdkTechnologyPackage(PdkTechnologyPackageMetadata);
 
 impl ValidatedPdkTechnologyPackage {
     #[must_use]
     pub fn manifest(&self) -> &PdkTechnologyManifest {
-        &self.manifest
+        self.0.manifest()
     }
 
     #[must_use]
     pub const fn manifest_digest(&self) -> ContentDigest {
-        self.manifest_digest
+        self.0.manifest_digest()
     }
 
     #[must_use]
     pub const fn archive_digest(&self) -> ContentDigest {
-        self.archive_digest
+        self.0.archive_digest()
     }
 
     #[must_use]
     pub fn artifact_digests(&self) -> &BTreeMap<String, ContentDigest> {
-        &self.artifact_digests
+        self.0.artifact_digests()
     }
 
     /// Signed technology symbols materialized against this archive's exact
@@ -73,20 +73,16 @@ impl ValidatedPdkTechnologyPackage {
     pub fn symbol_definitions(
         &self,
     ) -> &[rspice_model_library::symbol::ModelBoundSymbolDefinition] {
-        &self.symbol_definitions
+        self.0.symbol_definitions()
     }
 
     pub fn runtime_compatibility(&self) -> Result<(), String> {
-        validate_runtime_compatibility(&self.manifest).map_err(|error| error.to_string())
+        validate_runtime_compatibility(self.manifest()).map_err(|error| error.to_string())
     }
 
     #[must_use]
     pub fn binding(&self) -> PdkTechnologyBinding {
-        PdkTechnologyBinding {
-            package_id: self.manifest.package_id.clone(),
-            revision: self.manifest.revision.clone(),
-            manifest_digest: self.manifest_digest,
-        }
+        self.0.binding()
     }
 }
 
@@ -250,7 +246,7 @@ impl PdkTechnologyRegistry {
                 ));
             }
             if !self.audit.iter().any(|receipt| {
-                receipt.target == binding && receipt.archive_digest == package.archive_digest
+                receipt.target == binding && receipt.archive_digest == package.archive_digest()
             }) {
                 return Err(PdkTechnologyError::NotRuntimeValidated(format!(
                     "worker package {} {} has no matching authenticated installation receipt",
@@ -278,7 +274,7 @@ impl PdkTechnologyRegistry {
         self.archives.iter().find(|archive| {
             serde_json::to_vec(archive)
                 .ok()
-                .is_some_and(|bytes| content_digest(&bytes) == package.archive_digest)
+                .is_some_and(|bytes| content_digest(&bytes) == package.archive_digest())
         })
     }
 
@@ -344,11 +340,11 @@ impl PdkTechnologyRegistry {
         let active = self.active.as_ref()?;
         self.validated_packages.iter().find(|package| {
             package
-                .manifest
+                .manifest()
                 .package_id
                 .eq_ignore_ascii_case(&active.package_id)
-                && package.manifest.revision == active.revision
-                && package.manifest_digest == active.manifest_digest
+                && package.manifest().revision == active.revision
+                && package.manifest_digest() == active.manifest_digest
         })
     }
 
@@ -379,12 +375,12 @@ impl PdkTechnologyRegistry {
                     binding.package_id, binding.revision
                 ))
             })?;
-        if package.archive_digest != expected_archive_digest {
+        if package.archive_digest() != expected_archive_digest {
             return Err(PdkTechnologyError::NotRuntimeValidated(format!(
                 "{} {} resolves to archive {}, not the project-pinned archive {}",
                 binding.package_id,
                 binding.revision,
-                package.archive_digest,
+                package.archive_digest(),
                 expected_archive_digest
             )));
         }
@@ -452,12 +448,12 @@ impl PdkTechnologyRegistry {
                     binding.package_id, binding.revision
                 ))
             })?;
-        if package.archive_digest != expected_archive_digest {
+        if package.archive_digest() != expected_archive_digest {
             return Err(PdkTechnologyError::NotRuntimeValidated(format!(
                 "{} {} resolves to archive {}, not the project-pinned archive {}",
                 binding.package_id,
                 binding.revision,
-                package.archive_digest,
+                package.archive_digest(),
                 expected_archive_digest
             ))
             .into());
@@ -540,7 +536,7 @@ impl PdkTechnologyRegistry {
             authority,
             reason,
             binding,
-            package.archive_digest,
+            package.archive_digest(),
             self.active.clone(),
             self.active.clone(),
         )?;
@@ -587,7 +583,7 @@ impl PdkTechnologyRegistry {
                     ));
                     continue;
                 };
-                if receipt.archive_digest != package.archive_digest {
+                if receipt.archive_digest != package.archive_digest() {
                     errors.push(format!(
                         "receipt[{index}] archive digest does not match package {} {}",
                         receipt.target.package_id, receipt.target.revision
@@ -607,7 +603,7 @@ impl PdkTechnologyRegistry {
                         active.package_id, active.revision
                     )),
                     Some(package) => {
-                        if let Err(error) = validate_runtime_compatibility(&package.manifest) {
+                        if let Err(error) = validate_runtime_compatibility(package.manifest()) {
                             errors.push(format!(
                                 "active binding {} {} is incompatible: {error}",
                                 active.package_id, active.revision
@@ -765,10 +761,10 @@ impl PdkTechnologyRegistry {
             .iter()
             .find(|candidate| {
                 candidate
-                    .manifest
+                    .manifest()
                     .package_id
                     .eq_ignore_ascii_case(package_id)
-                    && candidate.manifest.revision == revision
+                    && candidate.manifest().revision == revision
             })
             .cloned()
             .ok_or_else(|| {
@@ -777,7 +773,7 @@ impl PdkTechnologyRegistry {
                 ))
             })?;
         let after = package.binding();
-        validate_runtime_compatibility(&package.manifest)?;
+        validate_runtime_compatibility(package.manifest())?;
         if self.active.as_ref() == Some(&after) {
             return Err(PdkTechnologyError::InvalidTransition(format!(
                 "{} {} is already active",
@@ -790,7 +786,7 @@ impl PdkTechnologyRegistry {
             authority,
             reason,
             after.clone(),
-            package.archive_digest,
+            package.archive_digest(),
             before,
             Some(after.clone()),
         )?;
@@ -876,111 +872,7 @@ pub fn validate_archive(
     archive: &SignedPdkTechnologyArchive,
     trust_store: &PdkPublisherTrustStore,
 ) -> Result<ValidatedPdkTechnologyPackage, PdkTechnologyError> {
-    if archive.schema_version != PDK_TECHNOLOGY_ARCHIVE_SCHEMA_VERSION {
-        return Err(PdkTechnologyError::UnsupportedSchema {
-            object: "archive",
-            actual: archive.schema_version,
-            supported: PDK_TECHNOLOGY_ARCHIVE_SCHEMA_VERSION,
-        });
-    }
-    if archive.files.len() > MAX_PDK_ARTIFACTS {
-        return Err(PdkTechnologyError::LimitExceeded(format!(
-            "archive has {} files; maximum is {MAX_PDK_ARTIFACTS}",
-            archive.files.len()
-        )));
-    }
-    let manifest_bytes = decode_bounded(
-        "manifest_base64",
-        &archive.manifest_base64,
-        MAX_PDK_MANIFEST_BYTES,
-    )?;
-    let manifest: PdkTechnologyManifest = serde_json::from_slice(&manifest_bytes)
-        .map_err(|error| PdkTechnologyError::ManifestParse(error.to_string()))?;
-    validate_manifest(&manifest)?;
-
-    let signature_bytes = decode_bounded("signature_base64", &archive.signature_base64, 64)?;
-    trust_store.verify_publisher_signature(
-        &manifest.publisher_id,
-        &manifest.signing_key_id,
-        &manifest_bytes,
-        &signature_bytes,
-    )?;
-
-    let mut actual_files = BTreeMap::<String, (usize, ContentDigest)>::new();
-    let mut total = 0usize;
-    for (index, file) in archive.files.iter().enumerate() {
-        validate_package_path(&format!("files[{index}].path"), &file.path)?;
-        let normalized = file.path.to_ascii_lowercase();
-        if actual_files.contains_key(&normalized) {
-            return Err(PdkTechnologyError::Duplicate(format!(
-                "archive repeats case-insensitive path '{}'",
-                file.path
-            )));
-        }
-        let bytes = decode_bounded(
-            &format!("files[{index}].content_base64"),
-            &file.content_base64,
-            MAX_PDK_ARTIFACT_BYTES,
-        )?;
-        total = total.checked_add(bytes.len()).ok_or_else(|| {
-            PdkTechnologyError::LimitExceeded("archive byte count overflow".to_owned())
-        })?;
-        if total > MAX_PDK_TOTAL_ARTIFACT_BYTES {
-            return Err(PdkTechnologyError::LimitExceeded(format!(
-                "decoded artifact bytes exceed {MAX_PDK_TOTAL_ARTIFACT_BYTES}"
-            )));
-        }
-        actual_files.insert(normalized, (bytes.len(), content_digest(&bytes)));
-    }
-
-    let mut artifact_digests = BTreeMap::new();
-    for (index, artifact) in manifest.artifacts.iter().enumerate() {
-        let key = artifact.path.to_ascii_lowercase();
-        let Some((actual_size, actual_digest)) = actual_files.remove(&key) else {
-            return Err(PdkTechnologyError::MissingArtifact(artifact.path.clone()));
-        };
-        let declared_size = usize::try_from(artifact.size_bytes).map_err(|_| {
-            PdkTechnologyError::InvalidField(format!(
-                "artifacts[{index}].size_bytes cannot be represented on this platform"
-            ))
-        })?;
-        if declared_size != actual_size {
-            return Err(PdkTechnologyError::ArtifactSizeMismatch {
-                path: artifact.path.clone(),
-                declared: artifact.size_bytes,
-                actual: actual_size,
-            });
-        }
-        if artifact.sha256 != actual_digest {
-            return Err(PdkTechnologyError::ArtifactDigestMismatch {
-                path: artifact.path.clone(),
-                declared: artifact.sha256,
-                actual: actual_digest,
-            });
-        }
-        artifact_digests.insert(artifact.path.clone(), actual_digest);
-    }
-    if let Some((extra, _)) = actual_files.first_key_value() {
-        return Err(PdkTechnologyError::UndeclaredArtifact(extra.clone()));
-    }
-
-    let archive_digest = content_digest(
-        &serde_json::to_vec(archive)
-            .map_err(|error| PdkTechnologyError::Serialization(error.to_string()))?,
-    );
-    let symbol_definitions = materialize_signed_symbol_definitions(&manifest, archive_digest)?;
-    let package = ValidatedPdkTechnologyPackage {
-        manifest,
-        manifest_digest: content_digest(&manifest_bytes),
-        // JSON envelope whitespace is intentionally not part of package
-        // identity. The signature binds the exact manifest bytes and each
-        // manifest digest binds exact decoded artifact bytes. This digest
-        // binds the complete normalized envelope identically before and after
-        // persistence.
-        archive_digest,
-        artifact_digests,
-        symbol_definitions,
-    };
+    let package = ValidatedPdkTechnologyPackage(authenticate_archive(archive, trust_store)?);
     super::technology_callback::validate_signed_callbacks(archive, &package)
         .map_err(PdkTechnologyError::CallbackValidation)?;
     // Executable model contracts are part of package validation, not a
@@ -991,57 +883,6 @@ pub fn validate_archive(
     Ok(package)
 }
 
-fn materialize_signed_symbol_definitions(
-    manifest: &PdkTechnologyManifest,
-    archive_digest: ContentDigest,
-) -> Result<Vec<rspice_model_library::symbol::ModelBoundSymbolDefinition>, PdkTechnologyError> {
-    let virtual_root = signed_model_virtual_root(&archive_digest.to_string());
-    let mut definitions = Vec::with_capacity(manifest.symbol_definitions.len());
-    for (index, signed) in manifest.symbol_definitions.iter().enumerate() {
-        let mut definition = signed.clone();
-        let rspice_model_library::symbol::SymbolSourceContract::Model { model, .. } =
-            &mut definition.source
-        else {
-            return Err(PdkTechnologyError::InvalidField(format!(
-                "manifest.symbol_definitions[{index}] is not model-bound"
-            )));
-        };
-        let package_path = model.source_path.as_deref().ok_or_else(|| {
-            PdkTechnologyError::InvalidField(format!(
-                "manifest.symbol_definitions[{index}] has no model source path"
-            ))
-        })?;
-        let source_path = virtual_root
-            .join(package_path_to_host_path(package_path))
-            .to_string_lossy()
-            .into_owned();
-        model.source_path = Some(source_path.clone());
-        definition
-            .netlist
-            .model
-            .as_mut()
-            .ok_or_else(|| {
-                PdkTechnologyError::InvalidField(format!(
-                    "manifest.symbol_definitions[{index}] has no executable model binding"
-                ))
-            })?
-            .source_path = Some(source_path);
-        definition.validate().map_err(|error| {
-            PdkTechnologyError::InvalidField(format!(
-                "manifest.symbol_definitions[{index}] is invalid after signed source materialization: {error}"
-            ))
-        })?;
-        definitions.push(definition);
-    }
-    definitions.sort_by(|left, right| {
-        left.identity
-            .cell
-            .to_ascii_lowercase()
-            .cmp(&right.identity.cell.to_ascii_lowercase())
-    });
-    Ok(definitions)
-}
-
 fn seal_pdk_model_sources(
     archive: &SignedPdkTechnologyArchive,
     package: &ValidatedPdkTechnologyPackage,
@@ -1049,7 +890,7 @@ fn seal_pdk_model_sources(
     let binding = package.binding();
     let archive_bytes = serde_json::to_vec(archive)
         .map_err(|error| PdkTechnologyError::Serialization(error.to_string()))?;
-    if content_digest(&archive_bytes) != package.archive_digest {
+    if content_digest(&archive_bytes) != package.archive_digest() {
         return Err(PdkTechnologyError::ModelMaterialization(format!(
             "{} {} archive bytes no longer match the validated archive digest",
             binding.package_id, binding.revision
@@ -1057,7 +898,7 @@ fn seal_pdk_model_sources(
     }
 
     let model_artifacts = package
-        .manifest
+        .manifest()
         .artifacts
         .iter()
         .filter(|artifact| artifact.kind == PdkTechnologyArtifactKind::Model)
@@ -1067,7 +908,7 @@ fn seal_pdk_model_sources(
     if model_artifacts.is_empty() {
         return Ok(SealedPdkModelSources {
             binding,
-            archive_digest: package.archive_digest,
+            archive_digest: package.archive_digest(),
             sources: Vec::new(),
             edges: Vec::new(),
             process_bindings: Vec::new(),
@@ -1081,7 +922,7 @@ fn seal_pdk_model_sources(
         .iter()
         .map(|file| (file.path.to_ascii_lowercase(), file))
         .collect::<BTreeMap<_, _>>();
-    let virtual_root = signed_model_virtual_root(&package.archive_digest.to_string());
+    let virtual_root = signed_model_virtual_root(&package.archive_digest().to_string());
     let mut virtual_paths = BTreeMap::<String, PathBuf>::new();
     let mut sources = Vec::<(PathBuf, String)>::with_capacity(model_artifacts.len());
     for (key, artifact) in &model_artifacts {
@@ -1095,7 +936,7 @@ fn seal_pdk_model_sources(
         )?;
         let actual_digest = content_digest(&bytes);
         if actual_digest != artifact.sha256
-            || package.artifact_digests.get(&artifact.path) != Some(&actual_digest)
+            || package.artifact_digests().get(&artifact.path) != Some(&actual_digest)
         {
             return Err(PdkTechnologyError::ArtifactDigestMismatch {
                 path: artifact.path.clone(),
@@ -1170,7 +1011,7 @@ fn seal_pdk_model_sources(
 
     let mut process_bindings = Vec::new();
     let mut reachable_artifacts = BTreeSet::<String>::new();
-    for contract in &package.manifest.model_sources {
+    for contract in &package.manifest().model_sources {
         for source in &contract.sources {
             let artifact_key = source.artifact_path.to_ascii_lowercase();
             let artifact = model_artifacts.get(&artifact_key).ok_or_else(|| {
@@ -1257,7 +1098,7 @@ fn seal_pdk_model_sources(
 
     Ok(SealedPdkModelSources {
         binding,
-        archive_digest: package.archive_digest,
+        archive_digest: package.archive_digest(),
         sources,
         edges,
         process_bindings,
@@ -1355,35 +1196,13 @@ fn package_order(
     right: &ValidatedPdkTechnologyPackage,
 ) -> std::cmp::Ordering {
     (
-        left.manifest.package_id.to_ascii_lowercase(),
-        left.manifest.revision.as_str(),
+        left.manifest().package_id.to_ascii_lowercase(),
+        left.manifest().revision.as_str(),
     )
         .cmp(&(
-            right.manifest.package_id.to_ascii_lowercase(),
-            right.manifest.revision.as_str(),
+            right.manifest().package_id.to_ascii_lowercase(),
+            right.manifest().revision.as_str(),
         ))
-}
-
-fn decode_bounded(field: &str, value: &str, maximum: usize) -> Result<Vec<u8>, PdkTechnologyError> {
-    let approximate = value.len().saturating_mul(3) / 4;
-    if approximate > maximum.saturating_add(3) {
-        return Err(PdkTechnologyError::LimitExceeded(format!(
-            "{field} exceeds {maximum} decoded bytes"
-        )));
-    }
-    let bytes = STANDARD
-        .decode(value)
-        .map_err(|error| PdkTechnologyError::InvalidBase64 {
-            field: field.to_owned(),
-            detail: error.to_string(),
-        })?;
-    if bytes.len() > maximum {
-        return Err(PdkTechnologyError::LimitExceeded(format!(
-            "{field} contains {} decoded bytes; maximum is {maximum}",
-            bytes.len()
-        )));
-    }
-    Ok(bytes)
 }
 
 fn validate_runtime_compatibility(
@@ -2028,6 +1847,7 @@ endmodule
         unreachable.manifest_base64 = STANDARD.encode(&manifest_bytes);
         unreachable.signature_base64 =
             STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
+        authenticate_archive(&unreachable, &trust).expect("archive bytes are authentic");
         assert!(matches!(
             validate_archive_bytes(&serde_json::to_vec(&unreachable).unwrap(), &trust),
             Err(PdkTechnologyError::ModelMaterialization(_))

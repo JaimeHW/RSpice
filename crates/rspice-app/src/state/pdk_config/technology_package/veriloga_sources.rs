@@ -16,7 +16,7 @@ pub(super) fn seal_pdk_veriloga_sources(
     PdkTechnologyError,
 > {
     let declared = package
-        .manifest
+        .manifest()
         .artifacts
         .iter()
         .filter(|artifact| artifact.kind == PdkTechnologyArtifactKind::VerilogASource)
@@ -43,7 +43,7 @@ pub(super) fn seal_pdk_veriloga_sources(
         )?;
         let actual_digest = content_digest(&bytes);
         if actual_digest != artifact.sha256
-            || package.artifact_digests.get(&artifact.path) != Some(&actual_digest)
+            || package.artifact_digests().get(&artifact.path) != Some(&actual_digest)
         {
             return Err(PdkTechnologyError::ArtifactDigestMismatch {
                 path: artifact.path.clone(),
@@ -91,8 +91,8 @@ pub(super) fn seal_pdk_veriloga_sources(
         max_module_name_bytes: 128,
     };
     let mut reachable = BTreeSet::<String>::new();
-    let mut bindings = Vec::with_capacity(package.manifest.veriloga_sources.len());
-    for contract in &package.manifest.veriloga_sources {
+    let mut bindings = Vec::with_capacity(package.manifest().veriloga_sources.len());
+    for contract in &package.manifest().veriloga_sources {
         let root_key = contract.root_artifact_path.to_ascii_lowercase();
         let root = declared.get(&root_key).ok_or_else(|| {
             PdkTechnologyError::InvalidReference(format!(

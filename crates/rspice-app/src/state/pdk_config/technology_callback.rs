@@ -847,12 +847,20 @@ mod tests {
             (memory (export "memory") 1 1)
             (func (export "derive") (result i32) i32.const 0))"#;
         let (bytes, trust, authority) = callback_archive(wat, Vec::new());
+        let archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
+        rspice_model_library::pdk::package::authenticate_archive(&archive, &trust)
+            .expect("archive bytes are authentic");
         let mut registry = PdkTechnologyRegistry::default();
+        let before = registry.clone();
         let error = registry
             .install_archive_bytes(&bytes, &trust, &authority, "Reject unauthorized import")
             .unwrap_err();
         assert!(error.to_string().contains("requires signed capability"));
         assert!(registry.archives().is_empty());
+        assert_eq!(
+            registry, before,
+            "failed callback validation must not publish"
+        );
     }
 
     #[test]

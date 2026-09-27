@@ -5561,6 +5561,7 @@ dependencies = [
 name = "rspice-model-library"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "csv",
  "ed25519-dalek",
  "rspice-app-types",

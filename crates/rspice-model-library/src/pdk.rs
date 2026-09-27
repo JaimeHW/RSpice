@@ -8,6 +8,7 @@ use sha2::{Digest as _, Sha256};
 pub mod callback;
 pub mod contracts;
 pub mod manifest;
+pub mod package;
 mod trust;
 pub use trust::{
     PdkAdministrativeAuthority, PdkPublisherTrustStore, PdkTrustAuditAction, PdkTrustAuditReceipt,
