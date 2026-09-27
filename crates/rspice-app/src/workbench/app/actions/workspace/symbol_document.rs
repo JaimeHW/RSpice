@@ -14,14 +14,14 @@ mod tests;
 use std::collections::BTreeMap;
 
 use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
-use crate::schematic::symbol_editor::{SymbolSaveCheck, symbol_save_checks};
-use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 use crate::state::{
-    CellViewRef, MAX_SYMBOL_DOCUMENT_BYTES, ModelBoundSymbolDefinition, PinFindingKind, PortSpec,
-    SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY, SchematicState, SymbolDocument,
-    SymbolEditorMetadata,
+    CellViewRef, ModelBoundSymbolDefinition, PinFindingKind, PortSpec,
+    SYMBOL_DOCUMENT_METADATA_KEY, SchematicState, SymbolDocument, SymbolEditorMetadata,
 };
 use crate::workbench::app_state::AppState;
+use crate::workbench::lifecycle::symbol_publication::{
+    EncodedSymbolEditorBundle, SymbolSaveCheck, check_symbol_pins, symbol_save_checks,
+};
 use crate::workbench::{SymbolCommitIntent, SymbolDocumentSnapshot};
 
 use rspice_design::symbol::edit::{
@@ -211,16 +211,7 @@ impl AppState {
         if self.active_view_read_only() {
             return Err(self.read_only_master_message());
         }
-        document.validate()?;
-        let encoded_document = serde_json::to_string(document)
-            .map_err(|error| format!("Could not serialize symbol metadata: {error}"))?;
-        if encoded_document.len() > MAX_SYMBOL_DOCUMENT_BYTES {
-            return Err(format!(
-                "Could not serialize symbol metadata: document is {} bytes; the limit is {MAX_SYMBOL_DOCUMENT_BYTES}",
-                encoded_document.len()
-            ));
-        }
-        let encoded_editor = metadata.encode()?;
+        let bundle = EncodedSymbolEditorBundle::encode(document, metadata)?;
         let previous_document = self.load_active_symbol_document().ok();
         let Some(view) = self
             .library_manager
@@ -230,13 +221,7 @@ impl AppState {
         else {
             return Err(format!("View '{}' not found", reference.display_path()));
         };
-        view.metadata
-            .insert(SYMBOL_DOCUMENT_METADATA_KEY.to_owned(), encoded_document);
-        view.metadata
-            .insert(SYMBOL_EDITOR_METADATA_KEY.to_owned(), encoded_editor);
-        view.metadata.remove("generated");
-        view.metadata.remove("ports");
-        view.modified = true;
+        bundle.store_in_view(view);
         if let Some(previous_document) = previous_document {
             let pin_remaps =
                 symbol_pin_position_remaps(&previous_document, document, &intent.renames);
@@ -498,31 +483,9 @@ impl AppState {
         let reference = self.workspace.active_view.clone();
         match self.load_active_symbol_document() {
             Ok(document) => {
-                let findings = document.pin_findings(&ports);
-                let mut result = DrcResult::new();
-                result.completed = true;
+                let result = check_symbol_pins(&document, &ports, &reference);
 
-                for (index, finding) in findings.iter().enumerate() {
-                    let violation_type = match finding.kind {
-                        PinFindingKind::UnplacedPin => DrcViolationType::SymbolUnplacedPin,
-                        PinFindingKind::OrphanedPin => DrcViolationType::SymbolOrphanedPin,
-                        PinFindingKind::PinOffGrid => DrcViolationType::SymbolPinOffGrid,
-                    };
-                    let point = document.pin(&finding.pin_name).and_then(|pin| pin.position);
-                    let message = format!("{}: {}", violation_type.description(), finding.pin_name);
-                    result.add_violation(DrcViolation::new(
-                        index + 1,
-                        violation_type,
-                        message,
-                        DrcLocation::SymbolPin {
-                            reference: reference.clone(),
-                            pin_name: finding.pin_name.clone(),
-                            point,
-                        },
-                    ));
-                }
-
-                if findings.is_empty() {
+                if result.violations().is_empty() {
                     self.dialogs.drc_results = Some(result);
                     self.dialogs.drc_checked_version = self.schematic.topology_version();
                     self.dialogs.drc_cycle = None;
