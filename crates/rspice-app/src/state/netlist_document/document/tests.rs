@@ -251,7 +251,9 @@ fn source_changes_invalidate_validation_and_dependency_resolution() {
     document
         .acknowledge_dependencies(document.content_digest(), vec![resolved])
         .expect("dependency acknowledgement");
-    document.validate_syntax().expect("syntax validation");
+    document
+        .acknowledge_validation(document.content_digest(), Vec::new())
+        .expect("validation receipt");
     assert!(document.validation().is_some());
 
     document
@@ -272,7 +274,7 @@ fn source_changes_invalidate_validation_and_dependency_resolution() {
 }
 
 #[test]
-fn syntax_validation_is_bound_to_exact_content() {
+fn validation_is_bound_to_exact_content() {
     let mut document = document();
     document
         .make_editable(document.content_digest())
@@ -283,12 +285,23 @@ fn syntax_validation_is_bound_to_exact_content() {
             b"broken\nR1 only-one-node\n.end\n".to_vec(),
         )
         .expect("edit");
-    document.validate_syntax().expect("validation transaction");
+    let diagnostic =
+        ValidationDiagnostic::try_new(DiagnosticSeverity::Error, "invalid resistor", 2, 1)
+            .expect("diagnostic");
+    document
+        .acknowledge_validation(document.content_digest(), vec![diagnostic])
+        .expect("validation transaction");
     let report = document.validation().expect("report");
     assert_eq!(report.content_digest(), document.content_digest());
     assert!(!report.is_valid());
     assert_eq!(report.error_count(), 1);
     assert!(report.diagnostics()[0].position().line() >= 1);
+    let before = document.clone();
+    assert!(matches!(
+        document.acknowledge_validation(content_digest(b"previous source"), Vec::new()),
+        Err(DocumentError::ContentConflict { .. })
+    ));
+    assert_eq!(document, before);
 }
 
 #[test]
@@ -729,7 +742,9 @@ fn deserialization_rejects_tampered_generated_source_map() {
 #[test]
 fn deserialization_rejects_future_schema_and_stale_validation() {
     let mut document = document();
-    document.validate_syntax().expect("validate");
+    document
+        .acknowledge_validation(document.content_digest(), Vec::new())
+        .expect("validate");
     let mut value = serde_json::to_value(&document).expect("serialize");
     value["schema_version"] = Value::from(99);
     assert!(serde_json::from_value::<NetlistDocument>(value).is_err());

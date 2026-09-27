@@ -1555,27 +1555,6 @@ impl NetlistDocument {
         Ok(self.finish_receipt(before))
     }
 
-    /// Run the engine's syntax parser over the exact active source. Include
-    /// resolution remains a separate dependency operation and is not claimed
-    /// by this report.
-    pub fn validate_syntax(&mut self) -> Result<TransitionReceipt, DocumentError> {
-        let diagnostics = match rspice_core::Netlist::parse(&self.source) {
-            Ok(_) => Vec::new(),
-            Err(error) => {
-                let line = parse_error_line(&error)
-                    .filter(|line| *line > 0 && *line <= source_line_count(&self.source))
-                    .unwrap_or(1);
-                vec![ValidationDiagnostic::try_new(
-                    DiagnosticSeverity::Error,
-                    error.to_string(),
-                    line,
-                    1,
-                )?]
-            }
-        };
-        self.acknowledge_validation(self.content_digest, diagnostics)
-    }
-
     fn install_unowned_source(&mut self, source: String) -> Result<(), DocumentError> {
         let include_directives = parse_include_directives(&source);
         let dependencies = normalize_dependencies(&include_directives, Vec::new())?;
@@ -2169,34 +2148,6 @@ fn validate_diagnostics(
         }
     }
     Ok(())
-}
-
-fn source_line_count(source: &str) -> usize {
-    source.bytes().filter(|byte| *byte == b'\n').count() + 1
-}
-
-fn parse_error_line(error: &rspice_core::netlist::ParseError) -> Option<usize> {
-    use rspice_core::netlist::{DeviceInitialConditionError, ParseError};
-
-    match error {
-        ParseError::Syntax { line, .. } => Some(*line),
-        ParseError::DuplicateName { duplicate_line, .. } => Some(*duplicate_line),
-        ParseError::MissingSubcircuitEnds(error) => Some(error.opened_at.line),
-        ParseError::MissingDeviceModel(error) => Some(error.line),
-        ParseError::UndefinedMutualInductorReference(error) => Some(error.origin.line),
-        ParseError::DeviceInitialCondition(error) => Some(match error.as_ref() {
-            DeviceInitialConditionError::DuplicateDirective { duplicate, .. } => duplicate.line,
-            DeviceInitialConditionError::MissingInformation { origin }
-            | DeviceInitialConditionError::MalformedDirective { origin, .. }
-            | DeviceInitialConditionError::SourceUnavailable { origin, .. }
-            | DeviceInitialConditionError::MalformedSource { origin, .. }
-            | DeviceInitialConditionError::NonFiniteValue { origin, .. }
-            | DeviceInitialConditionError::UnresolvedSource { origin, .. }
-            | DeviceInitialConditionError::InvalidArity { origin, .. }
-            | DeviceInitialConditionError::UnsupportedTarget { origin, .. } => origin.line,
-        }),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

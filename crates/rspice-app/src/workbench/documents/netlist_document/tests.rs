@@ -168,7 +168,7 @@ fn dependency_is_read_only_until_copy_then_edits_the_execution_closure() {
     );
     state.workspace.validate_simulation_configuration().unwrap();
 
-    let expanded = crate::state::expand_retained_netlist_dependencies(
+    let expanded = crate::simulation::netlist_sources::expand_retained_netlist_dependencies(
         document.id(),
         document.source(),
         document.dependencies(),

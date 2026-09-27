@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use rspice_core::netlist::{IncludeProcessor, SealedSourceBundle, SealedSourceEdge};
 
-use super::{DependencyMetadata, NetlistDocumentId};
+use crate::state::{DependencyMetadata, NetlistDocumentId};
 
 #[derive(Debug)]
 pub(crate) struct ExpandedRetainedNetlist {

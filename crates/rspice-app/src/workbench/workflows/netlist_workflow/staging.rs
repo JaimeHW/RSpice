@@ -406,7 +406,7 @@ fn resolve_plain_import_dependencies(
         retained_bytes: 0,
     };
     resolver.resolve_source(None, root_directory, root_source, 0)?;
-    crate::state::expand_retained_netlist_dependencies(
+    crate::simulation::netlist_sources::expand_retained_netlist_dependencies(
         crate::state::NetlistDocumentId::new(),
         root_source,
         &resolver.dependencies,
@@ -777,7 +777,7 @@ pub(crate) fn begin_owned_netlist_profile_review(state: &mut AppState) -> bool {
         let validation_source = if dependencies.is_empty() {
             source.clone()
         } else {
-            crate::state::expand_retained_netlist_dependencies(
+            crate::simulation::netlist_sources::expand_retained_netlist_dependencies(
                 document.id(),
                 &source,
                 &dependencies,
@@ -943,7 +943,7 @@ pub(crate) fn commit_staged_netlist_import(state: &mut AppState) -> bool {
     let validation_source = if review.dependencies.is_empty() {
         review.source.clone()
     } else {
-        match crate::state::expand_retained_netlist_dependencies(
+        match crate::simulation::netlist_sources::expand_retained_netlist_dependencies(
             crate::state::NetlistDocumentId::new(),
             &review.source,
             &review.dependencies,

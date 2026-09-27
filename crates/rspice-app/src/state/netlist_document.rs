@@ -9,7 +9,6 @@
 
 mod document;
 mod outline;
-mod sealed;
 mod search;
 
 pub use document::{
@@ -24,7 +23,6 @@ pub use outline::{
 pub(crate) use outline::{
     card_tokens, card_tokens_with_columns, parse_include_directives, same_include_graph,
 };
-pub(crate) use sealed::expand_retained_netlist_dependencies;
 pub(crate) use search::find_all_in_source_range_bounded_filter;
 pub use search::{
     BoundedFindMatches, FindDirection, FindError, FindMatch, FindOptions,
