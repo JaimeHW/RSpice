@@ -29,6 +29,8 @@ mod graphics;
 mod template;
 mod validation;
 
+pub use rspice_design_model::symbol_pin::{SymbolElectricalType, SymbolPinSide};
+
 pub use contracts::*;
 pub use definition::*;
 pub use form::*;

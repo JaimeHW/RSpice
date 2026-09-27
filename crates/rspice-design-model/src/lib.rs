@@ -23,6 +23,7 @@ pub mod primitives;
 pub mod sheet_authoring;
 pub mod sheet_package;
 pub mod symbol_geometry;
+pub mod symbol_pin;
 
 pub use design_management::*;
 pub use primitives::*;
