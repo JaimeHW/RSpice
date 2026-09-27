@@ -6,11 +6,19 @@ from check_app_crate_dependencies import violations
 
 
 class DependencyPolicyTests(unittest.TestCase):
-    def test_portable_value_crate_accepts_its_existing_lower_dependencies(self) -> None:
+    def test_extracted_crates_accept_allowed_and_optional_lower_dependencies(self) -> None:
         self.assertEqual(
             violations(
                 {"rspice-app-types": {"rspice-design-model", "serde"}},
                 {"rspice-app-types": {"rspice-app-types", "rspice-design-model", "serde"}},
+            ),
+            [],
+        )
+        self.assertEqual(
+            violations(
+                {"rspice-formats": {"rspice-results"}},
+                {"rspice-formats": {"rspice-results", "rspice-core"}},
+                {"rspice-formats", "csv", "serde"},
             ),
             [],
         )
@@ -24,6 +32,10 @@ class DependencyPolicyTests(unittest.TestCase):
         self.assertTrue(any("forbidden application dependency" in issue for issue in issues))
         self.assertTrue(any("GUI package" in issue for issue in issues))
         self.assertTrue(any("simulator package" in issue for issue in issues))
+        self.assertEqual(
+            violations({}, {}, {"rspice-formats", "rspice-core"}),
+            ["rspice-formats without optional features reaches simulator package rspice-core"],
+        )
 
 
 if __name__ == "__main__":

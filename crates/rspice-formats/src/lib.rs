@@ -2,10 +2,12 @@
 
 #[cfg(feature = "columnar")]
 pub mod columnar;
+pub mod fst;
 #[cfg(feature = "hdf5")]
 pub mod hdf5;
-pub mod fst;
 pub mod matlab;
+#[cfg(feature = "monte-carlo-checkpoint")]
+pub mod monte_carlo_checkpoint;
 pub mod numeric;
 pub mod numpy;
 pub mod table;

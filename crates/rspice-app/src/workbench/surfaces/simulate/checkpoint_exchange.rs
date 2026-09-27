@@ -1,4 +1,6 @@
 //! Portable trial journals and a small, cached inspection view.
+use rspice_formats::monte_carlo_checkpoint as checkpoint_file;
+
 use crate::io::file_exchange::{self, FileKind};
 use crate::product::ProjectId;
 use crate::state::MonteCarloCheckpointEvidence;
@@ -62,12 +64,7 @@ impl Owner {
 }
 
 pub(super) fn begin_import(ctx: &egui::Context, state: &mut AppState) {
-    match file_exchange::open_file(
-        ctx,
-        import_id(),
-        KIND,
-        MonteCarloCheckpointEvidence::portable_file_limit(),
-    ) {
+    match file_exchange::open_file(ctx, import_id(), KIND, checkpoint_file::size_limit()) {
         Ok(()) => {
             ctx.data_mut(|data| {
                 data.insert_temp(owner_id(), Owner::of(state));
@@ -85,16 +82,18 @@ pub(super) fn begin_export(
     state: &mut AppState,
     checkpoint: &MonteCarloCheckpointEvidence,
 ) {
-    let result = checkpoint.to_portable_file().and_then(|bytes| {
-        let digest = checkpoint.digest().to_string();
-        file_exchange::save_file(
-            ctx,
-            export_id(),
-            KIND,
-            format!("mc-{}.rspice-mc", &digest[..12]),
-            bytes,
-        )
-    });
+    let result = checkpoint_file::encode(checkpoint)
+        .map_err(|error| error.to_string())
+        .and_then(|bytes| {
+            let digest = checkpoint.digest().to_string();
+            file_exchange::save_file(
+                ctx,
+                export_id(),
+                KIND,
+                format!("mc-{}.rspice-mc", &digest[..12]),
+                bytes,
+            )
+        });
     if let Err(error) = result {
         state
             .ui
@@ -155,7 +154,8 @@ pub(super) fn poll(ctx: &egui::Context, app: &mut RSpiceApp) {
         if owner.as_ref() == Some(&Owner::of(&app.state)) {
             match outcome {
                 Ok(Some(file)) => {
-                    let result = MonteCarloCheckpointEvidence::from_portable_file(&file.text)
+                    let result = checkpoint_file::decode(&file.text)
+                        .map_err(|error| error.to_string())
                         .and_then(|checkpoint| {
                             app.state
                                 .simulation

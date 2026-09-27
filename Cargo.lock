@@ -5521,9 +5521,11 @@ dependencies = [
  "npyz",
  "num-complex",
  "parquet",
+ "rspice-results",
  "rust_xlsxwriter",
  "rustyhdf5",
  "serde",
+ "serde_json",
  "time",
  "zip",
 ]

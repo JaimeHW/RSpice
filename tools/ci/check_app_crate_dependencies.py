@@ -61,7 +61,8 @@ PACKAGE_LINE = re.compile(r"^([A-Za-z0-9_-]+) v\d")
 
 
 def violations(
-    direct: dict[str, set[str]], closures: dict[str, set[str]]
+    direct: dict[str, set[str]], closures: dict[str, set[str]],
+    portable_formats: set[str] | None = None,
 ) -> list[str]:
     """Validate the package graph; absent planned crates need no placeholder."""
     issues = []
@@ -80,6 +81,9 @@ def violations(
                 if dep in ENGINE_PACKAGES or dep.startswith("rspice-veriloga-model-")
             ):
                 issues.append(f"{name} reaches simulator package {dep}")
+    for dep in sorted(portable_formats or set()):
+        if dep in ENGINE_PACKAGES or dep.startswith("rspice-veriloga-model-"):
+            issues.append(f"rspice-formats without optional features reaches simulator package {dep}")
     return issues
 
 
@@ -108,7 +112,18 @@ def main() -> int:
             for line in tree.splitlines()
             if (match := PACKAGE_LINE.match(line))
         }
-    issues = violations(direct, closures)
+    portable_formats = set()
+    if "rspice-formats" in direct:
+        tree = run(
+            "cargo", "tree", "--locked", "-p", "rspice-formats", "--no-default-features",
+            "--target", "all", "--edges", "normal,build", "--prefix", "none",
+            "--format", "{p}",
+        )
+        portable_formats = {
+            match.group(1) for line in tree.splitlines()
+            if (match := PACKAGE_LINE.match(line))
+        }
+    issues = violations(direct, closures, portable_formats)
     if issues:
         print("\n".join(issues))
         return 1

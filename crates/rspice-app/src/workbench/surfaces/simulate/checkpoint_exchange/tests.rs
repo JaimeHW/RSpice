@@ -18,10 +18,7 @@ fn monte_carlo_checkpoint_file_actions_preserve_owner_and_project_storage() {
     begin_export(&ctx, &mut app.state, &checkpoint);
     poll(&ctx, &mut app);
     let exported = std::fs::read_to_string(&path).unwrap();
-    assert_eq!(
-        MonteCarloCheckpointEvidence::from_portable_file(&exported).unwrap(),
-        checkpoint
-    );
+    assert_eq!(checkpoint_file::decode(&exported).unwrap(), checkpoint);
 
     file_exchange::script_next_choice(file_exchange::ScriptedChoice::Chose(path.clone()));
     begin_import(&ctx, &mut app.state);

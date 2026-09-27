@@ -12,6 +12,7 @@ rust-version.workspace = true
 workspace = true
 
 [features]
+monte-carlo-checkpoint = ["dep:rspice-results", "dep:serde_json"]
 columnar = ["dep:arrow-array", "dep:arrow-ipc", "dep:arrow-schema", "dep:bytes", "dep:parquet"]
 fst = ["dep:fst-reader"]
 hdf5 = ["dep:rustyhdf5"]
@@ -32,7 +33,9 @@ npyz = { version = "0.9", features = ["complex"] }
 parquet = { version = "59", default-features = false, features = ["arrow"], optional = true }
 rustyhdf5 = { version = "1.93", default-features = false, optional = true }
 rust_xlsxwriter = { version = "0.92", default-features = false, optional = true }
+rspice-results = { workspace = true, optional = true, features = ["engine-evidence"] }
 serde.workspace = true
+serde_json = { workspace = true, optional = true }
 time.workspace = true
 zip = { version = "7.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 

@@ -51,7 +51,7 @@ rspice-app-types.workspace = true
 rspice-results = { workspace = true, features = ["engine-evidence"] }
 rspice-hardcopy-contract.workspace = true
 rspice-model-library.workspace = true
-rspice-formats = { workspace = true, features = ["columnar", "fst", "hdf5", "xlsx"] }
+rspice-formats = { workspace = true, features = ["columnar", "fst", "hdf5", "monte-carlo-checkpoint", "xlsx"] }
 rspice-simulation-contract.workspace = true
 
 # Verilog-A compiler (pure Rust, works on all platforms)

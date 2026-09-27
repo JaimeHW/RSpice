@@ -127,38 +127,3 @@ impl<'de> Deserialize<'de> for MonteCarloCheckpointLibrary {
         deserializer.deserialize_seq(LibraryVisitor)
     }
 }
-
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CheckpointFile {
-    format: String,
-    version: u32,
-    checkpoint: MonteCarloCheckpointEvidence,
-}
-impl MonteCarloCheckpointEvidence {
-    pub fn portable_file_limit() -> usize {
-        Self::byte_limit()
-            .div_ceil(3)
-            .saturating_mul(4)
-            .saturating_add(4096)
-    }
-    pub fn to_portable_file(&self) -> Result<Vec<u8>, String> {
-        serde_json::to_vec(&CheckpointFile {
-            format: "rspice.monte-carlo-checkpoint".into(),
-            version: 1,
-            checkpoint: self.clone(),
-        })
-        .map_err(|error| error.to_string())
-    }
-    pub fn from_portable_file(source: &str) -> Result<Self, String> {
-        if source.len() > Self::portable_file_limit() {
-            return Err("Checkpoint file exceeds its size limit".into());
-        }
-        let file: CheckpointFile = serde_json::from_str(source)
-            .map_err(|error| format!("Invalid checkpoint file: {error}"))?;
-        if file.format != "rspice.monte-carlo-checkpoint" || file.version != 1 {
-            return Err("Unsupported Monte Carlo checkpoint file format or version".into());
-        }
-        Ok(file.checkpoint)
-    }
-}
