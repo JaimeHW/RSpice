@@ -78,84 +78,13 @@ fn locate_optimization(
 /// Serialize the validated candidate history that the optimization sheet
 /// draws, including the terminal optimum metadata.
 pub(crate) fn export_csv(analysis: &AnalysisResult) -> Option<super::ResultSheetCsv> {
-    // Export is not a frame: it revalidates rather than trusting a memo
-    // whose dataset it was not handed.
-    let view = locate_optimization(analysis, analysis.validate_retained_evidence().is_ok())?
-        .view(analysis)?;
-    let mut contents = String::from("field,value\n");
-    contents.push_str(&format!("converged,{}\n", view.converged));
-    contents.push_str(&format!("best_cost,{:.17e}\n", view.best_cost));
-    contents.push_str(&format!("best_index,{}\n", view.best_index));
-    if !view.best_constraints.is_empty() {
-        contents.push_str(&format!(
-            "feasible,{}\n",
-            view.best_constraints.iter().all(|row| row.violation == 0.0)
-        ));
-        contents.push_str("\nconstraint,measurement,unit,lower,upper,tolerance,scale,value,normalized_violation,satisfied\n");
-        for (index, observation) in view.best_constraints.iter().enumerate() {
-            let term = &observation.constraint;
-            contents.push_str(&format!(
-                "{},{},{},{},{},{:.17e},{:.17e},{:.17e},{:.17e},{}\n",
-                index + 1,
-                super::csv_field(&term.measurement),
-                super::csv_field(&term.unit),
-                term.lower.map(|v| format!("{v:.17e}")).unwrap_or_default(),
-                term.upper.map(|v| format!("{v:.17e}")).unwrap_or_default(),
-                term.tolerance,
-                term.scale,
-                observation.value,
-                observation.violation,
-                observation.violation == 0.0
-            ));
-        }
-        contents.push_str("\nfield,value\n");
-    }
-    if !view.best_objectives.is_empty() {
-        contents.push_str(
-            "\nobjective,measurement,unit,goal,target,scale,weight,value,cost_contribution\n",
-        );
-        for (index, observation) in view.best_objectives.iter().enumerate() {
-            let term = &observation.objective;
-            contents.push_str(&format!(
-                "{},{},{},{:?},{},{:.17e},{:.17e},{:.17e},{:.17e}\n",
-                index + 1,
-                super::csv_field(&term.measurement),
-                super::csv_field(&term.unit),
-                term.goal,
-                term.target
-                    .map(|value| format!("{value:.17e}"))
-                    .unwrap_or_default(),
-                term.scale,
-                term.weight,
-                observation.value,
-                observation.contribution
-            ));
-        }
-        contents.push_str("\nfield,value\n");
-    }
-    contents.push_str(&format!(
-        "best_iteration,{:.17e}\n\niteration,cost",
-        view.iterations[view.best_index]
-    ));
-    for (name, _) in &view.variables {
-        contents.push(',');
-        contents.push_str(&super::csv_field(name));
-    }
-    contents.push('\n');
-    for index in 0..view.iterations.len() {
-        contents.push_str(&format!(
-            "{:.17e},{:.17e}",
-            view.iterations[index], view.cost.y[index]
-        ));
-        for (_, waveform) in &view.variables {
-            contents.push_str(&format!(",{:.17e}", waveform.y[index]));
-        }
-        contents.push('\n');
-    }
+    // Export revalidates the retained history; the UI generation cache is not an export permit.
+    frame_work::note(DatasetWalk::OptimizationView);
+    let encoded = rspice_formats::result_csv::encode_optimization_csv(analysis)?;
     Some(super::ResultSheetCsv {
         default_name: "rspice-optimization.csv",
-        detail: format!("{} optimization iterations", view.iterations.len()),
-        contents,
+        detail: format!("{} optimization iterations", encoded.iteration_count),
+        contents: encoded.contents,
     })
 }
 
