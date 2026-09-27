@@ -129,8 +129,9 @@ pub use project_sources::{
     MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES, MAX_PROJECT_SOURCE_QUALIFICATION_RECORDS,
     PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION, ProjectSourceBundle, ProjectSourceDependency,
     ProjectSourceDocument, ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage,
-    ProjectSourceOwner, ProjectSourceQualificationCheck, ProjectSourceQualificationDisposition,
-    ProjectSourceQualificationRecord, ProjectSourceQualificationTarget, ProjectSourceRegistry,
+    ProjectSourceOwner, ProjectSourceQualificationAttempt, ProjectSourceQualificationCheck,
+    ProjectSourceQualificationDisposition,
+    ProjectSourceQualificationTarget, ProjectSourceRegistry,
     ProjectSourceRole, ProjectSourceRoleBinding, project_veriloga_bundle_alias,
     project_veriloga_bundle_source_key,
 };

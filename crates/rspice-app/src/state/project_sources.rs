@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::product::{ContentDigest, ObjectRevision, ProjectId};
 
-use super::workspace::CellViewRef;
+use rspice_design_model::cell_view::CellViewRef;
 
 /// Persisted schema for [`ProjectSourceRegistry`].
 mod bundle;
@@ -630,14 +630,6 @@ pub enum AutomationStarterFile {
 }
 
 impl AutomationStarterFile {
-    #[cfg(test)]
-    pub const ALL: [Self; 4] = [
-        Self::PythonEntry,
-        Self::RunPlan,
-        Self::EnvironmentLock,
-        Self::Permissions,
-    ];
-
     #[must_use]
     pub const fn path(self) -> &'static str {
         match self {
@@ -821,10 +813,31 @@ pub struct ProjectSourceQualificationCheck {
     pub detail: String,
 }
 
+/// Qualification evidence submitted for the current source identity.
+/// The bundle assigns its history sequence only after identity checks pass.
+#[derive(Debug)]
+pub struct ProjectSourceQualificationAttempt {
+    pub attempt_id: Uuid,
+    pub recorded_at_unix_ms: u64,
+    pub source_revision: u64,
+    pub source_closure_digest: ContentDigest,
+    pub profile_digest: ContentDigest,
+    pub package_name: String,
+    pub package_version: String,
+    pub selected_module: String,
+    pub compiler_version: String,
+    pub disposition: ProjectSourceQualificationDisposition,
+    pub report_digest: ContentDigest,
+    pub targets: Vec<ProjectSourceQualificationTarget>,
+    pub checks: Vec<ProjectSourceQualificationCheck>,
+    pub error_count: usize,
+    pub warning_count: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectSourceQualificationRecord {
-    pub(crate) sequence: u64,
+    sequence: u64,
     pub attempt_id: Uuid,
     pub recorded_at_unix_ms: u64,
     pub source_revision: u64,
@@ -1440,7 +1453,7 @@ impl ProjectSourceRegistry {
     pub fn append_bundle_qualification(
         &mut self,
         id: ProjectSourceId,
-        record: ProjectSourceQualificationRecord,
+        record: ProjectSourceQualificationAttempt,
     ) -> Result<u64, ProjectSourceError> {
         self.bundles
             .iter_mut()

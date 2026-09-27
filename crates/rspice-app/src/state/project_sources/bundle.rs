@@ -189,7 +189,7 @@ impl ProjectSourceBundle {
     /// identity. Evidence never rewrites or deletes prior attempts.
     pub fn append_qualification(
         &mut self,
-        mut record: ProjectSourceQualificationRecord,
+        record: ProjectSourceQualificationAttempt,
     ) -> Result<u64, ProjectSourceError> {
         if self.qualifications.len() >= MAX_PROJECT_SOURCE_QUALIFICATION_RECORDS {
             return Err(ProjectSourceError::QualificationHistoryLimitExceeded);
@@ -206,7 +206,24 @@ impl ProjectSourceBundle {
         if sequence == 0 {
             return Err(ProjectSourceError::QualificationHistoryLimitExceeded);
         }
-        record.sequence = sequence;
+        let record = ProjectSourceQualificationRecord {
+            sequence,
+            attempt_id: record.attempt_id,
+            recorded_at_unix_ms: record.recorded_at_unix_ms,
+            source_revision: record.source_revision,
+            source_closure_digest: record.source_closure_digest,
+            profile_digest: record.profile_digest,
+            package_name: record.package_name,
+            package_version: record.package_version,
+            selected_module: record.selected_module,
+            compiler_version: record.compiler_version,
+            disposition: record.disposition,
+            report_digest: record.report_digest,
+            targets: record.targets,
+            checks: record.checks,
+            error_count: record.error_count,
+            warning_count: record.warning_count,
+        };
         record.validate()?;
         self.qualifications.push(record);
         Ok(sequence)

@@ -1011,7 +1011,7 @@ impl ProjectWorkspace {
     pub fn append_project_source_qualification(
         &mut self,
         bundle_id: crate::state::ProjectSourceId,
-        record: crate::state::ProjectSourceQualificationRecord,
+        record: crate::state::ProjectSourceQualificationAttempt,
     ) -> Result<u64, ProjectSourceError> {
         let sequence = self
             .project_sources

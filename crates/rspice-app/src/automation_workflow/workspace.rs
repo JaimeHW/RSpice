@@ -1628,7 +1628,12 @@ mod tests {
     #[test]
     fn every_file_is_exactly_bound_into_the_plan_digest() {
         let (baseline, _) = compile_automation_workspace(sources()).unwrap();
-        for kind in AutomationStarterFile::ALL {
+        for kind in [
+            AutomationStarterFile::PythonEntry,
+            AutomationStarterFile::RunPlan,
+            AutomationStarterFile::EnvironmentLock,
+            AutomationStarterFile::Permissions,
+        ] {
             let mut changed = sources();
             let owned = match kind {
                 AutomationStarterFile::PythonEntry => {

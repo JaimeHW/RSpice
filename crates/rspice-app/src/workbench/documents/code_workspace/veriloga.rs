@@ -1154,8 +1154,7 @@ fn record_veriloga_qualification(
         .as_millis()
         .try_into()
         .map_err(|_| "qualification timestamp exceeds the persisted range".to_owned())?;
-    let record = crate::state::ProjectSourceQualificationRecord {
-        sequence: 0,
+    let record = crate::state::ProjectSourceQualificationAttempt {
         attempt_id: uuid::Uuid::new_v4(),
         recorded_at_unix_ms,
         source_revision: token.revision,
