@@ -1,9 +1,7 @@
 //! Exact ambiguous-crossing candidates shared by editing and canvas queries.
 
-use super::{
-    point::Point,
-    wire::{Wire, WireSegment},
-};
+use super::wire::{Wire, WireSegment};
+use rspice_design_model::Point;
 use std::collections::{HashMap, HashSet};
 
 /// Nearest candidate with deterministic distance and coordinate tie breaking.

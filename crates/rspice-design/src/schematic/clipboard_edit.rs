@@ -4,20 +4,18 @@ use super::{
     bus::{Bus, BusTap},
     clipboard::ClipboardData,
     component::Component,
+    component_references::PreparedCopyReferences,
     design_note::DesignNote,
     document::SchematicDocument,
-    documentation_shape::DocumentationShape,
+    documentation_shape::{DocumentationShape, clamped_documentation_shape_translation},
+    identity::SchematicIdentity,
     junction_candidates::{collect_junction_candidates, nearest_junction_candidate},
+    junction_edit,
     net_label::{Junction, NetLabel},
-    point::Point,
     probe::SchematicProbe,
-    reference_edit::PreparedCopyReferences,
     wire::Wire,
 };
-use rspice_design::schematic::{
-    documentation_shape::clamped_documentation_shape_translation, identity::SchematicIdentity,
-    junction_edit,
-};
+use rspice_design_model::Point;
 use std::collections::HashSet;
 
 /// Complete object identities requested by a copy operation. Editor handles and
@@ -488,5 +486,61 @@ impl<'document, 'clipboard> ClipboardPaste<'document, 'clipboard> {
             junctions: &document.junctions[junctions_start..],
             topology_changes,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{component_type::ComponentType, history::SchematicSnapshot};
+    use super::*;
+
+    #[test]
+    fn discarded_paste_preserves_document_clipboard_and_allocators() {
+        let mut document = SchematicDocument::default();
+        let mut source = Component::new(7, ComponentType::Resistor, Point::new(10, 20));
+        source.name = "R7".to_owned();
+        document.components.push(source.clone());
+        let clipboard = ClipboardData::from_selection(vec![source], Vec::new(), Vec::new());
+        let before = SchematicSnapshot::capture(&document);
+        let clipboard_before = serde_json::to_value(&clipboard).unwrap();
+        let mut identity = SchematicIdentity::with_cursor(9);
+        identity.record_component_number("R", 7);
+
+        let paste = ClipboardPaste::prepare(
+            &mut document,
+            &mut identity,
+            &clipboard,
+            Point::new(100, 200),
+        )
+        .unwrap()
+        .unwrap();
+        drop(paste);
+
+        assert!(before.is_equal_document(&document));
+        assert_eq!(serde_json::to_value(&clipboard).unwrap(), clipboard_before);
+        assert_eq!(identity.cursor(), 9);
+        let mut expected_identity = identity.clone();
+        assert_eq!(
+            expected_identity.generate_name(ComponentType::Resistor),
+            "R8"
+        );
+
+        let pasted = ClipboardPaste::prepare(
+            &mut document,
+            &mut identity,
+            &clipboard,
+            Point::new(100, 200),
+        )
+        .unwrap()
+        .unwrap()
+        .commit();
+        assert_eq!(pasted.components.len(), 1);
+        assert_eq!(pasted.components[0].id, 9);
+        assert_eq!(pasted.components[0].name, "R8");
+        assert_eq!(pasted.components[0].pos, Point::new(100, 200));
+        assert_eq!(pasted.topology_changes, 1);
+        assert_eq!(identity.cursor(), 10);
+        assert_eq!(document.components.len(), 2);
+        assert_eq!(serde_json::to_value(&clipboard).unwrap(), clipboard_before);
     }
 }

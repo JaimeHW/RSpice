@@ -2,9 +2,12 @@
 
 pub mod bus;
 pub mod bus_edit;
+pub mod clipboard;
+pub mod clipboard_edit;
 pub mod component;
 pub mod component_display;
 pub mod component_edit;
+pub mod component_references;
 pub mod component_type;
 pub mod design_note;
 pub mod device_descriptor;
@@ -15,6 +18,7 @@ pub mod ground_names;
 pub mod history;
 pub mod identity;
 pub mod interface_repair;
+pub mod junction_candidates;
 pub mod junction_edit;
 pub mod label_position;
 pub mod movement;

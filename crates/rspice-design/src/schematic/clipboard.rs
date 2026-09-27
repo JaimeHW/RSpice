@@ -7,9 +7,9 @@ use super::component::Component;
 use super::design_note::DesignNote;
 use super::documentation_shape::DocumentationShape;
 use super::net_label::NetLabel;
-use super::point::Point;
 use super::probe::SchematicProbe;
 use super::wire::Wire;
+use rspice_design_model::Point;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 

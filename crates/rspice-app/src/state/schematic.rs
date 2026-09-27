@@ -19,13 +19,13 @@
 mod array;
 mod bus;
 mod canvas_cache;
-mod clipboard;
-mod clipboard_edit;
-mod junction_candidates;
+use rspice_design::schematic::clipboard;
+use rspice_design::schematic::clipboard_edit;
 use rspice_design::schematic::history as committed_history;
+use rspice_design::schematic::junction_candidates;
 mod component;
 mod component_references;
-mod reference_edit;
+use rspice_design::schematic::component_references as reference_edit;
 use rspice_design::schematic::component_type;
 mod design_note;
 mod device_catalog;
