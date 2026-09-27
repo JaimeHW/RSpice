@@ -63,6 +63,7 @@ PACKAGE_LINE = re.compile(r"^([A-Za-z0-9_-]+) v\d")
 def violations(
     direct: dict[str, set[str]], closures: dict[str, set[str]],
     portable_formats: set[str] | None = None,
+    native_bundle_formats: set[str] | None = None,
 ) -> list[str]:
     """Validate the package graph; absent planned crates need no placeholder."""
     issues = []
@@ -81,9 +82,13 @@ def violations(
                 if dep in ENGINE_PACKAGES or dep.startswith("rspice-veriloga-model-")
             ):
                 issues.append(f"{name} reaches simulator package {dep}")
-    for dep in sorted(portable_formats or set()):
-        if dep in ENGINE_PACKAGES or dep.startswith("rspice-veriloga-model-"):
-            issues.append(f"rspice-formats without optional features reaches simulator package {dep}")
+    for label, dependencies in (
+        ("without optional features", portable_formats),
+        ("with only native-bundle", native_bundle_formats),
+    ):
+        for dep in sorted(dependencies or set()):
+            if dep in ENGINE_PACKAGES or dep.startswith("rspice-veriloga-model-"):
+                issues.append(f"rspice-formats {label} reaches simulator package {dep}")
     return issues
 
 
@@ -112,18 +117,20 @@ def main() -> int:
             for line in tree.splitlines()
             if (match := PACKAGE_LINE.match(line))
         }
-    portable_formats = set()
+    portable_formats = {}
     if "rspice-formats" in direct:
-        tree = run(
-            "cargo", "tree", "--locked", "-p", "rspice-formats", "--no-default-features",
-            "--target", "all", "--edges", "normal,build", "--prefix", "none",
-            "--format", "{p}",
-        )
-        portable_formats = {
-            match.group(1) for line in tree.splitlines()
-            if (match := PACKAGE_LINE.match(line))
-        }
-    issues = violations(direct, closures, portable_formats)
+        for feature in ("", "native-bundle"):
+            selection = ("--features", feature) if feature else ()
+            tree = run(
+                "cargo", "tree", "--locked", "-p", "rspice-formats", "--no-default-features",
+                "--target", "all", "--edges", "normal,build", "--prefix", "none",
+                "--format", "{p}", *selection,
+            )
+            portable_formats[feature] = {
+                match.group(1) for line in tree.splitlines()
+                if (match := PACKAGE_LINE.match(line))
+            }
+    issues = violations(direct, closures, portable_formats.get(""), portable_formats.get("native-bundle"))
     if issues:
         print("\n".join(issues))
         return 1

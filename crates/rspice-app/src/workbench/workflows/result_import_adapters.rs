@@ -6,9 +6,8 @@
 
 use super::*;
 use rspice_formats::numeric::MAX_EXACT_F64_INTEGER;
-use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{Cursor, Read};
+use std::io::Cursor;
 
 const MAX_ARCHIVE_MEMBERS: usize = 1_024;
 const MAX_ARCHIVE_EXPANDED_BYTES: u64 = MAX_RESULT_DATASET_BYTES;
@@ -267,132 +266,29 @@ fn validate_coordinate(
 // -------------------------------------------------------------------------
 // Native RSpice bundles
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct NativeBundleManifest {
-    schema: String,
-    dataset_member: String,
-    dataset_sha256: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct NativeDataset {
-    schema: String,
-    analysis: String,
-    coordinate: NativeCoordinate,
-    signals: Vec<NativeSignal>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct NativeCoordinate {
-    name: String,
-    values: Vec<f64>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct NativeSignal {
-    name: String,
-    #[serde(default)]
-    unit: Option<String>,
-    #[serde(default)]
-    values: Option<Vec<f64>>,
-    #[serde(default)]
-    real: Option<Vec<f64>>,
-    #[serde(default)]
-    imag: Option<Vec<f64>>,
-}
-
 pub(super) fn parse_native_bundle(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes))
-        .map_err(|error| adapter_error(format, format_args!("invalid ZIP container: {error}")))?;
-    if archive.len() > MAX_ARCHIVE_MEMBERS {
-        return Err(adapter_error(
-            format,
-            format_args!(
-                "archive has {} members; the limit is {MAX_ARCHIVE_MEMBERS}",
-                archive.len()
-            ),
-        ));
-    }
-    let mut names = HashSet::with_capacity(archive.len());
-    let mut expanded = 0_u64;
-    for index in 0..archive.len() {
-        let file = archive.by_index(index).map_err(|error| {
-            adapter_error(format, format_args!("invalid member {index}: {error}"))
-        })?;
-        expanded = expanded
-            .checked_add(file.size())
-            .ok_or_else(|| adapter_error(format, "archive expanded-size accounting overflow"))?;
-        if expanded > MAX_ARCHIVE_EXPANDED_BYTES {
-            return Err(adapter_error(
-                format,
-                format_args!(
-                    "archive expands to {expanded} bytes; the limit is {MAX_ARCHIVE_EXPANDED_BYTES}"
-                ),
-            ));
-        }
-        let name = file.name().to_owned();
-        if !names.insert(name.clone()) {
-            return Err(adapter_error(
-                format,
-                format_args!("archive repeats member '{name}'"),
-            ));
-        }
-        if file.is_dir() || name.starts_with('/') || name.contains("..") || name.contains('\\') {
-            return Err(adapter_error(
-                format,
-                format_args!("unsafe or unsupported archive member '{name}'"),
-            ));
-        }
-    }
-    let manifest_bytes = read_zip_member(&mut archive, "manifest.json", format)?;
-    let manifest: NativeBundleManifest =
-        serde_json::from_slice(&manifest_bytes).map_err(|error| {
-            adapter_error(format, format_args!("manifest.json is invalid: {error}"))
-        })?;
-    let expected_schema = match format {
-        ResultImportFormat::RSpiceResultBundle => "rspice-result-bundle/1",
-        ResultImportFormat::RSpiceDatasetBundle => "rspice-dataset-bundle/1",
+    use rspice_formats::native_bundle::{
+        NativeBundleKind, NativeBundleReadLimits, decode_native_bundle,
+    };
+
+    let kind = match format {
+        ResultImportFormat::RSpiceResultBundle => NativeBundleKind::Result,
+        ResultImportFormat::RSpiceDatasetBundle => NativeBundleKind::Dataset,
         _ => unreachable!(),
     };
-    if manifest.schema != expected_schema {
-        return Err(adapter_error(
-            format,
-            format_args!(
-                "manifest schema '{}' is not supported; expected '{expected_schema}'",
-                manifest.schema
-            ),
-        ));
-    }
-    if manifest.dataset_member != "dataset.json" {
-        return Err(adapter_error(
-            format,
-            "manifest must bind the canonical dataset.json member",
-        ));
-    }
-    let dataset_bytes = read_zip_member(&mut archive, &manifest.dataset_member, format)?;
-    use sha2::Digest as _;
-    let digest = format!("{:x}", sha2::Sha256::digest(&dataset_bytes));
-    if !manifest.dataset_sha256.eq_ignore_ascii_case(&digest) {
-        return Err(adapter_error(
-            format,
-            "dataset.json SHA-256 does not match the signed manifest identity",
-        ));
-    }
-    let dataset: NativeDataset = serde_json::from_slice(&dataset_bytes)
-        .map_err(|error| adapter_error(format, format_args!("dataset.json is invalid: {error}")))?;
-    if dataset.schema != "rspice-waveform-dataset/1" {
-        return Err(adapter_error(
-            format,
-            format_args!("unsupported dataset schema '{}'", dataset.schema),
-        ));
-    }
+    let dataset = decode_native_bundle(
+        bytes,
+        kind,
+        NativeBundleReadLimits {
+            max_members: MAX_ARCHIVE_MEMBERS,
+            max_expanded_bytes: MAX_ARCHIVE_EXPANDED_BYTES,
+            max_member_bytes: MAX_RESULT_DATASET_BYTES,
+        },
+    )
+    .map_err(|error| adapter_error(format, error))?;
     let analysis = parse_analysis(format, &dataset.analysis)?;
     let mut signals = Vec::with_capacity(dataset.signals.len());
     for signal in dataset.signals {
@@ -423,35 +319,6 @@ pub(super) fn parse_native_bundle(
         dataset.coordinate.values,
         signals,
     )
-}
-
-fn read_zip_member(
-    archive: &mut zip::ZipArchive<Cursor<&[u8]>>,
-    name: &str,
-    format: ResultImportFormat,
-) -> Result<Vec<u8>, String> {
-    let file = archive
-        .by_name(name)
-        .map_err(|error| adapter_error(format, format_args!("missing '{name}': {error}")))?;
-    if file.size() > MAX_RESULT_DATASET_BYTES {
-        return Err(adapter_error(
-            format,
-            format_args!("'{name}' exceeds the byte limit"),
-        ));
-    }
-    let mut bytes = Vec::with_capacity(usize::try_from(file.size()).unwrap_or(0));
-    file.take(MAX_RESULT_DATASET_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|error| {
-            adapter_error(format, format_args!("could not decode '{name}': {error}"))
-        })?;
-    if bytes.len() as u64 > MAX_RESULT_DATASET_BYTES {
-        return Err(adapter_error(
-            format,
-            format_args!("'{name}' exceeds the byte limit"),
-        ));
-    }
-    Ok(bytes)
 }
 
 // -------------------------------------------------------------------------

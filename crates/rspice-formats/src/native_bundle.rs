@@ -4,8 +4,12 @@
 //! dataset schema. The manifest schema distinguishes the artifact contract;
 //! its digest binds the exact canonical `dataset.json` bytes.
 
+mod reader;
 mod writer;
 
+pub use reader::{
+    NativeBundleReadLimits, NativeCoordinate, NativeDataset, NativeSignal, decode_native_bundle,
+};
 pub use writer::encode_native_bundle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,3 +125,6 @@ impl std::error::Error for NativeBundleError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
