@@ -250,7 +250,10 @@ fn parameter_form_projects_ordered_typed_inheritance_and_constraints() {
     });
 
     let sheet = form.to_property_sheet().unwrap();
-    assert_eq!(sheet.names(), ["gain", "label", "corner"]);
+    assert_eq!(
+        serde_json::to_value(&sheet).unwrap()["order"],
+        serde_json::json!(["gain", "label", "corner"])
+    );
     assert!(!sheet.get("gain").unwrap().read_only);
     let label = sheet.get("label").unwrap();
     assert!(label.read_only);
