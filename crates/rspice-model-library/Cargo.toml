@@ -16,6 +16,7 @@ csv.workspace = true
 rspice-app-types.workspace = true
 rspice-design-model.workspace = true
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false }
+semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

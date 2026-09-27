@@ -5566,6 +5566,7 @@ dependencies = [
  "rspice-app-types",
  "rspice-core",
  "rspice-design-model",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",
