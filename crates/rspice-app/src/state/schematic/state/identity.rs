@@ -5,7 +5,7 @@
 //! reload; neither is reused after a delete.
 
 use super::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 impl SchematicState {
     // =========================================================================
@@ -44,42 +44,31 @@ impl SchematicState {
     /// Recalculate runtime state after loading from file
     /// This MUST be called after deserialization to prevent ID collisions
     pub fn recalculate_runtime_state(&mut self) {
-        let wire_count_before_repair = self.document.wires.len();
-        self.document.wires.retain(|wire| wire.points.len() >= 2);
+        let repaired = self.identity.repair_document(&mut self.document);
+        self.repair_clipboard_after_load();
+        self.topology_version = self
+            .topology_version
+            .wrapping_add(repaired.topology_changes);
+        self.remove_stale_runtime_references(&repaired);
+    }
+
+    pub(super) fn repair_clipboard_after_load(&mut self) {
         self.clipboard.wires.retain(|wire| wire.points.len() >= 2);
         self.clipboard.buses.retain(|bus| bus.validate().is_ok());
-        self.document
-            .documentation_shapes
-            .retain(|shape| shape.validate().is_ok());
         self.clipboard
             .documentation_shapes
             .retain(|shape| shape.validate().is_ok());
         self.clipboard
             .probes
             .retain(|probe| probe.validate().is_ok());
-        if self.document.wires.len() != wire_count_before_repair {
-            self.bump_topology_version();
-        }
-
-        let topology_changes = self.identity.recalculate(&mut self.document);
-        self.topology_version = self.topology_version.wrapping_add(topology_changes);
-
-        self.remove_stale_runtime_references();
     }
 
-    fn remove_stale_runtime_references(&mut self) {
-        let component_ids: HashSet<u64> = self
-            .document
-            .components
-            .iter()
-            .map(|component| component.id)
-            .collect();
-        let wire_point_counts: HashMap<u64, usize> = self
-            .document
-            .wires
-            .iter()
-            .map(|wire| (wire.id, wire.points.len()))
-            .collect();
+    fn remove_stale_runtime_references(
+        &mut self,
+        repaired: &rspice_design::schematic::identity::DocumentRepair,
+    ) {
+        let component_ids = &repaired.component_ids;
+        let wire_point_counts = &repaired.wire_point_counts;
         let junction_positions: HashSet<Point> = self
             .document
             .junctions
@@ -141,13 +130,6 @@ impl SchematicState {
             .documentation_shapes
             .retain(|id| documentation_shape_ids.contains(id));
         self.selection.probes.retain(|id| probe_ids.contains(id));
-
-        self.document.connections.retain(|connection| {
-            component_ids.contains(&connection.component_id)
-                && wire_point_counts
-                    .get(&connection.wire_id)
-                    .is_some_and(|point_count| connection.point_index < *point_count)
-        });
     }
 
     /// Generate a unique component name

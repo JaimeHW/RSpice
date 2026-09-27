@@ -11,7 +11,47 @@ pub struct SchematicIdentity {
     component_counters: HashMap<&'static str, u32>,
 }
 
+/// Live document identities reused when pruning editor references after repair.
+pub struct DocumentRepair {
+    pub topology_changes: u64,
+    pub component_ids: HashSet<u64>,
+    pub wire_point_counts: HashMap<u64, usize>,
+}
+
 impl SchematicIdentity {
+    /// Repair persisted geometry, identities and connections, retaining the
+    /// live-object indices needed by callers to reconcile runtime references.
+    pub fn repair_document(&mut self, document: &mut SchematicDocument) -> DocumentRepair {
+        let wire_count_before_repair = document.wires.len();
+        document.wires.retain(|wire| wire.points.len() >= 2);
+        document
+            .documentation_shapes
+            .retain(|shape| shape.validate().is_ok());
+        let topology_changes = u64::from(document.wires.len() != wire_count_before_repair)
+            .wrapping_add(self.recalculate(document));
+        let component_ids: HashSet<u64> = document
+            .components
+            .iter()
+            .map(|component| component.id)
+            .collect();
+        let wire_point_counts: HashMap<u64, usize> = document
+            .wires
+            .iter()
+            .map(|wire| (wire.id, wire.points.len()))
+            .collect();
+        document.connections.retain(|connection| {
+            component_ids.contains(&connection.component_id)
+                && wire_point_counts
+                    .get(&connection.wire_id)
+                    .is_some_and(|point_count| connection.point_index < *point_count)
+        });
+        DocumentRepair {
+            topology_changes,
+            component_ids,
+            wire_point_counts,
+        }
+    }
+
     pub fn with_cursor(next_id: u64) -> Self {
         Self {
             next_id,

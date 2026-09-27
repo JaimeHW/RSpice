@@ -550,7 +550,10 @@ pub(in crate::workbench) fn selected_component_sheet_move_plan(
         );
     }
     source_plan(state)?
-        .sheet_move_connectivity(&state.schematic)
+        .sheet_move_connectivity(
+            &state.schematic.document,
+            state.schematic.topology_version(),
+        )
         .map_err(|error| error.to_string())
 }
 

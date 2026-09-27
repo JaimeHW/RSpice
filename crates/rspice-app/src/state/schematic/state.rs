@@ -32,6 +32,7 @@ use super::wire::{Wire, WireConnection};
 
 mod components;
 mod editor_ops;
+mod hierarchy_ops;
 mod identity;
 mod junction_ops;
 mod selection_ops;
