@@ -110,7 +110,6 @@ impl SchematicState {
         }
         let snapshot = self.document.validated_revisions.revision_source(id)?;
         let target = SchematicSnapshot {
-            cancel_state: None,
             document_policy: snapshot.document_policy,
             grid_size: snapshot.grid_size,
             components: snapshot.components.to_vec(),
@@ -131,11 +130,11 @@ impl SchematicState {
             // to the project catalog, which still holds the live one.
             sheet_assignments: std::collections::BTreeMap::new(),
         };
-        if target.is_equal_state(self) {
+        if target.is_equal_document(&self.document) {
             return Err(ValidatedRevisionError::AlreadyCurrent);
         }
         let changed = self.with_undo("restore validated schematic revision", move |state| {
-            target.apply(state);
+            state.apply_snapshot(&target);
         });
         if changed {
             Ok(())

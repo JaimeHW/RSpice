@@ -453,7 +453,7 @@ pub(crate) fn apply_bound_model_choice(
         .file_path
         .clone()
         .or_else(|| library.root_path.clone());
-    let before = crate::state::SchematicSnapshot::capture(&app.state.schematic);
+    let before = crate::state::SchematicSnapshot::capture(&app.state.schematic.document);
     let component = app
         .state
         .schematic
@@ -516,7 +516,7 @@ pub(super) fn apply_bound_model_section(
         return;
     }
     let selected = (!selected_section.trim().is_empty()).then(|| selected_section.to_owned());
-    let before = crate::state::SchematicSnapshot::capture(&app.state.schematic);
+    let before = crate::state::SchematicSnapshot::capture(&app.state.schematic.document);
     let Some(binding) = app
         .state
         .schematic

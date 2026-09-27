@@ -9,6 +9,15 @@ use super::*;
 use crate::state::LibraryManager;
 
 impl SchematicState {
+    /// Restore document history while updating editor invalidation and selection.
+    pub fn apply_snapshot(&mut self, snapshot: &super::super::undo_history::SchematicSnapshot) {
+        if snapshot.apply(&mut self.document) {
+            self.bump_topology_version();
+        }
+        self.is_dirty = true;
+        self.selection.clear();
+    }
+
     // =========================================================================
     // Undo/Redo System (Commercial-Grade Transaction-Based)
     // =========================================================================
@@ -34,12 +43,14 @@ impl SchematicState {
     /// ```
     pub fn begin_operation(&mut self, description: impl Into<String>) {
         // Auto-initialize if needed
-        if !self.undo_history.is_initialized() {
+        if !self.undo_history.committed.is_initialized() {
             self.init_undo_history();
         }
 
-        let snapshot = super::super::undo_history::SchematicSnapshot::capture_operation(self);
-        self.undo_history.begin_operation(snapshot, description);
+        let snapshot = super::super::undo_history::SchematicSnapshot::capture(&self.document);
+        let cancel_state = super::super::undo_history::OperationCancelState::capture(self);
+        self.undo_history
+            .begin_operation(snapshot, description, Some(cancel_state));
     }
 
     /// End an undoable operation
@@ -50,7 +61,7 @@ impl SchematicState {
     /// # Returns
     /// `true` if an undo entry was created, `false` if nothing changed.
     pub fn end_operation(&mut self) -> bool {
-        let snapshot = super::super::undo_history::SchematicSnapshot::capture(self);
+        let snapshot = super::super::undo_history::SchematicSnapshot::capture(&self.document);
         let was_dirty = self.undo_history.pending_was_dirty();
         let committed = self.undo_history.end_operation(snapshot);
         if committed {
@@ -120,10 +131,10 @@ impl SchematicState {
         before: super::super::undo_history::SchematicSnapshot,
         description: impl Into<String>,
     ) -> bool {
-        if !self.undo_history.is_initialized() {
+        if !self.undo_history.committed.is_initialized() {
             self.init_undo_history();
         }
-        self.undo_history.begin_operation(before, description);
+        self.undo_history.begin_operation(before, description, None);
         self.end_operation()
     }
 
@@ -131,15 +142,15 @@ impl SchematicState {
     ///
     /// Returns `true` if undo was successful, `false` if nothing to undo.
     pub fn undo(&mut self) -> bool {
-        if !self.undo_history.can_undo() {
+        if !self.undo_history.committed.can_undo() {
             return false;
         }
 
         // Capture current state for redo
-        let current = super::super::undo_history::SchematicSnapshot::capture(self);
+        let current = super::super::undo_history::SchematicSnapshot::capture(&self.document);
 
-        if let Some((snapshot, _desc)) = self.undo_history.undo(current) {
-            snapshot.apply(self);
+        if let Some((snapshot, _desc)) = self.undo_history.committed.undo(current) {
+            self.apply_snapshot(&snapshot);
             self.reconcile_grid_pitch_runtime();
             self.recalculate_runtime_state();
             self.content_version = self.content_version.wrapping_add(1);
@@ -153,15 +164,15 @@ impl SchematicState {
     ///
     /// Returns `true` if redo was successful, `false` if nothing to redo.
     pub fn redo(&mut self) -> bool {
-        if !self.undo_history.can_redo() {
+        if !self.undo_history.committed.can_redo() {
             return false;
         }
 
         // Capture current state for undo
-        let current = super::super::undo_history::SchematicSnapshot::capture(self);
+        let current = super::super::undo_history::SchematicSnapshot::capture(&self.document);
 
-        if let Some((snapshot, _desc)) = self.undo_history.redo(current) {
-            snapshot.apply(self);
+        if let Some((snapshot, _desc)) = self.undo_history.committed.redo(current) {
+            self.apply_snapshot(&snapshot);
             self.reconcile_grid_pitch_runtime();
             self.recalculate_runtime_state();
             self.content_version = self.content_version.wrapping_add(1);
@@ -173,22 +184,22 @@ impl SchematicState {
 
     /// Check if undo is available
     pub fn can_undo(&self) -> bool {
-        self.undo_history.can_undo()
+        self.undo_history.committed.can_undo()
     }
 
     /// Check if redo is available
     pub fn can_redo(&self) -> bool {
-        self.undo_history.can_redo()
+        self.undo_history.committed.can_redo()
     }
 
     /// Get description of the next undo operation
     pub fn undo_description(&self) -> Option<&str> {
-        self.undo_history.undo_description()
+        self.undo_history.committed.undo_description()
     }
 
     /// Get description of the next redo operation
     pub fn redo_description(&self) -> Option<&str> {
-        self.undo_history.redo_description()
+        self.undo_history.committed.redo_description()
     }
 
     /// Clear undo history

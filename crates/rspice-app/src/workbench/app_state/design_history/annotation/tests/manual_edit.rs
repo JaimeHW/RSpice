@@ -176,7 +176,7 @@ fn manual_annotation_refusal_is_atomic_at_commit_and_history_boundaries() {
                 }
                 _ => unreachable!(),
             }
-            let before = SchematicSnapshot::capture(&state.schematic);
+            let before = SchematicSnapshot::capture(&state.schematic.document);
             let catalog = state.workspace.design_management.clone();
             let configurations = state.workspace.configuration_sets.clone();
             let outputs = state
@@ -197,7 +197,10 @@ fn manual_annotation_refusal_is_atomic_at_commit_and_history_boundaries() {
                 assert!(rename(&mut fixture, "V42").is_err(), "{failure}");
             }
             let state = &fixture.state;
-            assert!(before.is_equal_state(&state.schematic), "{failure}");
+            assert!(
+                before.is_equal_document(&state.schematic.document),
+                "{failure}"
+            );
             assert_eq!(state.workspace.design_management, catalog);
             assert_eq!(state.workspace.configuration_sets, configurations);
             assert_eq!(

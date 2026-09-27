@@ -870,7 +870,7 @@ mod tests {
             state.document.buses[0].declaration,
             Some(BusDeclaration::parse("DATA[15:0]").unwrap())
         );
-        assert_eq!(state.undo_history.undo_count(), 1);
+        assert_eq!(state.undo_history.committed.undo_count(), 1);
         assert!(state.undo());
         assert_eq!(state.document.buses[0], expected);
         assert_eq!(state.document.bus_taps[0].bus_point, Point::new(5, 0));
@@ -1000,7 +1000,7 @@ mod tests {
             state.document.bus_taps[0].slice,
             BusSlice::parse("ADDR[0:3]").unwrap()
         );
-        assert_eq!(state.undo_history.undo_count(), 1);
+        assert_eq!(state.undo_history.committed.undo_count(), 1);
         assert!(state.undo());
         assert_eq!(state.document.buses, before.document.buses);
         assert_eq!(state.document.bus_taps, before.document.bus_taps);
@@ -1048,7 +1048,7 @@ mod tests {
             state.document.bus_taps[0].orientation,
             BusTapOrientation::Left
         );
-        assert_eq!(state.undo_history.undo_count(), 1);
+        assert_eq!(state.undo_history.committed.undo_count(), 1);
     }
 
     #[test]
@@ -1141,7 +1141,7 @@ mod tests {
             state.document.bus_taps[1].slice,
             BusSlice::parse("ADDR<4:6>").unwrap()
         );
-        assert_eq!(state.undo_history.undo_count(), 1);
+        assert_eq!(state.undo_history.committed.undo_count(), 1);
         assert!(state.undo());
         assert_eq!(state.document.bus_taps, before_taps);
     }
@@ -1491,7 +1491,7 @@ mod tests {
             state.document.bus_taps[0].slice,
             BusSlice::parse("RENAMED[3:0]").unwrap()
         );
-        assert_eq!(state.undo_history.undo_count(), 1);
+        assert_eq!(state.undo_history.committed.undo_count(), 1);
         let after_buses = state.document.buses.clone();
         let after_taps = state.document.bus_taps.clone();
         assert!(state.undo());
@@ -1537,6 +1537,6 @@ mod tests {
         );
         assert_eq!(state.topology_version(), version);
         assert!(!state.is_dirty);
-        assert_eq!(state.undo_history.undo_count(), 0);
+        assert_eq!(state.undo_history.committed.undo_count(), 0);
     }
 }

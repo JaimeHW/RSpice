@@ -82,7 +82,7 @@ fn bulk_annotation_revision_exhaustion_preserves_source_and_history() {
         fixture.state.workspace.project.revision(),
         ObjectRevision::new(u64::MAX).unwrap()
     );
-    let snapshot = SchematicSnapshot::capture(&fixture.state.schematic);
+    let snapshot = SchematicSnapshot::capture(&fixture.state.schematic.document);
     let catalog = fixture.state.workspace.design_management.clone();
     let configurations = fixture.state.workspace.configuration_sets.clone();
     let outputs = fixture
@@ -99,7 +99,7 @@ fn bulk_annotation_revision_exhaustion_preserves_source_and_history() {
     assert_eq!(fixture.state.project_undo_sequence(), Some(sequence));
     assert_eq!(fixture.state.project_redo_sequence(), None);
     assert_eq!(fixture.state.workspace.active_schematic_reference(), active);
-    assert!(snapshot.is_equal_state(&fixture.state.schematic));
+    assert!(snapshot.is_equal_document(&fixture.state.schematic.document));
     assert_eq!(fixture.state.workspace.design_management, catalog);
     assert_eq!(fixture.state.workspace.configuration_sets, configurations);
     assert_eq!(
@@ -165,7 +165,9 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
                 .activate_history_document(&root, "Inspect root before history");
             let state = &mut fixture.state;
             let snapshots = [&root, &child, &other].map(|reference| {
-                SchematicSnapshot::capture(schematic_for_reference(state, reference).unwrap())
+                SchematicSnapshot::capture(
+                    &schematic_for_reference(state, reference).unwrap().document,
+                )
             });
             let outputs = state
                 .workspace
@@ -179,9 +181,9 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
             assert_eq!(state.workspace.active_schematic_reference(), root);
             assert_eq!(sequence(state, forward), before_sequence);
             for (reference, snapshot) in [&root, &child, &other].into_iter().zip(&snapshots) {
-                assert!(
-                    snapshot.is_equal_state(schematic_for_reference(state, reference).unwrap())
-                );
+                assert!(snapshot.is_equal_document(
+                    &schematic_for_reference(state, reference).unwrap().document
+                ));
             }
             assert_eq!(
                 state
@@ -275,12 +277,12 @@ fn new_output_revision_exhaustion_keeps_history_and_navigation_intact() {
             .unwrap()
             .saved_outputs
             .clone();
-        let snapshot = SchematicSnapshot::capture(&state.schematic);
+        let snapshot = SchematicSnapshot::capture(&state.schematic.document);
         let before_sequence = sequence(state, forward);
         assert!(cross_history(state, forward).is_err());
         assert_eq!(state.workspace.active_schematic_reference(), root);
         assert_eq!(sequence(state, forward), before_sequence);
-        assert!(snapshot.is_equal_state(&state.schematic));
+        assert!(snapshot.is_equal_document(&state.schematic.document));
         assert_eq!(
             state
                 .workspace

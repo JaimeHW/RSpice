@@ -55,7 +55,7 @@ impl AppState {
                 .ok_or_else(|| format!("Reference document '{key}' is unavailable."))?;
             validate_reference_document(self, key, source)?;
             let mut candidate = source.clone();
-            target.apply(&mut candidate);
+            candidate.apply_snapshot(target);
             // A probe follows its current occurrence. Restoring a captured
             // expression first would apply the inverse mapping twice or carry
             // an old root's meaning into a newly selected configuration.

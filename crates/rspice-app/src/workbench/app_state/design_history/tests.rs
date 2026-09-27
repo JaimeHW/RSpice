@@ -1117,7 +1117,8 @@ fn symbol_definition_and_generated_fixture_share_one_history_record() {
             .workspace
             .schematic_buffers
             .get(&fixture_ref.key())
-            .is_some_and(|stored| SchematicSnapshot::capture(&fixture).is_equal_state(stored))
+            .is_some_and(|stored| SchematicSnapshot::capture(&fixture.document)
+                .is_equal_document(&stored.document))
     );
 
     assert!(state.undo_project_design().expect("undo").is_some());

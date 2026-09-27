@@ -140,7 +140,7 @@ impl SelectionBulkEditAuthority {
             .schematic_buffers
             .iter()
             .filter(|(key, _)| !key.eq_ignore_ascii_case(&active_key))
-            .map(|(key, schematic)| (key.clone(), SchematicSnapshot::capture(schematic)))
+            .map(|(key, schematic)| (key.clone(), SchematicSnapshot::capture(&schematic.document)))
             .collect::<Vec<_>>();
         project_buffers.sort_by(|(left, _), (right, _)| left.cmp(right));
         Self {
@@ -162,7 +162,10 @@ impl SelectionBulkEditAuthority {
             return Some(reopen("The active schematic buffer changed"));
         }
         if self.active.topology_version != state.schematic.topology_version()
-            || !self.active.snapshot.is_equal_state(&state.schematic)
+            || !self
+                .active
+                .snapshot
+                .is_equal_document(&state.schematic.document)
         {
             return Some(reopen("The active schematic changed"));
         }
@@ -195,7 +198,7 @@ impl SelectionBulkEditAuthority {
             let Some(live) = state.workspace.schematic_buffers.get(key) else {
                 return Some(reopen("A project schematic was closed"));
             };
-            if !expected.is_equal_state(live) {
+            if !expected.is_equal_document(&live.document) {
                 return Some(reopen("A project schematic changed"));
             }
         }

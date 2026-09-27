@@ -1093,13 +1093,13 @@ mod tests {
                 )
                 .expect("saved output"),
             );
-        let before = crate::state::SchematicSnapshot::capture(&state.schematic);
+        let before = crate::state::SchematicSnapshot::capture(&state.schematic.document);
 
         open_create_hierarchy_dialog(&mut state);
         assert!(state.dialogs.create_hierarchy.open);
         let error = commit_create_hierarchy(&mut state).expect_err("reference must block");
         assert!(error.contains("saved output 'branch_current'"), "{error}");
-        assert!(before.is_equal_state(&state.schematic));
+        assert!(before.is_equal_document(&state.schematic.document));
         assert!(
             state
                 .library_manager

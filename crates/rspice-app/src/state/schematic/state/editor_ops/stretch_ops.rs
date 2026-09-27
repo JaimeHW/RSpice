@@ -1361,7 +1361,7 @@ mod tests {
     #[test]
     fn preview_is_nonmutating_and_is_the_exact_commit_candidate() {
         let mut state = selected_u_wire();
-        let before = SchematicSnapshot::capture(&state);
+        let before = SchematicSnapshot::capture(&state.document);
         let preview = state
             .preview_stretch_target(
                 Point::new(0, 5),
@@ -1370,7 +1370,7 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-        assert!(before.is_equal(&SchematicSnapshot::capture(&state)));
+        assert!(before.is_equal(&SchematicSnapshot::capture(&state.document)));
         state
             .stretch_target(
                 Point::new(0, 5),
@@ -1478,7 +1478,7 @@ mod tests {
             .document
             .net_labels
             .push(NetLabel::new(70, Point::new(10, 10), "SENSE"));
-        let before = SchematicSnapshot::capture(&existing);
+        let before = SchematicSnapshot::capture(&existing.document);
         assert_eq!(
             existing.stretch_target(
                 Point::new(0, 5),
@@ -1490,14 +1490,14 @@ mod tests {
                 point: Point::new(10, 10),
             })
         );
-        assert!(before.is_equal(&SchematicSnapshot::capture(&existing)));
+        assert!(before.is_equal(&SchematicSnapshot::capture(&existing.document)));
 
         let mut new_contact = selected_u_wire();
         new_contact
             .document
             .net_labels
             .push(NetLabel::new(71, Point::new(10, 15), "OTHER"));
-        let before = SchematicSnapshot::capture(&new_contact);
+        let before = SchematicSnapshot::capture(&new_contact.document);
         assert_eq!(
             new_contact.stretch_target(
                 Point::new(0, 5),
@@ -1509,7 +1509,7 @@ mod tests {
                 point: Point::new(10, 15),
             })
         );
-        assert!(before.is_equal(&SchematicSnapshot::capture(&new_contact)));
+        assert!(before.is_equal(&SchematicSnapshot::capture(&new_contact.document)));
     }
 
     fn declared_bus(id: u64, points: Vec<Point>) -> Bus {
@@ -1708,7 +1708,7 @@ mod tests {
             .unwrap(),
         );
         state.selection.select_documentation_shape(7);
-        let before = SchematicSnapshot::capture(&state);
+        let before = SchematicSnapshot::capture(&state.document);
         assert_eq!(
             state.stretch_target(
                 Point::new(10, 0),
@@ -1720,13 +1720,13 @@ mod tests {
             ),
             Err(StretchSelectionError::InvalidDocumentationGeometry { shape_id: 7 })
         );
-        assert!(before.is_equal(&SchematicSnapshot::capture(&state)));
+        assert!(before.is_equal(&SchematicSnapshot::capture(&state.document)));
     }
 
     #[test]
     fn stale_target_and_coordinate_overflow_are_rejected_atomically() {
         let mut state = selected_u_wire();
-        let before = SchematicSnapshot::capture(&state);
+        let before = SchematicSnapshot::capture(&state.document);
         assert_eq!(
             state.stretch_target(
                 Point::new(0, 5),
@@ -1735,11 +1735,11 @@ mod tests {
             ),
             Err(StretchSelectionError::StaleTarget)
         );
-        assert!(before.is_equal(&SchematicSnapshot::capture(&state)));
+        assert!(before.is_equal(&SchematicSnapshot::capture(&state.document)));
 
         state.document.wires[0].points[1].y = i32::MAX;
         state.document.wires[0].points[2].y = i32::MAX;
-        let before = SchematicSnapshot::capture(&state);
+        let before = SchematicSnapshot::capture(&state.document);
         assert_eq!(
             state.stretch_target(
                 Point::new(0, 1),
@@ -1748,13 +1748,13 @@ mod tests {
             ),
             Err(StretchSelectionError::CoordinateOverflow)
         );
-        assert!(before.is_equal(&SchematicSnapshot::capture(&state)));
+        assert!(before.is_equal(&SchematicSnapshot::capture(&state.document)));
     }
 
     #[test]
     fn read_only_zero_delta_and_unselected_target_are_clean_noops() {
         let mut state = selected_u_wire();
-        let baseline = SchematicSnapshot::capture(&state);
+        let baseline = SchematicSnapshot::capture(&state.document);
         state.read_only = true;
         assert_eq!(
             state.stretch_target(
@@ -1782,7 +1782,7 @@ mod tests {
             ),
             Ok(false)
         );
-        assert!(baseline.is_equal(&SchematicSnapshot::capture(&state)));
+        assert!(baseline.is_equal(&SchematicSnapshot::capture(&state.document)));
     }
 
     #[test]

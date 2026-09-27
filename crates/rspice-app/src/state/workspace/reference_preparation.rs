@@ -172,7 +172,7 @@ impl ProjectWorkspace {
             }
         }
         for schematic in after.values_mut() {
-            schematic.undo_history.clear_redo();
+            schematic.undo_history.committed.clear_redo();
         }
         let mut references = ReferenceChanges::between(self, &configurations, outputs);
         for (key, source) in &before {

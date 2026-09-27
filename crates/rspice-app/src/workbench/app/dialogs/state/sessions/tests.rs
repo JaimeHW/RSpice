@@ -82,7 +82,7 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
             grid_size: 10,
             document_policy: crate::state::SchematicDocumentPolicy::default(),
             snapshot: crate::state::SchematicSnapshot::capture(
-                &crate::state::SchematicState::default(),
+                &crate::state::SchematicState::default().document,
             ),
             selection: crate::state::Selection::default(),
         });
@@ -97,7 +97,7 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
                 grid_size: 10,
                 document_policy: crate::state::SchematicDocumentPolicy::default(),
                 snapshot: crate::state::SchematicSnapshot::capture(
-                    &crate::state::SchematicState::default(),
+                    &crate::state::SchematicState::default().document,
                 ),
                 selection: crate::state::Selection::default(),
             },
@@ -117,7 +117,7 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
                 grid_size: 10,
                 document_policy: crate::state::SchematicDocumentPolicy::default(),
                 snapshot: crate::state::SchematicSnapshot::capture(
-                    &crate::state::SchematicState::default(),
+                    &crate::state::SchematicState::default().document,
                 ),
                 selection: crate::state::Selection::default(),
             },
@@ -135,7 +135,7 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
                 grid_size: 10,
                 document_policy: crate::state::SchematicDocumentPolicy::default(),
                 snapshot: crate::state::SchematicSnapshot::capture(
-                    &crate::state::SchematicState::default(),
+                    &crate::state::SchematicState::default().document,
                 ),
                 selection: crate::state::Selection::default(),
             },

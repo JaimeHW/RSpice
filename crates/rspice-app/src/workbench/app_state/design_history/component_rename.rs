@@ -119,7 +119,7 @@ impl AppState {
             );
         }
         if candidate.name == expected.name || expected.kind.spice_prefix().is_empty() {
-            let before = SchematicSnapshot::capture(&self.schematic);
+            let before = SchematicSnapshot::capture(&self.schematic.document);
             self.schematic.document.components = components;
             self.schematic.is_dirty = true;
             self.schematic.bump_topology_version();
@@ -179,13 +179,14 @@ impl AppState {
         let record = prepared.publish(self, true)?;
         for key in record.after.keys() {
             if key.eq_ignore_ascii_case(&document.key()) {
-                self.schematic.undo_history.clear_redo();
+                self.schematic.undo_history.committed.clear_redo();
             } else {
                 self.workspace
                     .schematic_buffers
                     .get_mut(key)
                     .expect("guarded reference document")
                     .undo_history
+                    .committed
                     .clear_redo();
             }
         }

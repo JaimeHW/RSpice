@@ -281,16 +281,16 @@ fn escape_discards_valid_and_invalid_fields_without_design_or_history_changes() 
         ("Value", "12"),
     ] {
         let mut editor = Editor::new();
-        let before = crate::state::SchematicSnapshot::capture(&editor.app.state.schematic);
+        let before = crate::state::SchematicSnapshot::capture(&editor.app.state.schematic.document);
         let topology = editor.app.state.schematic.topology_version();
         editor.edit(label, draft);
-        assert!(before.is_equal_state(&editor.app.state.schematic));
+        assert!(before.is_equal_document(&editor.app.state.schematic.document));
         editor.pass(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
         assert!(
             editor.app.state.workbench.inline_edit.session().is_none(),
             "{label}: {draft}"
         );
-        assert!(before.is_equal_state(&editor.app.state.schematic));
+        assert!(before.is_equal_document(&editor.app.state.schematic.document));
         assert!(!editor.app.state.schematic.is_dirty);
         assert_eq!(editor.app.state.schematic.topology_version(), topology);
         assert!(!editor.app.state.schematic.can_undo());
@@ -468,13 +468,13 @@ fn changed_document_authority_or_component_never_reauthorizes_an_old_draft() {
             }
             _ => unreachable!(),
         }
-        let before = crate::state::SchematicSnapshot::capture(&editor.app.state.schematic);
+        let before = crate::state::SchematicSnapshot::capture(&editor.app.state.schematic.document);
         assert!(
             editor.app.state.commit_inline_component_edit().is_err(),
             "{change}"
         );
         assert!(
-            before.is_equal_state(&editor.app.state.schematic),
+            before.is_equal_document(&editor.app.state.schematic.document),
             "{change}"
         );
         assert_eq!(

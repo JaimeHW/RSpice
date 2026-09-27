@@ -293,7 +293,14 @@ fn legacy_output_page_setup_does_not_rewrite_document_policy() {
         app.state.schematic.document.document_policy, policy_before,
         "hardcopy output media must not mutate the authored schematic policy"
     );
-    assert_eq!(app.state.schematic.undo_history.undo_description(), None);
+    assert_eq!(
+        app.state
+            .schematic
+            .undo_history
+            .committed
+            .undo_description(),
+        None
+    );
 }
 
 #[test]

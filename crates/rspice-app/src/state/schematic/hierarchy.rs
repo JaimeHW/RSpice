@@ -1993,7 +1993,7 @@ mod tests {
         let mut schematic = SchematicState::default();
         let r1 = schematic.add_component(ComponentType::Resistor, Point::origin());
         let p1 = schematic.add_component(ComponentType::Port, Point::new(40, 0));
-        let before = super::super::undo_history::SchematicSnapshot::capture(&schematic);
+        let before = super::super::undo_history::SchematicSnapshot::capture(&schematic.document);
         schematic.selection.select_component(r1);
         schematic.selection.select_component(p1);
         let error = schematic
@@ -2007,7 +2007,7 @@ mod tests {
             error,
             HierarchyExtractionError::InterfacePortSelected(_)
         ));
-        assert!(before.is_equal_state(&schematic));
+        assert!(before.is_equal_document(&schematic.document));
     }
 
     #[test]

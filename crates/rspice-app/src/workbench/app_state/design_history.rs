@@ -700,9 +700,9 @@ impl AppState {
                 parent_ref: entry.parent_ref,
                 target_schematic_ref: entry.target_schematic_ref,
                 target_open_ref: entry.target_open_ref,
-                before_parent: SchematicSnapshot::capture(&entry.before_parent),
-                after_parent: SchematicSnapshot::capture(&entry.after_parent),
-                child: SchematicSnapshot::capture(&entry.child),
+                before_parent: SchematicSnapshot::capture(&entry.before_parent.document),
+                after_parent: SchematicSnapshot::capture(&entry.after_parent.document),
+                child: SchematicSnapshot::capture(&entry.child.document),
                 child_template: entry.child,
                 target_cell: entry.target_cell,
                 open_views_before: entry.open_views_before,
@@ -776,8 +776,8 @@ impl AppState {
             .into_iter()
             .map(|(reference, before, after)| InstanceRemovalDocument {
                 reference,
-                before: SchematicSnapshot::capture(&before),
-                after: SchematicSnapshot::capture(&after),
+                before: SchematicSnapshot::capture(&before.document),
+                after: SchematicSnapshot::capture(&after.document),
             })
             .filter(|document| !document.before.is_equal(&document.after))
             .collect::<Vec<_>>();
@@ -1785,7 +1785,7 @@ fn schematic_option_matches(
     match (observed, expected) {
         (None, None) => true,
         (Some(observed), Some(expected)) => {
-            SchematicSnapshot::capture(expected).is_equal_state(observed)
+            SchematicSnapshot::capture(&expected.document).is_equal_document(&observed.document)
         }
         _ => false,
     }
@@ -2039,13 +2039,13 @@ impl InstanceRemovalRecord {
 impl InstanceRemovalDocument {
     fn matches(&self, state: &AppState, expected: &SchematicSnapshot) -> bool {
         schematic_for_reference(state, &self.reference)
-            .is_some_and(|schematic| expected.is_equal_state(schematic))
+            .is_some_and(|schematic| expected.is_equal_document(&schematic.document))
     }
 
     fn restore(&self, state: &mut AppState, snapshot: &SchematicSnapshot) -> Result<(), String> {
         let key = self.reference.key();
         if state.workspace.active_schematic_reference() == self.reference {
-            snapshot.apply(&mut state.schematic);
+            state.schematic.apply_snapshot(snapshot);
             state
                 .workspace
                 .schematic_buffers
@@ -2058,7 +2058,7 @@ impl InstanceRemovalDocument {
                 self.reference.display_path()
             ));
         };
-        snapshot.apply(schematic);
+        schematic.apply_snapshot(snapshot);
         Ok(())
     }
 }
@@ -2068,7 +2068,7 @@ fn capture_schematic_map(
 ) -> BTreeMap<String, SchematicSnapshot> {
     schematics
         .into_iter()
-        .map(|(key, schematic)| (key, SchematicSnapshot::capture(&schematic)))
+        .map(|(key, schematic)| (key, SchematicSnapshot::capture(&schematic.document)))
         .collect()
 }
 
@@ -2076,14 +2076,14 @@ fn schematic_map_matches(state: &AppState, expected: &BTreeMap<String, Schematic
     let active_key = state.workspace.active_schematic_reference().key();
     expected.iter().all(|(key, snapshot)| {
         if key.eq_ignore_ascii_case(&active_key) {
-            snapshot.is_equal_state(&state.schematic)
+            snapshot.is_equal_document(&state.schematic.document)
         } else {
             state
                 .workspace
                 .schematic_buffers
                 .iter()
                 .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
-                .is_some_and(|(_, schematic)| snapshot.is_equal_state(schematic))
+                .is_some_and(|(_, schematic)| snapshot.is_equal_document(&schematic.document))
         }
     })
 }
@@ -2097,7 +2097,7 @@ fn apply_schematic_map(
     for (key, snapshot) in snapshots {
         if key.eq_ignore_ascii_case(&active_key) {
             let selection = preserve_selection.then(|| state.schematic.selection.clone());
-            snapshot.apply(&mut state.schematic);
+            state.schematic.apply_snapshot(snapshot);
             if let Some(selection) = selection {
                 state.schematic.selection = selection;
             }
@@ -2124,7 +2124,7 @@ fn apply_schematic_map(
             .get_mut(&existing_key)
             .expect("the retained schematic key remains present");
         let selection = preserve_selection.then(|| schematic.selection.clone());
-        snapshot.apply(schematic);
+        schematic.apply_snapshot(snapshot);
         if let Some(selection) = selection {
             schematic.selection = selection;
         }
@@ -2328,13 +2328,13 @@ fn schematic_matches(
     expected: &SchematicSnapshot,
 ) -> bool {
     if state.workspace.active_schematic_reference() == *reference {
-        expected.is_equal_state(&state.schematic)
+        expected.is_equal_document(&state.schematic.document)
     } else {
         state
             .workspace
             .schematic_buffers
             .get(&reference.key())
-            .is_some_and(|schematic| expected.is_equal_state(schematic))
+            .is_some_and(|schematic| expected.is_equal_document(&schematic.document))
     }
 }
 
@@ -2344,7 +2344,7 @@ fn apply_design_snapshot(
     snapshot: &SchematicSnapshot,
 ) -> Result<(), String> {
     if state.workspace.active_schematic_reference() == *reference {
-        snapshot.apply(&mut state.schematic);
+        state.schematic.apply_snapshot(snapshot);
         state
             .workspace
             .schematic_buffers
@@ -2361,7 +2361,7 @@ fn apply_design_snapshot(
                 reference.display_path()
             )
         })?;
-    snapshot.apply(schematic);
+    schematic.apply_snapshot(snapshot);
     Ok(())
 }
 

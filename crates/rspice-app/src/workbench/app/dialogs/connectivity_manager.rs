@@ -1217,11 +1217,11 @@ impl RSpiceApp {
         if !selected.is_empty() {
             candidate.recalculate_runtime_state();
             validate_repair_candidate(&self.state, &candidate, &dialog.report.drc)?;
-            let after = SchematicSnapshot::capture(&candidate);
+            let after = SchematicSnapshot::capture(&candidate.document);
             let changed = self.state.schematic.with_undo(
                 "apply reviewed connectivity repairs",
                 move |schematic| {
-                    after.apply(schematic);
+                    schematic.apply_snapshot(&after);
                     schematic.recalculate_runtime_state();
                 },
             );
@@ -1339,7 +1339,9 @@ fn connectivity_authority_error(state: &AppState) -> Option<String> {
         || authority.view_path != state.workspace.active_view.display_path()
         || authority.grid_size != state.schematic.document.grid_size
         || authority.document_policy != state.schematic.document.document_policy
-        || !authority.snapshot.is_equal_state(&state.schematic)
+        || !authority
+            .snapshot
+            .is_equal_document(&state.schematic.document)
         || state.dialogs.connectivity_manager.contract_at_open != state.workspace.connectivity;
     stale.then(|| {
         "The design changed after this report was extracted. Refresh the report before applying repairs or creating a bus.".to_owned()

@@ -1230,7 +1230,7 @@ mod tests {
         let plan = add_current_output(&mut state);
         state.workspace.plan_data_mut(plan).unwrap().saved_outputs[0].revision =
             crate::product::ObjectRevision::new(u64::MAX).unwrap();
-        let before = crate::state::SchematicSnapshot::capture(&state.schematic);
+        let before = crate::state::SchematicSnapshot::capture(&state.schematic.document);
         let payloads = state.workspace.simulation_plan_payloads.clone();
         open_property_editor(&mut state, 44);
         state
@@ -1245,7 +1245,7 @@ mod tests {
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
-        assert!(before.is_equal_state(&state.schematic));
+        assert!(before.is_equal_document(&state.schematic.document));
         assert_eq!(state.workspace.simulation_plan_payloads, payloads);
         assert!(state.tabbed_property_dialog.open);
         assert!(state.tabbed_property_dialog.commit_error.is_some());
@@ -1267,7 +1267,7 @@ mod tests {
             let mut state = state_with_resistor();
             state.schematic.document.components[0].params = source.to_owned();
             add_current_output(&mut state);
-            let before = crate::state::SchematicSnapshot::capture(&state.schematic);
+            let before = crate::state::SchematicSnapshot::capture(&state.schematic.document);
             let payloads = state.workspace.simulation_plan_payloads.clone();
             open_property_editor(&mut state, 44);
             state
@@ -1282,7 +1282,7 @@ mod tests {
             let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
                 render_property_dialog(ctx, &mut state);
             });
-            assert!(before.is_equal_state(&state.schematic));
+            assert!(before.is_equal_document(&state.schematic.document));
             assert_eq!(state.workspace.simulation_plan_payloads, payloads);
             assert!(state.tabbed_property_dialog.open);
             assert!(
@@ -1436,7 +1436,7 @@ mod tests {
         assert!(state.tabbed_property_dialog.open);
         assert_eq!(state.schematic.document.components[0].name, "R99");
         assert_eq!(state.schematic.document.components[0].params, "");
-        assert_eq!(state.schematic.undo_history.undo_count(), 0);
+        assert_eq!(state.schematic.undo_history.committed.undo_count(), 0);
         assert!(state.project_undo_sequence().is_some());
         assert!(component_property_session_error(&state).is_none());
         assert_eq!(
@@ -1470,7 +1470,7 @@ mod tests {
         assert!(!state.tabbed_property_dialog.open);
         assert_eq!(state.schematic.document.components[0].name, "R99");
         assert_eq!(state.schematic.document.components[0].params, "m=2");
-        assert_eq!(state.schematic.undo_history.undo_count(), 1);
+        assert_eq!(state.schematic.undo_history.committed.undo_count(), 1);
 
         assert!(state.schematic.undo());
         assert_eq!(state.schematic.document.components[0].name, "R99");

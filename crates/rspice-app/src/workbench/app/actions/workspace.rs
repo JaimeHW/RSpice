@@ -812,6 +812,7 @@ impl AppState {
         let recorded = self
             .schematic
             .undo_history
+            .committed
             .take_restored_sheet_assignments();
         // Only a cell view that already holds contracts can lose one, and only
         // that case needs the retained before-state. Every other document
@@ -853,6 +854,7 @@ impl AppState {
             .unwrap_or_default();
         self.schematic
             .undo_history
+            .committed
             .set_live_sheet_assignments(assignments);
         let removed_ports = receipt.map_or(0, |receipt| receipt.removed_cross_sheet_ports);
         let Some((before, before_schematic)) = before.filter(|_| removed_ports > 0) else {

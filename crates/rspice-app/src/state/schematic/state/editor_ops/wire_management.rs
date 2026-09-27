@@ -293,7 +293,7 @@ mod tests {
 
         assert!(!schematic.has_pending_operation());
         assert!(schematic.finish_wire().is_some());
-        assert_eq!(schematic.undo_history.undo_count(), 1);
+        assert_eq!(schematic.undo_history.committed.undo_count(), 1);
         assert_eq!(schematic.undo_description(), Some("draw wire"));
         assert_eq!(schematic.document.wires.len(), 3);
         assert!(!schematic.wire_drawing.active);
@@ -307,7 +307,7 @@ mod tests {
 
         assert!(schematic.redo());
         assert_eq!(schematic.document.wires.len(), 3);
-        assert_eq!(schematic.undo_history.undo_count(), 1);
+        assert_eq!(schematic.undo_history.committed.undo_count(), 1);
     }
 
     #[test]

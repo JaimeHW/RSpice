@@ -20,6 +20,7 @@ mod array;
 mod bus;
 mod canvas_cache;
 mod clipboard;
+mod committed_history;
 mod component;
 mod component_references;
 use rspice_design::schematic::component_type;

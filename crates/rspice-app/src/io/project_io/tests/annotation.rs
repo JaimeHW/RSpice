@@ -337,7 +337,7 @@ fn annotation_restoration_refuses_before_publishing_any_project_owner() {
             .map(|(key, source)| {
                 (
                     key.clone(),
-                    crate::state::SchematicSnapshot::capture(source),
+                    crate::state::SchematicSnapshot::capture(&source.document),
                 )
             })
             .collect();
@@ -354,7 +354,10 @@ fn annotation_restoration_refuses_before_publishing_any_project_owner() {
         );
         assert_eq!(fixture.project.workspace.project_metadata_dirty, dirty);
         for (key, snapshot) in snapshots {
-            assert!(snapshot.is_equal_state(&fixture.project.workspace.schematic_buffers[&key]));
+            assert!(
+                snapshot
+                    .is_equal_document(&fixture.project.workspace.schematic_buffers[&key].document)
+            );
         }
         let bytes = serialize_project_file(&fixture.project).unwrap();
         assert!(
