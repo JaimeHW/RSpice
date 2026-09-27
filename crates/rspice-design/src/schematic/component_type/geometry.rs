@@ -1,8 +1,8 @@
 //! Per-component-type geometry: terminal count and their placement on the
 //! default symbol body.
 
-use super::super::point::Point;
 use super::ComponentType;
+use rspice_design_model::Point;
 
 impl ComponentType {
     /// Get the number of terminals for this component type.

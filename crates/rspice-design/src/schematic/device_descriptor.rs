@@ -5,7 +5,7 @@
 //! generated Verilog-A and registry-provided XSPICE devices without growing a
 //! second hard-coded enum.
 
-use super::ComponentType;
+use super::component_type::ComponentType;
 
 /// The simulation path responsible for a built-in schematic device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

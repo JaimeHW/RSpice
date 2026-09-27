@@ -81,15 +81,7 @@ pub enum SchematicBackAnnotationContent {
     VoltagesCurrentsAndPower,
 }
 
-/// Instance parameter-label detail rendered on the canvas.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum SchematicParameterLabelVisibility {
-    ValuesOnly,
-    #[default]
-    NamesAndValues,
-    Hidden,
-}
+pub use rspice_design::schematic::component_display::SchematicParameterLabelVisibility;
 
 /// Interactive wire and bus routing policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
