@@ -7,6 +7,13 @@ pub use rspice_simulation::veriloga::{
     PreparedRuntimeError, PreparedVerilogARuntime, PreparedVerilogARuntimeSet,
 };
 pub(crate) mod build_profile;
+mod project_compile;
+#[cfg(test)]
+pub(crate) use project_compile::project_virtual_compile_limits;
+pub(crate) use project_compile::{
+    ProjectVerilogACompileError, compile_project_bundle_source,
+    compile_project_source_bundle_runtime, compile_project_virtual_runtime,
+};
 
 #[cfg(test)]
 mod project_tests;
@@ -129,57 +136,6 @@ pub(crate) fn veriloga_selected_module_digest(module_name: &str) -> crate::produ
     crate::product::ContentDigest::from_bytes(hasher.finalize().into())
 }
 
-pub(crate) fn compile_project_virtual_runtime(
-    bundle: &crate::state::ProjectSourceBundle,
-    module_name: &str,
-) -> Result<rspice_veriloga::VirtualRuntimeCompilation, PreparedRuntimeError> {
-    let resolved = build_profile::resolve_veriloga_build_profile(bundle)
-        .map_err(PreparedRuntimeError::SourceIdentity)?;
-    resolved
-        .profile
-        .validate_selected_module(module_name)
-        .map_err(PreparedRuntimeError::SourceIdentity)?;
-    let virtual_bundle =
-        build_profile::project_bundle_as_virtual_with_profile(bundle, &resolved.profile)
-            .map_err(PreparedRuntimeError::SourceBundle)?;
-    let compilation = rspice_veriloga::VerilogACompiler::new(resolved.profile.compiler_options())
-        .compile_virtual_runtime_diagnosed_with_qualifications(
-            &virtual_bundle, module_name, project_virtual_compile_limits(), resolved.profile.qualification_options(),
-        )
-        .map_err(|error| PreparedRuntimeError::Compile(format!(
-            "Could not compile Verilog-A module '{module_name}' from project bundle {}: {error}", bundle.id(),
-        )))?;
-    build_profile::validate_profile_cell_bindings(&compilation.runtime, &resolved.profile)
-        .map_err(PreparedRuntimeError::SourceIdentity)?;
-    Ok(compilation)
-}
-
-pub(crate) fn compile_project_source_bundle_runtime(
-    project_id: crate::product::ProjectId,
-    bundle: &crate::state::ProjectSourceBundle,
-    module_name: &str,
-) -> Result<PreparedVerilogARuntime, PreparedRuntimeError> {
-    if bundle.language() != crate::state::ProjectSourceLanguage::VerilogA {
-        return Err(PreparedRuntimeError::SourceIdentity(format!(
-            "Project source bundle {} is {}, not Verilog-A",
-            bundle.id(),
-            bundle.language()
-        )));
-    }
-    let source_key =
-        crate::state::project_veriloga_bundle_source_key(project_id, bundle, module_name)
-            .map_err(|error| PreparedRuntimeError::SourceIdentity(error.to_string()))?;
-    let netlist_alias = crate::state::project_veriloga_bundle_alias(bundle, module_name)
-        .map_err(|error| PreparedRuntimeError::SourceIdentity(error.to_string()))?;
-    let compilation = compile_project_virtual_runtime(bundle, module_name)?;
-    PreparedVerilogARuntime::try_from_virtual_compilation(
-        source_key,
-        bundle.closure_digest(),
-        netlist_alias,
-        &compilation,
-    )
-}
-
 pub(crate) fn compile_model_library_source_runtimes(
     authority: &crate::state::model_library::SealedModelLibraryVerilogAAuthority,
 ) -> Result<PreparedVerilogARuntimeSet, PreparedRuntimeError> {
@@ -213,21 +169,6 @@ pub fn append_project_veriloga_directive(
     }
     *source =
         crate::services::simulation_runner::splice_before_terminal_end_card(source, &directive);
-}
-
-pub(crate) fn project_virtual_compile_limits() -> rspice_veriloga::VirtualCompileLimits {
-    rspice_veriloga::VirtualCompileLimits {
-        max_files: crate::state::MAX_PROJECT_SOURCE_FILES,
-        max_path_bytes: crate::state::MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES,
-        max_file_bytes: crate::state::MAX_PROJECT_CODE_SOURCE_BYTES,
-        max_total_source_bytes: crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES,
-        max_include_depth: crate::state::MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH,
-        // Macro expansion is intentionally bounded separately from retained
-        // source bytes. Keep this identical to the prepared-runtime path so a
-        // bundle accepted by the editor cannot be rejected only at execution.
-        max_expanded_bytes: crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES.saturating_mul(2),
-        ..rspice_veriloga::VirtualCompileLimits::default()
-    }
 }
 
 fn model_library_virtual_compile_limits() -> rspice_veriloga::VirtualCompileLimits {

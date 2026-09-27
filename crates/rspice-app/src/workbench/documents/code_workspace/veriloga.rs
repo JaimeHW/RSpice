@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use rspice_veriloga::{
     CompileDiagnosticPhase, CompileDiagnosticSeverity, RuntimeCompileReport, RuntimeTarget,
-    RuntimeTargetMaturity, RuntimeTargetQualification, RuntimeTargetReadiness, VerilogACompiler,
+    RuntimeTargetMaturity, RuntimeTargetQualification, RuntimeTargetReadiness,
     VirtualRuntimeCompilation,
 };
 use sha2::Digest as _;
@@ -16,12 +16,9 @@ use crate::state::{
 };
 use crate::workbench::RSpiceApp;
 
-use super::veriloga_profile::{
-    project_bundle_as_virtual_with_profile, validate_profile_cell_bindings,
-};
 use crate::simulation::veriloga::VerilogASourceOperationToken;
 #[cfg(test)]
-use rspice_veriloga::VirtualSourceBundle;
+use rspice_veriloga::{VerilogACompiler, VirtualSourceBundle};
 
 use super::{
     CodeDiagnosticCollection, CodeEditorDiagnostic, CodeEditorSeverity, PendingVerilogACompile,
@@ -1226,78 +1223,45 @@ pub(super) fn compile_project_bundle_source(
     bundle: &ProjectSourceBundle,
     selected_module: Option<&str>,
 ) -> VerilogACompileOutcome {
-    let resolved = match super::veriloga_profile::resolve_veriloga_build_profile(bundle) {
-        Ok(resolved) => resolved,
-        Err(error) => return build_profile_error_outcome(error),
-    };
-    let compiler = VerilogACompiler::new(resolved.profile.compiler_options());
-    let qualifications = resolved.profile.qualification_options();
-    let source = bundle.root().content();
-    let selected_module = selected_module.or(match resolved.profile.entry_modules.as_slice() {
-        [module] => Some(module.as_str()),
-        _ => None,
-    });
-    let has_source_dependencies = bundle.files().iter().any(|file| {
-        bundle.role_for_path(file.logical_path()) != Some(ProjectSourceRole::VerilogABuildProfile)
-    });
-    if let Some(module_name) = selected_module {
-        if let Err(error) = resolved.profile.validate_selected_module(module_name) {
-            return build_profile_error_outcome(error);
-        }
-        let bundle = match project_bundle_as_virtual_with_profile(bundle, &resolved.profile) {
-            Ok(bundle) => bundle,
-            Err(error) => {
-                return VerilogACompileOutcome::Failure(vec![CodeEditorDiagnostic::current(
-                    "rspice.veriloga.bundle",
-                    "VA-SOURCE-CLOSURE",
-                    CodeEditorSeverity::Error,
-                    error,
-                    "sealed project source closure",
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                )]);
-            }
-        };
-        return match compiler.compile_virtual_runtime_diagnosed_with_qualifications(
-            &bundle,
-            module_name,
-            crate::simulation::veriloga::project_virtual_compile_limits(),
-            qualifications,
-        ) {
-            Ok(compilation) => successful_compile_outcome(compilation.runtime, &resolved.profile),
-            Err(failure) => virtual_compile_error_outcome(failure),
-        };
-    }
-    if has_source_dependencies || resolved.profile.entry_modules.len() > 1 {
-        return VerilogACompileOutcome::Failure(vec![CodeEditorDiagnostic::current(
-            "rspice.veriloga.bundle",
-            "VA-ROOT-MODULE-REQUIRED",
-            CodeEditorSeverity::Error,
-            "Select the root module before compiling this multi-file Verilog-A bundle.",
-            "Enter the exact module identifier in the Model project navigator.",
-            None,
-            None,
-            None,
-            None,
-            None,
-        )]);
-    }
-    match compiler.compile_runtime_with_qualifications(source, None, qualifications) {
-        Ok(report) => successful_compile_outcome(report, &resolved.profile),
-        Err(error) => compile_error_outcome(source, &error),
-    }
-}
+    use crate::simulation::veriloga::ProjectVerilogACompileError;
 
-fn successful_compile_outcome(
-    report: RuntimeCompileReport,
-    profile: &super::veriloga_profile::VerilogABuildProfile,
-) -> VerilogACompileOutcome {
-    match validate_profile_cell_bindings(&report, profile) {
-        Ok(()) => VerilogACompileOutcome::Success(Box::new(report)),
-        Err(error) => build_profile_error_outcome(error),
+    match crate::simulation::veriloga::compile_project_bundle_source(bundle, selected_module) {
+        Ok(report) => VerilogACompileOutcome::Success(report),
+        Err(ProjectVerilogACompileError::BuildProfile(error)) => build_profile_error_outcome(error),
+        Err(ProjectVerilogACompileError::SourceClosure(error)) => {
+            VerilogACompileOutcome::Failure(vec![CodeEditorDiagnostic::current(
+                "rspice.veriloga.bundle",
+                "VA-SOURCE-CLOSURE",
+                CodeEditorSeverity::Error,
+                error,
+                "sealed project source closure",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )])
+        }
+        Err(ProjectVerilogACompileError::RootModuleRequired) => {
+            VerilogACompileOutcome::Failure(vec![CodeEditorDiagnostic::current(
+                "rspice.veriloga.bundle",
+                "VA-ROOT-MODULE-REQUIRED",
+                CodeEditorSeverity::Error,
+                "Select the root module before compiling this multi-file Verilog-A bundle.",
+                "Enter the exact module identifier in the Model project navigator.",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )])
+        }
+        Err(ProjectVerilogACompileError::Compile(error)) => {
+            compile_error_outcome(bundle.root().content(), &error)
+        }
+        Err(ProjectVerilogACompileError::Virtual(failure)) => {
+            virtual_compile_error_outcome(*failure)
+        }
     }
 }
 
@@ -1790,59 +1754,6 @@ mod tests {
         assert_eq!(bundle.revision(), revision);
         assert_eq!(bundle.closure_digest(), closure_digest);
         bundle.validate().unwrap();
-    }
-
-    fn cell_binding_report() -> RuntimeCompileReport {
-        VerilogACompiler::default()
-            .compile_runtime(
-                r#"
-module leaf(p, n);
-  inout p, n; electrical p, n;
-endmodule
-module child(p, n);
-  inout p, n; electrical p, n;
-  leaf inner (.p(p), .n(n));
-endmodule
-module top(p, n);
-  inout p, n; electrical p, n;
-  child outer (.p(p), .n(n));
-endmodule
-"#,
-                Some("top"),
-            )
-            .unwrap()
-    }
-
-    #[test]
-    fn build_profile_cell_bindings_match_exact_elaboration_paths() {
-        let report = cell_binding_report();
-        let mut profile = crate::workbench::documents::code_workspace::veriloga_profile::VerilogABuildProfile::starter("top");
-        profile
-            .cell_bindings
-            .insert("outer".to_owned(), "child".to_owned());
-        profile
-            .cell_bindings
-            .insert("outer/inner".to_owned(), "leaf".to_owned());
-
-        validate_profile_cell_bindings(&report, &profile).unwrap();
-    }
-
-    #[test]
-    fn build_profile_cell_bindings_fail_closed_on_path_or_module_mismatch() {
-        let report = cell_binding_report();
-        let mut profile = crate::workbench::documents::code_workspace::veriloga_profile::VerilogABuildProfile::starter("top");
-        profile
-            .cell_bindings
-            .insert("outer/inner".to_owned(), "wrong".to_owned());
-        let mismatch = validate_profile_cell_bindings(&report, &profile).unwrap_err();
-        assert!(mismatch.contains("expects module 'wrong'"));
-
-        profile.cell_bindings.clear();
-        profile
-            .cell_bindings
-            .insert("inner".to_owned(), "leaf".to_owned());
-        let missing = validate_profile_cell_bindings(&report, &profile).unwrap_err();
-        assert!(missing.contains("not present in the elaboration graph"));
     }
 
     fn add_cell_bundle(app: &mut RSpiceApp, cell_name: &str) -> CellViewRef {

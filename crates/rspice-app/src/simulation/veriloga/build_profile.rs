@@ -466,6 +466,7 @@ mod tests {
     use crate::state::{
         ProjectSourceDependency, ProjectSourceFile, ProjectSourceOwner, ProjectSourceRoleBinding,
     };
+    use rspice_veriloga::{RuntimeCompileReport, VerilogACompiler};
 
     #[test]
     fn persisted_profile_is_selected_by_role_not_filename() {
@@ -542,5 +543,58 @@ version = "1.0.0"
             .insert("CORNER".to_owned(), "fast".to_owned());
         let encoded = profile.to_toml().unwrap();
         assert_eq!(VerilogABuildProfile::parse(&encoded).unwrap(), profile);
+    }
+
+    fn cell_binding_report() -> RuntimeCompileReport {
+        VerilogACompiler::default()
+            .compile_runtime(
+                r#"
+module leaf(p, n);
+  inout p, n; electrical p, n;
+endmodule
+module child(p, n);
+  inout p, n; electrical p, n;
+  leaf inner (.p(p), .n(n));
+endmodule
+module top(p, n);
+  inout p, n; electrical p, n;
+  child outer (.p(p), .n(n));
+endmodule
+"#,
+                Some("top"),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn build_profile_cell_bindings_match_exact_elaboration_paths() {
+        let report = cell_binding_report();
+        let mut profile = VerilogABuildProfile::starter("top");
+        profile
+            .cell_bindings
+            .insert("outer".to_owned(), "child".to_owned());
+        profile
+            .cell_bindings
+            .insert("outer/inner".to_owned(), "leaf".to_owned());
+
+        validate_profile_cell_bindings(&report, &profile).unwrap();
+    }
+
+    #[test]
+    fn build_profile_cell_bindings_fail_closed_on_path_or_module_mismatch() {
+        let report = cell_binding_report();
+        let mut profile = VerilogABuildProfile::starter("top");
+        profile
+            .cell_bindings
+            .insert("outer/inner".to_owned(), "wrong".to_owned());
+        let mismatch = validate_profile_cell_bindings(&report, &profile).unwrap_err();
+        assert!(mismatch.contains("expects module 'wrong'"));
+
+        profile.cell_bindings.clear();
+        profile
+            .cell_bindings
+            .insert("inner".to_owned(), "leaf".to_owned());
+        let missing = validate_profile_cell_bindings(&report, &profile).unwrap_err();
+        assert!(missing.contains("not present in the elaboration graph"));
     }
 }
