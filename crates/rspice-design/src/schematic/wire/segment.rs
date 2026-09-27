@@ -3,7 +3,7 @@
 //! Individual segment representation with geometric metadata for
 //! hit testing, intersection detection, and distance calculations.
 
-use super::super::point::Point;
+use rspice_design_model::Point;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================

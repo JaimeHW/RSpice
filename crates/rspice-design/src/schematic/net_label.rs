@@ -2,7 +2,7 @@
 //!
 //! Types for naming nets and handling wire junctions.
 
-use super::point::Point;
+use rspice_design_model::Point;
 use rspice_design_model::design_management::CrossSheetPortDirection;
 use serde::{Deserialize, Serialize};
 
@@ -166,7 +166,7 @@ impl NetLabel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::NetNamingPolicy;
+    use crate::schematic::document_policy::NetNamingPolicy;
 
     #[test]
     fn name_validation_matches_document_policy_and_spice_punctuation() {

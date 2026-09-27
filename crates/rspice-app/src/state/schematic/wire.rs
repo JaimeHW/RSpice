@@ -1,35 +1,8 @@
-//! Wire Types Module
-//!
-//! Wire segments, wire drawing state, and wire connections for schematic capture.
+//! Interactive wire drawing over design-owned conductor geometry.
 
-#![allow(clippy::module_inception)]
-//!
-//! This module provides robust wire handling with:
-//! - Individual segment representation with geometric metadata
-//! - Advanced hit testing with tolerance-based picking
-//! - Vertex manipulation for corner editing
-//! - Segment intersection and distance calculations
-//! - Interactive wire drawing state machine
-//! - Wire routing with multiple modes (orthogonal, diagonal, 45°)
-//! - Wire-terminal connection tracking for rubber-banding
-//!
-//! # Module Organization
-//!
-//! - `segment` - WireSegment and WireHitResult for geometric operations
-//! - `wire` - Core Wire polyline type
-//! - `routing` - WireRoutingMode and route optimization functions
-//! - `drawing` - WireDrawing interactive state machine
-//! - `connection` - WireConnection for terminal connections
-
-mod connection;
 mod drawing;
 mod routing;
-mod segment;
-mod wire;
 
-// Re-export all public types for backwards compatibility
-pub use connection::WireConnection;
 pub use drawing::WireDrawing;
 pub use routing::WireRoutingMode;
-pub use segment::WireSegment;
-pub use wire::Wire;
+pub use rspice_design::schematic::wire::{Wire, WireConnection, WireSegment};

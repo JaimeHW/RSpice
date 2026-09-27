@@ -3,8 +3,8 @@
 //! Core Wire type representing electrical connections in the schematic.
 //! Each wire is a polyline (sequence of connected points).
 
-use super::super::point::Point;
 use super::segment::{WireHitResult, WireSegment};
+use rspice_design_model::Point;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
