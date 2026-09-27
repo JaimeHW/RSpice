@@ -26,10 +26,8 @@ use super::*;
 /// expensive as it sounds — see [`crate::state::CATALOG_LIBRARY_SERIALIZATIONS`],
 /// which counts it, and the scale gate that holds the count at zero per frame.
 pub(crate) fn model_library_source_digest(library: &ModelLibrary) -> ContentDigest {
-    if let Some(root) = library.root_path.as_deref()
-        && let Some(pin) = library.source_closure.iter().find(|pin| pin.path == root)
-    {
-        return pin.digest;
+    if let Some(digest) = library.pinned_root_digest() {
+        return digest;
     }
     #[cfg(test)]
     crate::state::CATALOG_LIBRARY_SERIALIZATIONS.with(|count| count.set(count.get() + 1));

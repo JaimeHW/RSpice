@@ -366,6 +366,15 @@ pub struct ModelLibrary {
 }
 
 impl ModelLibrary {
+    /// The accepted root pin, when this library has a content-pinned source closure.
+    pub fn pinned_root_digest(&self) -> Option<ContentDigest> {
+        let root = self.root_path.as_deref()?;
+        self.source_closure
+            .iter()
+            .find(|pin| pin.path == root)
+            .map(|pin| pin.digest)
+    }
+
     /// Authenticate the complete retained source graph against this project revision.
     pub fn validate_project_owned_retained_closure(&self) -> Result<(), String> {
         let ModelSourceAuthority::ProjectOwned {

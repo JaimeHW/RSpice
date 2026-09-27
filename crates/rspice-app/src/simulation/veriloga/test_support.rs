@@ -7,6 +7,12 @@ use super::{
 
 pub(crate) fn standalone_connection_authority()
 -> crate::state::model_library::SealedModelLibraryVerilogAAuthority {
+    standalone_connection_authority_with_directive(".va \"rules.vams\" UI_CONNECTIONS\n")
+}
+
+pub(super) fn standalone_connection_authority_with_directive(
+    rules_directive: &str,
+) -> crate::state::model_library::SealedModelLibraryVerilogAAuthority {
     let mut rules = rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES
         .iter()
         .map(|(_, source)| *source)
@@ -16,7 +22,7 @@ pub(crate) fn standalone_connection_authority()
     manager.load_library_bundle(
         "standalone-ui-connections.lib",
         vec![
-            ("root.lib".to_owned(), b".va \"driver.vams\" UI_DRIVER\n.va \"rules.vams\" UI_CONNECTIONS\n".to_vec()),
+            ("root.lib".to_owned(), format!(".va \"driver.vams\" UI_DRIVER\n{rules_directive}").into_bytes()),
             ("driver.vams".to_owned(), b"module ui_driver(p,q); inout p; electrical p; output q; reg q; initial q=1; analog I(p)<+0; endmodule\n".to_vec()),
             ("rules.vams".to_owned(), rules.into_bytes()),
         ],

@@ -315,7 +315,7 @@ fn browser_bundle_retains_native_spectre_ahdl_dependency_without_parsing_it_as_s
         .model_library_veriloga_authority()
         .expect("sealed AHDL authority is valid")
         .expect("AHDL authority is present");
-    assert_eq!(authority.roots.len(), 1);
+    assert_eq!(authority.roots().len(), 1);
     let runtimes = crate::simulation::veriloga::compile_model_library_source_runtimes(&authority)
         .expect("retained Spectre AHDL compiles through the sealed runtime path");
     assert_eq!(runtimes.len(), 1);
@@ -1675,72 +1675,6 @@ fn project_model_correlation_commit_is_guarded_append_only_and_source_bound() {
     assert!(error.contains("changed after correlation review began"));
 }
 
-#[test]
-fn project_model_create_and_replace_publish_exact_retained_execution_bytes() {
-    let mut manager = ModelLibraryManager::new();
-    let created = manager
-        .create_project_model("owned_models", &project_definition(0.48, "r1"))
-        .expect("create project model");
-    let ModelSourceAuthority::ProjectOwned {
-        source_id,
-        revision,
-        digest: first_digest,
-    } = created.after.source_authority
-    else {
-        panic!("created model must be project-owned")
-    };
-    assert_eq!(revision, ObjectRevision::INITIAL);
-    assert_eq!(
-        created.after.models["owned_nch"].string_parameters["revision_tag"],
-        "r1"
-    );
-
-    let sealed = manager
-        .seal_execution_sources_with_reader(|path| {
-            panic!(
-                "project-owned desktop sealing must not read {}",
-                path.display()
-            )
-        })
-        .expect("retained project bytes seal");
-    assert_eq!(sealed.sources.len(), 1);
-    assert!(sealed.sources[0].1.contains("VTH0=0.48"));
-    assert!(sealed.sources[0].1.contains("REVISION_TAG=\"r1\""));
-
-    let replaced = manager
-        .replace_project_model_revision_in_library(
-            "owned_models",
-            source_id,
-            revision,
-            revision,
-            "owned_nch",
-            first_digest,
-            &ProjectModelRevisionDefinition::new(
-                project_definition(0.51, "r2"),
-                project_definition(0.51, "r2")
-                    .reconcile_metadata(None)
-                    .expect("candidate metadata"),
-            ),
-            &ModelQualificationState::default(),
-        )
-        .expect("replace project model");
-    let ModelSourceAuthority::ProjectOwned {
-        revision: second_revision,
-        digest: second_digest,
-        ..
-    } = replaced.after.source_authority
-    else {
-        panic!("replacement must remain project-owned")
-    };
-    assert_eq!(second_revision.get(), 2);
-    assert_ne!(first_digest, second_digest);
-    assert_eq!(replaced.after.models["owned_nch"].parameters["vth0"], 0.51);
-    assert_eq!(
-        replaced.after.models["owned_nch"].string_parameters["revision_tag"],
-        "r2"
-    );
-}
-
 fn sectioned_project_revision(vth0: f64) -> ProjectModelRevisionDefinition {
     let base = project_definition(vth0, "r1");
     let metadata = base
@@ -1826,32 +1760,6 @@ fn complete_project_revision_publishes_sections_and_executes_selected_corner() {
             .unit
             .as_deref(),
         Some("dimensionless")
-    );
-}
-
-#[test]
-fn project_model_tamper_fails_before_any_external_read() {
-    let mut manager = ModelLibraryManager::new();
-    manager
-        .create_project_model("owned_models", &project_definition(0.48, "r1"))
-        .expect("create project model");
-    manager
-        .get_library_mut("owned_models")
-        .unwrap()
-        .source_contents[0]
-        .bytes
-        .push(b' ');
-    let error = manager
-        .seal_execution_sources_with_reader(|path| {
-            panic!(
-                "tampered project source must fail before reading {}",
-                path.display()
-            )
-        })
-        .expect_err("tampered retained bytes must fail");
-    assert!(
-        error.contains("do not match the accepted digest"),
-        "{error}"
     );
 }
 

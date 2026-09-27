@@ -711,9 +711,9 @@ pub(crate) fn compile_signed_pdk_source_runtime(
 pub(crate) fn compile_model_library_source_runtimes(
     authority: &crate::state::model_library::SealedModelLibraryVerilogAAuthority,
 ) -> Result<PreparedVerilogARuntimeSet, PreparedRuntimeError> {
-    let mut logical_sources = Vec::with_capacity(authority.sources.len());
+    let mut logical_sources = Vec::with_capacity(authority.sources().len());
     let mut logical_paths = std::collections::HashMap::<String, String>::new();
-    for (path, source) in &authority.sources {
+    for (path, source) in authority.sources() {
         let logical = model_library_virtual_path(path)?;
         let folded = logical.to_ascii_lowercase();
         if let Some(existing) = logical_paths.insert(folded, logical.clone()) {
@@ -733,7 +733,7 @@ pub(crate) fn compile_model_library_source_runtimes(
     let mut runtimes = Vec::new();
     let mut connections = Vec::new();
     let mut roots_by_path = std::collections::BTreeMap::<_, Vec<_>>::new();
-    for root in &authority.roots {
+    for root in authority.roots() {
         let root_path = model_library_virtual_path(&root.path)?;
         roots_by_path.entry(root_path).or_default().push(root);
     }
@@ -767,7 +767,7 @@ pub(crate) fn compile_model_library_source_runtimes(
                 })?;
                 let source_key = format!(
                     "__rspice_model_library__/{}/{}/connections.vams",
-                    authority.closure_digest, root_identity
+                    authority.closure_digest(), root_identity
                 );
                 let alias = root
                     .netlist_alias
@@ -776,7 +776,7 @@ pub(crate) fn compile_model_library_source_runtimes(
                 connections.push(
                     PreparedVerilogAConnectionLibrary::try_new(
                         source_key,
-                        authority.closure_digest,
+                        authority.closure_digest(),
                         alias,
                         artifact,
                     )
@@ -832,11 +832,11 @@ pub(crate) fn compile_model_library_source_runtimes(
                     })?;
                 let source_key = format!(
                     "__rspice_model_library__/{}/{}/{}.va",
-                    authority.closure_digest, root_identity, module_name
+                    authority.closure_digest(), root_identity, module_name
                 );
                 runtimes.push(PreparedVerilogARuntime::try_from_virtual_compilation(
                     source_key,
-                    authority.closure_digest,
+                    authority.closure_digest(),
                     netlist_alias,
                     &compilation,
                 )?);
@@ -1091,37 +1091,25 @@ mod tests {
         old_shape.as_object_mut().unwrap().remove("connections");
         assert!(serde_json::from_value::<PreparedVerilogARuntimeSet>(old_shape).is_err());
 
-        let mut authority = standalone_connection_authority();
-        let root = authority
-            .roots
-            .iter_mut()
-            .find(|root| root.netlist_alias.as_deref() == Some("UI_CONNECTIONS"))
-            .unwrap();
-        root.netlist_alias = Some("ui_driver".to_owned());
+        let authority = standalone_connection_authority_with_directive(
+            ".va \"rules.vams\" ui_driver\n",
+        );
         assert!(
             compile_model_library_source_runtimes(&authority)
                 .unwrap_err()
                 .to_string()
                 .contains("different prepared artifacts")
         );
-        let root = authority
-            .roots
-            .iter_mut()
-            .find(|root| root.netlist_alias.as_deref() == Some("ui_driver"))
-            .unwrap();
-        root.netlist_alias = None;
+        let authority = standalone_connection_authority_with_directive(".va \"rules.vams\"\n");
         let unnamed = compile_model_library_source_runtimes(&authority).unwrap();
         assert!(
             unnamed
                 .sources()
                 .any(|source| source.netlist_alias().starts_with("__rspice_connections_"))
         );
-        let root = authority
-            .roots
-            .iter_mut()
-            .find(|root| root.netlist_alias.is_none())
-            .unwrap();
-        root.selected_module = Some("ui_driver".to_owned());
+        let authority = standalone_connection_authority_with_directive(
+            ".va \"rules.vams\" module=ui_driver\n",
+        );
         assert!(
             compile_model_library_source_runtimes(&authority)
                 .unwrap_err()
@@ -1132,24 +1120,29 @@ mod tests {
 
     #[test]
     fn sealed_library_module_selection_keeps_aliases_and_module_identity() {
-        let mut manager = ModelLibraryManager::new();
-        manager.load_library_bundle(
-            "selected-modules.lib",
-            vec![
-                ("root.lib".to_owned(), b".va \"devices.va\" first_alias module=first_load\n.va \"devices.va\" second_alias module=second_load\n.model fallback_d D\n".to_vec()),
-                ("devices.va".to_owned(), b"module first_load(p,n); inout p,n; electrical p,n; analog I(p,n)<+V(p,n); endmodule\nmodule second_load(p,n); inout p,n; electrical p,n; analog I(p,n)<+2*V(p,n); endmodule\n".to_vec()),
-            ],
-            None,
-        ).unwrap();
-        let sealed = manager.seal_execution_sources().unwrap();
-        let authority = sealed.model_library_veriloga_authority().unwrap().unwrap();
-        assert_eq!(authority.roots.len(), 2);
+        fn selected_authority(
+            first_module: &str,
+        ) -> crate::state::model_library::SealedModelLibraryVerilogAAuthority {
+            let mut manager = ModelLibraryManager::new();
+            manager.load_library_bundle(
+                "selected-modules.lib",
+                vec![
+                    ("root.lib".to_owned(), format!(".va \"devices.va\" first_alias module={first_module}\n.va \"devices.va\" second_alias module=second_load\n.model fallback_d D\n").into_bytes()),
+                    ("devices.va".to_owned(), b"module first_load(p,n); inout p,n; electrical p,n; analog I(p,n)<+V(p,n); endmodule\nmodule second_load(p,n); inout p,n; electrical p,n; analog I(p,n)<+2*V(p,n); endmodule\n".to_vec()),
+                ],
+                None,
+            ).unwrap();
+            let sealed = manager.seal_execution_sources().unwrap();
+            sealed.model_library_veriloga_authority().unwrap().unwrap()
+        }
+        let authority = selected_authority("first_load");
+        assert_eq!(authority.roots().len(), 2);
         assert_eq!(
-            authority.roots[0].selected_module.as_deref(),
+            authority.roots()[0].selected_module.as_deref(),
             Some("first_load")
         );
         assert_eq!(
-            authority.roots[1].selected_module.as_deref(),
+            authority.roots()[1].selected_module.as_deref(),
             Some("second_load")
         );
         let runtimes =
@@ -1164,8 +1157,7 @@ mod tests {
             .map(|runtime| runtime.source_key())
             .collect::<Vec<_>>();
         assert_ne!(keys[0], keys[1]);
-        let mut missing = authority.clone();
-        missing.roots[0].selected_module = Some("FIRST_LOAD".to_owned());
+        let missing = selected_authority("FIRST_LOAD");
         let error = crate::simulation::veriloga::compile_model_library_source_runtimes(&missing)
             .unwrap_err();
         assert!(
