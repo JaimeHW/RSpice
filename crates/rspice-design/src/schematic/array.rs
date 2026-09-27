@@ -15,8 +15,8 @@ use super::component::Component;
 use super::design_note::DesignNote;
 use super::documentation_shape::DocumentationShape;
 use super::net_label::{Junction, NetLabel};
-use super::point::Point;
 use super::wire::{Wire, WireConnection};
+use rspice_design_model::Point;
 
 const fn unit_naming_stride() -> u64 {
     1
@@ -606,10 +606,10 @@ pub enum SchematicArrayPlacement {
 /// Fully parsed and locally validated array command input.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SchematicArrayPlan {
-    pub(crate) kind: SchematicArrayKind,
-    pub(crate) count: SchematicArrayCount,
-    pub(crate) naming: SchematicArrayNaming,
-    pub(crate) placement: SchematicArrayPlacement,
+    pub(super) kind: SchematicArrayKind,
+    pub(super) count: SchematicArrayCount,
+    pub(super) naming: SchematicArrayNaming,
+    pub(super) placement: SchematicArrayPlacement,
 }
 
 impl<'de> Deserialize<'de> for SchematicArrayPlan {
@@ -761,17 +761,17 @@ impl ArrayObjectIds {
 /// Immutable candidate additions used by both canvas preview and atomic commit.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SchematicArrayPreview {
-    pub(crate) impact: SchematicArrayImpact,
-    pub(crate) components: Vec<Component>,
-    pub(crate) wires: Vec<Wire>,
-    pub(crate) junctions: Vec<Junction>,
-    pub(crate) buses: Vec<Bus>,
-    pub(crate) bus_taps: Vec<BusTap>,
-    pub(crate) net_labels: Vec<NetLabel>,
-    pub(crate) design_notes: Vec<DesignNote>,
-    pub(crate) documentation_shapes: Vec<DocumentationShape>,
-    pub(crate) connections: Vec<WireConnection>,
-    pub(crate) object_ids: ArrayObjectIds,
+    pub(super) impact: SchematicArrayImpact,
+    pub(super) components: Vec<Component>,
+    pub(super) wires: Vec<Wire>,
+    pub(super) junctions: Vec<Junction>,
+    pub(super) buses: Vec<Bus>,
+    pub(super) bus_taps: Vec<BusTap>,
+    pub(super) net_labels: Vec<NetLabel>,
+    pub(super) design_notes: Vec<DesignNote>,
+    pub(super) documentation_shapes: Vec<DocumentationShape>,
+    pub(super) connections: Vec<WireConnection>,
+    pub(super) object_ids: ArrayObjectIds,
 }
 
 impl SchematicArrayPreview {

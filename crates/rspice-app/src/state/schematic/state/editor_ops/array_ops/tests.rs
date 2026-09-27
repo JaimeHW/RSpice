@@ -289,7 +289,7 @@ fn bus_and_tap_ownership_and_scalar_slice_are_remapped_together() {
     )
     .unwrap();
     assert_eq!(
-        state.preview_array_selection(&tap_plan).unwrap().bus_taps[0]
+        state.preview_array_selection(&tap_plan).unwrap().bus_taps()[0]
             .slice
             .to_string(),
         "DATA[1]"
@@ -373,17 +373,6 @@ fn naming_collision_partial_stale_read_only_and_overflow_fail_closed() {
         overflow_state.preview_array_selection(&overflow),
         Err(SchematicArrayError::CoordinateOverflow)
     ));
-
-    let forged = SchematicArrayPlan {
-        kind: SchematicArrayKind::Linear,
-        count: SchematicArrayCount::new(2, 2).unwrap(),
-        naming: SchematicArrayNaming::parse("R1…R4").unwrap(),
-        placement: SchematicArrayPlacement::Pitch(Point::new(100, 100)),
-    };
-    assert_eq!(
-        overflow_state.preview_array_selection(&forged),
-        Err(SchematicArrayError::LinearCountRequiresOneAxis)
-    );
 }
 
 #[test]
@@ -500,9 +489,9 @@ fn default_group_naming_interleaves_same_prefix_without_collisions() {
     let sparse_names: HashSet<_> = sparse
         .preview_array_selection(&sparse_plan)
         .unwrap()
-        .components
-        .into_iter()
-        .map(|component| component.name)
+        .components()
+        .iter()
+        .map(|component| component.name.clone())
         .collect();
     assert_eq!(sparse_names.len(), 14);
 
@@ -906,7 +895,7 @@ fn duplicate_scalar_bus_sources_share_one_canonical_naming_range() {
         state
             .preview_array_selection(&plan)
             .unwrap()
-            .net_labels
+            .net_labels()
             .len(),
         6
     );

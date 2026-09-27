@@ -16,8 +16,8 @@
 //! - `net_label` - Net labels and junctions
 //! - `state` - Main SchematicState
 
-mod array;
-mod array_edit;
+use rspice_design::schematic::array;
+use rspice_design::schematic::array_edit;
 mod bus;
 mod canvas_cache;
 use rspice_design::schematic::clipboard;

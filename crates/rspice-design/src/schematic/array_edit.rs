@@ -18,14 +18,14 @@ use super::{
     document::SchematicDocument,
     documentation_shape::{DocumentationShape, DocumentationShapeGeometry, geometry_from_points},
     net_label::{Junction, NetLabel},
-    point::Point,
     wire::{Wire, WireConnection},
 };
-use rspice_design::schematic::{
+use super::{
     clipboard_edit::{CopySelection, capture_complete_selection},
     component_references::PreparedCopyReferences,
     identity::SchematicIdentity,
 };
+use rspice_design_model::Point;
 use std::collections::{HashMap, HashSet};
 
 /// Complete object inputs plus the presence of unsupported partial handles.
