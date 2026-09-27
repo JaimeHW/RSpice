@@ -1,5 +1,9 @@
 //! Retained digital and real-valued event history and its source attribution.
 
+use rspice_results::events::projection::{
+    BusRadix, BusTimeline, EventOrder, EventRow, EventSelectionSource, EventValue, bus_notes,
+    bus_subtitle, event_row_at_name, event_row_from_entry,
+};
 use std::sync::Arc;
 
 use egui::{RichText, Ui};
@@ -84,63 +88,6 @@ impl<'a> EventOrigin<'a> {
 #[cfg(test)]
 mod source_tests;
 
-/// Where one row of the event history came from.
-///
-/// Exact rows retain sparse timestamps from the engine or an imported file.
-/// Projected rows are reconstructed from `D(..)`/`E(..)` waveforms, which were
-/// sampled on a common grid — the distinction is reported, never hidden,
-/// because a projected time is an approximation of the real one. A `Bus` row
-/// is exact and derived: the word is reassembled from member rows that are
-/// themselves exact, so it is never available for a projection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EventSelectionSource {
-    ExactDigital,
-    ExactReal,
-    ProjectedDigital,
-    ProjectedReal,
-    Bus,
-}
-
-/// One event row's position in the merged, time-ordered history.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct EventOrderEntry {
-    pub source: EventSelectionSource,
-    /// Index of the trace, waveform, or — for a `Bus` row — the declaration
-    /// this row reads.
-    pub trace_index: usize,
-    pub point_index: usize,
-    pub time_s: f64,
-    pub initial: bool,
-}
-
-/// One declared bus, reassembled once for the sheet that draws it.
-///
-/// The word at each event is `rspice_core::execution::bus_events` reading the
-/// member histories; nothing here holds a value the members do not.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct BusTimeline {
-    /// The declaration's name with its declared range, as the sheet spells it.
-    label: String,
-    /// Bus name without the range — the selection key.
-    name: String,
-    /// Member node names, declared MSB first.
-    members: Vec<String>,
-    /// Every time a member changed, with the code each member held at it.
-    events: rspice_core::execution::BusEventTable,
-    /// Why this bus has no rows, when it has none.
-    refusal: Option<String>,
-}
-
-/// One immutable merge of the retained schedules and declared buses.
-#[derive(Debug, Clone, PartialEq)]
-struct EventOrder {
-    exact: bool,
-    rows: Vec<EventOrderEntry>,
-    buses: Vec<BusTimeline>,
-    current_names: Vec<String>,
-    current_rows: Vec<(usize, usize)>,
-}
-
 /// Source ownership is checked by both the sheet and the inspector. Holding
 /// the history revision prevents restored or edited results from reusing an
 /// old merge even when their dataset identity and display counter match.
@@ -211,19 +158,19 @@ enum SelectedEventValue {
 
 impl DigitalEventSelection {
     fn matches(&self, row: &EventRow<'_>, buses: &[BusTimeline]) -> bool {
-        if self.source != row.source
-            || self.trace_name != row.trace_name
-            || self.point_index != row.point_index
-            || self.time_bits != row.time_s.to_bits()
-            || self.initial != row.initial
+        if self.source != row.source()
+            || self.trace_name != row.trace_name()
+            || self.point_index != row.point_index()
+            || self.time_bits != row.time_s().to_bits()
+            || self.initial != row.initial()
         {
             return false;
         }
-        match (&self.value, &row.value) {
+        match (&self.value, row.value()) {
             (
                 SelectedEventValue::Scalar(bits),
                 EventValue::Digital { .. } | EventValue::Real(_),
-            ) => *bits == row.value.identity(),
+            ) => *bits == row.value().identity(),
             (
                 SelectedEventValue::Bus {
                     label,
@@ -233,13 +180,13 @@ impl DigitalEventSelection {
                 EventValue::Bus(_),
             ) => buses
                 .iter()
-                .find(|bus| bus.name == row.trace_name)
+                .find(|bus| bus.name() == row.trace_name())
                 .is_some_and(|bus| {
-                    &bus.label == label
-                        && &bus.members == members
+                    bus.label() == label.as_str()
+                        && bus.members() == members.as_slice()
                         && bus
-                            .events
-                            .get(row.point_index)
+                            .events()
+                            .get(row.point_index())
                             .is_some_and(|(_, current)| current == codes)
                 }),
             _ => false,
@@ -247,389 +194,67 @@ impl DigitalEventSelection {
     }
 }
 
-/// How a bus word is spelled.
-///
-/// Binary is the VCD spelling — one character per member, declared MSB first,
-/// with `x` for unknown and `z` for high impedance — and is the only one that
-/// can spell every word a run can produce. The other three denote an integer,
-/// which a word with an unknown or high-impedance bit does not have.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum BusRadix {
-    #[default]
-    Binary,
-    Hex,
-    Unsigned,
-    Signed,
-}
+const BUS_RADIX_OPTIONS: [&str; 4] = ["BIN", "HEX", "DEC", "±DEC"];
 
-impl BusRadix {
-    pub(super) const OPTIONS: [&'static str; 4] = ["BIN", "HEX", "DEC", "±DEC"];
-
-    const fn index(self) -> usize {
-        match self {
-            Self::Binary => 0,
-            Self::Hex => 1,
-            Self::Unsigned => 2,
-            Self::Signed => 3,
-        }
-    }
-
-    const fn from_index(index: usize) -> Self {
-        match index {
-            1 => Self::Hex,
-            2 => Self::Unsigned,
-            3 => Self::Signed,
-            _ => Self::Binary,
-        }
-    }
-
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Binary => "binary",
-            Self::Hex => "hexadecimal",
-            Self::Unsigned => "unsigned decimal",
-            Self::Signed => "signed decimal",
-        }
-    }
-}
-
-/// The widest bus whose unsigned and signed values a machine integer holds
-/// exactly. A wider word still has a hexadecimal and a binary spelling, both
-/// of which are exact at any width because neither is arithmetic.
-const MAX_DECIMAL_BUS_BITS: usize = 64;
-
-/// What one bus word is shown as, and why it is not what was asked for.
-#[derive(Clone)]
-struct BusWord {
-    text: String,
-    /// The reason the requested radix was not used, when it was not.
-    fallback: Option<&'static str>,
-}
-
-const UNRESOLVED_BITS_FALLBACK: &str =
-    "the word carries unknown (x) or high-impedance (z) bits, which denote no integer";
-const WIDE_WORD_FALLBACK: &str = "the bus is wider than 64 bits, which no exact machine integer \
-     spells; hexadecimal states the same word";
-
-/// Spell one bus word: the codes each member held, declared MSB first.
-///
-/// The bits come from `rspice_core::execution::event_code_to_vcd_bit`, which
-/// is the one place a code becomes a bit — the same mapping the dump uses, so
-/// a word read here and a word read out of an exported VCD cannot disagree.
-fn bus_word(codes: &[Option<u8>], radix: BusRadix) -> BusWord {
-    use rspice_core::execution::event_code_to_vcd_bit;
-    use rspice_core::io::VcdBit;
-
-    let bits = codes
-        .iter()
-        .map(|code| event_code_to_vcd_bit(*code))
-        .collect::<Vec<_>>();
-    let binary = || {
-        bits.iter()
-            .map(|bit| bit.map_or('?', VcdBit::as_char))
-            .collect::<String>()
-    };
-    let resolved = bits
-        .iter()
-        .map(|bit| match bit {
-            Some(VcdBit::Zero) => Some(false),
-            Some(VcdBit::One) => Some(true),
-            _ => None,
-        })
-        .collect::<Option<Vec<_>>>();
-    let Some(resolved) = resolved else {
-        return BusWord {
-            text: binary(),
-            fallback: (radix != BusRadix::Binary).then_some(UNRESOLVED_BITS_FALLBACK),
-        };
-    };
+fn bus_radix_index(radix: BusRadix) -> usize {
     match radix {
-        BusRadix::Binary => BusWord {
-            text: binary(),
-            fallback: None,
-        },
-        BusRadix::Hex => BusWord {
-            text: hex_word(&resolved),
-            fallback: None,
-        },
-        BusRadix::Unsigned | BusRadix::Signed => {
-            if resolved.len() > MAX_DECIMAL_BUS_BITS {
-                return BusWord {
-                    text: hex_word(&resolved),
-                    fallback: Some(WIDE_WORD_FALLBACK),
-                };
-            }
-            let magnitude = resolved
-                .iter()
-                .fold(0_u64, |value, bit| (value << 1) | u64::from(*bit));
-            let text = if radix == BusRadix::Signed {
-                // Two's complement in the declared width: the sign bit is the
-                // declared MSB, not bit 63, so a narrow bus signs at its own
-                // width. Shifting up and back does that in one step.
-                let spare = MAX_DECIMAL_BUS_BITS - resolved.len();
-                let signed = (magnitude << spare) as i64 >> spare;
-                signed.to_string()
-            } else {
-                magnitude.to_string()
-            };
-            BusWord {
-                text,
-                fallback: None,
-            }
-        }
+        BusRadix::Binary => 0,
+        BusRadix::Hex => 1,
+        BusRadix::Unsigned => 2,
+        BusRadix::Signed => 3,
     }
 }
 
-/// The hexadecimal spelling of a fully resolved word, declared MSB first.
-///
-/// Grouped from the least significant bit so the last digit is always a whole
-/// nibble; a width that is not a multiple of four leaves the leading digit
-/// short, which is what it is.
-fn hex_word(bits: &[bool]) -> String {
-    let mut digits = Vec::with_capacity(bits.len().div_ceil(4));
-    let mut nibble = 0_u8;
-    let mut filled = 0_u32;
-    for bit in bits.iter().rev() {
-        nibble |= u8::from(*bit) << filled;
-        filled += 1;
-        if filled == 4 {
-            digits.push(nibble);
-            nibble = 0;
-            filled = 0;
-        }
-    }
-    if filled > 0 {
-        digits.push(nibble);
-    }
-    let mut text = String::with_capacity(digits.len() + 2);
-    text.push_str("0x");
-    for digit in digits.iter().rev() {
-        text.push(char::from_digit(u32::from(*digit), 16).unwrap_or('?'));
-    }
-    text
-}
-
-#[derive(Clone, Copy)]
-struct LogicCode {
-    value: &'static str,
-    strength: &'static str,
-}
-
-#[derive(Clone)]
-enum EventValue {
-    Digital {
-        code: u8,
-        decoded: LogicCode,
-    },
-    Real(f64),
-    /// A whole bus word at one bus event, already spelled in the sheet's
-    /// radix. The word is derived, so it carries the reason it is not in the
-    /// radix that was asked for whenever that radix cannot state it.
-    Bus(BusWord),
-}
-
-impl EventValue {
-    fn identity(&self) -> u64 {
-        match self {
-            Self::Digital { code, .. } => u64::from(*code),
-            Self::Real(value) => value.to_bits(),
-            // A bus row is never compared for change compression: the
-            // reassembly already emits one row per change of the whole word.
-            Self::Bus(_) => 0,
-        }
-    }
-
-    fn display(&self) -> String {
-        match self {
-            Self::Digital { decoded, .. } => decoded.value.to_owned(),
-            Self::Real(value) => format!("{value:.17e}"),
-            Self::Bus(word) => word.text.clone(),
-        }
-    }
-
-    const fn strength(&self) -> &'static str {
-        match self {
-            Self::Digital { decoded, .. } => decoded.strength,
-            Self::Real(_) => "real-valued",
-            Self::Bus(_) => "per member",
-        }
-    }
-
-    const fn domain(&self) -> &'static str {
-        match self {
-            Self::Digital { .. } => "digital",
-            Self::Real(_) => "real",
-            Self::Bus(_) => "digital bus",
-        }
+fn bus_radix_from_index(index: usize) -> BusRadix {
+    match index {
+        1 => BusRadix::Hex,
+        2 => BusRadix::Unsigned,
+        3 => BusRadix::Signed,
+        _ => BusRadix::Binary,
     }
 }
 
-#[derive(Clone)]
-struct EventRow<'a> {
-    source: EventSelectionSource,
-    trace_name: &'a str,
-    signal_name: &'a str,
-    point_index: usize,
-    event_ordinal: usize,
-    time_s: f64,
-    value: EventValue,
-    initial: bool,
+trait EventRowSelection {
+    fn selection(
+        &self,
+        analysis: AnalysisPresentationKey,
+        buses: &[BusTimeline],
+    ) -> Option<DigitalEventSelection>;
 }
 
-impl EventRow<'_> {
-    /// Capture only on a selection gesture; ordinary row painting borrows
-    /// the evidence and compares it without copying the bus word or members.
+impl EventRowSelection for EventRow<'_> {
     fn selection(
         &self,
         analysis: AnalysisPresentationKey,
         buses: &[BusTimeline],
     ) -> Option<DigitalEventSelection> {
-        let value = match self.value {
+        let value = match self.value() {
             EventValue::Bus(_) => {
-                let bus = buses.iter().find(|bus| bus.name == self.trace_name)?;
+                let bus = buses.iter().find(|bus| bus.name() == self.trace_name())?;
                 SelectedEventValue::Bus {
-                    label: bus.label.clone(),
-                    members: bus.members.clone(),
-                    codes: bus.events.get(self.point_index)?.1.clone(),
+                    label: bus.label().to_owned(),
+                    members: bus.members().to_vec(),
+                    codes: bus.events().get(self.point_index())?.1.clone(),
                 }
             }
-            _ => SelectedEventValue::Scalar(self.value.identity()),
+            _ => SelectedEventValue::Scalar(self.value().identity()),
         };
         Some(DigitalEventSelection {
             analysis,
-            source: self.source,
-            trace_name: self.trace_name.to_owned(),
-            point_index: self.point_index,
-            time_bits: self.time_s.to_bits(),
-            initial: self.initial,
+            source: self.source(),
+            trace_name: self.trace_name().to_owned(),
+            point_index: self.point_index(),
+            time_bits: self.time_s().to_bits(),
+            initial: self.initial(),
             value,
         })
     }
-
-    const fn exact(&self) -> bool {
-        matches!(
-            self.source,
-            EventSelectionSource::ExactDigital
-                | EventSelectionSource::ExactReal
-                // A bus word is reassembled from exact member histories at
-                // the exact time one of them changed. Nothing is resampled.
-                | EventSelectionSource::Bus
-        )
-    }
-}
-
-fn logic_code(value: f64) -> Option<(u8, LogicCode)> {
-    if !value.is_finite() || value.fract() != 0.0 || !(0.0..=12.0).contains(&value) {
-        return None;
-    }
-    let code = value as u8;
-    let decoded = match code {
-        0 => LogicCode {
-            value: "0",
-            strength: "strong",
-        },
-        1 => LogicCode {
-            value: "1",
-            strength: "strong",
-        },
-        2 => LogicCode {
-            value: "X",
-            strength: "strong",
-        },
-        3 => LogicCode {
-            value: "0",
-            strength: "resistive",
-        },
-        4 => LogicCode {
-            value: "1",
-            strength: "resistive",
-        },
-        5 => LogicCode {
-            value: "X",
-            strength: "resistive",
-        },
-        6 => LogicCode {
-            value: "0",
-            strength: "high-Z",
-        },
-        7 => LogicCode {
-            value: "1",
-            strength: "high-Z",
-        },
-        8 => LogicCode {
-            value: "X",
-            strength: "high-Z",
-        },
-        9 => LogicCode {
-            value: "0",
-            strength: "undetermined",
-        },
-        10 => LogicCode {
-            value: "1",
-            strength: "undetermined",
-        },
-        11 => LogicCode {
-            value: "X",
-            strength: "undetermined",
-        },
-        12 => LogicCode {
-            value: "Z",
-            strength: "high-Z",
-        },
-        _ => return None,
-    };
-    Some((code, decoded))
-}
-
-fn logic_code_u8(code: u8) -> Option<LogicCode> {
-    logic_code(f64::from(code)).map(|(_, decoded)| decoded)
-}
-
-fn event_signal_name(name: &str) -> Option<(&str, bool)> {
-    if let Some(signal) = name
-        .strip_prefix("D(")
-        .and_then(|name| name.strip_suffix(')'))
-    {
-        Some((signal, true))
-    } else {
-        name.strip_prefix("E(")
-            .and_then(|name| name.strip_suffix(')'))
-            .map(|signal| (signal, false))
-    }
-}
-
-fn event_value(waveform: &WaveformData, value: f64) -> Option<EventValue> {
-    let (_, digital) = event_signal_name(&waveform.name)?;
-    if digital {
-        logic_code(value).map(|(code, decoded)| EventValue::Digital { code, decoded })
-    } else {
-        value.is_finite().then_some(EventValue::Real(value))
-    }
-}
-
-fn event_time_axis_is_valid(values: &[f64]) -> bool {
-    !values.is_empty()
-        && values.iter().all(|value| value.is_finite())
-        && values.windows(2).all(|pair| pair[0] < pair[1])
 }
 
 fn waveform_is_event(waveform: &WaveformData) -> bool {
-    let Some((_, digital)) = event_signal_name(&waveform.name) else {
-        return false;
-    };
-    super::frame_work::note(super::frame_work::DatasetWalk::EventProjectionScan);
-    if waveform.x.len() != waveform.y.len() || !event_time_axis_is_valid(&waveform.x) {
-        return false;
-    }
-    if digital {
-        waveform
-            .y
-            .iter()
-            .copied()
-            .all(|value| logic_code(value).is_some())
-    } else {
-        waveform.y.iter().all(|value| value.is_finite())
-    }
+    rspice_results::events::projection::waveform_is_event(waveform, || {
+        super::frame_work::note(super::frame_work::DatasetWalk::EventProjectionScan);
+    })
 }
 
 /// Whether this analysis has an event schedule worth a sheet.
@@ -678,329 +303,14 @@ pub(super) fn active_analysis_is_renderable(state: &AppState) -> bool {
     ) && super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
 }
 
-/// Reassemble every declared bus over the traces it names.
-///
-/// The word at each event comes from `rspice_core::execution::bus_events`,
-/// which is the only reassembly in the product. A declaration whose members
-/// are more than one reassembly holds at once is refused by that function, in
-/// its own words, and the refusal is carried here so the sheet can state it
-/// where the rows would have been rather than showing an empty bus.
-fn build_bus_timelines(
-    digital_traces: &[crate::state::DigitalEventTraceEvidence],
-    digital_buses: &[crate::state::DigitalBusEvidence],
-) -> Vec<BusTimeline> {
-    use rspice_core::execution::{BusMemberHistory, bus_events};
-
-    // One history per member, in the member's own point order. The retained
-    // evidence is already sorted in time — `validate_event_times` refuses one
-    // that is not — so nothing here reorders anything.
-    let histories = digital_traces
-        .iter()
-        .map(|trace| {
-            (
-                trace.node_name.as_str(),
-                trace
-                    .points
-                    .iter()
-                    .map(|point| (point.time_s, point.value_code))
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .collect::<std::collections::HashMap<_, _>>();
-
-    digital_buses
-        .iter()
-        .map(|bus| {
-            let members = bus
-                .members
-                .iter()
-                .map(|member| BusMemberHistory {
-                    points: histories
-                        .get(member.as_str())
-                        .map_or(&[][..], Vec::as_slice),
-                })
-                .collect::<Vec<_>>();
-            let (events, refusal) = match bus_events(&members) {
-                Ok(events) => (events, None),
-                Err(error) => (Vec::new(), Some(error.to_string())),
-            };
-            BusTimeline {
-                label: format!("{}[{}:{}]", bus.name, bus.msb, bus.lsb),
-                name: bus.name.clone(),
-                members: bus.members.clone(),
-                events,
-                refusal,
-            }
-        })
-        .collect()
-}
-
 fn build_event_order(
     analysis: &AnalysisResult,
     expanded: &std::collections::BTreeSet<String>,
 ) -> EventOrder {
     super::frame_work::note(super::frame_work::DatasetWalk::EventOrder);
-    if let Some(AnalysisResultPayload::TransientEvents {
-        digital_traces,
-        real_traces,
-        digital_buses,
-        current_impulses,
-    }) = analysis.result_payload.as_ref()
-    {
-        let buses = build_bus_timelines(digital_traces, digital_buses);
-        // A member of a collapsed bus is not listed on its own: the bus row
-        // is the same change, stated once as the word it belongs to. A bus
-        // that was refused hides nothing — its members are all there is.
-        let hidden = buses
-            .iter()
-            .filter(|bus| bus.refusal.is_none() && !expanded.contains(&bus.name))
-            .flat_map(|bus| bus.members.iter().map(String::as_str))
-            .collect::<std::collections::HashSet<_>>();
-        let mut rows = Vec::new();
-        for (trace_index, trace) in digital_traces.iter().enumerate() {
-            if hidden.contains(trace.node_name.as_str()) {
-                continue;
-            }
-            for (point_index, point) in trace.points.iter().enumerate() {
-                rows.push(EventOrderEntry {
-                    source: EventSelectionSource::ExactDigital,
-                    trace_index,
-                    point_index,
-                    time_s: point.time_s,
-                    initial: point_index == 0,
-                });
-            }
-        }
-        for (bus_index, bus) in buses.iter().enumerate() {
-            for (point_index, (time_s, _)) in bus.events.iter().enumerate() {
-                rows.push(EventOrderEntry {
-                    source: EventSelectionSource::Bus,
-                    trace_index: bus_index,
-                    point_index,
-                    time_s: *time_s,
-                    initial: point_index == 0,
-                });
-            }
-        }
-        for (trace_index, trace) in real_traces.iter().enumerate() {
-            for (point_index, point) in trace.points.iter().enumerate() {
-                rows.push(EventOrderEntry {
-                    source: EventSelectionSource::ExactReal,
-                    trace_index,
-                    point_index,
-                    time_s: point.time_s,
-                    initial: point_index == 0,
-                });
-            }
-        }
-        sort_event_order(analysis, &buses, &mut rows);
-        let mut current_names = Vec::new();
-        let mut current_rows = Vec::new();
-        if let Some(history) = current_impulses {
-            for (trace_index, trace) in history.traces.iter().enumerate() {
-                current_names.push(trace.owner.to_string());
-                current_rows
-                    .extend((0..trace.points.len()).map(|point_index| (trace_index, point_index)));
-            }
-            current_rows.sort_by(|&(left_trace, left_point), &(right_trace, right_point)| {
-                history.traces[left_trace].points[left_point]
-                    .time
-                    .total_cmp(&history.traces[right_trace].points[right_point].time)
-                    .then_with(|| current_names[left_trace].cmp(&current_names[right_trace]))
-            });
-        }
-        return EventOrder {
-            exact: true,
-            rows,
-            buses,
-            current_names,
-            current_rows,
-        };
-    }
-
-    // Legacy fallback: preserve access to old project files, but label these
-    // rows as projections because the accepted transient grid is not the
-    // original sparse event schedule.
-    let mut rows = Vec::new();
-    for (waveform_index, waveform) in analysis
-        .waveforms
-        .iter()
-        .enumerate()
-        .filter(|(_, waveform)| waveform_is_event(waveform))
-    {
-        if event_signal_name(&waveform.name).is_none() {
-            continue;
-        }
-        let mut previous = None;
-        for (sample_index, (&time_s, &raw_value)) in
-            waveform.x.iter().zip(waveform.y.iter()).enumerate()
-        {
-            let Some(value) = event_value(waveform, raw_value) else {
-                continue;
-            };
-            let identity = value.identity();
-            if previous == Some(identity) {
-                continue;
-            }
-            rows.push(EventOrderEntry {
-                source: if matches!(value, EventValue::Digital { .. }) {
-                    EventSelectionSource::ProjectedDigital
-                } else {
-                    EventSelectionSource::ProjectedReal
-                },
-                trace_index: waveform_index,
-                point_index: sample_index,
-                time_s,
-                initial: previous.is_none(),
-            });
-            previous = Some(identity);
-        }
-    }
-    sort_event_order(analysis, &[], &mut rows);
-    EventOrder {
-        exact: false,
-        rows,
-        buses: Vec::new(),
-        current_names: Vec::new(),
-        current_rows: Vec::new(),
-    }
-}
-
-fn sort_event_order(
-    analysis: &AnalysisResult,
-    buses: &[BusTimeline],
-    rows: &mut [EventOrderEntry],
-) {
-    rows.sort_by(|left, right| {
-        left.time_s
-            .total_cmp(&right.time_s)
-            .then_with(|| {
-                event_entry_signal_name(analysis, buses, *left)
-                    .cmp(event_entry_signal_name(analysis, buses, *right))
-            })
-            .then_with(|| left.point_index.cmp(&right.point_index))
-    });
-}
-
-fn event_entry_signal_name<'a>(
-    analysis: &'a AnalysisResult,
-    buses: &'a [BusTimeline],
-    entry: EventOrderEntry,
-) -> &'a str {
-    match entry.source {
-        EventSelectionSource::ExactDigital => analysis
-            .result_payload
-            .as_ref()
-            .and_then(|payload| match payload {
-                AnalysisResultPayload::TransientEvents { digital_traces, .. } => {
-                    digital_traces.get(entry.trace_index)
-                }
-                _ => None,
-            })
-            .map_or("", |trace| trace.node_name.as_str()),
-        EventSelectionSource::ExactReal => analysis
-            .result_payload
-            .as_ref()
-            .and_then(|payload| match payload {
-                AnalysisResultPayload::TransientEvents { real_traces, .. } => {
-                    real_traces.get(entry.trace_index)
-                }
-                _ => None,
-            })
-            .map_or("", |trace| trace.node_name.as_str()),
-        EventSelectionSource::ProjectedDigital | EventSelectionSource::ProjectedReal => analysis
-            .waveforms
-            .get(entry.trace_index)
-            .and_then(|waveform| event_signal_name(&waveform.name).map(|(name, _)| name))
-            .unwrap_or(""),
-        EventSelectionSource::Bus => buses
-            .get(entry.trace_index)
-            .map_or("", |bus| bus.label.as_str()),
-    }
-}
-
-fn event_row_from_entry<'a>(
-    analysis: &'a AnalysisResult,
-    buses: &'a [BusTimeline],
-    radix: BusRadix,
-    entry: EventOrderEntry,
-    event_ordinal: usize,
-) -> Option<EventRow<'a>> {
-    match entry.source {
-        EventSelectionSource::ExactDigital => {
-            let AnalysisResultPayload::TransientEvents { digital_traces, .. } =
-                analysis.result_payload.as_ref()?
-            else {
-                return None;
-            };
-            let trace = digital_traces.get(entry.trace_index)?;
-            let point = trace.points.get(entry.point_index)?;
-            Some(EventRow {
-                source: entry.source,
-                trace_name: &trace.node_name,
-                signal_name: &trace.node_name,
-                point_index: entry.point_index,
-                event_ordinal,
-                time_s: point.time_s,
-                value: EventValue::Digital {
-                    code: point.value_code,
-                    decoded: logic_code_u8(point.value_code)?,
-                },
-                initial: entry.initial,
-            })
-        }
-        EventSelectionSource::ExactReal => {
-            let AnalysisResultPayload::TransientEvents { real_traces, .. } =
-                analysis.result_payload.as_ref()?
-            else {
-                return None;
-            };
-            let trace = real_traces.get(entry.trace_index)?;
-            let point = trace.points.get(entry.point_index)?;
-            Some(EventRow {
-                source: entry.source,
-                trace_name: &trace.node_name,
-                signal_name: &trace.node_name,
-                point_index: entry.point_index,
-                event_ordinal,
-                time_s: point.time_s,
-                value: EventValue::Real(point.value),
-                initial: entry.initial,
-            })
-        }
-        EventSelectionSource::ProjectedDigital | EventSelectionSource::ProjectedReal => {
-            let waveform = analysis.waveforms.get(entry.trace_index)?;
-            let (signal_name, _) = event_signal_name(&waveform.name)?;
-            let (&time_s, &raw_value) = waveform
-                .x
-                .get(entry.point_index)
-                .zip(waveform.y.get(entry.point_index))?;
-            Some(EventRow {
-                source: entry.source,
-                trace_name: &waveform.name,
-                signal_name,
-                point_index: entry.point_index,
-                event_ordinal,
-                time_s,
-                value: event_value(waveform, raw_value)?,
-                initial: entry.initial,
-            })
-        }
-        EventSelectionSource::Bus => {
-            let bus = buses.get(entry.trace_index)?;
-            let (time_s, codes) = bus.events.get(entry.point_index)?;
-            Some(EventRow {
-                source: entry.source,
-                trace_name: &bus.name,
-                signal_name: &bus.label,
-                point_index: entry.point_index,
-                event_ordinal,
-                time_s: *time_s,
-                value: EventValue::Bus(bus_word(codes, radix)),
-                initial: entry.initial,
-            })
-        }
-    }
+    rspice_results::events::projection::build_event_order(analysis, expanded, || {
+        super::frame_work::note(super::frame_work::DatasetWalk::EventProjectionScan);
+    })
 }
 
 /// The whole sheet as rows, for the tests that read it without drawing.
@@ -1012,17 +322,17 @@ fn event_rows_with(
 ) -> (EventOrder, Vec<String>) {
     let cache = build_event_order(analysis, expanded);
     let rows = cache
-        .rows
+        .rows()
         .iter()
         .copied()
         .enumerate()
         .filter_map(|(index, entry)| {
-            event_row_from_entry(analysis, &cache.buses, radix, entry, index + 1).map(|row| {
+            event_row_from_entry(analysis, cache.buses(), radix, entry, index + 1).map(|row| {
                 format!(
                     "{} {} {}",
-                    row.signal_name,
-                    row.value.display(),
-                    row.value.domain()
+                    row.signal_name(),
+                    row.value().display(),
+                    row.value().domain()
                 )
             })
         })
@@ -1039,7 +349,7 @@ fn event_rows_with(
 #[cfg(test)]
 fn event_rows(analysis: &AnalysisResult) -> Vec<EventRow<'_>> {
     build_event_order(analysis, &std::collections::BTreeSet::new())
-        .rows
+        .rows()
         .iter()
         .copied()
         .enumerate()
@@ -1058,97 +368,14 @@ fn event_row_for_selection<'a>(
     radix: BusRadix,
     selection: &DigitalEventSelection,
 ) -> Option<EventRow<'a>> {
-    let entry = match selection.source {
-        EventSelectionSource::ExactDigital => {
-            let AnalysisResultPayload::TransientEvents { digital_traces, .. } =
-                analysis.result_payload.as_ref()?
-            else {
-                return None;
-            };
-            let (trace_index, trace) = digital_traces
-                .iter()
-                .enumerate()
-                .find(|(_, trace)| trace.node_name == selection.trace_name)?;
-            let point = trace.points.get(selection.point_index)?;
-            EventOrderEntry {
-                source: selection.source,
-                trace_index,
-                point_index: selection.point_index,
-                time_s: point.time_s,
-                initial: selection.point_index == 0,
-            }
-        }
-        EventSelectionSource::ExactReal => {
-            let AnalysisResultPayload::TransientEvents { real_traces, .. } =
-                analysis.result_payload.as_ref()?
-            else {
-                return None;
-            };
-            let (trace_index, trace) = real_traces
-                .iter()
-                .enumerate()
-                .find(|(_, trace)| trace.node_name == selection.trace_name)?;
-            let point = trace.points.get(selection.point_index)?;
-            EventOrderEntry {
-                source: selection.source,
-                trace_index,
-                point_index: selection.point_index,
-                time_s: point.time_s,
-                initial: selection.point_index == 0,
-            }
-        }
-        EventSelectionSource::ProjectedDigital | EventSelectionSource::ProjectedReal => {
-            let (trace_index, waveform) = analysis
-                .waveforms
-                .iter()
-                .enumerate()
-                .find(|(_, waveform)| waveform.name == selection.trace_name)?;
-            let (&time_s, &raw_value) = waveform
-                .x
-                .get(selection.point_index)
-                .zip(waveform.y.get(selection.point_index))?;
-            let current = event_value(waveform, raw_value)?;
-            let expected_source = if matches!(current, EventValue::Digital { .. }) {
-                EventSelectionSource::ProjectedDigital
-            } else {
-                EventSelectionSource::ProjectedReal
-            };
-            if selection.source != expected_source {
-                return None;
-            }
-            let previous = selection
-                .point_index
-                .checked_sub(1)
-                .and_then(|index| waveform.y.get(index))
-                .and_then(|value| event_value(waveform, *value))
-                .map(|value| value.identity());
-            if previous == Some(current.identity()) {
-                return None;
-            }
-            EventOrderEntry {
-                source: selection.source,
-                trace_index,
-                point_index: selection.point_index,
-                time_s,
-                initial: previous.is_none(),
-            }
-        }
-        EventSelectionSource::Bus => {
-            let (bus_index, bus) = buses
-                .iter()
-                .enumerate()
-                .find(|(_, bus)| bus.name == selection.trace_name)?;
-            let (time_s, _) = bus.events.get(selection.point_index)?;
-            EventOrderEntry {
-                source: selection.source,
-                trace_index: bus_index,
-                point_index: selection.point_index,
-                time_s: *time_s,
-                initial: selection.point_index == 0,
-            }
-        }
-    };
-    let row = event_row_from_entry(analysis, buses, radix, entry, 0)?;
+    let row = event_row_at_name(
+        analysis,
+        buses,
+        radix,
+        selection.source,
+        &selection.trace_name,
+        selection.point_index,
+    )?;
     selection.matches(&row, buses).then_some(row)
 }
 
@@ -1208,7 +435,7 @@ fn show_current_impulse_tables(
                     let index = row.index();
                     let trace = &history.traces[index];
                     row.col(|ui| {
-                        mono(ui, &order.current_names[index]);
+                        mono(ui, &order.current_names()[index]);
                     });
                     row.col(|ui| {
                         mono(ui, &trace.points.len().to_string());
@@ -1223,7 +450,7 @@ fn show_current_impulse_tables(
                 })
             });
     });
-    if order.current_rows.is_empty() {
+    if order.current_rows().is_empty() {
         panel_note(
             ui,
             if history.traces.is_empty() {
@@ -1248,14 +475,14 @@ fn show_current_impulse_tables(
             }
         })
         .body(|body| {
-            body.rows(ROW_HEIGHT, order.current_rows.len(), |mut row| {
-                let (trace_index, point_index) = order.current_rows[row.index()];
+            body.rows(ROW_HEIGHT, order.current_rows().len(), |mut row| {
+                let (trace_index, point_index) = order.current_rows()[row.index()];
                 let point = &history.traces[trace_index].points[point_index];
                 row.col(|ui| {
                     mono(ui, &format!("{:.17e}", point.time));
                 });
                 row.col(|ui| {
-                    mono(ui, &order.current_names[trace_index]);
+                    mono(ui, &order.current_names()[trace_index]);
                 });
                 row.col(|ui| {
                     mono(ui, &format!("{:.17e}", point.charge_coulombs));
@@ -1299,25 +526,25 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .active_analysis()
         .expect("active analysis resolved above");
     let radix = state.ui.results.event_bus_radix;
-    let exact = cache.exact;
+    let exact = cache.exact();
     let expanded = &state.ui.results.expanded_event_buses;
     StripHeader::new(
         "EVENTS",
         &format!(
             "{} · {} {}{}",
             analysis.label,
-            cache.rows.len() + cache.current_rows.len(),
+            cache.rows().len() + cache.current_rows().len(),
             if exact {
                 "retained events"
             } else {
                 "projected changes"
             },
-            bus_subtitle(&cache.buses),
+            bus_subtitle(cache.buses()),
         ),
         &[],
     )
     .show(ui);
-    if !cache.rows.is_empty()
+    if !cache.rows().is_empty()
         && let Some(note) = EventOrigin::active(state).note()
     {
         panel_note(ui, note);
@@ -1328,7 +555,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }) = analysis.result_payload.as_ref()
     {
         show_current_impulses(ui, history, &cache);
-        if cache.rows.is_empty() {
+        if cache.rows().is_empty() {
             return;
         }
     }
@@ -1338,7 +565,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             "Sampled waveform projection. Original sparse event timestamps are unavailable.",
         );
     }
-    for note in bus_notes(&cache.buses, radix) {
+    for note in bus_notes(cache.buses(), radix) {
         panel_note(ui, &note);
     }
 
@@ -1381,54 +608,56 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     }
                 })
                 .body(|body| {
-                    body.rows(ROW_HEIGHT, cache.rows.len(), |mut row| {
+                    body.rows(ROW_HEIGHT, cache.rows().len(), |mut row| {
                         let row_index = row.index();
-                        let Some(row_data) = cache.rows.get(row_index).copied().and_then(|entry| {
-                            event_row_from_entry(
-                                analysis,
-                                &cache.buses,
-                                radix,
-                                entry,
-                                row_index + 1,
-                            )
-                        }) else {
+                        let Some(row_data) =
+                            cache.rows().get(row_index).copied().and_then(|entry| {
+                                event_row_from_entry(
+                                    analysis,
+                                    cache.buses(),
+                                    radix,
+                                    entry,
+                                    row_index + 1,
+                                )
+                            })
+                        else {
                             return;
                         };
                         let is_selected = selected.as_ref().is_some_and(|selection| {
                             selection.analysis == analysis_key
-                                && selection.matches(&row_data, &cache.buses)
+                                && selection.matches(&row_data, cache.buses())
                         });
                         row.set_selected(is_selected);
                         row.col(|ui| {
                             if ui
                                 .selectable_label(
                                     is_selected,
-                                    format!("#{:04}", row_data.event_ordinal),
+                                    format!("#{:04}", row_data.event_ordinal()),
                                 )
                                 .clicked()
                             {
-                                requested = row_data.selection(analysis_key, &cache.buses);
+                                requested = row_data.selection(analysis_key, cache.buses());
                             }
                         });
                         row.col(|ui| {
-                            mono(ui, &format!("{:.17e} s", row_data.time_s));
+                            mono(ui, &format!("{:.17e} s", row_data.time_s()));
                         });
                         row.col(|ui| {
-                            mono(ui, row_data.signal_name);
+                            mono(ui, row_data.signal_name());
                             // The disclosure rides the bus row rather than a
                             // seventh column: it belongs to the one row it
                             // acts on, and a column that is blank on every
                             // scalar row would cost the table width to say
                             // nothing about them.
-                            if row_data.source == EventSelectionSource::Bus {
-                                let open = expanded.contains(row_data.trace_name);
+                            if row_data.source() == EventSelectionSource::Bus {
+                                let open = expanded.contains(row_data.trace_name());
                                 let response = chip(ui, "BITS", open);
                                 // The chip reads `BITS` on every bus row, so
                                 // its published name says which bus it opens
                                 // — two declarations on screen are otherwise
                                 // the same word to anything not looking at
                                 // the column beside it.
-                                let name = format!("Bits of {}", row_data.signal_name);
+                                let name = format!("Bits of {}", row_data.signal_name());
                                 response.widget_info(|| {
                                     egui::WidgetInfo::selected(
                                         egui::WidgetType::SelectableLabel,
@@ -1443,26 +672,26 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                     "Show the member rows this word is reassembled from"
                                 });
                                 if response.clicked() {
-                                    toggled_bus = Some(row_data.trace_name.to_owned());
+                                    toggled_bus = Some(row_data.trace_name().to_owned());
                                 }
                             }
                         });
                         row.col(|ui| {
-                            let text = row_data.value.display();
+                            let text = row_data.value().display();
                             let response = mono(ui, &text);
                             // A word is as wide as the bus is: the column
                             // clips rather than shoving the table along, so
                             // the whole word has to be reachable without
                             // selecting the row.
-                            if row_data.source == EventSelectionSource::Bus {
+                            if row_data.source() == EventSelectionSource::Bus {
                                 response.on_hover_text(text);
                             }
                         });
                         row.col(|ui| {
-                            ui.label(row_data.value.domain());
+                            ui.label(row_data.value().domain());
                         });
                         row.col(|ui| {
-                            ui.label(if row_data.initial {
+                            ui.label(if row_data.initial() {
                                 "initial"
                             } else {
                                 "change"
@@ -1479,59 +708,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     {
         state.ui.results.expanded_event_buses.insert(bus);
     }
-}
-
-/// The bus half of the sheet's subtitle, or nothing when none is declared.
-///
-/// A sheet with no declaration says nothing about buses at all: a "0 buses"
-/// count would suggest the run might have had one, and no run without a
-/// vector port or an imported vector ever can.
-fn bus_subtitle(buses: &[BusTimeline]) -> String {
-    if buses.is_empty() {
-        return String::new();
-    }
-    let members = buses.iter().map(|bus| bus.members.len()).sum::<usize>();
-    format!(
-        " · {} bus{} over {members} members",
-        buses.len(),
-        if buses.len() == 1 { "" } else { "es" }
-    )
-}
-
-/// What the sheet has to say about its buses beyond the rows themselves.
-///
-/// Each note is an exact count of something the reader would otherwise have
-/// to infer from an absence: a word the chosen radix cannot state, or a
-/// declaration that was refused reassembly and therefore has no rows at all.
-fn bus_notes(buses: &[BusTimeline], radix: BusRadix) -> Vec<String> {
-    let mut notes = Vec::new();
-    for bus in buses.iter().filter(|bus| bus.refusal.is_some()) {
-        notes.push(format!(
-            "{} has no bus rows: {}. Its {} member traces are listed individually.",
-            bus.label,
-            bus.refusal.as_deref().unwrap_or_default(),
-            bus.members.len()
-        ));
-    }
-    if radix == BusRadix::Binary {
-        return notes;
-    }
-    let mut fallbacks: std::collections::BTreeMap<&'static str, usize> =
-        std::collections::BTreeMap::new();
-    for bus in buses {
-        for (_, codes) in &bus.events {
-            if let Some(reason) = bus_word(codes, radix).fallback {
-                *fallbacks.entry(reason).or_default() += 1;
-            }
-        }
-    }
-    for (reason, count) in fallbacks {
-        notes.push(format!(
-            "{count} bus words are not shown in {}: {reason}.",
-            radix.label()
-        ));
-    }
-    notes
 }
 
 /// The Radix control, in the sheet's own domain bar.
@@ -1554,15 +730,15 @@ pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
     if !declares_bus {
         return false;
     }
-    let mut index = context.results.event_bus_radix.index();
+    let mut index = bus_radix_index(context.results.event_bus_radix);
     if segmented(
         ui,
         "rspice.results.events.radix",
-        &BusRadix::OPTIONS,
+        &BUS_RADIX_OPTIONS,
         &mut index,
         SegmentedWidth::Natural,
     ) {
-        context.results.event_bus_radix = BusRadix::from_index(index);
+        context.results.event_bus_radix = bus_radix_from_index(index);
     }
     true
 }
@@ -1621,7 +797,7 @@ fn event_selection_block(
     let analysis = state.simulation.active_analysis()?;
     if event_row_for_selection(
         analysis,
-        &order.buses,
+        order.buses(),
         state.ui.results.event_bus_radix,
         selection,
     )
@@ -1653,7 +829,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let Some(order) = event_order(state) else {
         return;
     };
-    let buses = &order.buses;
+    let buses = order.buses();
     let Some(event) = state
         .simulation
         .active_run()
@@ -1674,8 +850,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         Some(if event.exact() { "EXACT" } else { "PROJECTED" }),
     );
     let mut stats = vec![
-        ("Signal", event.signal_name.to_owned(), true),
-        ("Physical time", format!("{:.17e} s", event.time_s), true),
+        ("Signal", event.signal_name().to_owned(), true),
+        ("Physical time", format!("{:.17e} s", event.time_s()), true),
         (
             if event.exact() {
                 "Trace event"
@@ -1685,8 +861,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             format!("#{}", selection.point_index + 1),
             false,
         ),
-        ("Value", event.value.display(), true),
-        ("Domain", event.value.domain().to_owned(), false),
+        ("Value", event.value().display(), true),
+        ("Domain", event.value().domain().to_owned(), false),
     ];
     let origin = EventOrigin::active(state);
     stats.push(("Source", origin.label().to_owned(), false));
@@ -1694,7 +870,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         stats.push(("Import file", source.source_name.clone(), false));
     }
     let mut bus_fallback = None;
-    match &event.value {
+    match event.value() {
         EventValue::Digital { code, .. } => {
             stats.push(("Retained code", code.to_string(), false));
             stats.push((
@@ -1703,17 +879,17 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 } else {
                     "Encoded strength"
                 },
-                event.value.strength().to_owned(),
+                event.value().strength().to_owned(),
                 false,
             ));
         }
         EventValue::Bus(word) => {
             stats.push(("Radix", radix.label().to_owned(), false));
-            if let Some(bus) = buses.iter().find(|bus| bus.name == selection.trace_name) {
-                stats.push(("Members", bus.members.len().to_string(), false));
-                stats.push(("Bit order", bus.members.join(" "), false));
+            if let Some(bus) = buses.iter().find(|bus| bus.name() == selection.trace_name) {
+                stats.push(("Members", bus.members().len().to_string(), false));
+                stats.push(("Bit order", bus.members().join(" "), false));
             }
-            bus_fallback = word.fallback;
+            bus_fallback = word.fallback();
         }
         EventValue::Real(_) => {}
     }
@@ -1726,7 +902,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     }
     panel_note(
         ui,
-        match event.source {
+        match event.source() {
             EventSelectionSource::Bus => {
                 "This word is reassembled from the member histories beside it, at the exact time one of them changed. Every member keeps its own retained event code; the word holds no value they do not."
             }
@@ -1782,10 +958,10 @@ mod tests {
         );
         assert!(analysis_is_renderable(&analysis));
         let order = build_event_order(&analysis, &Default::default());
-        assert!(order.exact);
-        assert_eq!(order.current_names, ["I(V1)", "@Q1[ic]"]);
-        assert_eq!(order.current_rows, [(1, 0), (0, 0)]);
-        assert!(order.rows.is_empty());
+        assert!(order.exact());
+        assert_eq!(order.current_names(), ["I(V1)", "@Q1[ic]"]);
+        assert_eq!(order.current_rows(), [(1, 0), (0, 0)]);
+        assert!(order.rows().is_empty());
     }
 
     pub(super) fn committed_events(digital: &[(f64, u8)]) -> AnalysisResultPayload {
@@ -1841,9 +1017,12 @@ mod tests {
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![waveform]);
         let rows = event_rows(&analysis);
         assert_eq!(rows.len(), 2);
-        assert!(rows[0].initial);
-        assert_eq!(rows[1].point_index, 2);
-        assert!(matches!(rows[1].value, EventValue::Digital { code: 1, .. }));
+        assert!(rows[0].initial());
+        assert_eq!(rows[1].point_index(), 2);
+        assert!(matches!(
+            rows[1].value(),
+            EventValue::Digital { code: 1, .. }
+        ));
         assert!(!rows[0].exact());
     }
 
@@ -1854,9 +1033,9 @@ mod tests {
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![waveform]);
         let rows = event_rows(&analysis);
         assert_eq!(rows.len(), 2);
-        assert!(rows[0].initial);
-        assert_eq!(rows[0].time_s, 1.0);
-        assert!(matches!(rows[1].value, EventValue::Real(value) if value == 0.5));
+        assert!(rows[0].initial());
+        assert_eq!(rows[0].time_s(), 1.0);
+        assert!(matches!(rows[1].value(), EventValue::Real(value) if *value == 0.5));
     }
 
     #[test]
@@ -1868,13 +1047,6 @@ mod tests {
             "#fff",
         );
         assert!(!waveform_is_event(&waveform));
-    }
-
-    #[test]
-    fn digital_code_contract_rejects_non_integral_values() {
-        assert!(logic_code(12.0).is_some());
-        assert!(logic_code(2.5).is_none());
-        assert!(logic_code(13.0).is_none());
     }
 
     #[test]
@@ -1911,10 +1083,10 @@ mod tests {
             .with_result_payload(payload);
         let rows = event_rows(&analysis);
         assert_eq!(rows.len(), 3);
-        assert_eq!(rows[1].time_s.to_bits(), 0.5_f64.to_bits());
-        assert_eq!(rows[2].time_s.to_bits(), 0.5_f64.to_bits());
-        assert_eq!(rows[1].point_index, 1);
-        assert_eq!(rows[2].point_index, 2);
+        assert_eq!(rows[1].time_s().to_bits(), 0.5_f64.to_bits());
+        assert_eq!(rows[2].time_s().to_bits(), 0.5_f64.to_bits());
+        assert_eq!(rows[1].point_index(), 1);
+        assert_eq!(rows[2].point_index(), 2);
         assert!(rows.iter().all(EventRow::exact));
     }
 
@@ -1952,11 +1124,11 @@ mod tests {
         let rows = event_rows(&analysis);
 
         assert_eq!(
-            rows.iter().map(|row| row.signal_name).collect::<Vec<_>>(),
+            rows.iter().map(|row| row.signal_name()).collect::<Vec<_>>(),
             ["a", "a", "z"]
         );
-        assert_eq!(rows[0].point_index, 0);
-        assert_eq!(rows[1].point_index, 1);
+        assert_eq!(rows[0].point_index(), 0);
+        assert_eq!(rows[1].point_index(), 1);
     }
 
     #[test]
@@ -1979,7 +1151,7 @@ mod tests {
         assert_eq!(
             event_row_for_selection(&analysis, &[], BusRadix::Binary, &changed)
                 .expect("changed projected sample")
-                .point_index,
+                .point_index(),
             2
         );
     }
@@ -2184,7 +1356,7 @@ mod bus_tests {
     fn a_declared_bus_replaces_its_member_rows_with_one_word_per_change() {
         let analysis = two_bit_counter();
         let (cache, rows) = event_rows_with(&analysis, BusRadix::Binary, &collapsed());
-        assert_eq!(cache.buses.len(), 1);
+        assert_eq!(cache.buses().len(), 1);
         assert_eq!(
             rows,
             vec![
@@ -2253,13 +1425,13 @@ mod bus_tests {
             ]
         );
         assert_eq!(
-            bus_notes(&cache.buses, BusRadix::Hex),
-            vec![format!(
-                "2 bus words are not shown in hexadecimal: {UNRESOLVED_BITS_FALLBACK}."
-            )]
+            bus_notes(cache.buses(), BusRadix::Hex),
+            vec![
+                "2 bus words are not shown in hexadecimal: the word carries unknown (x) or high-impedance (z) bits, which denote no integer."
+            ]
         );
         assert!(
-            bus_notes(&cache.buses, BusRadix::Binary).is_empty(),
+            bus_notes(cache.buses(), BusRadix::Binary).is_empty(),
             "binary spells every word a run can produce, so it never has a note"
         );
     }
@@ -2309,9 +1481,9 @@ mod bus_tests {
             },
         );
         let (cache, rows) = event_rows_with(&analysis, BusRadix::Hex, &collapsed());
-        assert!(cache.buses.is_empty());
-        assert!(bus_subtitle(&cache.buses).is_empty());
-        assert!(bus_notes(&cache.buses, BusRadix::Hex).is_empty());
+        assert!(cache.buses().is_empty());
+        assert!(bus_subtitle(cache.buses()).is_empty());
+        assert!(bus_notes(cache.buses(), BusRadix::Hex).is_empty());
         assert!(rows.iter().all(|row| row.ends_with("digital")));
     }
 
@@ -2319,27 +1491,6 @@ mod bus_tests {
     fn the_subtitle_counts_the_declarations_and_their_members() {
         let analysis = two_bit_counter();
         let (cache, _) = event_rows_with(&analysis, BusRadix::Binary, &collapsed());
-        assert_eq!(bus_subtitle(&cache.buses), " · 1 bus over 2 members");
-    }
-
-    /// A word wider than a machine integer still has an exact hexadecimal and
-    /// binary spelling; the two decimal radices say so rather than rounding.
-    #[test]
-    fn a_word_wider_than_a_machine_integer_falls_back_to_hexadecimal() {
-        let ones = vec![Some(1_u8); 65];
-        let word = bus_word(&ones, BusRadix::Unsigned);
-        assert_eq!(word.fallback, Some(WIDE_WORD_FALLBACK));
-        assert_eq!(word.text, "0x1ffffffffffffffff");
-        assert_eq!(bus_word(&ones, BusRadix::Hex).fallback, None);
-        assert_eq!(bus_word(&ones, BusRadix::Binary).text, "1".repeat(65));
-    }
-
-    /// The sheet's binary spelling is the dump's, character for character:
-    /// both are `rspice_core::execution::event_code_to_vcd_bit`, so a word
-    /// read here and the same word read out of an exported VCD agree.
-    #[test]
-    fn the_binary_word_is_the_spelling_the_dump_writes() {
-        let codes = [Some(0_u8), Some(1), Some(2), Some(12), None];
-        assert_eq!(bus_word(&codes, BusRadix::Binary).text, "01xzx");
+        assert_eq!(bus_subtitle(cache.buses()), " · 1 bus over 2 members");
     }
 }

@@ -192,13 +192,13 @@ fn pick(
     let cache = state.ui.results.event_order_cache.as_ref().unwrap();
     let selection = cache
         .order
-        .rows
+        .rows()
         .iter()
         .find_map(|entry| {
             let row =
-                event_row_from_entry(analysis, &cache.order.buses, BusRadix::Binary, *entry, 0)?;
-            (row.source == source && row.trace_name == name && row.point_index == point)
-                .then(|| row.selection(key, &cache.order.buses))
+                event_row_from_entry(analysis, cache.order.buses(), BusRadix::Binary, *entry, 0)?;
+            (row.source() == source && row.trace_name() == name && row.point_index() == point)
+                .then(|| row.selection(key, cache.order.buses()))
                 .flatten()
         })
         .expect("the event was rendered and can be selected");
@@ -218,7 +218,7 @@ fn event_source_restoration_refreshes_bus_order_and_raw_codes() {
             .as_ref()
             .unwrap()
             .order
-            .rows
+            .rows()
             .len(),
         4
     );
@@ -237,8 +237,8 @@ fn event_source_restoration_refreshes_bus_order_and_raw_codes() {
     assert_eq!(state.simulation.data_version, version);
     paint(&mut state, false);
     let cache = state.ui.results.event_order_cache.as_ref().unwrap();
-    assert_eq!(cache.order.rows.len(), 3);
-    assert_eq!(cache.order.buses[0].events[1].1, [Some(0), Some(4)]);
+    assert_eq!(cache.order.rows().len(), 3);
+    assert_eq!(cache.order.buses()[0].events()[1].1, [Some(0), Some(4)]);
 }
 
 fn scalar_state(source: EventSelectionSource) -> (AppState, &'static str) {
@@ -419,7 +419,7 @@ fn event_source_appended_history_keeps_selection_and_refreshes_inspector_order()
             .as_ref()
             .unwrap()
             .order
-            .rows
+            .rows()
             .len(),
         5
     );
@@ -504,14 +504,14 @@ fn event_source_same_time_selection_survives_trace_reordering() {
     let order = event_order(&mut state).unwrap();
     let event = event_row_for_selection(
         state.simulation.active_analysis().unwrap(),
-        &order.buses,
+        order.buses(),
         BusRadix::Binary,
         &selection,
     )
     .unwrap();
-    assert_eq!(event.point_index, 2);
-    assert_eq!(event.time_s, 1.0);
-    assert_eq!(event.value.identity(), 0);
+    assert_eq!(event.point_index(), 2);
+    assert_eq!(event.time_s(), 1.0);
+    assert_eq!(event.value().identity(), 0);
 }
 
 #[test]
@@ -540,7 +540,17 @@ fn event_source_bus_selection_detects_strength_and_range_changes() {
         );
         let order = event_order(&mut state).unwrap();
         assert_eq!(
-            bus_word(&order.buses[0].events[1].1, BusRadix::Binary).text,
+            event_row_at_name(
+                state.simulation.active_analysis().unwrap(),
+                order.buses(),
+                BusRadix::Binary,
+                EventSelectionSource::Bus,
+                &selection.trace_name,
+                1
+            )
+            .unwrap()
+            .value()
+            .display(),
             "01"
         );
         assert!(
