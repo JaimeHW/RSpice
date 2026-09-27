@@ -65,8 +65,6 @@ pub(crate) use specs::active_run_specifications as run_specifications;
 pub(crate) use specs::export_csv as export_specs_csv;
 pub(crate) use specs::hardcopy_table as specs_hardcopy_table;
 
-use rspice_formats::table::escape_csv_field as csv_field;
-
 /// Route to the one surface that authors specification limits.
 ///
 /// The whole route, not just the document: the editor is a Results viewer, so

@@ -401,19 +401,10 @@ fn matrix_csv(
     block_index: usize,
     sample: usize,
 ) -> String {
-    let table = exact_table(matrix, analysis, block_index, sample);
-    let mut csv = table.columns.join(",");
-    csv.push('\n');
-    for row in table.rows {
-        csv.push_str(
-            &row.iter()
-                .map(|v| super::csv_field(v))
-                .collect::<Vec<_>>()
-                .join(","),
-        );
-        csv.push('\n');
-    }
-    csv
+    let table = matrix
+        .exact_table(analysis, block_index, sample)
+        .expect("resolved complex coefficient sample");
+    rspice_formats::result_csv::encode_network_matrix_csv(&table)
 }
 
 fn exact_table(
