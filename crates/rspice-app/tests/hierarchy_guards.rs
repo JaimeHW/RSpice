@@ -280,6 +280,10 @@ fn design_model_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-design-model/src")
 }
 
+fn design_src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-design/src")
+}
+
 fn rust_sources(root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut pending = vec![root.to_path_buf()];
@@ -426,7 +430,6 @@ const MAX_ROOT_CELL_LITERALS: usize = 0;
 
 #[test]
 fn path_grammar_is_owned_by_one_module() {
-    let root = src_dir();
     let allowed: BTreeMap<&str, usize> = PATH_GRAMMAR_SITES.iter().copied().collect();
     assert_eq!(
         allowed.len(),
@@ -436,15 +439,17 @@ fn path_grammar_is_owned_by_one_module() {
 
     let mut measured: BTreeMap<String, usize> = BTreeMap::new();
     let mut root_literals = 0usize;
-    for (path, file) in production_files(&root) {
-        let production = Source::read(&file).production;
-        let count: usize = PATH_GRAMMAR_PATTERNS
-            .iter()
-            .map(|pattern| count_occurrences(&production, pattern))
-            .sum();
-        root_literals += count_occurrences(&production, "\"/top\"");
-        if count > 0 {
-            measured.insert(path, count);
+    for (prefix, root) in [("", src_dir()), ("design/", design_src_dir())] {
+        for (path, file) in production_files(&root) {
+            let production = Source::read(&file).production;
+            let count: usize = PATH_GRAMMAR_PATTERNS
+                .iter()
+                .map(|pattern| count_occurrences(&production, pattern))
+                .sum();
+            root_literals += count_occurrences(&production, "\"/top\"");
+            if count > 0 {
+                measured.insert(format!("{prefix}{path}"), count);
+            }
         }
     }
 

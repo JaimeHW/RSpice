@@ -19,10 +19,12 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest as ShaDigest, Sha256};
 use thiserror::Error;
 
-use crate::product::ContentDigest;
+use rspice_app_types::product::ContentDigest;
 
-use super::workspace::{CellViewRef, validate_cell_view_name_segment};
-use super::{HierarchyPathError, InstancePath, InstancePathPattern, PatternSegment};
+use rspice_app_types::hierarchy_path::{
+    HierarchyPathError, InstancePath, InstancePathPattern, PatternSegment,
+};
+use rspice_design_model::cell_view::{CellViewRef, validate_cell_view_name_segment};
 
 pub const CONFIGURATION_SET_CATALOG_SCHEMA_VERSION: u16 = 2;
 
@@ -171,7 +173,7 @@ impl UnresolvedBindingPolicy {
     }
 }
 
-/// Exact semantic subset copied by the mockup's clone workflow.
+/// Exact semantic subset copied when cloning a configuration.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ConfigurationCloneScope {
     #[default]
@@ -454,7 +456,7 @@ impl ConfigurationSetCatalog {
     /// Rewrite original paths in one declared configuration. Callers resolve
     /// each executable root separately, so a same-spelled instance in another
     /// root cannot accidentally acquire the edit. Wildcards remain open.
-    pub(crate) fn remap_configuration_instance_paths(
+    pub fn remap_configuration_instance_paths(
         &mut self,
         id: ConfigurationSetId,
         mappings: &[(InstancePath, InstancePath)],
