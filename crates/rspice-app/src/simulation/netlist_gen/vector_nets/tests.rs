@@ -116,9 +116,10 @@ fn projection_names_every_bit_of_a_declared_bus_once() {
         Point::new(80, 0),
     ));
 
-    let connectivity = crate::state::vector_connectivity(&state, |component| {
-        component.terminal_positions_resolved(None)
-    });
+    let connectivity =
+        crate::state::vector_connectivity(&state.buses, &state.components, |component| {
+            component.terminal_positions_resolved(None)
+        });
     assert_eq!(connectivity.nets.len(), 1);
     assert!(connectivity.mismatches.is_empty());
 
@@ -166,9 +167,10 @@ fn touching_buses_that_declare_different_ranges_are_not_one_vector_net() {
         Point::new(80, 0),
     ));
 
-    let connectivity = crate::state::vector_connectivity(&state, |component| {
-        component.terminal_positions_resolved(None)
-    });
+    let connectivity =
+        crate::state::vector_connectivity(&state.buses, &state.components, |component| {
+            component.terminal_positions_resolved(None)
+        });
 
     assert_eq!(connectivity.nets.len(), 2);
     // The conflict itself is reported once, by the bus-tap projection that has

@@ -473,9 +473,10 @@ impl<'a> Pass<'a> {
     fn project_vector_nets(&mut self) {
         let schematic = self.schematic;
         let hierarchy = self.hierarchy;
-        let connectivity = vector_connectivity(schematic, |component| {
-            terminal_positions(component, hierarchy)
-        });
+        let connectivity =
+            vector_connectivity(&schematic.buses, &schematic.components, |component| {
+                terminal_positions(component, hierarchy)
+            });
 
         for mismatch in &connectivity.mismatches {
             self.diagnostics.push(ConnectivityDiagnostic {
