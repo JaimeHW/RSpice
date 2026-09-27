@@ -9,6 +9,9 @@ use std::collections::HashMap;
 
 use super::{Cell, Library, View};
 
+#[cfg(test)]
+mod tests;
+
 // Library Manager
 // =============================================================================
 
