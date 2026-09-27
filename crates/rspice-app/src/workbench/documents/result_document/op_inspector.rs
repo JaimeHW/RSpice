@@ -184,107 +184,28 @@ pub(crate) fn export_csv(analysis: &crate::state::AnalysisResult) -> Option<supe
         return None;
     }
 
-    let mut contents = String::from("section,owner,kind,region,quantity,value,unit,detail\n");
-    let mut rows = 0usize;
-    {
-        let mut push_value = |section: &str,
-                              owner: &str,
-                              kind: &str,
-                              region: &str,
-                              quantity: &str,
-                              value: String,
-                              unit: &str,
-                              row_detail: &str| {
-            contents.push_str(&format!(
-                "{},{},{},{},{},{},{},{}\n",
-                super::csv_field(section),
-                super::csv_field(owner),
-                super::csv_field(kind),
-                super::csv_field(region),
-                super::csv_field(quantity),
-                super::csv_field(&value),
-                super::csv_field(unit),
-                super::csv_field(row_detail),
-            ));
-            rows += 1;
-        };
-        if let Some(facts) = facts.as_ref() {
-            for (quantity, value, unit) in [
-                (
-                    "temperature",
-                    format!("{:.17e}", facts.temperature_celsius),
-                    "degC",
-                ),
-                ("process", process_label(facts.process).to_owned(), ""),
-                ("point_index", facts.point_index.to_string(), ""),
-                ("point_count", facts.point_count.to_string(), ""),
-                ("mna_nodes", facts.mna_nodes.to_string(), "count"),
-                ("mna_branches", facts.mna_branches.to_string(), "count"),
-                (
-                    "annotation",
-                    annotation_label(facts.annotation).to_owned(),
-                    "",
-                ),
-            ] {
-                push_value("solve_fact", "", "", "", quantity, value, unit, "");
-            }
-        }
-        if let Some(dc) = dc {
-            for (section, values) in [
-                ("node_voltage", dc.node_voltages.as_slice()),
-                ("branch_current", dc.branch_currents.as_slice()),
-                ("device_power", dc.power_dissipation.as_slice()),
-            ] {
-                for value in values {
-                    let row_detail = if value.value.is_finite() {
-                        ""
-                    } else {
-                        "non-finite retained value"
-                    };
-                    push_value(
-                        section,
-                        &value.name,
-                        "",
-                        "",
-                        "value",
-                        format!("{:.17e}", value.value),
-                        &value.unit,
-                        row_detail,
-                    );
-                }
-            }
-        }
-        if let Some(devices) = devices {
-            for entry in devices
-                .entries
-                .iter()
-                .filter(|entry| retained_detail_allows(&entry.name, detail.as_ref()))
-            {
-                for (name, value) in &entry.params {
-                    let row_detail = if value.is_finite() {
-                        ""
-                    } else {
-                        "non-finite retained value"
-                    };
-                    push_value(
-                        "device_parameter",
-                        &entry.name,
-                        entry.device_kind,
-                        entry.region.unwrap_or_default(),
-                        name,
-                        format!("{value:.17e}"),
-                        device_param_unit(entry.device_kind, name),
-                        row_detail,
-                    );
-                }
-            }
+    let mut csv = rspice_formats::result_csv::OperatingPointReportCsv::new();
+    if let Some(facts) = facts.as_ref() {
+        csv.append_solve_facts(facts);
+    }
+    if let Some(dc) = dc {
+        csv.append_dc_values(dc);
+    }
+    if let Some(devices) = devices {
+        for entry in devices
+            .entries
+            .iter()
+            .filter(|entry| retained_detail_allows(&entry.name, detail.as_ref()))
+        {
+            csv.append_device(entry);
         }
     }
+    let rows = csv.row_count();
 
     Some(super::ResultSheetCsv {
         default_name: "rspice-operating-point.csv",
         detail: format!("{rows} operating-point evidence rows"),
-        contents,
+        contents: csv.into_string(),
     })
 }
 
