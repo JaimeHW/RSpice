@@ -2,7 +2,6 @@
 //!
 //! Main state container for the schematic editor.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -26,6 +25,8 @@ use super::tool::Tool;
 use super::wire::{Wire, WireConnection, WireDrawing, WireSegment};
 
 mod components;
+mod design_identity;
+use design_identity::SchematicIdentity;
 mod editor_ops;
 mod identity;
 mod junction_ops;
@@ -323,11 +324,8 @@ pub struct SchematicState {
     /// Current schematic file path (for save without dialog)
     pub current_file: Option<PathBuf>,
 
-    /// Next component ID (runtime state, not persisted)
-    next_id: u64,
-
-    /// Component counters for auto-naming (runtime state, not persisted)
-    component_counters: HashMap<&'static str, u32>,
+    /// Object and reference-designator allocation (runtime only).
+    identity: SchematicIdentity,
 
     /// Clipboard for copy/paste operations.
     ///
@@ -465,8 +463,7 @@ impl SchematicState {
             zoom: 1.0,
             pan: (0.0, 0.0),
             current_file: None,
-            next_id: 1,
-            component_counters: HashMap::new(),
+            identity: SchematicIdentity::with_cursor(1),
             clipboard: ClipboardData::default(),
             preview_rotation: Rotation::default(),
             preview_mirror_h: false,
@@ -514,8 +511,7 @@ impl<'de> Deserialize<'de> for SchematicState {
             zoom: default_zoom(),
             pan: Default::default(),
             current_file: Default::default(),
-            next_id: Default::default(),
-            component_counters: Default::default(),
+            identity: Default::default(),
             clipboard: Default::default(),
             preview_rotation: Default::default(),
             preview_mirror_h: Default::default(),

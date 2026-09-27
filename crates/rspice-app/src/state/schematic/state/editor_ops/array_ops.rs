@@ -51,7 +51,7 @@ struct FreshIdAllocator {
 impl FreshIdAllocator {
     fn from_state(state: &SchematicState) -> Self {
         Self {
-            next: state.next_id.max(1),
+            next: state.identity_cursor().max(1),
             used: live_ids(state).collect(),
         }
     }
@@ -435,8 +435,7 @@ impl SchematicState {
                 .extend(preview.documentation_shapes);
             state.document.connections.extend(preview.connections);
             state.selection = preview.selection;
-            state.next_id = next_id;
-            state.rebuild_component_counters_after_array();
+            state.identity.commit_array(&state.document, next_id);
             state.is_dirty = true;
             if electrical {
                 state.bump_topology_version();
@@ -767,20 +766,6 @@ impl SchematicState {
             }
         }
         Ok(())
-    }
-
-    fn rebuild_component_counters_after_array(&mut self) {
-        for component in &self.document.components {
-            let prefix = component.kind.spice_prefix();
-            if let Some(number) = component
-                .name
-                .strip_prefix(prefix)
-                .and_then(|suffix| suffix.parse::<u32>().ok())
-            {
-                let counter = self.component_counters.entry(prefix).or_insert(0);
-                *counter = (*counter).max(number);
-            }
-        }
     }
 }
 

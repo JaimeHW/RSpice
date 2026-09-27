@@ -8,7 +8,7 @@ fn schematic_wire_layout_and_loaded_runtime_defaults_are_stable() {
     let mut state = SchematicState::default();
     state.zoom = 3.0;
     state.pan = (10.0, 20.0);
-    state.next_id = 99;
+    state.identity = SchematicIdentity::with_cursor(99);
     state.is_dirty = true;
     state.read_only = true;
     let json = serde_json::to_string(&state).unwrap();

@@ -166,8 +166,7 @@ impl SchematicState {
             }
             state.selection.select_only_component(component_id);
             if let Some((prefix, number)) = replacement_counter {
-                let counter = state.component_counters.entry(prefix).or_insert(0);
-                *counter = (*counter).max(number);
+                state.identity.record_component_number(prefix, number);
             }
             state.is_dirty = true;
             state.bump_topology_version();
