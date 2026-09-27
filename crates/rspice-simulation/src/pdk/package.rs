@@ -1,6 +1,6 @@
 //! Complete PDK runtime validation and exact executable source closure sealing.
 
-use crate::product::ContentDigest;
+use rspice_app_types::product::ContentDigest;
 use rspice_model_library::pdk::contracts::*;
 use rspice_model_library::pdk::manifest::{
     PdkTechnologyManifest, package_path_to_host_path, signed_model_virtual_root,
@@ -63,7 +63,7 @@ impl ValidatedPdkTechnologyPackage {
     }
 
     /// Recheck and compile this package's exact archived source closure.
-    pub(crate) fn seal_model_sources(
+    pub fn seal_model_sources(
         &self,
         archive: &SignedPdkTechnologyArchive,
     ) -> Result<SealedPdkModelSources, PdkTechnologyError> {
@@ -71,7 +71,7 @@ impl ValidatedPdkTechnologyPackage {
     }
 
     /// Execute the selected callback against the exact validated archive.
-    pub(crate) fn execute_callback(
+    pub fn execute_callback(
         &self,
         archive: &SignedPdkTechnologyArchive,
         callback_id: &str,
@@ -80,12 +80,7 @@ impl ValidatedPdkTechnologyPackage {
         rspice_model_library::pdk::callback::PdkCallbackExecutionReceipt,
         rspice_model_library::pdk::callback::PdkCallbackError,
     > {
-        super::super::technology_callback::execute_signed_callback(
-            archive,
-            self,
-            callback_id,
-            input,
-        )
+        super::callback::execute_signed_callback(archive, self, callback_id, input)
     }
 }
 
@@ -93,14 +88,14 @@ impl ValidatedPdkTechnologyPackage {
 /// signed package. Every path is a content-addressed virtual identity; no
 /// worker or browser execution path reopens a host file.
 #[derive(Debug, Clone)]
-pub(crate) struct SealedPdkModelSources(PdkModelSourceParts);
+pub struct SealedPdkModelSources(PdkModelSourceParts);
 
 impl SealedPdkModelSources {
-    pub(crate) fn as_parts(&self) -> &PdkModelSourceParts {
+    pub fn as_parts(&self) -> &PdkModelSourceParts {
         &self.0
     }
 
-    pub(crate) fn into_parts(self) -> PdkModelSourceParts {
+    pub fn into_parts(self) -> PdkModelSourceParts {
         self.0
     }
 }
@@ -108,47 +103,47 @@ impl SealedPdkModelSources {
 /// Owned source data released by a sealed closure. Constructing these parts
 /// alone cannot construct a seal or authorize a registry publication.
 #[derive(Debug, Clone)]
-pub(crate) struct PdkModelSourceParts {
-    pub(crate) binding: PdkTechnologyBinding,
-    pub(crate) archive_digest: ContentDigest,
-    pub(crate) sources: Vec<(PathBuf, String)>,
-    pub(crate) edges: Vec<rspice_core::netlist::SealedSourceEdge>,
-    pub(crate) process_bindings: Vec<SealedPdkModelProcessBinding>,
-    pub(crate) veriloga_artifacts: Vec<SealedPdkVerilogAArtifact>,
-    pub(crate) veriloga_bindings: Vec<SealedPdkVerilogABinding>,
+pub struct PdkModelSourceParts {
+    pub binding: PdkTechnologyBinding,
+    pub archive_digest: ContentDigest,
+    pub sources: Vec<(PathBuf, String)>,
+    pub edges: Vec<rspice_core::netlist::SealedSourceEdge>,
+    pub process_bindings: Vec<SealedPdkModelProcessBinding>,
+    pub veriloga_artifacts: Vec<SealedPdkVerilogAArtifact>,
+    pub veriloga_bindings: Vec<SealedPdkVerilogABinding>,
 }
 
 /// One source/section selected by a typed process contract inside a sealed
 /// PDK model-source closure.
 #[derive(Debug, Clone)]
-pub(crate) struct SealedPdkModelProcessBinding {
-    pub(crate) process: PdkModelProcess,
-    pub(crate) source_id: String,
-    pub(crate) domain: PdkModelDomain,
-    pub(crate) root_path: PathBuf,
-    pub(crate) artifact_path: String,
-    pub(crate) artifact_digest: ContentDigest,
-    pub(crate) section: Option<String>,
+pub struct SealedPdkModelProcessBinding {
+    pub process: PdkModelProcess,
+    pub source_id: String,
+    pub domain: PdkModelDomain,
+    pub root_path: PathBuf,
+    pub artifact_path: String,
+    pub artifact_digest: ContentDigest,
+    pub section: Option<String>,
 }
 
 /// Exact UTF-8 Verilog-A artifact retained from one authenticated archive.
 #[derive(Debug, Clone)]
-pub(crate) struct SealedPdkVerilogAArtifact {
-    pub(crate) path: String,
-    pub(crate) source: String,
-    pub(crate) digest: ContentDigest,
+pub struct SealedPdkVerilogAArtifact {
+    pub path: String,
+    pub source: String,
+    pub digest: ContentDigest,
 }
 
 /// One signed manifest contract whose dependency closure compiled while the
 /// package was validated. Execution recompiles these exact retained bytes and
 /// checks the resulting runtime at the ordinary prepared-run boundary.
 #[derive(Debug, Clone)]
-pub(crate) struct SealedPdkVerilogABinding {
-    pub(crate) source_id: String,
-    pub(crate) root_artifact_path: String,
-    pub(crate) root_artifact_digest: ContentDigest,
-    pub(crate) module_name: String,
-    pub(crate) netlist_alias: String,
+pub struct SealedPdkVerilogABinding {
+    pub source_id: String,
+    pub root_artifact_path: String,
+    pub root_artifact_digest: ContentDigest,
+    pub module_name: String,
+    pub netlist_alias: String,
 }
 
 pub fn validate_archive_bytes(
@@ -172,7 +167,7 @@ pub fn validate_archive(
     trust_store: &PdkPublisherTrustStore,
 ) -> Result<ValidatedPdkTechnologyPackage, PdkTechnologyError> {
     let package = ValidatedPdkTechnologyPackage(authenticate_archive(archive, trust_store)?);
-    super::super::technology_callback::validate_signed_callbacks(archive, &package)
+    super::callback::validate_signed_callbacks(archive, &package)
         .map_err(PdkTechnologyError::CallbackValidation)?;
     // Executable model contracts are part of package validation, not a
     // deferred simulation-time best effort. This proves section existence,
@@ -473,7 +468,7 @@ fn resolve_package_dependency(
     Ok(resolved)
 }
 
-pub(super) fn validate_runtime_compatibility(
+pub fn validate_runtime_compatibility(
     manifest: &PdkTechnologyManifest,
 ) -> Result<(), PdkTechnologyError> {
     let current_target = current_execution_target();

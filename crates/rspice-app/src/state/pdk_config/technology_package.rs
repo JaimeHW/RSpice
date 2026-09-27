@@ -24,13 +24,14 @@ use rspice_model_library::pdk::manifest::{signed_model_virtual_root, validate_pa
 use rspice_model_library::pdk::package::authenticate_archive;
 use serde::{Deserialize, Serialize};
 
-mod runtime;
-use runtime::validate_runtime_compatibility;
-pub(crate) use runtime::{
+use rspice_simulation::pdk::validate_runtime_compatibility;
+pub(crate) use rspice_simulation::pdk::{
     SealedPdkModelProcessBinding, SealedPdkModelSources, SealedPdkVerilogAArtifact,
     SealedPdkVerilogABinding,
 };
-pub use runtime::{ValidatedPdkTechnologyPackage, validate_archive, validate_archive_bytes};
+pub use rspice_simulation::pdk::{
+    ValidatedPdkTechnologyPackage, validate_archive, validate_archive_bytes,
+};
 
 use crate::product::ContentDigest;
 pub use rspice_model_library::pdk::contracts::*;

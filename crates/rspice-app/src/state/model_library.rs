@@ -10,7 +10,6 @@
 //! - **Model**: Individual device model (nmos, pmos, npn, etc.)
 
 mod compatibility;
-pub(crate) mod compilation;
 mod device_class;
 mod manager;
 mod source_label;

@@ -1,0 +1,23 @@
+[package]
+name = "rspice-simulation"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+base64.workspace = true
+rspice-app-types.workspace = true
+rspice-model-library.workspace = true
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false }
+rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+wasmi.workspace = true

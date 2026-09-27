@@ -111,7 +111,7 @@ pub(super) fn seal_pdk_veriloga_sources(
             ))
         })?;
         let compilation = rspice_veriloga::VerilogACompiler::new(
-            crate::state::model_library::compilation::unified_runtime_compiler_options(),
+            crate::compilation::unified_runtime_compiler_options(),
         )
         .compile_virtual_runtime(&bundle, &contract.module_name, limits)
         .map_err(|error| {

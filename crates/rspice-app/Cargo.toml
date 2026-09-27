@@ -53,6 +53,7 @@ rspice-hardcopy-contract.workspace = true
 rspice-model-library.workspace = true
 rspice-formats = { workspace = true, features = ["columnar", "fst", "hdf5", "monte-carlo-checkpoint", "native-bundle", "result-csv", "result-digital", "result-vcd", "table-schema", "xlsx"] }
 rspice-simulation-contract.workspace = true
+rspice-simulation.workspace = true
 
 # Verilog-A compiler (pure Rust, works on all platforms)
 rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }
@@ -72,10 +73,6 @@ thiserror.workspace = true
 sha2 = "0.10"
 regex = "1.12"
 similar = "2.7"
-# Signed PDK callbacks run in a deterministic, fuel-metered interpreter on
-# every supported target. No WASI integration is linked, so callbacks receive
-# only the explicit RSpice host capabilities declared by their signed contract.
-wasmi = { version = "1.1.0", default-features = false, features = ["std", "extra-checks", "prefer-btree-collections"] }
 
 # Logging
 log = "0.4"

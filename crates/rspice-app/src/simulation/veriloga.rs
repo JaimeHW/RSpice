@@ -12,7 +12,7 @@
 
 use sha2::{Digest as _, Sha256};
 
-use crate::state::model_library::compilation::unified_runtime_compiler_options;
+use rspice_simulation::compilation::unified_runtime_compiler_options;
 
 mod connections;
 use connections::PreparedVerilogAConnectionLibrary;

@@ -32,6 +32,7 @@ members = [
     "crates/rspice-model-library",
     "crates/rspice-formats",
     "crates/rspice-simulation-contract",
+    "crates/rspice-simulation",
     "crates/rspice-veriloga",
     "crates/rspice-python",
     "crates/rspice-wasm",
@@ -98,6 +99,7 @@ csv = "1.3"
 # `Cargo.lock`.
 serde_json = { version = "1.0", features = ["float_roundtrip"] }
 semver = "1.0"
+wasmi = { version = "1.1.0", default-features = false, features = ["std", "extra-checks", "prefer-btree-collections"] }
 toml = "1.1.3"
 unicode-normalization = "0.1"
 ropey = "1.6.1"
@@ -157,6 +159,7 @@ rspice-hardcopy-contract = { path = "crates/rspice-hardcopy-contract", version =
 rspice-model-library = { path = "crates/rspice-model-library", version = "0.1.0" }
 rspice-formats = { path = "crates/rspice-formats", version = "0.1.0" }
 rspice-simulation-contract = { path = "crates/rspice-simulation-contract", version = "0.1.0" }
+rspice-simulation = { path = "crates/rspice-simulation", version = "0.1.0" }
 rspice-cloud-client = { path = "crates/rspice-cloud-client", version = "0.1.0" }
 rspice-cloud-contract = { path = "crates/rspice-cloud-contract", version = "0.1.0" }
 rspice-cloud-domain = { path = "crates/rspice-cloud-domain", version = "0.1.0" }

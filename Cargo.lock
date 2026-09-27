@@ -5256,6 +5256,7 @@ dependencies = [
  "rspice-pack",
  "rspice-publication-contract",
  "rspice-results",
+ "rspice-simulation",
  "rspice-simulation-contract",
  "rspice-veriloga",
  "rustix 1.1.4",
@@ -5282,7 +5283,6 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
  "wasm-streams",
- "wasmi",
  "wat",
  "web-sys",
  "web-time",
@@ -5659,6 +5659,21 @@ dependencies = [
  "rustix 1.1.4",
  "windows-sys 0.61.2",
  "zeroize",
+]
+
+[[package]]
+name = "rspice-simulation"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "rspice-app-types",
+ "rspice-core",
+ "rspice-model-library",
+ "rspice-veriloga",
+ "semver",
+ "serde",
+ "serde_json",
+ "wasmi",
 ]
 
 [[package]]
