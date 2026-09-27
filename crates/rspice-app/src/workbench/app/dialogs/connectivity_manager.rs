@@ -347,7 +347,7 @@ fn build_report(
     // the document the canvas paints: a materialized page carries namespaced
     // coordinates that would scroll the editor off the design.
     let bus_analysis =
-        crate::schematic::bus_connectivity::analyze_bus_connectivity(&state.schematic.document);
+        rspice_design::connectivity::bus::analyze_bus_connectivity(&state.schematic.document);
     let nets = design_nets
         .iter()
         .map(|net| build_net_row(net, subject, &drc))
@@ -739,7 +739,7 @@ fn build_global_repairs(
 fn build_manual_repairs(
     state: &AppState,
     drc: &DrcResult,
-    bus_analysis: &crate::schematic::bus_connectivity::BusConnectivityAnalysis,
+    bus_analysis: &rspice_design::connectivity::bus::BusConnectivityAnalysis,
 ) -> Vec<ConnectivityRepair> {
     let mut repairs = Vec::new();
     for violation in drc.violations() {
@@ -1432,13 +1432,12 @@ fn validate_repair_candidate(
         }
     }
     let before_bus =
-        crate::schematic::bus_connectivity::analyze_bus_connectivity(&state.schematic.document)
+        rspice_design::connectivity::bus::analyze_bus_connectivity(&state.schematic.document)
             .diagnostics
             .len();
-    let after_bus =
-        crate::schematic::bus_connectivity::analyze_bus_connectivity(&candidate.document)
-            .diagnostics
-            .len();
+    let after_bus = rspice_design::connectivity::bus::analyze_bus_connectivity(&candidate.document)
+        .diagnostics
+        .len();
     if after_bus > before_bus {
         return Err(
             "Candidate validation introduced a new typed-bus diagnostic; no changes were applied."

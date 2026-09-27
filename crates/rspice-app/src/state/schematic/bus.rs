@@ -2,8 +2,8 @@
 
 pub use rspice_design::schematic::bus::{
     Bus, BusDeclaration, BusDirection, BusNotation, BusParseError, BusPropertyImpact, BusSlice,
-    BusTap, BusTapOrientation, BusTargetKind, MAX_BUS_MEMBER_INDEX, VectorConnectivity,
-    declared_vector, declared_width, nearest_lattice_point_on_segment, vector_connectivity,
+    BusTap, BusTapOrientation, BusTargetKind, MAX_BUS_MEMBER_INDEX, declared_vector,
+    declared_width, nearest_lattice_point_on_segment,
 };
 
 use super::{Point, WireRoutingMode};
@@ -94,6 +94,7 @@ impl BusDrawing {
 mod tests {
     use super::super::{ComponentType, SchematicState};
     use super::*;
+    use rspice_design::schematic::bus::{VectorConnectivity, vector_connectivity};
 
     /// The member budget is exact at both ends, and the refusal says which
     /// number it read and which one it holds authors to.

@@ -63,8 +63,8 @@ pub use array::{
 pub(crate) use bus::nearest_lattice_point_on_segment;
 pub use bus::{
     Bus, BusDeclaration, BusDirection, BusNotation, BusParseError, BusPropertyImpact, BusSlice,
-    BusTap, BusTapOrientation, BusTargetKind, MAX_BUS_MEMBER_INDEX, PendingBusTap,
-    VectorConnectivity, declared_vector, declared_width, vector_connectivity,
+    BusTap, BusTapOrientation, BusTargetKind, MAX_BUS_MEMBER_INDEX, PendingBusTap, declared_vector,
+    declared_width,
 };
 pub use component::{
     BuiltinXspiceInstance, BuiltinXspicePortBinding, BuiltinXspicePortDirection,

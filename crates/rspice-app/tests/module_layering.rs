@@ -205,7 +205,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("state", "simulation", 7),
     ("state", "services", 9),
     ("state", "io", 5),
-    ("state", "schematic", 2),
     // Editors and orchestration referencing each other sideways; retired by
     // the granularity folds and the `properties`/`panels` merge.
     // Project I/O now imports the lower-owned analysis kind directly; its
@@ -214,7 +213,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // Result aggregation, optimization execution, netlisting and materialized
     // OP dispatch remain app-owned until R04/R11 finish their extraction.
     ("services", "simulation", 7),
-    ("simulation", "schematic", 1),
     ("services", "properties", 2),
 ];
 

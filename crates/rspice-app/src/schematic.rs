@@ -14,7 +14,6 @@
 //! - This module provides the egui view layer
 //! - User interactions are translated to state mutations
 
-pub(crate) mod bus_connectivity;
 pub(crate) mod bus_geometry;
 mod component_palette;
 pub use component_palette::{ComponentPaletteEntry, component_palette};

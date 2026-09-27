@@ -3,7 +3,7 @@
 //! This module holds a selection, not a theory of connectivity. It records the
 //! wire IDs a highlight covers and the exact net name that authorized it; it
 //! never decides which conductors belong together. That question has one owner
-//! — `simulation::netlist_gen::extraction` — and the canvas, the netlister, the
+//! — `rspice_design::connectivity` — and the canvas, the netlister, the
 //! electrical rule check and the navigator all read that one answer. A second
 //! graph built here would light a different net than the deck solves, which is
 //! the failure this module is deliberately incapable of.

@@ -6,7 +6,7 @@
 //! reader must never see it: `#` is a character no drawing can contain, and
 //! quoting it back names a conductor the design does not have.
 //!
-//! [`super::vector_names::display_bit_name`] owns the spelling; this module
+//! [`rspice_design::connectivity::display_bit_name`] owns the spelling; this module
 //! owns the one question it cannot answer on its own — which bus declared the
 //! bit, and therefore which delimiters the design wrote it between. The answer
 //! is a lookup and never a default, because `BASE#DIGITS` is not proof of a
@@ -24,8 +24,8 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
-use super::vector_names::display_bit_name;
 use crate::state::{BusNotation, PortSpec, ProjectWorkspace, SchematicState};
+use rspice_design::connectivity::display_bit_name;
 
 /// Every vector one design declares, and the notation it was declared in.
 ///

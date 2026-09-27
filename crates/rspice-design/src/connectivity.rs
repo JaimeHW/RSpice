@@ -11,17 +11,24 @@
 //! disagrees with the netlister signs off on a circuit the engine never runs.
 //! Anything that needs to know what is connected to what asks [`extract`].
 
-use rspice_design::schematic::document::SchematicDocument;
 use std::collections::{HashMap, HashSet};
 
-use super::super::{Net, deck_bit_name};
-use crate::schematic::bus_connectivity::{
-    BusConnectivityAnalysis, BusDiagnosticKind, analyze_bus_connectivity,
-};
-use crate::state::{
-    BusNotation, Component, ComponentType, LibraryCellInstance, NetLabel, NetNamingPolicy, Point,
-    ResolvedCellSymbol, VectorConnectivity, WireSegment, vector_connectivity,
-};
+use crate::resolved_symbol::ResolvedCellSymbol;
+use crate::schematic::bus::{BusNotation, VectorConnectivity, vector_connectivity};
+use crate::schematic::component::{Component, LibraryCellInstance};
+use crate::schematic::component_type::ComponentType;
+use crate::schematic::document::SchematicDocument;
+use crate::schematic::document_policy::NetNamingPolicy;
+use crate::schematic::net_label::NetLabel;
+use crate::schematic::wire::WireSegment;
+use rspice_design_model::Point;
+
+pub mod bus;
+mod net;
+mod vector_names;
+use bus::{BusConnectivityAnalysis, BusDiagnosticKind, analyze_bus_connectivity};
+pub use net::Net;
+pub use vector_names::{deck_bit_name, display_bit_name};
 
 /// One placed terminal, bound to the node the deck emits for it.
 #[derive(Debug, Clone)]
@@ -183,8 +190,7 @@ pub fn terminal_positions(
 /// exactly as it is for the width — and every other name is already the
 /// authored form.
 pub fn display_net_name(schematic: &SchematicDocument, name: &str) -> String {
-    super::super::vector_names::display_bit_name(name, declared_notation(schematic, name))
-        .unwrap_or_else(|| name.to_owned())
+    display_bit_name(name, declared_notation(schematic, name)).unwrap_or_else(|| name.to_owned())
 }
 
 /// The notation the vector that owns this deck bit was declared in.

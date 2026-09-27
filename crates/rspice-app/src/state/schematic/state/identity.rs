@@ -703,12 +703,12 @@ mod tests {
 
         schematic.recalculate_runtime_state();
         let analysis =
-            crate::schematic::bus_connectivity::analyze_bus_connectivity(&schematic.document);
+            rspice_design::connectivity::bus::analyze_bus_connectivity(&schematic.document);
 
         assert_eq!(schematic.document.buses.len(), 1);
         assert_eq!(schematic.document.bus_taps.len(), 1);
         assert!(analysis.diagnostics.iter().any(|diagnostic| {
-            diagnostic.kind == crate::schematic::bus_connectivity::BusDiagnosticKind::MalformedBus
+            diagnostic.kind == rspice_design::connectivity::bus::BusDiagnosticKind::MalformedBus
                 && diagnostic.bus_id == Some(70)
         }));
         assert!(

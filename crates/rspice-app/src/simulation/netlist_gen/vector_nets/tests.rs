@@ -119,7 +119,7 @@ fn projection_names_every_bit_of_a_declared_bus_once() {
         Point::new(80, 0),
     ));
 
-    let connectivity = crate::state::vector_connectivity(
+    let connectivity = rspice_design::schematic::bus::vector_connectivity(
         &state.document.buses,
         &state.document.components,
         |component| component.terminal_positions_resolved(None),
@@ -171,7 +171,7 @@ fn touching_buses_that_declare_different_ranges_are_not_one_vector_net() {
         Point::new(80, 0),
     ));
 
-    let connectivity = crate::state::vector_connectivity(
+    let connectivity = rspice_design::schematic::bus::vector_connectivity(
         &state.document.buses,
         &state.document.components,
         |component| component.terminal_positions_resolved(None),

@@ -28,10 +28,10 @@
 //! `DATA#3` as `DATA<3>` in a document that declared `DATA[3:0]` would quote a
 //! spelling that document does not contain.
 
-use crate::state::BusNotation;
+use rspice_design_model::bus::BusNotation;
 
 /// Deck spelling of bit `index` of the vector net named `base`.
-pub(crate) fn deck_bit_name(base: &str, index: u32) -> String {
+pub fn deck_bit_name(base: &str, index: u32) -> String {
     format!("{base}#{index}")
 }
 
@@ -41,7 +41,7 @@ pub(crate) fn deck_bit_name(base: &str, index: u32) -> String {
 /// authored name, so the last one separates a base from its index and nothing
 /// else can produce that shape. A name with no `#`, an empty base, or a
 /// non-numeric index is an ordinary node and stays exactly as it is.
-pub(crate) fn display_bit_name(deck_name: &str, notation: BusNotation) -> Option<String> {
+pub fn display_bit_name(deck_name: &str, notation: BusNotation) -> Option<String> {
     let (base, index) = deck_name.rsplit_once('#')?;
     if base.is_empty() || index.is_empty() || !index.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
@@ -55,7 +55,7 @@ mod tests {
     use rspice_core::netlist::{ElementKind, Netlist, SaveSignal, XspicePort};
 
     use super::*;
-    use crate::state::BusDeclaration;
+    use rspice_design_model::bus::BusDeclaration;
 
     /// Every deck position a bit name can occupy, in one deck: element nodes,
     /// a `.SUBCKT` port list, a subcircuit instance, an XSPICE port, and both

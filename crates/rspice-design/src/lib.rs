@@ -1,6 +1,7 @@
 //! Headless design documents, source identities, and edit transactions.
 
 pub mod configuration_set;
+pub mod connectivity;
 pub mod connectivity_contract;
 pub mod library;
 pub mod model_bound_symbol;
