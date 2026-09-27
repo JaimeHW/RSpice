@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::product::ContentDigest;
+use crate::project_sources::canonical_cell_view_owner_key;
+use rspice_app_types::product::ContentDigest;
 
 /// Exact semantic operation retained by the project library audit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,8 +158,8 @@ impl ProjectLibraryMutation {
             Self::RenameLibrary {
                 from_library,
                 to_library,
-            } if crate::state::canonical_cell_view_owner_key(from_library, "", "")
-                == crate::state::canonical_cell_view_owner_key(to_library, "", "") =>
+            } if canonical_cell_view_owner_key(from_library, "", "")
+                == canonical_cell_view_owner_key(to_library, "", "") =>
             {
                 Err("library rename source and target identities are equal".to_owned())
             }
@@ -167,8 +168,8 @@ impl ProjectLibraryMutation {
                 cell,
                 from_view,
                 to_view,
-            } if crate::state::canonical_cell_view_owner_key(library, cell, from_view)
-                == crate::state::canonical_cell_view_owner_key(library, cell, to_view) =>
+            } if canonical_cell_view_owner_key(library, cell, from_view)
+                == canonical_cell_view_owner_key(library, cell, to_view) =>
             {
                 Err("view rename source and target identities are equal".to_owned())
             }
@@ -177,8 +178,8 @@ impl ProjectLibraryMutation {
                 source_cell,
                 target_library,
                 target_cell,
-            } if crate::state::canonical_cell_view_owner_key(source_library, source_cell, "")
-                == crate::state::canonical_cell_view_owner_key(target_library, target_cell, "") =>
+            } if canonical_cell_view_owner_key(source_library, source_cell, "")
+                == canonical_cell_view_owner_key(target_library, target_cell, "") =>
             {
                 Err("cell copy source and target identities are equal".to_owned())
             }
@@ -186,8 +187,8 @@ impl ProjectLibraryMutation {
                 library,
                 from_cell,
                 to_cell,
-            } if crate::state::canonical_cell_view_owner_key(library, from_cell, "")
-                == crate::state::canonical_cell_view_owner_key(library, to_cell, "") =>
+            } if canonical_cell_view_owner_key(library, from_cell, "")
+                == canonical_cell_view_owner_key(library, to_cell, "") =>
             {
                 Err("cell rename source and target identities are equal".to_owned())
             }
@@ -200,7 +201,7 @@ impl ProjectLibraryMutation {
 }
 
 /// Validate bounded audit text for a library operation or publication.
-pub(crate) fn validate_library_audit_text(field: &str, value: &str) -> Result<(), String> {
+pub fn validate_library_audit_text(field: &str, value: &str) -> Result<(), String> {
     if value.is_empty() {
         return Err(format!("{field} is required"));
     }

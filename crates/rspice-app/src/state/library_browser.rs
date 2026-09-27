@@ -26,22 +26,18 @@
 
 mod cell;
 mod library;
-mod locks;
 mod manager;
-mod mutation;
 mod placement;
 mod primitives;
 mod view;
 
 pub use cell::Cell;
 pub use library::Library;
-pub use locks::{
+pub use manager::LibraryManager;
+pub(crate) use placement::cell_parameter_contract;
+pub use placement::{LibraryCellPlacementCandidate, library_cell_placement_candidates};
+pub use rspice_design::library::{
     ProjectLibraryEditLock, ProjectLibraryEditLockScope, ProjectLibraryLockAuthority,
     ProjectLibraryLockSnapshot,
 };
-pub use manager::LibraryManager;
-pub use mutation::ProjectLibraryMutation;
-pub(crate) use mutation::validate_library_audit_text;
-pub(crate) use placement::cell_parameter_contract;
-pub use placement::{LibraryCellPlacementCandidate, library_cell_placement_candidates};
 pub use view::{View, ViewType};

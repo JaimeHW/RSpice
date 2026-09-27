@@ -29,7 +29,6 @@ mod reference_preparation;
 // The two functions are renamed on export: bare `normalize` and
 // `collation_key` say nothing about what they normalize outside their module,
 // and analysis names have functions by exactly those names.
-pub use super::library_browser::ProjectLibraryMutation;
 pub use capture_group::{
     CaptureGroup, CaptureGroupError, CaptureGroupMembership, CaptureGroupRule, MembershipMove,
     UNGROUPED_NAME, collation_key as capture_group_collation_key, group_namer,
@@ -46,6 +45,7 @@ pub use project_descriptor::*;
 pub use project_library_publication::*;
 pub(crate) use reference_changes::{PreparedReferences, ReferenceChanges};
 pub(crate) use reference_preparation::{SchematicReferenceTransaction, reference_from_key};
+pub use rspice_design::library::ProjectLibraryMutation;
 pub(crate) use rspice_simulation_contract::saved_output::{
     device_current_probe, saved_output_references, validate_raw_probe,
 };

@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::product::{ContentDigest, ObjectRevision, ProjectId};
 
 use super::{ProjectDescriptor, ProjectDescriptorError};
-use crate::state::library_browser::validate_library_audit_text;
+use rspice_design::library::validate_library_audit_text;
 
 pub const PROJECT_LIBRARY_PUBLICATION_RECEIPT_SCHEMA_VERSION: u16 = 1;
 pub const MAX_PROJECT_LIBRARY_PUBLICATION_RECEIPTS: usize = 4_096;

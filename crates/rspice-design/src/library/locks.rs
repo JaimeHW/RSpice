@@ -11,8 +11,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
-use crate::product::{ContentDigest, ObjectRevision, ProjectId};
-use crate::state::{ProjectLibraryMutation, canonical_cell_view_owner_key};
+use super::ProjectLibraryMutation;
+use crate::project_sources::canonical_cell_view_owner_key;
+use rspice_app_types::product::{ContentDigest, ObjectRevision, ProjectId};
 
 const LOCK_SNAPSHOT_SCHEMA_VERSION: u16 = 1;
 const MAX_LIBRARY_EDIT_LOCKS: usize = 4_096;
