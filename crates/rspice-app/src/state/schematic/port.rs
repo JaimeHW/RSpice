@@ -776,7 +776,7 @@ mod tests {
     #[test]
     fn a_pin_declares_the_same_member_space_a_bus_does() {
         let mut state = SchematicState::default();
-        let highest = crate::state::MAX_BUS_MEMBER_INDEX as usize;
+        let highest = rspice_design::schematic::bus::MAX_BUS_MEMBER_INDEX as usize;
 
         let widest = format!("D[{highest}:0]");
         assert!(

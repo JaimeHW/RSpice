@@ -2,7 +2,8 @@
 
 #[cfg(test)]
 use super::ComponentType;
-pub(crate) use super::reference_edit::PreparedCopyReferences;
+#[cfg(test)]
+use super::reference_edit::PreparedCopyReferences;
 use super::{Component, SchematicState, reference_edit};
 
 impl SchematicState {

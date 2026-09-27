@@ -195,8 +195,8 @@ fn array_preview_and_commit_reference_each_members_own_targets() {
     for member in 1..3 {
         let named = |source| {
             component(
-                &preview.components,
-                &plan.naming.value_for_source(source, member).unwrap(),
+                preview.components(),
+                &plan.naming().value_for_source(source, member).unwrap(),
             )
         };
         let first = named("L1");
@@ -219,7 +219,7 @@ fn array_preview_and_commit_reference_each_members_own_targets() {
     state.array_selection(&plan).unwrap();
     assert_eq!(
         &state.document.components[original.len()..],
-        preview.components
+        preview.components()
     );
     assert!(state.undo());
     assert_eq!(state.document.components, original);

@@ -17,6 +17,7 @@
 //! - `state` - Main SchematicState
 
 mod array;
+mod array_edit;
 mod bus;
 mod canvas_cache;
 use rspice_design::schematic::clipboard;
@@ -60,14 +61,12 @@ mod wire;
 // having a caller; the rest are reachable through their own module.
 pub use array::{
     SchematicArrayCount, SchematicArrayError, SchematicArrayImpact, SchematicArrayKind,
-    SchematicArrayNameAtom, SchematicArrayNaming, SchematicArrayPlacement, SchematicArrayPlan,
-    SchematicArrayPreview,
+    SchematicArrayNaming, SchematicArrayPlacement, SchematicArrayPlan, SchematicArrayPreview,
 };
 pub(crate) use bus::nearest_lattice_point_on_segment;
 pub use bus::{
     Bus, BusDeclaration, BusDirection, BusNotation, BusParseError, BusPropertyImpact, BusSlice,
-    BusTap, BusTapOrientation, BusTargetKind, MAX_BUS_MEMBER_INDEX, PendingBusTap, declared_vector,
-    declared_width,
+    BusTap, BusTapOrientation, BusTargetKind, PendingBusTap, declared_vector, declared_width,
 };
 pub use component::{
     BuiltinXspiceInstance, BuiltinXspicePortBinding, BuiltinXspicePortDirection,

@@ -40,12 +40,12 @@ fn preview_is_exact_and_does_not_mutate_any_live_runtime_state() {
 
     let preview = state.preview_array_selection(&plan).unwrap();
 
-    assert_eq!(preview.impact.members, 4);
-    assert_eq!(preview.impact.replicas, 3);
-    assert_eq!(preview.components.len(), 3);
+    assert_eq!(preview.impact().members, 4);
+    assert_eq!(preview.impact().replicas, 3);
+    assert_eq!(preview.components().len(), 3);
     assert_eq!(
         preview
-            .components
+            .components()
             .iter()
             .map(|component| (component.name.clone(), component.pos))
             .collect::<Vec<_>>(),
@@ -82,11 +82,8 @@ fn linear_commit_matches_preview_preserves_clipboard_and_undoes_once() {
 
     let impact = state.array_selection(&plan).unwrap();
 
-    assert_eq!(impact, preview.impact);
-    assert_eq!(
-        &state.document.components[1..],
-        preview.components.as_slice()
-    );
+    assert_eq!(impact, preview.impact());
+    assert_eq!(&state.document.components[1..], preview.components());
     assert_eq!(state.clipboard.components, clipboard.components);
     assert_eq!(state.clipboard.net_labels, clipboard.net_labels);
     assert_eq!(state.topology_version(), topology.wrapping_add(1));
@@ -112,7 +109,7 @@ fn rectangular_members_are_row_major_with_independent_axis_pitch() {
     let preview = state.preview_array_selection(&plan).unwrap();
     assert_eq!(
         preview
-            .components
+            .components()
             .iter()
             .map(|component| (component.name.as_str(), component.pos))
             .collect::<Vec<_>>(),
@@ -167,7 +164,7 @@ fn radial_documentation_rotates_exact_geometry_without_topology_change() {
     let preview = state.preview_array_selection(&plan).unwrap();
     assert_eq!(
         preview
-            .design_notes
+            .design_notes()
             .iter()
             .map(|note| note.pos)
             .collect::<Vec<_>>(),
@@ -246,19 +243,19 @@ fn resolved_internal_wire_connections_are_remapped_per_replica() {
     let preview = state
         .preview_array_selection_resolved(&plan, terminals, bounds)
         .unwrap();
-    assert_eq!(preview.wires.len(), 1);
-    assert_eq!(preview.connections.len(), 2);
-    let generated_wire_id = preview.wires[0].id;
+    assert_eq!(preview.wires().len(), 1);
+    assert_eq!(preview.connections().len(), 2);
+    let generated_wire_id = preview.wires()[0].id;
     assert!(
         preview
-            .connections
+            .connections()
             .iter()
             .all(|connection| connection.wire_id == generated_wire_id)
     );
     state
         .array_selection_resolved(&plan, terminals, bounds)
         .unwrap();
-    assert_eq!(state.document.connections, preview.connections);
+    assert_eq!(state.document.connections, preview.connections());
 }
 
 #[test]
@@ -314,10 +311,10 @@ fn bus_and_tap_ownership_and_scalar_slice_are_remapped_together() {
     );
 
     let preview = state.preview_array_selection(&plan).unwrap();
-    assert_eq!(preview.buses.len(), 1);
-    assert_eq!(preview.bus_taps.len(), 1);
-    assert_eq!(preview.bus_taps[0].bus_id, preview.buses[0].id);
-    assert_eq!(preview.bus_taps[0].slice.to_string(), "DATA[0]");
+    assert_eq!(preview.buses().len(), 1);
+    assert_eq!(preview.bus_taps().len(), 1);
+    assert_eq!(preview.bus_taps()[0].bus_id, preview.buses()[0].id);
+    assert_eq!(preview.bus_taps()[0].slice.to_string(), "DATA[0]");
     state.array_selection(&plan).unwrap();
     assert_eq!(
         state.document.bus_taps.last().unwrap().bus_id,
@@ -478,7 +475,7 @@ fn default_group_naming_interleaves_same_prefix_without_collisions() {
     .unwrap();
     let preview = state.preview_array_selection(&plan).unwrap();
     let names: HashSet<_> = preview
-        .components
+        .components()
         .iter()
         .map(|component| component.name.as_str())
         .collect();
@@ -549,110 +546,13 @@ fn default_bus_index_naming_interleaves_selected_scalar_labels() {
     .unwrap();
     let preview = state.preview_array_selection(&plan).unwrap();
     let names: HashSet<_> = preview
-        .net_labels
+        .net_labels()
         .iter()
         .map(|label| label.name.as_str())
         .collect();
     assert_eq!(names.len(), 6);
     assert!(names.contains("DATA[6]"));
     assert!(names.contains("DATA[7]"));
-}
-
-#[test]
-fn arbitrary_radial_angles_preserve_line_polygon_and_arc_control_geometry() {
-    let transform = MemberTransform::Rotate {
-        center: Point::origin(),
-        member_index: 1,
-        member_count: 3,
-    };
-    let geometries = [
-        DocumentationShapeGeometry::Line {
-            start: Point::new(30, 0),
-            end: Point::new(30, 30),
-        },
-        DocumentationShapeGeometry::Polygon {
-            points: vec![Point::new(40, 0), Point::new(60, 10), Point::new(45, 30)],
-        },
-        DocumentationShapeGeometry::Arc {
-            start: Point::new(30, 0),
-            through: Point::new(21, 21),
-            end: Point::new(0, 30),
-        },
-    ];
-
-    for (index, geometry) in geometries.into_iter().enumerate() {
-        let expected_points = geometry
-            .points()
-            .into_iter()
-            .map(|point| transform_point(point, transform).unwrap())
-            .collect::<Vec<_>>();
-        let transformed =
-            transform_documentation_geometry(&geometry, transform, 100 + index as u64).unwrap();
-        assert_eq!(transformed.kind(), geometry.kind());
-        assert_eq!(transformed.points(), expected_points);
-        transformed.validate().unwrap();
-    }
-}
-
-#[test]
-fn rectangle_and_callout_use_exact_integer_quarter_turns() {
-    let transform = MemberTransform::Rotate {
-        center: Point::origin(),
-        member_index: 1,
-        member_count: 4,
-    };
-    let rectangle = DocumentationShapeGeometry::Rectangle {
-        first: Point::new(10, 0),
-        opposite: Point::new(30, 20),
-    };
-    let callout = DocumentationShapeGeometry::Callout {
-        tip: Point::new(20, 0),
-        elbow: Point::new(10, 10),
-        box_corner: Point::new(30, 30),
-    };
-
-    assert_eq!(
-        transform_documentation_geometry(&rectangle, transform, 1).unwrap(),
-        DocumentationShapeGeometry::Rectangle {
-            first: Point::new(0, 10),
-            opposite: Point::new(-20, 30),
-        }
-    );
-    assert_eq!(
-        transform_documentation_geometry(&callout, transform, 2).unwrap(),
-        DocumentationShapeGeometry::Callout {
-            tip: Point::new(0, 20),
-            elbow: Point::new(-10, 10),
-            box_corner: Point::new(-30, 30),
-        }
-    );
-}
-
-#[test]
-fn axis_aligned_documentation_fails_closed_at_arbitrary_angles() {
-    let transform = MemberTransform::Rotate {
-        center: Point::origin(),
-        member_index: 1,
-        member_count: 3,
-    };
-    let rectangle = DocumentationShapeGeometry::Rectangle {
-        first: Point::new(10, 0),
-        opposite: Point::new(30, 20),
-    };
-    let callout = DocumentationShapeGeometry::Callout {
-        tip: Point::new(20, 0),
-        elbow: Point::new(10, 10),
-        box_corner: Point::new(30, 30),
-    };
-
-    assert_eq!(
-        transform_documentation_geometry(&rectangle, transform, 70),
-        Err(SchematicArrayError::InvalidGeometry { object_id: 70 })
-    );
-    assert_eq!(
-        transform_documentation_geometry(&callout, transform, 71),
-        Err(SchematicArrayError::InvalidGeometry { object_id: 71 })
-    );
 }
 
 #[test]
@@ -804,18 +704,18 @@ fn snapped_durable_connections_capture_implicit_wire_and_close_selection_symmetr
     let preview = state
         .preview_array_selection_resolved(&plan, terminals, bounds)
         .unwrap();
-    assert_eq!(preview.wires.len(), 1);
-    assert_eq!(preview.connections.len(), 2);
-    assert_eq!(preview.connections[0].terminal_name, "A");
-    assert_eq!(preview.connections[1].terminal_name, "B");
-    assert!(preview.selection.has_wire(wire_id));
-    assert!(preview.selection.has_wire(preview.wires[0].id));
+    assert_eq!(preview.wires().len(), 1);
+    assert_eq!(preview.connections().len(), 2);
+    assert_eq!(preview.connections()[0].terminal_name, "A");
+    assert_eq!(preview.connections()[1].terminal_name, "B");
+    assert!(preview.object_ids().wires.contains(&wire_id));
+    assert!(preview.object_ids().wires.contains(&preview.wires()[0].id));
     state
         .array_selection_resolved(&plan, terminals, bounds)
         .unwrap();
     assert_eq!(state.document.connections.len(), 4);
     assert!(state.selection.has_wire(wire_id));
-    assert!(state.selection.has_wire(preview.wires[0].id));
+    assert!(state.selection.has_wire(preview.wires()[0].id));
 }
 
 #[test]
@@ -857,10 +757,10 @@ fn explicitly_selected_wire_preserves_durable_terminal_ownership_without_duplica
     let preview = state
         .preview_array_selection_resolved(&plan, terminals, bounds)
         .unwrap();
-    assert_eq!(preview.connections.len(), 1);
-    assert_eq!(preview.connections[0].terminal_name, "durable-terminal");
-    assert!(preview.selection.has_wire(wire_id));
-    assert!(preview.selection.has_wire(preview.wires[0].id));
+    assert_eq!(preview.connections().len(), 1);
+    assert_eq!(preview.connections()[0].terminal_name, "durable-terminal");
+    assert!(preview.object_ids().wires.contains(&wire_id));
+    assert!(preview.object_ids().wires.contains(&preview.wires()[0].id));
 }
 
 #[test]

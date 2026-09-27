@@ -16,7 +16,6 @@ use super::design_note::DesignNote;
 use super::documentation_shape::DocumentationShape;
 use super::net_label::{Junction, NetLabel};
 use super::point::Point;
-use super::selection::Selection;
 use super::wire::{Wire, WireConnection};
 
 const fn unit_naming_stride() -> u64 {
@@ -737,6 +736,28 @@ impl SchematicArrayImpact {
     }
 }
 
+/// Identities of the retained source and generated objects in an array.
+/// This result contains no editor handles, filters or interaction state.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArrayObjectIds {
+    pub components: HashSet<u64>,
+    pub wires: HashSet<u64>,
+    pub buses: HashSet<u64>,
+    pub bus_taps: HashSet<u64>,
+    pub net_labels: HashSet<u64>,
+    pub design_notes: HashSet<u64>,
+    pub documentation_shapes: HashSet<u64>,
+    pub junctions: Vec<Point>,
+}
+
+impl ArrayObjectIds {
+    pub(super) fn include_junction(&mut self, point: Point) {
+        if !self.junctions.contains(&point) {
+            self.junctions.push(point);
+        }
+    }
+}
+
 /// Immutable candidate additions used by both canvas preview and atomic commit.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SchematicArrayPreview {
@@ -750,7 +771,7 @@ pub struct SchematicArrayPreview {
     pub(crate) design_notes: Vec<DesignNote>,
     pub(crate) documentation_shapes: Vec<DocumentationShape>,
     pub(crate) connections: Vec<WireConnection>,
-    pub(crate) selection: Selection,
+    pub(crate) object_ids: ArrayObjectIds,
 }
 
 impl SchematicArrayPreview {
@@ -798,8 +819,8 @@ impl SchematicArrayPreview {
         &self.connections
     }
 
-    pub const fn selection(&self) -> &Selection {
-        &self.selection
+    pub const fn object_ids(&self) -> &ArrayObjectIds {
+        &self.object_ids
     }
 }
 

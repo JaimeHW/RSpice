@@ -11,11 +11,14 @@ use super::bus::{Bus, BusDrawing, BusTap, PendingBusTap};
 use super::clipboard::ClipboardData;
 use super::component::{Component, LibraryCellInstance};
 use super::component_type::ComponentType;
-use super::design_note::{DesignNote, PendingDesignNotePlacement};
+#[cfg(test)]
+use super::design_note::DesignNote;
+use super::design_note::PendingDesignNotePlacement;
 use super::document::SchematicDocument;
-use super::documentation_shape::{
-    DocumentationShape, DocumentationShapeDrawing, PendingDocumentationShapePlacement,
-};
+#[cfg(test)]
+use super::documentation_shape::DocumentationShape;
+use super::documentation_shape::{DocumentationShapeDrawing, PendingDocumentationShapePlacement};
+#[cfg(test)]
 use super::net_label::{Junction, NetLabel};
 use super::point::Point;
 use super::port::PendingPortSequence;
@@ -23,7 +26,9 @@ use super::rotation::Rotation;
 use super::selection::Selection;
 use super::snap::SnapEngine;
 use super::tool::Tool;
-use super::wire::{Wire, WireConnection, WireDrawing};
+use super::wire::WireDrawing;
+#[cfg(test)]
+use super::wire::{Wire, WireConnection};
 
 mod components;
 mod editor_ops;
