@@ -19,10 +19,10 @@ use crate::state::{
     SYMBOL_DOCUMENT_METADATA_KEY, SchematicState, SymbolDocument, SymbolEditorMetadata,
 };
 use crate::workbench::app_state::AppState;
-use crate::workbench::lifecycle::symbol_publication::{
+use crate::workbench::{SymbolCommitIntent, SymbolDocumentSnapshot};
+use rspice_design::symbol::publication::{
     EncodedSymbolEditorBundle, SymbolSaveCheck, check_symbol_pins, symbol_save_checks,
 };
-use crate::workbench::{SymbolCommitIntent, SymbolDocumentSnapshot};
 
 use rspice_design::symbol::edit::{
     restore_symbol_snapshot_in_view, symbol_metadata_snapshot_from_view,

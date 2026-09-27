@@ -206,11 +206,10 @@ pub(crate) use workspace::{device_current_probe, saved_output_references};
 // should have to learn what they act on.
 pub use stimulus_library::library::StimulusLibrary;
 pub use symbol::{
-    MAX_SYMBOL_DOCUMENT_BYTES, MAX_SYMBOL_PIN_NAME_BYTES, MAX_SYMBOL_TEXT_BYTES, PinFindingKind,
-    PinSummary, SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY, SYMBOL_TERMINAL_GRID,
-    SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolPin, SymbolPinElectricalKind,
-    SymbolShape, SymbolTextAlign, SymbolTextPlacement, SymbolTextSize, pin_side_against_body,
-    symbol_text_bounds,
+    MAX_SYMBOL_PIN_NAME_BYTES, MAX_SYMBOL_TEXT_BYTES, PinFindingKind, PinSummary,
+    SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolDocument,
+    SymbolEditorMetadata, SymbolPin, SymbolPinElectricalKind, SymbolShape, SymbolTextAlign,
+    SymbolTextPlacement, SymbolTextSize, pin_side_against_body, symbol_text_bounds,
 };
 pub use symbol_resolver::{
     ResolvedCellSymbol, ResolvedSymbolIssueKind, ResolvedSymbolSource, SymbolResolver,

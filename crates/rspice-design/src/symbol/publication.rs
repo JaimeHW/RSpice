@@ -3,12 +3,18 @@
 #[cfg(test)]
 mod tests;
 
-use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
-use crate::state::{
-    CellViewRef, MAX_SYMBOL_DOCUMENT_BYTES, PinFindingKind, PortDirection, PortSpec,
-    SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
-    View,
+use super::{
+    PinFindingKind, SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY, SymbolDocument,
+    SymbolEditorMetadata,
 };
+use crate::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
+use crate::library::View;
+use rspice_design_model::{
+    cell_view::CellViewRef,
+    port::{PortDirection, PortSpec},
+    symbol_pin::{SymbolElectricalType, SymbolPinSide},
+};
+use rspice_model_library::symbol::ModelBoundSymbolDefinition;
 
 /// One row of the symbol's publication contract.
 ///
@@ -39,7 +45,7 @@ impl SymbolSaveCheck {
 /// The publication contract of `document`, judged against the interface it
 /// answers to and the model definition it is bound to, if any.
 pub fn symbol_save_checks(
-    definition: Option<&crate::state::ModelBoundSymbolDefinition>,
+    definition: Option<&ModelBoundSymbolDefinition>,
     cell: &str,
     document: &SymbolDocument,
     ports: &[PortSpec],
@@ -68,16 +74,14 @@ pub fn symbol_save_checks(
             .map(|port| {
                 (
                     match port.direction {
-                        PortDirection::Supply => crate::state::SymbolElectricalType::Power,
-                        _ => crate::state::SymbolElectricalType::Analog,
+                        PortDirection::Supply => SymbolElectricalType::Power,
+                        _ => SymbolElectricalType::Analog,
                     },
                     port.direction,
                     match port.direction {
-                        PortDirection::In => crate::state::SymbolPinSide::Left,
-                        PortDirection::Out | PortDirection::InOut => {
-                            crate::state::SymbolPinSide::Right
-                        }
-                        PortDirection::Supply => crate::state::SymbolPinSide::Top,
+                        PortDirection::In => SymbolPinSide::Left,
+                        PortDirection::Out | PortDirection::InOut => SymbolPinSide::Right,
+                        PortDirection::Supply => SymbolPinSide::Top,
                     },
                     port.name.clone(),
                 )
@@ -176,15 +180,7 @@ impl EncodedSymbolEditorBundle {
         document: &SymbolDocument,
         metadata: &SymbolEditorMetadata,
     ) -> Result<Self, String> {
-        document.validate()?;
-        let encoded_document = serde_json::to_string(document)
-            .map_err(|error| format!("Could not serialize symbol metadata: {error}"))?;
-        if encoded_document.len() > MAX_SYMBOL_DOCUMENT_BYTES {
-            return Err(format!(
-                "Could not serialize symbol metadata: document is {} bytes; the limit is {MAX_SYMBOL_DOCUMENT_BYTES}",
-                encoded_document.len()
-            ));
-        }
+        let encoded_document = document.encode()?;
         let encoded_editor = metadata.encode()?;
         Ok(Self {
             encoded_document,

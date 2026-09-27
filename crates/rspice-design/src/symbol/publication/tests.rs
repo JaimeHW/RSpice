@@ -1,7 +1,8 @@
 //! Publication contract cases independent of the editor surface.
 
 use super::*;
-use crate::state::{Point, SymbolPin};
+use crate::symbol::SymbolPin;
+use rspice_design_model::Point;
 
 /// The row used to state a count nothing computed. Every row now answers
 /// from the document, and the off-grid row answers from the same finding the

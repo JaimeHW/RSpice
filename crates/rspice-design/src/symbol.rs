@@ -26,6 +26,7 @@
 //!   again means deleting it.
 
 pub mod edit;
+pub mod publication;
 
 use std::collections::HashSet;
 
@@ -850,7 +851,7 @@ impl SymbolDocument {
         })
     }
 
-    pub fn store_in_view(&self, view: &mut View) -> Result<(), String> {
+    fn encode(&self) -> Result<String, String> {
         self.validate()?;
         let raw = serde_json::to_string(self)
             .map_err(|err| format!("Could not serialize symbol metadata: {err}"))?;
@@ -860,6 +861,11 @@ impl SymbolDocument {
                 raw.len()
             ));
         }
+        Ok(raw)
+    }
+
+    pub fn store_in_view(&self, view: &mut View) -> Result<(), String> {
+        let raw = self.encode()?;
         view.metadata
             .insert(SYMBOL_DOCUMENT_METADATA_KEY.to_owned(), raw);
         // The body owns whatever schema-1 text this view carried, so the

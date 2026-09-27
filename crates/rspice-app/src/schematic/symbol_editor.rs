@@ -20,8 +20,8 @@ use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
 use crate::workbench::AppState;
-use crate::workbench::lifecycle::symbol_publication::SymbolSaveCheck;
 use crate::workbench::{SymbolGridSpacing, SymbolSelection, SymbolTool};
+use rspice_design::symbol::publication::SymbolSaveCheck;
 
 const PIN_HIT_RADIUS: f32 = 10.0;
 const SCROLL_ZOOM_SENSITIVITY: f32 = 0.001;
