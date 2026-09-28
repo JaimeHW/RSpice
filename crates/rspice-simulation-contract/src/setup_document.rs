@@ -4,6 +4,7 @@
 //! drafts are read by the dedicated legacy adapter and live in the workbench
 //! session until projected into the stable analysis plan.
 
+mod catalog;
 pub mod legacy_read;
 
 use crate::legacy_plan_migration::default_global_run_set;

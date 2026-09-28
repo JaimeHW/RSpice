@@ -1,507 +1,57 @@
-//! Persisted simulation-plan catalog and clone/switch transactions.
-//!
-//! `SimSetupState` exposes the active plan through its portable setup document
-//! so existing execution consumers remain source-compatible. Inactive plans are
-//! stored as complete, typed records. Catalog mutations are staged on a clone
-//! of the setup and commit only after every name, identity, plan graph, and
-//! runner-ownership invariant has been checked.
+//! Editor restoration after persisted simulation-plan catalog transactions.
 
+use super::SimSetupState;
 use crate::product::SimulationPlanId;
+#[cfg(test)]
 use crate::simulation::dialog::SimulationOptions;
-use rspice_simulation_contract::plan_catalog::validate_model_binding_list;
 pub use rspice_simulation_contract::plan_catalog::{
     SimulationPlanCatalogError, SimulationPlanCloneOptions, SimulationPlanCloneOutcome,
-    SimulationPlanImportDocument, SimulationPlanLineage, SimulationPlanName, StoredSimulationPlan,
+    SimulationPlanImportDocument, SimulationPlanLineage, SimulationPlanName,
 };
-use rspice_simulation_contract::plan_model::SimulationPlan;
-use rspice_simulation_contract::run_set::RunSetState;
-use std::collections::HashSet;
-
-use crate::workbench::app_state::{ReferencePvtPoint, SimSetupState};
 
 impl SimSetupState {
-    #[must_use]
-    pub fn active_plan_name(&self) -> &SimulationPlanName {
-        &self.active_plan_name
-    }
-
-    #[must_use]
-    pub const fn active_plan_lineage(&self) -> SimulationPlanLineage {
-        self.document.active_plan_lineage
-    }
-
-    #[must_use]
-    pub fn inactive_plans(&self) -> &[StoredSimulationPlan] {
-        &self.inactive_plans
-    }
-
-    #[must_use]
-    pub fn plan_count(&self) -> usize {
-        usize::from(self.analysis_plan.is_some()) + self.inactive_plans.len()
-    }
-
-    /// Snapshot one catalog entry as a portable plan document without
-    /// changing the active editor.
-    pub fn export_plan(
-        &self,
-        id: SimulationPlanId,
-    ) -> Result<SimulationPlanImportDocument, SimulationPlanCatalogError> {
-        self.validate_plan_catalog()?;
-        if let Some(plan) = self.analysis_plan.as_ref().filter(|plan| plan.id() == id) {
-            return Ok(SimulationPlanImportDocument {
-                source_plan_id: plan.id(),
-                source_revision: plan.revision(),
-                name: self.active_plan_name.clone(),
-                analysis_plan: plan.clone(),
-                reference_pvt: self.reference_pvt,
-                run_set: self.run_set.clone(),
-                model_bindings: self.model_bindings.clone(),
-                save_policy: self.save_policy,
-                options: self.options.clone(),
-            });
-        }
-        let stored = self
-            .inactive_plans
-            .iter()
-            .find(|plan| plan.id() == id)
-            .ok_or(SimulationPlanCatalogError::PlanNotFound(id))?;
-        Ok(stored.to_document())
-    }
-
-    /// Create and activate a fresh root plan while retaining the current plan
-    /// unchanged in the catalog.
     pub fn create_plan(
         &mut self,
         name: impl Into<String>,
     ) -> Result<SimulationPlanId, SimulationPlanCatalogError> {
-        let name = SimulationPlanName::new(name)?;
-        self.ensure_plan_name_available(&name, None)?;
-        self.validate_plan_catalog()?;
-        let active = self
-            .analysis_plan
-            .as_ref()
-            .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?;
-        if active.has_executing_instances() {
-            return Err(SimulationPlanCatalogError::PlanExecuting(active.id()));
-        }
-
-        let mut candidate = self.clone();
-        let stored = take_active_plan_for_storage(&mut candidate)?;
-        candidate.inactive_plans.push(stored);
-        let plan = SimulationPlan::new();
-        let id = plan.id();
-        candidate.active_plan_name = name;
-        candidate.active_plan_lineage = SimulationPlanLineage::default();
-        candidate.analysis_plan = Some(plan);
-        candidate.reference_pvt = ReferencePvtPoint::default();
-        candidate.run_set = RunSetState::reference_only();
-        candidate.model_bindings.clear();
-        candidate.save_policy = crate::workbench::app_state::SimulationSavePolicy::default();
-        candidate.options = SimulationOptions::default();
-        candidate.options.temp = candidate.reference_pvt.temperature_celsius;
-        candidate.reset_plan_editor_transients();
-        candidate.refresh_legacy_analysis_projections();
-        candidate.validate_plan_catalog()?;
-        *self = candidate;
+        let id = self.document.create_plan(name)?;
+        self.reset_plan_editor_transients();
+        self.refresh_legacy_analysis_projections();
         Ok(id)
     }
 
-    /// Rename one plan without changing its stable identity or revision.
-    pub fn rename_plan(
-        &mut self,
-        id: SimulationPlanId,
-        name: impl Into<String>,
-    ) -> Result<(), SimulationPlanCatalogError> {
-        self.validate_plan_catalog()?;
-        let name = SimulationPlanName::new(name)?;
-        self.ensure_plan_name_available(&name, Some(id))?;
-        let active = self
-            .analysis_plan
-            .as_ref()
-            .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?;
-        if active.id() == id {
-            if active.has_executing_instances() {
-                return Err(SimulationPlanCatalogError::PlanExecuting(id));
-            }
-            self.active_plan_name = name;
-            return Ok(());
-        }
-        let plan = self
-            .inactive_plans
-            .iter_mut()
-            .find(|plan| plan.id() == id)
-            .ok_or(SimulationPlanCatalogError::PlanNotFound(id))?;
-        if plan.analysis_plan().has_executing_instances() {
-            return Err(SimulationPlanCatalogError::PlanExecuting(id));
-        }
-        plan.rename(name);
-        Ok(())
-    }
-
-    /// Recoverably archive one inactive plan.
-    pub fn archive_plan(&mut self, id: SimulationPlanId) -> Result<(), SimulationPlanCatalogError> {
-        self.validate_plan_catalog()?;
-        if self
-            .analysis_plan
-            .as_ref()
-            .is_some_and(|plan| plan.id() == id)
-        {
-            return Err(SimulationPlanCatalogError::ActivePlanCannotBeArchived(id));
-        }
-        let plan = self
-            .inactive_plans
-            .iter_mut()
-            .find(|plan| plan.id() == id)
-            .ok_or(SimulationPlanCatalogError::PlanNotFound(id))?;
-        if plan.archived() {
-            return Err(SimulationPlanCatalogError::PlanAlreadyArchived(id));
-        }
-        if plan.analysis_plan().has_executing_instances() {
-            return Err(SimulationPlanCatalogError::PlanExecuting(id));
-        }
-        plan.set_archived(true);
-        Ok(())
-    }
-
-    /// Restore an archived plan to the selectable catalog.
-    pub fn restore_plan(&mut self, id: SimulationPlanId) -> Result<(), SimulationPlanCatalogError> {
-        self.validate_plan_catalog()?;
-        let plan = self
-            .inactive_plans
-            .iter_mut()
-            .find(|plan| plan.id() == id)
-            .ok_or(SimulationPlanCatalogError::PlanNotFound(id))?;
-        if !plan.archived() {
-            return Err(SimulationPlanCatalogError::PlanNotArchived(id));
-        }
-        plan.set_archived(false);
-        Ok(())
-    }
-
-    /// Import a portable plan as a fresh local identity and activate it.
-    /// Source lineage is retained, while analysis identities are remapped so
-    /// imported references cannot collide with this project.
     pub fn import_plan(
         &mut self,
-        mut document: SimulationPlanImportDocument,
+        document: SimulationPlanImportDocument,
     ) -> Result<SimulationPlanCloneOutcome, SimulationPlanCatalogError> {
-        self.validate_plan_catalog()?;
-        self.ensure_plan_name_available(&document.name, None)?;
-        document.analysis_plan.prepare_after_restore();
-        document.analysis_plan.validate_structure()?;
-        validate_model_binding_list(&document.model_bindings)
-            .map_err(SimulationPlanCatalogError::InvalidModelBindings)?;
-        let current = self
-            .analysis_plan
-            .as_ref()
-            .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?;
-        if current.has_executing_instances() {
-            return Err(SimulationPlanCatalogError::PlanExecuting(current.id()));
-        }
-        let imported = document.analysis_plan.clone_as_new()?;
-        let analysis_identity_map = document
-            .analysis_plan
-            .instances()
-            .iter()
-            .zip(imported.instances())
-            .map(|(source, destination)| (source.id(), destination.id()))
-            .collect::<Vec<_>>();
-        let imported_id = imported.id();
-
-        let mut candidate = self.clone();
-        let stored = take_active_plan_for_storage(&mut candidate)?;
-        candidate.inactive_plans.push(stored);
-        candidate.active_plan_name = document.name;
-        candidate.active_plan_lineage = SimulationPlanLineage::cloned_from_with_contents(
-            document.source_plan_id,
-            document.source_revision,
-            SimulationPlanCloneOptions::ALL_PLAN_CONTENTS,
-        );
-        candidate.analysis_plan = Some(imported);
-        candidate.reference_pvt = document.reference_pvt;
-        candidate.run_set = document.run_set;
-        candidate.model_bindings = document.model_bindings;
-        candidate.save_policy = document.save_policy;
-        candidate.options = document.options;
-        candidate.reset_plan_editor_transients();
-        candidate.refresh_legacy_analysis_projections();
-        candidate.validate_plan_catalog()?;
-        *self = candidate;
-        Ok(SimulationPlanCloneOutcome {
-            source_plan_id: document.source_plan_id,
-            source_revision: document.source_revision,
-            cloned_plan_id: imported_id,
-            contents: SimulationPlanCloneOptions::ALL_PLAN_CONTENTS,
-            analysis_identity_map,
-        })
+        let outcome = self.document.import_plan(document)?;
+        self.reset_plan_editor_transients();
+        self.refresh_legacy_analysis_projections();
+        Ok(outcome)
     }
 
-    /// Clone the active plan and activate the clone in one atomic operation.
-    ///
-    /// The source becomes an inactive named plan. Result data is not part of
-    /// `SimSetupState`, so no result dataset or manifest can be duplicated by
-    /// this transaction.
     pub fn clone_active_plan(
         &mut self,
         new_name: impl Into<String>,
         contents: SimulationPlanCloneOptions,
     ) -> Result<SimulationPlanCloneOutcome, SimulationPlanCatalogError> {
-        let new_name = SimulationPlanName::new(new_name)?;
-        self.ensure_plan_name_available(&new_name, None)?;
-        self.validate_plan_catalog()?;
-
-        let source = self
-            .analysis_plan
-            .as_ref()
-            .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?;
-        if source.has_executing_instances() {
-            return Err(SimulationPlanCatalogError::PlanExecuting(source.id()));
-        }
-
-        let existing_ids = self.plan_identities();
-        let cloned_plan = loop {
-            let candidate = if contents.copy_analyses {
-                source.clone_as_new()?
-            } else {
-                SimulationPlan::empty()
-            };
-            if !existing_ids.contains(&candidate.id()) {
-                break candidate;
-            }
-        };
-        let source_id = source.id();
-        let source_revision = source.revision();
-        let cloned_id = cloned_plan.id();
-        let analysis_identity_map = source
-            .instances()
-            .iter()
-            .zip(cloned_plan.instances())
-            .map(|(source, cloned)| (source.id(), cloned.id()))
-            .collect();
-        let cloned_lineage =
-            SimulationPlanLineage::cloned_from_with_contents(source_id, source_revision, contents);
-        let cloned_reference_pvt = if contents.copy_pvt_and_model_bindings {
-            self.reference_pvt
-        } else {
-            ReferencePvtPoint::default()
-        };
-        let cloned_run_set = if contents.copy_pvt_and_model_bindings {
-            self.run_set.clone()
-        } else {
-            RunSetState::reference_only()
-        };
-        let cloned_model_bindings = if contents.copy_pvt_and_model_bindings {
-            self.model_bindings.clone()
-        } else {
-            Vec::new()
-        };
-        let cloned_save_policy = if contents.copy_advanced_options {
-            self.save_policy
-        } else {
-            crate::workbench::app_state::SimulationSavePolicy::default()
-        };
-        let mut cloned_options = if contents.copy_advanced_options {
-            self.options.clone()
-        } else {
-            SimulationOptions::default()
-        };
-        // Reference temperature is owned by the PVT domain and must agree
-        // with the exact value the solver consumes, regardless of whether the
-        // rest of the advanced options were copied.
-        cloned_options.temp = cloned_reference_pvt.temperature_celsius;
-
-        let mut candidate = self.clone();
-        let stored = take_active_plan_for_storage(&mut candidate)?;
-        candidate.inactive_plans.push(stored);
-        candidate.active_plan_name = new_name;
-        candidate.active_plan_lineage = cloned_lineage;
-        candidate.analysis_plan = Some(cloned_plan);
-        candidate.reference_pvt = cloned_reference_pvt;
-        candidate.run_set = cloned_run_set;
-        candidate.model_bindings = cloned_model_bindings;
-        candidate.save_policy = cloned_save_policy;
-        candidate.options = cloned_options;
-        candidate.reset_plan_editor_transients();
-        candidate.refresh_legacy_analysis_projections();
-        candidate.validate_plan_catalog()?;
-        *self = candidate;
-        Ok(SimulationPlanCloneOutcome {
-            source_plan_id: source_id,
-            source_revision,
-            cloned_plan_id: cloned_id,
-            contents,
-            analysis_identity_map,
-        })
+        let outcome = self.document.clone_active_plan(new_name, contents)?;
+        self.reset_plan_editor_transients();
+        self.refresh_legacy_analysis_projections();
+        Ok(outcome)
     }
 
-    /// Activate an existing plan without changing either plan's durable
-    /// identity or revision. The replaced active plan is retained in the same
-    /// catalog slot, preserving deterministic presentation order.
     pub fn activate_plan(
         &mut self,
         id: SimulationPlanId,
     ) -> Result<(), SimulationPlanCatalogError> {
-        self.validate_plan_catalog()?;
-        let active = self
-            .analysis_plan
-            .as_ref()
-            .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?;
-        if active.id() == id {
-            return Ok(());
-        }
-        if active.has_executing_instances() {
-            return Err(SimulationPlanCatalogError::PlanExecuting(active.id()));
-        }
-        let index = self
-            .inactive_plans
-            .iter()
-            .position(|plan| plan.id() == id)
-            .ok_or(SimulationPlanCatalogError::PlanNotFound(id))?;
-        if self.inactive_plans[index]
-            .analysis_plan()
-            .has_executing_instances()
-        {
-            return Err(SimulationPlanCatalogError::PlanExecuting(id));
-        }
-        if self.inactive_plans[index].archived() {
-            return Err(SimulationPlanCatalogError::PlanArchived(id));
-        }
-
-        let mut candidate = self.clone();
-        let target = candidate.inactive_plans.remove(index);
-        let current = take_active_plan_for_storage(&mut candidate)?;
-        candidate.inactive_plans.insert(index, current);
-        candidate.active_plan_lineage = target.lineage();
-        let target = target.into_document();
-        candidate.active_plan_name = target.name;
-        candidate.analysis_plan = Some(target.analysis_plan);
-        candidate.reference_pvt = target.reference_pvt;
-        candidate.run_set = target.run_set;
-        candidate.model_bindings = target.model_bindings;
-        candidate.save_policy = target.save_policy;
-        candidate.options = target.options;
-        candidate.reset_plan_editor_transients();
-        candidate.refresh_legacy_analysis_projections();
-        candidate.validate_plan_catalog()?;
-        *self = candidate;
-        Ok(())
-    }
-
-    /// Advance the active plan revision for a committed variables, outputs,
-    /// specifications, PVT, model-binding, or other plan-owned configuration
-    /// change. This invalidates revision-pinned preflight evidence without
-    /// pretending an analysis instance was edited.
-    pub fn commit_active_plan_configuration_change(
-        &mut self,
-        detail: impl Into<String>,
-    ) -> Result<
-        crate::simulation::plan::SimulationPlanConfigurationReceipt,
-        SimulationPlanCatalogError,
-    > {
-        self.validate_plan_catalog()?;
-        let plan = self
-            .analysis_plan
-            .as_mut()
-            .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?;
-        let receipt = plan.commit_configuration_change(detail)?;
-        Ok(receipt)
-    }
-
-    /// Validate names, identities, lineage, and every active/inactive analysis
-    /// graph. Editable incompleteness is permitted; structural corruption is
-    /// rejected.
-    pub(crate) fn validate_plan_catalog(&self) -> Result<(), SimulationPlanCatalogError> {
-        let active = self
-            .analysis_plan
-            .as_ref()
-            .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?;
-        active.validate_structure()?;
-
-        let mut names = HashSet::with_capacity(self.plan_count());
-        names.insert(self.active_plan_name.uniqueness_key());
-        let mut ids = HashSet::with_capacity(self.plan_count());
-        ids.insert(active.id());
-        if !self.active_plan_lineage.is_valid() {
-            return Err(SimulationPlanCatalogError::InvalidLineage(active.id()));
-        }
-        validate_model_binding_list(&self.model_bindings)
-            .map_err(SimulationPlanCatalogError::InvalidModelBindings)?;
-        self.save_policy
-            .validate()
-            .map_err(SimulationPlanCatalogError::InvalidSavePolicy)?;
-
-        for stored in &self.inactive_plans {
-            if !names.insert(stored.name().uniqueness_key()) {
-                return Err(SimulationPlanCatalogError::DuplicateName(
-                    stored.name().to_string(),
-                ));
-            }
-            if !ids.insert(stored.id()) {
-                return Err(SimulationPlanCatalogError::DuplicatePlanIdentity(
-                    stored.id(),
-                ));
-            }
-            if !stored.lineage().is_valid() {
-                return Err(SimulationPlanCatalogError::InvalidLineage(stored.id()));
-            }
-            validate_model_binding_list(stored.model_bindings())
-                .map_err(SimulationPlanCatalogError::InvalidModelBindings)?;
-            stored
-                .save_policy()
-                .validate()
-                .map_err(SimulationPlanCatalogError::InvalidSavePolicy)?;
-            stored.analysis_plan().validate_structure()?;
+        let previous = self.document.analysis_plan.as_ref().map(|plan| plan.id());
+        self.document.activate_plan(id)?;
+        if previous != Some(id) {
+            self.reset_plan_editor_transients();
+            self.refresh_legacy_analysis_projections();
         }
         Ok(())
-    }
-
-    pub(crate) fn prepare_plan_catalog_after_restore(&mut self) {
-        for plan in &mut self.inactive_plans {
-            plan.prepare_after_restore();
-        }
-    }
-
-    /// Migrate the former project-global model selection into every plan.
-    /// Called only by the execution-context schema migration that predates
-    /// per-plan bindings; a current explicit empty closure remains empty.
-    pub(crate) fn migrate_legacy_model_bindings(
-        &mut self,
-        bindings: &[crate::state::model_library::SimulationPlanModelBinding],
-    ) {
-        self.model_bindings = bindings.to_vec();
-        for plan in &mut self.inactive_plans {
-            plan.replace_model_bindings(bindings.to_vec());
-        }
-    }
-
-    fn plan_identities(&self) -> HashSet<SimulationPlanId> {
-        self.analysis_plan
-            .iter()
-            .map(SimulationPlan::id)
-            .chain(self.inactive_plans.iter().map(StoredSimulationPlan::id))
-            .collect()
-    }
-
-    fn ensure_plan_name_available(
-        &self,
-        name: &SimulationPlanName,
-        except_id: Option<SimulationPlanId>,
-    ) -> Result<(), SimulationPlanCatalogError> {
-        let key = name.uniqueness_key();
-        let active_conflicts = self
-            .analysis_plan
-            .as_ref()
-            .is_some_and(|plan| Some(plan.id()) != except_id)
-            && self.active_plan_name.uniqueness_key() == key;
-        let inactive_conflicts = self
-            .inactive_plans
-            .iter()
-            .any(|plan| Some(plan.id()) != except_id && plan.name().uniqueness_key() == key);
-        if active_conflicts || inactive_conflicts {
-            Err(SimulationPlanCatalogError::DuplicateName(name.to_string()))
-        } else {
-            Ok(())
-        }
     }
 
     fn reset_plan_editor_transients(&mut self) {
@@ -514,215 +64,10 @@ impl SimSetupState {
     }
 }
 
-fn take_active_plan_for_storage(
-    setup: &mut SimSetupState,
-) -> Result<StoredSimulationPlan, SimulationPlanCatalogError> {
-    let plan = setup
-        .analysis_plan
-        .take()
-        .ok_or(SimulationPlanCatalogError::ActivePlanUnavailable)?;
-    let document = SimulationPlanImportDocument {
-        source_plan_id: plan.id(),
-        source_revision: plan.revision(),
-        name: setup.active_plan_name.clone(),
-        analysis_plan: plan,
-        reference_pvt: setup.reference_pvt,
-        run_set: setup.run_set.clone(),
-        model_bindings: setup.model_bindings.clone(),
-        save_policy: setup.save_policy,
-        options: setup.options.clone(),
-    };
-    Ok(StoredSimulationPlan::from_document(
-        document,
-        setup.active_plan_lineage,
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::product::AnalysisInstanceId;
-    use crate::simulation::plan::{AnalysisKind, AnalysisLifecycleState};
-    use rspice_simulation_contract::run_set::RunSetDimensionKind;
-
-    #[test]
-    fn plan_names_are_trimmed_validated_and_case_insensitively_unique() {
-        let name = SimulationPlanName::new("  Post-layout sweep  ").expect("name is valid");
-        assert_eq!(name.as_str(), "Post-layout sweep");
-        assert!(SimulationPlanName::new("\n").is_err());
-        assert!(SimulationPlanName::new("a".repeat(97)).is_err());
-
-        let mut setup = SimSetupState::new();
-        let error = setup
-            .clone_active_plan(
-                "LAB CHARACTERIZATION",
-                SimulationPlanCloneOptions::default(),
-            )
-            .expect_err("names are unique without ASCII-case ambiguity");
-        assert!(matches!(
-            error,
-            SimulationPlanCatalogError::DuplicateName(_)
-        ));
-    }
-
-    #[test]
-    fn cloning_activates_a_fresh_plan_and_retains_an_independent_source() {
-        let mut setup = SimSetupState::new();
-        let source_id = setup.analysis_plan.as_ref().unwrap().id();
-        let source_instance_id = setup.analysis_plan.as_ref().unwrap().instances()[0].id();
-        setup.options.reltol = 2.5e-5;
-        setup.save_policy.retained_dataset_limit = 7;
-        setup
-            .run_set
-            .dimensions
-            .iter_mut()
-            .find(|dimension| dimension.kind == RunSetDimensionKind::Supply)
-            .unwrap()
-            .source = "netlist-source:VDD".to_owned();
-        setup
-            .model_bindings
-            .push(crate::state::model_library::SimulationPlanModelBinding {
-                library_name: "foundry-models".to_owned(),
-                source_digest: crate::product::ContentDigest::from_bytes([7; 32]),
-                selected_corner: Some("TT".to_owned()),
-            });
-        setup
-            .analysis_plan
-            .as_mut()
-            .unwrap()
-            .edit(source_instance_id, |draft| {
-                let crate::simulation::plan::AnalysisDraft::Transient(draft) = draft else {
-                    panic!("expected transient");
-                };
-                draft.stop = "42u".to_owned();
-            })
-            .unwrap();
-
-        let clone = setup
-            .clone_active_plan(
-                "Lab characterization · variant",
-                SimulationPlanCloneOptions::default(),
-            )
-            .expect("clone commits");
-        let clone_id = clone.cloned_plan_id;
-
-        assert_eq!(setup.plan_count(), 2);
-        assert_eq!(
-            setup.active_plan_name().as_str(),
-            "Lab characterization · variant"
-        );
-        assert_eq!(setup.analysis_plan.as_ref().unwrap().id(), clone_id);
-        assert_ne!(clone_id, source_id);
-        assert_eq!(setup.options.reltol, 2.5e-5);
-        assert_eq!(setup.save_policy.retained_dataset_limit, 7);
-        assert_eq!(clone.source_plan_id, source_id);
-        assert_eq!(clone.contents, SimulationPlanCloneOptions::default());
-        assert_eq!(
-            clone.analysis_identity_map,
-            vec![(source_instance_id, clone_instance_id(&setup))]
-        );
-        assert_eq!(
-            setup.active_plan_lineage(),
-            SimulationPlanLineage::cloned_from_with_contents(
-                source_id,
-                setup.inactive_plans()[0].revision(),
-                SimulationPlanCloneOptions::ALL_PLAN_CONTENTS,
-            )
-        );
-        let clone_instance = &setup.analysis_plan.as_ref().unwrap().instances()[0];
-        assert_ne!(clone_instance.id(), source_instance_id);
-        assert_eq!(clone_instance.lifecycle(), AnalysisLifecycleState::Draft);
-        assert!(setup.analysis_plan.as_ref().unwrap().receipts().is_empty());
-        assert!(
-            setup
-                .analysis_plan
-                .as_ref()
-                .unwrap()
-                .tombstones()
-                .is_empty()
-        );
-        assert_eq!(setup.inactive_plans()[0].id(), source_id);
-        assert_eq!(
-            setup.inactive_plans()[0]
-                .run_set()
-                .dimensions
-                .iter()
-                .find(|dimension| dimension.kind == RunSetDimensionKind::Supply)
-                .unwrap()
-                .source,
-            "netlist-source:VDD"
-        );
-        assert_eq!(
-            setup.inactive_plans()[0].model_bindings()[0]
-                .selected_corner
-                .as_deref(),
-            Some("TT")
-        );
-        setup
-            .run_set
-            .dimensions
-            .iter_mut()
-            .find(|dimension| dimension.kind == RunSetDimensionKind::Supply)
-            .unwrap()
-            .source = "netlist-source:VCORE".to_owned();
-        setup.model_bindings[0].selected_corner = Some("FF".to_owned());
-        setup.save_policy.retained_dataset_limit = 3;
-
-        setup
-            .activate_plan(source_id)
-            .expect("source can be reactivated");
-        assert_eq!(
-            setup.active_plan_name().as_str(),
-            SimulationPlanName::default().as_str()
-        );
-        assert_eq!(setup.analysis_plan.as_ref().unwrap().id(), source_id);
-        assert_eq!(
-            setup.analysis_plan.as_ref().unwrap().instances()[0].id(),
-            source_instance_id
-        );
-        assert_eq!(setup.inactive_plans()[0].id(), clone_id);
-        assert_eq!(
-            setup
-                .run_set
-                .dimensions
-                .iter()
-                .find(|dimension| dimension.kind == RunSetDimensionKind::Supply)
-                .unwrap()
-                .source,
-            "netlist-source:VDD",
-            "switching restores the source plan's independent run-set document"
-        );
-        assert_eq!(
-            setup.model_bindings[0].selected_corner.as_deref(),
-            Some("TT"),
-            "switching restores the source plan's model section"
-        );
-        assert_eq!(setup.save_policy.retained_dataset_limit, 7);
-        assert_eq!(
-            setup.inactive_plans()[0]
-                .run_set()
-                .dimensions
-                .iter()
-                .find(|dimension| dimension.kind == RunSetDimensionKind::Supply)
-                .unwrap()
-                .source,
-            "netlist-source:VCORE",
-            "the clone retains its independently edited run set"
-        );
-        assert_eq!(
-            setup.inactive_plans()[0].model_bindings()[0]
-                .selected_corner
-                .as_deref(),
-            Some("FF"),
-            "the clone retains its independently edited model section"
-        );
-        assert_eq!(
-            setup.inactive_plans()[0]
-                .save_policy()
-                .retained_dataset_limit,
-            3
-        );
-    }
+    use crate::simulation::plan::AnalysisKind;
 
     #[test]
     fn clone_content_flags_create_an_empty_plan_with_default_advanced_options() {
@@ -756,60 +101,28 @@ mod tests {
     }
 
     #[test]
-    fn create_rename_archive_restore_and_activate_preserve_identity() {
-        let mut setup = SimSetupState::new();
-        let original_id = setup.analysis_plan.as_ref().unwrap().id();
-        let created_id = setup
-            .create_plan("Fresh characterization")
-            .expect("fresh plan commits");
-        assert_ne!(created_id, original_id);
-        assert_eq!(setup.active_plan_name().as_str(), "Fresh characterization");
-        assert_eq!(
-            setup.active_plan_lineage(),
-            SimulationPlanLineage::default()
-        );
-        assert!(setup.model_bindings.is_empty());
-
-        setup
-            .rename_plan(original_id, "Archived source")
-            .expect("inactive rename preserves identity");
-        assert_eq!(setup.inactive_plans()[0].name().as_str(), "Archived source");
-        assert_eq!(setup.inactive_plans()[0].id(), original_id);
-        setup
-            .archive_plan(original_id)
-            .expect("inactive plan archives");
-        assert!(setup.inactive_plans()[0].archived());
-        assert!(matches!(
-            setup.activate_plan(original_id),
-            Err(SimulationPlanCatalogError::PlanArchived(id)) if id == original_id
-        ));
-        setup
-            .restore_plan(original_id)
-            .expect("archive is recoverable");
-        setup
-            .activate_plan(original_id)
-            .expect("restored plan activates");
-        assert_eq!(setup.analysis_plan.as_ref().unwrap().id(), original_id);
-        assert_eq!(setup.active_plan_name().as_str(), "Archived source");
-        assert!(matches!(
-            setup.archive_plan(original_id),
-            Err(SimulationPlanCatalogError::ActivePlanCannotBeArchived(id)) if id == original_id
-        ));
-    }
-
-    fn clone_instance_id(setup: &SimSetupState) -> AnalysisInstanceId {
-        setup.analysis_plan.as_ref().unwrap().instances()[0].id()
-    }
-
-    #[test]
     fn plan_switch_is_atomic_when_the_target_is_missing() {
         let mut setup = SimSetupState::new();
+        setup.session.palette_open = true;
+        setup.session.palette_query = "keep this draft".to_owned();
+        setup.session.palette_active = 3;
+        setup.session.palette_scroll_to_active = true;
+        setup.ac.points = "uncommitted draft".to_owned();
         let before = serde_json::to_value(&setup).unwrap();
+        let active_id = setup.analysis_plan.as_ref().unwrap().id();
+        setup
+            .activate_plan(active_id)
+            .expect("active plan is unchanged");
         assert!(matches!(
             setup.activate_plan(SimulationPlanId::new()),
             Err(SimulationPlanCatalogError::PlanNotFound(_))
         ));
         assert_eq!(serde_json::to_value(&setup).unwrap(), before);
+        assert!(setup.session.palette_open);
+        assert_eq!(setup.session.palette_query, "keep this draft");
+        assert_eq!(setup.session.palette_active, 3);
+        assert!(setup.session.palette_scroll_to_active);
+        assert_eq!(setup.ac.points, "uncommitted draft");
     }
 
     #[test]

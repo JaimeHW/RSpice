@@ -42,7 +42,7 @@ pub(super) fn dialog(
 /// the identity and the revision is never reached, and a run receipt names a
 /// plan by that identity rather than by its name.
 ///
-/// [`SimSetupState::rename_plan`]: crate::workbench::app_state::SimSetupState::rename_plan
+/// [`SimSetupState::rename_plan`]: rspice_simulation_contract::setup_document::SimulationSetupDocument::rename_plan
 const RENAME_DESCRIPTION: &str = "Renaming writes the plan's display name and nothing else. Its stable identity, its revision, and every run receipt that references it are left exactly as they are.";
 
 /// The two ways the catalog refuses a rename, which are the two `rename_plan`

@@ -28,5 +28,5 @@ pub use rspice_simulation_contract::analysis_kind::{AnalysisAvailability, Analys
 pub use rspice_simulation_contract::plan_model::{
     AnalysisDependency, AnalysisInstance, AnalysisLifecycleCommand, AnalysisLifecycleReceipt,
     AnalysisLifecycleState, AnalysisPlanError, AnalysisPlanIssue, FrozenAnalysisInstance,
-    FrozenSimulationPlan, SimulationPlan, SimulationPlanConfigurationReceipt,
+    FrozenSimulationPlan, SimulationPlan,
 };
