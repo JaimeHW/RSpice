@@ -1163,9 +1163,7 @@ fn project_persistence_location(app: &RSpiceApp) -> String {
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        binding
-            .canonical_path()
-            .map_or_else(fallback, |path| path.display().to_string())
+        binding.canonical_path.display().to_string()
     }
     #[cfg(target_arch = "wasm32")]
     {

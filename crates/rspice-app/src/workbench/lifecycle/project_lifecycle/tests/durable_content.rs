@@ -287,7 +287,7 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
             .unwrap();
         let post_save = prepare_post_save_registry(
             &state,
-            &saved,
+            &saved.file,
             SaveScope::ActiveDocument,
             SnapshotContent::Current,
         )

@@ -8,6 +8,8 @@ use super::*;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::simulation::plan::AnalysisKind;
 use crate::state::{ComponentType, Point};
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_project::persistence::native::NativeProjectStorage;
 
 mod durable_content;
 mod fingerprint_cache;
@@ -826,13 +828,14 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
 #[test]
 fn user_selected_native_publication_rejects_late_create_and_edit() {
     let path = unique_path("picker-cas");
-    let missing = persistence::observe_native_destination(&path)
+    let missing = persistence::NativeStorage
+        .observe_destination(&path)
         .expect("observe picker destination as missing");
     std::fs::write(&path, b"created after picker").expect("simulate late create");
 
-    let create_conflict =
-        persistence::publish_canonical_native(&path, missing, b"local project bytes")
-            .expect_err("late create must block publication");
+    let create_conflict = persistence::NativeStorage
+        .publish(&path, missing, b"local project bytes")
+        .expect_err("late create must block publication");
     assert!(matches!(
         create_conflict,
         rspice_project::persistence::PersistenceError::ExternalChange
@@ -842,12 +845,13 @@ fn user_selected_native_publication_rejects_late_create_and_edit() {
         b"created after picker"
     );
 
-    let accepted =
-        persistence::observe_native_destination(&path).expect("capture exact picker-time bytes");
+    let accepted = persistence::NativeStorage
+        .observe_destination(&path)
+        .expect("capture exact picker-time bytes");
     std::fs::write(&path, b"edited after picker").expect("simulate late edit");
-    let edit_conflict =
-        persistence::publish_canonical_native(&path, accepted, b"local project bytes")
-            .expect_err("late edit must block publication");
+    let edit_conflict = persistence::NativeStorage
+        .publish(&path, accepted, b"local project bytes")
+        .expect_err("late edit must block publication");
     assert!(matches!(
         edit_conflict,
         rspice_project::persistence::PersistenceError::ExternalChange

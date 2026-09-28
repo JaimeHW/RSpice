@@ -1,6 +1,8 @@
 //! Canonical project byte identities and persisted binding receipts.
 
 pub mod browser;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod native;
 
 use crate::{ProjectFile, ProjectIoError};
 use rspice_app_types::product::ContentDigest;

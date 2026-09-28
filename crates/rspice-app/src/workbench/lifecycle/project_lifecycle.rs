@@ -14,6 +14,10 @@ use accepted_project::AcceptedProject;
 pub(crate) use persistence::{
     start_browser_checkpoint_list, start_browser_checkpoint_publish, start_browser_checkpoint_read,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use rspice_project::persistence::native::DestinationAuthority;
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_project::persistence::native::{NativeCopyDestination, NativeSaveDestination};
 mod registry;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -65,6 +69,7 @@ struct BrowserConflict {
 pub(crate) struct ProjectLifecycleState {
     pub(crate) authority: ProjectLifecycle,
     accepted: Option<AcceptedProject>,
+    #[cfg(not(target_arch = "wasm32"))]
     unreadable_native_binding: Option<persistence::UnreadableNativeBinding>,
     result_cache: result_cache::ResultCache,
     #[cfg(target_arch = "wasm32")]
@@ -91,7 +96,7 @@ impl ProjectLifecycleState {
         self.accepted
             .as_ref()
             .and_then(|accepted| accepted.binding.as_ref())
-            .and_then(PersistenceBinding::canonical_path)
+            .map(|binding| binding.canonical_path.as_path())
     }
 }
 
@@ -130,16 +135,6 @@ pub(crate) fn accepted_active_schematic(state: &AppState) -> Option<crate::state
 /// a different save, import, or binding restoration has completed.
 pub(crate) const fn accepted_generation(state: &AppState) -> u64 {
     state.project_lifecycle.authority.accepted_generation()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DestinationAuthority {
-    /// Ordinary Save to an already accepted canonical binding.
-    Canonical,
-    /// A fresh native Save/Save As picker explicitly selected this path and
-    /// supplied the platform overwrite decision.
-    UserSelected,
 }
 
 pub(crate) fn snapshot(state: &AppState) -> Result<ProjectSnapshot, ProjectLifecycleError> {
@@ -545,7 +540,10 @@ pub(crate) fn accept_loaded_project(
     state.project_lifecycle.authority.open_session();
     state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, binding));
     state.project_lifecycle.authority.accept_content();
-    state.project_lifecycle.unreadable_native_binding = None;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        state.project_lifecycle.unreadable_native_binding = None;
+    }
     #[cfg(not(target_arch = "wasm32"))]
     {
         state.native_project_binding_receipt = native_receipt;
@@ -731,37 +729,24 @@ pub(crate) fn save_native(
 ) -> Result<(), ProjectLifecycleError> {
     require_open_project(state)?;
     require_project_writable(state)?;
-    let path = persistence::normalize_native_path(path)?;
-    if let Some(unreadable) = state.project_lifecycle.unreadable_native_binding.as_ref()
-        && unreadable.canonical_path == path
-    {
-        return Err(ProjectLifecycleError::UnreadableCanonical(
-            unreadable.reason.clone(),
-        ));
-    }
-    let expected = match authority {
-        DestinationAuthority::Canonical => state
+    let destination = NativeSaveDestination::new(
+        &persistence::NativeStorage,
+        path,
+        authority,
+        state
             .project_lifecycle
             .accepted
             .as_ref()
-            .and_then(|accepted| accepted.binding.as_ref())
-            .filter(|binding| binding.canonical_path() == Some(path.as_path()))
-            .map(PersistenceBinding::accepted_digest)
-            .map(|digest| crate::io::durable_file::ExpectedContent::Digest(*digest.as_bytes()))
-            .ok_or_else(|| {
-                ProjectLifecycleError::UnreadableCanonical(
-                    "no exact accepted byte baseline exists for this pathname".to_owned(),
-                )
-            })?,
-        DestinationAuthority::UserSelected => persistence::observe_native_destination(&path)?,
-    };
+            .and_then(|accepted| accepted.binding.as_ref()),
+        state.project_lifecycle.unreadable_native_binding.as_ref(),
+    )?;
     let scope = effective_save_scope(state, requested_scope);
     state.project_lifecycle.authority.begin_save()?;
 
     let result = (|| {
         let working = snapshot(state)?;
-        let mut candidate = match scope {
-            SaveScope::AllDocuments => working.clone(),
+        let candidate = match scope {
+            SaveScope::AllDocuments => working,
             SaveScope::ActiveDocument => state
                 .project_lifecycle
                 .accepted
@@ -769,19 +754,24 @@ pub(crate) fn save_native(
                 .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?
                 .document_candidate(&working, &active_document(state))?,
         };
-        candidate.file.workspace.project.set_path(path.clone());
-        // Build every fallible post-save document digest before publishing.
-        // Once the durable file replacement succeeds, adoption below is an
-        // in-memory, infallible state transition.
-        let post_save_registry =
-            prepare_post_save_registry(state, &candidate, scope, SnapshotContent::Current)?;
-        let (bytes, _) = persistence::serialized_project(&candidate.file)?;
-        let digest = persistence::publish_canonical_native(&path, expected, &bytes)?;
-        let binding = PersistenceBinding::Native {
-            canonical_path: path.clone(),
-            accepted_digest: digest,
+        let ProjectSnapshot {
+            file,
+            workspace_session,
+        } = candidate;
+        let published = destination.publish(&persistence::NativeStorage, file, |candidate| {
+            prepare_post_save_registry(state, candidate, scope, SnapshotContent::Current)
+        })?;
+        let candidate = ProjectSnapshot {
+            file: published.candidate,
+            workspace_session,
         };
-        adopt_successful_save(state, candidate, binding, scope, post_save_registry);
+        adopt_successful_save(
+            state,
+            candidate,
+            published.binding,
+            scope,
+            published.registry,
+        );
         Ok(())
     })();
     state.project_lifecycle.authority.cancel_transaction();
@@ -795,29 +785,16 @@ pub(crate) fn save_project_copy_native(
 ) -> Result<(), ProjectLifecycleError> {
     require_open_project(state)?;
     require_project_writable(state)?;
-    let path = persistence::normalize_native_path(path)?;
-    let canonical_source = state.project_lifecycle.canonical_native_path();
-    let unreadable_source = state
-        .project_lifecycle
-        .unreadable_native_binding
-        .as_ref()
-        .map(|unreadable| unreadable.canonical_path.as_path());
-    for source in canonical_source.into_iter().chain(unreadable_source) {
-        if source == path || persistence::native_paths_refer_to_same_file(source, &path)? {
-            return Err(ProjectLifecycleError::CopyDestinationIsCanonical);
-        }
-    }
-    let expected = persistence::observe_native_destination(&path)?;
+    let destination = NativeCopyDestination::new(
+        &persistence::NativeStorage,
+        path,
+        state.project_lifecycle.canonical_native_path(),
+        state.project_lifecycle.unreadable_native_binding.as_ref(),
+    )?;
     state.project_lifecycle.authority.begin_save()?;
     let result = (|| {
-        let mut copy = snapshot(state)?;
-        copy.file.workspace.project = copy.file.workspace.project.fork_copy_at(path.clone());
-        let (bytes, _) = persistence::serialized_project(&copy.file)?;
-        // The picker authorizes this destination, while the captured exact
-        // state still prevents a late create/edit from being overwritten.
-        // The source project's accepted baseline and binding never change.
-        let _ = persistence::publish_canonical_native(&path, expected, &bytes)?;
-        Ok(())
+        let copy = snapshot(state)?;
+        destination.publish(&persistence::NativeStorage, copy.file)
     })();
     state.project_lifecycle.authority.cancel_transaction();
     result
@@ -1063,7 +1040,7 @@ fn finish_successful_save(
     // the bytes actually on disk and recovery retains the written baseline.
     let post_save_registry = match prepare_post_save_registry(
         state,
-        &candidate,
+        &candidate.file,
         scope,
         SnapshotContent::Current,
     ) {
@@ -1081,7 +1058,7 @@ fn finish_successful_save(
 
 fn prepare_post_save_registry(
     state: &AppState,
-    candidate: &ProjectSnapshot,
+    candidate: &rspice_project::ProjectFile,
     scope: SaveScope,
     content: SnapshotContent,
 ) -> Result<registry::DocumentRegistry, ProjectLifecycleError> {
@@ -1089,9 +1066,7 @@ fn prepare_post_save_registry(
     state
         .project_lifecycle
         .authority
-        .prepare_post_save_registry(current.file, &candidate.file, scope, || {
-            active_document(state)
-        })
+        .prepare_post_save_registry(current.file, candidate, scope, || active_document(state))
 }
 
 fn rebase_pending_operation_dirty_state(
@@ -1113,7 +1088,7 @@ fn rebase_pending_operation_dirty_state(
     // projection used by dirty indicators. A delayed save may acknowledge an
     // older baseline, and a newer invalid draft cannot be declared clean.
     let comparison =
-        prepare_post_save_registry(state, candidate, scope, SnapshotContent::Committed);
+        prepare_post_save_registry(state, &candidate.file, scope, SnapshotContent::Committed);
     let dirty = |key: &str| {
         comparison
             .as_ref()

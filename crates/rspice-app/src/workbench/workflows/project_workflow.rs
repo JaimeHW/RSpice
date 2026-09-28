@@ -996,9 +996,7 @@ pub(crate) fn load_project_from_path(state: &mut AppState, path: &Path) -> bool 
         };
     match crate::workbench::lifecycle::project_lifecycle::read_native_binding(path) {
         Ok((project, binding)) => {
-            let canonical_path = match &binding {
-                PersistenceBinding::Native { canonical_path, .. } => canonical_path.clone(),
-            };
+            let canonical_path = binding.canonical_path.clone();
             apply_loaded_project_authorized(
                 state,
                 project,

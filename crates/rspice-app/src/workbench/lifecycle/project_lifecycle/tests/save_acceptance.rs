@@ -25,7 +25,8 @@ fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() 
                 schematic.document_mut_for_test().components[0].value = "2k".to_owned();
             });
             let candidate = snapshot(&state).unwrap();
-            let (bytes, _) = persistence::serialized_project(&candidate.file).unwrap();
+            let (bytes, _) =
+                rspice_project::persistence::serialized_project(&candidate.file).unwrap();
             let accepted_digest = state
                 .project_lifecycle
                 .accepted()
@@ -33,7 +34,7 @@ fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() 
                 .binding
                 .as_ref()
                 .unwrap()
-                .accepted_digest();
+                .accepted_digest;
             if later_change == 1 {
                 state
                     .schematic
@@ -47,16 +48,17 @@ fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() 
             state.schematic.document_mut_for_test().components[0].pos = Point::new(150, 100);
             let operation = state.schematic.pending_operation_id();
             state.sync_active_schematic_to_workspace();
-            let digest = persistence::publish_canonical_native(
-                &path,
-                crate::io::durable_file::ExpectedContent::Digest(*accepted_digest.as_bytes()),
-                &bytes,
-            )
-            .unwrap();
+            let digest = persistence::NativeStorage
+                .publish(
+                    &path,
+                    crate::io::durable_file::ExpectedContent::Digest(*accepted_digest.as_bytes()),
+                    &bytes,
+                )
+                .unwrap();
             finish_successful_save(
                 &mut state,
                 candidate,
-                PersistenceBinding::Native {
+                PersistenceBinding {
                     canonical_path: path.clone(),
                     accepted_digest: digest,
                 },
@@ -111,13 +113,14 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
             .binding
             .as_ref()
             .unwrap()
-            .accepted_digest();
+            .accepted_digest;
         state.schematic.with_undo("Place resistor", |schematic| {
             schematic.add_component(ComponentType::Resistor, Point::new(1, 1));
         });
         let candidate = snapshot(&state).unwrap();
         let candidate_content = registry::content_digest(&candidate.file).unwrap();
-        let (bytes, staged_digest) = persistence::serialized_project(&candidate.file).unwrap();
+        let (bytes, staged_digest) =
+            rspice_project::persistence::serialized_project(&candidate.file).unwrap();
 
         // Freeze bytes before the write. Inject a validation failure and a
         // newer authored edit while that write is pending. The browser's
@@ -128,14 +131,15 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
             schematic.add_component(ComponentType::Capacitor, Point::new(4, 1));
         });
         assert!(snapshot(&state).is_err());
-        let digest = persistence::publish_canonical_native(
-            &path,
-            crate::io::durable_file::ExpectedContent::Digest(*previous_digest.as_bytes()),
-            &bytes,
-        )
-        .unwrap();
+        let digest = persistence::NativeStorage
+            .publish(
+                &path,
+                crate::io::durable_file::ExpectedContent::Digest(*previous_digest.as_bytes()),
+                &bytes,
+            )
+            .unwrap();
         assert_eq!(digest, staged_digest);
-        let binding = PersistenceBinding::Native {
+        let binding = PersistenceBinding {
             canonical_path: path.clone(),
             accepted_digest: digest,
         };
@@ -151,7 +155,7 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
             accepted.content().fingerprints().unwrap().content_digest(),
             candidate_content
         );
-        assert_eq!(accepted.binding.as_ref().unwrap().accepted_digest(), digest);
+        assert_eq!(accepted.binding.as_ref().unwrap().accepted_digest, digest);
         assert_eq!(
             registry::content_digest(&crate::io::load_project_file(&path).unwrap().file).unwrap(),
             candidate_content

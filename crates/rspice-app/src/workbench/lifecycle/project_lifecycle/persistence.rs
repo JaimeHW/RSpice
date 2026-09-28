@@ -1,5 +1,13 @@
 //! Canonical project persistence identities and optimistic concurrency.
 mod browser;
+#[cfg(not(target_arch = "wasm32"))]
+mod native;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use native::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use rspice_project::persistence::native::{
+    NativeBinding as PersistenceBinding, UnreadableNativeBinding,
+};
 
 // `browser` is entirely `cfg(target_arch = "wasm32")`, so on native this glob
 // re-exports nothing and rustc reports it unused. Gating the `use` rather than
@@ -7,19 +15,9 @@ mod browser;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use browser::*;
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::Path;
-use std::path::PathBuf;
-
 #[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) use rspice_project::persistence::BrowserBindingBackend;
-#[cfg(not(target_arch = "wasm32"))]
-use rspice_project::persistence::PersistenceError;
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) use rspice_project::persistence::serialized_project;
-pub(crate) use rspice_project::persistence::{
-    BrowserBindingReceipt, NativeBindingReceipt, digest_bytes,
-};
+pub(crate) use rspice_project::persistence::{BrowserBindingReceipt, NativeBindingReceipt};
 
 #[cfg(target_arch = "wasm32")]
 use rspice_project::persistence::browser::{
@@ -31,79 +29,38 @@ use rspice_project::persistence::browser::{
     validate_browser_binding_metadata, validate_browser_restore_facts,
 };
 
+#[cfg(target_arch = "wasm32")]
 use crate::io::ProjectSnapshot;
+#[cfg(target_arch = "wasm32")]
 use crate::product::ContentDigest;
+#[cfg(target_arch = "wasm32")]
+use rspice_project::persistence::digest_bytes;
 
 #[cfg(target_arch = "wasm32")]
 const BROWSER_BINDING_DATABASE: &str = "rspice-project-bindings";
 #[cfg(target_arch = "wasm32")]
 const BROWSER_BINDING_STORE: &str = "canonical-file-handles";
 
+#[cfg(target_arch = "wasm32")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PersistenceBinding {
-    #[cfg(not(target_arch = "wasm32"))]
-    Native {
-        canonical_path: PathBuf,
-        accepted_digest: ContentDigest,
-    },
-    #[cfg(target_arch = "wasm32")]
     Browser {
         handle_id: u64,
         binding: BrowserBinding,
     },
 }
 
+#[cfg(target_arch = "wasm32")]
 impl PersistenceBinding {
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn native_receipt(&self, project_id: &str) -> NativeBindingReceipt {
-        match self {
-            Self::Native {
-                canonical_path,
-                accepted_digest,
-            } => NativeBindingReceipt {
-                canonical_path: canonical_path.clone(),
-                project_id: project_id.to_owned(),
-                accepted_digest: *accepted_digest,
-            },
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
     pub(crate) fn browser_receipt(&self) -> BrowserBindingReceipt {
         match self {
             Self::Browser { binding, .. } => binding.receipt.clone(),
         }
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub(crate) fn durable_browser_receipt(&self) -> Option<BrowserBindingReceipt> {
         match self {
             Self::Browser { binding, .. } => binding.durable_receipt(),
-        }
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-#[derive(Debug, Clone)]
-pub(crate) struct UnreadableNativeBinding {
-    pub(crate) canonical_path: PathBuf,
-    pub(crate) reason: String,
-}
-
-impl PersistenceBinding {
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn canonical_path(&self) -> Option<&Path> {
-        match self {
-            Self::Native { canonical_path, .. } => Some(canonical_path),
-        }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn accepted_digest(&self) -> ContentDigest {
-        match self {
-            Self::Native {
-                accepted_digest, ..
-            } => *accepted_digest,
         }
     }
 }
@@ -495,155 +452,6 @@ async fn run_browser_open(picker: js_sys::Promise) -> BrowserOpenResult {
         bytes,
         digest,
     }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn observe_native_destination(
-    path: &Path,
-) -> Result<crate::io::durable_file::ExpectedContent, PersistenceError> {
-    crate::io::durable_file::observe_expected_content(path)
-        .map_err(|error| PersistenceError::Platform(error.to_string()))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn publish_canonical_native(
-    path: &Path,
-    expected: crate::io::durable_file::ExpectedContent,
-    bytes: &[u8],
-) -> Result<ContentDigest, PersistenceError> {
-    match crate::io::durable_file::compare_exchange_bytes(path, expected, bytes) {
-        Ok(()) => Ok(digest_bytes(bytes)),
-        Err(crate::io::durable_file::CompareExchangeError::Conflict { .. }) => {
-            Err(PersistenceError::ExternalChange)
-        }
-        Err(crate::io::durable_file::CompareExchangeError::Io(error)) => {
-            Err(PersistenceError::Platform(error.to_string()))
-        }
-        Err(error) => Err(PersistenceError::Platform(error.to_string())),
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn read_native_binding(
-    path: &Path,
-) -> Result<(ProjectSnapshot, PersistenceBinding), PersistenceError> {
-    let canonical_path = normalize_native_path(path)?;
-    crate::io::durable_file::reconcile_publication(&canonical_path)
-        .map_err(|error| PersistenceError::Platform(error.to_string()))?;
-    let (project, digest) = crate::io::project_io::load_project_file_with_digest(&canonical_path)?;
-    Ok((
-        project,
-        PersistenceBinding::Native {
-            canonical_path,
-            accepted_digest: digest,
-        },
-    ))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn restore_native_binding(
-    path: &Path,
-    session_project_id: &str,
-    receipt: &NativeBindingReceipt,
-) -> Result<(ProjectSnapshot, PersistenceBinding), PersistenceError> {
-    receipt.validate_session_project(session_project_id)?;
-    let canonical_path = normalize_native_path(path)?;
-    receipt.validate_canonical_path(&canonical_path)?;
-    crate::io::durable_file::reconcile_publication(&canonical_path)
-        .map_err(|error| PersistenceError::Platform(error.to_string()))?;
-    let Some(project) = crate::io::project_io::load_project_file_with_expected_digest(
-        &canonical_path,
-        receipt.accepted_digest,
-    )?
-    else {
-        return Err(PersistenceError::ExternalChange);
-    };
-    receipt.validate_loaded_project(&project.file)?;
-    Ok((
-        project,
-        PersistenceBinding::Native {
-            canonical_path,
-            accepted_digest: receipt.accepted_digest,
-        },
-    ))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn normalize_native_path(path: &Path) -> Result<PathBuf, PersistenceError> {
-    if path.exists() {
-        return std::fs::canonicalize(path)
-            .map_err(|error| PersistenceError::Platform(error.to_string()));
-    }
-    let parent = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let parent = std::fs::canonicalize(parent)
-        .map_err(|error| PersistenceError::Platform(error.to_string()))?;
-    let name = path.file_name().ok_or_else(|| {
-        PersistenceError::Platform(format!("'{}' has no project filename", path.display()))
-    })?;
-    Ok(parent.join(name))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn native_paths_refer_to_same_file(
-    left: &Path,
-    right: &Path,
-) -> Result<bool, PersistenceError> {
-    // A missing endpoint cannot currently alias an existing filesystem
-    // object. In particular, a deleted canonical source must not prevent the
-    // user from recovering work to an independently selected destination.
-    if !left.exists() || !right.exists() {
-        return Ok(false);
-    }
-
-    #[cfg(windows)]
-    {
-        Ok(windows_file_identity(left)? == windows_file_identity(right)?)
-    }
-
-    #[cfg(not(windows))]
-    {
-        let left_path = left;
-        let right_path = right;
-        let left = std::fs::metadata(left_path)
-            .map_err(|error| PersistenceError::Platform(error.to_string()))?;
-        let right = std::fs::metadata(right_path)
-            .map_err(|error| PersistenceError::Platform(error.to_string()))?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt as _;
-            Ok(left.dev() == right.dev() && left.ino() == right.ino())
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = (left, right);
-            Ok(normalize_native_path(left_path)? == normalize_native_path(right_path)?)
-        }
-    }
-}
-
-#[cfg(windows)]
-fn windows_file_identity(path: &Path) -> Result<(u32, u64), PersistenceError> {
-    use std::os::windows::io::AsRawHandle as _;
-    use windows_sys::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
-    };
-
-    let file =
-        std::fs::File::open(path).map_err(|error| PersistenceError::Platform(error.to_string()))?;
-    let mut information = unsafe { std::mem::zeroed::<BY_HANDLE_FILE_INFORMATION>() };
-    let succeeded =
-        unsafe { GetFileInformationByHandle(file.as_raw_handle() as *mut _, &mut information) };
-    if succeeded == 0 {
-        return Err(PersistenceError::Platform(
-            std::io::Error::last_os_error().to_string(),
-        ));
-    }
-    let file_index = ((information.nFileIndexHigh as u64) << 32) | information.nFileIndexLow as u64;
-    Ok((information.dwVolumeSerialNumber, file_index))
 }
 
 #[cfg(test)]
