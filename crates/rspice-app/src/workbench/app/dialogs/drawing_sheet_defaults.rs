@@ -126,7 +126,7 @@ impl RSpiceApp {
         }
         refresh_untouched_baselines(&mut self.state);
         let following_sheets = {
-            let key = self.state.workspace.active_key();
+            let key = self.state.workspace.content.active_key();
             self.state
                 .workspace
                 .content
@@ -1735,7 +1735,7 @@ pub(super) fn commit_project_candidate(
     let schematic_tx = app
         .state
         .prepare_design_management_schematic_transaction(&candidate)?;
-    let owner = app.state.workspace.active_schematic_reference();
+    let owner = app.state.workspace.content.active_schematic_reference();
     let committed_revision = app
         .state
         .workspace

@@ -38,7 +38,7 @@ fn assert_projection(fixture: &Fixture, name: &str) {
         .workspace
         .design_projection(
             &state.library_manager,
-            &state.workspace.active_schematic_reference(),
+            &state.workspace.content.active_schematic_reference(),
             &state.schematic,
         )
         .unwrap();
@@ -163,7 +163,7 @@ fn manual_annotation_refusal_is_atomic_at_commit_and_history_boundaries() {
                 }
                 "annotation authority" => {
                     let object = SchematicObjectKey::new(
-                        &state.workspace.active_schematic_reference().key(),
+                        &state.workspace.content.active_schematic_reference().key(),
                         fixture.sources[0],
                     )
                     .unwrap();
@@ -246,7 +246,7 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
         )
         .unwrap();
         let loaded = crate::io::load_project_file(&path).unwrap();
-        let reference = loaded.workspace.active_schematic_reference();
+        let reference = loaded.workspace.content.active_schematic_reference();
         let source = loaded.workspace.schematic_editor(&reference.key()).unwrap();
         let projection = loaded
             .workspace

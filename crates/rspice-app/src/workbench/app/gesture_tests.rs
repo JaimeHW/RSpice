@@ -110,7 +110,12 @@ impl Fixture {
 
     fn second_document(&mut self) -> crate::state::CellViewRef {
         use crate::state::{Cell, CellViewRef, OpenCellView, View, ViewType};
-        let original = self.app.state.workspace.active_schematic_reference();
+        let original = self
+            .app
+            .state
+            .workspace
+            .content
+            .active_schematic_reference();
         let reference = CellViewRef::new(&original.library, "second", "schematic");
         let mut cell = Cell::new(&reference.cell);
         cell.add_view(View::new(&reference.view, ViewType::Schematic));
@@ -292,7 +297,7 @@ fn gesture_project_and_session_snapshots_preserve_committed_geometry() {
     fixture.app.state.sync_active_schematic_to_workspace();
     let project =
         crate::workbench::lifecycle::project_lifecycle::snapshot(&fixture.app.state).unwrap();
-    let key = fixture.app.state.workspace.active_key();
+    let key = fixture.app.state.workspace.content.active_key();
     assert_eq!(
         project.workspace.content.schematic_buffers[&key]
             .document()
@@ -353,7 +358,7 @@ fn gesture_native_save_acceptance_rebases_cancel_and_release_dirty_state() {
             )
             .unwrap();
             let saved = crate::io::load_project_file(&path).unwrap();
-            let key = fixture.app.state.workspace.active_key();
+            let key = fixture.app.state.workspace.content.active_key();
             assert_eq!(
                 saved.workspace.content.schematic_buffers[&key]
                     .document()
@@ -420,7 +425,12 @@ fn gesture_previews_remain_part_of_execution_and_replacement_guards() {
 #[test]
 fn gesture_document_navigation_rolls_back_before_buffering_the_original() {
     let mut fixture = Fixture::new(false);
-    let original = fixture.app.state.workspace.active_schematic_reference();
+    let original = fixture
+        .app
+        .state
+        .workspace
+        .content
+        .active_schematic_reference();
     let second = fixture.second_document();
     fixture.drag(DragType::MoveSelection);
     fixture.app.state.open_workspace_view(second.clone());
@@ -441,7 +451,12 @@ fn gesture_document_navigation_rolls_back_before_buffering_the_original() {
 fn gesture_window_projection_preserves_ownership_and_inactive_save_baselines() {
     use crate::workbench::state::WorkspaceDocumentId;
     let mut fixture = Fixture::new(false);
-    let original = fixture.app.state.workspace.active_schematic_reference();
+    let original = fixture
+        .app
+        .state
+        .workspace
+        .content
+        .active_schematic_reference();
     let second = fixture.second_document();
     let primary = fixture.app.state.workbench.window_session.primary();
     let layout = fixture.app.state.workbench.current_workspace_layout();
@@ -524,7 +539,12 @@ fn gesture_new_window_owner_and_owner_window_close_restore_the_old_buffer() {
     use crate::workbench::state::WorkspaceDocumentId;
     for close_owner in [false, true] {
         let mut fixture = Fixture::new(false);
-        let original = fixture.app.state.workspace.active_schematic_reference();
+        let original = fixture
+            .app
+            .state
+            .workspace
+            .content
+            .active_schematic_reference();
         let second = fixture.second_document();
         let primary = fixture.app.state.workbench.window_session.primary();
         let layout = fixture.app.state.workbench.current_workspace_layout();

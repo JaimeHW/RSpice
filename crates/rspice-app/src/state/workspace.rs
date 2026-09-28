@@ -1,6 +1,6 @@
 //! Workspace editor sessions and application adapters over project-owned content.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 mod annotation_restore;
@@ -11,7 +11,6 @@ mod hierarchy;
 use rspice_design::hierarchy as hierarchy_resolver;
 mod materialize;
 mod open_documents;
-mod reference_changes;
 mod reference_preparation;
 mod schematic_buffers;
 
@@ -26,10 +25,9 @@ pub use capture_group::{
 pub use design_intent::*;
 pub use design_projection::*;
 pub use hierarchy::*;
-pub(crate) use reference_changes::{PreparedReferences, ReferenceChanges};
-pub(crate) use reference_preparation::{SchematicReferenceTransaction, reference_from_key};
+pub(crate) use reference_preparation::SchematicReferenceTransaction;
 pub use rspice_design::library::ProjectLibraryMutation;
-pub use rspice_design::occurrence::{DocumentOccurrence, OccurrencePrune};
+pub use rspice_design::occurrence::DocumentOccurrence;
 pub use rspice_design::owned_netlist::{
     NetlistExecutionProfile, NetlistLineEnding, NetlistSourceDialect, NetlistTextEncoding,
     OwnedNetlistDescriptor, OwnedNetlistEditStrategy, OwnedNetlistIncludeDescriptor,

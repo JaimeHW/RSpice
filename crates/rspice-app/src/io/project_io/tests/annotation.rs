@@ -27,7 +27,7 @@ struct PendingAnnotation {
 
 fn pending_annotation() -> PendingAnnotation {
     let mut project = project_with_execution_context();
-    let root = project.workspace.active_schematic_reference();
+    let root = project.workspace.content.active_schematic_reference();
     let child = CellViewRef::new("user", "annotated_child", "schematic");
     let mut cell = Cell::new(&child.cell);
     cell.add_view(View::new("schematic", ViewType::Schematic));
@@ -213,7 +213,7 @@ fn reopening_pending_annotation_aligns_hierarchy_outputs_and_bound_probes_once()
             .dut_path(),
         "/X1"
     );
-    assert_eq!(workspace.occurrence_path().to_string(), "/X1");
+    assert_eq!(workspace.content.occurrence_path().to_string(), "/X1");
     for (reference, component_id, name) in [
         (&fixture.root, fixture.parent, "X1"),
         (&fixture.child, fixture.voltage, "V1"),

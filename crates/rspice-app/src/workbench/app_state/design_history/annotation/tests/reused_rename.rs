@@ -8,7 +8,10 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
     fixture
         .state
         .activate_history_document(&child, "Edit reused master");
-    assert_eq!(fixture.state.workspace.active_schematic_reference(), child);
+    assert_eq!(
+        fixture.state.workspace.content.active_schematic_reference(),
+        child
+    );
     fixture
         .state
         .schematic
@@ -121,7 +124,10 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
                 .state
                 .activate_history_document(&root, "Inspect affected root");
             assert!(fixture.state.undo_project_design().unwrap().is_some());
-            assert_eq!(fixture.state.workspace.active_schematic_reference(), child);
+            assert_eq!(
+                fixture.state.workspace.content.active_schematic_reference(),
+                child
+            );
         }
         if step == 1 {
             assert!(fixture.state.redo_project_design().unwrap().is_some());
@@ -221,7 +227,10 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
                 configurations
             );
             assert_eq!(fixture.state.project_undo_sequence(), sequence);
-            assert_eq!(fixture.state.workspace.active_schematic_reference(), child);
+            assert_eq!(
+                fixture.state.workspace.content.active_schematic_reference(),
+                child
+            );
             fixture
                 .state
                 .workspace

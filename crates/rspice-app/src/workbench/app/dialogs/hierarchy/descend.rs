@@ -103,6 +103,7 @@ impl RSpiceApp {
 /// row reports why instead of a path that addresses a different instance.
 fn descend_target_path(workspace: &crate::state::ProjectWorkspace, instance: &str) -> String {
     workspace
+        .content
         .occurrence_path()
         .child(instance)
         .map_or_else(|error| error.to_string(), |path| path.to_string())
@@ -151,7 +152,7 @@ fn commit_descend_context(state: &mut AppState) -> Result<(), String> {
         }
         HierarchyDescendEditMode::ReadOnlyReference => {
             state.open_workspace_view(reference);
-            state.workspace.set_active_read_only_reference(true);
+            state.workspace.content.set_active_read_only_reference(true);
         }
     }
     state.dialogs.descend_hierarchy.close();
@@ -529,7 +530,10 @@ mod tests {
             SchematicHierarchyVisibility::FullVisibleHierarchy;
         state.open_selected_instance_master();
         assert_eq!(state.workspace.content.active_view, child);
-        assert_eq!(state.workspace.occurrence_labels().last().unwrap(), "XAFE");
+        assert_eq!(
+            state.workspace.content.occurrence_labels().last().unwrap(),
+            "XAFE"
+        );
         assert_eq!(
             state.ui.schematic_visibility.hierarchy,
             SchematicHierarchyVisibility::FullVisibleHierarchy
@@ -549,7 +553,7 @@ mod tests {
 
         assert_eq!(state.workspace.content.active_view, child);
         assert_eq!(state.workspace.content.hierarchy_stack, vec![child]);
-        assert_eq!(state.workspace.occurrence_labels(), ["afe_core"]);
+        assert_eq!(state.workspace.content.occurrence_labels(), ["afe_core"]);
         assert!(!state.dialogs.descend_hierarchy.open);
     }
 
@@ -571,7 +575,10 @@ mod tests {
         commit_descend_context(&mut state).expect("explicit edit-in-place choice remains valid");
 
         assert_eq!(state.workspace.content.active_view, child);
-        assert_eq!(state.workspace.occurrence_labels().last().unwrap(), "XAFE");
+        assert_eq!(
+            state.workspace.content.occurrence_labels().last().unwrap(),
+            "XAFE"
+        );
         assert_eq!(
             state.ui.schematic_visibility.hierarchy,
             SchematicHierarchyVisibility::FullVisibleHierarchy
@@ -586,7 +593,7 @@ mod tests {
         commit_descend_context(&mut state).expect("valid reference context");
 
         assert_eq!(state.workspace.content.active_view, child);
-        assert!(state.workspace.active_read_only_reference());
+        assert!(state.workspace.content.active_read_only_reference());
         assert!(state.active_view_read_only());
         assert!(!state.schematic.session.read_only);
         assert!(
@@ -599,14 +606,14 @@ mod tests {
 
         state.open_workspace_view(parent);
         assert!(
-            !state.workspace.active_read_only_reference(),
+            !state.workspace.content.active_read_only_reference(),
             "the parent was never opened as a reference"
         );
         assert!(!state.active_view_read_only());
 
         state.open_workspace_view(child);
         assert!(
-            state.workspace.active_read_only_reference(),
+            state.workspace.content.active_read_only_reference(),
             "returning to the reference document still refuses writes"
         );
         assert!(

@@ -13,7 +13,7 @@ fn two_sheet_state() -> (AppState, SheetId, SheetId) {
         Component::new(10, ComponentType::Resistor, Point::new(10, 10)),
         Component::new(20, ComponentType::Capacitor, Point::new(40, 10)),
     ];
-    let key = state.workspace.active_schematic_reference().key();
+    let key = state.workspace.content.active_schematic_reference().key();
     let first = state
         .workspace
         .content
@@ -45,7 +45,7 @@ fn two_sheet_state() -> (AppState, SheetId, SheetId) {
 }
 
 fn delete_behavior(state: &mut AppState, behavior: SheetDeleteBehavior) {
-    let key = state.workspace.active_schematic_reference().key();
+    let key = state.workspace.content.active_schematic_reference().key();
     let catalog = state
         .workspace
         .content
@@ -127,7 +127,7 @@ fn page_navigation_wraps_around_both_ends() {
 #[test]
 fn a_single_sheet_catalog_offers_no_navigation() {
     let mut state = AppState::default();
-    let key = state.workspace.active_schematic_reference().key();
+    let key = state.workspace.content.active_schematic_reference().key();
     state
         .workspace
         .content
@@ -222,7 +222,7 @@ fn a_moving_delete_policy_relocates_the_objects_and_undo_restores_them() {
 #[test]
 fn the_last_sheet_of_a_catalog_is_retained() {
     let mut state = AppState::default();
-    let key = state.workspace.active_schematic_reference().key();
+    let key = state.workspace.content.active_schematic_reference().key();
     let only = state
         .workspace
         .content

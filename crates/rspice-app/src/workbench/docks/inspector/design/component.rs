@@ -105,7 +105,7 @@ pub(super) fn component_panel(
 /// instances and stops there — and the design root is implicit, so an inspected
 /// component on the top sheet reports `/`.
 pub(super) fn containing_occurrence_path(state: &AppState) -> String {
-    state.workspace.occurrence_path().to_string()
+    state.workspace.content.occurrence_path().to_string()
 }
 
 pub(super) fn component_view_contract(component: &Component) -> String {

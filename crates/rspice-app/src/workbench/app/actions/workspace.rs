@@ -222,7 +222,7 @@ impl AppState {
     /// writes into the same project that safe mode opened read-only.
     pub(crate) fn active_view_read_only(&self) -> bool {
         self.workbench.safe_mode.project_read_only()
-            || self.workspace.active_read_only_reference()
+            || self.workspace.content.active_read_only_reference()
             || self
                 .library_manager
                 .get_library(&self.workspace.content.active_view.library)
@@ -244,7 +244,7 @@ impl AppState {
             return "Safe mode opened this project read-only - restart without safe mode to edit"
                 .to_owned();
         }
-        if self.workspace.active_read_only_reference() {
+        if self.workspace.content.active_read_only_reference() {
             return "Read-only hierarchy reference - reopen the view in an editable context to modify it"
                 .to_owned();
         }
@@ -525,14 +525,14 @@ impl AppState {
         for open in &mut self.workspace.content.open_views {
             remap(&mut open.reference);
         }
-        self.workspace.remap_occurrence_masters(&remap);
+        self.workspace.content.remap_occurrence_masters(&remap);
 
         self.library_manager.purge_legacy_primitives();
     }
 
     pub(crate) fn sync_active_schematic_to_workspace(&mut self) {
-        if is_schematic_like(self.workspace.active_view_type()) {
-            let active = self.workspace.active_schematic_reference();
+        if is_schematic_like(self.workspace.content.active_view_type()) {
+            let active = self.workspace.content.active_schematic_reference();
             if self.schematic.has_pending_operation() {
                 // Window projection may retain a live gesture in a runtime
                 // buffer; it must not publish symbols or sheet transactions.
@@ -550,7 +550,7 @@ impl AppState {
             self.workspace.save_active_schematic(&self.schematic);
         }
         self.retry_annotation_restoration();
-        if is_schematic_like(self.workspace.active_view_type()) {
+        if is_schematic_like(self.workspace.content.active_view_type()) {
             self.sync_generated_symbol_view();
         }
     }
@@ -755,7 +755,7 @@ impl AppState {
         self.workspace
             .ensure_library_model(&mut self.library_manager);
         let reference = self.workspace.content.active_view.clone();
-        let schematic_reference = self.workspace.active_schematic_reference();
+        let schematic_reference = self.workspace.content.active_schematic_reference();
         self.schematic = schematic_for_workspace(self, &schematic_reference);
         self.bump_active_schematic_epoch();
         // Project persistence stores topology, not the derived rubber-band
@@ -790,7 +790,7 @@ impl AppState {
             .activate(WorkspaceDocumentId::CellView(reference.clone()));
         self.library_manager
             .select_view(&reference.library, &reference.cell, &reference.view);
-        let schematic_reference = self.workspace.active_schematic_reference();
+        let schematic_reference = self.workspace.content.active_schematic_reference();
         self.schematic = schematic_for_workspace(self, &schematic_reference);
         self.bump_active_schematic_epoch();
         self.refresh_active_design_check_projection();
@@ -821,10 +821,10 @@ impl AppState {
                 .descend_into(name, reference.clone(), view_type),
             None => self.workspace.open_as_root(reference.clone(), view_type),
         }
-        self.workspace.set_active_read_only_reference(false);
+        self.workspace.content.set_active_read_only_reference(false);
         self.library_manager
             .select_view(&reference.library, &reference.cell, &reference.view);
-        let schematic_reference = self.workspace.active_schematic_reference();
+        let schematic_reference = self.workspace.content.active_schematic_reference();
         self.schematic = schematic_for_workspace(self, &schematic_reference);
         self.bump_active_schematic_epoch();
         self.refresh_active_design_check_projection();
@@ -906,9 +906,12 @@ impl AppState {
         for schematic in self.workspace.content.schematic_buffers.values_mut() {
             schematic.revalidate_instance_bindings(libraries.catalog());
         }
-        let hierarchy_pruned = self.workspace.retain_valid_occurrences(|reference| {
-            reference.library != library || reference.cell != cell
-        });
+        let hierarchy_pruned = self
+            .workspace
+            .content
+            .retain_valid_occurrences(|reference| {
+                reference.library != library || reference.cell != cell
+            });
         CellRemovalScope {
             active_removed,
             project_root_removed,
@@ -938,6 +941,7 @@ impl AppState {
             .retain(|open| open.reference != deleted);
         let hierarchy_pruned = self
             .workspace
+            .content
             .retain_valid_occurrences(|reference| reference != &deleted);
 
         let preferred = CellViewRef::new(
@@ -985,6 +989,7 @@ impl AppState {
             .open_views
             .retain(|open| reference_exists_in(libraries, &open.reference));
         self.workspace
+            .content
             .retain_valid_occurrences(|reference| reference_exists_in(libraries, reference));
 
         let active_valid = !active_removed
@@ -1025,7 +1030,7 @@ impl AppState {
         // the prune, so it is a design root again rather than an occurrence
         // whose ancestors are gone.
         if hierarchy_pruned || !active_valid {
-            self.workspace.reroot_active_occurrence();
+            self.workspace.content.reroot_active_occurrence();
         }
         if is_schematic_like(fallback_type) {
             self.workspace.ensure_active_buffer();
@@ -1319,7 +1324,7 @@ impl AppState {
         for open in &mut self.workspace.content.open_views {
             remap_ref(&mut open.reference);
         }
-        self.workspace.remap_occurrence_masters(&remap_ref);
+        self.workspace.content.remap_occurrence_masters(&remap_ref);
 
         // Instance bindings follow — in every buffer and the live sheet.
         let mut remapped = 0usize;
@@ -1489,7 +1494,7 @@ impl AppState {
         for open in &mut self.workspace.content.open_views {
             remap_ref(&mut open.reference);
         }
-        self.workspace.remap_occurrence_masters(&remap_ref);
+        self.workspace.content.remap_occurrence_masters(&remap_ref);
 
         let remapped = self.remap_instance_bindings(|schematic| {
             schematic.rename_library_bindings(library, new_name)
@@ -1734,7 +1739,7 @@ impl AppState {
         for open in &mut self.workspace.content.open_views {
             remap_ref(&mut open.reference);
         }
-        self.workspace.remap_occurrence_masters(&remap_ref);
+        self.workspace.content.remap_occurrence_masters(&remap_ref);
 
         let remapped = self.remap_instance_bindings(|schematic| {
             schematic.rename_view_bindings(library, cell, view, new_name)
@@ -1763,7 +1768,7 @@ impl AppState {
     /// The live sheet and the buffer under the active key are two copies of one
     /// document, so both move but only one is counted.
     fn remap_instance_bindings(&mut self, rebind: impl Fn(&mut SchematicState) -> usize) -> usize {
-        let active_key = self.workspace.active_key();
+        let active_key = self.workspace.content.active_key();
         let mut remapped = 0usize;
         self.workspace.for_each_schematic_editor_mut(|key, buffer| {
             let count = rebind(buffer);
@@ -1782,7 +1787,7 @@ impl AppState {
     /// goes with the library; only a placement that would survive it is a
     /// reason to refuse the deletion, and it is the number the review states.
     pub(crate) fn external_instance_references_to_library(&self, library: &str) -> usize {
-        let active_key = self.workspace.active_key();
+        let active_key = self.workspace.content.active_key();
         let owned_prefix = format!("{library}/");
         let count = |document: &rspice_design::schematic::document::SchematicDocument| {
             document
@@ -1861,6 +1866,7 @@ impl AppState {
             .retain(|open| open.reference.library != library);
         let hierarchy_pruned = self
             .workspace
+            .content
             .retain_valid_occurrences(|reference| reference.library != library);
         self.restore_valid_workspace_focus_after_prune(
             active_removed,
@@ -1880,7 +1886,7 @@ impl AppState {
             .workbench
             .live_write_locks
             .schematic_views
-            .get(&self.workspace.active_key())
+            .get(&self.workspace.content.active_key())
             .cloned();
         let message = if self.workbench.safe_mode.project_read_only() {
             "Safe mode is read-only; no design data was changed.".to_owned()
@@ -1901,7 +1907,7 @@ impl AppState {
 
     /// Ascend one hierarchy level (the U gesture / pathbar action).
     pub(crate) fn ascend_workspace_level(&mut self) {
-        let depth = self.workspace.occurrence_depth();
+        let depth = self.workspace.content.occurrence_depth();
         if depth >= 2 {
             self.focus_workspace_breadcrumb(depth - 2);
         }

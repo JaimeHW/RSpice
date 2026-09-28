@@ -625,11 +625,12 @@ impl RSpiceApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
         if matches!(
-            self.state.workspace.active_view_type(),
+            self.state.workspace.content.active_view_type(),
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
         ) {
             self.state
                 .workspace
+                .content
                 .set_active_dirty(self.state.schematic.session.is_dirty);
         }
         self.sync_window_title(ctx);

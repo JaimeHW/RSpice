@@ -1327,14 +1327,14 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         ContextAction::PageSetup => (
             writable
                 && matches!(
-                    state.workspace.active_view_type(),
+                    state.workspace.content.active_view_type(),
                     ViewType::Schematic | ViewType::Testbench
                 ),
             "Page setup requires a writable schematic or testbench",
         ),
         ContextAction::FitContent => (
             matches!(
-                state.workspace.active_view_type(),
+                state.workspace.content.active_view_type(),
                 ViewType::Schematic | ViewType::Testbench
             ),
             "Fit is available on a schematic or testbench canvas",

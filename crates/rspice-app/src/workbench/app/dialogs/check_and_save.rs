@@ -584,7 +584,7 @@ fn rollback_validated_save(
     message: &str,
 ) {
     clear_pending_save_state(state);
-    let active_key = state.workspace.active_schematic_reference().key();
+    let active_key = state.workspace.content.active_schematic_reference().key();
     let rollback_result = if active_key == target_view_key {
         rollback_exact_journal(
             &mut state.schematic,

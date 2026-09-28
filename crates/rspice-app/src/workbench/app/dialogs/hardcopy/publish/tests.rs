@@ -16,7 +16,7 @@ fn governed_design_print_selects_the_active_sheet_identity() {
         .activate(crate::workbench::state::WorkspaceDocumentId::CellView(
             reference,
         ));
-    let key = app.state.workspace.active_key();
+    let key = app.state.workspace.content.active_key();
     let sheet_id = app
         .state
         .workspace
@@ -179,7 +179,7 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
         .workbench
         .documents
         .activate(WorkspaceDocumentId::CellView(reference));
-    let key = app.state.workspace.active_key();
+    let key = app.state.workspace.content.active_key();
     let sheet_id = app
         .state
         .workspace
@@ -377,7 +377,7 @@ fn governed_page_authority_rejects_catalog_or_active_sheet_drift() {
     use crate::state::{SchematicPageOrientation, SchematicPageSize, SchematicSheetFormat};
 
     let mut app = RSpiceApp::test_instance();
-    let key = app.state.workspace.active_key();
+    let key = app.state.workspace.content.active_key();
     let sheet_id = app
         .state
         .workspace

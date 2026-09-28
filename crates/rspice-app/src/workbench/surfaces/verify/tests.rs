@@ -188,7 +188,7 @@ fn stage_literal_tuning_binding(
         .find(|component| component.id == component_id)
         .cloned()
         .expect("component exists");
-    let source_view = app.state.workspace.active_schematic_reference();
+    let source_view = app.state.workspace.content.active_schematic_reference();
     let typed_expression = format!("{} ohm", component.value.trim());
     let variable = crate::state::DesignVariable::new(
         variable_name,

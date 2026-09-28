@@ -1049,7 +1049,7 @@ fn save_active_overlays_only_active_document_on_accepted_baseline() {
             .workspace
             .content
             .schematic_buffers
-            .get(&state.workspace.active_key())
+            .get(&state.workspace.content.active_key())
             .expect("active buffer")
             .document()
             .components
@@ -1801,7 +1801,7 @@ fn sheet_names(project: &ProjectFile, key: &str) -> Vec<String> {
 fn saving_one_cell_view_publishes_only_that_cell_views_sheets() {
     let path = unique_path("cell-view-sheets");
     let mut state = AppState::default();
-    let active = state.workspace.active_schematic_reference();
+    let active = state.workspace.content.active_schematic_reference();
     let other = CellViewRef::new(&active.library, "aux", "schematic");
     if let Some(library) = state.library_manager.get_library_mut(&other.library) {
         let mut cell = crate::state::Cell::new(&other.cell);
@@ -1861,7 +1861,7 @@ fn saving_one_cell_view_publishes_only_that_cell_views_sheets() {
 fn saving_a_cell_views_sheets_clears_the_unsaved_project_marker() {
     let path = unique_path("sheet-dirty-marker");
     let mut state = AppState::default();
-    let active = state.workspace.active_schematic_reference();
+    let active = state.workspace.content.active_schematic_reference();
     state
         .workspace
         .content

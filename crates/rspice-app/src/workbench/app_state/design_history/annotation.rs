@@ -142,8 +142,8 @@ impl AppState {
         transaction
             .prepared_references
             .clone()
-            .publish(&mut self.workspace);
-        let active_key = self.workspace.active_schematic_reference().key();
+            .publish(&mut self.workspace.content);
+        let active_key = self.workspace.content.active_schematic_reference().key();
         for (key, schematic) in &transaction.after {
             if key.eq_ignore_ascii_case(&active_key) {
                 self.schematic = schematic.clone();

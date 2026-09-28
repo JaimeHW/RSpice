@@ -87,8 +87,8 @@ impl ProjectWorkspace {
     }
 }
 
-struct WorkspaceProjectionSources<'a>(
-    &'a HashMap<String, crate::state::schematic::SchematicSession>,
+pub(super) struct WorkspaceProjectionSources<'a>(
+    pub(super) &'a HashMap<String, crate::state::schematic::SchematicSession>,
 );
 
 impl ProjectionSources for WorkspaceProjectionSources<'_> {

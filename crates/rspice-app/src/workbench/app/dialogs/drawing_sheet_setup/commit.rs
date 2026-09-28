@@ -23,7 +23,7 @@ fn drawing_sheet_setup_available_for_state(state: &AppState) -> bool {
         && state.workbench.current_route().surface_id() == SurfaceId::Design
         && !state.schematic_edit_read_only()
         && matches!(
-            state.workspace.active_view_type(),
+            state.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         )
 }
@@ -84,7 +84,7 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
     if !drawing_sheet_setup_available_for_state(state) {
         return false;
     }
-    let cell_view_key = state.workspace.active_key();
+    let cell_view_key = state.workspace.content.active_key();
     let resolved_active = crate::schematic::view::drawing_sheet::ActiveDrawingSheet::resolve(state);
     let governed = state
         .workspace
@@ -140,7 +140,7 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
             .drawing_sheet_personal_preferences()
             .presets,
     );
-    let document = state.workspace.active_display_path().to_uppercase();
+    let document = state.workspace.content.active_display_path().to_uppercase();
     let managed_sheet_names = state
         .workspace
         .content
@@ -162,7 +162,7 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
             "DRAWING SHEET · {document} · {} · SHEET {sheet_number} OF {sheet_count}",
             sheet_name.to_uppercase()
         ),
-        document_name: state.workspace.active_display_path().to_owned(),
+        document_name: state.workspace.content.active_display_path().to_owned(),
         sheet_name,
         sheet_count,
         writable_sheet_count,
@@ -201,7 +201,7 @@ pub(crate) fn validate_drawing_sheet_authority(
     state: &AppState,
     authority: &DrawingSheetAuthority,
 ) -> Result<(), String> {
-    if state.workspace.active_key() != authority.cell_view_key {
+    if state.workspace.content.active_key() != authority.cell_view_key {
         return Err("The active cell/view changed. Close and reopen Page Setup.".to_owned());
     }
     authority.edit.validate(state, "Page Setup")?;
@@ -232,7 +232,7 @@ pub(crate) fn validate_drawing_sheet_authority(
             .workspace
             .content
             .design_management
-            .sheet_catalog(&state.workspace.active_key())
+            .sheet_catalog(&state.workspace.content.active_key())
             .and_then(|catalog| catalog.active_sheet_id());
         return if active_governed_sheet.is_none() {
             Ok(())
@@ -243,7 +243,7 @@ pub(crate) fn validate_drawing_sheet_authority(
             )
         };
     };
-    if state.workspace.active_key() != governed.cell_view_key {
+    if state.workspace.content.active_key() != governed.cell_view_key {
         return Err("The active cell/view changed. Close and reopen Page Setup.".to_owned());
     }
     let catalog = state
@@ -276,7 +276,7 @@ pub(crate) fn resume_drawing_sheet_setup_after_support(state: &mut AppState) -> 
         .authority
         .clone()
         .ok_or_else(|| "Page Setup lost its suspended authority.".to_owned())?;
-    if state.workspace.active_key() != previous.cell_view_key {
+    if state.workspace.content.active_key() != previous.cell_view_key {
         return Err(
             "The active cell/view changed while Page Setup was suspended. Close and reopen it."
                 .to_owned(),
@@ -650,7 +650,7 @@ fn commit_governed_page_setup_candidate(
     let schematic_tx = app
         .state
         .prepare_design_management_schematic_transaction(&candidate)?;
-    let owner = app.state.workspace.active_schematic_reference();
+    let owner = app.state.workspace.content.active_schematic_reference();
     let committed_revision = app
         .state
         .workspace
@@ -957,7 +957,7 @@ fn apply_legacy_sheet_setup(
         .preferences
         .drawing_sheet_personal_preferences();
     let mut personal = personal_before.clone();
-    let owner_key = app.state.workspace.active_key();
+    let owner_key = app.state.workspace.content.active_key();
     let sheet_id = candidate
         .bootstrap_for_cell_view(
             &owner_key,
@@ -1049,7 +1049,7 @@ fn apply_legacy_sheet_setup(
     let schematic_tx = app
         .state
         .prepare_design_management_schematic_transaction(&candidate)?;
-    let owner = app.state.workspace.active_schematic_reference();
+    let owner = app.state.workspace.content.active_schematic_reference();
     let committed_revision = app
         .state
         .workspace
@@ -1198,7 +1198,7 @@ mod tests {
 
     fn governed_app_with_sheets(count: usize) -> (RSpiceApp, String, Vec<crate::state::SheetId>) {
         let mut app = RSpiceApp::test_instance();
-        let key = app.state.workspace.active_key();
+        let key = app.state.workspace.content.active_key();
         let first = app
             .state
             .workspace
@@ -1267,7 +1267,7 @@ mod tests {
         let mut state = AppState::default();
         let authority = DrawingSheetAuthority {
             edit: crate::workbench::app::SchematicEditAuthority::capture(&state),
-            cell_view_key: state.workspace.active_key(),
+            cell_view_key: state.workspace.content.active_key(),
             design_management_revision: state.workspace.content.design_management.revision(),
             personal_preferences_digest: Some(
                 state
@@ -1902,7 +1902,7 @@ mod tests {
     #[test]
     fn bootstrap_apply_saves_staged_sheet_and_project_title_fields_consistently() {
         let mut app = RSpiceApp::test_instance();
-        let key = app.state.workspace.active_key();
+        let key = app.state.workspace.content.active_key();
         let mut settings = app
             .state
             .workspace
@@ -1968,7 +1968,7 @@ mod tests {
     #[test]
     fn bootstrap_apply_publishes_an_unchanged_inherited_format() {
         let mut app = RSpiceApp::test_instance();
-        let key = app.state.workspace.active_key();
+        let key = app.state.workspace.content.active_key();
         open_drawing_sheet_setup(&mut app);
         assert!(!app.state.dialogs.drawing_sheet_setup.is_dirty());
 
@@ -1988,7 +1988,7 @@ mod tests {
     #[test]
     fn bootstrap_current_sheet_physical_edit_severs_default_inheritance() {
         let mut app = RSpiceApp::test_instance();
-        let key = app.state.workspace.active_key();
+        let key = app.state.workspace.content.active_key();
         open_drawing_sheet_setup(&mut app);
         app.state
             .dialogs

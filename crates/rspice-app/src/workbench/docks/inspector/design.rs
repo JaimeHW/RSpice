@@ -652,7 +652,7 @@ fn sheet_row(ui: &mut Ui, state: &AppState, object_id: u64) {
     let Some(catalog) = sheet_visibility::multi_sheet_catalog(state) else {
         return;
     };
-    let key = state.workspace.active_schematic_reference().key();
+    let key = state.workspace.content.active_schematic_reference().key();
     let Some(id) = state
         .workspace
         .content
@@ -820,7 +820,7 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
         } else {
             format!(
                 "{} · depth {depth}",
-                app.state.workspace.active_display_path()
+                app.state.workspace.content.active_display_path()
             )
         },
     );

@@ -89,7 +89,7 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
         }
     });
 
-    let schematic_reference = state.workspace.active_schematic_reference();
+    let schematic_reference = state.workspace.content.active_schematic_reference();
     let schematic_ports = state.schematic.interface_ports();
     let schematic_source = (!schematic_ports.is_empty()).then(|| CreateSymbolSchematicSource {
         reference: schematic_reference,

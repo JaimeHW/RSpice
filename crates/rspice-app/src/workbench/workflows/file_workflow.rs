@@ -111,12 +111,12 @@ fn replace_active_schematic_document(state: &mut AppState, mut schematic: Schema
     state.schematic = schematic;
     state.ui.schematic_snap = state.schematic.session.snap_engine.clone();
     state.bump_active_schematic_epoch();
-    match state.workspace.active_view_type() {
+    match state.workspace.content.active_view_type() {
         ViewType::Schematic | ViewType::Testbench => {
             state.sync_active_schematic_to_workspace();
         }
         _ => {
-            let reference = state.workspace.active_schematic_reference();
+            let reference = state.workspace.content.active_schematic_reference();
             let dirty = state.schematic.session.is_dirty;
             state
                 .workspace
@@ -616,7 +616,7 @@ mod tests {
     }
 
     fn open_default_symbol_view(state: &mut AppState) -> CellViewRef {
-        let schematic_reference = state.workspace.active_schematic_reference();
+        let schematic_reference = state.workspace.content.active_schematic_reference();
         let symbol_reference = CellViewRef::new(
             &schematic_reference.library,
             &schematic_reference.cell,
@@ -633,7 +633,7 @@ mod tests {
             cell.add_view(View::new("symbol", ViewType::Symbol));
         }
         state.open_workspace_view(symbol_reference);
-        assert_eq!(state.workspace.active_view_type(), ViewType::Symbol);
+        assert_eq!(state.workspace.content.active_view_type(), ViewType::Symbol);
         schematic_reference
     }
 
@@ -661,7 +661,7 @@ mod tests {
     fn create_new_schematic_from_symbol_view_replaces_paired_schematic_buffer() {
         let mut state = AppState::default();
         let schematic_reference = open_default_symbol_view(&mut state);
-        let symbol_key = state.workspace.active_key();
+        let symbol_key = state.workspace.content.active_key();
         install_stale_paired_schematic(&mut state, &schematic_reference);
 
         create_new_schematic(&mut state);
@@ -709,7 +709,7 @@ mod tests {
     fn load_schematic_from_symbol_view_replaces_paired_schematic_buffer() {
         let mut state = AppState::default();
         let schematic_reference = open_default_symbol_view(&mut state);
-        let symbol_key = state.workspace.active_key();
+        let symbol_key = state.workspace.content.active_key();
         install_stale_paired_schematic(&mut state, &schematic_reference);
 
         let mut schematic = SchematicState::default();

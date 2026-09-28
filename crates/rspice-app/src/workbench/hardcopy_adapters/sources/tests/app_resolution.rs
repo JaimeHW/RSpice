@@ -87,7 +87,7 @@ fn ungoverned_current_sheet_and_worker_use_the_canvas_project_default() {
             .workspace
             .content
             .design_management
-            .sheet_catalog(&state.workspace.active_key())
+            .sheet_catalog(&state.workspace.content.active_key())
             .is_none()
     );
     let expected_format = state
@@ -100,7 +100,7 @@ fn ungoverned_current_sheet_and_worker_use_the_canvas_project_default() {
     let source_key = format!(
         "project:{}:cell-view:{}",
         state.workspace.content.project.id().as_uuid(),
-        state.workspace.active_key()
+        state.workspace.content.active_key()
     );
 
     let synchronous =
@@ -144,7 +144,7 @@ fn prepared_resolution_is_send_owned_and_snapshot_isolated() {
     let source_key = format!(
         "project:{}:cell-view:{}",
         state.workspace.content.project.id().as_uuid(),
-        state.workspace.active_key()
+        state.workspace.content.active_key()
     );
     let synchronous =
         resolve_retained_hardcopy_source(&state, &source_key, HardcopyScope::ActiveDocument)
@@ -173,7 +173,7 @@ fn prepared_design_worker_fixture() -> (PreparedRetainedHardcopyResolution, Reso
     let source_key = format!(
         "project:{}:cell-view:{}",
         state.workspace.content.project.id().as_uuid(),
-        state.workspace.active_key()
+        state.workspace.content.active_key()
     );
     let expected =
         resolve_retained_hardcopy_source(&state, &source_key, HardcopyScope::ActiveDocument)
@@ -282,7 +282,7 @@ fn enumeration_exposes_all_sheets_exact_members_and_available_named_sets() {
         .workbench
         .documents
         .activate(WorkspaceDocumentId::CellView(reference));
-    let active_key = state.workspace.active_key();
+    let active_key = state.workspace.content.active_key();
     let first_id = state
         .workspace
         .content

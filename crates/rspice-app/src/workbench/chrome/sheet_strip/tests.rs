@@ -27,7 +27,12 @@ fn app_with_sheets(count: usize) -> RSpiceApp {
         ComponentType::Resistor,
         Point::new(20, 20),
     )];
-    let key = app.state.workspace.active_schematic_reference().key();
+    let key = app
+        .state
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     let first = app
         .state
         .workspace

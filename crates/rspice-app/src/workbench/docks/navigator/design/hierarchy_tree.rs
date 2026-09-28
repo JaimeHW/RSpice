@@ -790,7 +790,7 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
         return;
     }
 
-    let active = app.state.workspace.occurrence_path();
+    let active = app.state.workspace.content.occurrence_path();
     let scroll_to = tree.take_scroll_to();
     let mut descend = None;
     let mut enter_sheet = None;
@@ -918,7 +918,7 @@ fn resolved_projection(
 /// is offered exactly where there is one: on a child of the occurrence being
 /// edited. A row deeper in the tree names an instance none of them can reach.
 fn occurrence_context_menu(response: &Response, app: &mut RSpiceApp, row: &OccurrenceRow) {
-    if row.path.parent().as_ref() != Some(&app.state.workspace.occurrence_path()) {
+    if row.path.parent().as_ref() != Some(&app.state.workspace.content.occurrence_path()) {
         return;
     }
     let Some(object) = app
@@ -950,7 +950,13 @@ fn reveal_canvas_selection(app: &RSpiceApp, tree: &mut NavigatorTreeState) {
     let Some((instance, _)) = app.state.hierarchy_master_for_component(component) else {
         return;
     };
-    let Ok(path) = app.state.workspace.occurrence_path().child(&instance) else {
+    let Ok(path) = app
+        .state
+        .workspace
+        .content
+        .occurrence_path()
+        .child(&instance)
+    else {
         return;
     };
     if tree.selection() == Some(&path) {
@@ -1010,9 +1016,10 @@ pub(super) fn open_occurrence(
 
     let rooted_here = state
         .workspace
+        .content
         .active_occurrence()
         .is_some_and(|occurrence| occurrence.root == root);
-    let current = state.workspace.occurrence_path();
+    let current = state.workspace.content.occurrence_path();
     let shared = if rooted_here {
         shared_prefix(&current, path)
     } else {

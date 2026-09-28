@@ -1217,7 +1217,7 @@ mod tests {
         let source_key = format!(
             "project:{}:cell-view:{}",
             state.workspace.content.project.id().as_uuid(),
-            state.workspace.active_key()
+            state.workspace.content.active_key()
         );
         let scope = HardcopyScope::ActiveDocument;
         let source = resolve_retained_hardcopy_source(&state, &source_key, scope.clone())

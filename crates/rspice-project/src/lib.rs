@@ -23,7 +23,8 @@ pub use open_view::OpenCellView;
 mod workspace;
 pub use workspace::{
     HardcopySourceSetPersistenceError, MAX_PROJECT_HARDCOPY_SOURCE_SETS,
-    MAX_PROJECT_VISUALIZATION_DOCUMENTS, PreparedPhysicalLayoutCatalog,
-    ProjectConfigurationMutationError, ProjectWorkspace, SimulationConfigurationError,
-    VisualizationDocumentPersistenceError,
+    MAX_PROJECT_VISUALIZATION_DOCUMENTS, PreparedAnnotation, PreparedPhysicalLayoutCatalog,
+    PreparedReferences, ProjectConfigurationMutationError, ProjectHierarchy,
+    ProjectReferenceTransaction, ProjectWorkspace, ReferenceChanges, SimulationConfigurationError,
+    VisualizationDocumentPersistenceError, reference_from_key,
 };

@@ -30,15 +30,6 @@ impl SchematicState {
 #[cfg(test)]
 mod tests;
 
-pub(crate) struct PreparedProbeReferences(
-    rspice_design::schematic::owned::references::PreparedProbeReferences,
-);
-impl PreparedProbeReferences {
-    pub(crate) fn apply_to(self, candidate: &mut SchematicState) {
-        self.0.apply_to(&mut candidate.design);
-        candidate.session.is_dirty = true;
-    }
-}
 impl SchematicState {
     pub(crate) fn prepare_component_transaction(
         &mut self,
@@ -69,13 +60,5 @@ impl SchematicEditorRef<'_> {
         candidate.session.is_dirty = true;
         candidate.session.selection.clear();
         candidate
-    }
-    pub(crate) fn prepare_probe_reference_update(
-        &self,
-        mappings: &rspice_design::references::PathMappings,
-    ) -> Result<Option<PreparedProbeReferences>, String> {
-        self.design
-            .prepare_probe_reference_update(mappings)
-            .map(|prepared| prepared.map(PreparedProbeReferences))
     }
 }

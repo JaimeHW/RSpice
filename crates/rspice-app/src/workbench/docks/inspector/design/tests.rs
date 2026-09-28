@@ -174,7 +174,12 @@ fn app_with_probe_on_last_sheet(sheets: usize) -> (RSpiceApp, u64) {
     );
     app.state.sync_active_schematic_to_workspace();
 
-    let key = app.state.workspace.active_schematic_reference().key();
+    let key = app
+        .state
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     let first = app
         .state
         .workspace
@@ -1339,7 +1344,7 @@ fn the_net_inspector_states_the_sheets_a_connector_partners_with() {
     };
 
     let mut state = AppState::default();
-    let key = state.workspace.active_schematic_reference().key();
+    let key = state.workspace.content.active_schematic_reference().key();
     state
         .schematic
         .document_mut_for_test()
@@ -1533,7 +1538,7 @@ fn the_inspector_reads_the_projection_so_coincident_pages_stay_two_nets() {
         "the editor buffer holds one coordinate space, so its pages overlap"
     );
 
-    let key = state.workspace.active_schematic_reference().key();
+    let key = state.workspace.content.active_schematic_reference().key();
     let first = state
         .workspace
         .content

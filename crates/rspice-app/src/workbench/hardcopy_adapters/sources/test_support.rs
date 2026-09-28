@@ -30,13 +30,13 @@ pub(crate) fn resolve_retained_hardcopy_source(
     let design_key = format!(
         "project:{}:cell-view:{}",
         project_id.as_uuid(),
-        state.workspace.active_key()
+        state.workspace.content.active_key()
     );
     if matches!(
-        state.workspace.active_view_type(),
+        state.workspace.content.active_view_type(),
         ViewType::Schematic | ViewType::Testbench
     ) {
-        let active_key = state.workspace.active_key();
+        let active_key = state.workspace.content.active_key();
         if let Some(catalog) = state
             .workspace
             .content
@@ -82,14 +82,14 @@ pub(crate) fn resolve_retained_hardcopy_source(
     }
     if source_key == design_key {
         let identity = active_cell_view_identity(state)?;
-        return match state.workspace.active_view_type() {
+        return match state.workspace.content.active_view_type() {
             ViewType::Schematic | ViewType::Testbench => {
                 let resolver = SymbolResolver::new(
                     &state.library_manager,
                     &state.workspace.content.schematic_buffers,
                 );
                 if matches!(scope, HardcopyScope::AllSheetsOrPanes) {
-                    let active_key = state.workspace.active_key();
+                    let active_key = state.workspace.content.active_key();
                     let sheet_catalog = state
                         .workspace
                         .content
@@ -120,7 +120,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
                             .title_block_field_values,
                     });
                 }
-                let active_key = state.workspace.active_key();
+                let active_key = state.workspace.content.active_key();
                 let sheet_catalog = matches!(scope, HardcopyScope::CurrentSheet)
                     .then(|| {
                         state

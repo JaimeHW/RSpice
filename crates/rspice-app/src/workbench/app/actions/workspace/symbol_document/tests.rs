@@ -140,7 +140,7 @@ fn pin_index(document: &SymbolDocument, name: &str) -> usize {
 #[test]
 fn the_save_point_tracks_publication_not_the_stored_view() {
     let mut state = state_with_open_symbol(0);
-    let key = state.workspace.active_key();
+    let key = state.workspace.content.active_key();
     let document = contract_matching_document(&state);
     let mut metadata = SymbolEditorMetadata::for_document(&document);
 

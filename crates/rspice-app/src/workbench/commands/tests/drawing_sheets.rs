@@ -66,7 +66,7 @@ fn document_sheet_commands_open_their_real_surfaces_only_in_schematic_context() 
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.project_open = true;
     app.state.workbench.workspace = Workspace::Design;
-    let key = app.state.workspace.active_key();
+    let key = app.state.workspace.content.active_key();
     app.state
         .workspace
         .content
@@ -96,7 +96,7 @@ fn sheet_format_manager_requires_live_schematic_edit_authority() {
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.project_open = true;
     app.state.workbench.workspace = Workspace::Design;
-    let key = app.state.workspace.active_key();
+    let key = app.state.workspace.content.active_key();
     app.state
         .workspace
         .content

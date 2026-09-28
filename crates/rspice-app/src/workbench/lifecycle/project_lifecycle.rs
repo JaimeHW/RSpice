@@ -272,10 +272,10 @@ fn capture_snapshot(
 ) -> Result<ProjectFile, ProjectLifecycleError> {
     let mut workspace = state.workspace.clone();
     if matches!(
-        workspace.active_view_type(),
+        workspace.content.active_view_type(),
         ViewType::Schematic | ViewType::Testbench
     ) {
-        workspace.insert_schematic_editor(workspace.active_key(), state.schematic.clone());
+        workspace.insert_schematic_editor(workspace.content.active_key(), state.schematic.clone());
     }
     // A save/checkpoint retains committed content even when a native window
     // currently holds a live pointer preview in one of the runtime buffers.
@@ -367,7 +367,7 @@ pub(crate) fn operation_in_progress(state: &AppState) -> bool {
 
 pub(crate) fn active_document(state: &AppState) -> ProjectDocumentId {
     if state.workbench.workspace == crate::workbench::state::Workspace::Netlist
-        && state.workspace.active_view_type() == ViewType::VerilogA
+        && state.workspace.content.active_view_type() == ViewType::VerilogA
         && state
             .workspace
             .content
@@ -1431,7 +1431,7 @@ fn rebase_pending_operation_dirty_state(
             .unwrap_or(true)
     };
     if state.schematic.has_pending_operation() {
-        let was_dirty = dirty(&state.workspace.active_schematic_reference().key());
+        let was_dirty = dirty(&state.workspace.content.active_schematic_reference().key());
         state.schematic.set_pending_was_dirty(was_dirty);
     }
     state
@@ -1934,7 +1934,7 @@ pub(crate) fn close_active_document(state: &mut AppState) -> Result<(), ProjectL
     state.cancel_schematic_drag();
     state.sync_active_schematic_to_workspace();
     let closing = state.workspace.content.active_view.clone();
-    state.workspace.close_view(&closing);
+    state.workspace.content.close_view(&closing);
     state.restore_active_schematic_from_workspace();
     refresh_registry(state)
 }

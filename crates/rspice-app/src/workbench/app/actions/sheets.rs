@@ -54,7 +54,7 @@ pub(in crate::workbench) fn active_sheet_catalog(state: &AppState) -> Option<&Sh
         .workspace
         .content
         .design_management
-        .sheet_catalog(&state.workspace.active_schematic_reference().key())
+        .sheet_catalog(&state.workspace.content.active_schematic_reference().key())
 }
 
 pub(in crate::workbench) fn sheet_entries(state: &AppState) -> Vec<SheetEntry> {
@@ -562,7 +562,7 @@ fn edit_catalog<T>(
     description: &str,
     edit: impl FnOnce(&mut SheetCatalog) -> Result<T, String>,
 ) -> Result<T, String> {
-    let key = state.workspace.active_schematic_reference().key();
+    let key = state.workspace.content.active_schematic_reference().key();
     let before = state.workspace.content.design_management.clone();
     let mut candidate = before.clone();
     let catalog = candidate
@@ -581,7 +581,7 @@ fn commit(
 ) -> Result<(), String> {
     candidate.validate().map_err(|error| error.to_string())?;
     let schematic_tx = state.prepare_design_management_schematic_transaction(&candidate)?;
-    let owner = state.workspace.active_schematic_reference();
+    let owner = state.workspace.content.active_schematic_reference();
     let committed_revision = state
         .workspace
         .content

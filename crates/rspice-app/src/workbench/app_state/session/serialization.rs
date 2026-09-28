@@ -746,7 +746,7 @@ mod tests {
             crate::state::Point::new(17, 29),
         );
         state.workspace.save_active_schematic(&state.schematic);
-        let active_key = state.workspace.active_key();
+        let active_key = state.workspace.content.active_key();
 
         let mut session = serde_json::to_value(&state).expect("serialize recovery fixture");
         let object = session.as_object_mut().expect("session object");

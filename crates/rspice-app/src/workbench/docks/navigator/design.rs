@@ -500,7 +500,7 @@ fn navigator_path(workspace: &crate::state::ProjectWorkspace) -> (String, String
         workspace.content.active_view.library, workspace.content.active_view.cell
     );
     (
-        workspace.occurrence_path().to_string(),
+        workspace.content.occurrence_path().to_string(),
         master,
         workspace.content.hierarchy_stack.len() > 1,
     )
@@ -922,7 +922,7 @@ fn whole_design_sources(app: &RSpiceApp) -> Vec<crate::simulation::placed_source
     let Some(projection) = design_projection(app) else {
         return rows;
     };
-    let active = app.state.workspace.occurrence_path();
+    let active = app.state.workspace.content.occurrence_path();
     rows.extend(
         crate::simulation::placed_sources::design_sources(
             &app.state.library_manager,
@@ -943,7 +943,7 @@ fn whole_design_rf_ports(app: &RSpiceApp) -> Vec<crate::simulation::placed_sourc
     let Some(projection) = design_projection(app) else {
         return rows;
     };
-    let active = app.state.workspace.occurrence_path();
+    let active = app.state.workspace.content.occurrence_path();
     rows.extend(
         crate::simulation::placed_sources::design_rf_ports(
             &app.state.library_manager,
@@ -999,7 +999,8 @@ fn derived_row_is_in_scope(
     occurrence: Option<&crate::state::InstancePath>,
     component_id: u64,
 ) -> bool {
-    if occurrence.is_some_and(|occurrence| *occurrence != state.workspace.occurrence_path()) {
+    if occurrence.is_some_and(|occurrence| *occurrence != state.workspace.content.occurrence_path())
+    {
         return true;
     }
     sheet_visibility::object_is_in_scope(state, scope, component_id)
@@ -1011,7 +1012,7 @@ fn row_is_elsewhere<'a>(
     state: &crate::workbench::app_state::AppState,
     occurrence: Option<&'a crate::state::InstancePath>,
 ) -> Option<&'a crate::state::InstancePath> {
-    occurrence.filter(|occurrence| **occurrence != state.workspace.occurrence_path())
+    occurrence.filter(|occurrence| **occurrence != state.workspace.content.occurrence_path())
 }
 
 /// Land the session on the occurrence a row names, then select and centre the
@@ -1035,7 +1036,7 @@ fn descend_to_placed(
     component_id: u64,
 ) {
     hierarchy_tree::open_occurrence(state, occurrence);
-    if state.workspace.occurrence_path() != *occurrence {
+    if state.workspace.content.occurrence_path() != *occurrence {
         return;
     }
     let Some(position) = state
@@ -1662,7 +1663,7 @@ impl NavigatorObject {
     }
 
     fn stable_path(&self, state: &AppState) -> String {
-        let owner = state.workspace.active_display_path();
+        let owner = state.workspace.content.active_display_path();
         match self {
             Self::Component { label, id, .. } => format!("{owner}/{label}#component-{id}"),
             Self::Net { name, .. } => format!("{owner}::net/{name}"),

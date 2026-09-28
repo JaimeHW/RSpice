@@ -643,7 +643,7 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
 fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
     let mut app = result_app_with_current_out_map(false);
     let view = app.state.workspace.content.active_view.clone();
-    let view_type = app.state.workspace.active_view_type();
+    let view_type = app.state.workspace.content.active_view_type();
     app.state.workspace.open_as_root(view.clone(), view_type);
 
     let error = cross_probe_trace_to_design(&mut app, "V(x1.out)")

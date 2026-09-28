@@ -36,7 +36,7 @@ enum OverflowReviewAction {
 pub(crate) fn open_drawing_sheet_overflow_review(state: &mut AppState) -> bool {
     if state.dialogs.drawing_sheet_overflow_open
         || !matches!(
-            state.workspace.active_view_type(),
+            state.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         )
     {

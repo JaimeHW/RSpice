@@ -508,7 +508,7 @@ fn parent_context_sheets(
         SchematicHierarchyVisibility::ActiveAndParent => 1,
         SchematicHierarchyVisibility::FullVisibleHierarchy => usize::MAX,
     };
-    let Some(occurrence) = state.workspace.active_occurrence() else {
+    let Some(occurrence) = state.workspace.content.active_occurrence() else {
         return Vec::new();
     };
     let masters: Vec<&CellViewRef> = occurrence.masters().collect();
@@ -1120,7 +1120,7 @@ fn occurrence_net_points<'a>(
     index: Option<&'a CrossProbeIndex>,
     engine_name: &str,
 ) -> Option<&'a Vec<Point>> {
-    let occurrence = state.workspace.occurrence_path();
+    let occurrence = state.workspace.content.occurrence_path();
     let selected = match index {
         Some(index) => index.for_occurrence(&occurrence),
         None if occurrence.is_root() => std::slice::from_ref(&state.simulation.cross_probe),

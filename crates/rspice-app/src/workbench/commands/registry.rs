@@ -73,7 +73,7 @@ impl ShortcutContext {
             // result sheet.
             Self::EditContext => {
                 app.state.workbench.workspace == Workspace::Results
-                    || match app.state.workspace.active_view_type() {
+                    || match app.state.workspace.content.active_view_type() {
                         crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
                             app.state.workbench.workspace == Workspace::Design
                         }
@@ -87,7 +87,7 @@ impl ShortcutContext {
             Self::EngineeringCanvas => {
                 app.state.workbench.workspace == Workspace::Design
                     && matches!(
-                        app.state.workspace.active_view_type(),
+                        app.state.workspace.content.active_view_type(),
                         crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
                     )
             }
@@ -95,7 +95,8 @@ impl ShortcutContext {
                 matches!(
                     app.state.workbench.workspace,
                     Workspace::Design | Workspace::Models
-                ) && app.state.workspace.active_view_type() == crate::state::ViewType::Symbol
+                ) && app.state.workspace.content.active_view_type()
+                    == crate::state::ViewType::Symbol
             }
             Self::DesignWorkspace => app.state.workbench.workspace == Workspace::Design,
             Self::SimulationWorkspace => app.state.workbench.workspace == Workspace::Simulate,
@@ -1078,7 +1079,7 @@ impl Command {
                     .workspace
                     .content
                     .design_management
-                    .sheet_catalog(&app.state.workspace.active_key())
+                    .sheet_catalog(&app.state.workspace.content.active_key())
                     .and_then(|catalog| catalog.active())
                     .is_none() =>
             {

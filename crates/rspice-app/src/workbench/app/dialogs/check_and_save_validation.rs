@@ -80,7 +80,7 @@ pub(crate) struct CheckAndSaveValidationReport {
 impl CheckAndSaveValidationReport {
     pub(crate) fn collect(state: &AppState) -> Result<Self, String> {
         let effective_scope = effective_save_scope(state, SaveScope::ActiveDocument);
-        let active_view = state.workspace.active_schematic_reference();
+        let active_view = state.workspace.content.active_schematic_reference();
         let project_id = state.workspace.content.project.id().to_string();
         let project_revision = state.workspace.content.project.revision().get();
         let accepted_generation = accepted_generation(state);
@@ -630,7 +630,7 @@ impl CheckAndSaveValidationReport {
             && self.active_schematic_epoch == state.active_schematic_epoch
             && self.active_topology_version == state.schematic.topology_version()
             && self.library_revision == state.library_manager.revision()
-            && self.active_view == state.workspace.active_schematic_reference()
+            && self.active_view == state.workspace.content.active_schematic_reference()
     }
 
     pub(crate) fn authority_is_resolved(&self) -> bool {

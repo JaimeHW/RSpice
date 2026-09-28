@@ -798,7 +798,7 @@ impl AppState {
                 document.reference.clone(),
             ));
         }
-        let active = self.workspace.active_schematic_reference();
+        let active = self.workspace.content.active_schematic_reference();
         let header = RecordHeader::committed(compensations, Some(active.clone()), Some(active));
         self.push_project_record(
             header,
@@ -1034,7 +1034,7 @@ impl AppState {
         if stranded.is_empty() {
             return;
         }
-        let active = self.workspace.active_schematic_reference().key();
+        let active = self.workspace.content.active_schematic_reference().key();
         for placement in &stranded {
             if self
                 .library_manager
@@ -1085,7 +1085,7 @@ impl AppState {
         };
         self.workspace.save_active_schematic(&self.schematic);
         self.workspace.activate_view(reference.clone(), view_type);
-        let key = self.workspace.active_schematic_reference().key();
+        let key = self.workspace.content.active_schematic_reference().key();
         if let Some(buffer) = self.workspace.clone_schematic_editor(&key) {
             self.schematic = buffer;
         }
@@ -1646,7 +1646,7 @@ impl SymbolDefinitionRecord {
             });
         if fixture_removed
             && self.fixture.as_ref().is_some_and(|fixture| {
-                state.workspace.active_schematic_reference() == fixture.reference
+                state.workspace.content.active_schematic_reference() == fixture.reference
                     || state
                         .workspace
                         .content
@@ -1768,7 +1768,7 @@ fn schematic_for_reference<'a>(
     state: &'a AppState,
     reference: &CellViewRef,
 ) -> Option<crate::state::SchematicEditorRef<'a>> {
-    if state.workspace.active_schematic_reference() == *reference {
+    if state.workspace.content.active_schematic_reference() == *reference {
         Some(state.schematic.editor_ref())
     } else {
         state.workspace.schematic_editor(&reference.key())
@@ -1799,7 +1799,7 @@ fn apply_symbol_fixture(
             state
                 .workspace
                 .insert_schematic_editor(key.clone(), schematic.clone());
-            if state.workspace.active_schematic_reference() == *reference {
+            if state.workspace.content.active_schematic_reference() == *reference {
                 state.schematic = schematic.clone();
             }
             if let Some(open) = state
@@ -1871,14 +1871,14 @@ impl DesignManagementRecord {
     fn after_design_matches(&self, state: &AppState) -> bool {
         design_management_semantics_match(&state.workspace.content.design_management, &self.after)
             && schematic_map_matches(state, &self.after_schematics)
-            && self.references.matches(&state.workspace, false)
+            && self.references.matches(&state.workspace.content, false)
             && state.workspace.content.project.revision() == self.undo_guard_revision
     }
 
     fn before_design_matches(&self, state: &AppState) -> bool {
         design_management_semantics_match(&state.workspace.content.design_management, &self.before)
             && schematic_map_matches(state, &self.before_schematics)
-            && self.references.matches(&state.workspace, true)
+            && self.references.matches(&state.workspace.content, true)
             && self
                 .redo_guard_revision
                 .is_some_and(|revision| state.workspace.content.project.revision() == revision)
@@ -1903,7 +1903,7 @@ impl DesignManagementRecord {
                 .ok_or_else(|| format!("Reference document '{key}' is unavailable."))?;
             reference_preparation::validate_reference_document(state, key, source)?;
         }
-        self.references.prepare(&state.workspace, forward)?;
+        self.references.prepare(&state.workspace.content, forward)?;
         let current = &state.workspace.content.design_management;
         let mut prepared_catalog = current.clone();
         prepared_catalog
@@ -1946,7 +1946,7 @@ impl DesignManagementRecord {
             .replace_design_management(self.before.clone())
             .map_err(|error| error.to_string())?;
         apply_schematic_map(state, &history.before, false)?;
-        history.references.publish(&mut state.workspace);
+        history.references.publish(&mut state.workspace.content);
         self.before_schematics = history.before;
         self.after_schematics = history.after;
         self.references = history.changes;
@@ -1968,7 +1968,7 @@ impl DesignManagementRecord {
             .replace_design_management(self.after.clone())
             .map_err(|error| error.to_string())?;
         apply_schematic_map(state, &history.after, false)?;
-        history.references.publish(&mut state.workspace);
+        history.references.publish(&mut state.workspace.content);
         self.before_schematics = history.before;
         self.after_schematics = history.after;
         self.references = history.changes;
@@ -2046,7 +2046,7 @@ impl InstanceRemovalDocument {
 
     fn restore(&self, state: &mut AppState, snapshot: &SchematicSnapshot) -> Result<(), String> {
         let key = self.reference.key();
-        if state.workspace.active_schematic_reference() == self.reference {
+        if state.workspace.content.active_schematic_reference() == self.reference {
             state.schematic.apply_snapshot(snapshot);
             state
                 .workspace
@@ -2074,7 +2074,7 @@ fn capture_schematic_map(
 }
 
 fn schematic_map_matches(state: &AppState, expected: &BTreeMap<String, SchematicSnapshot>) -> bool {
-    let active_key = state.workspace.active_schematic_reference().key();
+    let active_key = state.workspace.content.active_schematic_reference().key();
     expected.iter().all(|(key, snapshot)| {
         if key.eq_ignore_ascii_case(&active_key) {
             snapshot.is_equal_document(&state.schematic.document())
@@ -2095,7 +2095,7 @@ fn apply_schematic_map(
     snapshots: &BTreeMap<String, SchematicSnapshot>,
     preserve_selection: bool,
 ) -> Result<(), String> {
-    let active_key = state.workspace.active_schematic_reference().key();
+    let active_key = state.workspace.content.active_schematic_reference().key();
     for (key, snapshot) in snapshots {
         if key.eq_ignore_ascii_case(&active_key) {
             let selection = preserve_selection.then(|| state.schematic.session.selection.clone());
@@ -2333,7 +2333,7 @@ fn schematic_matches(
     reference: &CellViewRef,
     expected: &SchematicSnapshot,
 ) -> bool {
-    if state.workspace.active_schematic_reference() == *reference {
+    if state.workspace.content.active_schematic_reference() == *reference {
         expected.is_equal_document(&state.schematic.document())
     } else {
         state
@@ -2350,7 +2350,7 @@ fn apply_design_snapshot(
     reference: &CellViewRef,
     snapshot: &SchematicSnapshot,
 ) -> Result<(), String> {
-    if state.workspace.active_schematic_reference() == *reference {
+    if state.workspace.content.active_schematic_reference() == *reference {
         state.schematic.apply_snapshot(snapshot);
         state
             .workspace
@@ -2371,7 +2371,7 @@ fn apply_design_snapshot(
 }
 
 fn schematic_read_only(state: &AppState, reference: &CellViewRef) -> bool {
-    if state.workspace.active_schematic_reference() == *reference {
+    if state.workspace.content.active_schematic_reference() == *reference {
         state.schematic.session.read_only
     } else {
         state
@@ -2404,7 +2404,7 @@ fn document_read_only(state: &AppState, reference: &CellViewRef) -> bool {
 }
 
 fn schematic_clone(state: &AppState, reference: &CellViewRef) -> Option<SchematicState> {
-    if state.workspace.active_schematic_reference() == *reference {
+    if state.workspace.content.active_schematic_reference() == *reference {
         Some(state.schematic.clone())
     } else {
         state.workspace.clone_schematic_editor(&reference.key())
@@ -2472,7 +2472,7 @@ fn has_external_master_reference(state: &AppState, record: &HierarchyExtractionR
         .schematic_buffers
         .iter()
         .any(|(key, schematic)| is_external(key) && references_target(schematic.document()))
-        || (is_external(&state.workspace.active_schematic_reference().key())
+        || (is_external(&state.workspace.content.active_schematic_reference().key())
             && references_target(state.schematic.document()))
 }
 

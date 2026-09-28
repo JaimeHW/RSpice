@@ -158,7 +158,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     match app.state.workbench.workspace {
         // A symbol cellview is a design document with its own structure:
         // an ordered pin contract instead of a hierarchy of instances.
-        Workspace::Design if app.state.workspace.active_view_type() == ViewType::Symbol => {
+        Workspace::Design if app.state.workspace.content.active_view_type() == ViewType::Symbol => {
             symbol::show(ui, app);
         }
         Workspace::Design => design::show(ui, app),

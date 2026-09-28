@@ -1,12 +1,15 @@
 //! Exact live-reference deltas shared by component and annotation transactions.
 
-use super::{DocumentOccurrence, ProjectWorkspace};
-use crate::product::{SavedOutputId, SimulationPlanId};
-use crate::state::{CellViewRef, Component, ConfigurationSetCatalog, SavedOutput};
+use super::ProjectWorkspace;
+use rspice_app_types::product::{SavedOutputId, SimulationPlanId};
+use rspice_design::occurrence::DocumentOccurrence;
 use rspice_design::references::DesignReferenceChanges;
+use rspice_design::{configuration_set::ConfigurationSetCatalog, schematic::component::Component};
+use rspice_design_model::cell_view::CellViewRef;
+use rspice_simulation_contract::saved_output::SavedOutput;
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ReferenceChanges {
+pub struct ReferenceChanges {
     design: DesignReferenceChanges,
     outputs: Vec<OutputChange>,
 }
@@ -20,14 +23,14 @@ struct OutputChange {
 }
 
 #[derive(Clone)]
-pub(crate) struct PreparedReferences {
+pub struct PreparedReferences {
     configurations: ConfigurationSetCatalog,
     outputs: Vec<(SimulationPlanId, SavedOutput)>,
     occurrences: Vec<(CellViewRef, DocumentOccurrence)>,
 }
 
 impl ReferenceChanges {
-    pub(crate) fn reversed(mut self) -> Self {
+    pub fn reversed(mut self) -> Self {
         self.design = self.design.reversed();
         for change in &mut self.outputs {
             std::mem::swap(&mut change.before, &mut change.after);
@@ -41,15 +44,11 @@ impl ReferenceChanges {
         outputs: Vec<(SimulationPlanId, SavedOutput)>,
     ) -> Self {
         Self {
-            design: DesignReferenceChanges::between(
-                &workspace.content.configuration_sets,
-                configurations,
-            ),
+            design: DesignReferenceChanges::between(&workspace.configuration_sets, configurations),
             outputs: outputs
                 .into_iter()
                 .map(|(plan, output)| {
                     let before = workspace
-                        .content
                         .plan_data(plan)
                         .expect("source plan")
                         .saved_outputs
@@ -76,9 +75,9 @@ impl ReferenceChanges {
         self.design.add_instance_renames(document, before, after);
     }
 
-    pub(crate) fn matches(&self, workspace: &ProjectWorkspace, forward: bool) -> bool {
+    pub fn matches(&self, workspace: &ProjectWorkspace, forward: bool) -> bool {
         self.design
-            .checked_configurations(&workspace.content.configuration_sets, forward)
+            .checked_configurations(&workspace.configuration_sets, forward)
             .is_some()
             && self.outputs_match(workspace, forward)
     }
@@ -86,7 +85,6 @@ impl ReferenceChanges {
     fn outputs_match(&self, workspace: &ProjectWorkspace, forward: bool) -> bool {
         self.outputs.iter().all(|change| {
             workspace
-                .content
                 .plan_data(change.plan)
                 .and_then(|payload| {
                     payload
@@ -106,14 +104,14 @@ impl ReferenceChanges {
     }
 
     /// Finish revision arithmetic and validation before any owner changes.
-    pub(crate) fn prepare(
+    pub fn prepare(
         &self,
         workspace: &ProjectWorkspace,
         forward: bool,
     ) -> Result<PreparedReferences, String> {
         let Some(configurations) = self
             .design
-            .checked_configurations(&workspace.content.configuration_sets, forward)
+            .checked_configurations(&workspace.configuration_sets, forward)
             .filter(|_| self.outputs_match(workspace, forward))
         else {
             return Err(
@@ -124,7 +122,6 @@ impl ReferenceChanges {
         let mut outputs = Vec::with_capacity(self.outputs.len());
         for change in &self.outputs {
             let mut output = workspace
-                .content
                 .plan_data(change.plan)
                 .expect("guarded plan")
                 .saved_outputs
@@ -147,7 +144,6 @@ impl ReferenceChanges {
             outputs,
             occurrences: self.design.prepare_occurrences(
                 workspace
-                    .content
                     .open_views
                     .iter()
                     .map(|open| (&open.reference, &open.occurrence)),
@@ -158,12 +154,11 @@ impl ReferenceChanges {
 }
 
 impl PreparedReferences {
-    pub(crate) fn publish(self, workspace: &mut ProjectWorkspace) {
+    pub fn publish(self, workspace: &mut ProjectWorkspace) {
         workspace.replace_document_occurrences(self.occurrences);
-        workspace.content.configuration_sets = self.configurations;
+        workspace.configuration_sets = self.configurations;
         for (plan, replacement) in self.outputs {
             let target = workspace
-                .content
                 .plan_data_mut(plan)
                 .expect("guarded plan")
                 .saved_outputs
@@ -172,6 +167,6 @@ impl PreparedReferences {
                 .expect("guarded output");
             *target = replacement;
         }
-        workspace.content.project_metadata_dirty = true;
+        workspace.project_metadata_dirty = true;
     }
 }

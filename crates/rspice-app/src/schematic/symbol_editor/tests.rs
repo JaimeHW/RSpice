@@ -48,7 +48,7 @@ fn drag_symbol_edit_records_one_undo_snapshot_per_gesture() {
     record_drag_symbol_edit(&mut state, &document);
     record_drag_symbol_edit(&mut state, &document);
 
-    let key = state.workspace.active_key();
+    let key = state.workspace.content.active_key();
     assert_eq!(
         state.ui.symbol.history.undo_depth(&key),
         1,
@@ -263,7 +263,7 @@ fn a_multi_object_grab_moves_the_whole_selection_as_one_edit() {
         document.body.first(),
         Some(SymbolShape::Circle { center, .. }) if *center == Point::new(10, 20)
     ));
-    let key = state.workspace.active_key();
+    let key = state.workspace.content.active_key();
     assert_eq!(
         state.ui.symbol.history.undo_depth(&key),
         1,

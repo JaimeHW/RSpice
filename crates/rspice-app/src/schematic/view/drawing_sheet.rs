@@ -194,7 +194,7 @@ pub(crate) struct ActiveDrawingSheet {
 
 impl ActiveDrawingSheet {
     pub(crate) fn resolve(state: &AppState) -> Self {
-        let key = state.workspace.active_schematic_reference().key();
+        let key = state.workspace.content.active_schematic_reference().key();
         if let Some(catalog) = state
             .workspace
             .content

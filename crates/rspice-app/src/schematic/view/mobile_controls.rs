@@ -375,7 +375,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = Workspace::Design;
         assert!(matches!(
-            app.state.workspace.active_view_type(),
+            app.state.workspace.content.active_view_type(),
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
         ));
         app.state.schematic.session.zoom = 1.0;

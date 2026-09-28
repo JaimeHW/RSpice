@@ -47,7 +47,7 @@ fn fixture() -> (RSpiceApp, Component, ConfigurationSetId, SimulationPlanId) {
         .configuration_sets
         .create(ConfigurationSetDefinition {
             name: "Rename test".to_owned(),
-            root: app.state.workspace.active_schematic_reference(),
+            root: app.state.workspace.content.active_schematic_reference(),
             dut_path: "/V1".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: Vec::new(),
@@ -384,7 +384,7 @@ fn rename_starts_a_new_history_branch_without_stale_local_redo() {
 #[test]
 fn switching_documents_does_not_redirect_rename_history() {
     let (mut app, expected, configuration, plan) = fixture();
-    let owner = app.state.workspace.active_schematic_reference();
+    let owner = app.state.workspace.content.active_schematic_reference();
     app.state
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
@@ -398,7 +398,10 @@ fn switching_documents_does_not_redirect_rename_history() {
         .add_component(ComponentType::Resistor, Point::new(50, 50));
     let other_snapshot = SchematicSnapshot::capture(&app.state.schematic.document());
     app.action_edit_undo();
-    assert_eq!(app.state.workspace.active_schematic_reference(), owner);
+    assert_eq!(
+        app.state.workspace.content.active_schematic_reference(),
+        owner
+    );
     assert_reference(&app, configuration, plan, "V1");
     assert!(other_snapshot.is_equal_document(
         &app.state.workspace.content.schematic_buffers[&other.key()].document()
@@ -469,7 +472,7 @@ fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
         .unwrap();
         let loaded = crate::io::load_project_file(&path).unwrap();
         let schematic = &loaded.workspace.content.schematic_buffers
-            [&loaded.workspace.active_schematic_reference().key()];
+            [&loaded.workspace.content.active_schematic_reference().key()];
         assert_eq!(schematic.document().components[0].name, name);
         assert_eq!(
             schematic.document().probes[0].source_expression.as_deref(),

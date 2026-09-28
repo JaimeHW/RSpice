@@ -23,94 +23,26 @@ impl ProjectWorkspace {
     }
 
     fn apply_pending_annotation(&mut self, libraries: &LibraryManager) -> Result<usize, String> {
-        let annotation = self.content.design_management.annotation();
-        if annotation.journal().is_empty() {
+        let Some(prepared) = self
+            .project_hierarchy(libraries, None)
+            .prepare_pending_annotation()?
+        else {
             return Ok(0);
-        }
-        self.content
-            .design_management
-            .validate()
-            .map_err(|error| error.to_string())?;
-        let sources = self
-            .content
-            .schematic_buffers
-            .iter()
-            .flat_map(|(key, schematic)| {
-                schematic
-                    .document()
-                    .components
-                    .iter()
-                    .map(move |component| {
-                        crate::state::SchematicObjectKey::new(key, component.id)
-                            .map(|object| (object, component.name.as_str()))
-                    })
+        };
+        let sessions: Vec<_> = prepared
+            .changed_documents()
+            .map(|key| {
+                let mut session = self
+                    .schematic_sessions
+                    .get(key)
+                    .cloned()
+                    .unwrap_or_default();
+                session.is_dirty = true;
+                (key.to_owned(), session)
             })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| error.to_string())?;
-        let assignments = annotation
-            .projected_reference_assignments(sources)
-            .map_err(|error| error.to_string())?;
-        if assignments.is_empty() {
-            return Ok(0);
-        }
-        let count = assignments.len();
-        let mut by_document: BTreeMap<String, BTreeMap<u64, String>> = BTreeMap::new();
-        for (object, name) in assignments {
-            let key = self
-                .content
-                .schematic_buffers
-                .keys()
-                .find(|key| key.eq_ignore_ascii_case(object.cell_view_key()))
-                .expect("annotation targets were collected from these buffers");
-            by_document
-                .entry(key.clone())
-                .or_default()
-                .insert(object.object_id(), name);
-        }
-        let mut before = BTreeMap::new();
-        let mut after = BTreeMap::new();
-        for (key, names) in by_document {
-            let source = self.schematic_editor(&key).expect("annotation source");
-            let candidate = source
-                .renamed_reference_candidate(&names)
-                .map_err(|reason| {
-                    format!("Cannot restore reference annotation in '{key}': {reason}")
-                })?;
-            before.insert(key.clone(), source.clone_editor());
-            after.insert(key, candidate);
-        }
-        // The overlay must be an actual source, including projects last saved
-        // with a non-schematic document active. It never changes navigation.
-        let requested = self.active_schematic_reference();
-        let active_key = self
-            .content
-            .schematic_buffers
-            .keys()
-            .find(|key| key.eq_ignore_ascii_case(&requested.key()))
-            .unwrap_or_else(|| {
-                before
-                    .keys()
-                    .next()
-                    .expect("at least one pending annotation")
-            });
-        let active_reference = reference_from_key(active_key)?;
-        let transaction = self.prepare_schematic_reference_transaction(
-            libraries,
-            &active_reference,
-            self.schematic_editor(active_key)
-                .expect("annotation overlay"),
-            before,
-            after,
-        )?;
-        transaction.prepared_references.publish(self);
-        for (key, schematic) in transaction.after {
-            for open in &mut self.content.open_views {
-                if open.reference.key().eq_ignore_ascii_case(&key) {
-                    open.dirty = true;
-                }
-            }
-            self.insert_schematic_editor(key, schematic);
-        }
+            .collect();
+        let count = prepared.publish(&mut self.content);
+        self.schematic_sessions.extend(sessions);
         Ok(count)
     }
 }

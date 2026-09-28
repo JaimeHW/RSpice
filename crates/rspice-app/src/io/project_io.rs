@@ -1176,11 +1176,11 @@ impl ProjectFile {
         {
             return Err(ProjectIoError::InvalidData(format!(
                 "workspace.active_view references '{}', but workspace.open_views does not contain it",
-                self.workspace.active_key()
+                self.workspace.content.active_key()
             )));
         }
         if project_view_requires_schematic_buffer(active_view_type) {
-            required_schematic_buffers.insert(self.workspace.active_key());
+            required_schematic_buffers.insert(self.workspace.content.active_key());
         }
         let mut open_view_keys = HashSet::new();
         for (index, open_view) in self.workspace.content.open_views.iter().enumerate() {
@@ -1657,7 +1657,7 @@ pub(crate) fn load_project_text(
             "Assigned distinct IDs to {repaired_markers} result marker(s) with duplicate IDs; all annotation positions, labels, and dataset bindings were preserved."
         ));
     }
-    load_repairs.extend(project.workspace.migrate_document_occurrences());
+    load_repairs.extend(project.workspace.content.migrate_document_occurrences());
     let mut migrated_generated_bindings = 0usize;
     let mut unresolved_generated_bindings = 0usize;
     for schematic in project.workspace.content.schematic_buffers.values_mut() {

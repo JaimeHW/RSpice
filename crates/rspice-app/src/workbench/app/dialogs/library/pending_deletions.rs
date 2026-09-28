@@ -480,7 +480,7 @@ fn apply_instance_resolution(
         })
     };
 
-    let active = state.workspace.active_schematic_reference();
+    let active = state.workspace.content.active_schematic_reference();
     let active_key = active.key();
     let mut edited = state
         .workspace

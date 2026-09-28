@@ -40,7 +40,12 @@ fn app_with_sheets(count: usize) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.project_open = true;
     app.state.workbench.activate(Workspace::Design);
-    let key = app.state.workspace.active_schematic_reference().key();
+    let key = app
+        .state
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     let first = app
         .state
         .workspace

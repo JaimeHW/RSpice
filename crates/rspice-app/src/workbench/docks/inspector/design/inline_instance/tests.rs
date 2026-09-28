@@ -433,7 +433,12 @@ fn workspace_and_run_commands_resolve_the_pending_field_first() {
 fn opening_another_document_commits_to_the_original_component_and_preserves_refusals() {
     for valid in [false, true] {
         let mut editor = Editor::new();
-        let original = editor.app.state.workspace.active_schematic_reference();
+        let original = editor
+            .app
+            .state
+            .workspace
+            .content
+            .active_schematic_reference();
         let other = CellViewRef::new(&original.library, "other", "schematic");
         let mut other_schematic = crate::state::SchematicState::default();
         other_schematic
@@ -449,7 +454,12 @@ fn opening_another_document_commits_to_the_original_component_and_preserves_refu
         editor.app.state.open_workspace_view(other.clone());
         if valid {
             assert_eq!(
-                editor.app.state.workspace.active_schematic_reference(),
+                editor
+                    .app
+                    .state
+                    .workspace
+                    .content
+                    .active_schematic_reference(),
                 other
             );
             assert_eq!(
@@ -465,7 +475,12 @@ fn opening_another_document_commits_to_the_original_component_and_preserves_refu
             );
             editor.app.action_edit_undo();
             assert_eq!(
-                editor.app.state.workspace.active_schematic_reference(),
+                editor
+                    .app
+                    .state
+                    .workspace
+                    .content
+                    .active_schematic_reference(),
                 original
             );
             assert_eq!(
@@ -474,7 +489,12 @@ fn opening_another_document_commits_to_the_original_component_and_preserves_refu
             );
         } else {
             assert_eq!(
-                editor.app.state.workspace.active_schematic_reference(),
+                editor
+                    .app
+                    .state
+                    .workspace
+                    .content
+                    .active_schematic_reference(),
                 original
             );
             assert_eq!(

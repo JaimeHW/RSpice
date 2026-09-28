@@ -74,7 +74,7 @@ pub(super) fn active_symbol_editor(app: &RSpiceApp) -> bool {
     matches!(
         app.state.workbench.workspace,
         Workspace::Design | Workspace::Models
-    ) && app.state.workspace.active_view_type() == crate::state::ViewType::Symbol
+    ) && app.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol
 }
 
 /// Mockup-owned `G` command: cycle only the canvas presentation. Snap pitch
@@ -92,7 +92,7 @@ pub(super) fn cycle_canvas_grid(app: &mut RSpiceApp) {
 pub(super) fn active_schematic_editor(app: &RSpiceApp) -> bool {
     app.state.workbench.workspace == Workspace::Design
         && matches!(
-            app.state.workspace.active_view_type(),
+            app.state.workspace.content.active_view_type(),
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
         )
 }
@@ -254,7 +254,7 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
             app.state.workbench.command_query.clear();
         }
         Workspace::Design => {
-            if app.state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+            if app.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
                 app.state.ui.symbol.zoom = 1.0;
                 app.state.ui.symbol.pan = (0.0, 0.0);
                 app.state.ui.symbol.needs_fit = true;

@@ -559,7 +559,7 @@ fn engineering_context_summary(
     }
     match app.state.workbench.workspace {
         Workspace::Design => {
-            let view_type = app.state.workspace.active_view_type();
+            let view_type = app.state.workspace.content.active_view_type();
             app.state.ui.canvas_hover.map_or_else(
                 || match view_type {
                     crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
@@ -716,7 +716,7 @@ fn selection_summary(app: &RSpiceApp) -> String {
 /// reaches here — its chip reports plot magnification instead.
 fn zoom_factor(app: &RSpiceApp) -> f64 {
     if app.state.workbench.workspace == Workspace::Design
-        && app.state.workspace.active_view_type() == crate::state::ViewType::Symbol
+        && app.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol
     {
         f64::from(app.state.ui.symbol.zoom)
     } else {
@@ -1277,7 +1277,12 @@ mod tests {
 
         let mut app = RSpiceApp::test_instance();
         app.state.project_lifecycle.project_open = true;
-        let key = app.state.workspace.active_schematic_reference().key();
+        let key = app
+            .state
+            .workspace
+            .content
+            .active_schematic_reference()
+            .key();
         let first = app
             .state
             .workspace

@@ -132,7 +132,7 @@ fn restore_visibility_recovery(state: &mut AppState) -> Result<(), String> {
     state.schematic.session.bus_drawing.routing_mode = recovery.routing_mode;
     state.schematic.session.net_highlight = recovery.net_highlight;
     state.schematic.session.selection = recovery.selection;
-    let active_key = state.workspace.active_schematic_reference().key();
+    let active_key = state.workspace.content.active_schematic_reference().key();
     if let Some(mut buffer) = state.workspace.schematic_editor_mut(&active_key) {
         buffer.editor.session.selection = state.schematic.session.selection.clone();
     }

@@ -386,7 +386,7 @@ impl Command {
                     && state
                         .workspace
                         .content.design_management
-                        .sheet_catalog(&state.workspace.active_key())
+                        .sheet_catalog(&state.workspace.content.active_key())
                         .is_some_and(|catalog| catalog.active().is_some())
             }
             Self::CustomSheetSizes => {

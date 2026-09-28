@@ -50,5 +50,5 @@ pub(in crate::workbench) fn placed_instance(
 /// this first, because the component id it holds means nothing anywhere else.
 #[must_use]
 pub(in crate::workbench) fn reaches(state: &AppState, occurrence: Option<&InstancePath>) -> bool {
-    occurrence.is_none_or(|occurrence| *occurrence == state.workspace.occurrence_path())
+    occurrence.is_none_or(|occurrence| *occurrence == state.workspace.content.occurrence_path())
 }

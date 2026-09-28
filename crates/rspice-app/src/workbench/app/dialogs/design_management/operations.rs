@@ -444,7 +444,7 @@ impl RSpiceApp {
                 let subjects = hierarchy_audit_subjects(
                     &resolution,
                     inputs.audit_view_checks,
-                    &self.state.workspace.occurrence_path(),
+                    &self.state.workspace.content.occurrence_path(),
                 );
                 let request = HierarchyAuditRequest {
                     configuration,
@@ -524,7 +524,7 @@ pub(super) fn renumber_request(
         .map(|(key, schematic)| (key.clone(), schematic))
         .collect::<std::collections::HashMap<_, _>>();
     documents.insert(owner_key.to_owned(), active_schematic.editor_ref().design);
-    let occurrence = workspace.occurrence_path().to_string();
+    let occurrence = workspace.content.occurrence_path().to_string();
     let mut objects = Vec::new();
     for (cell_view_key, schematic) in &documents {
         let hierarchy_path = if cell_view_key == owner_key {

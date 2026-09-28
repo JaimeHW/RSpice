@@ -416,7 +416,7 @@ fn leaving_symbol_view_does_not_save_stale_schematic_under_symbol_key() {
     )];
 
     state.open_workspace_view(amp_symbol.clone());
-    assert_eq!(state.workspace.active_view_type(), ViewType::Symbol);
+    assert_eq!(state.workspace.content.active_view_type(), ViewType::Symbol);
 
     state.open_workspace_view(top_schematic);
 
@@ -2036,20 +2036,21 @@ fn renaming_a_cell_rewrites_the_masters_inside_every_occurrence() {
     let mut state = state_with_populated_user_library();
     let amp = CellViewRef::new("user", "amp", "schematic");
     state.descend_into_instance(Some("XAMP".to_owned()), amp.clone());
-    assert_eq!(state.workspace.occurrence_path().to_string(), "/XAMP");
+    let path = state.workspace.content.occurrence_path();
+    assert_eq!(path.to_string(), "/XAMP");
 
     state
         .rename_cell("user", "top", "tb")
         .expect("a writable cell renames");
 
-    let occurrence = state
-        .workspace
+    let workspace = &state.workspace.content;
+    let occurrence = workspace
         .active_occurrence()
         .expect("the descended document is still open");
     assert_eq!(occurrence.root, CellViewRef::new("user", "tb", "schematic"));
     assert_eq!(occurrence.terminal_master(), &amp);
     assert_eq!(
-        state.workspace.occurrence_path().to_string(),
+        workspace.occurrence_path().to_string(),
         "/XAMP",
         "renaming a master never renames the instance that reaches it"
     );
@@ -2058,9 +2059,8 @@ fn renaming_a_cell_rewrites_the_masters_inside_every_occurrence() {
 #[test]
 fn rename_library_propagation_matrix() {
     let mut state = state_with_populated_user_library();
-    let source_id = state
-        .workspace
-        .content
+    let project = &state.workspace.content;
+    let source_id = project
         .project_sources
         .iter_bundles()
         .find(|bundle| {

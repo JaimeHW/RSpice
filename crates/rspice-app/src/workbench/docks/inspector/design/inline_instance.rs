@@ -461,7 +461,7 @@ pub(super) fn prepare_component_tuning(
         .plan_data(plan_id)
         .map(|payload| payload.design_variables.clone())
         .ok_or_else(|| "the active simulation plan has no configuration payload".to_owned())?;
-    let source_view = app.state.workspace.active_schematic_reference();
+    let source_view = app.state.workspace.content.active_schematic_reference();
     let source_topology_version = app.state.schematic.topology_version();
     let active_plan_run = app
         .state
@@ -931,7 +931,7 @@ pub(super) fn off_sheet_declaration(state: &AppState, name: &str) -> Option<OffS
         .collect::<Vec<_>>()
         .join(", ");
 
-    let key = state.workspace.active_schematic_reference().key();
+    let key = state.workspace.content.active_schematic_reference().key();
     let catalog = state
         .workspace
         .content

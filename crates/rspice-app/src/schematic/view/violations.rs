@@ -340,7 +340,7 @@ mod tests {
 
     fn state_with_hidden_object(hidden_id: u64) -> AppState {
         let mut state = AppState::default();
-        let key = state.workspace.active_schematic_reference().key();
+        let key = state.workspace.content.active_schematic_reference().key();
         let first = state
             .workspace
             .content

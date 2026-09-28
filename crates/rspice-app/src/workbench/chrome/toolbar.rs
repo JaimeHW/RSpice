@@ -481,7 +481,7 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     }
     match workspace {
         Workspace::Project => project_tools(ui, app, layout),
-        Workspace::Design if app.state.workspace.active_view_type() == ViewType::Symbol => {
+        Workspace::Design if app.state.workspace.content.active_view_type() == ViewType::Symbol => {
             symbol_tools(ui, app, layout);
         }
         Workspace::Design => design_tools(ui, app, layout),

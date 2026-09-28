@@ -454,7 +454,7 @@ pub(crate) fn open_design_management_dialog(state: &mut AppState) {
         return;
     }
     if !matches!(
-        state.workspace.active_view_type(),
+        state.workspace.content.active_view_type(),
         crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
     ) {
         state.push_user_message(ConsoleMessage::warning(
@@ -463,7 +463,7 @@ pub(crate) fn open_design_management_dialog(state: &mut AppState) {
         return;
     }
     crate::schematic::view::retain_selection_on_active_sheet(state);
-    let owner_key = state.workspace.active_schematic_reference().key();
+    let owner_key = state.workspace.content.active_schematic_reference().key();
     let selection_object_ids = selected_stable_object_ids(&state.schematic);
     let all_object_ids = all_stable_object_ids(&state.schematic);
     let selection_summary = selected_object_summary(&state.schematic, &selection_object_ids);

@@ -761,7 +761,7 @@ fn build_comparison_workspace(
     recovered.session.needs_history_reset = true;
     let candidate_reference = workspace.content.active_view.clone();
     workspace.insert_schematic_editor(candidate_reference.key(), recovered.clone());
-    workspace.set_active_dirty(true);
+    workspace.content.set_active_dirty(true);
 
     if let Some(mut baseline) = baseline {
         // Library/cell/view identifiers are persisted slash-delimited keys and
@@ -795,7 +795,7 @@ fn build_comparison_workspace(
     }
 
     workspace.open_as_root(candidate_reference.clone(), ViewType::Schematic);
-    workspace.set_active_dirty(true);
+    workspace.content.set_active_dirty(true);
     libraries.select_view(
         &candidate_reference.library,
         &candidate_reference.cell,

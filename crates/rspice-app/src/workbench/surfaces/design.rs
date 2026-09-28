@@ -24,10 +24,10 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     occurrence_scope_banner(ui, app);
     let content_rect = ui.available_rect_before_wrap();
     let canvas_document = matches!(
-        app.state.workspace.active_view_type(),
+        app.state.workspace.content.active_view_type(),
         ViewType::Schematic | ViewType::Testbench
     );
-    match app.state.workspace.active_view_type() {
+    match app.state.workspace.content.active_view_type() {
         ViewType::Schematic | ViewType::Testbench => {
             crate::schematic::view::render_schematic_view(
                 ui,
@@ -52,7 +52,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 fn paint_live_cursors(ui: &mut Ui, app: &RSpiceApp, canvas: Rect) {
     use crate::services::live_protocol::CursorLocus;
 
-    let doc = format!("schematic/{}", app.state.workspace.active_key());
+    let doc = format!("schematic/{}", app.state.workspace.content.active_key());
     let cursors: Vec<_> = app
         .live_session
         .peers()
@@ -348,11 +348,12 @@ fn hierarchy_breadcrumb_segments(state: &AppState) -> Vec<BreadcrumbCrumb> {
     let active = &state.workspace.content.active_view;
     let occurrence = state
         .workspace
+        .content
         .active_occurrence()
         .cloned()
         .unwrap_or_else(|| DocumentOccurrence::rooted(active.clone()));
     let visibility = if matches!(
-        state.workspace.active_view_type(),
+        state.workspace.content.active_view_type(),
         ViewType::Schematic | ViewType::Testbench
     ) {
         state.ui.schematic_visibility.hierarchy
@@ -449,7 +450,7 @@ fn read_only_banner(ui: &mut Ui, app: &RSpiceApp) {
             ui.label(
                 egui::RichText::new(format!(
                     "{} is read only. Create an editable copy before changing this document.",
-                    app.state.workspace.active_display_path()
+                    app.state.workspace.content.active_display_path()
                 ))
                 .color(t.color.warn),
             );
@@ -496,7 +497,7 @@ fn unsupported_document(ui: &mut Ui, app: &RSpiceApp, view_type: ViewType) {
         &format!("{} view", view_type.display_name()),
         &format!(
             "{} is registered in the project and available for downstream integrations.",
-            app.state.workspace.active_display_path()
+            app.state.workspace.content.active_display_path()
         ),
     );
 }
@@ -577,7 +578,10 @@ mod tests {
         );
 
         descended(&mut state, "XBIAS", "bias");
-        assert_eq!(state.workspace.occurrence_path().to_string(), "/XAFE/XBIAS");
+        assert_eq!(
+            state.workspace.content.occurrence_path().to_string(),
+            "/XAFE/XBIAS"
+        );
         assert_eq!(
             crumb_labels(&state),
             vec![
@@ -615,7 +619,10 @@ mod tests {
             .expect("the descended level is a crumb");
         app.state.focus_workspace_breadcrumb(intermediate);
 
-        assert_eq!(app.state.workspace.occurrence_path().to_string(), "/XAFE");
+        assert_eq!(
+            app.state.workspace.content.occurrence_path().to_string(),
+            "/XAFE"
+        );
         assert_eq!(app.state.workspace.content.active_view.cell, "afe_core");
 
         let root = hierarchy_breadcrumb_segments(&app.state)
@@ -625,7 +632,7 @@ mod tests {
             .expect("the design root is a crumb");
         app.state.focus_workspace_breadcrumb(root);
 
-        assert!(app.state.workspace.occurrence_path().is_root());
+        assert!(app.state.workspace.content.occurrence_path().is_root());
         assert_eq!(app.state.workspace.content.active_view.cell, "top");
     }
 

@@ -135,7 +135,7 @@ fn state_with_descended_hierarchy_record() -> (AppState, CellViewRef, CellViewRe
 #[test]
 fn undo_and_redo_restore_the_occurrence_each_document_was_edited_at() {
     let (mut state, parent_ref, target) = state_with_descended_hierarchy_record();
-    assert_eq!(state.workspace.occurrence_path().to_string(), "/X1");
+    assert_eq!(state.workspace.content.occurrence_path().to_string(), "/X1");
 
     assert!(
         state
@@ -145,7 +145,7 @@ fn undo_and_redo_restore_the_occurrence_each_document_was_edited_at() {
     );
     assert_eq!(state.workspace.content.active_view, parent_ref);
     assert!(
-        state.workspace.occurrence_path().is_root(),
+        state.workspace.content.occurrence_path().is_root(),
         "the parent is a design root again once the child it was reached through is gone"
     );
 
@@ -157,7 +157,7 @@ fn undo_and_redo_restore_the_occurrence_each_document_was_edited_at() {
     );
     assert_eq!(state.workspace.content.active_view, target);
     assert_eq!(
-        state.workspace.occurrence_path().to_string(),
+        state.workspace.content.occurrence_path().to_string(),
         "/X1",
         "redo returns to the occurrence the child was being edited at"
     );
@@ -587,7 +587,7 @@ fn state_with_design_management_record()
 -> (AppState, DesignManagementCatalog, DesignManagementCatalog) {
     let mut state = AppState::default();
     state.project_lifecycle.project_open = true;
-    let owner = state.workspace.active_schematic_reference();
+    let owner = state.workspace.content.active_schematic_reference();
     let before = state.workspace.content.design_management.clone();
     let mut candidate = before.clone();
     candidate
@@ -783,7 +783,10 @@ fn undoing_a_publish_unresolves_the_placements_it_leaves_behind() {
     state
         .workspace
         .insert_schematic_editor(elsewhere.key(), buffer);
-    assert_ne!(state.workspace.active_schematic_reference(), elsewhere);
+    assert_ne!(
+        state.workspace.content.active_schematic_reference(),
+        elsewhere
+    );
 
     assert!(state.undo_project_design().expect("undo").is_some());
 

@@ -53,7 +53,10 @@ fn a_saved_project_writes_occurrences_and_not_the_old_global_breadcrumb() {
     let restored = load_project_text(&text, None).expect("the project reloads");
     restored.validate().expect("the restored project validates");
     assert!(restored.workspace_migration_warning.is_none());
-    assert_eq!(restored.workspace.occurrence_path().to_string(), "/XAMP");
+    assert_eq!(
+        restored.workspace.content.occurrence_path().to_string(),
+        "/XAMP"
+    );
     assert_eq!(restored.workspace.content.active_view, schematic("amp"));
 }
 
@@ -78,10 +81,14 @@ fn a_save_written_before_occurrences_folds_its_breadcrumb_onto_the_active_docume
     let restored = load_project_text(&value.to_string(), None).expect("the legacy save loads");
     restored.validate().expect("the migrated project validates");
     assert!(restored.workspace_migration_warning.is_none());
-    assert_eq!(restored.workspace.occurrence_path().to_string(), "/XAMP");
+    assert_eq!(
+        restored.workspace.content.occurrence_path().to_string(),
+        "/XAMP"
+    );
     assert_eq!(
         restored
             .workspace
+            .content
             .active_occurrence()
             .map(|occurrence| occurrence.root.clone()),
         Some(schematic("top")),
@@ -111,7 +118,7 @@ fn a_save_whose_breadcrumb_arrays_disagree_keeps_the_shorter_prefix_and_warns() 
         .expect("dropping a level the save could not name owes the reader a warning");
     assert!(warning.contains("1 level"), "{warning}");
     assert!(
-        restored.workspace.occurrence_path().is_root(),
+        restored.workspace.content.occurrence_path().is_root(),
         "an instance name that is missing is dropped, never invented from the cell name"
     );
 }
@@ -129,5 +136,5 @@ fn the_frozen_reference_project_gains_a_rooted_occurrence_per_document() {
         assert!(!open_view.occurrence.is_unrooted());
         assert_eq!(open_view.occurrence.terminal_master(), &open_view.reference);
     }
-    assert!(project.workspace.occurrence_path().is_root());
+    assert!(project.workspace.content.occurrence_path().is_root());
 }

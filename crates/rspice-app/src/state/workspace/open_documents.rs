@@ -160,7 +160,7 @@ impl ProjectWorkspace {
     /// follows placed hierarchical instances and the same schematic/source
     /// ownership used by netlisting.
     pub fn resolve_hierarchy(&self, libraries: &LibraryManager) -> HierarchyResolution {
-        HierarchyResolver::new(self, libraries, None).resolve()
+        self.project_hierarchy(libraries, None).resolve()
     }
 
     /// Resolve the hierarchy while projecting the live editor buffer over its
@@ -173,8 +173,7 @@ impl ProjectWorkspace {
         active_reference: &'a CellViewRef,
         active_schematic: &'a SchematicState,
     ) -> HierarchyResolution {
-        HierarchyResolver::new(
-            self,
+        self.project_hierarchy(
             libraries,
             Some((active_reference, active_schematic.editor_ref())),
         )
@@ -239,7 +238,7 @@ impl ProjectWorkspace {
         // reach the occurrence model only here. On a live workspace this is an
         // identity, because the projection already mirrors the active
         // document.
-        self.adopt_breadcrumb_for_active_document();
+        self.content.adopt_breadcrumb_for_active_document();
 
         if is_schematic_like(active_view_type) {
             self.ensure_active_buffer();
@@ -251,57 +250,29 @@ impl ProjectWorkspace {
         );
     }
 
-    pub fn active_key(&self) -> String {
-        self.content.active_view.key()
-    }
-
-    pub fn active_display_path(&self) -> String {
-        self.content.active_view.display_path()
-    }
-
-    pub fn active_view_type(&self) -> ViewType {
-        self.content
-            .open_views
-            .iter()
-            .find(|open| open.reference == self.content.active_view)
-            .map(|open| open.view_type)
-            .unwrap_or(ViewType::Schematic)
-    }
-
     pub fn ensure_active_buffer(&mut self) {
-        let key = self.active_key();
+        let key = self.content.active_key();
         if !self.content.schematic_buffers.contains_key(&key) {
             self.insert_schematic_editor(key, SchematicState::default());
         }
     }
 
     pub(crate) fn active_schematic(&self) -> Option<SchematicEditorRef<'_>> {
-        self.schematic_editor(&self.active_key())
-    }
-
-    pub fn active_schematic_reference(&self) -> CellViewRef {
-        if self.active_view_type() == ViewType::Symbol {
-            return CellViewRef::new(
-                &self.content.active_view.library,
-                &self.content.active_view.cell,
-                DEFAULT_SCHEMATIC_VIEW,
-            );
-        }
-        self.content.active_view.clone()
+        self.schematic_editor(&self.content.active_key())
     }
 
     pub(crate) fn active_context_schematic(&self) -> Option<SchematicEditorRef<'_>> {
-        let reference = self.active_schematic_reference();
+        let reference = self.content.active_schematic_reference();
         self.schematic_editor(&reference.key())
     }
 
     pub fn save_active_schematic(&mut self, schematic: &SchematicState) {
-        if !is_schematic_like(self.active_view_type()) {
+        if !is_schematic_like(self.content.active_view_type()) {
             return;
         }
-        let key = self.active_key();
+        let key = self.content.active_key();
         self.insert_schematic_editor(key, schematic.clone());
-        self.set_active_dirty(schematic.session.is_dirty);
+        self.content.set_active_dirty(schematic.session.is_dirty);
     }
 
     pub fn mark_all_clean(&mut self) {
@@ -345,7 +316,7 @@ impl ProjectWorkspace {
         {
             self.insert_schematic_editor(reference.key(), SchematicState::default());
         }
-        self.project_active_occurrence();
+        self.content.project_active_occurrence();
     }
 
     /// Activate the document `reference` names. This is the tab gesture: it
@@ -360,153 +331,26 @@ impl ProjectWorkspace {
     /// document; every other gesture reaches one through an instance.
     pub fn open_as_root(&mut self, reference: CellViewRef, view_type: ViewType) {
         self.open_view(reference.clone(), view_type);
-        self.set_active_occurrence(DocumentOccurrence::rooted(reference));
+        self.content
+            .set_active_occurrence(DocumentOccurrence::rooted(reference));
     }
 
     /// Descend into `instance`, opening its master `reference` on the active
     /// document's occurrence.
     pub fn descend_into(&mut self, instance: String, reference: CellViewRef, view_type: ViewType) {
-        let mut occurrence = self.active_occurrence_or_root();
+        let mut occurrence = self.content.active_occurrence_or_root();
         let already_open = occurrence.terminal_master() == &reference;
         self.open_view(reference.clone(), view_type);
         if already_open {
             return;
         }
         occurrence.descend(instance, reference);
-        self.set_active_occurrence(occurrence);
-    }
-
-    /// The occurrence the active document is editing.
-    pub fn active_occurrence(&self) -> Option<&DocumentOccurrence> {
-        self.content
-            .open_views
-            .iter()
-            .find(|open| open.reference == self.content.active_view)
-            .map(|open| &open.occurrence)
-    }
-
-    /// The active document's occurrence, or the root occurrence its reference
-    /// implies while no document claims it.
-    fn active_occurrence_or_root(&self) -> DocumentOccurrence {
-        self.active_occurrence()
-            .cloned()
-            .unwrap_or_else(|| DocumentOccurrence::rooted(self.content.active_view.clone()))
-    }
-
-    fn set_active_occurrence(&mut self, occurrence: DocumentOccurrence) {
-        let active = self.content.active_view.clone();
-        if let Some(open) = self
-            .content
-            .open_views
-            .iter_mut()
-            .find(|open| open.reference == active)
-        {
-            occurrence.debug_assert_opens(&open.reference);
-            open.occurrence = occurrence;
-        }
-        self.project_active_occurrence();
-    }
-
-    /// Root every document that carries no occurrence at its own reference.
-    ///
-    /// This is the one repair for a tab record written before documents owned
-    /// an occurrence, and it never invents a step: a document restored without
-    /// one is a root, not a guessed descent.
-    fn root_unrooted_occurrences(&mut self) {
-        for open in &mut self.content.open_views {
-            if open.occurrence.is_unrooted() || open.occurrence.terminal_master() != &open.reference
-            {
-                open.occurrence = DocumentOccurrence::rooted(open.reference.clone());
-            }
-        }
-    }
-
-    /// Refresh the session-global breadcrumb from the active document.
-    ///
-    /// The two vectors are a read-only projection for surfaces that have not
-    /// moved onto the per-document occurrence yet; the occurrence on the open
-    /// document is the authority, and this is the only writer.
-    fn project_active_occurrence(&mut self) {
-        let occurrence = self.active_occurrence_or_root();
-        self.content.hierarchy_stack = occurrence.masters().cloned().collect();
-        self.content.hierarchy_instances = occurrence
-            .steps
-            .iter()
-            .map(|step| step.instance_name.clone())
-            .collect();
-    }
-
-    /// Publish prepared instance-name changes while retaining each tab's
-    /// chosen root and master. Breadcrumbs derive from the resulting records.
-    pub(crate) fn replace_document_occurrences(
-        &mut self,
-        occurrences: Vec<(CellViewRef, DocumentOccurrence)>,
-    ) {
-        if occurrences.is_empty() {
-            return;
-        }
-        for (reference, occurrence) in occurrences {
-            if let Some(open) = self
-                .content
-                .open_views
-                .iter_mut()
-                .find(|open| open.reference == reference)
-            {
-                open.occurrence = occurrence;
-            }
-        }
-        self.project_active_occurrence();
-    }
-
-    /// Display labels for the active occurrence: the root cell, then the
-    /// instance descended through at each level.
-    pub fn occurrence_labels(&self) -> Vec<String> {
-        self.active_occurrence_or_root().labels()
-    }
-
-    /// The occurrence the active document is editing, as an instance path.
-    pub fn occurrence_path(&self) -> crate::state::InstancePath {
-        self.active_occurrence_or_root().instance_path()
-    }
-
-    /// Levels on the active occurrence, counting the design root.
-    pub fn occurrence_depth(&self) -> usize {
-        self.active_occurrence_or_root().depth()
-    }
-
-    /// Whether the active document was opened as a read-only hierarchy
-    /// reference.
-    pub fn active_read_only_reference(&self) -> bool {
-        self.content
-            .open_views
-            .iter()
-            .find(|open| open.reference == self.content.active_view)
-            .is_some_and(|open| open.read_only_reference)
-    }
-
-    pub fn set_active_read_only_reference(&mut self, read_only: bool) {
-        let active = self.content.active_view.clone();
-        if let Some(open) = self
-            .content
-            .open_views
-            .iter_mut()
-            .find(|open| open.reference == active)
-        {
-            open.read_only_reference = read_only;
-        }
-    }
-
-    /// Re-root the active document's occurrence at the document itself —
-    /// what a prune leaves behind once whatever it was reached through is
-    /// gone.
-    pub fn reroot_active_occurrence(&mut self) {
-        let reference = self.content.active_view.clone();
-        self.set_active_occurrence(DocumentOccurrence::rooted(reference));
+        self.content.set_active_occurrence(occurrence);
     }
 
     /// Pop one hierarchy level (the U gesture). Returns the new focus.
     pub fn ascend_one(&mut self) -> Option<CellViewRef> {
-        let depth = self.occurrence_depth();
+        let depth = self.content.occurrence_depth();
         if depth < 2 {
             return None;
         }
@@ -514,7 +358,7 @@ impl ProjectWorkspace {
     }
 
     pub fn focus_breadcrumb(&mut self, index: usize) -> Option<CellViewRef> {
-        let mut occurrence = self.active_occurrence_or_root();
+        let mut occurrence = self.content.active_occurrence_or_root();
         if index >= occurrence.depth() {
             return None;
         }
@@ -522,170 +366,8 @@ impl ProjectWorkspace {
         occurrence.truncate_to(index);
         let reference = occurrence.terminal_master().clone();
         self.open_view(reference.clone(), ViewType::Schematic);
-        self.set_active_occurrence(occurrence);
+        self.content.set_active_occurrence(occurrence);
         Some(reference)
-    }
-
-    /// Prune every open document's occurrence to what still exists.
-    ///
-    /// A document whose root master is gone closes; one that passes through a
-    /// master that is gone keeps the deepest prefix still entirely valid and
-    /// re-targets onto that prefix's terminal master, because an occurrence
-    /// step is only ever created by descending into a schematic. Nothing is
-    /// invented to fill a gap. Returns whether any occurrence changed.
-    pub fn retain_valid_occurrences(&mut self, is_valid: impl Fn(&CellViewRef) -> bool) -> bool {
-        let mut pruned = false;
-        self.content.open_views.retain_mut(|open| {
-            match open.occurrence.retain_valid_prefix(&is_valid) {
-                OccurrencePrune::Intact => true,
-                OccurrencePrune::Truncated => {
-                    open.reference = open.occurrence.terminal_master().clone();
-                    open.view_type = ViewType::Schematic;
-                    pruned = true;
-                    true
-                }
-                OccurrencePrune::Rootless => {
-                    pruned = true;
-                    false
-                }
-            }
-        });
-        // A document re-targeted onto a master another tab already shows is
-        // the same document twice; the first one keeps it.
-        let mut seen = HashSet::new();
-        self.content
-            .open_views
-            .retain(|open| seen.insert(open.reference.key()));
-        if !self
-            .content
-            .open_views
-            .iter()
-            .any(|open| open.reference == self.content.active_view)
-            && let Some(next) = self.content.open_views.first()
-        {
-            self.content.active_view = next.reference.clone();
-        }
-        self.project_active_occurrence();
-        pruned
-    }
-
-    /// Rewrite the masters a library, cell, or view rename moved, on every
-    /// open document's occurrence. Callers remap `active_view` and each
-    /// document's `reference` first, so the terminal-master invariant holds
-    /// across the whole transaction.
-    pub fn remap_occurrence_masters(&mut self, mut remap: impl FnMut(&mut CellViewRef)) {
-        for open in &mut self.content.open_views {
-            for master in open.occurrence.masters_mut() {
-                remap(master);
-            }
-            open.occurrence.debug_assert_opens(&open.reference);
-        }
-        self.project_active_occurrence();
-    }
-
-    /// The occurrence a session-global breadcrumb spells, and how many of its
-    /// levels it could not name. Zipping stops at the shorter of the two
-    /// vectors, because a missing instance name cannot be invented.
-    fn breadcrumb_occurrence(&self) -> Option<(DocumentOccurrence, usize)> {
-        let root = self.content.hierarchy_stack.first().cloned()?;
-        let mut occurrence = DocumentOccurrence::rooted(root);
-        for (master, instance) in self
-            .content
-            .hierarchy_stack
-            .iter()
-            .skip(1)
-            .zip(&self.content.hierarchy_instances)
-        {
-            occurrence.descend(instance.clone(), master.clone());
-        }
-        let unnamed = self.content.hierarchy_stack.len() - occurrence.depth();
-        Some((occurrence, unnamed))
-    }
-
-    /// Adopt a breadcrumb that describes the document already in front.
-    ///
-    /// Restore paths that never run project migration reach the occurrence
-    /// model here, and so does every schematic restore, so this must never
-    /// re-target which document is active: the breadcrumb records where a
-    /// session had navigated, not which document a caller just opened. A
-    /// breadcrumb that ends anywhere else is dropped in favour of the
-    /// projection.
-    fn adopt_breadcrumb_for_active_document(&mut self) {
-        self.root_unrooted_occurrences();
-        match self.breadcrumb_occurrence() {
-            Some((occurrence, _)) if occurrence.terminal_master() == &self.content.active_view => {
-                self.set_active_occurrence(occurrence);
-            }
-            _ => self.project_active_occurrence(),
-        }
-    }
-
-    /// Fold a save's session-global breadcrumb onto the document it described.
-    ///
-    /// Every document is first rooted at its own reference, then the active
-    /// one adopts the breadcrumb. A save whose two vectors disagree keeps only
-    /// the prefix both spell, and adopts it only if it ends at a document that
-    /// is actually open — an occurrence that named a master no tab shows would
-    /// address a different instance than the document on screen. Returns the
-    /// load warning that repair owes the reader.
-    pub fn migrate_document_occurrences(&mut self) -> Option<String> {
-        self.root_unrooted_occurrences();
-        let Some((occurrence, unnamed)) = self.breadcrumb_occurrence() else {
-            self.project_active_occurrence();
-            return None;
-        };
-        let terminal = occurrence.terminal_master().clone();
-        let adopted = self
-            .content
-            .open_views
-            .iter()
-            .any(|open| open.reference == terminal);
-
-        if !adopted {
-            self.project_active_occurrence();
-            return Some(format!(
-                "This project's saved hierarchy breadcrumb ended at {}, which no open document \
-                 shows; the active document was restored at its own root instead.",
-                terminal.display_path()
-            ));
-        }
-
-        self.content.active_view = terminal;
-        self.set_active_occurrence(occurrence);
-        (unnamed > 0).then(|| {
-            format!(
-                "This project's saved hierarchy breadcrumb named {unnamed} level(s) it carried no \
-                 instance name for; the occurrence was kept at {} rather than guessing them.",
-                self.occurrence_path()
-            )
-        })
-    }
-
-    pub fn close_view(&mut self, reference: &CellViewRef) {
-        if self.content.open_views.len() <= 1 {
-            return;
-        }
-
-        self.content
-            .open_views
-            .retain(|open| &open.reference != reference);
-        if &self.content.active_view == reference
-            && let Some(next) = self.content.open_views.last().cloned()
-        {
-            self.content.active_view = next.reference;
-        }
-        self.project_active_occurrence();
-    }
-
-    pub fn set_active_dirty(&mut self, dirty: bool) {
-        if let Some(open) = self
-            .content
-            .open_views
-            .iter_mut()
-            .find(|open| open.reference == self.content.active_view)
-        {
-            open.dirty = dirty;
-        }
     }
 }
 
@@ -748,17 +430,28 @@ mod tests {
 
     #[test]
     fn the_occurrence_path_names_instances_below_the_implicit_root() {
-        assert!(descended(&[]).occurrence_path().is_root());
-        assert_eq!(descended(&["X1"]).occurrence_path().to_string(), "/X1");
+        assert!(descended(&[]).content.occurrence_path().is_root());
         assert_eq!(
-            descended(&["X1", "XB"]).occurrence_path().to_string(),
+            descended(&["X1"]).content.occurrence_path().to_string(),
+            "/X1"
+        );
+        assert_eq!(
+            descended(&["X1", "XB"])
+                .content
+                .occurrence_path()
+                .to_string(),
             "/X1/XB"
         );
         assert!(
-            descended(&["X 1"]).occurrence_path().is_root(),
+            descended(&["X 1"]).content.occurrence_path().is_root(),
             "a label the grammar cannot name resolves to the root, not to half a path"
         );
-        assert!(descended(&["X1", "X 2"]).occurrence_path().is_root());
+        assert!(
+            descended(&["X1", "X 2"])
+                .content
+                .occurrence_path()
+                .is_root()
+        );
     }
 
     /// The defect this model exists to kill: one session-global breadcrumb
@@ -769,21 +462,21 @@ mod tests {
         let mut workspace = ProjectWorkspace::default();
         workspace.open_as_root(master("tb"), ViewType::Schematic);
         workspace.descend_into("XA".to_owned(), master("afe"), ViewType::Schematic);
-        assert_eq!(workspace.occurrence_path().to_string(), "/XA");
+        assert_eq!(workspace.content.occurrence_path().to_string(), "/XA");
 
         workspace.open_as_root(master("tb"), ViewType::Schematic);
         workspace.descend_into("XB".to_owned(), master("bias"), ViewType::Schematic);
         workspace.descend_into("XR".to_owned(), master("ref"), ViewType::Schematic);
-        assert_eq!(workspace.occurrence_path().to_string(), "/XB/XR");
+        assert_eq!(workspace.content.occurrence_path().to_string(), "/XB/XR");
 
         workspace.activate_view(master("afe"), ViewType::Schematic);
         assert_eq!(
-            workspace.occurrence_path().to_string(),
+            workspace.content.occurrence_path().to_string(),
             "/XA",
             "activating a document restores the occurrence it was opened at"
         );
         workspace.activate_view(master("ref"), ViewType::Schematic);
-        assert_eq!(workspace.occurrence_path().to_string(), "/XB/XR");
+        assert_eq!(workspace.content.occurrence_path().to_string(), "/XB/XR");
         assert_eq!(
             workspace.content.hierarchy_stack,
             vec![master("tb"), master("bias"), master("ref")],
@@ -805,17 +498,17 @@ mod tests {
         let mut workspace = ProjectWorkspace::default();
         workspace.open_as_root(master("tb"), ViewType::Schematic);
         workspace.open_as_root(master("afe"), ViewType::Schematic);
-        workspace.set_active_read_only_reference(true);
-        assert!(workspace.active_read_only_reference());
+        workspace.content.set_active_read_only_reference(true);
+        assert!(workspace.content.active_read_only_reference());
 
         workspace.activate_view(master("tb"), ViewType::Schematic);
         assert!(
-            !workspace.active_read_only_reference(),
+            !workspace.content.active_read_only_reference(),
             "the other document was never opened read-only"
         );
         workspace.activate_view(master("afe"), ViewType::Schematic);
         assert!(
-            workspace.active_read_only_reference(),
+            workspace.content.active_read_only_reference(),
             "returning to the reference document still refuses writes"
         );
     }
@@ -824,7 +517,11 @@ mod tests {
     fn pruning_truncates_to_what_survives_and_closes_a_rootless_document() {
         let mut workspace = descended(&["X1", "XB"]);
         let deepest = workspace.content.active_view.clone();
-        assert!(workspace.retain_valid_occurrences(|reference| reference.cell != "level_0"));
+        assert!(
+            workspace
+                .content
+                .retain_valid_occurrences(|reference| reference.cell != "level_0")
+        );
         assert!(
             workspace
                 .content
@@ -833,13 +530,17 @@ mod tests {
                 .all(|open| open.reference != deepest),
             "the document below a master that is gone folds onto the surviving prefix"
         );
-        assert!(workspace.occurrence_path().is_root());
+        assert!(workspace.content.occurrence_path().is_root());
 
         let mut rootless = ProjectWorkspace::default();
         rootless.open_as_root(master("keep"), ViewType::Schematic);
         rootless.open_as_root(master("gone"), ViewType::Schematic);
         rootless.descend_into("X1".to_owned(), master("child"), ViewType::Schematic);
-        assert!(rootless.retain_valid_occurrences(|reference| reference.cell != "gone"));
+        assert!(
+            rootless
+                .content
+                .retain_valid_occurrences(|reference| reference.cell != "gone")
+        );
         assert!(
             rootless
                 .content
@@ -866,11 +567,12 @@ mod tests {
         workspace.content.hierarchy_stack = vec![root.clone(), master("afe")];
         workspace.content.hierarchy_instances = vec!["XAFE".to_owned()];
 
-        assert!(workspace.migrate_document_occurrences().is_none());
-        assert_eq!(workspace.occurrence_path().to_string(), "/XAFE");
+        assert!(workspace.content.migrate_document_occurrences().is_none());
+        assert_eq!(workspace.content.occurrence_path().to_string(), "/XAFE");
         assert_eq!(workspace.content.active_view, master("afe"));
         assert_eq!(
             workspace
+                .content
                 .active_occurrence()
                 .map(|occurrence| &occurrence.root),
             Some(&root)
@@ -887,11 +589,12 @@ mod tests {
         workspace.content.hierarchy_instances = vec!["XAFE".to_owned()];
 
         let warning = workspace
+            .content
             .migrate_document_occurrences()
             .expect("a breadcrumb that cannot be spelled owes the reader a warning");
         assert!(warning.contains("1 level"), "{warning}");
         assert_eq!(
-            workspace.occurrence_path().to_string(),
+            workspace.content.occurrence_path().to_string(),
             "/XAFE",
             "the level with no instance name is dropped, never invented"
         );

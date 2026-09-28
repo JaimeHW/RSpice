@@ -266,7 +266,7 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
             .map_err(|error| error.to_string())?;
     }
     let binding_changed = if let Some(binding) = binding.as_ref() {
-        if app.state.workspace.active_schematic_reference() != binding.source_view {
+        if app.state.workspace.content.active_schematic_reference() != binding.source_view {
             return Err(format!(
                 "the active schematic changed from {} while the tuning sandbox was open",
                 binding.source_view.display_path()

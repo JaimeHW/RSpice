@@ -230,7 +230,7 @@ impl RSpiceApp {
         let schematic_tx = self
             .state
             .prepare_design_management_schematic_transaction(&draft)?;
-        let owner = self.state.workspace.active_schematic_reference();
+        let owner = self.state.workspace.content.active_schematic_reference();
         let committed_revision = self
             .state
             .workspace

@@ -594,7 +594,7 @@ mod tests {
     #[test]
     fn cross_sheet_selection_fails_closed_instead_of_moving_a_visible_subset() {
         let mut state = selected_components(&[(1, 0, 0), (2, 40, 0)]);
-        let key = state.workspace.active_schematic_reference().key();
+        let key = state.workspace.content.active_schematic_reference().key();
         let first = state
             .workspace
             .content

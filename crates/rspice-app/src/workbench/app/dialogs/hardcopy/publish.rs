@@ -757,7 +757,7 @@ fn active_schematic_page_authority(
 
     if app.state.workbench.current_route().surface_id() != SurfaceId::Design
         || !matches!(
-            app.state.workspace.active_view_type(),
+            app.state.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         )
         || !matches!(
@@ -768,7 +768,7 @@ fn active_schematic_page_authority(
         return None;
     }
 
-    let cell_view_key = app.state.workspace.active_key();
+    let cell_view_key = app.state.workspace.content.active_key();
     let base_source_key = format!(
         "project:{}:cell-view:{cell_view_key}",
         app.state.workspace.content.project.id().as_uuid()
@@ -819,7 +819,7 @@ fn validate_schematic_page_authority(
             .workspace
             .content
             .design_management
-            .sheet_catalog(&state.workspace.active_key())
+            .sheet_catalog(&state.workspace.content.active_key())
             .and_then(|catalog| catalog.active_sheet_id());
         return if active_governed_sheet.is_none() {
             Ok(())
@@ -830,7 +830,7 @@ fn validate_schematic_page_authority(
             )
         };
     };
-    if state.workspace.active_key() != governed.cell_view_key {
+    if state.workspace.content.active_key() != governed.cell_view_key {
         return Err("The active cell/view changed. Close and reopen Page Setup.".to_owned());
     }
     let catalog = state
@@ -953,7 +953,7 @@ fn active_retained_source_selection(
                 .workspace
                 .content
                 .design_management
-                .sheet_catalog(&app.state.workspace.active_key())
+                .sheet_catalog(&app.state.workspace.content.active_key())
                 .and_then(|catalog| catalog.active_sheet_id())
                 .map(|sheet_id| format!(":sheet:{sheet_id}"));
             active_sheet_suffix

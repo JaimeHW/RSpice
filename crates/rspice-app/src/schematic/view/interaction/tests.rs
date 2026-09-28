@@ -479,6 +479,7 @@ fn probe_marker_rejects_read_only_and_replaced_view_identity_without_mutation() 
     let mut read_only_reference = AppState::default();
     read_only_reference
         .workspace
+        .content
         .set_active_read_only_reference(true);
     assert!(retain_probe_flag(&mut read_only_reference, Point::origin(), None, None).is_err());
     assert!(read_only_reference.schematic.document().probes.is_empty());
@@ -1491,7 +1492,7 @@ fn hidden_overlapping_component_cannot_block_active_component_hit() {
         Component::new(20, ComponentType::Capacitor, point),
         Component::new(10, ComponentType::Resistor, point),
     ];
-    let key = state.workspace.active_schematic_reference().key();
+    let key = state.workspace.content.active_schematic_reference().key();
     let first = state
         .workspace
         .content
@@ -1545,7 +1546,7 @@ fn inactive_sheet_probe_cannot_block_active_probe_hit() {
         SchematicProbe::new(30, point, "V(active)", Some("V(active)".to_owned())).unwrap(),
         SchematicProbe::new(31, point, "V(hidden)", Some("V(hidden)".to_owned())).unwrap(),
     ];
-    let key = state.workspace.active_schematic_reference().key();
+    let key = state.workspace.content.active_schematic_reference().key();
     let first = state
         .workspace
         .content

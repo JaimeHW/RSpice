@@ -251,7 +251,7 @@ pub(crate) fn open_connectivity_manager(state: &mut AppState) {
         return;
     }
     if !matches!(
-        state.workspace.active_view_type(),
+        state.workspace.content.active_view_type(),
         crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
     ) {
         state.push_user_message(ConsoleMessage::warning(
@@ -432,7 +432,7 @@ fn connectivity_drc_config(state: &AppState) -> DrcConfig {
         "schematic",
     );
     DrcConfig {
-        check_missing_ground: state.workspace.active_schematic_reference() == root,
+        check_missing_ground: state.workspace.content.active_schematic_reference() == root,
         ..DrcConfig::default()
     }
 }
@@ -674,7 +674,7 @@ fn build_global_repairs(
     if policy.global_promotion == GlobalNetPromotionPolicy::TechnologyDefinedOnly {
         return Vec::new();
     }
-    let active_key = state.workspace.active_schematic_reference().key();
+    let active_key = state.workspace.content.active_schematic_reference().key();
     let mut repairs = Vec::new();
     for global in globals {
         let active_aliases = global
@@ -1138,7 +1138,13 @@ impl RSpiceApp {
         self.state.dialogs.connectivity_manager.close();
         self.state.workbench.workspace = crate::workbench::state::Workspace::Design;
         if let RevealTarget::Label { view_key, .. } = &target
-            && *view_key != self.state.workspace.active_schematic_reference().key()
+            && *view_key
+                != self
+                    .state
+                    .workspace
+                    .content
+                    .active_schematic_reference()
+                    .key()
             && let Some(reference) = cell_view_reference_from_key(view_key)
         {
             self.state.open_workspace_view(reference);

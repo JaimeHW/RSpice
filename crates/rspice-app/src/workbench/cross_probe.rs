@@ -99,7 +99,7 @@ pub(crate) fn synchronize_schematic_cross_probe(state: &mut AppState) {
         current_generated_artifact(state).map(|artifact| artifact.provenance().input().digest());
     let key = SynchronizationKey {
         active_view_key: state.workspace.content.active_view.key(),
-        occurrence: state.workspace.occurrence_path(),
+        occurrence: state.workspace.content.occurrence_path(),
         topology_version: state.schematic.topology_version(),
         target: target.clone(),
         cross_probe_version: state.simulation.cross_probe.version,
@@ -378,7 +378,7 @@ fn compatible_result_trace(
     // A trace is named by the node the engine solved, which below the design
     // root is the occurrence's flattened name rather than the local one the
     // drawing shows.
-    let occurrence = state.workspace.occurrence_path();
+    let occurrence = state.workspace.content.occurrence_path();
     let signal = match target {
         SchematicCrossProbeTarget::Component {
             emitted_instance, ..

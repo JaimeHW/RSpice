@@ -929,7 +929,7 @@ fn borrow_signal_conductor<'a>(
     if !result_mapping_is_current(state) {
         return Err(LocateSignalError::NoCurrentMap);
     }
-    let occurrence = state.workspace.occurrence_path();
+    let occurrence = state.workspace.content.occurrence_path();
     if target.scope.fold_key() != occurrence.fold_key() {
         return Err(LocateSignalError::OtherOccurrence(target.scope.to_string()));
     }
@@ -1303,7 +1303,7 @@ pub fn render_schematic_view(
     crate::ui::theme::paint_focus_ring(ui, &response, available);
     crate::workbench::app_state::report_engineering_canvas_focus(
         &response,
-        state.workspace.active_view_type(),
+        state.workspace.content.active_view_type(),
     );
 }
 

@@ -1094,7 +1094,7 @@ impl LiveSessionEngine {
     /// Keep the workspace buffer map current with the active working copy,
     /// but only when its content actually moved.
     fn sync_active_buffer(&mut self, state: &mut AppState) {
-        let key = state.workspace.active_key();
+        let key = state.workspace.content.active_key();
         let version = state.schematic.content_version();
         if self.active_synced_version != Some((key.clone(), version)) {
             state.sync_active_schematic_to_workspace();
@@ -1486,7 +1486,7 @@ impl LiveSessionEngine {
         let Some(identity) = self.connection.as_ref().map(|c| c.identity) else {
             return;
         };
-        let focused = schematic_doc_key(&state.workspace.active_key());
+        let focused = schematic_doc_key(&state.workspace.content.active_key());
         self.send(&LiveMessage::Presence(PresencePayload {
             sender: identity,
             focused_doc: Some(focused),
@@ -1506,7 +1506,7 @@ impl LiveSessionEngine {
             state.ui.canvas_hover.and_then(|(x, y)| {
                 let (x, y) = (x as f32, y as f32);
                 (x.is_finite() && y.is_finite()).then(|| CursorLocus::Canvas {
-                    doc: schematic_doc_key(&state.workspace.active_key()),
+                    doc: schematic_doc_key(&state.workspace.content.active_key()),
                     x,
                     y,
                 })
@@ -1642,7 +1642,7 @@ impl LiveSessionEngine {
         }
         let active_locked = locks
             .schematic_views
-            .contains_key(&state.workspace.active_key());
+            .contains_key(&state.workspace.content.active_key());
         state.workbench.live_write_locks = locks;
         state.schematic.session.read_only = active_locked;
     }
@@ -1661,7 +1661,7 @@ fn install_schematic_buffer(
     prepared.session.needs_fit = false;
     prepared.session.is_dirty = remote_is_unsaved;
     prepared.session.needs_history_reset = true;
-    if state.workspace.active_key() == cell_key {
+    if state.workspace.content.active_key() == cell_key {
         prepared.session.zoom = state.schematic.session.zoom;
         prepared.session.pan = state.schematic.session.pan;
         prepared.session.read_only = state.schematic.session.read_only;

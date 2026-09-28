@@ -75,7 +75,7 @@ impl RSpiceApp {
             self.state.shortcut_resolver.reset();
             return;
         }
-        let active_view = self.state.workspace.active_view_type();
+        let active_view = self.state.workspace.content.active_view_type();
         let canvas_focus =
             engineering_canvas_has_focus(ctx, self.state.workbench.workspace, active_view);
         if crate::schematic::view::handle_pre_render_placement_transform(
@@ -143,7 +143,7 @@ impl RSpiceApp {
     pub(in crate::workbench) fn execute_shortcut_command(&mut self, command: ShortcutCommand) {
         use crate::state::{ComponentType, Tool};
 
-        if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol
+        if self.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol
             && self.execute_symbol_shortcut_command(command)
         {
             return;
@@ -931,7 +931,7 @@ impl RSpiceApp {
     /// answer `None` rather than a position that would sort as the oldest
     /// record in the session.
     fn active_document_undo_sequence(&self) -> Option<crate::state::UndoSequence> {
-        if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+        if self.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
             return None;
         }
         self.state.schematic.history().undo_sequence()
@@ -939,14 +939,14 @@ impl RSpiceApp {
 
     /// Where the active document's next redo step sits in the global order.
     fn active_document_redo_sequence(&self) -> Option<crate::state::UndoSequence> {
-        if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+        if self.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
             return None;
         }
         self.state.schematic.history().redo_sequence()
     }
 
     fn try_active_document_undo(&mut self) -> bool {
-        if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+        if self.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
             return match self.state.undo_active_symbol_document() {
                 Ok(true) => {
                     self.state
@@ -980,7 +980,7 @@ impl RSpiceApp {
     }
 
     fn try_active_document_redo(&mut self) -> bool {
-        if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+        if self.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
             return match self.state.redo_active_symbol_document() {
                 Ok(true) => {
                     self.state
@@ -1208,7 +1208,7 @@ mod shortcut_ownership_tests {
         use crate::workbench::app_state::DesignManagementHistoryEntry;
 
         state.project_lifecycle.project_open = true;
-        let owner = state.workspace.active_schematic_reference();
+        let owner = state.workspace.content.active_schematic_reference();
         let before = state.workspace.content.design_management.clone();
         let drawn = state
             .schematic
@@ -1486,7 +1486,7 @@ mod shortcut_ownership_tests {
         let profile = app.state.ui.preferences.shortcuts().clone();
         let environment = ShortcutEnvironment {
             workspace: app.state.workbench.workspace,
-            active_view: app.state.workspace.active_view_type(),
+            active_view: app.state.workspace.content.active_view_type(),
             canvas_focus: false,
         };
         let mut resolver = std::mem::take(&mut app.state.shortcut_resolver);

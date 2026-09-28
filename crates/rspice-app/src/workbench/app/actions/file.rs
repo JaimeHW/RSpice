@@ -581,7 +581,7 @@ mod tests {
             state.workbench.activate(workspace);
             state.schematic.session.current_file = Some(schematic_path);
             state.schematic.session.is_dirty = true;
-            state.workspace.set_active_dirty(true);
+            state.workspace.content.set_active_dirty(true);
             let mut app = test_app_with_file_io(
                 state,
                 TestFileWorkflowIo {
@@ -617,7 +617,7 @@ mod tests {
                 Point::new(10, 20),
             ));
         state.schematic.session.is_dirty = true;
-        let active_key = state.workspace.active_key();
+        let active_key = state.workspace.content.active_key();
         assert!(
             state
                 .workspace
@@ -684,7 +684,7 @@ mod tests {
             DestinationAuthority::UserSelected,
         )
         .expect("create source project");
-        let active_key = project_source.workspace.active_key();
+        let active_key = project_source.workspace.content.active_key();
         project_source
             .schematic
             .add_component(ComponentType::Resistor, Point::new(7, 3));
@@ -801,7 +801,7 @@ mod tests {
                 .workspace
                 .content
                 .schematic_buffers
-                .get(&schematic_app.state.workspace.active_key())
+                .get(&schematic_app.state.workspace.content.active_key())
                 .expect("saved active schematic")
                 .document()
                 .components
@@ -935,7 +935,7 @@ mod tests {
             DestinationAuthority::UserSelected,
         )
         .expect("seed canonical project");
-        let active_key = state.workspace.active_key();
+        let active_key = state.workspace.content.active_key();
         state
             .schematic
             .add_component(ComponentType::Capacitor, Point::new(3, 8));

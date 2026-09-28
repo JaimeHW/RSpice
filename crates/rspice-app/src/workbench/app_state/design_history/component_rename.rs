@@ -35,8 +35,8 @@ impl AppState {
     pub(crate) fn inline_edit_authority(&self) -> InlineEditAuthority {
         InlineEditAuthority {
             project: self.workspace.content.project.id(),
-            document: self.workspace.active_schematic_reference(),
-            occurrence: self.workspace.active_occurrence().cloned(),
+            document: self.workspace.content.active_schematic_reference(),
+            occurrence: self.workspace.content.active_occurrence().cloned(),
             design_epoch: self.design_execution_epoch,
             document_epoch: self.active_schematic_epoch,
         }
@@ -100,7 +100,7 @@ impl AppState {
         candidate: Component,
         description: &str,
     ) -> Result<bool, String> {
-        let document = self.workspace.active_schematic_reference();
+        let document = self.workspace.content.active_schematic_reference();
         let writable = self.project_lifecycle.project_open && !document_read_only(self, &document);
         let prepared = self
             .schematic
@@ -207,7 +207,7 @@ impl ComponentRenameRecord {
     fn matches(&self, state: &AppState, forward: bool) -> bool {
         let expected = if forward { &self.before } else { &self.after };
         schematic_map_matches(state, expected)
-            && self.references.matches(&state.workspace, forward)
+            && self.references.matches(&state.workspace.content, forward)
             && self.annotation.as_ref().is_none_or(|change| {
                 state.workspace.content.design_management.annotation()
                     == if forward {
@@ -248,7 +248,7 @@ impl ComponentRenameRecord {
                 .ok_or_else(|| format!("Reference document '{key}' is unavailable."))?;
             validate_reference_document(state, key, source)?;
         }
-        self.references.prepare(&state.workspace, forward)?;
+        self.references.prepare(&state.workspace.content, forward)?;
         self.prepare_annotation(state, forward)
     }
 
@@ -359,7 +359,7 @@ impl PreparedComponentRename {
             },
             true,
         )?;
-        self.references.publish(&mut state.workspace);
+        self.references.publish(&mut state.workspace.content);
         state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         state.ui.netlist.current_generation_input_digest = None;
         if let Some(change) = &mut record.annotation {

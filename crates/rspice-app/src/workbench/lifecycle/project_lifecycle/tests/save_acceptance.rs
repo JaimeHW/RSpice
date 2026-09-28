@@ -67,7 +67,7 @@ fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() 
                 state.schematic.document().components[0].pos,
                 Point::new(150, 100)
             );
-            let key = state.workspace.active_key();
+            let key = state.workspace.content.active_key();
             let mut inactive_copy = state.workspace.clone_schematic_editor(&key).unwrap();
             assert!(inactive_copy.cancel_operation());
             assert_eq!(inactive_copy.session.is_dirty, later_change != 0);

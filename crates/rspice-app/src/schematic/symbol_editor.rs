@@ -175,7 +175,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         });
         crate::workbench::app_state::report_engineering_canvas_focus(
             &response,
-            state.workspace.active_view_type(),
+            state.workspace.content.active_view_type(),
         );
         if changed && let Err(error) = state.store_active_symbol_editor_bundle(&document, &editor) {
             state.push_user_message(ConsoleMessage::warning(error));
@@ -526,7 +526,7 @@ fn revision_state_strip(ui: &mut Ui, state: &AppState, revision: u64) {
         .ui
         .symbol
         .history
-        .is_dirty(&state.workspace.active_key());
+        .is_dirty(&state.workspace.content.active_key());
     let (text, color) = if dirty {
         (
             format!("Unpublished edits \u{00b7} last published revision {revision}"),

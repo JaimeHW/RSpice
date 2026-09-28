@@ -498,7 +498,7 @@ fn elsewhere<'a>(
     state: &AppState,
     occurrence: Option<&'a InstancePath>,
 ) -> Option<&'a InstancePath> {
-    occurrence.filter(|occurrence| **occurrence != state.workspace.occurrence_path())
+    occurrence.filter(|occurrence| **occurrence != state.workspace.content.occurrence_path())
 }
 
 /// Whether the drawing on screen is showing this row's instance selected.

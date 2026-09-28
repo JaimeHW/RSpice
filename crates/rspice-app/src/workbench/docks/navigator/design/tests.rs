@@ -103,18 +103,13 @@ fn two_sheet_named_signals() -> RSpiceApp {
     }
     app.state.sync_active_schematic_to_workspace();
 
-    let key = app.state.workspace.active_schematic_reference().key();
-    let first = app
-        .state
-        .workspace
-        .content
+    let workspace = &mut app.state.workspace.content;
+    let key = workspace.active_schematic_reference().key();
+    let first = workspace
         .design_management
         .bootstrap_for_cell_view(&key, "Input stage", [301, 302])
         .expect("the fixture cell view takes a sheet catalog");
-    let catalog = app
-        .state
-        .workspace
-        .content
+    let catalog = workspace
         .design_management
         .sheet_catalog_mut(&key)
         .expect("the catalog was just bootstrapped");
@@ -316,14 +311,14 @@ fn an_occurrence_row_lands_the_session_on_that_occurrence() {
     let leaf = instance.child("XLEAF").expect("the leaf is nameable");
 
     hierarchy_tree::open_occurrence(&mut app.state, &leaf);
-    assert_eq!(app.state.workspace.occurrence_path(), leaf);
+    assert_eq!(app.state.workspace.content.occurrence_path(), leaf);
     assert_eq!(
         app.state.workspace.content.active_view,
         CellViewRef::new("work", "leaf", "schematic")
     );
 
     hierarchy_tree::open_occurrence(&mut app.state, &instance);
-    assert_eq!(app.state.workspace.occurrence_path(), instance);
+    assert_eq!(app.state.workspace.content.occurrence_path(), instance);
     assert_eq!(
         app.state.workspace.content.active_view,
         CellViewRef::new("work", "child", "schematic")
@@ -2324,7 +2319,7 @@ fn an_excitation_of_another_occurrence_opens_it_rather_than_selecting_here() {
     let state = &panel.app.state;
 
     assert_eq!(
-        state.workspace.occurrence_path(),
+        state.workspace.content.occurrence_path(),
         occurrence,
         "the click lands the session on the occurrence the row names"
     );

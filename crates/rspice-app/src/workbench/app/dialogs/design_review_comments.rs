@@ -146,7 +146,7 @@ pub(crate) fn open_design_review_comments(state: &mut AppState) {
         return;
     }
     if !matches!(
-        state.workspace.active_view_type(),
+        state.workspace.content.active_view_type(),
         crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
     ) {
         state.push_user_message(ConsoleMessage::warning(

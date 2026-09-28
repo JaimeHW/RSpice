@@ -84,7 +84,7 @@ impl AppState {
         if self.workspace.annotation_restoration_error().is_some() {
             self.sync_active_schematic_to_workspace();
         }
-        let subject = self.workspace.active_schematic_reference();
+        let subject = self.workspace.content.active_schematic_reference();
         let config = design_check_config(self, &subject);
         // Checks run over the design as configured, not over the editor
         // buffer. That is what makes two sheets with coincident authored
@@ -127,7 +127,7 @@ impl AppState {
         result: DrcResult,
     ) -> Result<(), String> {
         if !matches!(
-            self.workspace.active_view_type(),
+            self.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         ) {
             return Err(
@@ -135,7 +135,7 @@ impl AppState {
                     .to_owned(),
             );
         }
-        let subject = self.workspace.active_schematic_reference();
+        let subject = self.workspace.content.active_schematic_reference();
         let config = design_check_config(self, &subject);
         self.publish_design_check_result(subject, config, result)
     }
@@ -152,7 +152,7 @@ impl AppState {
             );
         }
         let is_active_subject =
-            owner_key(&subject) == owner_key(&self.workspace.active_schematic_reference());
+            owner_key(&subject) == owner_key(&self.workspace.content.active_schematic_reference());
         let input_digest = design_check_input_digest(self, &subject, &config)?;
         self.design_checks.insert(CellViewCheckReceipt {
             project_id: self.workspace.content.project.id(),
@@ -188,12 +188,12 @@ impl AppState {
 
     pub(crate) fn active_design_check_status(&self) -> DesignCheckStatus<'_> {
         if !matches!(
-            self.workspace.active_view_type(),
+            self.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         ) {
             return DesignCheckStatus::NotRun;
         }
-        self.design_check_status(&self.workspace.active_schematic_reference())
+        self.design_check_status(&self.workspace.content.active_schematic_reference())
     }
 
     pub(crate) fn project_root_design_check_status(&self) -> DesignCheckStatus<'_> {
@@ -202,13 +202,13 @@ impl AppState {
 
     pub(crate) fn clear_active_design_check(&mut self) {
         if !matches!(
-            self.workspace.active_view_type(),
+            self.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         ) {
             self.refresh_active_design_check_projection();
             return;
         }
-        let subject = self.workspace.active_schematic_reference();
+        let subject = self.workspace.content.active_schematic_reference();
         self.design_checks.clear_subject(&subject);
     }
 
@@ -221,7 +221,7 @@ impl AppState {
     /// a different cell/view's findings while they are migrated to receipts.
     pub(crate) fn refresh_active_design_check_projection(&mut self) {
         if !matches!(
-            self.workspace.active_view_type(),
+            self.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         ) {
             self.dialogs.drc_checked_version = 0;
@@ -278,7 +278,7 @@ fn design_check_input_digest(
         .map(|(key, schematic)| (key.clone(), schematic))
         .collect::<std::collections::HashMap<_, _>>();
     if matches!(
-        state.workspace.active_view_type(),
+        state.workspace.content.active_view_type(),
         ViewType::Schematic | ViewType::Testbench
     ) {
         live_buffers.insert(
@@ -349,7 +349,7 @@ mod tests {
     #[test]
     fn receipts_never_alias_another_active_cell_view() {
         let mut state = AppState::default();
-        let root = state.workspace.active_schematic_reference();
+        let root = state.workspace.content.active_schematic_reference();
         let other = CellViewRef::new(&root.library, "aux", &root.view);
         state
             .workspace
@@ -532,7 +532,7 @@ mod tests {
             ));
         state.sync_active_schematic_to_workspace();
 
-        let key = state.workspace.active_schematic_reference().key();
+        let key = state.workspace.content.active_schematic_reference().key();
         let first = state
             .workspace
             .content

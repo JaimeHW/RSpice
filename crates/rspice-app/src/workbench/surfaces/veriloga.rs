@@ -64,7 +64,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             Ok(selected) => selected,
             Err(error) => {
                 let messages = app.state.ui.messages();
-                let description = if app.state.workspace.active_view_type()
+                let description = if app.state.workspace.content.active_view_type()
                     == crate::state::ViewType::VerilogA
                 {
                     error

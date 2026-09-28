@@ -1462,7 +1462,10 @@ fn descend_records_the_instance_names() {
     workspace.descend_into("X1".into(), reference("ota_5t"), ViewType::Schematic);
     workspace.descend_into("XB".into(), reference("bias_2t"), ViewType::Schematic);
 
-    assert_eq!(workspace.occurrence_labels(), ["tb_ota", "X1", "XB"]);
+    assert_eq!(
+        workspace.content.occurrence_labels(),
+        ["tb_ota", "X1", "XB"]
+    );
     assert_eq!(workspace.content.active_view.cell, "bias_2t");
 }
 
@@ -1474,11 +1477,11 @@ fn breadcrumb_focus_truncates_the_occurrence_path() {
     workspace.descend_into("XB".into(), reference("bias_2t"), ViewType::Schematic);
 
     workspace.focus_breadcrumb(1);
-    assert_eq!(workspace.occurrence_labels(), ["tb_ota", "X1"]);
+    assert_eq!(workspace.content.occurrence_labels(), ["tb_ota", "X1"]);
     assert_eq!(workspace.content.active_view.cell, "ota_5t");
 
     workspace.ascend_one();
-    assert_eq!(workspace.occurrence_labels(), ["tb_ota"]);
+    assert_eq!(workspace.content.occurrence_labels(), ["tb_ota"]);
     assert_eq!(workspace.content.active_view.cell, "tb_ota");
     // At the root, ascending is a no-op.
     assert!(workspace.ascend_one().is_none());
@@ -1500,7 +1503,7 @@ fn symbol_active_view_does_not_allocate_schematic_buffer() {
 
     workspace.ensure_library_model(&mut libraries);
 
-    assert_eq!(workspace.active_view_type(), ViewType::Symbol);
+    assert_eq!(workspace.content.active_view_type(), ViewType::Symbol);
     assert!(
         !workspace
             .content

@@ -204,7 +204,7 @@ impl AppState {
         // Selecting changes no document, so the buffer's selection is written on
         // its own rather than through the whole save-and-revalidate path an edit
         // takes.
-        let active_key = state.workspace.active_schematic_reference().key();
+        let active_key = state.workspace.content.active_schematic_reference().key();
         if let Some(mut buffer) = state.workspace.schematic_editor_mut(&active_key) {
             buffer.editor.session.selection = state.schematic.session.selection.clone();
         }

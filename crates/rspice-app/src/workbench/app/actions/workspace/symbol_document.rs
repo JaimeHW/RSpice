@@ -157,7 +157,7 @@ impl AppState {
                 .remap_symbol_instance_wires(&reference, &pin_remaps);
         }
         self.apply_symbol_pin_renames(&reference, &snapshot.renames);
-        self.workspace.set_active_dirty(true);
+        self.workspace.content.set_active_dirty(true);
         Ok(())
     }
 
@@ -190,7 +190,7 @@ impl AppState {
             self.schematic
                 .remap_symbol_instance_wires(&reference, &pin_remaps);
         }
-        self.workspace.set_active_dirty(true);
+        self.workspace.content.set_active_dirty(true);
         Ok(())
     }
 
@@ -251,13 +251,13 @@ impl AppState {
         // The undo entry this edit sits on top of has to be able to put the
         // names back, so it carries the reverse of what was just applied.
         if !intent.renames.is_empty() {
-            let key = self.workspace.active_key();
+            let key = self.workspace.content.active_key();
             self.ui
                 .symbol
                 .history
                 .record_inverse_renames(&key, &intent.renames);
         }
-        self.workspace.set_active_dirty(true);
+        self.workspace.content.set_active_dirty(true);
         Ok(())
     }
 
@@ -327,7 +327,7 @@ impl AppState {
         let revision = candidate.publish_revision(document, revision_note)?;
         self.store_active_symbol_editor_bundle(document, &candidate)?;
         *metadata = candidate;
-        let key = self.workspace.active_key();
+        let key = self.workspace.content.active_key();
         self.ui.symbol.history.mark_save_point(key);
         Ok(revision)
     }
@@ -374,7 +374,7 @@ impl AppState {
             .workbench
             .live_write_locks
             .schematic_views
-            .get(&self.workspace.active_key())
+            .get(&self.workspace.content.active_key())
         {
             return format!("{holder} holds the write lease on this symbol");
         }
@@ -390,7 +390,7 @@ impl AppState {
     pub(crate) fn symbol_editor_copy_available(&self) -> bool {
         !self.workbench.safe_mode.project_read_only()
             && !self.workbench.live_write_locks.mirror
-            && !self.workspace.active_read_only_reference()
+            && !self.workspace.content.active_read_only_reference()
     }
 
     /// Carry a pin rename to every placement of the cellview.
@@ -425,14 +425,14 @@ impl AppState {
 
     pub(crate) fn record_symbol_edit(&mut self, before: &SymbolDocument) {
         const MAX_SYMBOL_UNDO: usize = 128;
-        let key = self.workspace.active_key();
+        let key = self.workspace.content.active_key();
         let snapshot = self.active_symbol_snapshot(before);
         self.push_symbol_undo_snapshot(key, snapshot, MAX_SYMBOL_UNDO);
     }
 
     pub(super) fn record_symbol_metadata_edit(&mut self, before: &SymbolDocument) {
         const MAX_SYMBOL_UNDO: usize = 128;
-        let key = self.workspace.active_key();
+        let key = self.workspace.content.active_key();
         let snapshot = self.active_symbol_metadata_snapshot(before);
         self.push_symbol_undo_snapshot(key, snapshot, MAX_SYMBOL_UNDO);
     }
@@ -450,21 +450,21 @@ impl AppState {
         self.ui
             .symbol
             .history
-            .can_undo(&self.workspace.active_key())
+            .can_undo(&self.workspace.content.active_key())
     }
 
     pub(crate) fn can_redo_active_symbol_document(&self) -> bool {
         self.ui
             .symbol
             .history
-            .can_redo(&self.workspace.active_key())
+            .can_redo(&self.workspace.content.active_key())
     }
 
     pub(crate) fn undo_active_symbol_document(&mut self) -> Result<bool, String> {
         if self.active_view_read_only() {
             return Err(self.read_only_master_message());
         }
-        let key = self.workspace.active_key();
+        let key = self.workspace.content.active_key();
         let Some(previous) = self.ui.symbol.history.pop_undo(&key) else {
             return Ok(false);
         };
@@ -480,7 +480,7 @@ impl AppState {
         if self.active_view_read_only() {
             return Err(self.read_only_master_message());
         }
-        let key = self.workspace.active_key();
+        let key = self.workspace.content.active_key();
         let Some(next) = self.ui.symbol.history.pop_redo(&key) else {
             return Ok(false);
         };

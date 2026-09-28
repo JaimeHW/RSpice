@@ -115,7 +115,7 @@ pub(crate) struct SelectionBulkEditAuthority {
 
 impl SelectionBulkEditAuthority {
     fn capture(state: &AppState) -> Self {
-        let active_key = state.workspace.active_schematic_reference().key();
+        let active_key = state.workspace.content.active_schematic_reference().key();
         let mut project_buffers = state
             .workspace
             .content
@@ -157,7 +157,7 @@ impl SelectionBulkEditAuthority {
             return Some(reopen("The active schematic changed"));
         }
         if self.active.view_path != state.workspace.content.active_view.display_path()
-            || self.active_key != state.workspace.active_schematic_reference().key()
+            || self.active_key != state.workspace.content.active_schematic_reference().key()
         {
             return Some(reopen("The active cell/view changed"));
         }
@@ -1069,7 +1069,7 @@ fn default_property_value(property: SelectionBulkProperty) -> &'static str {
 /// the display path of every row it owns. The design root is implicit, so the
 /// top sheet is `/` rather than the name of the cell that happens to be top.
 fn active_hierarchy_path(state: &AppState) -> String {
-    state.workspace.occurrence_path().to_string()
+    state.workspace.content.occurrence_path().to_string()
 }
 
 /// The library cell a buffer outside the active occurrence belongs to.
@@ -1090,7 +1090,7 @@ fn build_rows(
     filter: &SelectionBulkFilter,
     property: SelectionBulkProperty,
 ) -> Vec<SelectionBulkRow> {
-    let active_key = state.workspace.active_schematic_reference().key();
+    let active_key = state.workspace.content.active_schematic_reference().key();
     let mut buffers = Vec::new();
     buffers.push((
         active_key.clone(),

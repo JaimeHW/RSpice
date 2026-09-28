@@ -26,7 +26,7 @@ struct Fixture {
 fn fixture(names: &[&str]) -> Fixture {
     let mut state = AppState::default();
     state.project_lifecycle.project_open = true;
-    let owner = state.workspace.active_schematic_reference();
+    let owner = state.workspace.content.active_schematic_reference();
     let plan = state.sim_setup.stable_analysis_plan().unwrap().id();
     let mut sources = Vec::new();
     let mut dependents = Vec::new();
@@ -162,7 +162,7 @@ fn publish(fixture: &mut Fixture) {
     state.apply_design_management_schematic_transaction(&transaction);
     state.record_design_management_transaction(DesignManagementHistoryEntry {
         description: "renumber schematic references".to_owned(),
-        owner: state.workspace.active_schematic_reference(),
+        owner: state.workspace.content.active_schematic_reference(),
         before,
         after: state.workspace.content.design_management.clone(),
         before_schematics: transaction.before,
@@ -381,7 +381,7 @@ fn reused_master_fixture(
     state
         .workspace
         .ensure_library_model(&mut state.library_manager);
-    let root = state.workspace.active_schematic_reference();
+    let root = state.workspace.content.active_schematic_reference();
     let child_ref = CellViewRef::new(&root.library, "child", "schematic");
     let other_ref = CellViewRef::new(&root.library, "other", "schematic");
     for reference in [&child_ref, &other_ref] {

@@ -1342,7 +1342,7 @@ fn project_text_load_rejects_missing_active_schematic_buffer() {
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     let mut project = ProjectFile::new(workspace, libraries);
-    let active_key = project.workspace.active_key();
+    let active_key = project.workspace.content.active_key();
     project.workspace.remove_schematic_editor(&active_key);
     let json = serde_json::to_string_pretty(&project).expect("corrupt fixture serializes");
 

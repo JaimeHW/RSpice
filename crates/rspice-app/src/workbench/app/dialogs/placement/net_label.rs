@@ -644,7 +644,12 @@ mod tests {
 
         apply_commit(&mut app.state, *commit).expect("placement");
 
-        let key = app.state.workspace.active_schematic_reference().key();
+        let key = app
+            .state
+            .workspace
+            .content
+            .active_schematic_reference()
+            .key();
         let retained = app
             .state
             .workspace

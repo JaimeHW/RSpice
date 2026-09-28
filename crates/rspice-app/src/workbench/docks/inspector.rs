@@ -419,7 +419,8 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 // A symbol cellview is edited against its pin contract, not
                 // against a schematic selection.
                 Workspace::Design
-                    if app.state.workspace.active_view_type() == crate::state::ViewType::Symbol =>
+                    if app.state.workspace.content.active_view_type()
+                        == crate::state::ViewType::Symbol =>
                 {
                     symbol::show(ui, app);
                 }
@@ -449,7 +450,7 @@ fn inspector_scroll_identity(app: &RSpiceApp) -> String {
     format!(
         "{}|{}|{:?}",
         route,
-        app.state.workspace.active_display_path(),
+        app.state.workspace.content.active_display_path(),
         app.state.schematic.session.selection
     )
 }
@@ -2073,7 +2074,7 @@ fn schematic_cross_probe_unavailability(
                 .to_owned(),
         );
     }
-    let here = state.workspace.occurrence_path(); // only that occurrence answers for a trace
+    let here = state.workspace.content.occurrence_path(); // only that occurrence answers for a trace
     if let Ok(probe) = crate::state::ProbeTarget::parse_legacy(net)
         && probe.scope.fold_key() != here.fold_key()
     {

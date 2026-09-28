@@ -58,7 +58,7 @@ pub(crate) fn object_is_in_scope(state: &AppState, scope: SheetScope, object_id:
 /// when it answers `None`, so none of them can offer a control with one
 /// position or a page number with one page.
 pub(crate) fn multi_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
-    let key = state.workspace.active_schematic_reference().key();
+    let key = state.workspace.content.active_schematic_reference().key();
     state
         .workspace
         .content
@@ -93,7 +93,7 @@ fn object_is_on_active_sheet_in_workspace(
     workspace: &crate::state::ProjectWorkspace,
     object_id: u64,
 ) -> bool {
-    let key = workspace.active_schematic_reference().key();
+    let key = workspace.content.active_schematic_reference().key();
     let Some(catalog) = workspace.content.design_management.sheet_catalog(&key) else {
         return true;
     };
@@ -439,7 +439,7 @@ mod tests {
 
     fn two_sheet_state(active_ids: &[u64], hidden_ids: &[u64]) -> AppState {
         let mut state = AppState::default();
-        let key = state.workspace.active_schematic_reference().key();
+        let key = state.workspace.content.active_schematic_reference().key();
         let all_ids = active_ids
             .iter()
             .chain(hidden_ids)
@@ -498,7 +498,7 @@ mod tests {
         let mut single = AppState::default();
         assert!(multi_sheet_catalog(&single).is_none());
 
-        let key = single.workspace.active_schematic_reference().key();
+        let key = single.workspace.content.active_schematic_reference().key();
         single
             .workspace
             .content

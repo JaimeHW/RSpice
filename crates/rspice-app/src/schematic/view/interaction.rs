@@ -342,7 +342,7 @@ fn select_double_click_action(
         // Ascend belongs to the document under the pointer, so the depth read
         // is the open document's own occurrence rather than the session-global
         // breadcrumb, which describes whichever document was activated last.
-        None if canvas_is_empty_at_pointer && state.workspace.occurrence_depth() > 1 => {
+        None if canvas_is_empty_at_pointer && state.workspace.content.occurrence_depth() > 1 => {
             SelectDoubleClickAction::Ascend
         }
         None => SelectDoubleClickAction::None,
@@ -1873,7 +1873,7 @@ fn probe_spelling_for(
     }) else {
         return Ok(OccurrenceProbeSpelling::verbatim(display));
     };
-    let occurrence = state.workspace.occurrence_path();
+    let occurrence = state.workspace.content.occurrence_path();
     OccurrenceProbeSpelling::for_leaf(&occurrence, quantity, name).ok_or_else(|| {
         format!("instance path {occurrence} has no name the engine can be asked for")
     })
@@ -2049,12 +2049,12 @@ fn report_probe_outcome(ui: &Ui, state: &mut AppState, display: &str, outcome: P
 
 fn probe_edit_identity_is_current(state: &AppState) -> Result<(), String> {
     if !matches!(
-        state.workspace.active_view_type(),
+        state.workspace.content.active_view_type(),
         ViewType::Schematic | ViewType::Testbench
     ) {
         return Err("the active cell/view is not a schematic document".to_owned());
     }
-    if state.workspace.active_schematic_reference() != state.workspace.content.active_view {
+    if state.workspace.content.active_schematic_reference() != state.workspace.content.active_view {
         return Err("the active schematic identity changed before the probe was placed".to_owned());
     }
     if state.workspace.active_schematic().is_none() {

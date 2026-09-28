@@ -111,7 +111,7 @@ pub(crate) fn open_sheet_format_manager(state: &mut AppState) -> Result<(), Stri
     let edit = crate::workbench::app::SchematicEditAuthority::capture(state);
     edit.validate(state, "Sheet Format Manager")?;
     let preview_content = DrawingSheetPreviewContent::from_state(state);
-    let owner_key = state.workspace.active_key();
+    let owner_key = state.workspace.content.active_key();
     let catalog = designs.sheet_catalog(&owner_key).ok_or_else(|| {
         "Create the governed drawing sheet in Page Setup before managing document formats."
             .to_owned()
@@ -167,7 +167,7 @@ pub(crate) fn open_title_block_fields(state: &mut AppState) -> Result<(), String
     if state.dialogs.drawing_sheet_setup.open {
         return open_staged_title_block_fields(state);
     }
-    let owner_key = state.workspace.active_key();
+    let owner_key = state.workspace.content.active_key();
     let catalog = designs.sheet_catalog(&owner_key);
     if catalog.is_none() {
         return open_staged_title_block_fields(state);
@@ -1164,7 +1164,7 @@ fn validate_manager_authority(
         .as_ref()
         .ok_or_else(|| "Sheet Format Manager has no edit authority.".to_owned())?
         .validate(app, "Sheet Format Manager")?;
-    if app.workspace.active_key() != state.owner_key {
+    if app.workspace.content.active_key() != state.owner_key {
         return Err("The active cell/view changed. Close and reopen Sheet Formats.".to_owned());
     }
     if designs.revision() != state.design_management_revision {
@@ -1508,7 +1508,7 @@ fn commit_candidate(
     let schematic_tx = app
         .state
         .prepare_design_management_schematic_transaction(&candidate)?;
-    let owner = app.state.workspace.active_schematic_reference();
+    let owner = app.state.workspace.content.active_schematic_reference();
     let committed_revision = app
         .state
         .workspace
@@ -1547,7 +1547,7 @@ fn title_field_automatic_values(
     );
     values.insert(
         DrawingSheetTitleFieldId::CellView,
-        state.workspace.active_display_path(),
+        state.workspace.content.active_display_path(),
     );
     values.insert(DrawingSheetTitleFieldId::SheetTitle, sheet_name.to_owned());
     values.insert(
@@ -2045,7 +2045,7 @@ mod tests {
     #[test]
     fn manager_refuses_to_open_without_schematic_edit_authority() {
         let mut app = RSpiceApp::test_instance();
-        let key = app.state.workspace.active_key();
+        let key = app.state.workspace.content.active_key();
         app.state
             .workspace
             .content
@@ -2072,7 +2072,7 @@ mod tests {
     #[test]
     fn manager_partially_applies_and_names_organization_managed_skips() {
         let mut app = RSpiceApp::test_instance();
-        let key = app.state.workspace.active_key();
+        let key = app.state.workspace.content.active_key();
         let first = app
             .state
             .workspace
@@ -2206,7 +2206,7 @@ mod tests {
     #[test]
     fn first_sheet_title_fields_stage_into_page_setup_without_early_persistence() {
         let mut app = RSpiceApp::test_instance();
-        let key = app.state.workspace.active_key();
+        let key = app.state.workspace.content.active_key();
         assert!(
             app.state
                 .workspace
@@ -2258,7 +2258,7 @@ mod tests {
     #[test]
     fn managed_title_field_policy_is_enforced_at_commit_without_partial_persistence() {
         let mut app = RSpiceApp::test_instance();
-        let key = app.state.workspace.active_key();
+        let key = app.state.workspace.content.active_key();
         let sheet_id = app
             .state
             .workspace
@@ -2345,7 +2345,7 @@ mod tests {
     #[test]
     fn governed_page_setup_stages_nested_title_fields_and_commits_once() {
         let mut app = RSpiceApp::test_instance();
-        let key = app.state.workspace.active_key();
+        let key = app.state.workspace.content.active_key();
         let sheet_id = app
             .state
             .workspace

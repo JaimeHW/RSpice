@@ -102,7 +102,7 @@ fn removed_marker_id_is_not_reused_after_scoped_save_and_reopen() {
             let written = crate::io::load_project_file(&path).unwrap();
             let expected_components = usize::from(scope == SaveScope::AllDocuments);
             assert_eq!(
-                written.workspace.content.schematic_buffers[&state.workspace.active_key()]
+                written.workspace.content.schematic_buffers[&state.workspace.content.active_key()]
                     .document()
                     .components
                     .len(),

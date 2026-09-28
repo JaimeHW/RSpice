@@ -109,30 +109,31 @@ impl SelectedVerilogASource {
 }
 
 pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilogASource, String> {
-    let (owner, selected_module) = if app.state.workspace.active_view_type() == ViewType::VerilogA {
-        let reference = app.state.workspace.content.active_view.clone();
-        let module = crate::state::workspace::project_veriloga_binding_for_view(
-            &app.state.workspace,
-            &app.state.library_manager,
-            &reference,
-        )?
-        .selected_module()
-        .to_owned();
-        (ProjectSourceOwner::cell_view(reference), Some(module))
-    } else {
-        let selected_module = app
-            .state
-            .ui
-            .code_workspace
-            .veriloga
-            .selected_module
-            .trim()
+    let (owner, selected_module) =
+        if app.state.workspace.content.active_view_type() == ViewType::VerilogA {
+            let reference = app.state.workspace.content.active_view.clone();
+            let module = crate::state::workspace::project_veriloga_binding_for_view(
+                &app.state.workspace,
+                &app.state.library_manager,
+                &reference,
+            )?
+            .selected_module()
             .to_owned();
-        (
-            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-            (!selected_module.is_empty()).then_some(selected_module),
-        )
-    };
+            (ProjectSourceOwner::cell_view(reference), Some(module))
+        } else {
+            let selected_module = app
+                .state
+                .ui
+                .code_workspace
+                .veriloga
+                .selected_module
+                .trim()
+                .to_owned();
+            (
+                ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
+                (!selected_module.is_empty()).then_some(selected_module),
+            )
+        };
     let bundle = app
         .state
         .workspace
@@ -507,7 +508,7 @@ pub(crate) fn request_veriloga_root_import(app: &mut RSpiceApp) -> Result<(), St
     {
         return Err("A Verilog-A import or compile transaction is already active.".to_owned());
     }
-    if app.state.workspace.active_view_type() == ViewType::VerilogA
+    if app.state.workspace.content.active_view_type() == ViewType::VerilogA
         && selected_veriloga_source(app).is_err()
     {
         return Err(

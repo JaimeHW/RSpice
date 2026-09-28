@@ -66,7 +66,7 @@ impl AppState {
         &self,
     ) -> BTreeMap<String, crate::state::SchematicEditorRef<'_>> {
         self.workspace.schematic_reference_sources(
-            &self.workspace.active_schematic_reference(),
+            &self.workspace.content.active_schematic_reference(),
             self.schematic.editor_ref(),
         )
     }
@@ -81,7 +81,7 @@ impl AppState {
         }
         let transaction = self.workspace.prepare_schematic_reference_transaction(
             &self.library_manager,
-            &self.workspace.active_schematic_reference(),
+            &self.workspace.content.active_schematic_reference(),
             self.schematic.editor_ref(),
             before,
             after,
