@@ -16,16 +16,19 @@ pub(crate) fn start_browser_binding_persist(
     binding: PersistenceBinding,
     complete: impl FnOnce(Result<(), String>) + 'static,
 ) {
-    let PersistenceBinding::Browser {
-        handle_id,
+    let PersistenceBinding::Browser { handle_id, binding } = binding;
+    let BrowserBinding {
+        receipt,
+        display_name,
+        persisted_generation,
+    } = binding;
+    let BrowserBindingReceipt {
         binding_id,
         backend,
         project_id,
         accepted_generation,
-        display_name,
         accepted_digest,
-        persisted_generation,
-    } = binding;
+    } = receipt;
     let handle = match resolve_browser_handle(handle_id) {
         Ok(handle) => handle,
         Err(error) => {
@@ -101,7 +104,7 @@ pub(super) async fn run_browser_write(
             (handle, target, true, None)
         }
         BrowserWriteStart::Opfs { target } => {
-            let handle = match open_opfs_binding_handle(target.binding_id, true).await {
+            let handle = match open_opfs_binding_handle(target.intent.binding_id, true).await {
                 Ok(handle) => handle,
                 Err(error) => return BrowserWriteResult::Failed(error),
             };
@@ -116,8 +119,8 @@ pub(super) async fn run_browser_write(
     };
     let (handle, target, newly_registered, display_name_override) = prepared;
     let lock = match acquire_browser_web_lock(
-        target.binding_id,
-        persist_binding || target.backend == BrowserBindingBackend::Opfs,
+        target.intent.binding_id,
+        persist_binding || target.intent.backend == BrowserBindingBackend::Opfs,
     )
     .await
     {
@@ -162,7 +165,7 @@ pub(super) async fn run_browser_write_locked(
     persist_binding: bool,
     bytes: &[u8],
 ) -> BrowserWriteResult {
-    if target.backend == BrowserBindingBackend::ExternalFile {
+    if target.intent.backend == BrowserBindingBackend::ExternalFile {
         let permission = match call_promise_method(
             handle,
             "requestPermission",
@@ -180,10 +183,10 @@ pub(super) async fn run_browser_write_locked(
     if persist_binding
         && browser_binding_store_supported()
         && let Err(error) = indexed_db_validate_generation(
-            target.binding_id,
-            &target.project_id,
-            target.backend,
-            target.persisted_generation,
+            target.intent.binding_id,
+            &target.intent.project_id,
+            target.intent.backend,
+            target.intent.persisted_generation,
         )
         .await
     {
@@ -201,6 +204,7 @@ pub(super) async fn run_browser_write_locked(
         Ok(current) => {
             let observed = digest_bytes(&current);
             if target
+                .intent
                 .expected_digest
                 .is_some_and(|expected| expected != observed)
             {
@@ -216,8 +220,13 @@ pub(super) async fn run_browser_write_locked(
         }
         Err(error) => return BrowserWriteResult::Failed(error),
     };
-    match write_browser_handle_bytes(handle, bytes, Some(expected_before_commit), target.backend)
-        .await
+    match write_browser_handle_bytes(
+        handle,
+        bytes,
+        Some(expected_before_commit),
+        target.intent.backend,
+    )
+    .await
     {
         Ok(()) => {}
         Err(BrowserWriteFailure::ExternalChange(observed_digest)) => {
@@ -250,11 +259,11 @@ pub(super) async fn run_browser_write_locked(
     if persist_binding {
         let commit = classify_browser_binding_commit(
             persist_browser_binding(BrowserBindingPersistRequest {
-                binding_id: target.binding_id,
-                backend: target.backend,
-                project_id: &target.project_id,
-                accepted_generation: target.accepted_generation,
-                expected_generation: target.persisted_generation,
+                binding_id: target.intent.binding_id,
+                backend: target.intent.backend,
+                project_id: &target.intent.project_id,
+                accepted_generation: target.intent.accepted_generation,
+                expected_generation: target.intent.persisted_generation,
                 handle,
                 digest: staged_digest,
                 display_name: &display_name,
@@ -264,10 +273,10 @@ pub(super) async fn run_browser_write_locked(
         if let BrowserBindingCommitOutcome::SessionOnly(error) = commit {
             return BrowserWriteResult::SavedSessionOnly {
                 handle_id,
-                binding_id: target.binding_id,
-                backend: target.backend,
-                project_id: target.project_id.clone(),
-                generation: target.accepted_generation,
+                binding_id: target.intent.binding_id,
+                backend: target.intent.backend,
+                project_id: target.intent.project_id.clone(),
+                generation: target.intent.accepted_generation,
                 display_name,
                 digest: staged_digest,
                 persistence_error: error,
@@ -276,10 +285,10 @@ pub(super) async fn run_browser_write_locked(
     }
     BrowserWriteResult::Saved {
         handle_id,
-        binding_id: target.binding_id,
-        backend: target.backend,
-        project_id: target.project_id.clone(),
-        generation: target.accepted_generation,
+        binding_id: target.intent.binding_id,
+        backend: target.intent.backend,
+        project_id: target.intent.project_id.clone(),
+        generation: target.intent.accepted_generation,
         display_name,
         digest: staged_digest,
     }
@@ -564,13 +573,11 @@ pub(super) async fn restore_browser_binding(
     };
     let binding_from_receipt = |handle_id| PersistenceBinding::Browser {
         handle_id,
-        binding_id: receipt.binding_id,
-        backend: receipt.backend,
-        project_id: receipt.project_id.clone(),
-        accepted_generation: receipt.accepted_generation,
-        display_name: metadata.display_name.clone(),
-        accepted_digest: receipt.accepted_digest,
-        persisted_generation: Some(metadata.accepted_generation),
+        binding: BrowserBinding {
+            receipt: receipt.clone(),
+            display_name: metadata.display_name.clone(),
+            persisted_generation: Some(metadata.accepted_generation),
+        },
     };
     let metadata_matches_receipt = validate_browser_binding_metadata(&metadata, receipt).is_ok();
     if !metadata_matches_receipt {
@@ -639,13 +646,14 @@ pub(super) async fn restore_browser_binding(
         baseline: Box::new(baseline),
         binding: PersistenceBinding::Browser {
             handle_id,
-            binding_id: receipt.binding_id,
-            backend: receipt.backend,
-            project_id: receipt.project_id.clone(),
-            accepted_generation: receipt.accepted_generation,
-            display_name: metadata.display_name,
-            accepted_digest,
-            persisted_generation: Some(receipt.accepted_generation),
+            binding: BrowserBinding {
+                receipt: BrowserBindingReceipt {
+                    accepted_digest,
+                    ..receipt.clone()
+                },
+                display_name: metadata.display_name,
+                persisted_generation: Some(receipt.accepted_generation),
+            },
         },
     }
 }

@@ -21,10 +21,10 @@ pub(crate) use rspice_project::persistence::{
 
 #[cfg(target_arch = "wasm32")]
 use rspice_project::persistence::browser::{
-    BROWSER_BINDING_SCHEMA_VERSION, BrowserBindingCommitOutcome, BrowserBindingMetadata,
-    BrowserPermissionDecision, MAX_EXACT_BROWSER_GENERATION, browser_backend_from_name,
-    browser_backend_name, browser_generation_has_restart_authority, browser_generation_is_exact,
-    browser_permission_decision, classify_browser_binding_commit,
+    BROWSER_BINDING_SCHEMA_VERSION, BrowserBinding, BrowserBindingCommitOutcome,
+    BrowserBindingMetadata, BrowserPermissionDecision, BrowserWriteIntent,
+    MAX_EXACT_BROWSER_GENERATION, browser_backend_from_name, browser_backend_name,
+    browser_generation_is_exact, browser_permission_decision, classify_browser_binding_commit,
     validate_binding_generation_commit, validate_browser_binding_identity,
     validate_browser_binding_metadata, validate_browser_restore_facts,
 };
@@ -47,16 +47,7 @@ pub(crate) enum PersistenceBinding {
     #[cfg(target_arch = "wasm32")]
     Browser {
         handle_id: u64,
-        binding_id: uuid::Uuid,
-        backend: BrowserBindingBackend,
-        project_id: String,
-        accepted_generation: u64,
-        display_name: String,
-        accepted_digest: ContentDigest,
-        /// Generation currently committed to IndexedDB. `None` means the
-        /// canonical bytes are verified and live for this session, but the
-        /// restart record could not be committed.
-        persisted_generation: Option<u64>,
+        binding: BrowserBinding,
     },
 }
 
@@ -78,42 +69,14 @@ impl PersistenceBinding {
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn browser_receipt(&self) -> BrowserBindingReceipt {
         match self {
-            Self::Browser {
-                binding_id,
-                backend,
-                project_id,
-                accepted_generation,
-                accepted_digest,
-                ..
-            } => BrowserBindingReceipt {
-                binding_id: *binding_id,
-                project_id: project_id.clone(),
-                accepted_generation: *accepted_generation,
-                accepted_digest: *accepted_digest,
-                backend: *backend,
-            },
+            Self::Browser { binding, .. } => binding.receipt.clone(),
         }
     }
 
-    /// Return restart authority only when the exact accepted generation has
-    /// actually been committed to browser binding storage. A live file handle
-    /// with a newer session-only generation is useful for retrying in this
-    /// tab, but it must never be serialized as durable restart authority.
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn durable_browser_receipt(&self) -> Option<BrowserBindingReceipt> {
         match self {
-            Self::Browser {
-                accepted_generation,
-                persisted_generation,
-                ..
-            } if browser_generation_has_restart_authority(
-                *accepted_generation,
-                *persisted_generation,
-            ) =>
-            {
-                Some(self.browser_receipt())
-            }
-            Self::Browser { .. } => None,
+            Self::Browser { binding, .. } => binding.durable_receipt(),
         }
     }
 }
@@ -176,12 +139,7 @@ pub(crate) enum BrowserWriteResult {
 #[derive(Debug, Clone)]
 pub(crate) struct BrowserWriteTarget {
     pub(crate) handle_id: Option<u64>,
-    pub(crate) binding_id: uuid::Uuid,
-    pub(crate) backend: BrowserBindingBackend,
-    pub(crate) project_id: String,
-    pub(crate) accepted_generation: u64,
-    pub(crate) expected_digest: Option<ContentDigest>,
-    pub(crate) persisted_generation: Option<u64>,
+    pub(crate) intent: BrowserWriteIntent,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -349,20 +307,12 @@ pub(crate) fn start_browser_write(
     if bytes.len() as u64 > crate::io::project_io::MAX_PROJECT_FILE_BYTES {
         return Err("project exceeds the browser project-size limit".to_owned());
     }
-    if !browser_generation_is_exact(target.accepted_generation)
-        || target
-            .persisted_generation
-            .is_some_and(|generation| !browser_generation_is_exact(generation))
-    {
-        return Err(
-            "browser binding generation must be a nonzero JavaScript-exact integer".to_owned(),
-        );
-    }
+    target.intent.validate_generation()?;
     let operation = if let Some(handle_id) = target.handle_id {
         let handle = resolve_browser_handle(handle_id)?;
         BrowserWriteStart::Existing { handle, target }
     } else {
-        match target.backend {
+        match target.intent.backend {
             BrowserBindingBackend::ExternalFile => {
                 let window = web_sys::window().ok_or("browser window is unavailable")?;
                 let picker = js_sys::Reflect::get(

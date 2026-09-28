@@ -450,7 +450,7 @@ fn start_browser_project_save(
         },
     );
     if prepared.target.handle_id.is_none()
-        && prepared.target.backend
+        && prepared.target.intent.backend
             == crate::workbench::lifecycle::project_lifecycle::BrowserBindingBackend::ExternalFile
         && !save_surface_supported
     {
@@ -1618,14 +1618,17 @@ fn finish_browser_canonical_open(
     };
     let binding = PersistenceBinding::Browser {
         handle_id,
-        binding_id: uuid::Uuid::new_v4(),
-        backend:
-            crate::workbench::lifecycle::project_lifecycle::BrowserBindingBackend::ExternalFile,
-        project_id: project.file.workspace.project.id().to_string(),
-        accepted_generation: 1,
-        display_name: display_name.clone(),
-        accepted_digest: digest,
-        persisted_generation: None,
+        binding: rspice_project::persistence::browser::BrowserBinding {
+            receipt: rspice_project::persistence::BrowserBindingReceipt {
+                binding_id: uuid::Uuid::new_v4(),
+                backend: crate::workbench::lifecycle::project_lifecycle::BrowserBindingBackend::ExternalFile,
+                project_id: project.file.workspace.project.id().to_string(),
+                accepted_generation: 1,
+                accepted_digest: digest,
+            },
+            display_name: display_name.clone(),
+            persisted_generation: None,
+        },
     };
     let binding_for_persist = binding.clone();
     let opened = apply_loaded_project_authorized(

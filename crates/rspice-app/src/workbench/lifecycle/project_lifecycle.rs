@@ -31,6 +31,8 @@ pub(crate) use registry::ProjectDocumentId;
 pub(crate) use rspice_project::lifecycle::BrowserOperationContext;
 use rspice_project::lifecycle::ProjectLifecycle;
 pub(crate) use rspice_project::lifecycle::{ProjectLifecycleError, RevertReviewToken, SaveScope};
+#[cfg(target_arch = "wasm32")]
+use rspice_project::persistence::browser::BrowserWriteIntent;
 
 use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
 use crate::io::{ProjectSimulationResults, ProjectSnapshot};
@@ -918,30 +920,12 @@ pub(crate) fn prepare_browser_save(
                 PersistenceBinding::Browser { handle_id, .. } => *handle_id,
             });
         let project_id = candidate.file.workspace.project.id().to_string();
-        let target = if let Some(PersistenceBinding::Browser {
-            handle_id,
-            binding_id,
-            backend,
-            project_id: binding_project_id,
-            accepted_generation,
-            accepted_digest,
-            persisted_generation,
-            ..
-        }) = existing_binding
+        let target = if let Some(PersistenceBinding::Browser { handle_id, binding }) =
+            existing_binding
         {
-            if *binding_project_id != project_id {
-                return Err(ProjectLifecycleError::InvalidState(
-                    "browser binding belongs to a different logical project".to_owned(),
-                ));
-            }
             persistence::BrowserWriteTarget {
                 handle_id: Some(*handle_id),
-                binding_id: *binding_id,
-                backend: *backend,
-                project_id,
-                accepted_generation: accepted_generation.saturating_add(1).max(1),
-                expected_digest: Some(*accepted_digest),
-                persisted_generation: *persisted_generation,
+                intent: binding.prepare_write(project_id)?,
             }
         } else {
             let backend = if project_copy || persistence::browser_external_canonical_supported() {
@@ -953,12 +937,7 @@ pub(crate) fn prepare_browser_save(
             };
             persistence::BrowserWriteTarget {
                 handle_id: None,
-                binding_id: uuid::Uuid::new_v4(),
-                backend,
-                project_id,
-                accepted_generation: 1,
-                expected_digest: None,
-                persisted_generation: None,
+                intent: BrowserWriteIntent::fresh(project_id, backend),
             }
         };
         Ok(BrowserPreparedSave {
@@ -1095,35 +1074,25 @@ pub(crate) fn complete_browser_save(
         state.project_lifecycle.authority.cancel_transaction();
         return Ok(());
     }
-    if binding_id != prepared.target.binding_id
-        || backend != prepared.target.backend
-        || project_id != prepared.target.project_id
-        || generation != prepared.target.accepted_generation
-        || digest != prepared.staged_digest
-    {
-        persistence::release_browser_handle(handle_id);
-        state.project_lifecycle.authority.cancel_transaction();
-        return Err(ProjectLifecycleError::InvalidState(
-            "browser binding identity changed during save completion".to_owned(),
-        ));
-    }
-    let binding = PersistenceBinding::Browser {
-        handle_id,
+    let receipt = BrowserBindingReceipt {
         binding_id,
         backend,
         project_id,
         accepted_generation: generation,
-        display_name,
         accepted_digest: digest,
-        // Keep the last generation that is known to exist in IndexedDB when
-        // this publication is session-only. The new file bytes are canonical
-        // for this live tab, but the next retry must CAS from durable storage.
-        persisted_generation:
-            rspice_project::persistence::browser::persisted_generation_after_browser_write(
-                durable,
-                generation,
-                prepared.target.persisted_generation,
-            ),
+    };
+    let binding = match prepared.target.intent.accept_publication(
+        prepared.staged_digest,
+        receipt,
+        display_name,
+        durable,
+    ) {
+        Ok(binding) => PersistenceBinding::Browser { handle_id, binding },
+        Err(error) => {
+            persistence::release_browser_handle(handle_id);
+            state.project_lifecycle.authority.cancel_transaction();
+            return Err(error);
+        }
     };
     finish_successful_save(state, prepared.candidate, binding, prepared.scope);
     state.project_lifecycle.authority.cancel_transaction();
@@ -1388,17 +1357,13 @@ pub(crate) fn complete_browser_binding_promotion(
     }
     state.project_lifecycle.authority.finish_browser_promotion();
     if result.is_ok()
-        && let Some(PersistenceBinding::Browser {
-            persisted_generation,
-            accepted_generation,
-            ..
-        }) = state
+        && let Some(PersistenceBinding::Browser { binding, .. }) = state
             .project_lifecycle
             .accepted
             .as_mut()
             .and_then(|accepted| accepted.binding.as_mut())
     {
-        *persisted_generation = Some(*accepted_generation);
+        binding.persisted_generation = Some(binding.receipt.accepted_generation);
     }
     state.browser_project_binding_receipt = state
         .project_lifecycle

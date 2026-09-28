@@ -804,12 +804,10 @@ fn start_browser_publication(
     let suggested_name = publication_filename(&app.state, &draft.label);
     let target = BrowserWriteTarget {
         handle_id: None,
-        binding_id: uuid::Uuid::new_v4(),
-        backend: BrowserBindingBackend::ExternalFile,
-        project_id: app.state.workspace.content.project.id().to_string(),
-        accepted_generation: 1,
-        expected_digest: None,
-        persisted_generation: None,
+        intent: rspice_project::persistence::browser::BrowserWriteIntent::fresh(
+            app.state.workspace.content.project.id().to_string(),
+            BrowserBindingBackend::ExternalFile,
+        ),
     };
     let repaint = ctx.clone();
     start_browser_write(target, false, &suggested_name, bytes, move |result| {

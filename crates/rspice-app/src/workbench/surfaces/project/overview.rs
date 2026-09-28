@@ -1171,15 +1171,13 @@ fn project_persistence_location(app: &RSpiceApp) -> String {
     {
         match binding {
             crate::workbench::lifecycle::project_lifecycle::PersistenceBinding::Browser {
-                display_name,
-                accepted_generation,
-                persisted_generation,
+                binding,
                 ..
             } => {
-                if *persisted_generation == Some(*accepted_generation) {
-                    display_name.clone()
+                if binding.persisted_generation == Some(binding.receipt.accepted_generation) {
+                    binding.display_name.clone()
                 } else {
-                    format!("{display_name} · session-only browser binding")
+                    format!("{} · session-only browser binding", binding.display_name)
                 }
             }
         }
