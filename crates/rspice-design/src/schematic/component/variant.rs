@@ -54,7 +54,7 @@ impl VariantSource<'_> {
         projected: &Component,
         mut target_binding: LibraryCellInstance,
         target_symbol: &ResolvedCellSymbol,
-    ) -> Result<Component, String> {
+    ) -> Result<PreparedVariantReplacement, String> {
         let source = self.source;
         let source_symbol = self.symbol;
         if !target_symbol.issues().is_empty() {
@@ -131,7 +131,10 @@ impl VariantSource<'_> {
         let mut replacement = projected.clone();
         replacement.library_cell = Some(target_binding);
         replacement.execution_terminal_layout = Some(layout);
-        Ok(replacement)
+        Ok(PreparedVariantReplacement {
+            component_id: projected.id,
+            replacement,
+        })
     }
 }
 
@@ -167,5 +170,22 @@ impl LibraryCellInstance {
 
     pub fn variant_model_section(&self) -> Option<&str> {
         self.variant_model_section.as_deref()
+    }
+}
+
+/// A fully prepared variant replacement for one projected component.
+pub struct PreparedVariantReplacement {
+    component_id: u64,
+    replacement: Component,
+}
+
+impl PreparedVariantReplacement {
+    pub fn apply_to(self, document: &mut super::super::document::SchematicDocument) {
+        let component = document
+            .components
+            .iter_mut()
+            .find(|component| component.id == self.component_id)
+            .expect("prepared component");
+        *component = self.replacement;
     }
 }

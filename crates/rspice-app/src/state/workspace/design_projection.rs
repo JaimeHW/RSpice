@@ -558,18 +558,10 @@ impl ProjectWorkspace {
             let replacement = variant_source
                 .prepare_replacement(projected_component, target_binding, &target_symbol)
                 .map_err(&refusal)?;
-            updates.push((key.clone(), source.id, replacement));
+            updates.push((key.clone(), replacement));
         }
-        for (key, component_id, replacement) in updates {
-            let component = projected
-                .get_mut(&key)
-                .expect("prepared document")
-                .document
-                .components
-                .iter_mut()
-                .find(|component| component.id == component_id)
-                .expect("prepared component");
-            *component = replacement;
+        for (key, replacement) in updates {
+            replacement.apply_to(&mut projected.get_mut(&key).expect("prepared document").document);
         }
         Ok(())
     }

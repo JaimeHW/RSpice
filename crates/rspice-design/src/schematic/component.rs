@@ -3,6 +3,7 @@
 //! A placed component on the schematic with position, rotation, and properties.
 
 mod variant;
+pub use variant::PreparedVariantReplacement;
 
 use super::component_type::ComponentType;
 use super::label_position::LabelPosition;
