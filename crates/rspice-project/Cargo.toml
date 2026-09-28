@@ -12,10 +12,12 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+ron = { version = "0.12.2", features = ["integer128"] }
 rspice-app-types.workspace = true
 rspice-design.workspace = true
 rspice-design-model.workspace = true
 rspice-model-library.workspace = true
+rspice-simulation-contract.workspace = true
 # Source-edge syntax retains the canonical netlist path grammar.
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false }
 serde.workspace = true

@@ -299,12 +299,9 @@ fn capture_snapshot(
         .project_lifecycle
         .result_cache
         .capture(&state.simulation);
-    let execution_context = ProjectExecutionContext::from_state(
-        workspace.project.id(),
-        &state.sim_setup,
-        &state.model_library_manager,
-    )
-    .map_err(ProjectLifecycleError::InvalidState)?;
+    let execution_context =
+        crate::io::capture_execution_context(&state.sim_setup, &state.model_library_manager)
+            .map_err(ProjectLifecycleError::InvalidState)?;
     let project = ProjectFile::new_with_execution_context(
         workspace,
         libraries,
@@ -1778,7 +1775,10 @@ fn revert_document_in_place(
                     "accepted project has no simulation plan".to_owned(),
                 )
             })?;
-            state.sim_setup = context.simulation_plan;
+            state.sim_setup = crate::workbench::app_state::SimSetupState {
+                setup: context.simulation_plan,
+                session: Default::default(),
+            };
             state.sim_setup.prepare_after_restore();
             state.workspace.simulation_plan_payloads = baseline.workspace.simulation_plan_payloads;
             if let Some(plan_id) = state
@@ -1796,9 +1796,9 @@ fn revert_document_in_place(
                     "accepted project has no model catalog".to_owned(),
                 )
             })?;
-            let (_, manager, warnings) = context
-                .into_state(baseline_project_id)
-                .map_err(ProjectLifecycleError::InvalidState)?;
+            let (_, manager, warnings) =
+                crate::io::restore_execution_context(context, baseline_project_id)
+                    .map_err(ProjectLifecycleError::InvalidState)?;
             state.model_library_manager = manager;
             for warning in warnings {
                 state.push_user_message(crate::diagnostics::ConsoleMessage::warning(warning));

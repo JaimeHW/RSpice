@@ -30,7 +30,7 @@ fn insert_ac_analysis(state: &mut AppState) -> crate::product::AnalysisInstanceI
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn has_ac_analysis(setup: &crate::workbench::app_state::SimSetupState) -> bool {
+fn has_ac_analysis(setup: &rspice_simulation_contract::setup_state::SimulationSetup) -> bool {
     setup
         .stable_analysis_plan()
         .expect("current project owns a stable plan")

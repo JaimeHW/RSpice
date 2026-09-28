@@ -1,7 +1,12 @@
-//! Project identity, metadata and revision receipts.
+//! Project identity, execution context, metadata and revision receipts.
 
 mod descriptor;
+mod execution_context;
 mod library_publication;
 
 pub use descriptor::*;
+pub use execution_context::{
+    PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION, ProjectExecutionContext, ProjectModelLibrary,
+    persisted_active_model_section_names,
+};
 pub use library_publication::*;

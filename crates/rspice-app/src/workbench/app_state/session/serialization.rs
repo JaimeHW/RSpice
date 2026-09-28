@@ -89,16 +89,13 @@ impl serde::Serialize for AppState {
         if simulation_results.validate().is_err() {
             simulation_results = ProjectSimulationResults::default();
         }
-        let execution_context = ProjectExecutionContext::from_state(
-            self.workspace.project.id(),
-            &self.sim_setup,
-            &self.model_library_manager,
-        )
-        .map_err(|error| {
-            <S::Error as serde::ser::Error>::custom(format!(
-                "session execution context is structurally invalid: {error}"
-            ))
-        })?;
+        let execution_context =
+            crate::io::capture_execution_context(&self.sim_setup, &self.model_library_manager)
+                .map_err(|error| {
+                    <S::Error as serde::ser::Error>::custom(format!(
+                        "session execution context is structurally invalid: {error}"
+                    ))
+                })?;
         if ProjectFile::validate_result_plan_references_for(
             &simulation_results,
             Some(&execution_context.simulation_plan),
@@ -337,7 +334,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
             (Some(value), None) => {
                 let restored = serde_json::from_str::<ProjectExecutionContext>(&value)
                     .map_err(|error| error.to_string())
-                    .and_then(|context| context.into_state(project_id));
+                    .and_then(|context| crate::io::restore_execution_context(context, project_id));
                 match restored {
                     Ok((simulation_plan, model_library_manager, warnings)) => {
                         state.sim_setup = simulation_plan;
@@ -352,7 +349,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
             (None, Some(context)) => match ProjectExecutionContext::from_legacy_session_ron(
                 context.get_ron(),
             )
-            .and_then(|context| context.into_state(project_id))
+            .and_then(|context| crate::io::restore_execution_context(context, project_id))
             {
                 Ok((simulation_plan, model_library_manager, warnings)) => {
                     state.sim_setup = simulation_plan;

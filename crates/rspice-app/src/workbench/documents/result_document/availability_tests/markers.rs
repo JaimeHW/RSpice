@@ -1,19 +1,15 @@
 //! Marker identity and payload failures must never corrupt saved annotations.
 
 use super::*;
-use crate::io::{ProjectExecutionContext, ProjectFile, ProjectSimulationResults};
+use crate::io::{ProjectFile, ProjectSimulationResults};
 
 fn marker_project(state: &AppState) -> ProjectFile {
     ProjectFile::new_with_execution_context(
         state.workspace.clone(),
         state.library_manager.clone(),
         ProjectSimulationResults::from_state(&state.simulation),
-        ProjectExecutionContext::from_state(
-            state.workspace.project.id(),
-            &state.sim_setup,
-            &state.model_library_manager,
-        )
-        .unwrap(),
+        crate::io::capture_execution_context(&state.sim_setup, &state.model_library_manager)
+            .unwrap(),
     )
     .with_result_presentation(state.ui.results.project_presentation(&state.simulation))
 }

@@ -18,7 +18,6 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest as _, Sha256};
 
-use crate::io::project_execution::ProjectExecutionContext;
 use crate::product::{
     AnalysisInstanceId, ContentDigest, DatasetId, DerivedAnalysisIdentity, JobId, ModelSourceId,
     ObjectRevision, ProjectId, RunId, SimulationPlanId,
@@ -37,6 +36,7 @@ use crate::state::{
     SpecificationDefinition, SpecificationPolicy, SpecificationVerdict, ViewType, WaveformData,
     canonical_cell_view_owner_key,
 };
+use rspice_project::ProjectExecutionContext;
 use rspice_simulation_contract::analysis_kind::AnalysisKind;
 
 /// Presence-aware persisted field used at schema-era boundaries.
@@ -835,7 +835,7 @@ impl ProjectFile {
 
     pub(crate) fn validate_result_plan_references_for(
         simulation_results: &ProjectSimulationResults,
-        simulation_plan: Option<&crate::workbench::app_state::SimSetupState>,
+        simulation_plan: Option<&rspice_simulation_contract::setup_state::SimulationSetup>,
         project_revision: ObjectRevision,
     ) -> Result<(), String> {
         let has_plan_receipt = simulation_results.runs.iter().any(|run| {

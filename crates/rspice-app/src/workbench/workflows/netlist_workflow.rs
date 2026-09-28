@@ -331,7 +331,7 @@ fn acknowledge_canonical_dependencies(
 fn dependency_root_path(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
     #[cfg(target_arch = "wasm32")]
     {
-        if crate::state::model_library::is_portable_absolute_path(path) {
+        if rspice_model_library::is_portable_absolute_path(path) {
             return Ok(path.to_path_buf());
         }
         Err(format!(

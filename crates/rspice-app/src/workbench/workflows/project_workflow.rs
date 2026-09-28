@@ -1088,7 +1088,7 @@ fn apply_loaded_project_authorized(
         .execution_context
         .take()
     {
-        Some(context) => match context.into_state(project_id) {
+        Some(context) => match crate::io::restore_execution_context(context, project_id) {
             Ok(restored) => restored,
             Err(error) => {
                 state.push_user_message(ConsoleMessage::error(format!(

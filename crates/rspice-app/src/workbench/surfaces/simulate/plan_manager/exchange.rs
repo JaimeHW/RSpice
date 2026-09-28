@@ -858,11 +858,7 @@ pub(in crate::workbench::surfaces::simulate) fn commit_import_simulation_plan(
     workspace
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    crate::io::ProjectExecutionContext::from_state(
-        workspace.project.id(),
-        &setup,
-        &app.state.model_library_manager,
-    )?;
+    crate::io::capture_execution_context(&setup, &app.state.model_library_manager)?;
 
     let first_instance = setup
         .stable_analysis_plan()?

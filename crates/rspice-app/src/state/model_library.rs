@@ -54,8 +54,11 @@ pub use manager::{
 pub(crate) use manager::{SealedModelLibraryVerilogAAuthority, model_library_source_digest};
 pub use rspice_model_library::DeviceModel;
 pub use rspice_model_library::ProjectModelRevisionDefinition;
+pub(crate) use rspice_model_library::first_unreachable_source;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use rspice_model_library::is_foreign_platform_absolute_path;
+#[cfg(test)]
+pub(crate) use rspice_model_library::is_portable_absolute_path;
 pub use rspice_model_library::qualification::{
     ApprovalDecision, CompatibilityAssessment, CompatibilityDisposition, ConsumerChange,
     ConsumerImpactAssessment, DocumentReference, DocumentationDeclaration, DocumentationSet,
@@ -76,15 +79,14 @@ pub use rspice_model_library::qualification::{
 pub use rspice_model_library::{ClosureFacts, closure_facts, envelope_is_invalid};
 pub use rspice_model_library::{
     ModelConsumerScope, ModelExecutionPlan, ModelResolutionRecord, ModelValidationFinding,
-    ModelValidationFindingSeverity, ModelValidationReceipt, SimulationPlanModelBinding,
+    ModelValidationFindingSeverity, SimulationPlanModelBinding,
 };
 pub use rspice_model_library::{ModelLevel, ModelType};
 pub use rspice_model_library::{
-    ModelLibrary, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourcePin,
-    ModelSubcircuitInterface, PackPartPin, SEALED_MODEL_SOURCE_MARKER, labelled_pack,
+    ModelLibrary, ModelSourceAuthority, PackPartPin, SEALED_MODEL_SOURCE_MARKER, labelled_pack,
 };
-pub(crate) use rspice_model_library::{
-    first_unreachable_source, is_portable_absolute_path, project_owned_source_path,
-    subcircuit_interface_key,
+#[cfg(test)]
+pub use rspice_model_library::{
+    ModelSourceContent, ModelSourceEdge, ModelSourcePin, ModelSubcircuitInterface,
 };
 pub use source_label::short_digest;

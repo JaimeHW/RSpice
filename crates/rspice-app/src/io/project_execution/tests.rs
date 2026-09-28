@@ -5,13 +5,23 @@
 //! run blocked - never dropped or silently re-resolved.
 
 use super::*;
+use crate::product::ContentDigest;
 use crate::product::ObjectRevision;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind, AnalysisLifecycleState};
 use crate::state::model_library::{
     CornerSectionBinding, CornerSectionDomain, CorrelationDatasetClass, CorrelationDatasetRevision,
     CorrelationSuite,
 };
+use crate::state::model_library::{
+    ModelCorrelationState, ModelLibrary, ModelQualificationState, ModelSectionQualification,
+    ModelSourceContent, ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin,
+    ProjectModelDefinition, ProjectModelRevisionDefinition, is_portable_absolute_path,
+};
 use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSuiteInput};
+use rspice_project::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION;
+use sha2::{Digest as _, Sha256};
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 fn project_id() -> ProjectId {
     ProjectId::from_namespace(
@@ -24,7 +34,7 @@ fn context_from_state(
     plan: &SimSetupState,
     manager: &ModelLibraryManager,
 ) -> Result<ProjectExecutionContext, String> {
-    ProjectExecutionContext::from_state(project_id(), plan, manager)
+    crate::io::capture_execution_context(plan, manager)
 }
 
 #[test]
@@ -167,8 +177,7 @@ fn source_qualified_provider_decision_round_trips_without_reauthorization() {
     let encoded = serde_json::to_vec(&context).expect("execution context serializes");
     let restored: ProjectExecutionContext =
         serde_json::from_slice(&encoded).expect("execution context deserializes");
-    let (_, restored, _) = restored
-        .into_state(project_id())
+    let (_, restored, _) = crate::io::restore_execution_context(restored, project_id())
         .expect("provider decision restores against exact retained sources");
     assert_eq!(
         restored
@@ -212,8 +221,7 @@ fn retained_subcircuit_interfaces_round_trip_migrate_and_reject_tampering() {
 
     let restored: ProjectExecutionContext =
         serde_json::from_value(value.clone()).expect("context deserializes");
-    let (_, restored_manager, _) = restored
-        .into_state(project_id())
+    let (_, restored_manager, _) = crate::io::restore_execution_context(restored, project_id())
         .expect("exact interface restores");
     assert_eq!(
         restored_manager
@@ -237,8 +245,7 @@ fn retained_subcircuit_interfaces_round_trip_migrate_and_reject_tampering() {
     );
 
     let mut legacy = value;
-    legacy["schema_version"] =
-        serde_json::json!(EXPLICIT_MODEL_DEFINITION_RESOLUTION_SCHEMA_VERSION);
+    legacy["schema_version"] = serde_json::json!(13);
     legacy["model_libraries"][0]
         .as_object_mut()
         .expect("library is an object")
@@ -297,10 +304,9 @@ fn active_model_section_provenance_round_trips_migrates_and_rejects_tampering() 
     let restored: ProjectExecutionContext =
         serde_json::from_value(value.clone()).expect("current context deserializes");
     restored.validate().expect("exact section validates");
-    let (_, mut restored_manager, warnings) = restored
-        .clone()
-        .into_state(project_id())
-        .expect("complete section catalog restores");
+    let (_, mut restored_manager, warnings) =
+        crate::io::restore_execution_context(restored.clone(), project_id())
+            .expect("complete section catalog restores");
     assert!(warnings.is_empty());
     let restored_library = restored_manager
         .get_library_mut("sectioned-cards")
@@ -312,8 +318,7 @@ fn active_model_section_provenance_round_trips_migrates_and_rejects_tampering() 
     );
 
     let mut schema_17 = value.clone();
-    schema_17["schema_version"] =
-        serde_json::json!(EXPLICIT_SIMULATION_PLAN_MODEL_BINDINGS_SCHEMA_VERSION);
+    schema_17["schema_version"] = serde_json::json!(17);
     schema_17["model_libraries"][0]
         .as_object_mut()
         .expect("library is an object")
@@ -336,7 +341,7 @@ fn active_model_section_provenance_round_trips_migrates_and_rejects_tampering() 
     schema_17.validate().expect("schema-17 migration validates");
 
     let mut legacy = value.clone();
-    legacy["schema_version"] = serde_json::json!(RETAINED_SUBCIRCUIT_INTERFACE_SCHEMA_VERSION);
+    legacy["schema_version"] = serde_json::json!(14);
     legacy["model_libraries"][0]["models"]["nch"]
         .as_object_mut()
         .expect("model is an object")
@@ -394,33 +399,11 @@ fn active_model_section_provenance_round_trips_migrates_and_rejects_tampering() 
 }
 
 #[test]
-fn current_schema_rejects_every_retired_singleton_analysis_field() {
-    let context = context_from_state(&SimSetupState::new(), &ModelLibraryManager::new())
-        .expect("baseline context validates");
-    let baseline = serde_json::to_value(context).expect("context serializes");
-
-    for field in RETIRED_SINGLETON_ANALYSIS_FIELDS {
-        let mut value = baseline.clone();
-        value["simulation_plan"]
-            .as_object_mut()
-            .expect("simulation plan is an object")
-            .insert((*field).to_owned(), serde_json::Value::Null);
-        let error = serde_json::from_value::<ProjectExecutionContext>(value)
-            .expect_err("current schema must reject retired singleton input")
-            .to_string();
-        assert!(
-            error.contains(&format!("retired singleton field `{field}`")),
-            "{error}"
-        );
-    }
-}
-
-#[test]
 fn schema_three_still_accepts_singletons_only_for_load_time_migration() {
     let context = context_from_state(&SimSetupState::new(), &ModelLibraryManager::new())
         .expect("baseline context validates");
     let mut value = serde_json::to_value(context).expect("context serializes");
-    value["schema_version"] = serde_json::json!(SINGLETON_ANALYSIS_PLAN_SCHEMA_VERSION);
+    value["schema_version"] = serde_json::json!(3);
     let persisted_plan = value["simulation_plan"]
         .as_object_mut()
         .expect("simulation plan is an object");
@@ -453,7 +436,7 @@ fn schema_four_promotes_the_single_stable_plan_into_the_named_catalog() {
     let context = context_from_state(&SimSetupState::new(), &ModelLibraryManager::new())
         .expect("baseline context validates");
     let mut value = serde_json::to_value(context).expect("context serializes");
-    value["schema_version"] = serde_json::json!(STABLE_ANALYSIS_PLAN_SCHEMA_VERSION);
+    value["schema_version"] = serde_json::json!(4);
     let persisted_plan = value["simulation_plan"]
         .as_object_mut()
         .expect("simulation plan is an object");
@@ -506,7 +489,7 @@ fn schema_sixteen_migrates_global_model_selection_into_every_plan() {
     .expect("second plan exists");
     let context = context_from_state(&plan, &manager).expect("current context validates");
     let mut value = serde_json::to_value(context).expect("context serializes");
-    value["schema_version"] = serde_json::json!(SOURCE_QUALIFIED_MODEL_RESOLUTION_SCHEMA_VERSION);
+    value["schema_version"] = serde_json::json!(16);
     let persisted_plan = value["simulation_plan"]
         .as_object_mut()
         .expect("simulation plan is an object");
@@ -557,7 +540,7 @@ fn schema_six_classifies_legacy_sources_without_inventing_edit_authority() {
     manager.add_library(ModelLibrary::new("built-in-catalog"));
     let context = context_from_state(&SimSetupState::new(), &manager).expect("context validates");
     let mut value = serde_json::to_value(context).expect("context serializes");
-    value["schema_version"] = serde_json::json!(RETAINED_MODEL_SOURCE_BYTES_SCHEMA_VERSION);
+    value["schema_version"] = serde_json::json!(6);
     for library in value["model_libraries"]
         .as_array_mut()
         .expect("libraries array")
@@ -592,7 +575,7 @@ fn schema_seven_migrates_without_inventing_model_authoring_records() {
     let context =
         context_from_state(&SimSetupState::new(), &manager).expect("baseline context validates");
     let mut value = serde_json::to_value(context).expect("context serializes");
-    value["schema_version"] = serde_json::json!(MODEL_SOURCE_AUTHORITY_SCHEMA_VERSION);
+    value["schema_version"] = serde_json::json!(7);
     for library in value["model_libraries"]
         .as_array_mut()
         .expect("libraries are an array")
@@ -636,7 +619,7 @@ fn schema_eight_migrates_without_inventing_correlation_records() {
     let context =
         context_from_state(&SimSetupState::new(), &manager).expect("baseline context validates");
     let mut value = serde_json::to_value(context).expect("context serializes");
-    value["schema_version"] = serde_json::json!(MODEL_AUTHORING_QUALIFICATION_SCHEMA_VERSION);
+    value["schema_version"] = serde_json::json!(8);
     for library in value["model_libraries"]
         .as_array_mut()
         .expect("libraries are an array")
@@ -765,9 +748,9 @@ fn project_owned_model_round_trip_preserves_authority_bytes_and_revision() {
     let json = serde_json::to_string(&context).expect("context serializes");
     let restored: ProjectExecutionContext =
         serde_json::from_str(&json).expect("context deserializes");
-    let (_, restored_manager, warnings) = restored
-        .into_state(project_id())
-        .expect("project-owned model restores");
+    let (_, restored_manager, warnings) =
+        crate::io::restore_execution_context(restored, project_id())
+            .expect("project-owned model restores");
 
     assert!(warnings.is_empty(), "{warnings:?}");
     assert_eq!(
@@ -819,8 +802,7 @@ fn retained_import_round_trip_executes_from_authenticated_bytes_after_source_dis
 
     let context = context_from_state(&SimSetupState::new(), &manager).expect("context validates");
     std::fs::remove_dir_all(directory).expect("remove live imported source");
-    let (_, restored, warnings) = context
-        .into_state(project_id())
+    let (_, restored, warnings) = crate::io::restore_execution_context(context, project_id())
         .expect("retained import restores");
     assert!(warnings.is_empty());
     let restored_library = restored
@@ -865,8 +847,7 @@ fn project_owned_multifile_closure_restores_distinct_member_identities() {
         .expect("multi-file project-owned closure validates");
     std::fs::remove_dir_all(directory).expect("retained restore must not need fixture files");
 
-    let (_, restored, warnings) = context
-        .into_state(project_id())
+    let (_, restored, warnings) = crate::io::restore_execution_context(context, project_id())
         .expect("multi-file project-owned closure restores from retained bytes");
     assert!(warnings.is_empty(), "{warnings:?}");
     let library = restored.get_library("foundry").expect("library restores");
@@ -1188,8 +1169,7 @@ fn restored_execution_lifecycle_never_retains_runner_authority() {
         assert_eq!(instance.lifecycle(), AnalysisLifecycleState::Draft);
         restored.validate().expect("normalized context validates");
 
-        let (mut setup, _, _) = restored
-            .into_state(project_id())
+        let (mut setup, _, _) = crate::io::restore_execution_context(restored, project_id())
             .expect("normalized context enters application state");
         setup
             .stable_analysis_plan_mut()
@@ -1235,7 +1215,8 @@ fn incomplete_disabled_and_enabled_analysis_drafts_round_trip_losslessly() {
     let serialized = serde_json::to_string(&context).expect("context serializes");
     let restored: ProjectExecutionContext =
         serde_json::from_str(&serialized).expect("context deserializes");
-    let (restored, _, _) = restored.into_state(project_id()).expect("context restores");
+    let (restored, _, _) =
+        crate::io::restore_execution_context(restored, project_id()).expect("context restores");
     let restored = restored
         .stable_analysis_plan()
         .expect("v4 restores a stable plan");
@@ -1299,8 +1280,8 @@ fn legacy_context_migrates_to_sorted_execution_order() {
     plan.enabled.extend([4, 0]);
     plan.analysis_order.clear();
     let mut context = ProjectExecutionContext {
-        schema_version: LEGACY_EXECUTION_CONTEXT_SCHEMA_VERSION,
-        simulation_plan: plan,
+        schema_version: 0,
+        simulation_plan: plan.setup,
         model_libraries: Vec::new(),
         model_resolution_records: Vec::new(),
         model_validation_receipt: None,
@@ -1375,9 +1356,9 @@ fn model_source_and_section_bindings_round_trip_without_substitution() {
     let restored_context: ProjectExecutionContext =
         serde_json::from_str(&json).expect("context deserializes");
 
-    let (_, restored_manager, warnings) = restored_context
-        .into_state(project_id())
-        .expect("available source restores");
+    let (_, restored_manager, warnings) =
+        crate::io::restore_execution_context(restored_context, project_id())
+            .expect("available source restores");
 
     assert!(warnings.is_empty());
     assert_eq!(
@@ -1455,7 +1436,7 @@ fn schema_ten_corner_names_migrate_to_required_composite_contracts() {
         .expect("load legacy-shaped source");
     let context = context_from_state(&SimSetupState::new(), &manager).expect("context validates");
     let mut value = serde_json::to_value(context).expect("context serializes");
-    value["schema_version"] = serde_json::json!(MODEL_BIN_AUDIT_SCHEMA_VERSION);
+    value["schema_version"] = serde_json::json!(10);
     for library in value["model_libraries"]
         .as_array_mut()
         .expect("libraries array")
@@ -1482,8 +1463,7 @@ fn schema_ten_corner_names_migrate_to_required_composite_contracts() {
         restored.schema_version,
         PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION
     );
-    let (_, restored_manager, _) = restored
-        .into_state(project_id())
+    let (_, restored_manager, _) = crate::io::restore_execution_context(restored, project_id())
         .expect("migrated state restores");
     let corner = restored_manager
         .get_library("foundry")
@@ -1514,11 +1494,10 @@ fn schema_one_external_source_migrates_unpinned_and_stays_blocked_until_refresh(
         .expect("load source");
     let mut context =
         context_from_state(&SimSetupState::new(), &manager).expect("current context validates");
-    context.schema_version = UNPINNED_MODEL_SOURCE_SCHEMA_VERSION;
+    context.schema_version = 1;
     context.model_libraries[0].source_closure.clear();
 
-    let (_, restored, warnings) = context
-        .into_state(project_id())
+    let (_, restored, warnings) = crate::io::restore_execution_context(context, project_id())
         .expect("legacy unpinned catalog remains recoverable");
 
     assert_eq!(warnings.len(), 1);
@@ -1541,11 +1520,10 @@ fn schema_two_multifile_source_migrates_without_inventing_resolution_edges() {
         .expect("load multifile source");
     let mut context =
         context_from_state(&SimSetupState::new(), &manager).expect("current context validates");
-    context.schema_version = PATH_PINNED_MODEL_SOURCE_SCHEMA_VERSION;
+    context.schema_version = 2;
     context.model_libraries[0].source_edges.clear();
 
-    let (_, restored, warnings) = context
-        .into_state(project_id())
+    let (_, restored, warnings) = crate::io::restore_execution_context(context, project_id())
         .expect("schema-two catalog remains repairable");
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].contains("no authenticated dependency-resolution graph"));
@@ -1575,10 +1553,9 @@ fn unavailable_or_changed_model_source_is_retained_warned_and_run_blocked() {
         .expect("external library keeps canonical root");
 
     std::fs::remove_file(&path).expect("remove source");
-    let (_, retained, warnings) = context
-        .clone()
-        .into_state(project_id())
-        .expect("missing source is retained for repair");
+    let (_, retained, warnings) =
+        crate::io::restore_execution_context(context.clone(), project_id())
+            .expect("missing source is retained for repair");
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].contains("is unavailable"));
     assert_eq!(
@@ -1599,8 +1576,7 @@ fn unavailable_or_changed_model_source_is_retained_warned_and_run_blocked() {
             ".include \"shared.inc\"\n.lib TT\n.model nch NMOS (LEVEL=1 KP=9e-3)\n.endl TT\n.lib FF\n.model nch NMOS (LEVEL=1 KP=8e-3)\n.endl FF\n",
         )
         .expect("write changed source");
-    let (_, retained, warnings) = context
-        .into_state(project_id())
+    let (_, retained, warnings) = crate::io::restore_execution_context(context, project_id())
         .expect("changed source must not discard persisted catalog");
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].contains("differs from the explicitly accepted SHA-256"));
@@ -1625,7 +1601,7 @@ fn foreign_platform_source_binding_is_retained_without_filesystem_probe() {
 
     let context = ProjectExecutionContext {
         schema_version: PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
-        simulation_plan: SimSetupState::new(),
+        simulation_plan: SimSetupState::new().setup,
         model_libraries: vec![ProjectModelLibrary {
             name: "foreign-foundry".to_owned(),
             pdk_name: String::new(),
@@ -1658,8 +1634,7 @@ fn foreign_platform_source_binding_is_retained_without_filesystem_probe() {
     context
         .validate()
         .expect("foreign desktop syntax remains valid project metadata");
-    let (_, manager, warnings) = context
-        .into_state(project_id())
+    let (_, manager, warnings) = crate::io::restore_execution_context(context, project_id())
         .expect("foreign binding remains retained for repair");
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].contains("foreign-platform"), "{:?}", warnings);
@@ -1704,7 +1679,7 @@ fn source_ordering_is_enforced_for_either_desktop_path_syntax() {
         let context = |root: PathBuf, closure: Vec<ModelSourcePin>, edges: Vec<ModelSourceEdge>| {
             ProjectExecutionContext {
                 schema_version: PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
-                simulation_plan: SimSetupState::new(),
+                simulation_plan: SimSetupState::new().setup,
                 model_libraries: vec![ProjectModelLibrary {
                     name: "ordering-fixture".to_owned(),
                     pdk_name: String::new(),
@@ -1810,7 +1785,7 @@ fn disconnected_source_subgraph_is_rejected_even_when_every_member_has_an_edge()
     source_edges.sort();
     let context = ProjectExecutionContext {
         schema_version: PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
-        simulation_plan: SimSetupState::new(),
+        simulation_plan: SimSetupState::new().setup,
         model_libraries: vec![ProjectModelLibrary {
             name: "disconnected".to_owned(),
             pdk_name: String::new(),
@@ -1841,50 +1816,4 @@ fn disconnected_source_subgraph_is_rejected_even_when_every_member_has_an_edge()
         .validate()
         .expect_err("all closure members must be root-reachable");
     assert!(error.contains("not reachable from root_path"), "{error}");
-}
-
-/// A projection written before this build could name a family still opens.
-///
-/// The card's retained bytes are what the closure authenticates, and the token
-/// they declare is compared exactly here — so a project whose only difference
-/// is that its writer had no `Njfet` to write is a faithful projection, not a
-/// tampered one. It is accepted in that one direction only: a persisted
-/// classification that says something *else* is still a mismatch, and so is
-/// one that claims a family the reparse did not reach.
-#[test]
-fn a_projection_classified_by_the_older_vocabulary_still_matches() {
-    let card = |model_type, spice_type: &str| {
-        let mut card = DeviceModel::new("JMOD", model_type);
-        card.spice_type = Some(spice_type.to_owned());
-        card
-    };
-
-    let parsed = card(ModelType::Njfet, "NJF");
-    assert!(parsed_model_projection_matches_without_section(
-        &card(ModelType::Other, "NJF"),
-        &parsed
-    ));
-    assert!(parsed_model_projection_matches_without_section(
-        &card(ModelType::Njfet, "NJF"),
-        &parsed
-    ));
-    assert!(
-        !parsed_model_projection_matches_without_section(&card(ModelType::Pjfet, "NJF"), &parsed),
-        "the wrong polarity is a mismatch, not an older spelling"
-    );
-    assert!(
-        !parsed_model_projection_matches_without_section(
-            &card(ModelType::Njfet, "NJF"),
-            &card(ModelType::Other, "NJF")
-        ),
-        "the widening is one-directional: a claimed family the reparse did not \
-         reach is a mismatch"
-    );
-    assert!(
-        !parsed_model_projection_matches_without_section(
-            &card(ModelType::Other, "NJF"),
-            &card(ModelType::Nmos, "NMOS")
-        ),
-        "only the families added with this vocabulary are excused"
-    );
 }

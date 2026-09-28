@@ -5623,11 +5623,13 @@ dependencies = [
 name = "rspice-project"
 version = "0.1.0"
 dependencies = [
+ "ron",
  "rspice-app-types",
  "rspice-core",
  "rspice-design",
  "rspice-design-model",
  "rspice-model-library",
+ "rspice-simulation-contract",
  "serde",
  "serde_json",
  "sha2 0.10.9",

@@ -530,7 +530,6 @@ fn matches_documented_pristine_plan(
 }
 
 fn pristine_execution_context(
-    project_id: crate::product::ProjectId,
     identity_source: &crate::workbench::app_state::SimSetupState,
 ) -> Result<ProjectExecutionContext, String> {
     let mut pristine = crate::workbench::app_state::SimSetupState::new();
@@ -545,8 +544,7 @@ fn pristine_execution_context(
         // untouched identity, so UUID generation itself is not user work.
         pristine.analysis_plan = source_plan.cloned();
     }
-    ProjectExecutionContext::from_state(
-        project_id,
+    crate::io::capture_execution_context(
         &pristine,
         &crate::workbench::app_state::default_model_library_manager(),
     )
@@ -554,13 +552,9 @@ fn pristine_execution_context(
 }
 
 fn project_owned_differences(state: &AppState) -> Result<ProjectOwnedDifferences, String> {
-    let project_id = state.workspace.project.id();
-    let current_execution = ProjectExecutionContext::from_state(
-        project_id,
-        &state.sim_setup,
-        &state.model_library_manager,
-    )
-    .map_err(|error| format!("current simulation/model state is invalid: {error}"))?;
+    let current_execution =
+        crate::io::capture_execution_context(&state.sim_setup, &state.model_library_manager)
+            .map_err(|error| format!("current simulation/model state is invalid: {error}"))?;
     let current_execution = canonical_execution_context(&current_execution)?;
 
     let current_results = ProjectSimulationResults::from_state(&state.simulation);
@@ -568,36 +562,31 @@ fn project_owned_differences(state: &AppState) -> Result<ProjectOwnedDifferences
         .validate()
         .map_err(|error| format!("current simulation results are invalid: {error}"))?;
 
-    let (saved_execution, saved_results) =
-        if let Some(project_path) = state.workspace.project.path.as_deref() {
-            let project = crate::io::load_project_file(project_path).map_err(|error| {
-                format!(
-                    "saved project snapshot '{}' could not be loaded: {error}",
-                    project_path.display()
-                )
-            })?;
-            if let Some(warning) = project.simulation_results_warning.as_deref() {
-                return Err(format!(
-                    "saved project result snapshot could not be verified: {warning}"
-                ));
-            }
-            let execution = match project.execution_context.as_ref() {
-                Some(context) => canonical_execution_context(context)?,
-                None => canonical_execution_context(&pristine_execution_context(
-                    project_id,
-                    &state.sim_setup,
-                )?)?,
-            };
-            (execution, project.simulation_results)
-        } else {
-            (
-                canonical_execution_context(&pristine_execution_context(
-                    project_id,
-                    &state.sim_setup,
-                )?)?,
-                ProjectSimulationResults::default(),
+    let (saved_execution, saved_results) = if let Some(project_path) =
+        state.workspace.project.path.as_deref()
+    {
+        let project = crate::io::load_project_file(project_path).map_err(|error| {
+            format!(
+                "saved project snapshot '{}' could not be loaded: {error}",
+                project_path.display()
             )
+        })?;
+        if let Some(warning) = project.simulation_results_warning.as_deref() {
+            return Err(format!(
+                "saved project result snapshot could not be verified: {warning}"
+            ));
+        }
+        let execution = match project.execution_context.as_ref() {
+            Some(context) => canonical_execution_context(context)?,
+            None => canonical_execution_context(&pristine_execution_context(&state.sim_setup)?)?,
         };
+        (execution, project.simulation_results)
+    } else {
+        (
+            canonical_execution_context(&pristine_execution_context(&state.sim_setup)?)?,
+            ProjectSimulationResults::default(),
+        )
+    };
 
     Ok(ProjectOwnedDifferences {
         execution_or_models: current_execution != saved_execution,

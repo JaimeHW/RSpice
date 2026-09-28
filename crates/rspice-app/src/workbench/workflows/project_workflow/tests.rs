@@ -760,12 +760,9 @@ fn project_import_restores_plan_order_solver_options_and_model_catalog() {
     project_models.add_library(ModelLibrary::new("project_exact_models"));
     source.model_library_manager = project_models;
 
-    let context = ProjectExecutionContext::from_state(
-        source.workspace.project.id(),
-        &source.sim_setup,
-        &source.model_library_manager,
-    )
-    .expect("source context validates");
+    let context =
+        crate::io::capture_execution_context(&source.sim_setup, &source.model_library_manager)
+            .expect("source context validates");
     let expected_plan =
         serde_json::to_value(&context.simulation_plan).expect("expected plan serializes");
     let mut design_libraries = crate::state::LibraryManager::with_primitives();
@@ -847,8 +844,7 @@ fn project_import_restores_plan_order_solver_options_and_model_catalog() {
 #[test]
 fn invalid_execution_context_does_not_partially_replace_open_project() {
     let mut project = project_named("invalid-context.rspiceproj");
-    let context = ProjectExecutionContext::from_state(
-        project.workspace.project.id(),
+    let context = crate::io::capture_execution_context(
         &crate::workbench::app_state::SimSetupState::new(),
         &crate::state::model_library::ModelLibraryManager::new(),
     )
@@ -1598,12 +1594,9 @@ fn a_disagreeing_legacy_corner_run_space_is_reported_on_load() {
 
     let mut source = AppState::default();
     source.sim_setup.run_set = temperatures(&["0", "27", "85"]);
-    let context = ProjectExecutionContext::from_state(
-        source.workspace.project.id(),
-        &source.sim_setup,
-        &source.model_library_manager,
-    )
-    .expect("the source context validates");
+    let context =
+        crate::io::capture_execution_context(&source.sim_setup, &source.model_library_manager)
+            .expect("the source context validates");
 
     // A project written before the run space had one owner: its Corner draft
     // carries a second, disagreeing declaration inline, and its execution

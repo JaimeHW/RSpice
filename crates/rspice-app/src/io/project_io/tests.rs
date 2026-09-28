@@ -553,12 +553,8 @@ fn project_with_execution_context() -> ProjectFile {
     setup
         .migrate_legacy_analysis_plan(workspace.project.id())
         .expect("legacy execution fixture migrates at the load boundary");
-    let execution_context = crate::io::ProjectExecutionContext::from_state(
-        workspace.project.id(),
-        &setup,
-        &model_manager,
-    )
-    .expect("execution fixture validates");
+    let execution_context = crate::io::capture_execution_context(&setup, &model_manager)
+        .expect("execution fixture validates");
     ProjectFile::new_with_execution_context(
         workspace,
         design_libraries,
@@ -1128,10 +1124,11 @@ fn unfinished_analysis_drafts_are_project_data_not_file_corruption() {
 
     let loaded = load_project_text(&value.to_string(), None)
         .expect("draft syntax is validated by run preflight, not project loading");
-    let plan = &loaded
-        .execution_context
-        .expect("context retained")
-        .simulation_plan;
+    let (plan, _, _) = crate::io::restore_execution_context(
+        loaded.execution_context.expect("context retained"),
+        loaded.workspace.project.id(),
+    )
+    .expect("context enters application state");
 
     let stable = plan.stable_analysis_plan().expect("stable plan restored");
     let transient = stable
