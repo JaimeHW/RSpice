@@ -415,7 +415,7 @@ fn working_fingerprints(
     state: &AppState,
 ) -> Result<registry::DocumentFingerprints, ProjectLifecycleError> {
     let current = capture_snapshot(state, SnapshotContent::Current)?;
-    registry::DocumentFingerprints::with_results_cache(
+    registry::document_fingerprints_with_results_cache(
         &current,
         &state.project_lifecycle.result_fingerprints,
     )
@@ -1378,9 +1378,9 @@ fn prepare_post_save_registry(
     let mut post_save_registry = registry::DocumentRegistry::default();
     let cache = &state.project_lifecycle.result_fingerprints;
     let candidate_fingerprints =
-        registry::DocumentFingerprints::with_results_cache(candidate, cache)
+        registry::document_fingerprints_with_results_cache(candidate, cache)
             .map_err(ProjectLifecycleError::InvalidState)?;
-    let current_fingerprints = registry::DocumentFingerprints::with_results_cache(&current, cache)
+    let current_fingerprints = registry::document_fingerprints_with_results_cache(&current, cache)
         .map_err(ProjectLifecycleError::InvalidState)?;
     post_save_registry
         .rebuild_from_fingerprints(&current_fingerprints, Some(&candidate_fingerprints));

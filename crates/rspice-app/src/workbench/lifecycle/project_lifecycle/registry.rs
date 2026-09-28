@@ -1,146 +1,38 @@
-//! Stable project-document registry and content fingerprints.
-
-mod result_fingerprint;
-pub(super) use result_fingerprint::ResultFingerprintCache;
-
-use std::collections::{HashMap, HashSet};
-
-use serde::Serialize;
-use sha2::{Digest as _, Sha256};
+//! Capture project-document fingerprints from the application workspace.
 
 use crate::io::ProjectFile;
 use crate::product::ContentDigest;
 use crate::state::CellViewRef;
-use crate::state::result_presentation::ResultFingerprintFields;
 use crate::workbench::state::Workspace;
+#[cfg(test)]
+pub(super) use rspice_project::registry::result_fingerprint::RESULT_FINGERPRINT_PASSES;
+pub(super) use rspice_project::registry::{DocumentFingerprints, ResultFingerprintCache};
+pub(crate) use rspice_project::registry::{DocumentRegistry, ProjectDocumentId};
+use rspice_project::registry::{
+    SchematicDocumentContent, ViewDocumentContent, digest, project_configuration_value,
+    reference_from_key, result_fingerprint,
+};
+use std::collections::{HashMap, HashSet};
 
 #[cfg(test)]
 thread_local! {
     /// Full document fingerprint passes, including retained sample scans.
     pub(super) static FINGERPRINT_PASSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    pub(super) static RESULT_FINGERPRINT_PASSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// Stable identity of every project-owned document that participates in
-/// Save, Save all, Revert, and dirty-state decisions.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum ProjectDocumentId {
-    ProjectConfiguration,
-    CellView(CellViewRef),
-    SimulationPlan,
-    ResultHistory,
-    VerificationSpecifications,
-    ModelCatalog,
-    NetlistSource,
-    StimulusLibrary,
+pub(super) fn document_fingerprints(project: &ProjectFile) -> Result<DocumentFingerprints, String> {
+    Ok(DocumentFingerprints::from_documents(document_digests(
+        project,
+    )?))
 }
 
-impl ProjectDocumentId {
-    pub(crate) fn stable_key(&self) -> String {
-        match self {
-            Self::ProjectConfiguration => "project/configuration".to_owned(),
-            Self::CellView(reference) => format!("design/{}", reference.key()),
-            Self::SimulationPlan => "simulation/plan".to_owned(),
-            Self::ResultHistory => "results/history".to_owned(),
-            Self::VerificationSpecifications => "verification/specifications".to_owned(),
-            Self::ModelCatalog => "models/catalog".to_owned(),
-            Self::NetlistSource => "netlist/source".to_owned(),
-            Self::StimulusLibrary => "stimulus/library".to_owned(),
-        }
-    }
-
-    /// The document as a reader names it in a save, close, or revert prompt.
-    pub(crate) fn label(&self) -> String {
-        match self {
-            Self::ProjectConfiguration => "Project configuration".to_owned(),
-            // Cell and view as the reader knows them, not the persisted
-            // library/cell/view key.
-            Self::CellView(reference) => format!("{} \u{b7} {}", reference.cell, reference.view),
-            Self::SimulationPlan => "Simulation plan".to_owned(),
-            Self::ResultHistory => "Result history".to_owned(),
-            Self::VerificationSpecifications => "Verification specifications".to_owned(),
-            Self::ModelCatalog => "Model catalog".to_owned(),
-            Self::NetlistSource => "Netlist source".to_owned(),
-            Self::StimulusLibrary => "Stimulus library".to_owned(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct DocumentRecord {
-    pub(crate) id: ProjectDocumentId,
-    pub(crate) dirty: bool,
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct DocumentRegistry {
-    records: Vec<DocumentRecord>,
-    comparison_failed: bool,
-}
-
-impl DocumentRegistry {
-    pub(crate) fn records(&self) -> &[DocumentRecord] {
-        &self.records
-    }
-
-    pub(crate) fn is_dirty(&self, id: &ProjectDocumentId) -> bool {
-        self.comparison_failed
-            || self
-                .records
-                .iter()
-                .find(|record| &record.id == id)
-                .is_some_and(|record| record.dirty)
-    }
-
-    pub(super) fn comparison_failed(&self) -> bool {
-        self.comparison_failed
-    }
-
-    /// A failed comparison cannot provide evidence that any document is clean,
-    /// including documents created since the previous successful comparison.
-    pub(super) fn invalidate(&mut self) {
-        self.comparison_failed = true;
-        for record in &mut self.records {
-            record.dirty = true;
-        }
-    }
-
-    #[cfg(test)]
-    fn rebuild(
-        &mut self,
-        current: &ProjectFile,
-        accepted: Option<&DocumentFingerprints>,
-    ) -> Result<(), String> {
-        let current = DocumentFingerprints::new(current)?;
-        self.rebuild_from_fingerprints(&current, accepted);
-        Ok(())
-    }
-
-    pub(super) fn rebuild_from_fingerprints(
-        &mut self,
-        current: &DocumentFingerprints,
-        accepted: Option<&DocumentFingerprints>,
-    ) {
-        let current = &current.documents;
-        let empty = HashMap::new();
-        let accepted = accepted.map_or(&empty, |fingerprints| &fingerprints.documents);
-        let mut ids = current
-            .keys()
-            .chain(accepted.keys())
-            .cloned()
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        ids.sort_by_key(ProjectDocumentId::stable_key);
-        self.records = ids
-            .into_iter()
-            .map(|id| DocumentRecord {
-                dirty: current.get(&id) != accepted.get(&id),
-                id,
-            })
-            .collect();
-        self.comparison_failed = false;
-    }
+pub(super) fn document_fingerprints_with_results_cache(
+    project: &ProjectFile,
+    cache: &ResultFingerprintCache,
+) -> Result<DocumentFingerprints, String> {
+    Ok(DocumentFingerprints::from_documents(
+        document_digests_with_results_cache(project, Some(cache))?,
+    ))
 }
 
 pub(crate) fn active_document(
@@ -161,51 +53,8 @@ pub(crate) fn active_document(
     }
 }
 
-/// Cached identities of one complete, immutable project snapshot.
-#[derive(Debug)]
-pub(super) struct DocumentFingerprints {
-    documents: HashMap<ProjectDocumentId, ContentDigest>,
-    content: ContentDigest,
-}
-
-impl DocumentFingerprints {
-    pub(super) fn new(project: &ProjectFile) -> Result<Self, String> {
-        Ok(Self::from_documents(document_digests(project)?))
-    }
-
-    pub(super) fn with_results_cache(
-        project: &ProjectFile,
-        cache: &ResultFingerprintCache,
-    ) -> Result<Self, String> {
-        Ok(Self::from_documents(document_digests_with_results_cache(
-            project,
-            Some(cache),
-        )?))
-    }
-
-    fn from_documents(documents: HashMap<ProjectDocumentId, ContentDigest>) -> Self {
-        let mut ordered = documents.iter().collect::<Vec<_>>();
-        ordered.sort_by_key(|(id, _)| id.stable_key());
-        let mut hasher = Sha256::new();
-        hasher.update(b"rspice-project-content-digest\0v1\0");
-        hasher.update((ordered.len() as u64).to_be_bytes());
-        for (id, digest) in ordered {
-            let key = id.stable_key();
-            hasher.update((key.len() as u64).to_be_bytes());
-            hasher.update(key.as_bytes());
-            hasher.update(digest.as_bytes());
-        }
-        let content = ContentDigest::from_bytes(hasher.finalize().into());
-        Self { documents, content }
-    }
-
-    pub(super) fn content_digest(&self) -> ContentDigest {
-        self.content
-    }
-}
-
 pub(crate) fn content_digest(project: &ProjectFile) -> Result<ContentDigest, String> {
-    DocumentFingerprints::new(project).map(|fingerprints| fingerprints.content_digest())
+    document_fingerprints(project).map(|fingerprints| fingerprints.content_digest())
 }
 
 fn document_digests(
@@ -232,7 +81,13 @@ fn document_digests_with_results_cache(
 
     documents.insert(
         ProjectDocumentId::ProjectConfiguration,
-        digest(&project_configuration_value(project)?)?,
+        digest(&project_configuration_value(
+            &project.workspace.project,
+            &project.libraries,
+            &project.workspace.configuration_sets,
+            &project.workspace.design_management,
+            project.workspace.pdk_callback_receipts(),
+        )?)?,
     );
     documents.insert(
         ProjectDocumentId::SimulationPlan,
@@ -257,8 +112,18 @@ fn document_digests_with_results_cache(
     documents.insert(
         ProjectDocumentId::ResultHistory,
         match results_cache {
-            Some(cache) => cache.digest(project)?,
-            None => result_fingerprint::digest(project)?,
+            Some(cache) => cache.digest(
+                &project.simulation_results,
+                &project.workspace.report_documents,
+                &project.workspace.visualization_documents,
+                &project.result_presentation,
+            )?,
+            None => result_fingerprint::digest(
+                &project.simulation_results,
+                &project.workspace.report_documents,
+                &project.workspace.visualization_documents,
+                &project.result_presentation,
+            )?,
         },
     );
     // The stimulus definitions ride the project document rather than a
@@ -321,7 +186,7 @@ fn document_digests_with_results_cache(
             .workspace
             .schematic_buffers
             .get(&reference.key())
-            .map(SchematicDocumentContent::from);
+            .map(|schematic| SchematicDocumentContent::from(schematic.document()));
         let physical_layout = project.workspace.physical_layout_document(&reference);
         let view = project
             .libraries
@@ -341,197 +206,6 @@ fn document_digests_with_results_cache(
     Ok(documents)
 }
 
-/// Explicit lifecycle projection of a schematic document. Runtime interaction
-/// state (selection, wire preview, clipboard, pan/zoom, caches, derived
-/// terminal connections, and undo history) is deliberately impossible to
-/// serialize through this type.
-#[derive(Serialize)]
-struct SchematicDocumentContent<'a> {
-    schema_version: u16,
-    grid_size: i32,
-    document_policy: crate::state::SchematicDocumentPolicy,
-    components: &'a [crate::state::Component],
-    wires: &'a [crate::state::Wire],
-    buses: &'a [crate::state::Bus],
-    bus_taps: &'a [crate::state::BusTap],
-    net_labels: &'a [crate::state::NetLabel],
-    design_notes: &'a [crate::state::DesignNote],
-    documentation_shapes: &'a [crate::state::DocumentationShape],
-    junctions: &'a [crate::state::Junction],
-    probes: &'a [crate::state::SchematicProbe],
-}
-
-impl<'a> From<&'a crate::state::SchematicState> for SchematicDocumentContent<'a> {
-    fn from(schematic: &'a crate::state::SchematicState) -> Self {
-        Self {
-            schema_version: 5,
-            grid_size: schematic.document().grid_size,
-            document_policy: schematic.document().document_policy,
-            components: &schematic.document().components,
-            wires: &schematic.document().wires,
-            buses: &schematic.document().buses,
-            bus_taps: &schematic.document().bus_taps,
-            net_labels: &schematic.document().net_labels,
-            design_notes: &schematic.document().design_notes,
-            documentation_shapes: &schematic.document().documentation_shapes,
-            junctions: &schematic.document().junctions,
-            probes: &schematic.document().probes,
-        }
-    }
-}
-
-/// Engineering portion of a library view. View metadata owns document
-/// content; browser/file bindings, open state, timestamps, and dirty state do
-/// not.
-#[derive(Serialize)]
-struct ViewDocumentContent<'a> {
-    schema_version: u16,
-    name: &'a str,
-    view_type: crate::state::ViewType,
-    metadata: &'a HashMap<String, String>,
-}
-
-impl<'a> From<&'a crate::state::View> for ViewDocumentContent<'a> {
-    fn from(view: &'a crate::state::View) -> Self {
-        Self {
-            schema_version: 1,
-            name: &view.name,
-            view_type: view.view_type,
-            metadata: &view.metadata,
-        }
-    }
-}
-
-fn project_configuration_value(project: &ProjectFile) -> Result<serde_json::Value, String> {
-    let mut value = serde_json::to_value((
-        &project.workspace.project,
-        &project.libraries,
-        &project.workspace.configuration_sets,
-        &project.workspace.design_management,
-        project.workspace.pdk_callback_receipts(),
-    ))
-    .map_err(|error| error.to_string())?;
-    // Paths are persistence bindings and browser/tree expansion is
-    // presentation state.  Neither makes engineering content dirty.
-    if let Some(project) = value.pointer_mut("/0/path") {
-        *project = serde_json::Value::Null;
-    }
-    if let Some(project) = value.get_mut(0).and_then(serde_json::Value::as_object_mut) {
-        project.remove("revision");
-    }
-    scrub_library_presentation(&mut value);
-    // Every view entry, including its existence and metadata, is owned by the
-    // corresponding CellView document. Project configuration owns the
-    // library/cell catalog only; otherwise saving configuration could silently
-    // accept an unrelated unsaved view or reverting it could discard one.
-    if let Some(libraries) = value
-        .pointer_mut("/1/libraries")
-        .and_then(|v| v.as_object_mut())
-    {
-        for library in libraries.values_mut() {
-            if let Some(object) = library.as_object_mut() {
-                object.remove("path");
-            }
-            if let Some(cells) = library.get_mut("cells").and_then(|v| v.as_object_mut()) {
-                for cell in cells.values_mut() {
-                    if let Some(views) = cell.get_mut("views").and_then(|v| v.as_object_mut()) {
-                        views.clear();
-                    }
-                }
-            }
-        }
-    }
-    Ok(value)
-}
-
-fn scrub_library_presentation(value: &mut serde_json::Value) {
-    let Some(manager) = value.get_mut(1).and_then(serde_json::Value::as_object_mut) else {
-        return;
-    };
-    for key in [
-        "selected_library",
-        "selected_cell",
-        "selected_view",
-        "filter_text",
-        "show_read_only",
-        // The revision is a concurrency/audit coordinate, not independent
-        // engineering configuration. The catalog structure below is the
-        // content authority, while each view document owns its view payload.
-        "revision",
-    ] {
-        manager.remove(key);
-    }
-    if let Some(libraries) = manager.get_mut("libraries").and_then(|v| v.as_object_mut()) {
-        for library in libraries.values_mut() {
-            if let Some(object) = library.as_object_mut() {
-                object.remove("expanded");
-                if let Some(cells) = object.get_mut("cells").and_then(|v| v.as_object_mut()) {
-                    for cell in cells.values_mut() {
-                        if let Some(object) = cell.as_object_mut() {
-                            object.remove("expanded");
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn reference_from_key(key: &str) -> Option<CellViewRef> {
-    let mut segments = key.split('/');
-    let reference = CellViewRef::new(segments.next()?, segments.next()?, segments.next()?);
-    segments.next().is_none().then_some(reference)
-}
-
-fn digest(value: &impl Serialize) -> Result<ContentDigest, String> {
-    let value = serde_json::to_value(value).map_err(|error| error.to_string())?;
-    let mut canonical = Vec::new();
-    write_canonical_json(&value, &mut canonical)?;
-    let mut hasher = Sha256::new();
-    hasher.update(b"rspice-canonical-json-digest\0v1\0");
-    hasher.update((canonical.len() as u64).to_be_bytes());
-    hasher.update(canonical);
-    Ok(ContentDigest::from_bytes(hasher.finalize().into()))
-}
-
-fn write_canonical_json(value: &serde_json::Value, out: &mut Vec<u8>) -> Result<(), String> {
-    match value {
-        serde_json::Value::Null => out.extend_from_slice(b"null"),
-        serde_json::Value::Bool(value) => {
-            out.extend_from_slice(if *value { b"true" } else { b"false" })
-        }
-        serde_json::Value::Number(number) => out.extend_from_slice(number.to_string().as_bytes()),
-        serde_json::Value::String(string) => {
-            serde_json::to_writer(&mut *out, string).map_err(|error| error.to_string())?;
-        }
-        serde_json::Value::Array(values) => {
-            out.push(b'[');
-            for (index, value) in values.iter().enumerate() {
-                if index != 0 {
-                    out.push(b',');
-                }
-                write_canonical_json(value, out)?;
-            }
-            out.push(b']');
-        }
-        serde_json::Value::Object(values) => {
-            out.push(b'{');
-            let mut entries = values.iter().collect::<Vec<_>>();
-            entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-            for (index, (key, value)) in entries.into_iter().enumerate() {
-                if index != 0 {
-                    out.push(b',');
-                }
-                serde_json::to_writer(&mut *out, key).map_err(|error| error.to_string())?;
-                out.push(b':');
-                write_canonical_json(value, out)?;
-            }
-            out.push(b'}');
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,18 +216,6 @@ mod tests {
         SimulationPlanPayloadRecord,
     };
     use crate::workbench::app_state::AppState;
-
-    #[test]
-    fn canonical_digest_is_independent_of_map_insertion_order() {
-        let mut first = HashMap::new();
-        first.insert("alpha", 1_u32);
-        first.insert("beta", 2_u32);
-        let mut second = HashMap::new();
-        second.insert("beta", 2_u32);
-        second.insert("alpha", 1_u32);
-
-        assert_eq!(digest(&first).unwrap(), digest(&second).unwrap());
-    }
 
     #[test]
     fn presentation_and_interaction_state_never_marks_engineering_documents_dirty() {
@@ -588,12 +250,10 @@ mod tests {
 
         let current = super::super::snapshot(&state).expect("current snapshot");
         let mut registry = DocumentRegistry::default();
-        registry
-            .rebuild(
-                &current,
-                Some(&DocumentFingerprints::new(&baseline).unwrap()),
-            )
-            .expect("rebuild registry");
+        registry.rebuild_from_fingerprints(
+            &document_fingerprints(&current).unwrap(),
+            Some(&document_fingerprints(&baseline).unwrap()),
+        );
         assert!(
             registry.records().iter().all(|record| !record.dirty),
             "selection, clipboard, viewport, open-state, and browser presentation are not engineering edits"
@@ -603,12 +263,10 @@ mod tests {
             .schematic
             .add_component(ComponentType::Capacitor, Point::new(12, 9));
         let edited = super::super::snapshot(&state).expect("edited snapshot");
-        registry
-            .rebuild(
-                &edited,
-                Some(&DocumentFingerprints::new(&baseline).unwrap()),
-            )
-            .expect("rebuild edited registry");
+        registry.rebuild_from_fingerprints(
+            &document_fingerprints(&edited).unwrap(),
+            Some(&document_fingerprints(&baseline).unwrap()),
+        );
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
         assert!(!registry.is_dirty(&ProjectDocumentId::ProjectConfiguration));
     }
@@ -626,9 +284,10 @@ mod tests {
 
         let with_bus = super::super::snapshot(&state).expect("bus snapshot");
         let mut registry = DocumentRegistry::default();
-        registry
-            .rebuild(&with_bus, Some(&DocumentFingerprints::new(&empty).unwrap()))
-            .unwrap();
+        registry.rebuild_from_fingerprints(
+            &document_fingerprints(&with_bus).unwrap(),
+            Some(&document_fingerprints(&empty).unwrap()),
+        );
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active.clone())));
 
         state
@@ -642,12 +301,10 @@ mod tests {
             )
             .expect("place tap");
         let with_tap = super::super::snapshot(&state).expect("tap snapshot");
-        registry
-            .rebuild(
-                &with_tap,
-                Some(&DocumentFingerprints::new(&with_bus).unwrap()),
-            )
-            .unwrap();
+        registry.rebuild_from_fingerprints(
+            &document_fingerprints(&with_tap).unwrap(),
+            Some(&document_fingerprints(&with_bus).unwrap()),
+        );
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
     }
 
@@ -668,12 +325,10 @@ mod tests {
 
         let current = super::super::snapshot(&state).expect("design-note snapshot");
         let mut registry = DocumentRegistry::default();
-        registry
-            .rebuild(
-                &current,
-                Some(&DocumentFingerprints::new(&baseline).unwrap()),
-            )
-            .unwrap();
+        registry.rebuild_from_fingerprints(
+            &document_fingerprints(&current).unwrap(),
+            Some(&document_fingerprints(&baseline).unwrap()),
+        );
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active.clone())));
 
         let mut edited_state = state;
@@ -681,9 +336,10 @@ mod tests {
             .update(DesignNoteKind::PlainText, "Updated bias network")
             .unwrap();
         let edited = super::super::snapshot(&edited_state).expect("edited snapshot");
-        registry
-            .rebuild(&edited, Some(&DocumentFingerprints::new(&current).unwrap()))
-            .unwrap();
+        registry.rebuild_from_fingerprints(
+            &document_fingerprints(&edited).unwrap(),
+            Some(&document_fingerprints(&current).unwrap()),
+        );
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
     }
 
@@ -721,12 +377,10 @@ mod tests {
 
         assert_ne!(baseline_digest, edited_digest);
         let mut registry = DocumentRegistry::default();
-        registry
-            .rebuild(
-                &edited,
-                Some(&DocumentFingerprints::new(&baseline).unwrap()),
-            )
-            .unwrap();
+        registry.rebuild_from_fingerprints(
+            &document_fingerprints(&edited).unwrap(),
+            Some(&document_fingerprints(&baseline).unwrap()),
+        );
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
     }
 
@@ -878,12 +532,10 @@ mod tests {
 
         let current = super::super::snapshot(&state).expect("current snapshot");
         let mut registry = DocumentRegistry::default();
-        registry
-            .rebuild(
-                &current,
-                Some(&DocumentFingerprints::new(&baseline).unwrap()),
-            )
-            .unwrap();
+        registry.rebuild_from_fingerprints(
+            &document_fingerprints(&current).unwrap(),
+            Some(&document_fingerprints(&baseline).unwrap()),
+        );
         assert!(registry.is_dirty(&ProjectDocumentId::SimulationPlan));
         assert!(!registry.is_dirty(&ProjectDocumentId::VerificationSpecifications));
     }
@@ -921,12 +573,10 @@ mod tests {
             .unwrap();
         let current = super::super::snapshot(&state).expect("edited snapshot");
         let mut registry = DocumentRegistry::default();
-        registry
-            .rebuild(
-                &current,
-                Some(&DocumentFingerprints::new(&baseline).unwrap()),
-            )
-            .unwrap();
+        registry.rebuild_from_fingerprints(
+            &document_fingerprints(&current).unwrap(),
+            Some(&document_fingerprints(&baseline).unwrap()),
+        );
 
         assert!(registry.is_dirty(&ProjectDocumentId::NetlistSource));
         assert!(!registry.is_dirty(&ProjectDocumentId::ProjectConfiguration));
@@ -968,12 +618,10 @@ mod tests {
 
         let current = super::super::snapshot(&state).expect("current snapshot");
         let mut registry = DocumentRegistry::default();
-        registry
-            .rebuild(
-                &current,
-                Some(&DocumentFingerprints::new(&baseline).unwrap()),
-            )
-            .unwrap();
+        registry.rebuild_from_fingerprints(
+            &document_fingerprints(&current).unwrap(),
+            Some(&document_fingerprints(&baseline).unwrap()),
+        );
 
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(reference)));
         assert!(!registry.is_dirty(&ProjectDocumentId::ProjectConfiguration));

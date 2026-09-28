@@ -26,7 +26,7 @@ pub(crate) struct AcceptedProject {
 
 impl AcceptedProject {
     pub(super) fn new(baseline: ProjectFile, binding: Option<PersistenceBinding>) -> Self {
-        let fingerprints = DocumentFingerprints::new(&baseline);
+        let fingerprints = super::registry::document_fingerprints(&baseline);
         Self {
             content: Rc::new(AcceptedContent {
                 baseline,

@@ -12,3 +12,5 @@ pub use execution_context::{
 pub use library_publication::*;
 
 pub mod results;
+
+pub mod registry;

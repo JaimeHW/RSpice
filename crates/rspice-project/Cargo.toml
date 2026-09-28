@@ -13,6 +13,7 @@ workspace = true
 
 [features]
 result-validation-observation = []
+document-fingerprint-observation = []
 
 [dependencies]
 rspice-results = { workspace = true, features = ["engine-evidence"] }
