@@ -59,8 +59,12 @@ fn state_with_selected_source(library_edits: usize, adopt: bool) -> AppState {
 
     let mut state = AppState::default();
     state.schematic.document_mut_for_test().components.clear();
-    let mut definition = StimulusDefinition::new("sensor_drive", ComponentType::VoltageSourceSin)
-        .expect("a definition");
+    let mut definition = StimulusDefinition::new(
+        "sensor_drive",
+        ComponentType::VoltageSourceSin,
+        crate::state::stimulus_library::now_unix_ms,
+    )
+    .expect("a definition");
     definition.value = "0".to_owned();
     definition.params = "va=1 freq=1k".to_owned();
     let mut source = Component::new(7, ComponentType::VoltageSourceSin, Point::origin());
@@ -82,7 +86,10 @@ fn state_with_selected_source(library_edits: usize, adopt: bool) -> AppState {
             .clone();
         let mut draft = crate::state::stimulus_library::draft::DefinitionDraft::new(held);
         draft.edit(|working| working.params = format!("va=1 freq={}k", edit + 2));
-        state.workspace.stimulus_library.apply(&mut draft);
+        state
+            .workspace
+            .stimulus_library
+            .apply(&mut draft, crate::state::stimulus_library::now_unix_ms);
     }
     state
         .schematic

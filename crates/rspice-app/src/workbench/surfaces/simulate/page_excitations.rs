@@ -781,9 +781,12 @@ mod tests {
     /// A design fixture whose one source has adopted `definition`, with the
     /// library holding `library_revision` of it.
     fn adopted_design(library_revision: u32) -> (SchematicState, StimulusLibrary) {
-        let mut definition =
-            StimulusDefinition::new("sensor_drive", ComponentType::VoltageSourceSin)
-                .expect("definition");
+        let mut definition = StimulusDefinition::new(
+            "sensor_drive",
+            ComponentType::VoltageSourceSin,
+            crate::state::stimulus_library::now_unix_ms,
+        )
+        .expect("definition");
         definition.value = "0".to_owned();
         definition.params = "va=3m freq=1k".to_owned();
         let mut component = Component::new(1, ComponentType::VoltageSourceSin, Point::origin())
@@ -799,7 +802,7 @@ mod tests {
         let mut draft = DefinitionDraft::new(definition);
         for revision in 1..library_revision {
             draft.edit(|working| working.params = format!("va={revision}m freq=1k"));
-            library.apply(&mut draft);
+            library.apply(&mut draft, crate::state::stimulus_library::now_unix_ms);
         }
         (schematic_with(vec![component]), library)
     }

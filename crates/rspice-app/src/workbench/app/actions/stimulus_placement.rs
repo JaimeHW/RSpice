@@ -62,9 +62,12 @@ mod tests {
 
     fn app_with_definition() -> RSpiceApp {
         let mut app = RSpiceApp::test_instance();
-        let mut definition =
-            StimulusDefinition::new("sensor_drive", ComponentType::VoltageSourceSin)
-                .expect("definition");
+        let mut definition = StimulusDefinition::new(
+            "sensor_drive",
+            ComponentType::VoltageSourceSin,
+            crate::state::stimulus_library::now_unix_ms,
+        )
+        .expect("definition");
         definition.value = "0".to_owned();
         definition.params = "va=3m freq=1k".to_owned();
         app.state

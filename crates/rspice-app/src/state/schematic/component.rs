@@ -88,6 +88,7 @@ mod tests {
         let definition = crate::state::stimulus_library::definition::StimulusDefinition::new(
             "sensor_diff_1k",
             ComponentType::VoltageSourceSin,
+            crate::state::stimulus_library::now_unix_ms,
         )
         .expect("definition");
         definition.adopt_onto(&mut source).expect("adopt");

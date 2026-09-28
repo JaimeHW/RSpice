@@ -16,8 +16,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::product::ContentDigest;
-use crate::state::ComponentType;
+use crate::schematic::component_type::ComponentType;
+use rspice_app_types::product::ContentDigest;
 
 /// Why a stimulus definition could not be built.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -285,7 +285,7 @@ impl RetainedPwlFile {
         imported_at_unix_ms: u64,
     ) -> Self {
         let contents = contents.into();
-        let digest = crate::state::content_digest(&contents);
+        let digest = crate::netlist_document::content_digest(&contents);
         Self {
             file_name: file_name.into(),
             contents,
@@ -346,6 +346,7 @@ impl StimulusDefinition {
     pub fn new(
         name: impl Into<String>,
         component_type: ComponentType,
+        now_unix_ms: impl FnOnce() -> u64,
     ) -> Result<Self, StimulusDefinitionError> {
         let name = name.into();
         if !is_spice_identifier(&name) {
@@ -361,7 +362,7 @@ impl StimulusDefinition {
             params: String::new(),
             purpose: String::new(),
             revision: 1,
-            modified_unix_ms: super::now_unix_ms(),
+            modified_unix_ms: now_unix_ms(),
             pwl_file: None,
             former_names: Vec::new(),
         })
@@ -482,16 +483,16 @@ impl StimulusDefinition {
     }
 
     /// Publish the next revision, stamping the moment it was published.
-    pub(super) fn publish_next_revision(&mut self) {
+    pub(super) fn publish_next_revision(&mut self, now_unix_ms: impl FnOnce() -> u64) {
         self.revision = self.revision.saturating_add(1);
-        self.modified_unix_ms = super::now_unix_ms();
+        self.modified_unix_ms = now_unix_ms();
     }
 
     /// Start the revision count over, for a definition that is new rather than
     /// edited — a duplicate, or one extracted from a placed source.
-    pub(super) fn restart_revisions(&mut self) {
+    pub(super) fn restart_revisions(&mut self, now_unix_ms: impl FnOnce() -> u64) {
         self.revision = 1;
-        self.modified_unix_ms = super::now_unix_ms();
+        self.modified_unix_ms = now_unix_ms();
     }
 
     /// This definition with its parameter text canonicalized and its revision
@@ -535,7 +536,7 @@ impl StimulusDefinition {
     }
 }
 
-pub use rspice_design::parameters::normalize_params;
+pub use crate::parameters::normalize_params;
 
 /// Whether a name is one unquoted word the netlist reader accepts.
 ///
@@ -589,11 +590,11 @@ mod tests {
     #[test]
     fn a_definition_refuses_a_type_that_is_not_an_independent_source() {
         assert_eq!(
-            StimulusDefinition::new("vin", ComponentType::Resistor),
+            StimulusDefinition::new("vin", ComponentType::Resistor, || 42),
             Err(StimulusDefinitionError::NotASource(ComponentType::Resistor))
         );
         assert_eq!(
-            StimulusDefinition::new("vin", ComponentType::BehavioralSource),
+            StimulusDefinition::new("vin", ComponentType::BehavioralSource, || 42),
             Err(StimulusDefinitionError::NotASource(
                 ComponentType::BehavioralSource
             ))
@@ -604,13 +605,13 @@ mod tests {
     fn a_definition_refuses_a_name_the_netlist_reader_would_not_accept() {
         for name in ["", " ", "two words", "va=1", "\"quoted\""] {
             assert!(
-                StimulusDefinition::new(name, ComponentType::VoltageSourceSin).is_err(),
+                StimulusDefinition::new(name, ComponentType::VoltageSourceSin, || 42).is_err(),
                 "'{name}' should not be a definition name"
             );
         }
         for name in ["vin", "sensor_diff_1k", "VDD_OPERATE", "step2"] {
             assert!(
-                StimulusDefinition::new(name, ComponentType::VoltageSourceSin).is_ok(),
+                StimulusDefinition::new(name, ComponentType::VoltageSourceSin, || 42).is_ok(),
                 "'{name}' should be a definition name"
             );
         }
@@ -618,8 +619,8 @@ mod tests {
 
     #[test]
     fn a_family_switch_keeps_the_kind_and_resets_the_shape_parameters() {
-        let mut pulse =
-            StimulusDefinition::new("clk", ComponentType::CurrentSourcePulse).expect("definition");
+        let mut pulse = StimulusDefinition::new("clk", ComponentType::CurrentSourcePulse, || 42)
+            .expect("definition");
         pulse.value = "0".to_owned();
         pulse.params = "i2=1m pw=1u per=2u".to_owned();
 
@@ -638,8 +639,8 @@ mod tests {
     /// library could not name at all.
     #[test]
     fn a_definition_switches_into_trrandom_and_back_out_again() {
-        let mut noise =
-            StimulusDefinition::new("dither", ComponentType::CurrentSourceNoise).expect("ok");
+        let mut noise = StimulusDefinition::new("dither", ComponentType::CurrentSourceNoise, || 42)
+            .expect("ok");
         noise.params = "na=1n nt=1u".to_owned();
 
         let random = noise.with_family(StimulusFamily::Trrandom);
@@ -661,8 +662,8 @@ mod tests {
 
     #[test]
     fn a_kind_switch_keeps_the_family_and_the_card() {
-        let mut sffm =
-            StimulusDefinition::new("carrier", ComponentType::VoltageSourceSffm).expect("ok");
+        let mut sffm = StimulusDefinition::new("carrier", ComponentType::VoltageSourceSffm, || 42)
+            .expect("ok");
         sffm.value = "0".to_owned();
         sffm.params = "fc=1Meg fm=1k".to_owned();
 
@@ -675,7 +676,8 @@ mod tests {
     #[test]
     fn a_family_switch_away_from_pwl_file_drops_the_retained_table() {
         let mut definition =
-            StimulusDefinition::new("bridge", ComponentType::VoltageSourcePwlFile).expect("ok");
+            StimulusDefinition::new("bridge", ComponentType::VoltageSourcePwlFile, || 42)
+                .expect("ok");
         definition.pwl_file = Some(RetainedPwlFile::new("step.csv", "0 0\n1e-9 1\n", 17));
 
         assert!(
@@ -694,11 +696,12 @@ mod tests {
 
     #[test]
     fn normalization_ignores_parameter_order_and_revision_stamps() {
-        let mut first = StimulusDefinition::new("s", ComponentType::VoltageSourceSin).expect("ok");
+        let mut first =
+            StimulusDefinition::new("s", ComponentType::VoltageSourceSin, || 42).expect("ok");
         first.params = "va=1 vo=0 freq=1k".to_owned();
         let mut second = first.clone();
         second.params = "freq=1k  vo=0  va=1".to_owned();
-        second.publish_next_revision();
+        second.publish_next_revision(|| 42);
 
         assert_ne!(first, second);
         assert_eq!(first.normalized(), second.normalized());
@@ -709,7 +712,7 @@ mod tests {
         let retained = RetainedPwlFile::new("step.csv", "0 0\n1e-9 1\n", 42);
         assert_eq!(
             retained.digest,
-            crate::state::content_digest("0 0\n1e-9 1\n")
+            crate::netlist_document::content_digest("0 0\n1e-9 1\n")
         );
         assert_eq!(retained.imported_at_unix_ms, 42);
     }

@@ -104,7 +104,7 @@ pub(crate) struct StimulusRealization {
 impl StimulusRealization {
     /// Realize one definition over one span, under this transient.
     pub fn of(record: &StimulusDefinition, choice: SpanChoice, timing: PreviewTiming) -> Self {
-        let component = record.preview_component();
+        let component = crate::simulation::stimulus_realize::definition_preview_component(record);
         let spec = match source_spec(&component) {
             Ok(spec) => spec,
             Err(reason) => {
@@ -176,7 +176,7 @@ impl StimulusRealization {
     /// result rather than asking the generator twice and disagreeing about
     /// whether it refused.
     pub fn card(record: &StimulusDefinition) -> Result<String, Vec<String>> {
-        record.card_text(DETACHED_NETS)
+        crate::simulation::stimulus_realize::definition_card_text(record, DETACHED_NETS)
     }
 }
 
@@ -1120,7 +1120,9 @@ mod tests {
     use crate::workbench::state::PreviewSpan;
 
     fn definition(kind: ComponentType, value: &str, params: &str) -> StimulusDefinition {
-        let mut definition = StimulusDefinition::new("probe", kind).expect("placeable");
+        let mut definition =
+            StimulusDefinition::new("probe", kind, crate::state::stimulus_library::now_unix_ms)
+                .expect("placeable");
         definition.value = value.to_owned();
         definition.params = params.to_owned();
         definition

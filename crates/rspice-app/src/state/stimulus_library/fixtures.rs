@@ -122,7 +122,9 @@ pub(crate) fn definition(name: &str) -> StimulusDefinition {
         .into_iter()
         .find(|(row, ..)| *row == name)
         .unwrap_or_else(|| panic!("no stimulus fixture named {name}"));
-    let mut definition = StimulusDefinition::new(name, kind).expect("a placeable source type");
+    let mut definition =
+        StimulusDefinition::new(name, kind, crate::state::stimulus_library::now_unix_ms)
+            .expect("a placeable source type");
     definition.value = value.to_owned();
     definition.params = params.to_owned();
     if kind == ComponentType::VoltageSourcePwlFile {

@@ -33,11 +33,10 @@ const NEW_DEFINITION_FAMILY: crate::state::ComponentType =
 
 /// Create a definition, select it, and leave the reader in its name field.
 pub(crate) fn new_definition(state: &mut AppState) {
-    match state
-        .workspace
-        .stimulus_library
-        .new_definition(NEW_DEFINITION_FAMILY)
-    {
+    match state.workspace.stimulus_library.new_definition(
+        NEW_DEFINITION_FAMILY,
+        crate::state::stimulus_library::now_unix_ms,
+    ) {
         Ok(definition) => {
             let name = definition.name().to_owned();
             state.workbench.selected_stimulus_definition = Some(name.clone());
@@ -55,7 +54,11 @@ pub(crate) fn duplicate_definition(state: &mut AppState) {
     let Some(name) = selected(state) else {
         return;
     };
-    match state.workspace.stimulus_library.duplicate(&name) {
+    match state
+        .workspace
+        .stimulus_library
+        .duplicate(&name, crate::state::stimulus_library::now_unix_ms)
+    {
         Ok(copy) => {
             let copy = copy.name().to_owned();
             state.workbench.selected_stimulus_definition = Some(copy.clone());
@@ -159,7 +162,10 @@ pub(crate) fn apply_draft(state: &mut AppState) {
         state.push_user_message(ConsoleMessage::warning(error.to_string()));
         return;
     }
-    let revision = state.workspace.stimulus_library.apply(&mut published);
+    let revision = state
+        .workspace
+        .stimulus_library
+        .apply(&mut published, crate::state::stimulus_library::now_unix_ms);
     if !renamed.eq_ignore_ascii_case(&name) {
         state.workbench.stimulus_editor.rename_key(&name, &renamed);
     }
@@ -382,7 +388,7 @@ pub(crate) fn validate_library(state: &mut AppState) {
             .stimulus_editor
             .draft(definition.name())
             .map_or_else(|| definition.clone(), |draft| draft.working().clone());
-        if record.card_text(["p", "n"]).is_err() {
+        if crate::simulation::stimulus_realize::definition_card_text(&record, ["p", "n"]).is_err() {
             errors += 1;
         }
         for finding in contract_findings(state, &record) {

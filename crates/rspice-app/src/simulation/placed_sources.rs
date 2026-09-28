@@ -2475,9 +2475,12 @@ mod tests {
             let design = Design::new(root, &[]);
             let projection = design.projection();
 
-            let mut definition =
-                StimulusDefinition::new("sensor_drive", ComponentType::VoltageSourceSin)
-                    .expect("definition");
+            let mut definition = StimulusDefinition::new(
+                "sensor_drive",
+                ComponentType::VoltageSourceSin,
+                crate::state::stimulus_library::now_unix_ms,
+            )
+            .expect("definition");
             definition.params = "freq=1k".to_owned();
             let mut library = StimulusLibrary::default();
             library.insert(definition.clone()).expect("insert");
@@ -2507,7 +2510,7 @@ mod tests {
             let mut published = library.clone();
             let mut draft = DefinitionDraft::new(held);
             draft.edit(|working| working.params = "freq=2k".to_owned());
-            published.apply(&mut draft);
+            published.apply(&mut draft, crate::state::stimulus_library::now_unix_ms);
             let _ = design_sources(&design.libraries, &published, &projection, None);
             assert_eq!(
                 count(Derivation::PlacedSources),

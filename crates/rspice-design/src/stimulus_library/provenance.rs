@@ -16,15 +16,16 @@
 //! standing as free verbs named `adopt` and `adopters`, which say nothing about
 //! their subject at a call site.
 
+use rspice_design_model::Point;
 use std::collections::BTreeMap;
 
 use super::definition::{
     RetainedPwlFile, StimulusDefinition, StimulusDefinitionError, StimulusFamily, StimulusKind,
 };
 use super::library::StimulusLibrary;
-use crate::state::{Component, ComponentType};
+use crate::schematic::{component::Component, component_type::ComponentType};
 
-pub use rspice_design::schematic::stimulus_provenance::StimulusProvenance;
+pub use crate::schematic::stimulus_provenance::StimulusProvenance;
 
 impl StimulusDefinition {
     /// The receipt for copying this definition onto an instance.
@@ -36,6 +37,29 @@ impl StimulusDefinition {
             value: self.value.clone(),
             params: self.params.clone(),
         }
+    }
+}
+
+impl StimulusDefinition {
+    /// A component carrying this definition's card and nothing else.
+    ///
+    /// It is never placed and its id means nothing; it exists so that a
+    /// definition can be asked every question a placed source can be asked —
+    /// its card, its engine-contract findings, its waveform — through the code
+    /// that already answers those questions for instances. Realizing a
+    /// definition is therefore never a second implementation of anything.
+    #[must_use]
+    pub fn transient_component(&self) -> Component {
+        let mut component = Component::new(0, self.component_type(), Point::origin());
+        component.name = self.name().to_owned();
+        // Adoption is the copy, and it cannot refuse a component built from
+        // this definition's own type; the fallback keeps the function total
+        // rather than asserting.
+        if self.adopt_onto(&mut component).is_err() {
+            component.value = self.value.clone();
+            component.params = self.params.clone();
+        }
+        component
     }
 }
 
@@ -260,8 +284,9 @@ impl StimulusDefinition {
         component: &mut Component,
         name: impl Into<String>,
         purpose: impl Into<String>,
+        now_unix_ms: impl FnOnce() -> u64,
     ) -> Result<Self, StimulusDefinitionError> {
-        let mut definition = Self::new(name, component.kind)?;
+        let mut definition = Self::new(name, component.kind, now_unix_ms)?;
         definition.value = component.value.clone();
         definition.params = component.params.clone();
         definition.purpose = purpose.into();
@@ -391,7 +416,7 @@ impl StimulusLibrary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::Point;
+    use rspice_design_model::Point;
 
     fn source(kind: ComponentType, value: &str, params: &str) -> Component {
         let mut component = Component::new(7, kind, Point::new(0, 0));
@@ -407,7 +432,7 @@ mod tests {
         value: &str,
         params: &str,
     ) -> StimulusDefinition {
-        let mut definition = StimulusDefinition::new(name, kind).expect("definition");
+        let mut definition = StimulusDefinition::new(name, kind, || 42).expect("definition");
         definition.value = value.to_owned();
         definition.params = params.to_owned();
         definition
@@ -555,7 +580,7 @@ mod tests {
             ProvenanceState::Modified { from: 1 }
         );
 
-        definition.publish_next_revision();
+        definition.publish_next_revision(|| 42);
         assert_eq!(
             library(vec![definition.clone()]).provenance_state(&component),
             ProvenanceState::ModifiedBehind {
@@ -616,7 +641,7 @@ mod tests {
             library.get("sensor_diff_1k").expect("held").clone(),
         );
         draft.edit(|working| working.params = "va=2".to_owned());
-        library.apply(&mut draft);
+        library.apply(&mut draft, || 42);
         assert_eq!(
             library.provenance_state(&component),
             ProvenanceState::Behind {
@@ -719,7 +744,7 @@ mod tests {
     fn extraction_publishes_the_card_and_points_the_instance_at_it() {
         let mut component = source(ComponentType::CurrentSourceExp, "0", "i2=1m tau1=1u");
         let definition =
-            StimulusDefinition::extract_from(&mut component, "ramp_1u", "startup ramp")
+            StimulusDefinition::extract_from(&mut component, "ramp_1u", "startup ramp", || 42)
                 .expect("extract");
 
         assert_eq!(definition.revision(), 1);
@@ -737,7 +762,7 @@ mod tests {
     fn extraction_refuses_a_component_that_is_not_an_independent_source() {
         let mut resistor = source(ComponentType::Resistor, "1k", "");
         assert_eq!(
-            StimulusDefinition::extract_from(&mut resistor, "r", ""),
+            StimulusDefinition::extract_from(&mut resistor, "r", "", || 42),
             Err(StimulusDefinitionError::NotASource(ComponentType::Resistor))
         );
         assert!(resistor.stimulus_provenance.is_none());

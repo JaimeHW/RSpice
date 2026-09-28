@@ -91,7 +91,11 @@ pub(crate) fn ensure_minis(
         // a flat line that says nothing.
         cache.insert(
             key,
-            stimulus_realize::shape_trace(&definition.preview_component(), MINI_SAMPLES, timing),
+            stimulus_realize::shape_trace(
+                &crate::simulation::stimulus_realize::definition_preview_component(definition),
+                MINI_SAMPLES,
+                timing,
+            ),
         );
         evaluated += 1;
     }

@@ -329,7 +329,11 @@ fn consequence(component: &Component, definition: &StimulusDefinition) -> String
 
 /// Why this name cannot be saved, in the model's own words.
 fn extract_refusal(state: &AppState, component: &Component, name: &str) -> Option<String> {
-    if let Err(error) = StimulusDefinition::new(name, component.kind) {
+    if let Err(error) = StimulusDefinition::new(
+        name,
+        component.kind,
+        crate::state::stimulus_library::now_unix_ms,
+    ) {
         return Some(error.to_string());
     }
     state
@@ -504,9 +508,13 @@ fn commit_extraction(state: &mut AppState, component_id: u64) -> Result<String, 
         return Err(refusal);
     }
     let mut candidate = expected.clone();
-    let definition =
-        StimulusDefinition::extract_from(&mut candidate, &session.name, &session.purpose)
-            .map_err(|error| error.to_string())?;
+    let definition = StimulusDefinition::extract_from(
+        &mut candidate,
+        &session.name,
+        &session.purpose,
+        crate::state::stimulus_library::now_unix_ms,
+    )
+    .map_err(|error| error.to_string())?;
     let name = definition.name().to_owned();
     // The library first, then the instance, and the library back out if the
     // instance refuses. The other order leaves a receipt naming a definition

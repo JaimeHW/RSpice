@@ -1644,6 +1644,7 @@ fn a_stimulus_definition_is_listed_as_a_part_and_arms_the_cursor() {
     let mut definition = crate::state::stimulus_library::definition::StimulusDefinition::new(
         "sensor_drive",
         ComponentType::VoltageSourceSin,
+        crate::state::stimulus_library::now_unix_ms,
     )
     .expect("definition");
     definition.value = "0".to_owned();

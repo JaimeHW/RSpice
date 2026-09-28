@@ -415,8 +415,12 @@ mod tests {
     use crate::state::ComponentType;
 
     fn sine(name: &str) -> StimulusDefinition {
-        let mut definition = StimulusDefinition::new(name, ComponentType::VoltageSourceSin)
-            .expect("a sine source is placeable");
+        let mut definition = StimulusDefinition::new(
+            name,
+            ComponentType::VoltageSourceSin,
+            crate::state::stimulus_library::now_unix_ms,
+        )
+        .expect("a sine source is placeable");
         definition.value = "0".to_owned();
         definition.params = "va=3m freq=1k".to_owned();
         definition

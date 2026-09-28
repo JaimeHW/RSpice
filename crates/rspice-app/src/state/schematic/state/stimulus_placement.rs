@@ -110,9 +110,12 @@ mod tests {
     use crate::state::{StimulusLibrary, Tool};
 
     fn library_with_sin() -> (StimulusLibrary, StimulusDefinition) {
-        let mut definition =
-            StimulusDefinition::new("sensor_drive", ComponentType::VoltageSourceSin)
-                .expect("definition");
+        let mut definition = StimulusDefinition::new(
+            "sensor_drive",
+            ComponentType::VoltageSourceSin,
+            crate::state::stimulus_library::now_unix_ms,
+        )
+        .expect("definition");
         definition.value = "0".to_owned();
         definition.params = "va=3m freq=1k".to_owned();
         let mut library = StimulusLibrary::default();

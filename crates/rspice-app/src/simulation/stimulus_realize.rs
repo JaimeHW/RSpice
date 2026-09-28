@@ -27,7 +27,7 @@ use rspice_core::netlist::{ParamContext, SourceSpec};
 
 use crate::simulation::table_route::{self, TableRoute, TableSources};
 use crate::state::stimulus_library::definition::StimulusDefinition;
-use crate::state::{Component, ComponentType, Point};
+use crate::state::{Component, ComponentType};
 
 /// The two nets a source is realized against when nobody is asking about a
 /// particular sheet.
@@ -52,52 +52,32 @@ pub(crate) fn source_card_text(
     )
 }
 
-impl StimulusDefinition {
-    /// A component carrying this definition's card and nothing else.
-    ///
-    /// It is never placed and its id means nothing; it exists so that a
-    /// definition can be asked every question a placed source can be asked —
-    /// its card, its engine-contract findings, its waveform — through the code
-    /// that already answers those questions for instances. Realizing a
-    /// definition is therefore never a second implementation of anything.
-    #[must_use]
-    pub fn transient_component(&self) -> Component {
-        let mut component = Component::new(0, self.component_type(), Point::origin());
-        component.name = self.name().to_owned();
-        // Adoption is the copy, and it cannot refuse a component built from
-        // this definition's own type; the fallback keeps the function total
-        // rather than asserting.
-        if self.adopt_onto(&mut component).is_err() {
-            component.value = self.value.clone();
-            component.params = self.params.clone();
-        }
-        component
-    }
+/// The card this definition realizes to, between these two nets.
+///
+/// The generator writes it, through the instance the definition would be
+/// adopted onto, so a library's realization line and a placed adopter's
+/// deck line cannot spell the same definition differently.
+pub(crate) fn definition_card_text(
+    definition: &StimulusDefinition,
+    nets: [&str; 2],
+) -> Result<String, Vec<String>> {
+    source_card_text(&definition.transient_component(), nets)
+}
 
-    /// The card this definition realizes to, between these two nets.
-    ///
-    /// The generator writes it, through the instance the definition would be
-    /// adopted onto, so a library's realization line and a placed adopter's
-    /// deck line cannot spell the same definition differently.
-    pub fn card_text(&self, nets: [&str; 2]) -> Result<String, Vec<String>> {
-        source_card_text(&self.transient_component(), nets)
-    }
-
-    /// [`Self::transient_component`] as a preview evaluates it: a `PWL FILE`
-    /// definition whose named file is not here reads the table it retains.
-    ///
-    /// Kept apart from the component the card is written from, because the
-    /// realization line states the card a deck would carry and that card names
-    /// the file, not a cache path.
-    #[must_use]
-    pub(crate) fn preview_component(&self) -> Component {
-        let component = self.transient_component();
-        let Some(stored) = data_file_reference(&component) else {
-            return component;
-        };
-        let (route, _) = table_route::route_retaining(&stored, None, self.pwl_file.as_ref());
-        reading_table(&component, &route).unwrap_or(component)
-    }
+/// [`StimulusDefinition::transient_component`] as a preview evaluates it: a `PWL FILE`
+/// definition whose named file is not here reads the table it retains.
+///
+/// Kept apart from the component the card is written from, because the
+/// realization line states the card a deck would carry and that card names
+/// the file, not a cache path.
+#[must_use]
+pub(crate) fn definition_preview_component(definition: &StimulusDefinition) -> Component {
+    let component = definition.transient_component();
+    let Some(stored) = data_file_reference(&component) else {
+        return component;
+    };
+    let (route, _) = table_route::route_retaining(&stored, None, definition.pwl_file.as_ref());
+    reading_table(&component, &route).unwrap_or(component)
 }
 
 /// The data file a file-backed source's card names, as stored.

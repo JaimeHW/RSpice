@@ -203,8 +203,12 @@ mod tests {
             "the plain diode is not the zener"
         );
 
-        let definition =
-            StimulusDefinition::new("sensor_drive", ComponentType::VoltageSourceSin).expect("ok");
+        let definition = StimulusDefinition::new(
+            "sensor_drive",
+            ComponentType::VoltageSourceSin,
+            crate::state::stimulus_library::now_unix_ms,
+        )
+        .expect("ok");
         schematic.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
         schematic.arm_tool(Tool::Place(ComponentType::VoltageSourceSin));
         assert!(
@@ -227,8 +231,12 @@ mod tests {
     fn an_armed_definition_survives_repeated_placement() {
         use crate::state::stimulus_library::definition::StimulusDefinition;
 
-        let mut definition =
-            StimulusDefinition::new("sensor_drive", ComponentType::VoltageSourceSin).expect("ok");
+        let mut definition = StimulusDefinition::new(
+            "sensor_drive",
+            ComponentType::VoltageSourceSin,
+            crate::state::stimulus_library::now_unix_ms,
+        )
+        .expect("ok");
         definition.params = "freq=1k".to_owned();
         let mut schematic = SchematicState::default();
         schematic.arm_tool(Tool::Place(ComponentType::VoltageSourceSin));

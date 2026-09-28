@@ -374,11 +374,13 @@ fn contract_section(ui: &mut Ui, state: &AppState, definition: &StimulusDefiniti
     // rather than a template restated here, so it cannot describe a card the
     // deck would not carry.
     if let Some(record) = empty.as_ref() {
-        let (text, tone) =
-            match record.card_text(crate::simulation::stimulus_realize::DETACHED_NETS) {
-                Ok(card) => (card, palette.text_dim),
-                Err(errors) => (errors.join("; "), palette.err),
-            };
+        let (text, tone) = match crate::simulation::stimulus_realize::definition_card_text(
+            record,
+            crate::simulation::stimulus_realize::DETACHED_NETS,
+        ) {
+            Ok(card) => (card, palette.text_dim),
+            Err(errors) => (errors.join("; "), palette.err),
+        };
         caption(ui, &messages.text(MessageId::StimulusContractCard));
         ui.horizontal(|ui| {
             ui.add_space(SECTION_PAD);
@@ -424,7 +426,12 @@ fn empty_card(
     family: StimulusFamily,
     definition: &StimulusDefinition,
 ) -> Option<StimulusDefinition> {
-    StimulusDefinition::new(definition.name(), family.component_type(definition.kind())).ok()
+    StimulusDefinition::new(
+        definition.name(),
+        family.component_type(definition.kind()),
+        crate::state::stimulus_library::now_unix_ms,
+    )
+    .ok()
 }
 
 /// A quiet line naming what the block under it is.

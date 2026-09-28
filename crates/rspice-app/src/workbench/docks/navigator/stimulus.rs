@@ -199,7 +199,9 @@ fn scope_counts(state: &AppState, tally: &Tally) -> ScopeCounts {
         counts.total.adopters += adopters;
         counts.total.behind += held.map_or(0, |held| held.behind);
         let record = live_record(state, definition);
-        if record.card_text(DETACHED_NETS).is_err() {
+        if crate::simulation::stimulus_realize::definition_card_text(&record, DETACHED_NETS)
+            .is_err()
+        {
             counts.errors += 1;
         }
         for finding in stimulus_actions::contract_findings(state, &record) {
@@ -321,7 +323,7 @@ fn row<'a>(
 /// about work in progress, which is the only thing a press can still fix here.
 fn draft_is_refused(state: &AppState, definition: &StimulusDefinition) -> bool {
     let record = live_record(state, definition);
-    record.card_text(DETACHED_NETS).is_err()
+    crate::simulation::stimulus_realize::definition_card_text(&record, DETACHED_NETS).is_err()
         || stimulus_actions::contract_findings(state, &record)
             .iter()
             .any(|finding| finding.strength == ContractStrength::Refusal)

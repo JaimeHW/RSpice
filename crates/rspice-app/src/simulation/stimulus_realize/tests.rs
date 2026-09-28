@@ -4,7 +4,7 @@ use super::*;
 use rspice_design::properties::PropertyCatalog;
 
 use crate::state::stimulus_library::definition::{StimulusFamily, StimulusKind};
-use crate::state::{SchematicState, Wire};
+use crate::state::{Point, SchematicState, Wire};
 
 /// The samples of a trace the window can carry, or a failure naming the band
 /// it produced instead.
@@ -100,6 +100,7 @@ fn provenance_never_reaches_the_card() {
     let definition = crate::state::stimulus_library::definition::StimulusDefinition::new(
         "sensor_diff_1k",
         ComponentType::VoltageSourceSin,
+        crate::state::stimulus_library::now_unix_ms,
     )
     .expect("definition");
     let mut copy = definition.clone();
@@ -118,12 +119,14 @@ fn a_definition_realizes_through_the_instance_it_would_be_adopted_onto() {
     let mut definition = crate::state::stimulus_library::definition::StimulusDefinition::new(
         "sensor_diff_1k",
         ComponentType::VoltageSourceSin,
+        crate::state::stimulus_library::now_unix_ms,
     )
     .expect("definition");
     definition.value = "0".to_owned();
     definition.params = "va=3m freq=1k".to_owned();
 
-    let card = definition.card_text(["p", "n"]).expect("card");
+    let card = crate::simulation::stimulus_realize::definition_card_text(&definition, ["p", "n"])
+        .expect("card");
     assert_eq!(card, "sensor_diff_1k p n SIN(0 3m 1k 0 0 0)");
 
     let mut instance = Component::new(9, ComponentType::VoltageSourceSin, Point::origin());
@@ -364,9 +367,12 @@ fn an_absolute_data_file_that_is_not_there_is_refused_at_the_card() {
 fn a_definition_previews_the_table_it_retains_when_the_named_file_is_gone() {
     use crate::state::stimulus_library::definition::RetainedPwlFile;
 
-    let mut definition =
-        StimulusDefinition::new("bridge_step", ComponentType::VoltageSourcePwlFile)
-            .expect("a definition");
+    let mut definition = StimulusDefinition::new(
+        "bridge_step",
+        ComponentType::VoltageSourcePwlFile,
+        crate::state::stimulus_library::now_unix_ms,
+    )
+    .expect("a definition");
     definition.params = "file=bridge_step_not_here.csv".to_owned();
     let without = StimulusRealization::of(&definition, SpanChoice::Transient, timing(4e-9));
     assert!(
@@ -385,7 +391,9 @@ fn a_definition_previews_the_table_it_retains_when_the_named_file_is_gone() {
     assert!(readouts.minimum.abs() < 1e-9, "{readouts:?}");
     assert!((readouts.maximum - 1.5).abs() < 1e-2, "{readouts:?}");
 
-    let card = definition.card_text(DETACHED_NETS).expect("card");
+    let card =
+        crate::simulation::stimulus_realize::definition_card_text(&definition, DETACHED_NETS)
+            .expect("card");
     assert!(card.contains("bridge_step_not_here.csv"), "{card}");
 }
 

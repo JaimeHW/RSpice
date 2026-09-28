@@ -163,9 +163,12 @@ mod tests {
     /// A library holding one `PWL FILE` definition that retains `contents`, and
     /// the placed source that has adopted it.
     fn adopted_pwl_file(file: &std::path::Path, contents: &str) -> (StimulusLibrary, Component) {
-        let mut definition =
-            StimulusDefinition::new("bridge_step", ComponentType::VoltageSourcePwlFile)
-                .expect("a definition");
+        let mut definition = StimulusDefinition::new(
+            "bridge_step",
+            ComponentType::VoltageSourcePwlFile,
+            crate::state::stimulus_library::now_unix_ms,
+        )
+        .expect("a definition");
         definition.params = format!("file={}", file.display());
         definition.pwl_file = Some(RetainedPwlFile::new("step.csv", contents, 0));
         let mut source = Component::new(1, ComponentType::VoltageSourcePwlFile, Point::origin())

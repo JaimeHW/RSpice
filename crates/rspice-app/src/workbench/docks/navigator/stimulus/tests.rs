@@ -351,7 +351,10 @@ fn the_footer_states_the_adoption_and_the_library_audit() {
             .expect("held"),
     );
     draft.edit(|working| working.params = "v2=20m per=1m".to_owned());
-    app.state.workspace.stimulus_library.apply(&mut draft);
+    app.state
+        .workspace
+        .stimulus_library
+        .apply(&mut draft, crate::state::stimulus_library::now_unix_ms);
     assert!(
         browser(&mut app.state)
             .iter()
@@ -395,7 +398,10 @@ fn the_minis_are_evaluated_once_across_two_frames() {
             .expect("held"),
     );
     draft.edit(|working| working.params = "va=9m freq=1k".to_owned());
-    app.state.workspace.stimulus_library.apply(&mut draft);
+    app.state
+        .workspace
+        .stimulus_library
+        .apply(&mut draft, crate::state::stimulus_library::now_unix_ms);
     let _ = browser(&mut app.state);
     assert_eq!(
         app.state.workbench.stimulus_browser.evaluations(),
@@ -522,11 +528,17 @@ fn the_engine_contract_is_the_card_the_netlister_writes_for_the_family() {
         published.contains(&"ENGINE CONTRACT \u{b7} PULSE".to_owned()),
         "{published:?}"
     );
-    let empty = StimulusDefinition::new("bridge_cal_step", ComponentType::VoltageSourcePulse)
-        .expect("a pulse source is placeable");
-    let card = empty
-        .card_text(crate::simulation::stimulus_realize::DETACHED_NETS)
-        .expect("the netlister writes a card for an unauthored pulse");
+    let empty = StimulusDefinition::new(
+        "bridge_cal_step",
+        ComponentType::VoltageSourcePulse,
+        crate::state::stimulus_library::now_unix_ms,
+    )
+    .expect("a pulse source is placeable");
+    let card = crate::simulation::stimulus_realize::definition_card_text(
+        &empty,
+        crate::simulation::stimulus_realize::DETACHED_NETS,
+    )
+    .expect("the netlister writes a card for an unauthored pulse");
     assert!(
         published.iter().any(|run| run == &card),
         "the family's own card is missing: {published:?}"

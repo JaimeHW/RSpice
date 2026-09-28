@@ -117,9 +117,9 @@ impl DefinitionDraft {
     /// The history is cleared rather than extended: the published revision is
     /// what adopters compare against, and an undo that walked back past it
     /// would leave the library holding a revision number no record explains.
-    pub fn apply(&mut self) -> StimulusDefinition {
+    pub fn apply(&mut self, now_unix_ms: impl FnOnce() -> u64) -> StimulusDefinition {
         let mut published = self.working.clone();
-        published.publish_next_revision();
+        published.publish_next_revision(now_unix_ms);
         self.saved = published.clone();
         self.working = published.clone();
         self.history = vec![published.clone()];
@@ -131,11 +131,11 @@ impl DefinitionDraft {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::ComponentType;
+    use crate::schematic::component_type::ComponentType;
 
     fn draft() -> DefinitionDraft {
         let mut definition =
-            StimulusDefinition::new("sensor_diff_1k", ComponentType::VoltageSourceSin)
+            StimulusDefinition::new("sensor_diff_1k", ComponentType::VoltageSourceSin, || 42)
                 .expect("definition");
         definition.value = "0".to_owned();
         definition.params = "va=3m freq=1k".to_owned();
@@ -207,7 +207,7 @@ mod tests {
     fn apply_publishes_the_next_revision_and_clears_the_history() {
         let mut draft = draft();
         draft.edit(|working| working.params = "va=6m freq=1k".to_owned());
-        let published = draft.apply();
+        let published = draft.apply(|| 42);
 
         assert_eq!(published.revision(), 2);
         assert_eq!(published.params, "va=6m freq=1k");

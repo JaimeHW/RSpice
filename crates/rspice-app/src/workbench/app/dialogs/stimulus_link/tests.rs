@@ -18,7 +18,9 @@ use crate::ui::tokens::Mode;
 use crate::workbench::app::RSpiceApp;
 
 fn definition(name: &str, kind: ComponentType, value: &str, params: &str) -> StimulusDefinition {
-    let mut definition = StimulusDefinition::new(name, kind).expect("definition");
+    let mut definition =
+        StimulusDefinition::new(name, kind, crate::state::stimulus_library::now_unix_ms)
+            .expect("definition");
     definition.value = value.to_owned();
     definition.params = params.to_owned();
     definition
