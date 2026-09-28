@@ -10,7 +10,7 @@ pub(crate) fn remap_instance_probes_many(
     expression: &str,
     mappings: &[(InstancePath, InstancePath)],
 ) -> Result<Option<String>, String> {
-    if let Some((device, _)) = crate::state::device_current_probe(expression) {
+    if let Some((device, _)) = rspice_app_types::raw_probe::device_current_probe(expression) {
         return Ok(remap_argument(device, mappings, true)?.map(|replacement| {
             let start = expression.len() - expression.trim_start().len() + 1;
             format!(

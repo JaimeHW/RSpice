@@ -25,6 +25,7 @@ mod plan_data;
 mod project_descriptor;
 mod project_library_publication;
 mod reference_changes;
+mod reference_paths;
 mod reference_preparation;
 
 // The two functions are renamed on export: bare `normalize` and
@@ -70,9 +71,11 @@ use crate::product::{
     ResultDocumentId, RevisionError, SavedOutputId, SimulationPlanId, SpecificationId,
 };
 use crate::state::{
-    Cell, ComponentType, InstancePath, Library, LibraryCellInstance, LibraryManager,
-    SchematicState, View, ViewType,
+    Cell, ComponentType, Library, LibraryCellInstance, LibraryManager, SchematicState, View,
+    ViewType,
 };
+#[cfg(test)]
+use rspice_app_types::hierarchy_path::InstancePath;
 
 pub use rspice_design_model::cell_view::{
     CellViewRef, DEFAULT_PROJECT_LIBRARY, DEFAULT_SCHEMATIC_VIEW, DEFAULT_TOP_CELL,
