@@ -116,7 +116,7 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
             schematic.add_component(ComponentType::Resistor, Point::new(1, 1));
         });
         let candidate = snapshot(&state).unwrap();
-        let candidate_content = registry::content_digest(&candidate).unwrap();
+        let candidate_content = registry::content_digest(&candidate.file).unwrap();
         let (bytes, staged_digest) = persistence::serialized_project(&candidate).unwrap();
 
         // Freeze bytes before the write. Inject a validation failure and a
@@ -153,7 +153,7 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
         );
         assert_eq!(accepted.binding.as_ref().unwrap().accepted_digest(), digest);
         assert_eq!(
-            registry::content_digest(&crate::io::load_project_file(&path).unwrap()).unwrap(),
+            registry::content_digest(&crate::io::load_project_file(&path).unwrap().file).unwrap(),
             candidate_content
         );
         assert_eq!(

@@ -1,5 +1,13 @@
 //! Project-document identities, dirty comparison and canonical fingerprints.
 
+mod fingerprints;
+#[cfg(any(test, feature = "document-fingerprint-observation"))]
+pub use fingerprints::FINGERPRINT_PASSES;
+pub use fingerprints::{
+    content_digest, document_digests, document_fingerprints,
+    document_fingerprints_with_results_cache,
+};
+
 pub mod result_fingerprint;
 pub use result_fingerprint::ResultFingerprintCache;
 

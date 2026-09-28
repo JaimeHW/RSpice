@@ -343,7 +343,7 @@ pub(crate) fn generated_netlist_input_digest(
     project.file.workspace.netlist_document = None;
     project.file.workspace.netlist_descriptor = None;
     project.file.workspace.retained_netlist_decks.clear();
-    registry::content_digest(&project).map_err(ProjectLifecycleError::InvalidState)
+    registry::content_digest(&project.file).map_err(ProjectLifecycleError::InvalidState)
 }
 
 pub(crate) fn has_unsaved_changes(state: &AppState) -> bool {
@@ -417,7 +417,7 @@ fn working_fingerprints(
 ) -> Result<registry::DocumentFingerprints, ProjectLifecycleError> {
     let current = capture_snapshot(state, SnapshotContent::Current)?;
     registry::document_fingerprints_with_results_cache(
-        &current,
+        &current.file,
         &state.project_lifecycle.result_fingerprints,
     )
     .map_err(ProjectLifecycleError::InvalidState)
@@ -1383,10 +1383,11 @@ fn prepare_post_save_registry(
     let mut post_save_registry = registry::DocumentRegistry::default();
     let cache = &state.project_lifecycle.result_fingerprints;
     let candidate_fingerprints =
-        registry::document_fingerprints_with_results_cache(candidate, cache)
+        registry::document_fingerprints_with_results_cache(&candidate.file, cache)
             .map_err(ProjectLifecycleError::InvalidState)?;
-    let current_fingerprints = registry::document_fingerprints_with_results_cache(&current, cache)
-        .map_err(ProjectLifecycleError::InvalidState)?;
+    let current_fingerprints =
+        registry::document_fingerprints_with_results_cache(&current.file, cache)
+            .map_err(ProjectLifecycleError::InvalidState)?;
     post_save_registry
         .rebuild_from_fingerprints(&current_fingerprints, Some(&candidate_fingerprints));
     Ok(post_save_registry)
@@ -1949,8 +1950,9 @@ pub(crate) fn begin_project_replacement(
     {
         return Err(ProjectLifecycleError::TransactionInProgress);
     }
-    let content = registry::content_digest(&capture_snapshot(state, SnapshotContent::Current)?)
-        .map_err(ProjectLifecycleError::InvalidState)?;
+    let content =
+        registry::content_digest(&capture_snapshot(state, SnapshotContent::Current)?.file)
+            .map_err(ProjectLifecycleError::InvalidState)?;
     let transaction = LifecycleTransaction::replacement(content);
     let id = transaction.id;
     state.project_lifecycle.transaction = Some(transaction);
@@ -1994,7 +1996,7 @@ pub(crate) fn validate_project_replacement(
     let expected = transaction
         .replacement_guard
         .ok_or(ProjectLifecycleError::ReplacementChanged)?;
-    let actual = registry::content_digest(&capture_snapshot(state, SnapshotContent::Current)?)
+    let actual = registry::content_digest(&capture_snapshot(state, SnapshotContent::Current)?.file)
         .map_err(ProjectLifecycleError::InvalidState)?;
     if actual != expected {
         return Err(ProjectLifecycleError::ReplacementChanged);

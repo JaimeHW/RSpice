@@ -1,41 +1,18 @@
-//! Capture project-document fingerprints from the application workspace.
+//! Map the selected application surface to its canonical project document.
 
-use crate::io::ProjectSnapshot;
-use crate::product::ContentDigest;
 use crate::state::CellViewRef;
 use crate::workbench::state::Workspace;
 #[cfg(test)]
-pub(super) use rspice_project::registry::result_fingerprint::RESULT_FINGERPRINT_PASSES;
-pub(super) use rspice_project::registry::{DocumentFingerprints, ResultFingerprintCache};
-pub(crate) use rspice_project::registry::{DocumentRegistry, ProjectDocumentId};
-use rspice_project::registry::{
-    SchematicDocumentContent, ViewDocumentContent, digest, project_configuration_value,
-    reference_from_key, result_fingerprint,
-};
-use std::collections::{HashMap, HashSet};
-
+pub(super) use rspice_project::registry::FINGERPRINT_PASSES;
 #[cfg(test)]
-thread_local! {
-    /// Full document fingerprint passes, including retained sample scans.
-    pub(super) static FINGERPRINT_PASSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-pub(super) fn document_fingerprints(
-    project: &ProjectSnapshot,
-) -> Result<DocumentFingerprints, String> {
-    Ok(DocumentFingerprints::from_documents(document_digests(
-        project,
-    )?))
-}
-
-pub(super) fn document_fingerprints_with_results_cache(
-    project: &ProjectSnapshot,
-    cache: &ResultFingerprintCache,
-) -> Result<DocumentFingerprints, String> {
-    Ok(DocumentFingerprints::from_documents(
-        document_digests_with_results_cache(project, Some(cache))?,
-    ))
-}
+pub(super) use rspice_project::registry::result_fingerprint::RESULT_FINGERPRINT_PASSES;
+pub(super) use rspice_project::registry::{
+    DocumentFingerprints, ResultFingerprintCache, content_digest, document_fingerprints,
+    document_fingerprints_with_results_cache,
+};
+pub(crate) use rspice_project::registry::{DocumentRegistry, ProjectDocumentId};
+#[cfg(test)]
+use rspice_project::registry::{digest, document_digests};
 
 pub(crate) fn active_document(
     workspace: Workspace,
@@ -53,164 +30,6 @@ pub(crate) fn active_document(
         Workspace::Models => ProjectDocumentId::ModelCatalog,
         Workspace::Netlist => ProjectDocumentId::NetlistSource,
     }
-}
-
-pub(crate) fn content_digest(project: &ProjectSnapshot) -> Result<ContentDigest, String> {
-    document_fingerprints(project).map(|fingerprints| fingerprints.content_digest())
-}
-
-fn document_digests(
-    project: &ProjectSnapshot,
-) -> Result<HashMap<ProjectDocumentId, ContentDigest>, String> {
-    document_digests_with_results_cache(project, None)
-}
-
-fn document_digests_with_results_cache(
-    project: &ProjectSnapshot,
-    results_cache: Option<&ResultFingerprintCache>,
-) -> Result<HashMap<ProjectDocumentId, ContentDigest>, String> {
-    #[cfg(test)]
-    FINGERPRINT_PASSES.with(|passes| passes.set(passes.get() + 1));
-    let mut documents = HashMap::new();
-    let mut plan_payloads = project
-        .file
-        .workspace
-        .simulation_plan_payloads
-        .iter()
-        .map(|record| (record.plan_id, &record.payload))
-        .collect::<Vec<_>>();
-    plan_payloads
-        .sort_by(|(left, _), (right, _)| left.as_uuid().as_bytes().cmp(right.as_uuid().as_bytes()));
-
-    documents.insert(
-        ProjectDocumentId::ProjectConfiguration,
-        digest(&project_configuration_value(
-            &project.file.workspace.project,
-            &project.file.libraries,
-            &project.file.workspace.configuration_sets,
-            &project.file.workspace.design_management,
-            project.file.workspace.pdk_callback_receipts(),
-        )?)?,
-    );
-    documents.insert(
-        ProjectDocumentId::SimulationPlan,
-        digest(&(
-            project
-                .file
-                .execution_context
-                .as_ref()
-                .map(|context| &context.simulation_plan),
-            plan_payloads,
-        ))?,
-    );
-    documents.insert(
-        ProjectDocumentId::ModelCatalog,
-        digest(&project.file.execution_context.as_ref().map(|context| {
-            (
-                &context.model_libraries,
-                &context.model_resolution_records,
-                &context.model_validation_receipt,
-            )
-        }))?,
-    );
-    documents.insert(
-        ProjectDocumentId::ResultHistory,
-        match results_cache {
-            Some(cache) => cache.digest(
-                &project.file.simulation_results,
-                &project.file.workspace.report_documents,
-                &project.file.workspace.visualization_documents,
-                &project.file.result_presentation,
-            )?,
-            None => result_fingerprint::digest(
-                &project.file.simulation_results,
-                &project.file.workspace.report_documents,
-                &project.file.workspace.visualization_documents,
-                &project.file.result_presentation,
-            )?,
-        },
-    );
-    // The stimulus definitions ride the project document rather than a
-    // sidecar, so without an identity here an edited library would move the
-    // saved file while every document in this registry still read clean —
-    // "no unsaved changes" over a library that had just been republished.
-    documents.insert(
-        ProjectDocumentId::StimulusLibrary,
-        digest(&project.file.workspace.stimulus_library)?,
-    );
-    documents.insert(
-        ProjectDocumentId::VerificationSpecifications,
-        // Retained as a stable registry identity for older callers. Current
-        // specifications participate in the simulation-plan payload digest.
-        digest(&())?,
-    );
-    let code_workspace_sources = project
-        .file
-        .workspace
-        .project_sources
-        .iter_bundles()
-        .filter(|bundle| {
-            matches!(
-                bundle.owner(),
-                crate::state::ProjectSourceOwner::CodeWorkspace { .. }
-            )
-        })
-        .collect::<Vec<_>>();
-    documents.insert(
-        ProjectDocumentId::NetlistSource,
-        digest(&(
-            &project.file.workspace.netlist_source,
-            &project.file.workspace.netlist_source_path,
-            &project.file.workspace.netlist_document,
-            &project.file.workspace.netlist_descriptor,
-            &project.file.workspace.retained_netlist_decks,
-            code_workspace_sources,
-        ))?,
-    );
-
-    let mut references = HashSet::new();
-    for key in project.file.workspace.schematic_buffers.keys() {
-        if let Some(reference) = reference_from_key(key) {
-            references.insert(reference);
-        }
-    }
-    for key in project.file.workspace.physical_layout_documents().keys() {
-        if let Some(reference) = reference_from_key(key) {
-            references.insert(reference);
-        }
-    }
-    for (library_key, library) in project.file.libraries.libraries_by_key() {
-        for (cell_key, cell) in &library.cells {
-            for view_key in cell.views.keys() {
-                references.insert(CellViewRef::new(library_key, cell_key, view_key));
-            }
-        }
-    }
-    for reference in references {
-        let schematic = project
-            .file
-            .workspace
-            .schematic_buffers
-            .get(&reference.key())
-            .map(|schematic| SchematicDocumentContent::from(schematic.document()));
-        let physical_layout = project.file.workspace.physical_layout_document(&reference);
-        let view = project
-            .file
-            .libraries
-            .get_library(&reference.library)
-            .and_then(|library| library.get_cell(&reference.cell))
-            .and_then(|cell| cell.get_view(&reference.view))
-            .map(ViewDocumentContent::from);
-        let project_source = project.file.workspace.project_sources.bundle_for_owner(
-            &crate::state::ProjectSourceOwner::cell_view(reference.clone()),
-        );
-        documents.insert(
-            ProjectDocumentId::CellView(reference),
-            digest(&(schematic, physical_layout, view, project_source))?,
-        );
-    }
-
-    Ok(documents)
 }
 
 #[cfg(test)]
@@ -262,8 +81,8 @@ mod tests {
         let current = super::super::snapshot(&state).expect("current snapshot");
         let mut registry = DocumentRegistry::default();
         registry.rebuild_from_fingerprints(
-            &document_fingerprints(&current).unwrap(),
-            Some(&document_fingerprints(&baseline).unwrap()),
+            &document_fingerprints(&current.file).unwrap(),
+            Some(&document_fingerprints(&baseline.file).unwrap()),
         );
         assert!(
             registry.records().iter().all(|record| !record.dirty),
@@ -275,8 +94,8 @@ mod tests {
             .add_component(ComponentType::Capacitor, Point::new(12, 9));
         let edited = super::super::snapshot(&state).expect("edited snapshot");
         registry.rebuild_from_fingerprints(
-            &document_fingerprints(&edited).unwrap(),
-            Some(&document_fingerprints(&baseline).unwrap()),
+            &document_fingerprints(&edited.file).unwrap(),
+            Some(&document_fingerprints(&baseline.file).unwrap()),
         );
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
         assert!(!registry.is_dirty(&ProjectDocumentId::ProjectConfiguration));
@@ -296,8 +115,8 @@ mod tests {
         let with_bus = super::super::snapshot(&state).expect("bus snapshot");
         let mut registry = DocumentRegistry::default();
         registry.rebuild_from_fingerprints(
-            &document_fingerprints(&with_bus).unwrap(),
-            Some(&document_fingerprints(&empty).unwrap()),
+            &document_fingerprints(&with_bus.file).unwrap(),
+            Some(&document_fingerprints(&empty.file).unwrap()),
         );
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active.clone())));
 
@@ -313,8 +132,8 @@ mod tests {
             .expect("place tap");
         let with_tap = super::super::snapshot(&state).expect("tap snapshot");
         registry.rebuild_from_fingerprints(
-            &document_fingerprints(&with_tap).unwrap(),
-            Some(&document_fingerprints(&with_bus).unwrap()),
+            &document_fingerprints(&with_tap.file).unwrap(),
+            Some(&document_fingerprints(&with_bus.file).unwrap()),
         );
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
     }
@@ -337,8 +156,8 @@ mod tests {
         let current = super::super::snapshot(&state).expect("design-note snapshot");
         let mut registry = DocumentRegistry::default();
         registry.rebuild_from_fingerprints(
-            &document_fingerprints(&current).unwrap(),
-            Some(&document_fingerprints(&baseline).unwrap()),
+            &document_fingerprints(&current.file).unwrap(),
+            Some(&document_fingerprints(&baseline.file).unwrap()),
         );
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active.clone())));
 
@@ -348,8 +167,8 @@ mod tests {
             .unwrap();
         let edited = super::super::snapshot(&edited_state).expect("edited snapshot");
         registry.rebuild_from_fingerprints(
-            &document_fingerprints(&edited).unwrap(),
-            Some(&document_fingerprints(&current).unwrap()),
+            &document_fingerprints(&edited.file).unwrap(),
+            Some(&document_fingerprints(&current.file).unwrap()),
         );
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
     }
@@ -377,11 +196,11 @@ mod tests {
         state.schematic.document_mut_for_test().documentation_shapes[0]
             .translate(Point::new(3, -2));
         let edited = super::super::snapshot(&state).expect("edited shape snapshot");
-        let baseline_digest = document_digests(&baseline)
+        let baseline_digest = document_digests(&baseline.file)
             .unwrap()
             .remove(&ProjectDocumentId::CellView(active.clone()))
             .unwrap();
-        let edited_digest = document_digests(&edited)
+        let edited_digest = document_digests(&edited.file)
             .unwrap()
             .remove(&ProjectDocumentId::CellView(active.clone()))
             .unwrap();
@@ -389,8 +208,8 @@ mod tests {
         assert_ne!(baseline_digest, edited_digest);
         let mut registry = DocumentRegistry::default();
         registry.rebuild_from_fingerprints(
-            &document_fingerprints(&edited).unwrap(),
-            Some(&document_fingerprints(&baseline).unwrap()),
+            &document_fingerprints(&edited.file).unwrap(),
+            Some(&document_fingerprints(&baseline.file).unwrap()),
         );
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active)));
     }
@@ -417,11 +236,11 @@ mod tests {
             .rev()
             .collect();
 
-        let first_digest = document_digests(&first)
+        let first_digest = document_digests(&first.file)
             .unwrap()
             .remove(&ProjectDocumentId::SimulationPlan)
             .unwrap();
-        let second_digest = document_digests(&second)
+        let second_digest = document_digests(&second.file)
             .unwrap()
             .remove(&ProjectDocumentId::SimulationPlan)
             .unwrap();
@@ -447,11 +266,11 @@ mod tests {
             .expect("report page transaction");
         edited.file.workspace.report_documents.push(report);
 
-        let baseline_digest = document_digests(&baseline)
+        let baseline_digest = document_digests(&baseline.file)
             .unwrap()
             .remove(&ProjectDocumentId::ResultHistory)
             .unwrap();
-        let edited_digest = document_digests(&edited)
+        let edited_digest = document_digests(&edited.file)
             .unwrap()
             .remove(&ProjectDocumentId::ResultHistory)
             .unwrap();
@@ -493,7 +312,7 @@ mod tests {
             ))
             .unwrap();
             assert_eq!(
-                document_digests(&project).unwrap()[&ProjectDocumentId::ResultHistory],
+                document_digests(&project.file).unwrap()[&ProjectDocumentId::ResultHistory],
                 legacy
             );
             let retained = project
@@ -506,13 +325,13 @@ mod tests {
                 .unwrap_or(0);
             project.file.result_presentation.marker_id_high_water = Some(retained);
             assert_eq!(
-                document_digests(&project).unwrap()[&ProjectDocumentId::ResultHistory],
+                document_digests(&project.file).unwrap()[&ProjectDocumentId::ResultHistory],
                 legacy,
                 "an explicit, implied allocation limit preserves the legacy digest"
             );
             project.file.result_presentation.marker_id_high_water = Some(retained + 1);
             assert_ne!(
-                document_digests(&project).unwrap()[&ProjectDocumentId::ResultHistory],
+                document_digests(&project.file).unwrap()[&ProjectDocumentId::ResultHistory],
                 legacy,
                 "deleted or abandoned marker identities remain document content"
             );
@@ -548,8 +367,8 @@ mod tests {
         let current = super::super::snapshot(&state).expect("current snapshot");
         let mut registry = DocumentRegistry::default();
         registry.rebuild_from_fingerprints(
-            &document_fingerprints(&current).unwrap(),
-            Some(&document_fingerprints(&baseline).unwrap()),
+            &document_fingerprints(&current.file).unwrap(),
+            Some(&document_fingerprints(&baseline.file).unwrap()),
         );
         assert!(registry.is_dirty(&ProjectDocumentId::SimulationPlan));
         assert!(!registry.is_dirty(&ProjectDocumentId::VerificationSpecifications));
@@ -592,8 +411,8 @@ mod tests {
         let current = super::super::snapshot(&state).expect("edited snapshot");
         let mut registry = DocumentRegistry::default();
         registry.rebuild_from_fingerprints(
-            &document_fingerprints(&current).unwrap(),
-            Some(&document_fingerprints(&baseline).unwrap()),
+            &document_fingerprints(&current.file).unwrap(),
+            Some(&document_fingerprints(&baseline.file).unwrap()),
         );
 
         assert!(registry.is_dirty(&ProjectDocumentId::NetlistSource));
@@ -638,8 +457,8 @@ mod tests {
         let current = super::super::snapshot(&state).expect("current snapshot");
         let mut registry = DocumentRegistry::default();
         registry.rebuild_from_fingerprints(
-            &document_fingerprints(&current).unwrap(),
-            Some(&document_fingerprints(&baseline).unwrap()),
+            &document_fingerprints(&current.file).unwrap(),
+            Some(&document_fingerprints(&baseline.file).unwrap()),
         );
 
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(reference)));
