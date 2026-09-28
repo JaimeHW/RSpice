@@ -48,6 +48,7 @@ fn derived_labels(state: &AppState) -> BTreeSet<String> {
     let active_pane = state.workbench.visualization_studio.active_pane;
     state
         .workspace
+        .content
         .visualization_document(document_id)
         .map(|document| {
             document

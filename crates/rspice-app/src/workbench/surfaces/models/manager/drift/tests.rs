@@ -169,8 +169,8 @@ fn a_project_opened_at_the_same_revision_cannot_wear_the_previous_project_s_drif
         b".model b pmos\n",
     ));
     assert_eq!(
-        open.workspace.project.revision().get(),
-        opened.workspace.project.revision().get(),
+        open.workspace.content.project.revision().get(),
+        opened.workspace.content.project.revision().get(),
         "the two projects collide on revision, which is what makes this a test"
     );
 

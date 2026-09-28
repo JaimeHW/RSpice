@@ -1087,7 +1087,7 @@ mod tests {
         assert!(simulation.select_run(0));
         assert!(simulation.select_analysis(0));
         let mut workspace = crate::state::ProjectWorkspace::default();
-        workspace.specs.push(SpecEntry {
+        workspace.content.specs.push(SpecEntry {
             measurement: "gain_dc".to_owned(),
             expression: String::new(),
             min: Some(39.5),
@@ -1095,7 +1095,7 @@ mod tests {
             unit: "dB".to_owned(),
             scope: SpecPointScope::AllPoints,
         });
-        workspace.specs.push(SpecEntry {
+        workspace.content.specs.push(SpecEntry {
             measurement: "vos".to_owned(),
             expression: String::new(),
             min: Some(-50.0),
@@ -1129,7 +1129,7 @@ mod tests {
         {
             member_measurements[0].measurements[0].passed = false;
         }
-        workspace.specs[0].min = Some(-100.0);
+        workspace.content.specs[0].min = Some(-100.0);
         let plan = population::plan(&mut context(&simulation, &workspace, &mut results)).unwrap();
         let measured = &plan.columns[plan.column_index("gain_dc").unwrap()];
         let column = engineering_column(measured, Whiskers::Tukey).unwrap();
@@ -1139,7 +1139,7 @@ mod tests {
             rows.iter()
                 .any(|row| row.0 == "Yield" && row.1 == "66.67 % · 95 % CI 20.77–93.85")
         );
-        workspace.specs.clear();
+        workspace.content.specs.clear();
         let plan = population::plan(&mut context(&simulation, &workspace, &mut results)).unwrap();
         let measured = &plan.columns[plan.column_index("gain_dc").unwrap()];
         assert!(
@@ -1195,7 +1195,7 @@ mod tests {
             population::plan(&mut context(&simulation, &workspace, &mut results)).unwrap();
         let columns = drawn_columns(&original, &results.box_violin).unwrap();
         assert_eq!(columns.len(), 2);
-        workspace.specs[0].measurement = "gain_ac".to_owned();
+        workspace.content.specs[0].measurement = "gain_ac".to_owned();
 
         let plan = population::plan(&mut context(&simulation, &workspace, &mut results)).unwrap();
         let columns = drawn_columns(&plan, &results.box_violin).unwrap();

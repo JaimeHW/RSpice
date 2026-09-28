@@ -94,6 +94,7 @@ fn legacy_specifications_migrate_to_stable_governed_definitions() {
     let plan_id = SimulationPlanId::new();
     let mut workspace = ProjectWorkspace::default();
     workspace
+        .content
         .simulation_plan_payloads
         .push(SimulationPlanPayloadRecord {
             plan_id,
@@ -103,10 +104,10 @@ fn legacy_specifications_migrate_to_stable_governed_definitions() {
             },
         });
 
-    workspace.migrate_active_plan_data(plan_id);
-    let first = workspace.plan_data(plan_id).unwrap().clone();
-    workspace.migrate_active_plan_data(plan_id);
-    let replay = workspace.plan_data(plan_id).unwrap();
+    workspace.content.migrate_active_plan_data(plan_id);
+    let first = workspace.content.plan_data(plan_id).unwrap().clone();
+    workspace.content.migrate_active_plan_data(plan_id);
+    let replay = workspace.content.plan_data(plan_id).unwrap();
 
     assert_eq!(first.specification_definitions.len(), 1);
     assert_eq!(
@@ -117,7 +118,10 @@ fn legacy_specifications_migrate_to_stable_governed_definitions() {
         replay.specification_definitions[0].projected_entry(),
         replay.specs[0],
     );
-    workspace.validate_simulation_configuration().unwrap();
+    workspace
+        .content
+        .validate_simulation_configuration()
+        .unwrap();
 }
 
 #[test]
@@ -127,9 +131,11 @@ fn scalar_spec_edits_preserve_governance_and_clone_remaps_analysis_binding() {
     let source_analysis = AnalysisInstanceId::new();
     let cloned_analysis = AnalysisInstanceId::new();
     let mut workspace = ProjectWorkspace::default();
-    workspace.replace_active_specs(source_plan_id, vec![scalar_spec("peak", 1.0)]);
+    workspace
+        .content
+        .replace_active_specs(source_plan_id, vec![scalar_spec("peak", 1.0)]);
 
-    let source = workspace.plan_data_mut(source_plan_id).unwrap();
+    let source = workspace.content.plan_data_mut(source_plan_id).unwrap();
     let definition = &mut source.specification_definitions[0];
     let original_id = definition.id;
     definition.requirement_key = "REQ-PEAK".to_owned();
@@ -138,8 +144,11 @@ fn scalar_spec_edits_preserve_governance_and_clone_remaps_analysis_binding() {
     definition.guard_band = Some(0.05);
     definition.producing_analysis = Some(source_analysis);
 
-    workspace.replace_active_specs(source_plan_id, vec![scalar_spec("peak", 1.2)]);
+    workspace
+        .content
+        .replace_active_specs(source_plan_id, vec![scalar_spec("peak", 1.2)]);
     let edited = &workspace
+        .content
         .plan_data(source_plan_id)
         .unwrap()
         .specification_definitions[0];
@@ -150,6 +159,7 @@ fn scalar_spec_edits_preserve_governance_and_clone_remaps_analysis_binding() {
     assert_eq!(edited.projected_entry().min, Some(1.2));
 
     workspace
+        .content
         .clone_plan_data(
             source_plan_id,
             cloned_plan_id,
@@ -159,6 +169,7 @@ fn scalar_spec_edits_preserve_governance_and_clone_remaps_analysis_binding() {
         )
         .unwrap();
     let cloned = &workspace
+        .content
         .plan_data(cloned_plan_id)
         .unwrap()
         .specification_definitions[0];
@@ -166,15 +177,21 @@ fn scalar_spec_edits_preserve_governance_and_clone_remaps_analysis_binding() {
     assert_eq!(cloned.requirement_key, "REQ-PEAK");
     assert_eq!(cloned.producing_analysis, Some(cloned_analysis));
     assert_eq!(cloned.projected_entry().min, Some(1.2));
-    workspace.validate_simulation_configuration().unwrap();
+    workspace
+        .content
+        .validate_simulation_configuration()
+        .unwrap();
 }
 
 #[test]
 fn legacy_projection_edit_does_not_flatten_unchanged_equality_semantics() {
     let plan_id = SimulationPlanId::new();
     let mut workspace = ProjectWorkspace::default();
-    workspace.replace_active_specs(plan_id, vec![scalar_spec("offset", -0.1)]);
+    workspace
+        .content
+        .replace_active_specs(plan_id, vec![scalar_spec("offset", -0.1)]);
     let definition = &mut workspace
+        .content
         .plan_data_mut(plan_id)
         .unwrap()
         .specification_definitions[0];
@@ -185,9 +202,12 @@ fn legacy_projection_edit_does_not_flatten_unchanged_equality_semantics() {
     let mut projected = definition.projected_entry();
     projected.scope = SpecPointScope::Nominal;
 
-    workspace.replace_active_specs(plan_id, vec![projected]);
+    workspace
+        .content
+        .replace_active_specs(plan_id, vec![projected]);
 
     let retained = &workspace
+        .content
         .plan_data(plan_id)
         .unwrap()
         .specification_definitions[0];
@@ -208,14 +228,17 @@ fn design_variable_expression_update_preserves_identity_and_metadata() {
     let original = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
     let variable_id = original.id;
     workspace
+        .content
         .add_design_variable(plan_id, original.clone())
         .expect("fixture variable is accepted");
 
     workspace
+        .content
         .update_design_variable_expression(plan_id, variable_id, "22 kohm")
         .expect("valid expression update commits");
 
     let updated = &workspace
+        .content
         .plan_data(plan_id)
         .expect("plan payload remains present")
         .design_variables[0];
@@ -237,11 +260,13 @@ fn out_of_range_design_variable_update_is_rejected_atomically() {
     let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
     let variable_id = variable.id;
     workspace
+        .content
         .add_design_variable(plan_id, variable)
         .expect("fixture variable is accepted");
     let before = serde_json::to_value(&workspace).expect("workspace serializes");
 
     let error = workspace
+        .content
         .update_design_variable_expression(plan_id, variable_id, "2 Mohm")
         .expect_err("out-of-range expression must be rejected");
 
@@ -262,13 +287,16 @@ fn design_variable_update_rejects_a_missing_stable_identity() {
     let mut workspace = ProjectWorkspace::default();
     let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
     workspace
+        .content
         .add_design_variable(plan_id, variable)
         .expect("fixture variable is accepted");
     let missing_id = DesignVariableId::new();
     let before = serde_json::to_value(&workspace).expect("workspace serializes");
 
     assert_eq!(
-        workspace.update_design_variable_expression(plan_id, missing_id, "22 kohm"),
+        workspace
+            .content
+            .update_design_variable_expression(plan_id, missing_id, "22 kohm"),
         Err(SimulationConfigurationError::DesignVariableNotFound {
             plan_id,
             variable_id: missing_id,
@@ -288,16 +316,19 @@ fn committed_design_variable_update_advances_revision_once() {
     let variable_id = variable.id;
     let initial_revision = variable.revision;
     workspace
+        .content
         .add_design_variable(plan_id, variable)
         .expect("fixture variable is accepted");
 
     let committed_revision = workspace
+        .content
         .update_design_variable_expression(plan_id, variable_id, "22 kohm")
         .expect("valid expression update commits");
 
     assert_eq!(committed_revision.get(), initial_revision.get() + 1);
     assert_eq!(
         workspace
+            .content
             .plan_data(plan_id)
             .expect("plan payload remains present")
             .design_variables[0]
@@ -317,15 +348,19 @@ fn bulk_design_variable_update_is_all_or_nothing() {
         (second.id, "2 Mohm".to_owned()),
     ];
     workspace
+        .content
         .add_design_variable(plan_id, first)
         .expect("first fixture variable is accepted");
     workspace
+        .content
         .add_design_variable(plan_id, second)
         .expect("second fixture variable is accepted");
     let before = serde_json::to_value(&workspace).expect("workspace serializes");
 
     assert!(matches!(
-        workspace.update_design_variable_expressions(plan_id, &updates),
+        workspace
+            .content
+            .update_design_variable_expressions(plan_id, &updates),
         Err(SimulationConfigurationError::InvalidDesignVariable { index: 1, .. })
     ));
     assert_eq!(
@@ -341,6 +376,7 @@ fn bulk_design_variable_update_rejects_duplicate_identities_atomically() {
     let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
     let variable_id = variable.id;
     workspace
+        .content
         .add_design_variable(plan_id, variable)
         .expect("fixture variable is accepted");
     let before = serde_json::to_value(&workspace).expect("workspace serializes");
@@ -350,7 +386,9 @@ fn bulk_design_variable_update_rejects_duplicate_identities_atomically() {
     ];
 
     assert_eq!(
-        workspace.update_design_variable_expressions(plan_id, &updates),
+        workspace
+            .content
+            .update_design_variable_expressions(plan_id, &updates),
         Err(
             SimulationConfigurationError::DuplicateDesignVariableUpdate {
                 plan_id,
@@ -374,10 +412,12 @@ fn bulk_design_variable_add_commits_the_whole_batch() {
     ];
 
     workspace
+        .content
         .add_design_variables(plan_id, batch)
         .expect("a valid batch commits");
 
     let names = workspace
+        .content
         .plan_data(plan_id)
         .expect("plan payload exists")
         .design_variables
@@ -400,7 +440,7 @@ fn bulk_design_variable_add_rejects_an_invalid_member_atomically() {
     let before = serde_json::to_value(&workspace).expect("workspace serializes");
 
     assert!(matches!(
-        workspace.add_design_variables(plan_id, batch),
+        workspace.content.add_design_variables(plan_id, batch),
         Err(SimulationConfigurationError::InvalidDesignVariable { message, .. })
             if message.contains("outside the inclusive allowed range")
     ));
@@ -421,7 +461,7 @@ fn bulk_design_variable_add_rejects_a_name_repeated_within_the_batch() {
     let before = serde_json::to_value(&workspace).expect("workspace serializes");
 
     assert_eq!(
-        workspace.add_design_variables(plan_id, batch),
+        workspace.content.add_design_variables(plan_id, batch),
         Err(SimulationConfigurationError::DesignVariableNameConflict {
             plan_id,
             name: "rload".to_owned(),
@@ -438,6 +478,7 @@ fn bulk_design_variable_add_rejects_a_name_the_plan_already_owns() {
     let plan_id = SimulationPlanId::new();
     let mut workspace = ProjectWorkspace::default();
     workspace
+        .content
         .add_design_variable(
             plan_id,
             resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project),
@@ -450,7 +491,7 @@ fn bulk_design_variable_add_rejects_a_name_the_plan_already_owns() {
     ];
 
     assert_eq!(
-        workspace.add_design_variables(plan_id, batch),
+        workspace.content.add_design_variables(plan_id, batch),
         Err(SimulationConfigurationError::DesignVariableNameConflict {
             plan_id,
             name: "RLOAD".to_owned(),
@@ -537,6 +578,7 @@ fn plan_payload_clone_refreshes_row_ids_and_analysis_references() {
         }),
     };
     workspace
+        .content
         .simulation_plan_payloads
         .push(SimulationPlanPayloadRecord {
             plan_id: source_plan_id,
@@ -550,6 +592,7 @@ fn plan_payload_clone_refreshes_row_ids_and_analysis_references() {
         });
 
     workspace
+        .content
         .clone_plan_data(
             source_plan_id,
             cloned_plan_id,
@@ -558,7 +601,7 @@ fn plan_payload_clone_refreshes_row_ids_and_analysis_references() {
             &[(source_analysis, cloned_analysis)],
         )
         .unwrap();
-    let cloned = workspace.plan_data(cloned_plan_id).unwrap();
+    let cloned = workspace.content.plan_data(cloned_plan_id).unwrap();
     assert_ne!(cloned.design_variables[0].id, variable_id);
     assert_ne!(cloned.saved_outputs[0].id, output_id);
     assert!(matches!(
@@ -585,19 +628,24 @@ fn plan_payload_clone_refreshes_row_ids_and_analysis_references() {
     ));
 
     workspace
+        .content
         .plan_data_mut(cloned_plan_id)
         .unwrap()
         .design_variables[0]
         .expression = "20 kohm".to_owned();
     assert_eq!(
         workspace
+            .content
             .plan_data(source_plan_id)
             .unwrap()
             .design_variables[0]
             .expression,
         "10 kohm"
     );
-    workspace.validate_simulation_configuration().unwrap();
+    workspace
+        .content
+        .validate_simulation_configuration()
+        .unwrap();
 }
 
 #[test]
@@ -622,19 +670,28 @@ fn regression_tolerance_contract_round_trips_and_rejects_invalid_windows() {
         }),
     };
     workspace
+        .content
         .ensure_active_plan_data(plan_id)
         .regression_tolerances = vec![rule.clone()];
-    workspace.validate_simulation_configuration().unwrap();
+    workspace
+        .content
+        .validate_simulation_configuration()
+        .unwrap();
 
     let json = serde_json::to_string(&workspace).unwrap();
     let restored: ProjectWorkspace = serde_json::from_str(&json).unwrap();
     assert_eq!(
-        restored.plan_data(plan_id).unwrap().regression_tolerances,
+        restored
+            .content
+            .plan_data(plan_id)
+            .unwrap()
+            .regression_tolerances,
         vec![rule]
     );
 
     let mut invalid = restored;
     invalid
+        .content
         .plan_data_mut(plan_id)
         .unwrap()
         .regression_tolerances[0]
@@ -643,19 +700,20 @@ fn regression_tolerance_contract_round_trips_and_rejects_invalid_windows() {
         end: 1.0,
     });
     assert!(matches!(
-        invalid.validate_simulation_configuration(),
+        invalid.content.validate_simulation_configuration(),
         Err(SimulationConfigurationError::InvalidRegressionTolerance { .. })
     ));
 
     let mut invalid_name = workspace;
     invalid_name
+        .content
         .plan_data_mut(plan_id)
         .unwrap()
         .regression_tolerances[0]
         .target
         .name = "v(out)\u{1}".to_owned();
     assert!(matches!(
-        invalid_name.validate_simulation_configuration(),
+        invalid_name.content.validate_simulation_configuration(),
         Err(SimulationConfigurationError::InvalidRegressionTolerance { .. })
     ));
 }
@@ -690,7 +748,7 @@ pub(super) fn instance(library: &str, cell: &str) -> LibraryCellInstance {
 #[test]
 fn hierarchy_resolution_follows_instances_not_open_tabs() {
     let mut workspace = ProjectWorkspace::default();
-    workspace.open_views.push(OpenCellView::new(
+    workspace.content.open_views.push(OpenCellView::new(
         CellViewRef::new("unrelated", "open_tab", "schematic"),
         ViewType::Schematic,
     ));
@@ -782,6 +840,7 @@ fn active_configuration_drives_exact_path_resolution_and_receipt_identity() {
     );
 
     let id = workspace
+        .content
         .configuration_sets
         .create(crate::state::ConfigurationSetDefinition {
             name: "Lab characterization".to_owned(),
@@ -811,6 +870,7 @@ fn active_configuration_drives_exact_path_resolution_and_receipt_identity() {
     assert_eq!(
         resolution.configuration_digest,
         workspace
+            .content
             .configuration_sets
             .find(id)
             .map(|configuration| configuration.semantic_digest())
@@ -837,6 +897,7 @@ fn active_configuration_rejects_missing_dut_and_override_paths() {
     let mut libraries = LibraryManager::default();
     workspace.ensure_library_model(&mut libraries);
     workspace
+        .content
         .configuration_sets
         .create(crate::state::ConfigurationSetDefinition {
             name: "Missing bindings".to_owned(),
@@ -895,6 +956,7 @@ fn reviewed_fallback_is_resolved_and_retained_in_the_hierarchy_receipt() {
         SchematicState::default(),
     );
     workspace
+        .content
         .configuration_sets
         .create(crate::state::ConfigurationSetDefinition {
             name: "Reviewed fallback".to_owned(),
@@ -930,8 +992,8 @@ fn reviewed_fallback_is_resolved_and_retained_in_the_hierarchy_receipt() {
 #[test]
 fn configuration_catalog_replacement_advances_project_revision_atomically() {
     let mut workspace = ProjectWorkspace::default();
-    let original_revision = workspace.project.revision();
-    let mut candidate = workspace.configuration_sets.clone();
+    let original_revision = workspace.content.project.revision();
+    let mut candidate = workspace.content.configuration_sets.clone();
     candidate
         .create(crate::state::ConfigurationSetDefinition {
             name: "Release".to_owned(),
@@ -949,20 +1011,27 @@ fn configuration_catalog_replacement_advances_project_revision_atomically() {
         .expect("candidate configuration");
 
     let committed_revision = workspace
+        .content
         .replace_configuration_sets(candidate.clone())
         .expect("publish configuration catalog");
-    assert_eq!(workspace.project.revision(), committed_revision);
-    assert_ne!(workspace.project.revision(), original_revision);
-    assert_eq!(workspace.configuration_sets, candidate);
-    assert!(workspace.project_metadata_dirty);
+    assert_eq!(workspace.content.project.revision(), committed_revision);
+    assert_ne!(workspace.content.project.revision(), original_revision);
+    assert_eq!(workspace.content.configuration_sets, candidate);
+    assert!(workspace.content.project_metadata_dirty);
 
     let committed = workspace.clone();
     assert_eq!(
-        workspace.replace_configuration_sets(candidate),
+        workspace.content.replace_configuration_sets(candidate),
         Err(ProjectConfigurationMutationError::NoChanges)
     );
-    assert_eq!(workspace.project.revision(), committed.project.revision());
-    assert_eq!(workspace.configuration_sets, committed.configuration_sets);
+    assert_eq!(
+        workspace.content.project.revision(),
+        committed.content.project.revision()
+    );
+    assert_eq!(
+        workspace.content.configuration_sets,
+        committed.content.configuration_sets
+    );
 }
 
 #[test]
@@ -987,14 +1056,20 @@ fn configuration_catalog_replacement_rejects_unmaterialized_roots_atomically() {
         .expect("structurally valid candidate");
 
     assert!(matches!(
-        workspace.replace_configuration_sets(candidate),
+        workspace.content.replace_configuration_sets(candidate),
         Err(ProjectConfigurationMutationError::MissingRootBuffer { .. })
     ));
-    assert_eq!(workspace.project.revision(), before.project.revision());
-    assert_eq!(workspace.configuration_sets, before.configuration_sets);
     assert_eq!(
-        workspace.project_metadata_dirty,
-        before.project_metadata_dirty
+        workspace.content.project.revision(),
+        before.content.project.revision()
+    );
+    assert_eq!(
+        workspace.content.configuration_sets,
+        before.content.configuration_sets
+    );
+    assert_eq!(
+        workspace.content.project_metadata_dirty,
+        before.content.project_metadata_dirty
     );
 }
 
@@ -1038,10 +1113,12 @@ fn design_management_projection_namespaces_sheets_and_materializes_explicit_port
             terminal_name.clone(),
         ));
     let source_sheet = workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&key, "Input", [first, second, component])
         .expect("bootstrap sheet ownership");
     let catalog = workspace
+        .content
         .design_management
         .sheet_catalog_mut(&key)
         .expect("sheet catalog");
@@ -1182,7 +1259,7 @@ fn hierarchy_resolution_projects_unsaved_active_topology() {
 
     let persisted = workspace.resolve_hierarchy(&libraries);
     let projected =
-        workspace.resolve_hierarchy_with_active(&libraries, &workspace.active_view, &live);
+        workspace.resolve_hierarchy_with_active(&libraries, &workspace.content.active_view, &live);
 
     assert_eq!(persisted.total_instances, 1);
     assert_eq!(projected.total_instances, 2);
@@ -1251,6 +1328,7 @@ fn configuration_veriloga_binding_uses_exact_project_bundle_on_all_targets() {
         .expect("valid project source bundle");
     let bundle_id = bundle.id();
     workspace
+        .content
         .project_sources
         .insert_bundle(bundle)
         .expect("attach project source bundle");
@@ -1263,6 +1341,7 @@ fn configuration_veriloga_binding_uses_exact_project_bundle_on_all_targets() {
         .editor
         .add_library_cell_component(Point::new(20, 20), placed);
     workspace
+        .content
         .configuration_sets
         .create(crate::state::ConfigurationSetDefinition {
             name: "Mixed-signal".to_owned(),
@@ -1384,7 +1463,7 @@ fn descend_records_the_instance_names() {
     workspace.descend_into("XB".into(), reference("bias_2t"), ViewType::Schematic);
 
     assert_eq!(workspace.occurrence_labels(), ["tb_ota", "X1", "XB"]);
-    assert_eq!(workspace.active_view.cell, "bias_2t");
+    assert_eq!(workspace.content.active_view.cell, "bias_2t");
 }
 
 #[test]
@@ -1396,11 +1475,11 @@ fn breadcrumb_focus_truncates_the_occurrence_path() {
 
     workspace.focus_breadcrumb(1);
     assert_eq!(workspace.occurrence_labels(), ["tb_ota", "X1"]);
-    assert_eq!(workspace.active_view.cell, "ota_5t");
+    assert_eq!(workspace.content.active_view.cell, "ota_5t");
 
     workspace.ascend_one();
     assert_eq!(workspace.occurrence_labels(), ["tb_ota"]);
-    assert_eq!(workspace.active_view.cell, "tb_ota");
+    assert_eq!(workspace.content.active_view.cell, "tb_ota");
     // At the root, ascending is a no-op.
     assert!(workspace.ascend_one().is_none());
 }
@@ -1408,12 +1487,10 @@ fn breadcrumb_focus_truncates_the_occurrence_path() {
 #[test]
 fn symbol_active_view_does_not_allocate_schematic_buffer() {
     let reference = symbol_reference("ota_5t");
-    let mut workspace = ProjectWorkspace {
-        active_view: reference.clone(),
-        open_views: vec![OpenCellView::new(reference.clone(), ViewType::Symbol)],
-        schematic_buffers: HashMap::new(),
-        ..ProjectWorkspace::default()
-    };
+    let mut workspace = ProjectWorkspace::default();
+    workspace.content.active_view = reference.clone();
+    workspace.content.open_views = vec![OpenCellView::new(reference.clone(), ViewType::Symbol)];
+    workspace.content.schematic_buffers = HashMap::new();
     let mut libraries = LibraryManager::default();
     let mut library = Library::new("work");
     let mut cell = Cell::new("ota_5t");
@@ -1425,7 +1502,10 @@ fn symbol_active_view_does_not_allocate_schematic_buffer() {
 
     assert_eq!(workspace.active_view_type(), ViewType::Symbol);
     assert!(
-        !workspace.schematic_buffers.contains_key(&reference.key()),
+        !workspace
+            .content
+            .schematic_buffers
+            .contains_key(&reference.key()),
         "symbol views must not be backed by stale schematic buffers"
     );
     let symbol_view = libraries
@@ -1439,17 +1519,18 @@ fn symbol_active_view_does_not_allocate_schematic_buffer() {
 #[test]
 fn saving_while_symbol_active_does_not_create_symbol_schematic_buffer() {
     let reference = symbol_reference("ota_5t");
-    let mut workspace = ProjectWorkspace {
-        active_view: reference.clone(),
-        open_views: vec![OpenCellView::new(reference.clone(), ViewType::Symbol)],
-        schematic_buffers: HashMap::new(),
-        ..ProjectWorkspace::default()
-    };
+    let mut workspace = ProjectWorkspace::default();
+    workspace.content.active_view = reference.clone();
+    workspace.content.open_views = vec![OpenCellView::new(reference.clone(), ViewType::Symbol)];
+    workspace.content.schematic_buffers = HashMap::new();
 
     workspace.save_active_schematic(&SchematicState::default());
 
     assert!(
-        !workspace.schematic_buffers.contains_key(&reference.key()),
+        !workspace
+            .content
+            .schematic_buffers
+            .contains_key(&reference.key()),
         "session restore/save paths must not persist default schematics under symbol views"
     );
 }
@@ -1458,73 +1539,92 @@ fn saving_while_symbol_active_does_not_create_symbol_schematic_buffer() {
 fn generated_netlist_cannot_be_promoted_by_an_editor_write() {
     let mut workspace = ProjectWorkspace::default();
 
-    assert!(!workspace.replace_editable_netlist_source("edited\n.end\n".to_owned()));
-    assert!(workspace.netlist_source.is_none());
-    assert!(!workspace.netlist_source_dirty);
+    assert!(
+        !workspace
+            .content
+            .replace_editable_netlist_source("edited\n.end\n".to_owned())
+    );
+    assert!(workspace.content.netlist_source.is_none());
+    assert!(!workspace.content.netlist_source_dirty);
     assert!(!workspace.any_dirty());
 }
 
 #[test]
 fn explicit_editable_copy_enters_project_dirty_lifecycle() {
     let mut workspace = ProjectWorkspace::default();
-    workspace.netlist_source_path = Some(PathBuf::from("generated.sp"));
+    workspace.content.netlist_source_path = Some(PathBuf::from("generated.sp"));
 
-    assert!(workspace.make_netlist_editable_copy("generated\n.op\n.end\n"));
+    assert!(
+        workspace
+            .content
+            .make_netlist_editable_copy("generated\n.op\n.end\n")
+    );
     assert_eq!(
-        workspace.netlist_source.as_deref(),
+        workspace.content.netlist_source.as_deref(),
         Some("generated\n.op\n.end\n")
     );
-    assert!(workspace.netlist_source_path.is_none());
-    assert!(workspace.netlist_source_dirty);
+    assert!(workspace.content.netlist_source_path.is_none());
+    assert!(workspace.content.netlist_source_dirty);
     assert!(workspace.any_dirty());
 
     workspace.mark_all_clean();
-    assert!(workspace.has_editable_netlist_source());
-    assert!(!workspace.netlist_source_dirty);
+    assert!(workspace.content.has_editable_netlist_source());
+    assert!(!workspace.content.netlist_source_dirty);
     assert!(!workspace.any_dirty());
 }
 
 #[test]
 fn editable_copy_does_not_overwrite_existing_owned_source() {
     let mut workspace = ProjectWorkspace::default();
-    workspace.netlist_source = Some("owned\n.end\n".to_owned());
-    workspace.netlist_source_path = Some(PathBuf::from("owned.cir"));
+    workspace.content.netlist_source = Some("owned\n.end\n".to_owned());
+    workspace.content.netlist_source_path = Some(PathBuf::from("owned.cir"));
 
-    assert!(!workspace.make_netlist_editable_copy("generated\n.end\n"));
-    assert_eq!(workspace.netlist_source.as_deref(), Some("owned\n.end\n"));
+    assert!(
+        !workspace
+            .content
+            .make_netlist_editable_copy("generated\n.end\n")
+    );
     assert_eq!(
-        workspace.netlist_source_path.as_deref(),
+        workspace.content.netlist_source.as_deref(),
+        Some("owned\n.end\n")
+    );
+    assert_eq!(
+        workspace.content.netlist_source_path.as_deref(),
         Some(Path::new("owned.cir"))
     );
-    assert!(!workspace.netlist_source_dirty);
+    assert!(!workspace.content.netlist_source_dirty);
 }
 
 #[test]
 fn editing_imported_source_preserves_its_dependency_origin() {
     let mut workspace = ProjectWorkspace::default();
-    workspace.netlist_source = Some("owned\n.end\n".to_owned());
-    workspace.netlist_source_path = Some(PathBuf::from("decks/owned.cir"));
+    workspace.content.netlist_source = Some("owned\n.end\n".to_owned());
+    workspace.content.netlist_source_path = Some(PathBuf::from("decks/owned.cir"));
 
-    assert!(workspace.replace_editable_netlist_source("edited\n.end\n".to_owned()));
+    assert!(
+        workspace
+            .content
+            .replace_editable_netlist_source("edited\n.end\n".to_owned())
+    );
     assert_eq!(
-        workspace.netlist_source_path.as_deref(),
+        workspace.content.netlist_source_path.as_deref(),
         Some(Path::new("decks/owned.cir"))
     );
-    assert!(workspace.netlist_source_dirty);
+    assert!(workspace.content.netlist_source_dirty);
 }
 
 #[test]
 fn returning_to_generated_output_is_saved_as_a_project_change() {
     let mut workspace = ProjectWorkspace::default();
-    workspace.netlist_source = Some("owned\n.end\n".to_owned());
-    workspace.netlist_source_path = Some(PathBuf::from("owned.cir"));
+    workspace.content.netlist_source = Some("owned\n.end\n".to_owned());
+    workspace.content.netlist_source_path = Some(PathBuf::from("owned.cir"));
 
-    assert!(workspace.return_to_generated_netlist());
-    assert!(workspace.netlist_source.is_none());
-    assert!(workspace.netlist_source_path.is_none());
-    assert!(workspace.netlist_source_dirty);
+    assert!(workspace.content.return_to_generated_netlist());
+    assert!(workspace.content.netlist_source.is_none());
+    assert!(workspace.content.netlist_source_path.is_none());
+    assert!(workspace.content.netlist_source_dirty);
     assert!(workspace.any_dirty());
-    assert!(!workspace.return_to_generated_netlist());
+    assert!(!workspace.content.return_to_generated_netlist());
 }
 
 #[test]
@@ -1611,6 +1711,7 @@ fn technology_binding_persists_while_runtime_dirty_state_resets() {
     let mut workspace = ProjectWorkspace::default();
     let binding = technology_binding_fixture();
     workspace
+        .content
         .attach_technology(binding.clone())
         .expect("valid binding commits");
     assert!(workspace.any_dirty());
@@ -1618,8 +1719,12 @@ fn technology_binding_persists_while_runtime_dirty_state_resets() {
     let bytes = serde_json::to_vec(&workspace).expect("workspace serializes");
     let restored: ProjectWorkspace = serde_json::from_slice(&bytes).expect("workspace restores");
 
-    assert_eq!(restored.project.technology_binding(), Some(&binding));
+    assert_eq!(
+        restored.content.project.technology_binding(),
+        Some(&binding)
+    );
     restored
+        .content
         .project
         .validate()
         .expect("restored binding validates");
@@ -1646,24 +1751,26 @@ fn hardcopy_page_setup_persists_and_uses_project_dirty_lifecycle() {
     let mut workspace = ProjectWorkspace::default();
 
     let first = workspace
+        .content
         .save_hardcopy_setup(&source, HardcopySetup::default())
         .expect("page setup commits");
     assert_eq!(first.disposition(), SetupSaveDisposition::Inserted);
-    assert!(workspace.hardcopy_setups_dirty);
+    assert!(workspace.content.hardcopy_setups_dirty);
     assert!(workspace.any_dirty());
 
     let bytes = serde_json::to_vec(&workspace).expect("workspace serializes");
     let mut restored: ProjectWorkspace =
         serde_json::from_slice(&bytes).expect("workspace restores");
-    assert_eq!(restored.hardcopy_setups.len(), 1);
-    assert!(!restored.hardcopy_setups_dirty);
+    assert_eq!(restored.content.hardcopy_setups.len(), 1);
+    assert!(!restored.content.hardcopy_setups_dirty);
     assert!(!restored.any_dirty());
 
     let unchanged = restored
+        .content
         .save_hardcopy_setup(&source, HardcopySetup::default())
         .expect("identical setup is accepted");
     assert_eq!(unchanged.disposition(), SetupSaveDisposition::Unchanged);
-    assert!(!restored.hardcopy_setups_dirty);
+    assert!(!restored.content.hardcopy_setups_dirty);
     assert!(!restored.any_dirty());
 }
 
@@ -1678,26 +1785,31 @@ fn project_print_mapping_routes_through_project_dirty_lifecycle() {
     .unwrap();
     let mut workspace = ProjectWorkspace::default();
     let receipt = workspace
+        .content
         .save_project_print_mapping(mapping.clone())
         .unwrap();
     assert_eq!(
         receipt.disposition(),
         rspice_hardcopy_contract::PrintMappingSaveDisposition::Created
     );
-    assert!(workspace.project_print_mappings_dirty);
+    assert!(workspace.content.project_print_mappings_dirty);
     assert!(workspace.any_dirty());
 
     let bytes = serde_json::to_vec(&workspace).unwrap();
     let mut restored: ProjectWorkspace = serde_json::from_slice(&bytes).unwrap();
     assert!(
         restored
+            .content
             .project_print_mappings
             .get("documentation")
             .is_some()
     );
     assert!(!restored.any_dirty());
 
-    let unchanged = restored.save_project_print_mapping(mapping).unwrap();
+    let unchanged = restored
+        .content
+        .save_project_print_mapping(mapping)
+        .unwrap();
     assert_eq!(
         unchanged.disposition(),
         rspice_hardcopy_contract::PrintMappingSaveDisposition::Unchanged
@@ -1735,18 +1847,26 @@ fn hardcopy_source_sets_persist_validate_and_use_project_dirty_lifecycle() {
     let source_key = source_set.source_key();
     let mut workspace = ProjectWorkspace::default();
 
-    assert!(workspace.save_hardcopy_source_set(source_set).unwrap());
-    assert!(!workspace.hardcopy_source_sets().is_empty());
-    assert!(workspace.hardcopy_source_set(&source_key).is_some());
+    assert!(
+        workspace
+            .content
+            .save_hardcopy_source_set(source_set)
+            .unwrap()
+    );
+    assert!(!workspace.content.hardcopy_source_sets().is_empty());
+    assert!(workspace.content.hardcopy_source_set(&source_key).is_some());
     assert!(workspace.any_dirty());
 
     let bytes = serde_json::to_vec(&workspace).unwrap();
     let mut restored: ProjectWorkspace = serde_json::from_slice(&bytes).unwrap();
-    restored.validate_simulation_configuration().unwrap();
-    assert_eq!(restored.hardcopy_source_sets().len(), 1);
+    restored
+        .content
+        .validate_simulation_configuration()
+        .unwrap();
+    assert_eq!(restored.content.hardcopy_source_sets().len(), 1);
     assert!(!restored.any_dirty());
-    assert!(restored.remove_hardcopy_source_set(&source_key));
-    assert!(restored.hardcopy_source_sets().is_empty());
+    assert!(restored.content.remove_hardcopy_source_set(&source_key));
+    assert!(restored.content.hardcopy_source_sets().is_empty());
     assert!(restored.any_dirty());
 }
 
@@ -1780,16 +1900,18 @@ fn hardcopy_source_set_catalog_rejects_case_folded_duplicate_names() {
     };
     let mut workspace = ProjectWorkspace::default();
     workspace
+        .content
         .save_hardcopy_source_set(build_set(0x5100, "Tapeout"))
         .unwrap();
     let error = workspace
+        .content
         .save_hardcopy_source_set(build_set(0x5200, "tapeout"))
         .unwrap_err();
     assert!(matches!(
         error,
         HardcopySourceSetPersistenceError::DuplicateName { .. }
     ));
-    assert_eq!(workspace.hardcopy_source_sets().len(), 1);
+    assert_eq!(workspace.content.hardcopy_source_sets().len(), 1);
 }
 
 #[test]
@@ -1819,8 +1941,8 @@ fn legacy_workspaces_restore_with_no_project_source_examples() {
 
     let restored: ProjectWorkspace = serde_json::from_value(value).unwrap();
 
-    assert!(restored.project_sources.is_empty());
-    assert!(!restored.project_sources_dirty);
+    assert!(restored.content.project_sources.is_empty());
+    assert!(!restored.content.project_sources_dirty);
 }
 
 #[test]
@@ -1828,10 +1950,12 @@ fn only_bootstrapped_projects_receive_exact_canonical_code_sources() {
     let mut libraries = LibraryManager::default();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     let verilog_a = workspace
+        .content
         .project_sources
         .get(ProjectSourceLanguage::VerilogA)
         .unwrap();
     let automation = workspace
+        .content
         .project_sources
         .get(ProjectSourceLanguage::RSpiceAutomation)
         .unwrap();
@@ -1847,6 +1971,7 @@ fn only_bootstrapped_projects_receive_exact_canonical_code_sources() {
         crate::state::DEFAULT_AUTOMATION_PYTHON,
     );
     let automation_bundle = workspace
+        .content
         .project_sources
         .bundle_for_owner(&ProjectSourceOwner::code_workspace(
             ProjectSourceLanguage::RSpiceAutomation,
@@ -1891,7 +2016,12 @@ fn only_bootstrapped_projects_receive_exact_canonical_code_sources() {
         ]
     );
     assert!(!workspace.any_dirty());
-    assert!(ProjectWorkspace::default().project_sources.is_empty());
+    assert!(
+        ProjectWorkspace::default()
+            .content
+            .project_sources
+            .is_empty()
+    );
 }
 
 #[test]
@@ -1899,13 +2029,13 @@ fn file_new_bootstrap_is_empty_but_keeps_a_valid_project_hierarchy() {
     let mut libraries = LibraryManager::default();
     let workspace = ProjectWorkspace::new_empty_bootstrapped(&mut libraries, "Afe", "afe", "core");
 
-    assert!(workspace.project_sources.is_empty());
-    assert!(!workspace.project_sources_dirty);
+    assert!(workspace.content.project_sources.is_empty());
+    assert!(!workspace.content.project_sources_dirty);
     assert!(
         libraries
-            .get_library(&workspace.active_view.library)
-            .and_then(|library| library.get_cell(&workspace.active_view.cell))
-            .and_then(|cell| cell.get_view(&workspace.active_view.view))
+            .get_library(&workspace.content.active_view.library)
+            .and_then(|library| library.get_cell(&workspace.content.active_view.cell))
+            .and_then(|cell| cell.get_view(&workspace.content.active_view.view))
             .is_some()
     );
 }
@@ -2046,22 +2176,25 @@ fn workspace_source_dirty_state_tracks_edits_validation_and_cleaning() {
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
 
     workspace
+        .content
         .replace_project_source(
             ProjectSourceLanguage::RSpiceAutomation,
             "plan = project.plan(\"Unicode Δ\")".to_owned(),
         )
         .unwrap();
-    assert!(workspace.project_sources_dirty);
+    assert!(workspace.content.project_sources_dirty);
     assert!(workspace.any_dirty());
-    workspace.mark_project_sources_clean();
+    workspace.content.mark_project_sources_clean();
     assert!(!workspace.any_dirty());
 
     let identity = workspace
+        .content
         .mark_project_source_validated(ProjectSourceLanguage::RSpiceAutomation)
         .unwrap();
-    assert!(workspace.project_sources_dirty);
+    assert!(workspace.content.project_sources_dirty);
     assert_eq!(
         workspace
+            .content
             .project_sources
             .get(ProjectSourceLanguage::RSpiceAutomation)
             .unwrap()
@@ -2072,6 +2205,7 @@ fn workspace_source_dirty_state_tracks_edits_validation_and_cleaning() {
     assert!(!workspace.any_dirty());
 
     let repeated = workspace
+        .content
         .mark_project_source_validated(ProjectSourceLanguage::RSpiceAutomation)
         .unwrap();
     assert_eq!(repeated, identity);

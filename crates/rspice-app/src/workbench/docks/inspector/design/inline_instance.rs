@@ -457,6 +457,7 @@ pub(super) fn prepare_component_tuning(
     let variables = app
         .state
         .workspace
+        .content
         .plan_data(plan_id)
         .map(|payload| payload.design_variables.clone())
         .ok_or_else(|| "the active simulation plan has no configuration payload".to_owned())?;
@@ -931,13 +932,18 @@ pub(super) fn off_sheet_declaration(state: &AppState, name: &str) -> Option<OffS
         .join(", ");
 
     let key = state.workspace.active_schematic_reference().key();
-    let catalog = state.workspace.design_management.sheet_catalog(&key);
+    let catalog = state
+        .workspace
+        .content
+        .design_management
+        .sheet_catalog(&key);
     let active_sheet = catalog.and_then(|catalog| catalog.active_sheet_id());
     let mut pages: Vec<u32> = Vec::new();
     if let Some(catalog) = catalog {
         for label in &connectors {
             let Some(sheet) = state
                 .workspace
+                .content
                 .design_management
                 .sheet_for_object_or_active(&key, label.id)
             else {
@@ -994,7 +1000,12 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
             preview: HeroPreview::Icon(net_icon(class)),
             eyebrow: format!(
                 "NET · SHEET {}",
-                app.state.workspace.active_view.cell.to_ascii_uppercase()
+                app.state
+                    .workspace
+                    .content
+                    .active_view
+                    .cell
+                    .to_ascii_uppercase()
             ),
             title: net_name.clone(),
             subtitle: scope.clone(),
@@ -1294,12 +1305,12 @@ pub(super) fn active_run_matches_design(state: &AppState) -> bool {
     let Some(run) = state.simulation.active_run() else {
         return false;
     };
-    run.prepared_receipt()
-        .is_some_and(|receipt| receipt.project_revision() == state.workspace.project.revision())
-        && state.simulation.cross_probe.is_current_for(
-            &state.workspace.active_view,
-            state.schematic.topology_version(),
-        )
+    run.prepared_receipt().is_some_and(|receipt| {
+        receipt.project_revision() == state.workspace.content.project.revision()
+    }) && state.simulation.cross_probe.is_current_for(
+        &state.workspace.content.active_view,
+        state.schematic.topology_version(),
+    )
 }
 
 pub(super) fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -> bool {

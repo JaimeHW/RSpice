@@ -51,7 +51,11 @@ fn the_frozen_hierarchical_reference_still_loads_and_validates() {
         "vendor/filter/schematic",
     ] {
         assert!(
-            project.workspace.schematic_buffers.contains_key(view),
+            project
+                .workspace
+                .content
+                .schematic_buffers
+                .contains_key(view),
             "{view} lost its schematic buffer"
         );
     }
@@ -82,6 +86,7 @@ fn the_frozen_hierarchical_reference_keeps_its_sheets_configuration_and_outputs(
 
     let catalog = project
         .workspace
+        .content
         .design_management
         .sheet_catalog(AMP_VIEW_KEY)
         .expect("the amp sheet catalog is retained");
@@ -97,6 +102,7 @@ fn the_frozen_hierarchical_reference_keeps_its_sheets_configuration_and_outputs(
 
     let configuration = project
         .workspace
+        .content
         .configuration_sets
         .active()
         .expect("the reference configuration is still active");
@@ -110,11 +116,15 @@ fn the_frozen_hierarchical_reference_keeps_its_sheets_configuration_and_outputs(
         .expect("the frozen reference carries a stable analysis plan")
         .id();
     assert_eq!(
-        project.workspace.plan_data(plan).map(|payload| payload
-            .saved_outputs
-            .iter()
-            .map(|output| output.source_expression.as_str())
-            .collect::<Vec<_>>()),
+        project
+            .workspace
+            .content
+            .plan_data(plan)
+            .map(|payload| payload
+                .saved_outputs
+                .iter()
+                .map(|output| output.source_expression.as_str())
+                .collect::<Vec<_>>()),
         Some(vec![SAVED_OUTPUT_EXPRESSION])
     );
 }
@@ -140,6 +150,7 @@ fn legacy_paths_load_and_reserialize_in_the_new_grammar() {
     let loaded = load_project_text(FROZEN_PROJECT, None).expect("the frozen reference loads");
     let configuration = loaded
         .workspace
+        .content
         .configuration_sets
         .active()
         .expect("the reference configuration is still active");
@@ -151,12 +162,13 @@ fn legacy_paths_load_and_reserialize_in_the_new_grammar() {
         "migration restates an authored choice rather than making one"
     );
     assert_eq!(
-        loaded.workspace.configuration_sets.schema_version(),
+        loaded.workspace.content.configuration_sets.schema_version(),
         crate::state::ConfigurationSetCatalog::default().schema_version(),
         "the catalog is relabelled as the schema it now holds"
     );
     loaded
         .workspace
+        .content
         .configuration_sets
         .validate()
         .expect("the migrated catalog's digests cover what it now stores");
@@ -179,7 +191,7 @@ fn legacy_paths_load_and_reserialize_in_the_new_grammar() {
 
     let reloaded = load_project_text(&rewritten, None).expect("the migrated project reloads");
     assert_eq!(
-        reloaded.workspace.configuration_sets, loaded.workspace.configuration_sets,
+        reloaded.workspace.content.configuration_sets, loaded.workspace.content.configuration_sets,
         "migration is a one-time rewrite"
     );
 }
@@ -211,8 +223,9 @@ fn the_frozen_symbol_sidecar_text_loads_as_body_geometry() {
 fn a_configured_path_the_engine_cannot_name_is_refused_at_load() {
     let mut libraries = LibraryManager::with_primitives();
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let root = workspace.active_view.clone();
+    let root = workspace.content.active_view.clone();
     workspace
+        .content
         .configuration_sets
         .create(configuration_named("Release", &root, "/XDUT"))
         .expect("an addressable configuration");

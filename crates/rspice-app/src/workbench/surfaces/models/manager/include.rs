@@ -821,7 +821,7 @@ fn unbound_instances(state: &AppState, definitions: &[DefinitionRow]) -> Vec<Unb
         .iter()
         .map(|row| row.definition.as_str())
         .collect::<BTreeSet<_>>();
-    let sheet = state.workspace.active_view.display_path();
+    let sheet = state.workspace.content.active_view.display_path();
     let mut unbound = schematic
         .document()
         .components

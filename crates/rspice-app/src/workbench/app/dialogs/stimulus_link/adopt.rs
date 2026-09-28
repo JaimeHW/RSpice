@@ -90,6 +90,7 @@ pub(super) fn adopt_groups<'a>(
     let needle = filter.trim().to_ascii_lowercase();
     let mut ordered: Vec<&StimulusDefinition> = state
         .workspace
+        .content
         .stimulus_library
         .definitions()
         .iter()
@@ -211,11 +212,16 @@ pub(super) fn render(
     component: &Component,
     cache: &mut MiniCache,
 ) {
-    source_preview::ensure_minis(cache, &state.workspace.stimulus_library, session.timing);
+    source_preview::ensure_minis(
+        cache,
+        &state.workspace.content.stimulus_library,
+        session.timing,
+    );
     let groups = adopt_groups(state, component, &session.filter, cache);
     let picked = session.pick.as_ref().and_then(|name| {
         state
             .workspace
+            .content
             .stimulus_library
             .get(name)
             .filter(|definition| definition.adoption_fit(component) != AdoptionFit::Kind)

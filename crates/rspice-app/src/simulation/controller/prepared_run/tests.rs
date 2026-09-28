@@ -41,7 +41,8 @@ fn standalone_connection_directive_is_an_authenticated_prepared_dependency() {
 fn exhausted_run_sequence_blocks_dispatch_without_starting_a_batch() {
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.netlist_source = Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
+    state.workspace.content.netlist_source =
+        Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     state.simulation.next_run_id = u64::MAX;
     let baseline = crate::io::capture_simulation_results(&state.simulation);
     let mut controller = SimulationController::new();
@@ -618,7 +619,7 @@ fn frozen_hierarchy_rejects_stale_instance_model_library_metadata() {
         .workspace
         .configuration_execution_projection(
             &state.library_manager,
-            &state.workspace.active_view,
+            &state.workspace.content.active_view,
             &state.schematic,
         )
         .expect("freeze schematic hierarchy");
@@ -642,7 +643,7 @@ fn frozen_hierarchy_rejects_stale_instance_model_library_metadata() {
         .workspace
         .configuration_execution_projection(
             &state.library_manager,
-            &state.workspace.active_view,
+            &state.workspace.content.active_view,
             &state.schematic,
         )
         .expect("freeze rebound schematic hierarchy");
@@ -675,7 +676,7 @@ fn receipt_backed_manual_project_deck_uses_signed_pdk_models_without_host_paths(
     let mut state = AppState::default();
     state.provision_test_project_technology_contract();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.netlist_source =
+    state.workspace.content.netlist_source =
         Some("signed project deck\nV1 d 0 1\nM1 d d 0 0 nmos_demo\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
     let snapshot = controller
@@ -699,7 +700,7 @@ fn governed_manual_deck_dispatches_signed_pdk_veriloga_runtime_without_host_path
     let mut state = AppState::default();
     state.provision_test_project_veriloga_technology_contract();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.netlist_source =
+    state.workspace.content.netlist_source =
         Some("signed Verilog-A project deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
     let snapshot = controller
@@ -804,12 +805,12 @@ fn prepared_snapshot_detects_analysis_mutation_without_revision_change() {
     let prepared = controller
         .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
         .expect("prepare first snapshot");
-    let revision = state.workspace.project.revision().get();
+    let revision = state.workspace.content.project.revision().get();
     edit_frozen_transient_stop(&mut state, "2m");
     let changed = controller
         .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
         .expect("prepare changed snapshot");
-    assert_eq!(state.workspace.project.revision().get(), revision);
+    assert_eq!(state.workspace.content.project.revision().get(), revision);
     assert_ne!(prepared.digest(), changed.digest());
 }
 
@@ -857,6 +858,7 @@ fn prepared_snapshot_authenticates_plan_owned_saved_outputs() {
     .expect("valid output");
     state
         .workspace
+        .content
         .add_saved_output(plan_id, output)
         .expect("plan owns output");
 
@@ -922,8 +924,9 @@ fn manual_touchstone_export_uses_imported_deck_origin_not_stale_schematic_path()
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
     state.schematic.session.current_file = Some(PathBuf::from("stale").join("schematic.rsch"));
-    state.workspace.netlist_source_path = Some(PathBuf::from("imported").join("rf_fixture.cir"));
-    state.workspace.netlist_source = Some(
+    state.workspace.content.netlist_source_path =
+        Some(PathBuf::from("imported").join("rf_fixture.cir"));
+    state.workspace.content.netlist_source = Some(
             "deck\nV2 out 0 dc 0 ac 1 portnum 2 z0 75\nV1 in 0 dc 0 ac 1 portnum 1 z0 50\nR1 in out 100\n.sp lin 3 1Meg 3Meg\n.end\n"
                 .to_owned(),
         );
@@ -956,7 +959,7 @@ fn manual_touchstone_export_uses_imported_deck_origin_not_stale_schematic_path()
 fn manual_fourier_is_topologically_bound_to_its_exact_transient_task() {
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.netlist_source = Some(
+    state.workspace.content.netlist_source = Some(
         "Fourier deck\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.four 1k V(out)\n.tran 10u 5m\n.end\n"
             .to_owned(),
     );
@@ -983,13 +986,22 @@ fn manual_fourier_is_topologically_bound_to_its_exact_transient_task() {
 fn campaign_freezes_distinct_plan_members_without_switching_the_live_editor() {
     let mut state = runnable_state();
     let first_plan_id = state.sim_setup.stable_analysis_plan().unwrap().id();
-    state.workspace.migrate_active_plan_data(first_plan_id);
+    state
+        .workspace
+        .content
+        .migrate_active_plan_data(first_plan_id);
     let second_plan_id = state
         .sim_setup
         .create_plan("Second campaign plan")
         .expect("create campaign plan");
-    state.workspace.migrate_inactive_plan_data(second_plan_id);
-    state.workspace.sync_legacy_specs_projection(second_plan_id);
+    state
+        .workspace
+        .content
+        .migrate_inactive_plan_data(second_plan_id);
+    state
+        .workspace
+        .content
+        .sync_legacy_specs_projection(second_plan_id);
     let live_plan_before_dispatch = state.sim_setup.stable_analysis_plan().unwrap().id();
     let mut controller = SimulationController::new();
 
@@ -1073,6 +1085,7 @@ fn prepared_snapshot_authenticates_and_enforces_plan_owned_save_policy() {
         .id();
     state
         .workspace
+        .content
         .add_saved_output(
             plan_id,
             crate::state::SavedOutput::new(
@@ -1105,6 +1118,7 @@ fn deferred_outputs_share_one_sealed_engine_source_budget_per_analysis() {
     for name in ["deferred_voltage", "deferred_voltage_copy"] {
         state
             .workspace
+            .content
             .add_saved_output(
                 plan_id,
                 crate::state::SavedOutput::new(
@@ -1140,7 +1154,7 @@ fn deferred_outputs_share_one_sealed_engine_source_budget_per_analysis() {
 fn manual_periodic_analyses_are_topologically_bound_to_seed_and_pss() {
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.netlist_source = Some(
+    state.workspace.content.netlist_source = Some(
         "Periodic deck\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\nLPROBE out sensed 1n\nR2 sensed 0 1k\n.pss fund=1Meg points=128 harms=8\n.pac dec 20 1k 100Meg input=V1 out=out\n.pnoise dec 10 1 1Meg out=out\n.pxf dec 10 1k 10Meg input=V1 out=out outsideband=1\n.pstb probe=LPROBE maxharm=8 nmults=6\n.end\n"
             .to_owned(),
     );
@@ -1215,7 +1229,7 @@ fn governed_snapshot_check_rejects_in_flight_pvt_change() {
 #[test]
 fn manual_include_without_origin_fails_closed() {
     let mut state = AppState::default();
-    state.workspace.netlist_source =
+    state.workspace.content.netlist_source =
         Some("deck\n.include models.lib\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let controller = SimulationController::new();
     let error = controller
@@ -1337,6 +1351,7 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
     let mut state = AppState::default();
     state
         .workspace
+        .content
         .replace_imported_project_source(
             crate::state::ProjectSourceLanguage::VerilogA,
             "model.va".to_owned(),
@@ -1346,24 +1361,27 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
         .expect("replace bootstrapped project Verilog-A source");
     let bundle = state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&crate::state::ProjectSourceOwner::code_workspace(
             crate::state::ProjectSourceLanguage::VerilogA,
         ))
         .expect("installed project source bundle");
-    let receipt = compile_project_bundle_receipt(state.workspace.project.id(), bundle, None)
-        .expect("compile project Verilog-A source");
+    let receipt =
+        compile_project_bundle_receipt(state.workspace.content.project.id(), bundle, None)
+            .expect("compile project Verilog-A source");
     state.ui.code_workspace.veriloga.receipt = Some(receipt);
 
     let bundle = state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&crate::state::ProjectSourceOwner::code_workspace(
             crate::state::ProjectSourceLanguage::VerilogA,
         ))
         .expect("installed project source bundle");
     let source_key = crate::state::project_veriloga_bundle_source_key(
-        state.workspace.project.id(),
+        state.workspace.content.project.id(),
         bundle,
         "owned",
     )
@@ -1450,6 +1468,7 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
     let expected_digest = bundle.closure_digest();
     state
         .workspace
+        .content
         .project_sources
         .insert_bundle(bundle)
         .expect("attach cell-view source");
@@ -1461,6 +1480,7 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
         .add_library_cell_component(crate::state::Point::new(20, 20), placed);
     state
         .workspace
+        .content
         .configuration_sets
         .create(crate::state::ConfigurationSetDefinition {
             name: "Mixed-signal".to_owned(),
@@ -1481,7 +1501,7 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
         .workspace
         .configuration_execution_projection(
             &state.library_manager,
-            &state.workspace.active_view,
+            &state.workspace.content.active_view,
             &state.schematic,
         )
         .expect("resolve configured behavioral view");
@@ -1573,7 +1593,7 @@ fn statistical_deferred_file_waveforms_are_rejected_before_dispatch() {
         );
         fs::write(&path, &source).unwrap();
         let mut state = manual_deck_state(&source);
-        state.workspace.netlist_source_path = Some(path.clone());
+        state.workspace.content.netlist_source_path = Some(path.clone());
         let result = SimulationController::new()
             .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck);
         if file_backed {
@@ -1675,7 +1695,8 @@ fn every_materialized_corner_binding_is_audited_before_dispatch() {
 fn active_batch_reentry_preserves_prepared_authorization_and_batch_metadata() {
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.netlist_source = Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
+    state.workspace.content.netlist_source =
+        Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
     let snapshot = controller
         .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
@@ -1716,7 +1737,8 @@ fn active_batch_reentry_preserves_prepared_authorization_and_batch_metadata() {
 fn unpolled_completion_reentry_does_not_consume_or_replace_authorization() {
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.netlist_source = Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
+    state.workspace.content.netlist_source =
+        Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
     let snapshot = controller
         .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
@@ -1808,7 +1830,8 @@ fn external_input_audit_ignores_comments_and_inline_data() {
 fn direct_manual_run_cannot_bypass_internal_prepare_and_permit_consumption() {
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.netlist_source = Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
+    state.workspace.content.netlist_source =
+        Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
 
     controller.start_simulation(&mut state);
@@ -1844,8 +1867,8 @@ fn included_source_mutation_after_prepare_is_rejected() {
 
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.netlist_source = Some(source.to_owned());
-    state.workspace.netlist_source_path = Some(origin);
+    state.workspace.content.netlist_source = Some(source.to_owned());
+    state.workspace.content.netlist_source_path = Some(origin);
     let mut controller = SimulationController::new();
     let metadata = controller
         .validate_manual_deck_document(&state)
@@ -1876,8 +1899,8 @@ fn dispatched_include_closure_never_reopens_mutated_source_files() {
 
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.netlist_source = Some(source.to_owned());
-    state.workspace.netlist_source_path = Some(origin);
+    state.workspace.content.netlist_source = Some(source.to_owned());
+    state.workspace.content.netlist_source_path = Some(origin);
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)
@@ -2027,7 +2050,7 @@ fn insert_enabled_draft(
 fn manual_deck_state(deck: &str) -> AppState {
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.netlist_source = Some(deck.to_owned());
+    state.workspace.content.netlist_source = Some(deck.to_owned());
     state
 }
 
@@ -2041,7 +2064,7 @@ fn reviewed_foreign_profile_is_applied_when_the_owned_deck_is_prepared() {
         None,
         "reviewed.cir",
     ));
-    let descriptor = state.workspace.netlist_descriptor.as_mut().unwrap();
+    let descriptor = state.workspace.content.netlist_descriptor.as_mut().unwrap();
     descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spectre);
     descriptor.execution_profile = Some(crate::state::NetlistExecutionProfile::SpectreSpiceV1);
     descriptor.compatibility_reviewed = true;
@@ -2074,7 +2097,7 @@ fn an_unreviewed_owned_profile_cannot_acquire_a_manual_execution_permit() {
         None,
         "quarantined.cir",
     ));
-    let descriptor = state.workspace.netlist_descriptor.as_mut().unwrap();
+    let descriptor = state.workspace.content.netlist_descriptor.as_mut().unwrap();
     descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spice3Ngspice);
     descriptor.execution_profile = None;
     descriptor.compatibility_reviewed = false;
@@ -2093,7 +2116,7 @@ fn reviewed_ngspice_profile_binds_engine_defaults_and_revalidates_edits() {
         None,
         "reviewed.cir"
     ));
-    let descriptor = state.workspace.netlist_descriptor.as_mut().unwrap();
+    let descriptor = state.workspace.content.netlist_descriptor.as_mut().unwrap();
     descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spice3Ngspice);
     descriptor.execution_profile = Some(crate::state::NetlistExecutionProfile::Spice3NgspiceV2);
     descriptor.compatibility_reviewed = true;
@@ -2124,7 +2147,7 @@ fn reviewed_ngspice_profile_binds_engine_defaults_and_revalidates_edits() {
         ),
         source.replace(".control; analyses", ".unsupported_card\n.control"),
     ] {
-        state.workspace.netlist_source = Some(edit);
+        state.workspace.content.netlist_source = Some(edit);
         assert!(controller.validate_manual_deck_document(&state).is_err());
         assert!(controller.pending_prepared_run.is_none());
     }
@@ -2201,11 +2224,19 @@ fn a_technology_binding_without_an_audit_receipt_blocks_preparation() {
     let mut state = runnable_state();
     // A copy keeps the binding and starts a fresh audit history, which is
     // exactly the shape the reattach contract refuses.
-    state.workspace.project = state
+    state.workspace.content.project = state
         .workspace
+        .content
         .project
         .fork_copy_at(PathBuf::from("forked").join("copy.rsproj"));
-    assert!(state.workspace.project.technology_binding().is_some());
+    assert!(
+        state
+            .workspace
+            .content
+            .project
+            .technology_binding()
+            .is_some()
+    );
     assert!(!state.project_technology_in_effect());
 
     let mut controller = SimulationController::new();
@@ -2334,7 +2365,7 @@ fn the_prepared_snapshot_carries_the_decks_emission_map() {
         .workspace
         .configuration_execution_projection(
             &state.library_manager,
-            &state.workspace.active_view,
+            &state.workspace.content.active_view,
             &state.schematic,
         )
         .expect("the authored hierarchy projects");
@@ -2454,7 +2485,7 @@ fn reviewed_spectre_header_survives_path_based_dependency_expansion() {
             Some(path),
             "export"
         ));
-        let descriptor = state.workspace.netlist_descriptor.as_mut().unwrap();
+        let descriptor = state.workspace.content.netlist_descriptor.as_mut().unwrap();
         descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spectre);
         descriptor.execution_profile = Some(profile);
         descriptor.compatibility_reviewed = true;

@@ -966,11 +966,11 @@ fn result_mapping_is_current(state: &AppState, analysis_key: AnalysisPresentatio
         return false;
     };
     analysis_key.resolve(run).is_some()
-        && run
-            .prepared_receipt()
-            .is_some_and(|receipt| receipt.project_revision() == state.workspace.project.revision())
+        && run.prepared_receipt().is_some_and(|receipt| {
+            receipt.project_revision() == state.workspace.content.project.revision()
+        })
         && state.simulation.cross_probe.is_current_for(
-            &state.workspace.active_view,
+            &state.workspace.content.active_view,
             state.schematic.topology_version(),
         )
 }

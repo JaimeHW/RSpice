@@ -50,14 +50,14 @@ pub(crate) fn selected_named_net_target(state: &AppState) -> Option<NamedNetTarg
         .workspace
         .design_projection(
             &state.library_manager,
-            &state.workspace.active_view,
+            &state.workspace.content.active_view,
             &state.schematic,
         )
         .ok()?;
     let nets = crate::simulation::netlist_gen::projection_nets(
         &state.library_manager,
         &projection,
-        &state.workspace.active_view.key(),
+        &state.workspace.content.active_view.key(),
     );
     let net = if let Some(port) = selected_port {
         let port = port.port_spec()?;

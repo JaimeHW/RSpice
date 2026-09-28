@@ -251,7 +251,13 @@ fn dependency_panel_free_height(ui: &Ui, pane_height: f32, top: f32) -> f32 {
 fn technology_binding_panel(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
     ui.spacing_mut().item_spacing.y = 0.0;
-    let binding = app.state.workspace.project.technology_binding().cloned();
+    let binding = app
+        .state
+        .workspace
+        .content
+        .project
+        .technology_binding()
+        .cloned();
     let contract = app.state.validate_project_technology_contract();
     let contract_ok = binding.is_some() && contract.is_ok();
     workspace_table_panel_header(
@@ -731,22 +737,22 @@ fn display_path(path: &std::path::Path) -> String {
 }
 
 fn dependency_manifest(state: &AppState) -> DependencyManifest {
-    let technology =
-        state
-            .workspace
-            .project
-            .technology_binding()
-            .map(|binding| TechnologyManifest {
-                label: binding.display_label(),
-                model_library: binding.model_library().to_owned(),
-                root_source: binding.root_source().display().to_string(),
-                source_count: binding.source_closure().len(),
-                dependency_edge_count: binding.source_edges().len(),
-            });
+    let technology = state
+        .workspace
+        .content
+        .project
+        .technology_binding()
+        .map(|binding| TechnologyManifest {
+            label: binding.display_label(),
+            model_library: binding.model_library().to_owned(),
+            root_source: binding.root_source().display().to_string(),
+            source_count: binding.source_closure().len(),
+            dependency_edge_count: binding.source_edges().len(),
+        });
     DependencyManifest {
         schema_version: 1,
-        project_id: state.workspace.project.id().to_string(),
-        project_revision: state.workspace.project.revision().get(),
+        project_id: state.workspace.content.project.id().to_string(),
+        project_revision: state.workspace.content.project.revision().get(),
         technology,
         resources: dependency_rows(state),
     }
@@ -768,6 +774,7 @@ fn export_dependency_manifest(ctx: &Context, state: &mut AppState) {
         "{}-dependencies.json",
         state
             .workspace
+            .content
             .project
             .display_name()
             .chars()

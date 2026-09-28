@@ -153,7 +153,7 @@ fn header_context(ui: &mut Ui, app: &RSpiceApp, snapshot: CatalogSnapshot, token
     header_chip(
         ui,
         "Project",
-        &format!("r{}", app.state.workspace.project.revision().get()),
+        &format!("r{}", app.state.workspace.content.project.revision().get()),
         tokens.color.text,
         tokens,
     );
@@ -354,7 +354,7 @@ fn resolve_symbol_reference(app: &RSpiceApp) -> Option<CellViewRef> {
         return selected;
     }
 
-    let active = &app.state.workspace.active_view;
+    let active = &app.state.workspace.content.active_view;
     let active_is_symbol = manager
         .get_library(&active.library)
         .and_then(|library| library.get_cell(&active.cell))
@@ -421,7 +421,7 @@ fn symbol_context(ui: &mut Ui, app: &RSpiceApp, projection: Option<&SymbolProjec
                         context_value(
                             ui,
                             "Project",
-                            &format!("r{}", app.state.workspace.project.revision().get()),
+                            &format!("r{}", app.state.workspace.content.project.revision().get()),
                             tokens.color.text_dim,
                             &tokens,
                         );
@@ -1278,7 +1278,7 @@ mod tests {
     fn exact_selected_symbol_wins_over_an_unrelated_active_document() {
         let app = app_with_typed_symbol();
         assert_ne!(
-            app.state.workspace.active_view,
+            app.state.workspace.content.active_view,
             CellViewRef::new("authoring", "amp", "symbol")
         );
         assert_eq!(

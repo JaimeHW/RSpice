@@ -345,7 +345,7 @@ fn crumb_width(ui: &Ui, text: &str, weight: FontWeight) -> f32 {
 fn hierarchy_breadcrumb_segments(state: &AppState) -> Vec<BreadcrumbCrumb> {
     use crate::state::SchematicHierarchyVisibility;
 
-    let active = &state.workspace.active_view;
+    let active = &state.workspace.content.active_view;
     let occurrence = state
         .workspace
         .active_occurrence()
@@ -432,7 +432,7 @@ fn occurrence_scope_banner(ui: &mut Ui, app: &RSpiceApp) {
                 egui::RichText::new(format!(
                     "Edits here apply to all {} occurrences of {}.",
                     occurrences.len(),
-                    app.state.workspace.active_view.cell
+                    app.state.workspace.content.active_view.cell
                 ))
                 .color(t.color.info),
             )
@@ -458,7 +458,7 @@ fn read_only_banner(ui: &mut Ui, app: &RSpiceApp) {
 
 fn source_document(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
-    let reference = app.state.workspace.active_view.clone();
+    let reference = app.state.workspace.content.active_view.clone();
     let contents = app
         .state
         .library_manager
@@ -616,7 +616,7 @@ mod tests {
         app.state.focus_workspace_breadcrumb(intermediate);
 
         assert_eq!(app.state.workspace.occurrence_path().to_string(), "/XAFE");
-        assert_eq!(app.state.workspace.active_view.cell, "afe_core");
+        assert_eq!(app.state.workspace.content.active_view.cell, "afe_core");
 
         let root = hierarchy_breadcrumb_segments(&app.state)
             .into_iter()
@@ -626,7 +626,7 @@ mod tests {
         app.state.focus_workspace_breadcrumb(root);
 
         assert!(app.state.workspace.occurrence_path().is_root());
-        assert_eq!(app.state.workspace.active_view.cell, "top");
+        assert_eq!(app.state.workspace.content.active_view.cell, "top");
     }
 
     /// A crumb states the instance *and* its master. Two occurrences of one
@@ -683,7 +683,7 @@ mod tests {
         };
 
         let mut app = RSpiceApp::test_instance();
-        let root = app.state.workspace.active_view.clone();
+        let root = app.state.workspace.content.active_view.clone();
         let shared = CellViewRef::new("user", "pad", "schematic");
 
         if app

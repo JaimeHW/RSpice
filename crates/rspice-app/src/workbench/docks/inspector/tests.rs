@@ -342,7 +342,7 @@ fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
     app.state.project_lifecycle.project_open = true;
     app.state.workbench.split_with_results = split;
     app.state.workbench.activate(Workspace::Results);
-    let project_revision = app.state.workspace.project.revision();
+    let project_revision = app.state.workspace.content.project.revision();
     let analysis_id = crate::product::AnalysisInstanceId::new();
     let receipt = crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
         source_domain: crate::state::AnalysisResultSourceDomain::SimulationPlan,
@@ -411,7 +411,7 @@ fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
         .wires
         .push(crate::state::Wire::new(91, vec![a, b]));
     app.state.simulation.cross_probe.update(
-        app.state.workspace.active_view.clone(),
+        app.state.workspace.content.active_view.clone(),
         std::collections::HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),
         std::collections::HashMap::from([("OUT".to_owned(), vec![a, b])]),
         std::collections::HashMap::new(),
@@ -559,6 +559,7 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
     let stale_revision = app
         .state
         .workspace
+        .content
         .project
         .revision()
         .next()
@@ -641,7 +642,7 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
 #[test]
 fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
     let mut app = result_app_with_current_out_map(false);
-    let view = app.state.workspace.active_view.clone();
+    let view = app.state.workspace.content.active_view.clone();
     let view_type = app.state.workspace.active_view_type();
     app.state.workspace.open_as_root(view.clone(), view_type);
 
@@ -736,7 +737,7 @@ fn generated_provenance_never_claims_source_mapping_without_evidence() {
 fn owned_provenance_requires_exact_saved_and_validated_bytes() {
     let mut state = AppState::default();
     state.simulation.netlist_content = "owned\n.end\n".to_owned();
-    let project_revision = state.workspace.project.revision().get();
+    let project_revision = state.workspace.content.project.revision().get();
     let digest = crate::state::content_digest(&state.simulation.netlist_content);
     state.ui.netlist.externally_saved_content_digest = Some(digest);
     state.ui.netlist.validation = Some(
@@ -754,7 +755,7 @@ fn owned_provenance_requires_exact_saved_and_validated_bytes() {
         owned_source_state(&state, digest),
         "externally synchronized · validated"
     );
-    state.workspace.netlist_source_dirty = true;
+    state.workspace.content.netlist_source_dirty = true;
     assert_eq!(
         owned_source_state(&state, digest),
         "externally synchronized · validated · project modified"

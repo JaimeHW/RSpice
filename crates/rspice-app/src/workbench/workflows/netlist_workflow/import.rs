@@ -92,7 +92,7 @@ pub(super) fn apply_imported_netlist_transaction(
     };
     let mut candidate = state.clone();
     if !initializing_netlist_project
-        && candidate.workspace.netlist_document.is_some()
+        && candidate.workspace.content.netlist_document.is_some()
         && let Err(error) =
             crate::workbench::documents::netlist_document::retain_active_top_deck(&mut candidate)
     {
@@ -113,11 +113,11 @@ pub(super) fn apply_imported_netlist_transaction(
     candidate.workbench.netlist_open_documents.clear();
     let source_digest = crate::state::content_digest(&source);
     let reopenable_import = source_path.is_some();
-    candidate.workspace.netlist_source = Some(source.clone());
-    candidate.workspace.netlist_document = Some(document.clone());
-    candidate.workspace.netlist_descriptor = Some(descriptor);
-    candidate.workspace.netlist_source_path = source_path;
-    candidate.workspace.set_netlist_source_dirty(true);
+    candidate.workspace.content.netlist_source = Some(source.clone());
+    candidate.workspace.content.netlist_document = Some(document.clone());
+    candidate.workspace.content.netlist_descriptor = Some(descriptor);
+    candidate.workspace.content.netlist_source_path = source_path;
+    candidate.workspace.content.set_netlist_source_dirty(true);
     candidate.simulation.netlist_content = source;
     candidate.ui.netlist.owned_document = Some(document);
     candidate.ui.netlist.externally_saved_content_digest =
@@ -132,7 +132,11 @@ pub(super) fn apply_imported_netlist_transaction(
     candidate
         .workbench
         .activate(crate::workbench::state::Workspace::Netlist);
-    if let Err(error) = candidate.workspace.validate_simulation_configuration() {
+    if let Err(error) = candidate
+        .workspace
+        .content
+        .validate_simulation_configuration()
+    {
         state.push_user_message(ConsoleMessage::error(format!(
             "SPICE deck import failed: {error}"
         )));
@@ -210,12 +214,14 @@ pub(super) fn apply_opened_netlist_project(
         .unwrap_or("Netlist Project");
     if candidate
         .workspace
+        .content
         .project
         .rename(proposed_name.to_owned())
         .is_err()
     {
         let _ = candidate
             .workspace
+            .content
             .project
             .rename("Netlist Project".to_owned());
     }

@@ -76,7 +76,7 @@ pub(crate) fn editor_id(state: &AppState) -> egui::Id {
         super::ActiveNetlistDocument::OwnedSource => netlist
             .owned_document
             .as_ref()
-            .or(state.workspace.netlist_document.as_ref())
+            .or(state.workspace.content.netlist_document.as_ref())
             .map(|document| document.id()),
         super::ActiveNetlistDocument::GeneratedDiff | super::ActiveNetlistDocument::RunSnapshot => {
             None
@@ -539,7 +539,7 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
     } else {
         match state.ui.netlist.active_document {
             super::ActiveNetlistDocument::OwnedSource => {
-                state.workspace.netlist_source_path.as_deref()
+                state.workspace.content.netlist_source_path.as_deref()
             }
             super::ActiveNetlistDocument::Generated => {
                 state.schematic.session.current_file.as_deref()
@@ -582,7 +582,8 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
     } else {
         None
     };
-    let include_search = crate::state::IncludeSearchChain::for_project(&state.workspace.project);
+    let include_search =
+        crate::state::IncludeSearchChain::for_project(&state.workspace.content.project);
     let (mut diagnostics, symbols) = if buffer.trim().is_empty() {
         (Vec::new(), Some(Vec::new()))
     } else {
@@ -1078,7 +1079,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         Option<super::super::language::NetlistValueHover>,
     ) {
         let mut state = AppState::default();
-        state.workspace.netlist_source = Some(HOVER_DECK.to_owned());
+        state.workspace.content.netlist_source = Some(HOVER_DECK.to_owned());
         state.simulation.netlist_content = HOVER_DECK.to_owned();
         state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
         state.ui.netlist.active_document_initialized = true;
@@ -1213,7 +1214,7 @@ M1 d g s b nch W={w} L={l*2}\n\
     fn completion_reaches_a_document_that_has_content_in_it() {
         let mut state = AppState::default();
         let source = "test deck\n.tr";
-        state.workspace.netlist_source = Some(source.to_owned());
+        state.workspace.content.netlist_source = Some(source.to_owned());
         state.simulation.netlist_content = source.to_owned();
         state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
         state.ui.netlist.active_document_initialized = true;
@@ -1976,9 +1977,9 @@ M1 d g s b nch W={w} L={l*2}\n\
             1,
             2.5,
         ));
-        assert!(state.workspace.netlist_source.is_none());
+        assert!(state.workspace.content.netlist_source.is_none());
         assert_eq!(state.simulation.netlist_content, "generated\n.op\n.end\n");
-        assert!(!state.workspace.netlist_source_dirty);
+        assert!(!state.workspace.content.netlist_source_dirty);
         assert_eq!(state.ui.netlist.revision, 4);
         assert!(state.ui.netlist.edited_lines.is_empty());
     }
@@ -1986,9 +1987,10 @@ M1 d g s b nch W={w} L={l*2}\n\
     #[test]
     fn editor_commit_updates_only_an_existing_owned_source() {
         let mut state = AppState::default();
-        state.workspace.netlist_source = Some("owned\n.op\n.end\n".to_owned());
+        state.workspace.content.netlist_source = Some("owned\n.op\n.end\n".to_owned());
         state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-        state.workspace.netlist_source_path = Some(std::path::PathBuf::from("imported/owned.cir"));
+        state.workspace.content.netlist_source_path =
+            Some(std::path::PathBuf::from("imported/owned.cir"));
         state.simulation.netlist_content = "owned\n.op\n.end\n".to_owned();
         state.ui.netlist.revision = 9;
 
@@ -1999,7 +2001,7 @@ M1 d g s b nch W={w} L={l*2}\n\
             7.25,
         ));
         assert_eq!(
-            state.workspace.netlist_source.as_deref(),
+            state.workspace.content.netlist_source.as_deref(),
             Some("owned\n.tran 1n 1u\n.end\n")
         );
         assert_eq!(
@@ -2007,10 +2009,10 @@ M1 d g s b nch W={w} L={l*2}\n\
             "owned\n.tran 1n 1u\n.end\n"
         );
         assert_eq!(
-            state.workspace.netlist_source_path.as_deref(),
+            state.workspace.content.netlist_source_path.as_deref(),
             Some(std::path::Path::new("imported/owned.cir"))
         );
-        assert!(state.workspace.netlist_source_dirty);
+        assert!(state.workspace.content.netlist_source_dirty);
         assert_eq!(state.ui.netlist.revision, 10);
         assert_eq!(state.ui.netlist.last_edit_time, 7.25);
         assert!(state.ui.netlist.edited_lines.contains(&1));

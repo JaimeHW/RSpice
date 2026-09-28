@@ -833,7 +833,7 @@ pub(super) fn placed_instances(
     };
     // `family` is `library/model`; an instance names the model alone.
     let family = row.family.rsplit('/').next().unwrap_or_default().to_owned();
-    let sheet = app.state.workspace.active_view.display_path();
+    let sheet = app.state.workspace.content.active_view.display_path();
     let mut hasher = DefaultHasher::new();
     row.reference.library.hash(&mut hasher);
     row.reference.cell.hash(&mut hasher);

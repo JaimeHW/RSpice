@@ -1318,9 +1318,11 @@ pub(super) fn draw_shelf_drag_preview(
                 &component,
                 preview_stroke,
             );
-        } else if let Some(symbol) =
-            SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers)
-                .resolve_binding(binding)
+        } else if let Some(symbol) = SymbolResolver::new(
+            &state.library_manager,
+            &state.workspace.content.schematic_buffers,
+        )
+        .resolve_binding(binding)
             && symbol.source() == ResolvedSymbolSource::Authored
             && resolved_symbol_world_bounds(&component, &symbol).is_some()
         {

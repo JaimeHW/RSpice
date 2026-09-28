@@ -19,7 +19,7 @@ fn desktop_and_compact_title_contexts_have_distinct_mockup_ownership() {
 
     assert_eq!(
         title_context_text(&app, false),
-        app.state.workspace.project.display_name()
+        app.state.workspace.content.project.display_name()
     );
     assert_eq!(title_context_text(&app, true), "top · schematic");
     assert_eq!(active_title_cell(&app), "top · schematic");

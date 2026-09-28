@@ -32,12 +32,17 @@ use super::{MAX_FINDING_ROWS, log_severity_from_drc, parse_encoded_ports};
 
 impl AppState {
     pub(crate) fn active_symbol_ports(&self) -> Vec<PortSpec> {
-        let reference = &self.workspace.active_view;
+        let reference = &self.workspace.content.active_view;
         let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");
-        if self.workspace.active_view == schematic_ref {
+        if self.workspace.content.active_view == schematic_ref {
             return self.schematic.document().interface_ports();
         }
-        if let Some(schematic) = self.workspace.schematic_buffers.get(&schematic_ref.key()) {
+        if let Some(schematic) = self
+            .workspace
+            .content
+            .schematic_buffers
+            .get(&schematic_ref.key())
+        {
             let ports = schematic.document().interface_ports();
             if !ports.is_empty() {
                 return ports;
@@ -54,7 +59,7 @@ impl AppState {
     }
 
     pub(crate) fn load_active_symbol_document(&self) -> Result<SymbolDocument, String> {
-        let reference = &self.workspace.active_view;
+        let reference = &self.workspace.content.active_view;
         let Some(view) = self
             .library_manager
             .get_library(&reference.library)
@@ -79,7 +84,7 @@ impl AppState {
         &self,
         document: &SymbolDocument,
     ) -> Result<SymbolEditorMetadata, String> {
-        let reference = &self.workspace.active_view;
+        let reference = &self.workspace.content.active_view;
         let Some(view) = self
             .library_manager
             .get_library(&reference.library)
@@ -92,7 +97,7 @@ impl AppState {
     }
 
     fn active_symbol_snapshot(&self, fallback: &SymbolDocument) -> SymbolDocumentSnapshot {
-        let reference = &self.workspace.active_view;
+        let reference = &self.workspace.content.active_view;
         let current_document = self.load_active_symbol_document().ok();
         self.library_manager
             .get_library(&reference.library)
@@ -110,7 +115,7 @@ impl AppState {
     }
 
     fn active_symbol_metadata_snapshot(&self, fallback: &SymbolDocument) -> SymbolDocumentSnapshot {
-        let reference = &self.workspace.active_view;
+        let reference = &self.workspace.content.active_view;
         self.library_manager
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
@@ -123,7 +128,7 @@ impl AppState {
         &mut self,
         snapshot: &SymbolDocumentSnapshot,
     ) -> Result<(), String> {
-        let reference = self.workspace.active_view.clone();
+        let reference = self.workspace.content.active_view.clone();
         if self.active_view_read_only() {
             return Err(self.read_only_master_message());
         }
@@ -160,7 +165,7 @@ impl AppState {
         &mut self,
         document: &SymbolDocument,
     ) -> Result<(), String> {
-        let reference = self.workspace.active_view.clone();
+        let reference = self.workspace.content.active_view.clone();
         if self.active_view_read_only() {
             return Err(self.read_only_master_message());
         }
@@ -210,7 +215,7 @@ impl AppState {
         metadata: &SymbolEditorMetadata,
         intent: &SymbolCommitIntent,
     ) -> Result<(), String> {
-        let reference = self.workspace.active_view.clone();
+        let reference = self.workspace.content.active_view.clone();
         if self.active_view_read_only() {
             return Err(self.read_only_master_message());
         }
@@ -258,7 +263,7 @@ impl AppState {
 
     /// The model definition the active symbol view is bound to, if any.
     fn active_model_bound_symbol_definition(&self) -> Option<ModelBoundSymbolDefinition> {
-        let reference = &self.workspace.active_view;
+        let reference = &self.workspace.content.active_view;
         self.library_manager
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
@@ -275,7 +280,7 @@ impl AppState {
         let definition = self.active_model_bound_symbol_definition();
         symbol_save_checks(
             definition.as_ref(),
-            &self.workspace.active_view.cell,
+            &self.workspace.content.active_view.cell,
             document,
             ports,
         )
@@ -489,7 +494,7 @@ impl AppState {
 
     pub(crate) fn run_active_symbol_pin_checks(&mut self) {
         let ports = self.active_symbol_ports();
-        let reference = self.workspace.active_view.clone();
+        let reference = self.workspace.content.active_view.clone();
         match self.load_active_symbol_document() {
             Ok(document) => {
                 let result = check_symbol_pins(&document, &ports, &reference);

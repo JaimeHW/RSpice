@@ -20,7 +20,7 @@ fn omitted_instances_do_not_reappear_as_preflight_hierarchy_blockers() {
             .workspace
             .configuration_execution_projection(
                 &state.library_manager,
-                &state.workspace.active_view,
+                &state.workspace.content.active_view,
                 &state.schematic,
             )
             .is_ok()
@@ -46,7 +46,7 @@ fn omitted_instances_do_not_reappear_as_preflight_hierarchy_blockers() {
             .workspace
             .resolve_hierarchy_with_active(
                 &state.library_manager,
-                &state.workspace.active_view,
+                &state.workspace.content.active_view,
                 &state.schematic,
             )
             .bindings

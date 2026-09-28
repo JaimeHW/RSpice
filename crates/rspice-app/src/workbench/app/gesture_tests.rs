@@ -123,6 +123,7 @@ impl Fixture {
         self.app
             .state
             .workspace
+            .content
             .open_views
             .push(OpenCellView::new(reference.clone(), ViewType::Schematic));
         self.app
@@ -293,7 +294,7 @@ fn gesture_project_and_session_snapshots_preserve_committed_geometry() {
         crate::workbench::lifecycle::project_lifecycle::snapshot(&fixture.app.state).unwrap();
     let key = fixture.app.state.workspace.active_key();
     assert_eq!(
-        project.workspace.schematic_buffers[&key]
+        project.workspace.content.schematic_buffers[&key]
             .document()
             .components[0]
             .pos,
@@ -302,7 +303,7 @@ fn gesture_project_and_session_snapshots_preserve_committed_geometry() {
     let json = serde_json::to_string(&fixture.app.state).unwrap();
     let restored: AppState = serde_json::from_str(&json).unwrap();
     assert_eq!(
-        restored.workspace.schematic_buffers[&key]
+        restored.workspace.content.schematic_buffers[&key]
             .document()
             .components[0]
             .pos,
@@ -354,7 +355,7 @@ fn gesture_native_save_acceptance_rebases_cancel_and_release_dirty_state() {
             let saved = crate::io::load_project_file(&path).unwrap();
             let key = fixture.app.state.workspace.active_key();
             assert_eq!(
-                saved.workspace.schematic_buffers[&key]
+                saved.workspace.content.schematic_buffers[&key]
                     .document()
                     .components[0]
                     .pos,
@@ -423,8 +424,8 @@ fn gesture_document_navigation_rolls_back_before_buffering_the_original() {
     let second = fixture.second_document();
     fixture.drag(DragType::MoveSelection);
     fixture.app.state.open_workspace_view(second.clone());
-    assert_eq!(fixture.app.state.workspace.active_view, second);
-    let buffer = &fixture.app.state.workspace.schematic_buffers[&original.key()];
+    assert_eq!(fixture.app.state.workspace.content.active_view, second);
+    let buffer = &fixture.app.state.workspace.content.schematic_buffers[&original.key()];
     assert_eq!(buffer.document().components[0].pos, Point::new(100, 100));
     assert!(buffer.pending_operation_id().is_none());
     fixture.app.state.open_workspace_view(original);
@@ -463,7 +464,7 @@ fn gesture_window_projection_preserves_ownership_and_inactive_save_baselines() {
 
     for _ in 0..3 {
         assert!(fixture.app.project_application_window(secondary, layout));
-        assert_eq!(fixture.app.state.workspace.active_view, second);
+        assert_eq!(fixture.app.state.workspace.content.active_view, second);
         assert!(
             !fixture
                 .app
@@ -477,7 +478,7 @@ fn gesture_window_projection_preserves_ownership_and_inactive_save_baselines() {
         let snapshot =
             crate::workbench::lifecycle::project_lifecycle::snapshot(&fixture.app.state).unwrap();
         assert_eq!(
-            snapshot.workspace.schematic_buffers[&original.key()]
+            snapshot.workspace.content.schematic_buffers[&original.key()]
                 .document()
                 .components[0]
                 .pos,
@@ -486,7 +487,7 @@ fn gesture_window_projection_preserves_ownership_and_inactive_save_baselines() {
         let restored: AppState =
             serde_json::from_str(&serde_json::to_string(&fixture.app.state).unwrap()).unwrap();
         assert_eq!(
-            restored.workspace.schematic_buffers[&original.key()]
+            restored.workspace.content.schematic_buffers[&original.key()]
                 .document()
                 .components[0]
                 .pos,
@@ -546,7 +547,7 @@ fn gesture_new_window_owner_and_owner_window_close_restore_the_old_buffer() {
         // Closing an unrelated window must not cancel the primary gesture.
         fixture.app.state.cancel_schematic_drag_in_window(secondary);
         assert!(
-            fixture.app.state.workspace.schematic_buffers[&original.key()]
+            fixture.app.state.workspace.content.schematic_buffers[&original.key()]
                 .pending_operation_id()
                 .is_some()
         );
@@ -565,7 +566,7 @@ fn gesture_new_window_owner_and_owner_window_close_restore_the_old_buffer() {
                     .schematic_drag_owned_by_context(&fixture.ctx)
             );
         }
-        let buffer = &fixture.app.state.workspace.schematic_buffers[&original.key()];
+        let buffer = &fixture.app.state.workspace.content.schematic_buffers[&original.key()];
         assert!(buffer.pending_operation_id().is_none());
         assert_eq!(buffer.document().components[0].pos, Point::new(100, 100));
     }

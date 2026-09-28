@@ -569,9 +569,15 @@ mod tests {
         let third = setup
             .create_plan("Startup and recovery")
             .expect("a second fresh root plan is created");
-        app.state.workspace.migrate_active_plan_data(root);
-        app.state.workspace.migrate_inactive_plan_data(second);
-        app.state.workspace.migrate_inactive_plan_data(third);
+        app.state.workspace.content.migrate_active_plan_data(root);
+        app.state
+            .workspace
+            .content
+            .migrate_inactive_plan_data(second);
+        app.state
+            .workspace
+            .content
+            .migrate_inactive_plan_data(third);
         app.state.sim_setup = setup;
         // `create_plan` activates what it creates, so the last one made leads
         // the projection and the other two are the retained entries.

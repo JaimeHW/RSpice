@@ -290,7 +290,7 @@ fn editing_one_model_preserves_a_qualified_sectioned_sibling_revision() {
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.project_open = true;
     app.state.model_library_manager = manager;
-    let project_revision = app.state.workspace.project.revision();
+    let project_revision = app.state.workspace.content.project.revision();
     app.state
         .workbench
         .model_editor
@@ -427,7 +427,7 @@ fn opening_a_different_model_never_replaces_an_unsaved_candidate() {
             &app.state.model_library_manager,
             "first-owned-model",
             "nch_owned",
-            app.state.workspace.project.revision(),
+            app.state.workspace.content.project.revision(),
         )
         .expect("open first candidate");
     app.state
@@ -901,7 +901,7 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
         .model_library_manager
         .create_project_model("owned-models", &definition())
         .expect("create project model fixture");
-    let starting_project_revision = app.state.workspace.project.revision();
+    let starting_project_revision = app.state.workspace.content.project.revision();
     let starting_execution_epoch = app.state.design_execution_epoch;
     app.state
         .workbench
@@ -930,7 +930,7 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
         committed_project_revision,
         starting_project_revision.next().expect("project revision")
     );
-    assert!(app.state.workspace.project_metadata_dirty);
+    assert!(app.state.workspace.content.project_metadata_dirty);
     assert_eq!(
         app.state.design_execution_epoch,
         starting_execution_epoch.wrapping_add(1)
@@ -966,7 +966,7 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
             .contains("no semantic changes")
     );
     assert_eq!(
-        app.state.workspace.project.revision(),
+        app.state.workspace.content.project.revision(),
         committed_project_revision
     );
     assert_eq!(
@@ -1014,7 +1014,7 @@ fn sectioned_editor_publishes_metadata_only_revision_without_losing_execution_se
         .model_library_manager
         .create_project_model_revision("sectioned", &revision, &ModelQualificationState::default())
         .expect("create sectioned revision");
-    let project_revision = app.state.workspace.project.revision();
+    let project_revision = app.state.workspace.content.project.revision();
     app.state
         .workbench
         .model_editor
@@ -1229,7 +1229,7 @@ fn cooperative_qualification_publishes_only_a_complete_platform_run() {
         .model_library_manager
         .create_project_model("owned-models", &definition())
         .expect("create model");
-    let revision = app.state.workspace.project.revision();
+    let revision = app.state.workspace.content.project.revision();
     app.state
         .workbench
         .model_editor
@@ -1294,7 +1294,7 @@ fn selected_vector_rerun_executes_only_its_complete_suite() {
         .model_library_manager
         .create_project_model("owned-models", &definition())
         .unwrap();
-    let revision = app.state.workspace.project.revision();
+    let revision = app.state.workspace.content.project.revision();
     app.state
         .workbench
         .model_editor
@@ -1381,7 +1381,7 @@ fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
         .model_library_manager
         .create_project_model("owned-models", &definition())
         .expect("create model");
-    let revision = app.state.workspace.project.revision();
+    let revision = app.state.workspace.content.project.revision();
     app.state
         .workbench
         .model_editor

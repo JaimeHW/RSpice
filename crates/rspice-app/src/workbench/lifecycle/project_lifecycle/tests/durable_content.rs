@@ -260,7 +260,7 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
         let saved = crate::io::load_project_file(&path).unwrap();
         assert_eq!(annotations(&saved), annotations(&edited), "{annotation:?}");
         assert!(
-            saved.workspace.schematic_buffers[&state.workspace.active_view.key()]
+            saved.workspace.content.schematic_buffers[&state.workspace.content.active_view.key()]
                 .document()
                 .components
                 .is_empty()
@@ -307,7 +307,8 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
             annotations(&snapshot(&state).unwrap())
         );
         assert_eq!(
-            all_saved.workspace.schematic_buffers[&state.workspace.active_view.key()]
+            all_saved.workspace.content.schematic_buffers
+                [&state.workspace.content.active_view.key()]
                 .document()
                 .components
                 .len(),

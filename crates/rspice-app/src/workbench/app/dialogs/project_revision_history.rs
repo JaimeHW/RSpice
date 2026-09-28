@@ -689,9 +689,10 @@ fn project_audit_rows(state: &AppState) -> Vec<ProjectAuditRow> {
         &state.schematic.document().validated_revisions,
         true,
     );
-    let active_key = state.workspace.active_view.key();
+    let active_key = state.workspace.content.active_view.key();
     let mut retained_schematics = state
         .workspace
+        .content
         .schematic_buffers
         .iter()
         .filter(|entry| entry.0.as_str() != active_key.as_str())
@@ -720,6 +721,7 @@ fn find_project_schematic_revision(
         .or_else(|| {
             state
                 .workspace
+                .content
                 .schematic_buffers
                 .values()
                 .flat_map(|schematic| schematic.document().validated_revisions.records())
@@ -815,13 +817,13 @@ fn simulation_plan_row(
 }
 
 fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, state: &AppState) {
-    if let Some(binding) = state.workspace.project.technology_binding() {
+    if let Some(binding) = state.workspace.content.project.technology_binding() {
         let digest = binding
             .source_closure()
             .iter()
             .find(|source| source.path == binding.root_source())
             .map(|source| short_text(&source.digest.to_string()))
-            .unwrap_or_else(|| state.workspace.project.revision().get().to_string());
+            .unwrap_or_else(|| state.workspace.content.project.revision().get().to_string());
         rows.push(ProjectAuditRow {
             key: format!("technology-binding:{}:{}", binding.model_library(), digest),
             kind: ProjectAuditArtifactKind::ModelOrPdk,
@@ -922,7 +924,7 @@ fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, state: &AppState) 
 }
 
 fn append_governed_rows(rows: &mut Vec<ProjectAuditRow>, state: &AppState) {
-    let management = &state.workspace.design_management;
+    let management = &state.workspace.content.design_management;
     for entry in management.annotation().journal().iter().rev() {
         rows.push(ProjectAuditRow {
             key: format!("annotation-journal:{}", entry.id()),

@@ -46,6 +46,7 @@ fn fixture() -> (RSpiceApp, u64) {
     ] {
         app.state
             .workspace
+            .content
             .stimulus_library
             .insert(held)
             .expect("insert");
@@ -73,6 +74,7 @@ fn wide_fixture() -> (RSpiceApp, u64) {
     ] {
         app.state
             .workspace
+            .content
             .stimulus_library
             .insert(held)
             .expect("insert");
@@ -98,6 +100,7 @@ fn kind_only_fixture() -> (RSpiceApp, u64) {
     ] {
         app.state
             .workspace
+            .content
             .stimulus_library
             .insert(held)
             .expect("insert");
@@ -120,7 +123,7 @@ fn instance_of(app: &RSpiceApp, id: u64) -> Component {
 fn groups_of(app: &RSpiceApp, id: u64, filter: &str, cache: &mut MiniCache) -> Vec<String> {
     ensure_minis(
         cache,
-        &app.state.workspace.stimulus_library,
+        &app.state.workspace.content.stimulus_library,
         PreviewTiming::default(),
     );
     let component = instance_of(app, id);
@@ -135,7 +138,7 @@ fn groups_of(app: &RSpiceApp, id: u64, filter: &str, cache: &mut MiniCache) -> V
 fn nets_of(app: &RSpiceApp, id: u64) -> Vec<String> {
     crate::simulation::placed_sources::placed_sources(
         &app.state.schematic,
-        &app.state.workspace.stimulus_library,
+        &app.state.workspace.content.stimulus_library,
         None,
     )
     .into_iter()
@@ -157,6 +160,7 @@ fn a_cross_family_adoption_re_places_the_instance_and_keeps_both_nets() {
     let held = app
         .state
         .workspace
+        .content
         .stimulus_library
         .get("sensor_drive")
         .cloned()
@@ -172,6 +176,7 @@ fn a_cross_family_adoption_re_places_the_instance_and_keeps_both_nets() {
     assert_eq!(
         app.state
             .workspace
+            .content
             .stimulus_library
             .provenance_state(&component),
         ProvenanceState::Adopted { revision: 1 }
@@ -199,6 +204,7 @@ fn a_same_family_adoption_is_a_copy_with_a_receipt() {
     );
     app.state
         .workspace
+        .content
         .stimulus_library
         .insert(held.clone())
         .expect("insert");
@@ -218,6 +224,7 @@ fn a_cross_kind_adoption_is_refused_rather_than_converted() {
     let held = app
         .state
         .workspace
+        .content
         .stimulus_library
         .get("leak")
         .cloned()
@@ -306,7 +313,7 @@ fn arrow_keys_step_over_the_rows_that_cannot_be_adopted() {
     let mut cache = MiniCache::new();
     ensure_minis(
         &mut cache,
-        &app.state.workspace.stimulus_library,
+        &app.state.workspace.content.stimulus_library,
         PreviewTiming::default(),
     );
     let component = instance_of(&app, id);
@@ -354,13 +361,21 @@ fn the_list_minis_are_evaluated_once_per_definition_revision() {
     let mut cache = MiniCache::new();
     let timing = PreviewTiming::default();
     assert_eq!(
-        ensure_minis(&mut cache, &app.state.workspace.stimulus_library, timing),
+        ensure_minis(
+            &mut cache,
+            &app.state.workspace.content.stimulus_library,
+            timing
+        ),
         5,
         "the first frame evaluates every definition the library holds"
     );
     for _ in 0..3 {
         assert_eq!(
-            ensure_minis(&mut cache, &app.state.workspace.stimulus_library, timing),
+            ensure_minis(
+                &mut cache,
+                &app.state.workspace.content.stimulus_library,
+                timing
+            ),
             0,
             "later frames evaluate nothing"
         );
@@ -368,6 +383,7 @@ fn the_list_minis_are_evaluated_once_per_definition_revision() {
 
     app.state
         .workspace
+        .content
         .stimulus_library
         .insert(definition(
             "ramp",
@@ -377,7 +393,11 @@ fn the_list_minis_are_evaluated_once_per_definition_revision() {
         ))
         .expect("insert");
     assert_eq!(
-        ensure_minis(&mut cache, &app.state.workspace.stimulus_library, timing),
+        ensure_minis(
+            &mut cache,
+            &app.state.workspace.content.stimulus_library,
+            timing
+        ),
         1,
         "a definition the library gained is evaluated, and only it"
     );
@@ -393,7 +413,11 @@ fn the_list_minis_are_evaluated_once_per_definition_revision() {
         )),
     );
     assert_eq!(
-        ensure_minis(&mut stale, &app.state.workspace.stimulus_library, timing),
+        ensure_minis(
+            &mut stale,
+            &app.state.workspace.content.stimulus_library,
+            timing
+        ),
         6,
         "every definition is still evaluated at the revision the library holds"
     );
@@ -413,6 +437,7 @@ fn extraction_publishes_the_instance_card_and_leaves_it_adopted() {
     let held = app
         .state
         .workspace
+        .content
         .stimulus_library
         .get("v1_pulse")
         .expect("the library holds the new definition");
@@ -424,6 +449,7 @@ fn extraction_publishes_the_instance_card_and_leaves_it_adopted() {
     assert_eq!(
         app.state
             .workspace
+            .content
             .stimulus_library
             .provenance_state(&component),
         ProvenanceState::Adopted { revision: 1 }
@@ -444,13 +470,13 @@ fn extraction_publishes_the_instance_card_and_leaves_it_adopted() {
 fn a_refused_extraction_leaves_both_the_library_and_the_instance_as_they_were() {
     let (mut app, id) = fixture();
     open_stimulus_link(&mut app.state, id, StimulusLinkMode::Extract).expect("opens");
-    let held = app.state.workspace.stimulus_library.clone();
+    let held = app.state.workspace.content.stimulus_library.clone();
 
     // A name the library already holds is refused before anything moves.
     app.state.dialogs.stimulus_link.name = "sensor_drive".to_owned();
     let refusal = commit_extraction(&mut app.state, id).expect_err("the name is taken");
     assert!(refusal.contains("already defines"), "{refusal}");
-    assert_eq!(app.state.workspace.stimulus_library, held);
+    assert_eq!(app.state.workspace.content.stimulus_library, held);
 
     // An instance transaction the schematic refuses takes the definition back
     // out, so the two halves cannot land apart.
@@ -463,12 +489,13 @@ fn a_refused_extraction_leaves_both_the_library_and_the_instance_as_they_were() 
     assert!(
         app.state
             .workspace
+            .content
             .stimulus_library
             .get("v1_pulse")
             .is_none(),
         "the definition is withdrawn when the instance edit refuses: {refusal}"
     );
-    assert_eq!(app.state.workspace.stimulus_library, held);
+    assert_eq!(app.state.workspace.content.stimulus_library, held);
     let component = instance_of(&app, id);
     assert!(component.stimulus_provenance.is_none());
 }
@@ -545,6 +572,7 @@ fn adopt_opens_on_the_definition_the_instance_already_carries() {
     let held = app
         .state
         .workspace
+        .content
         .stimulus_library
         .get("sensor_drive")
         .cloned()

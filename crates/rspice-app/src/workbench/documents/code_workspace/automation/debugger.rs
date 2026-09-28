@@ -272,9 +272,14 @@ pub(super) fn send_debug_control(
 }
 
 pub(super) fn active_automation_python_document(app: &RSpiceApp) -> Option<(uuid::Uuid, String)> {
-    let bundle = app.state.workspace.project_sources.bundle_for_owner(
-        &ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation),
-    )?;
+    let bundle = app
+        .state
+        .workspace
+        .content
+        .project_sources
+        .bundle_for_owner(&ProjectSourceOwner::code_workspace(
+            ProjectSourceLanguage::RSpiceAutomation,
+        ))?;
     let path = app
         .state
         .ui

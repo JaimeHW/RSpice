@@ -488,7 +488,7 @@ fn component_editor_context(state: &AppState) -> ComponentEditorContext {
 
     let instance_path = format!(
         "{}/{}",
-        state.workspace.active_view.display_path(),
+        state.workspace.content.active_view.display_path(),
         component.name
     );
     let library_cell = component
@@ -541,7 +541,7 @@ fn component_stimulus_context(
     if !crate::simulation::stimulus_realize::is_independent_source(component.kind) {
         return None;
     }
-    let library = &state.workspace.stimulus_library;
+    let library = &state.workspace.content.stimulus_library;
     let definition = component
         .stimulus_provenance
         .as_ref()
@@ -814,13 +814,12 @@ fn component_operating_point_context(
     component: &Component,
 ) -> Option<ComponentOperatingPointContext> {
     let run = state.simulation.active_run()?;
-    let current = run
-        .prepared_receipt()
-        .is_some_and(|receipt| receipt.project_revision() == state.workspace.project.revision())
-        && state.simulation.cross_probe.is_current_for(
-            &state.workspace.active_view,
-            state.schematic.topology_version(),
-        );
+    let current = run.prepared_receipt().is_some_and(|receipt| {
+        receipt.project_revision() == state.workspace.content.project.revision()
+    }) && state.simulation.cross_probe.is_current_for(
+        &state.workspace.content.active_view,
+        state.schematic.topology_version(),
+    );
     run.analyses.iter().find_map(|analysis| {
         analysis.device_op.as_ref().and_then(|report| {
             report
@@ -869,7 +868,7 @@ fn component_terminal_context(
 ) -> Vec<ComponentTerminalContext> {
     let projection = match state.workspace.design_projection(
         &state.library_manager,
-        &state.workspace.active_view,
+        &state.workspace.content.active_view,
         &state.schematic,
     ) {
         Ok(projection) => projection,
@@ -891,7 +890,7 @@ fn component_terminal_context(
     let nets = projection_nets(
         &state.library_manager,
         &projection,
-        &state.workspace.active_view.key(),
+        &state.workspace.content.active_view.key(),
     );
     let mut bound = HashMap::<(u64, String), String>::new();
     for net in nets.iter() {
@@ -992,7 +991,7 @@ fn component_property_session_error(state: &AppState) -> Option<String> {
                 .to_owned(),
         );
     }
-    if dialog.view_path != state.workspace.active_view.display_path() {
+    if dialog.view_path != state.workspace.content.active_view.display_path() {
         return Some(
             "The active cell/view changed while properties were open. Close and reopen the current object."
                 .to_owned(),
@@ -1084,7 +1083,11 @@ mod tests {
             crate::state::SavedOutputStreaming::StoreOnly,
         )
         .unwrap();
-        state.workspace.add_saved_output(plan, output).unwrap();
+        state
+            .workspace
+            .content
+            .add_saved_output(plan, output)
+            .unwrap();
         plan
     }
 
@@ -1208,7 +1211,13 @@ mod tests {
         assert_eq!(state.schematic.document().components[0].name, "R99");
         assert_eq!(state.schematic.document().components[0].value, "2k");
         assert_eq!(
-            state.workspace.plan_data(plan).unwrap().saved_outputs[0].source_expression,
+            state
+                .workspace
+                .content
+                .plan_data(plan)
+                .unwrap()
+                .saved_outputs[0]
+                .source_expression,
             "I(R99)"
         );
         assert!(!state.schematic.can_undo());
@@ -1219,7 +1228,13 @@ mod tests {
         assert_eq!(state.schematic.document().components[0].name, "R1");
         assert_eq!(state.schematic.document().components[0].value, "1k");
         assert_eq!(
-            state.workspace.plan_data(plan).unwrap().saved_outputs[0].source_expression,
+            state
+                .workspace
+                .content
+                .plan_data(plan)
+                .unwrap()
+                .saved_outputs[0]
+                .source_expression,
             "I(R1)"
         );
         assert!(state.project_undo_sequence().is_none());
@@ -1227,7 +1242,13 @@ mod tests {
         assert_eq!(state.schematic.document().components[0].name, "R99");
         assert_eq!(state.schematic.document().components[0].value, "2k");
         assert_eq!(
-            state.workspace.plan_data(plan).unwrap().saved_outputs[0].source_expression,
+            state
+                .workspace
+                .content
+                .plan_data(plan)
+                .unwrap()
+                .saved_outputs[0]
+                .source_expression,
             "I(R99)"
         );
     }
@@ -1238,10 +1259,15 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let mut state = state_with_resistor();
         let plan = add_current_output(&mut state);
-        state.workspace.plan_data_mut(plan).unwrap().saved_outputs[0].revision =
-            crate::product::ObjectRevision::new(u64::MAX).unwrap();
+        state
+            .workspace
+            .content
+            .plan_data_mut(plan)
+            .unwrap()
+            .saved_outputs[0]
+            .revision = crate::product::ObjectRevision::new(u64::MAX).unwrap();
         let before = crate::state::SchematicSnapshot::capture(&state.schematic.document());
-        let payloads = state.workspace.simulation_plan_payloads.clone();
+        let payloads = state.workspace.content.simulation_plan_payloads.clone();
         open_property_editor(&mut state, 44);
         state
             .tabbed_property_dialog
@@ -1256,7 +1282,7 @@ mod tests {
             render_property_dialog(ctx, &mut state);
         });
         assert!(before.is_equal_document(&state.schematic.document()));
-        assert_eq!(state.workspace.simulation_plan_payloads, payloads);
+        assert_eq!(state.workspace.content.simulation_plan_payloads, payloads);
         assert!(state.tabbed_property_dialog.open);
         assert!(state.tabbed_property_dialog.commit_error.is_some());
         assert!(state.tabbed_property_dialog.is_modified("name"));
@@ -1278,7 +1304,7 @@ mod tests {
             state.schematic.document_mut_for_test().components[0].params = source.to_owned();
             add_current_output(&mut state);
             let before = crate::state::SchematicSnapshot::capture(&state.schematic.document());
-            let payloads = state.workspace.simulation_plan_payloads.clone();
+            let payloads = state.workspace.content.simulation_plan_payloads.clone();
             open_property_editor(&mut state, 44);
             state
                 .tabbed_property_dialog
@@ -1293,7 +1319,7 @@ mod tests {
                 render_property_dialog(ctx, &mut state);
             });
             assert!(before.is_equal_document(&state.schematic.document()));
-            assert_eq!(state.workspace.simulation_plan_payloads, payloads);
+            assert_eq!(state.workspace.content.simulation_plan_payloads, payloads);
             assert!(state.tabbed_property_dialog.open);
             assert!(
                 state
@@ -1336,12 +1362,12 @@ mod tests {
         let mut state = state_with_resistor();
         open_property_editor(&mut state, 44);
         let captured_epoch = state.tabbed_property_dialog.active_schematic_epoch;
-        let original_view = state.workspace.active_view.clone();
+        let original_view = state.workspace.content.active_view.clone();
 
         state.open_workspace_view(CellViewRef::new("work", "detour", "schematic"));
         state.open_workspace_view(original_view.clone());
 
-        assert_eq!(state.workspace.active_view, original_view);
+        assert_eq!(state.workspace.content.active_view, original_view);
         assert_ne!(state.active_schematic_epoch, captured_epoch);
         assert!(component_property_session_error(&state).is_some());
     }

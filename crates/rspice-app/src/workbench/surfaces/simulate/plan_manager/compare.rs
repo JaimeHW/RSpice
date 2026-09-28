@@ -668,8 +668,14 @@ mod tests {
         let active = setup
             .create_plan("Corner characterization")
             .expect("a fresh root plan is created");
-        app.state.workspace.migrate_active_plan_data(retained);
-        app.state.workspace.migrate_inactive_plan_data(active);
+        app.state
+            .workspace
+            .content
+            .migrate_active_plan_data(retained);
+        app.state
+            .workspace
+            .content
+            .migrate_inactive_plan_data(active);
         app.state.sim_setup = setup;
 
         let records = plan_catalog_records(&app);
@@ -749,6 +755,7 @@ mod tests {
 
         app.state
             .workspace
+            .content
             .add_design_variable(
                 active,
                 crate::state::DesignVariable::new(
@@ -764,7 +771,7 @@ mod tests {
                 .expect("a valid project variable"),
             )
             .expect("the active plan takes a variable");
-        let payload = app.state.workspace.ensure_active_plan_data(active);
+        let payload = app.state.workspace.content.ensure_active_plan_data(active);
         payload.specs.push(crate::state::SpecEntry {
             measurement: ADDED_REQUIREMENT.to_owned(),
             expression: "trig v(in) val=0.9 targ v(out) val=1.8".to_owned(),
@@ -885,6 +892,7 @@ mod tests {
         let (mut app, active, retained) = app_with_two_identical_plans();
         app.state
             .workspace
+            .content
             .ensure_active_plan_data(active)
             .regression_baseline_run = Some(crate::product::RunId::new());
         let records = plan_catalog_records(&app);

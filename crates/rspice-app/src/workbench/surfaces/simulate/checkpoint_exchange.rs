@@ -57,7 +57,7 @@ struct Owner {
 impl Owner {
     fn of(state: &AppState) -> Self {
         Self {
-            project: state.workspace.project.id(),
+            project: state.workspace.content.project.id(),
             epoch: state.design_execution_epoch,
         }
     }

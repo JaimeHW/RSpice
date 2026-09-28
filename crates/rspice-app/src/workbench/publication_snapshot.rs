@@ -340,21 +340,21 @@ fn engineering_publication(
         .workspace
         .design_projection(
             &state.library_manager,
-            &state.workspace.active_view,
+            &state.workspace.content.active_view,
             &state.schematic,
         )
         .map_err(|error| PublicationBuildError::SourceResolution {
-            source: state.workspace.active_view.display_path(),
+            source: state.workspace.content.active_view.display_path(),
             reason: error.to_string(),
         })?;
     let hierarchy = HierarchySource::from_design_projection(&state.library_manager, &projection);
     let subject = projection
         .schematic_buffers()
         .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(&state.workspace.active_view.key()))
+        .find(|(key, _)| key.eq_ignore_ascii_case(&state.workspace.content.active_view.key()))
         .map(|(_, schematic)| schematic)
         .ok_or_else(|| PublicationBuildError::SourceResolution {
-            source: state.workspace.active_view.display_path(),
+            source: state.workspace.content.active_view.display_path(),
             reason: "the open view is not part of the configured design".to_owned(),
         })?;
     let design_nets = design_nets_with_hierarchy(subject, &hierarchy);
@@ -1037,7 +1037,7 @@ fn active_specs(state: &AppState) -> Vec<SpecEntry> {
         .sim_setup
         .analysis_plan
         .as_ref()
-        .map(|plan| state.workspace.active_specs(plan.id()))
+        .map(|plan| state.workspace.content.active_specs(plan.id()))
         .unwrap_or(&[])
         .to_vec()
 }
@@ -1374,7 +1374,7 @@ fn effective_deck(state: &AppState) -> Option<NetlistSection> {
         .netlist
         .last_run_buffer
         .as_deref()
-        .or(state.workspace.netlist_source.as_deref())
+        .or(state.workspace.content.netlist_source.as_deref())
         .filter(|deck| !deck.trim().is_empty())
         .or_else(|| {
             let live = state.simulation.netlist_content.as_str();

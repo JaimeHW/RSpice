@@ -68,6 +68,7 @@ use crate::workbench::workflows::export_workflow::{
 fn retain_hardcopy_receipt(app: &mut RSpiceApp, receipt: HardcopyReceipt) -> Result<(), String> {
     app.state
         .workspace
+        .content
         .record_hardcopy_receipt(receipt.clone())
         .map_err(|error| error.to_string())?;
     app.state.dialogs.hardcopy.last_receipt = Some(receipt);
@@ -661,6 +662,7 @@ fn apply_open_resolved(
     let saved = app
         .state
         .workspace
+        .content
         .hardcopy_setups
         .setup_for(resolved.authority())
         .map_err(|error| error.to_string())?
@@ -715,6 +717,7 @@ fn apply_selected_resolved(
     let saved = app
         .state
         .workspace
+        .content
         .hardcopy_setups
         .setup_for(resolved.authority())
         .map_err(|error| error.to_string())?
@@ -768,11 +771,12 @@ fn active_schematic_page_authority(
     let cell_view_key = app.state.workspace.active_key();
     let base_source_key = format!(
         "project:{}:cell-view:{cell_view_key}",
-        app.state.workspace.project.id().as_uuid()
+        app.state.workspace.content.project.id().as_uuid()
     );
     let governed_sheet = app
         .state
         .workspace
+        .content
         .design_management
         .sheet_catalog(&cell_view_key)
         .and_then(|catalog| catalog.active().map(|sheet| (catalog, sheet)));
@@ -813,6 +817,7 @@ fn validate_schematic_page_authority(
     let Some(governed) = &authority.governed_sheet else {
         let active_governed_sheet = state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&state.workspace.active_key())
             .and_then(|catalog| catalog.active_sheet_id());
@@ -830,6 +835,7 @@ fn validate_schematic_page_authority(
     }
     let catalog = state
         .workspace
+        .content
         .design_management
         .sheet_catalog(&governed.cell_view_key)
         .ok_or_else(|| {
@@ -854,6 +860,7 @@ fn authored_sheet_format(
     if let Some(governed) = &authority.governed_sheet {
         return state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&governed.cell_view_key)
             .and_then(|catalog| catalog.find(governed.sheet_id))
@@ -944,6 +951,7 @@ fn active_retained_source_selection(
             let active_sheet_suffix = app
                 .state
                 .workspace
+                .content
                 .design_management
                 .sheet_catalog(&app.state.workspace.active_key())
                 .and_then(|catalog| catalog.active_sheet_id())
@@ -1050,8 +1058,14 @@ fn metadata_for(
         crate::time_compat::unix_epoch().as_secs(),
     )?);
     let (header, provenance) = identity_lines(
-        app.state.workspace.project.display_name(),
-        &app.state.workspace.project.revision().get().to_string(),
+        app.state.workspace.content.project.display_name(),
+        &app.state
+            .workspace
+            .content
+            .project
+            .revision()
+            .get()
+            .to_string(),
         resolved.authority().display_name(),
         resolved.source_key(),
         &resolved.authority().revision().get().to_string(),
@@ -1432,7 +1446,7 @@ fn stage_print_mapping_persistence(
             Ok(StagedPrintMappingPersistence::Document)
         }
         crate::hardcopy::PrintMappingSaveScope::ProjectPrintSet(_) => {
-            let mut catalog = app.state.workspace.project_print_mappings.clone();
+            let mut catalog = app.state.workspace.content.project_print_mappings.clone();
             let receipt = catalog
                 .save(mapping.clone())
                 .map_err(|error| error.to_string())?;
@@ -1467,8 +1481,8 @@ fn commit_print_mapping_persistence(
     match staged {
         StagedPrintMappingPersistence::Document => Ok(()),
         StagedPrintMappingPersistence::Project { catalog, changed } => {
-            app.state.workspace.project_print_mappings = catalog;
-            app.state.workspace.project_print_mappings_dirty |= changed;
+            app.state.workspace.content.project_print_mappings = catalog;
+            app.state.workspace.content.project_print_mappings_dirty |= changed;
             Ok(())
         }
         StagedPrintMappingPersistence::Personal(catalog) => app
@@ -1759,15 +1773,15 @@ fn commit_authenticated_page_setup(
         validate_schematic_page_authority(&app.state, authority)?;
     }
 
-    let mut staged_setups = app.state.workspace.hardcopy_setups.clone();
+    let mut staged_setups = app.state.workspace.content.hardcopy_setups.clone();
     let outcome = staged_setups
         .save(source.authority(), pending.setup)
         .map_err(|error| error.to_string())?;
 
     commit_print_mapping_persistence(app, pending.staged_mapping)?;
-    app.state.workspace.hardcopy_setups = staged_setups;
+    app.state.workspace.content.hardcopy_setups = staged_setups;
     if outcome.disposition() != crate::hardcopy::SetupSaveDisposition::Unchanged {
-        app.state.workspace.hardcopy_setups_dirty = true;
+        app.state.workspace.content.hardcopy_setups_dirty = true;
     }
     Ok(format!(
         "Page setup {} for {}.",

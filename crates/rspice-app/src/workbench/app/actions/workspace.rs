@@ -225,7 +225,7 @@ impl AppState {
             || self.workspace.active_read_only_reference()
             || self
                 .library_manager
-                .get_library(&self.workspace.active_view.library)
+                .get_library(&self.workspace.content.active_view.library)
                 .is_some_and(|library| library.read_only)
     }
 
@@ -248,7 +248,7 @@ impl AppState {
             return "Read-only hierarchy reference - reopen the view in an editable context to modify it"
                 .to_owned();
         }
-        let library = &self.workspace.active_view.library;
+        let library = &self.workspace.content.active_view.library;
         format!("Read-only - '{library}' masters cannot be edited")
     }
 
@@ -480,6 +480,7 @@ impl AppState {
         // Move schematic buffers (the actual drawn content) to user keys.
         let legacy_keys: Vec<String> = self
             .workspace
+            .content
             .schematic_buffers
             .keys()
             .filter(|key| key.starts_with(&legacy_prefix))
@@ -491,7 +492,12 @@ impl AppState {
             };
             let tail = &key[legacy_prefix.len()..];
             let new_key = format!("{user}/{tail}");
-            if !self.workspace.schematic_buffers.contains_key(&new_key) {
+            if !self
+                .workspace
+                .content
+                .schematic_buffers
+                .contains_key(&new_key)
+            {
                 self.workspace.insert_schematic_editor(new_key, buffer);
             }
 
@@ -515,8 +521,8 @@ impl AppState {
                 reference.library = user.to_string();
             }
         };
-        remap(&mut self.workspace.active_view);
-        for open in &mut self.workspace.open_views {
+        remap(&mut self.workspace.content.active_view);
+        for open in &mut self.workspace.content.open_views {
             remap(&mut open.reference);
         }
         self.workspace.remap_occurrence_masters(&remap);
@@ -561,6 +567,7 @@ impl AppState {
         };
         if self
             .workspace
+            .content
             .schematic_buffers
             .values()
             .any(|schematic| schematic.pending_operation_id().is_some())
@@ -599,22 +606,23 @@ impl AppState {
         // synchronizes without copying its design authority.
         let before = self
             .workspace
+            .content
             .design_management
             .sheet_catalog(&active.key())
             .is_some_and(|catalog| !catalog.cross_sheet_ports().is_empty())
             .then(|| {
                 (
-                    self.workspace.design_management.clone(),
+                    self.workspace.content.design_management.clone(),
                     self.workspace
                         .clone_schematic_editor(&active.key())
                         .unwrap_or_else(|| self.schematic.clone()),
                 )
             });
-        let receipt = match self.workspace.assign_unowned_objects_to_active_sheet(
-            active,
-            &self.schematic,
-            &recorded,
-        ) {
+        let receipt = match self
+            .workspace
+            .content
+            .assign_unowned_objects_to_active_sheet(active, &self.schematic, &recorded)
+        {
             Ok(receipt) => receipt,
             Err(error) => {
                 self.push_user_message(ConsoleMessage::warning(format!(
@@ -623,9 +631,10 @@ impl AppState {
                 return;
             }
         };
-        let committed_revision = self.workspace.project.revision();
+        let committed_revision = self.workspace.content.project.revision();
         let assignments = self
             .workspace
+            .content
             .design_management
             .sheet_catalog(&active.key())
             .map(|catalog| catalog.object_assignments().clone())
@@ -635,7 +644,7 @@ impl AppState {
         let Some((before, before_schematic)) = before.filter(|_| removed_ports > 0) else {
             return;
         };
-        let after = self.workspace.design_management.clone();
+        let after = self.workspace.content.design_management.clone();
         self.record_design_management_transaction(DesignManagementHistoryEntry {
             description: "drop cross-sheet connections whose anchors were deleted".to_owned(),
             owner: active.clone(),
@@ -665,7 +674,7 @@ impl AppState {
         const GENERATED_KEY: &str = "generated";
         const PORTS_KEY: &str = "ports";
 
-        let reference = self.workspace.active_view.clone();
+        let reference = self.workspace.content.active_view.clone();
         if !reference.view.eq_ignore_ascii_case("schematic") {
             return;
         }
@@ -745,7 +754,7 @@ impl AppState {
         self.cancel_schematic_drag();
         self.workspace
             .ensure_library_model(&mut self.library_manager);
-        let reference = self.workspace.active_view.clone();
+        let reference = self.workspace.content.active_view.clone();
         let schematic_reference = self.workspace.active_schematic_reference();
         self.schematic = schematic_for_workspace(self, &schematic_reference);
         self.bump_active_schematic_epoch();
@@ -759,14 +768,14 @@ impl AppState {
     }
 
     pub(crate) fn open_workspace_view(&mut self, reference: CellViewRef) {
-        if self.workspace.active_view != reference {
+        if self.workspace.content.active_view != reference {
             if !self.commit_pending_inspector_edit() {
                 return;
             }
             self.cancel_schematic_drag();
         }
         self.sync_active_schematic_to_workspace();
-        if self.workspace.active_view == reference {
+        if self.workspace.content.active_view == reference {
             self.workbench
                 .documents
                 .activate(WorkspaceDocumentId::CellView(reference));
@@ -864,12 +873,13 @@ impl AppState {
     }
 
     fn drop_workspace_references_to_cell(&mut self, library: &str, cell: &str) -> CellRemovalScope {
-        let active_removed = self.workspace.active_view.library == library
-            && self.workspace.active_view.cell == cell;
-        let project_root_removed = self.workspace.project.root_library == library
-            && self.workspace.project.top_cell == cell;
+        let active_removed = self.workspace.content.active_view.library == library
+            && self.workspace.content.active_view.cell == cell;
+        let project_root_removed = self.workspace.content.project.root_library == library
+            && self.workspace.content.project.top_cell == cell;
         let prefix = format!("{library}/{cell}/");
         self.workspace
+            .content
             .schematic_buffers
             .retain(|key, _| !key.starts_with(&prefix));
         self.workspace
@@ -877,19 +887,23 @@ impl AppState {
             .retain(|key, _| !key.starts_with(&prefix));
         let orphaned_layouts = self
             .workspace
+            .content
             .physical_layout_documents()
             .values()
             .filter(|document| document.owner().library == library && document.owner().cell == cell)
             .map(|document| document.owner().clone())
             .collect::<Vec<_>>();
         for owner in orphaned_layouts {
-            self.workspace.remove_physical_layout_document(&owner);
+            self.workspace
+                .content
+                .remove_physical_layout_document(&owner);
         }
         self.workspace
+            .content
             .open_views
             .retain(|open| open.reference.library != library || open.reference.cell != cell);
         let libraries = &self.library_manager;
-        for schematic in self.workspace.schematic_buffers.values_mut() {
+        for schematic in self.workspace.content.schematic_buffers.values_mut() {
             schematic.revalidate_instance_bindings(libraries.catalog());
         }
         let hierarchy_pruned = self.workspace.retain_valid_occurrences(|reference| {
@@ -910,13 +924,16 @@ impl AppState {
     ) {
         self.sync_active_schematic_to_workspace();
         let deleted = CellViewRef::new(library, cell, view);
-        let active_removed = self.workspace.active_view == deleted;
-        let project_root_removed = self.workspace.project.root_library == library
-            && self.workspace.project.top_cell == cell
+        let active_removed = self.workspace.content.active_view == deleted;
+        let project_root_removed = self.workspace.content.project.root_library == library
+            && self.workspace.content.project.top_cell == cell
             && view == crate::state::workspace::DEFAULT_SCHEMATIC_VIEW;
         self.workspace.remove_schematic_editor(&deleted.key());
-        self.workspace.remove_physical_layout_document(&deleted);
         self.workspace
+            .content
+            .remove_physical_layout_document(&deleted);
+        self.workspace
+            .content
             .open_views
             .retain(|open| open.reference != deleted);
         let hierarchy_pruned = self
@@ -964,20 +981,22 @@ impl AppState {
     ) {
         let libraries = &self.library_manager;
         self.workspace
+            .content
             .open_views
             .retain(|open| reference_exists_in(libraries, &open.reference));
         self.workspace
             .retain_valid_occurrences(|reference| reference_exists_in(libraries, reference));
 
         let active_valid = !active_removed
-            && reference_exists_in(&self.library_manager, &self.workspace.active_view);
+            && reference_exists_in(&self.library_manager, &self.workspace.content.active_view);
         let fallback = if active_valid {
-            self.workspace.active_view.clone()
+            self.workspace.content.active_view.clone()
         } else {
             preferred
                 .filter(|reference| reference_exists_in(&self.library_manager, reference))
                 .or_else(|| {
                     self.workspace
+                        .content
                         .open_views
                         .iter()
                         .find(|open| reference_exists_in(&self.library_manager, &open.reference))
@@ -989,16 +1008,18 @@ impl AppState {
 
         if !self
             .workspace
+            .content
             .open_views
             .iter()
             .any(|open| open.reference == fallback)
         {
             self.workspace
+                .content
                 .open_views
                 .push(OpenCellView::new(fallback.clone(), fallback_type));
         }
         if !active_valid {
-            self.workspace.active_view = fallback.clone();
+            self.workspace.content.active_view = fallback.clone();
         }
         // Whatever the restored document was reached through did not survive
         // the prune, so it is a design root again rather than an occurrence
@@ -1029,6 +1050,7 @@ impl AppState {
             fallback.clone()
         } else {
             self.workspace
+                .content
                 .open_views
                 .iter()
                 .find(|open| {
@@ -1039,8 +1061,8 @@ impl AppState {
                 .or_else(|| first_schematic_reference_in(&self.library_manager))
                 .unwrap_or_else(|| self.create_fallback_schematic_cell())
         };
-        self.workspace.project.root_library = root.library;
-        self.workspace.project.top_cell = root.cell;
+        self.workspace.content.project.root_library = root.library;
+        self.workspace.content.project.top_cell = root.cell;
     }
 
     fn create_fallback_schematic_cell(&mut self) -> CellViewRef {
@@ -1072,10 +1094,11 @@ impl AppState {
         }
 
         let reference = CellViewRef::new(library_name, cell_name, view_name);
-        self.workspace.project.root_library = reference.library.clone();
-        self.workspace.project.top_cell = reference.cell.clone();
+        self.workspace.content.project.root_library = reference.library.clone();
+        self.workspace.content.project.top_cell = reference.cell.clone();
         if !self
             .workspace
+            .content
             .schematic_buffers
             .contains_key(&reference.key())
         {
@@ -1123,19 +1146,20 @@ impl AppState {
 
         self.sync_active_schematic_to_workspace();
 
-        let mut candidate_sources = self.workspace.project_sources.clone();
+        let mut candidate_sources = self.workspace.content.project_sources.clone();
         let copied_source_ids = candidate_sources
             .clone_cell_view_bundles(src_library, cell, dst_library, new_name)
             .map_err(|error| {
                 format!("Could not copy the cell's project source bundles: {error}")
             })?;
-        let mut candidate_design_management = self.workspace.design_management.clone();
+        let mut candidate_design_management = self.workspace.content.design_management.clone();
         let copied_sheet_catalogs = candidate_design_management
             .copy_cell_sheet_catalogs(src_library, cell, dst_library, new_name)
             .map_err(|error| format!("Could not copy the cell's sheet-catalog ownership: {error}"))?
             .copied_sheet_catalogs;
         let candidate_layouts = self
             .workspace
+            .content
             .prepare_copy_physical_layout_cell_documents(src_library, cell, dst_library, new_name)
             .map_err(|error| format!("Could not copy the cell's physical layouts: {error}"))?;
         let project_mutation = self.preflight_project_library_mutation(
@@ -1172,14 +1196,15 @@ impl AppState {
             }
         }
         self.workspace
+            .content
             .commit_prepared_physical_layout_catalog(candidate_layouts);
 
         if !copied_source_ids.is_empty() {
-            self.workspace.project_sources = candidate_sources;
-            self.workspace.project_sources_dirty = true;
+            self.workspace.content.project_sources = candidate_sources;
+            self.workspace.content.project_sources_dirty = true;
         }
         if copied_sheet_catalogs > 0 {
-            self.workspace.design_management = candidate_design_management;
+            self.workspace.content.design_management = candidate_design_management;
         }
         self.publish_project_library_mutation(project_mutation);
 
@@ -1221,19 +1246,19 @@ impl AppState {
             ));
         }
 
-        let mut candidate_sources = self.workspace.project_sources.clone();
+        let mut candidate_sources = self.workspace.content.project_sources.clone();
         let renamed_source_ids = candidate_sources
             .rename_cell_view_bundles(library, cell, new_name)
             .map_err(|error| {
                 format!("Could not move the cell's project source ownership: {error}")
             })?;
-        let mut candidate_configurations = self.workspace.configuration_sets.clone();
+        let mut candidate_configurations = self.workspace.content.configuration_sets.clone();
         let renamed_configuration_roots = candidate_configurations
             .rename_cell_roots(library, cell, new_name)
             .map_err(|error| {
                 format!("Could not move the cell's configuration-set roots: {error}")
             })?;
-        let mut candidate_design_management = self.workspace.design_management.clone();
+        let mut candidate_design_management = self.workspace.content.design_management.clone();
         let design_management_receipt = candidate_design_management
             .rename_cell_sheet_catalogs(library, cell, new_name)
             .map_err(|error| {
@@ -1244,6 +1269,7 @@ impl AppState {
             || design_management_receipt.remapped_annotation_objects > 0;
         let candidate_layouts = self
             .workspace
+            .content
             .prepare_rename_physical_layout_cell_documents(library, cell, new_name)
             .map_err(|error| format!("Could not rename the cell's physical layouts: {error}"))?;
         let project_mutation = self.preflight_project_library_mutation(
@@ -1266,6 +1292,7 @@ impl AppState {
         let old_prefix = format!("{library}/{cell}/");
         let moved_keys: Vec<String> = self
             .workspace
+            .content
             .schematic_buffers
             .keys()
             .filter(|key| key.starts_with(&old_prefix))
@@ -1279,6 +1306,7 @@ impl AppState {
             }
         }
         self.workspace
+            .content
             .commit_prepared_physical_layout_catalog(candidate_layouts);
 
         // Open references follow.
@@ -1287,8 +1315,8 @@ impl AppState {
                 reference.cell = new_name.to_owned();
             }
         };
-        remap_ref(&mut self.workspace.active_view);
-        for open in &mut self.workspace.open_views {
+        remap_ref(&mut self.workspace.content.active_view);
+        for open in &mut self.workspace.content.open_views {
             remap_ref(&mut open.reference);
         }
         self.workspace.remap_occurrence_masters(&remap_ref);
@@ -1303,8 +1331,8 @@ impl AppState {
         remap_schematic(&mut self.schematic);
 
         if !renamed_source_ids.is_empty() {
-            self.workspace.project_sources = candidate_sources;
-            self.workspace.project_sources_dirty = true;
+            self.workspace.content.project_sources = candidate_sources;
+            self.workspace.content.project_sources_dirty = true;
             let transient_uses_renamed = self
                 .ui
                 .code_workspace
@@ -1324,17 +1352,18 @@ impl AppState {
             }
         }
         if renamed_configuration_roots > 0 {
-            self.workspace.configuration_sets = candidate_configurations;
-            self.workspace.project_metadata_dirty = true;
+            self.workspace.content.configuration_sets = candidate_configurations;
+            self.workspace.content.project_metadata_dirty = true;
         }
         if design_management_changed {
-            self.workspace.design_management = candidate_design_management;
+            self.workspace.content.design_management = candidate_design_management;
         }
         // The project root names its top cell by name. Leaving the old name
         // behind makes `ProjectFile::validate` reject every later save.
-        if self.workspace.project.root_library == library && self.workspace.project.top_cell == cell
+        if self.workspace.content.project.root_library == library
+            && self.workspace.content.project.top_cell == cell
         {
-            self.workspace.project.top_cell = new_name.to_owned();
+            self.workspace.content.project.top_cell = new_name.to_owned();
         }
         self.publish_project_library_mutation(project_mutation);
 
@@ -1395,22 +1424,23 @@ impl AppState {
         }
         let candidate_layouts = self
             .workspace
+            .content
             .prepare_rename_physical_layout_library_documents(library, new_name)
             .map_err(|error| format!("Could not rename the library's physical layouts: {error}"))?;
 
-        let mut candidate_configurations = self.workspace.configuration_sets.clone();
+        let mut candidate_configurations = self.workspace.content.configuration_sets.clone();
         let renamed_configuration_roots = candidate_configurations
             .rename_library_roots(library, new_name)
             .map_err(|error| {
                 format!("Could not move the library's configuration-set roots: {error}")
             })?;
-        let mut candidate_sources = self.workspace.project_sources.clone();
+        let mut candidate_sources = self.workspace.content.project_sources.clone();
         let renamed_source_ids = candidate_sources
             .rename_library_bundles(library, new_name)
             .map_err(|error| {
                 format!("Could not move the library's project source ownership: {error}")
             })?;
-        let mut candidate_design_management = self.workspace.design_management.clone();
+        let mut candidate_design_management = self.workspace.content.design_management.clone();
         let design_management_receipt = candidate_design_management
             .rename_library_sheet_catalogs(library, new_name)
             .map_err(|error| {
@@ -1433,6 +1463,7 @@ impl AppState {
         let old_prefix = format!("{library}/");
         let moved_keys: Vec<String> = self
             .workspace
+            .content
             .schematic_buffers
             .keys()
             .filter(|key| key.starts_with(&old_prefix))
@@ -1446,6 +1477,7 @@ impl AppState {
             }
         }
         self.workspace
+            .content
             .commit_prepared_physical_layout_catalog(candidate_layouts);
 
         let remap_ref = |reference: &mut CellViewRef| {
@@ -1453,8 +1485,8 @@ impl AppState {
                 reference.library = new_name.to_owned();
             }
         };
-        remap_ref(&mut self.workspace.active_view);
-        for open in &mut self.workspace.open_views {
+        remap_ref(&mut self.workspace.content.active_view);
+        for open in &mut self.workspace.content.open_views {
             remap_ref(&mut open.reference);
         }
         self.workspace.remap_occurrence_masters(&remap_ref);
@@ -1465,17 +1497,17 @@ impl AppState {
 
         self.commit_renamed_project_sources(candidate_sources, &renamed_source_ids);
         if renamed_configuration_roots > 0 {
-            self.workspace.configuration_sets = candidate_configurations;
-            self.workspace.project_metadata_dirty = true;
+            self.workspace.content.configuration_sets = candidate_configurations;
+            self.workspace.content.project_metadata_dirty = true;
         }
         if design_management_receipt.affected_sheet_catalogs > 0
             || design_management_receipt.remapped_variant_objects > 0
             || design_management_receipt.remapped_annotation_objects > 0
         {
-            self.workspace.design_management = candidate_design_management;
+            self.workspace.content.design_management = candidate_design_management;
         }
-        if self.workspace.project.root_library == library {
-            self.workspace.project.root_library = new_name.to_owned();
+        if self.workspace.content.project.root_library == library {
+            self.workspace.content.project.root_library = new_name.to_owned();
         }
         self.publish_project_library_mutation(project_mutation);
 
@@ -1500,7 +1532,7 @@ impl AppState {
             })
             .unwrap_or_default();
 
-        let mut candidate_design_management = self.workspace.design_management.clone();
+        let mut candidate_design_management = self.workspace.content.design_management.clone();
         let mut design_management_changed = false;
         for cell in &cells {
             let receipt = candidate_design_management
@@ -1523,17 +1555,20 @@ impl AppState {
             .remove_library(library)
             .ok_or_else(|| format!("Library '{library}' disappeared during the deletion"))?;
         if design_management_changed {
-            self.workspace.design_management = candidate_design_management;
+            self.workspace.content.design_management = candidate_design_management;
         }
         let owned_layouts = self
             .workspace
+            .content
             .physical_layout_documents()
             .values()
             .filter(|document| document.owner().library == library)
             .map(|document| document.owner().clone())
             .collect::<Vec<_>>();
         for owner in &owned_layouts {
-            self.workspace.remove_physical_layout_document(owner);
+            self.workspace
+                .content
+                .remove_physical_layout_document(owner);
         }
         self.prune_workspace_after_library_deleted(library);
         self.publish_project_library_mutation(project_mutation);
@@ -1558,10 +1593,10 @@ impl AppState {
                 "Library '{library}' is read-only; it cannot be deleted"
             ));
         }
-        if self.workspace.project.root_library == library {
+        if self.workspace.content.project.root_library == library {
             return Err(format!(
                 "Library '{library}' holds the project root cell '{}'. Repoint the project root before deleting it.",
-                self.workspace.project.top_cell
+                self.workspace.content.project.top_cell
             ));
         }
         let scope = format!("library '{library}'");
@@ -1578,6 +1613,7 @@ impl AppState {
         // one of its masters would be left dangling, so that one blocks.
         let foreign_masters = self
             .workspace
+            .content
             .physical_layout_documents()
             .values()
             .filter(|document| document.owner().library != library)
@@ -1639,22 +1675,23 @@ impl AppState {
         }
         let candidate_layouts = self
             .workspace
+            .content
             .prepare_rename_physical_layout_view_documents(library, cell, view, new_name)
             .map_err(|error| format!("Could not rename the view's physical layouts: {error}"))?;
 
-        let mut candidate_configurations = self.workspace.configuration_sets.clone();
+        let mut candidate_configurations = self.workspace.content.configuration_sets.clone();
         let renamed_configuration_roots = candidate_configurations
             .rename_view_roots(library, cell, view, new_name)
             .map_err(|error| {
                 format!("Could not move the view's configuration-set roots: {error}")
             })?;
-        let mut candidate_sources = self.workspace.project_sources.clone();
+        let mut candidate_sources = self.workspace.content.project_sources.clone();
         let renamed_source_ids = candidate_sources
             .rename_view_bundles(library, cell, view, new_name)
             .map_err(|error| {
                 format!("Could not move the view's project source ownership: {error}")
             })?;
-        let mut candidate_design_management = self.workspace.design_management.clone();
+        let mut candidate_design_management = self.workspace.content.design_management.clone();
         let design_management_receipt = candidate_design_management
             .rename_view_sheet_catalogs(library, cell, view, new_name)
             .map_err(|error| {
@@ -1685,6 +1722,7 @@ impl AppState {
                 .insert_schematic_editor(new_reference.key(), buffer);
         }
         self.workspace
+            .content
             .commit_prepared_physical_layout_catalog(candidate_layouts);
 
         let remap_ref = |reference: &mut CellViewRef| {
@@ -1692,8 +1730,8 @@ impl AppState {
                 *reference = new_reference.clone();
             }
         };
-        remap_ref(&mut self.workspace.active_view);
-        for open in &mut self.workspace.open_views {
+        remap_ref(&mut self.workspace.content.active_view);
+        for open in &mut self.workspace.content.open_views {
             remap_ref(&mut open.reference);
         }
         self.workspace.remap_occurrence_masters(&remap_ref);
@@ -1704,13 +1742,13 @@ impl AppState {
 
         self.commit_renamed_project_sources(candidate_sources, &renamed_source_ids);
         if renamed_configuration_roots > 0 {
-            self.workspace.configuration_sets = candidate_configurations;
-            self.workspace.project_metadata_dirty = true;
+            self.workspace.content.configuration_sets = candidate_configurations;
+            self.workspace.content.project_metadata_dirty = true;
         }
         if design_management_receipt.affected_sheet_catalogs > 0
             || design_management_receipt.remapped_annotation_objects > 0
         {
-            self.workspace.design_management = candidate_design_management;
+            self.workspace.content.design_management = candidate_design_management;
         }
         self.publish_project_library_mutation(project_mutation);
 
@@ -1758,13 +1796,14 @@ impl AppState {
                 })
                 .count()
         };
-        let live = if self.workspace.active_view.library == library {
+        let live = if self.workspace.content.active_view.library == library {
             0
         } else {
             count(self.schematic.document())
         };
         live + self
             .workspace
+            .content
             .schematic_buffers
             .iter()
             .filter(|(key, _)| {
@@ -1784,8 +1823,8 @@ impl AppState {
         if renamed.is_empty() {
             return;
         }
-        self.workspace.project_sources = candidate;
-        self.workspace.project_sources_dirty = true;
+        self.workspace.content.project_sources = candidate;
+        self.workspace.content.project_sources_dirty = true;
         let transient_uses_renamed = self
             .ui
             .code_workspace
@@ -1807,15 +1846,17 @@ impl AppState {
 
     fn prune_workspace_after_library_deleted(&mut self, library: &str) {
         self.sync_active_schematic_to_workspace();
-        let active_removed = self.workspace.active_view.library == library;
+        let active_removed = self.workspace.content.active_view.library == library;
         let prefix = format!("{library}/");
         self.workspace
+            .content
             .schematic_buffers
             .retain(|key, _| !key.starts_with(&prefix));
         self.workspace
             .schematic_sessions
             .retain(|key, _| !key.starts_with(&prefix));
         self.workspace
+            .content
             .open_views
             .retain(|open| open.reference.library != library);
         let hierarchy_pruned = self
@@ -2070,7 +2111,7 @@ fn selected_instance_generated_line(
         .and_then(crate::state::NetlistDocument::generated_artifact)
         .ok_or(NO_DECK)?;
     let identity = crate::state::GeneratedSourceMapEntry::component_identity_for(
-        &state.workspace.active_view.key(),
+        &state.workspace.content.active_view.key(),
         component_id,
     );
     let line = artifact
@@ -2123,6 +2164,7 @@ fn require_no_configuration_roots(
 ) -> Result<(), String> {
     let names = state
         .workspace
+        .content
         .configuration_sets
         .configurations()
         .iter()
@@ -2147,6 +2189,7 @@ fn require_no_configuration_roots(
 fn require_no_owned_sources(state: &AppState, library: &str) -> Result<(), String> {
     let bundles = state
         .workspace
+        .content
         .project_sources
         .iter_bundles()
         .filter(|bundle| {

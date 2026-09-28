@@ -59,7 +59,7 @@ pub(super) fn library(ui: &mut Ui, app: &mut RSpiceApp) {
     let ctx = ui.ctx().clone();
     ensure_valid_selection(
         &mut app.state.library_manager,
-        &app.state.workspace.active_view,
+        &app.state.workspace.content.active_view,
     );
     library_context(ui, &mut app.state);
 
@@ -578,7 +578,7 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
                     let rollback = Button::new("Rollback\u{2026}")
                         .enabled(
                             governance_write_allowed
-                                && !state.workspace.project.library_publications().is_empty(),
+                                && !state.workspace.content.project.library_publications().is_empty(),
                         )
                         .show(ui)
                         .on_disabled_hover_text(if state.simulation.has_active_execution() {
@@ -894,14 +894,14 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
 
 fn library_view_usage(state: &AppState, reference: &CellViewRef) -> Vec<String> {
     let mut consumers = Vec::new();
-    let active_key = state.workspace.active_view.key();
+    let active_key = state.workspace.content.active_view.key();
     collect_library_view_usage(
         &state.schematic,
-        &state.workspace.active_view.display_path(),
+        &state.workspace.content.active_view.display_path(),
         reference,
         &mut consumers,
     );
-    for (key, schematic) in &state.workspace.schematic_buffers {
+    for (key, schematic) in &state.workspace.content.schematic_buffers {
         if key == &active_key {
             continue;
         }
@@ -979,8 +979,8 @@ fn show_library_audit_history(ctx: &Context, state: &AppState) {
         return;
     }
 
-    let receipts = state.workspace.project.library_mutation_audit();
-    let publications = state.workspace.project.library_publications();
+    let receipts = state.workspace.content.project.library_mutation_audit();
+    let publications = state.workspace.content.project.library_publications();
     let description = format!(
         "{} immutable mutation receipt{} and {} content-addressed publication{}.",
         receipts.len(),
@@ -996,7 +996,7 @@ fn show_library_audit_history(ctx: &Context, state: &AppState) {
                 property_row(
                     ui,
                     "Project revision",
-                    &state.workspace.project.revision().get().to_string(),
+                    &state.workspace.content.project.revision().get().to_string(),
                 );
                 property_row(
                     ui,
@@ -1301,7 +1301,7 @@ mod tests {
         manager.selected_cell = Some("missing".to_owned());
         manager.selected_view = Some("missing".to_owned());
 
-        ensure_valid_selection(&mut manager, &app.state.workspace.active_view);
+        ensure_valid_selection(&mut manager, &app.state.workspace.content.active_view);
 
         assert!(manager.current_library().is_some());
         assert!(manager.current_cell().is_some());
@@ -1315,7 +1315,7 @@ mod tests {
         assert_eq!(icon_for_view(ViewType::Config), WorkbenchIcon::Sliders);
 
         let mut app = RSpiceApp::test_instance();
-        let reference = app.state.workspace.active_view.clone();
+        let reference = app.state.workspace.content.active_view.clone();
         apply_library_intent(
             &egui::Context::default(),
             &mut app,
@@ -1327,7 +1327,7 @@ mod tests {
     #[test]
     fn configuration_views_route_to_the_project_configuration_page() {
         let mut app = RSpiceApp::test_instance();
-        let reference = app.state.workspace.active_view.clone();
+        let reference = app.state.workspace.content.active_view.clone();
         apply_library_intent(
             &egui::Context::default(),
             &mut app,
@@ -1489,7 +1489,7 @@ mod tests {
     #[test]
     fn where_used_report_reads_live_and_inactive_schematic_buffers() {
         let mut app = RSpiceApp::test_instance();
-        let reference = app.state.workspace.active_view.clone();
+        let reference = app.state.workspace.content.active_view.clone();
         let binding = crate::state::LibraryCellInstance::new(
             &reference.library,
             &reference.cell,
@@ -1572,7 +1572,7 @@ mod tests {
         };
 
         let mut app = RSpiceApp::test_instance();
-        let project_revision = app.state.workspace.project.revision();
+        let project_revision = app.state.workspace.content.project.revision();
         let library_revision = app.state.library_manager.revision();
         let library = app
             .state
@@ -1583,7 +1583,7 @@ mod tests {
             .name
             .clone();
         let snapshot = ProjectLibraryLockSnapshot::try_new(
-            app.state.workspace.project.id(),
+            app.state.workspace.content.project.id(),
             1,
             project_revision,
             library_revision,
@@ -1612,7 +1612,10 @@ mod tests {
             .expect_err("foreign library lock must block the mutation");
 
         assert!(error.contains("locked by other-engineer@example.test"));
-        assert_eq!(app.state.workspace.project.revision(), project_revision);
+        assert_eq!(
+            app.state.workspace.content.project.revision(),
+            project_revision
+        );
         assert_eq!(app.state.library_manager.revision(), library_revision);
     }
 
@@ -1621,8 +1624,8 @@ mod tests {
         use sha2::Digest as _;
 
         let mut app = RSpiceApp::test_instance();
-        let project_id = app.state.workspace.project.id();
-        let project_revision = app.state.workspace.project.revision();
+        let project_id = app.state.workspace.content.project.id();
+        let project_revision = app.state.workspace.content.project.revision();
         let library_revision = app.state.library_manager.revision();
 
         let candidate = app
@@ -1653,16 +1656,26 @@ mod tests {
         let text = std::str::from_utf8(&bytes).expect("publication is UTF-8");
         let artifact =
             crate::io::project_io::load_project_text(text, None).expect("artifact validates");
-        assert_eq!(artifact.workspace.project.id(), project_id);
-        assert_eq!(artifact.workspace.project.revision(), project_revision);
-        assert!(artifact.workspace.project.library_publications().is_empty());
+        assert_eq!(artifact.workspace.content.project.id(), project_id);
         assert_eq!(
-            app.state.workspace.project.library_publications(),
+            artifact.workspace.content.project.revision(),
+            project_revision
+        );
+        assert!(
+            artifact
+                .workspace
+                .content
+                .project
+                .library_publications()
+                .is_empty()
+        );
+        assert_eq!(
+            app.state.workspace.content.project.library_publications(),
             [receipt.clone()]
         );
-        assert!(app.state.workspace.project_metadata_dirty);
-        let mut tampered_descriptor =
-            serde_json::to_value(&app.state.workspace.project).expect("descriptor serializes");
+        assert!(app.state.workspace.content.project_metadata_dirty);
+        let mut tampered_descriptor = serde_json::to_value(&app.state.workspace.content.project)
+            .expect("descriptor serializes");
         tampered_descriptor["library_publications"][0]["reason"] =
             serde_json::json!("silently changed reason");
         let tampered_descriptor: crate::state::ProjectDescriptor =
@@ -1705,7 +1718,7 @@ mod tests {
         let mut tampered = bytes.clone();
         let last = tampered.last_mut().expect("nonempty publication artifact");
         *last ^= 0x01;
-        let revision_before_rejection = app.state.workspace.project.revision();
+        let revision_before_rejection = app.state.workspace.content.project.revision();
         let tampered_result = app.rollback_project_library_publication(
             receipt.publication_id(),
             &tampered,
@@ -1715,7 +1728,7 @@ mod tests {
         );
         assert!(tampered_result.is_err());
         assert_eq!(
-            app.state.workspace.project.revision(),
+            app.state.workspace.content.project.revision(),
             revision_before_rejection
         );
         assert!(
@@ -1743,14 +1756,14 @@ mod tests {
                 .is_none()
         );
         assert_eq!(
-            app.state.workspace.project.library_publications(),
+            app.state.workspace.content.project.library_publications(),
             [receipt.clone()],
             "rollback retains immutable publication lineage"
         );
         assert!(matches!(
             app.state
                 .workspace
-                .project
+                .content.project
                 .library_mutation_audit()
                 .last()
                 .map(|entry| entry.mutation()),
@@ -1766,7 +1779,7 @@ mod tests {
                 && reason == "Restore the qualified handoff"
         ));
 
-        let revision_after_first = app.state.workspace.project.revision();
+        let revision_after_first = app.state.workspace.content.project.revision();
         let duplicate = app.prepare_project_library_publication(
             "ANALOG-CORE-1.0.0",
             "release-engineer@example.test",
@@ -1775,7 +1788,7 @@ mod tests {
         );
         assert!(duplicate.is_err());
         assert_eq!(
-            app.state.workspace.project.revision(),
+            app.state.workspace.content.project.revision(),
             revision_after_first,
             "rejected publication must not partially advance project state"
         );
@@ -1815,7 +1828,7 @@ mod tests {
             .add_cell(crate::state::Cell::new("intervening_change"));
         app.state
             .publish_project_library_mutation(prepared_mutation);
-        let revision_after_mutation = app.state.workspace.project.revision();
+        let revision_after_mutation = app.state.workspace.content.project.revision();
 
         let error = app
             .commit_project_library_publication(candidate)
@@ -1825,12 +1838,13 @@ mod tests {
         assert!(
             app.state
                 .workspace
+                .content
                 .project
                 .library_publications()
                 .is_empty()
         );
         assert_eq!(
-            app.state.workspace.project.revision(),
+            app.state.workspace.content.project.revision(),
             revision_after_mutation
         );
     }

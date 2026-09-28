@@ -240,10 +240,10 @@ impl ProjectFile {
         execution_context: ProjectExecutionContext,
     ) -> Self {
         if let Some(plan) = &execution_context.simulation_plan.analysis_plan {
-            workspace.migrate_active_plan_data(plan.id());
+            workspace.content.migrate_active_plan_data(plan.id());
         }
         for plan in execution_context.simulation_plan.inactive_plans() {
-            workspace.migrate_inactive_plan_data(plan.id());
+            workspace.content.migrate_inactive_plan_data(plan.id());
         }
         Self {
             version: ProjectVersion::current(),
@@ -275,10 +275,12 @@ impl ProjectFile {
             });
         }
         self.workspace
+            .content
             .project
             .validate()
             .map_err(|error| ProjectIoError::InvalidData(error.to_string()))?;
         self.workspace
+            .content
             .validate_simulation_configuration()
             .map_err(|error| ProjectIoError::InvalidData(error.to_string()))?;
         self.validate_result_expression_groups()?;
@@ -294,7 +296,7 @@ impl ProjectFile {
                 ProjectIoError::InvalidData(format!("execution context is invalid: {error}"))
             })?;
         }
-        if let Some(binding) = self.workspace.project.technology_binding() {
+        if let Some(binding) = self.workspace.content.project.technology_binding() {
             let context = self.execution_context.as_ref().ok_or_else(|| {
                 ProjectIoError::InvalidData(
                     "attached technology requires an authoritative execution context".to_owned(),
@@ -382,7 +384,7 @@ impl ProjectFile {
     fn validate_schematic_instance_masters(&mut self) -> Vec<String> {
         let mut repairs = Vec::new();
         let mut missing = Vec::new();
-        for schematic in self.workspace.schematic_buffers.values_mut() {
+        for schematic in self.workspace.content.schematic_buffers.values_mut() {
             missing.extend(schematic.revalidate_instance_bindings(self.libraries.catalog()));
         }
         missing.sort_unstable();
@@ -416,6 +418,7 @@ impl ProjectFile {
         // of a hash order that changes between runs.
         let mut owners = self
             .workspace
+            .content
             .schematic_buffers
             .keys()
             .cloned()
@@ -429,7 +432,7 @@ impl ProjectFile {
         let mut edges = owners
             .iter()
             .map(|key| {
-                let mut masters = self.workspace.schematic_buffers[key]
+                let mut masters = self.workspace.content.schematic_buffers[key]
                     .document()
                     .components
                     .iter()
@@ -475,10 +478,11 @@ impl ProjectFile {
         let mut hierarchy = HashMap::<String, Vec<String>>::new();
         let signed_pin = self
             .workspace
+            .content
             .project
             .technology_binding()
             .and_then(crate::state::ProjectTechnologyBinding::signed_package);
-        for (key, document) in self.workspace.physical_layout_documents() {
+        for (key, document) in self.workspace.content.physical_layout_documents() {
             let mut masters = Vec::with_capacity(document.instances().len());
             let owner = view_index.get_exact(key).ok_or_else(|| {
                 ProjectIoError::InvalidData(format!(
@@ -520,6 +524,7 @@ impl ProjectFile {
                 }
                 if self
                     .workspace
+                    .content
                     .physical_layout_document(&instance.master)
                     .is_none()
                 {
@@ -556,7 +561,7 @@ impl ProjectFile {
             })
         };
 
-        for record in &self.workspace.simulation_plan_payloads {
+        for record in &self.workspace.content.simulation_plan_payloads {
             let plan_id = record.plan_id;
             let plan = find_plan(plan_id).ok_or_else(|| {
                 ProjectIoError::InvalidData(format!(
@@ -626,13 +631,13 @@ impl ProjectFile {
                 .map(crate::simulation::plan::SimulationPlan::id)
                 .chain(setup.inactive_plans().iter().map(|plan| plan.id()));
             for plan_id in plan_ids {
-                if self.workspace.plan_data(plan_id).is_none() {
+                if self.workspace.content.plan_data(plan_id).is_none() {
                     return Err(ProjectIoError::InvalidData(format!(
                         "simulation plan {plan_id} has no plan-owned configuration payload"
                     )));
                 }
             }
-        } else if !self.workspace.simulation_plan_payloads.is_empty() {
+        } else if !self.workspace.content.simulation_plan_payloads.is_empty() {
             return Err(ProjectIoError::InvalidData(
                 "simulation plan payloads are present without an execution context".to_owned(),
             ));
@@ -641,7 +646,7 @@ impl ProjectFile {
     }
 
     fn validate_regression_baseline_eligibility(&self) -> Result<(), String> {
-        for record in &self.workspace.simulation_plan_payloads {
+        for record in &self.workspace.content.simulation_plan_payloads {
             let Some(run_id) = record.payload.regression_baseline_run else {
                 continue;
             };
@@ -697,6 +702,7 @@ impl ProjectFile {
     fn pin_regression_baseline_references(&mut self) -> usize {
         let baseline_ids = self
             .workspace
+            .content
             .simulation_plan_payloads
             .iter()
             .filter_map(|record| record.payload.regression_baseline_run)
@@ -717,7 +723,7 @@ impl ProjectFile {
 
     fn clear_regression_baseline_references(&mut self) -> usize {
         let mut cleared = 0;
-        for record in &mut self.workspace.simulation_plan_payloads {
+        for record in &mut self.workspace.content.simulation_plan_payloads {
             if record.payload.regression_baseline_run.take().is_some() {
                 cleared += 1;
             }
@@ -739,7 +745,7 @@ impl ProjectFile {
             self.execution_context
                 .as_ref()
                 .map(|context| &context.simulation_plan),
-            self.workspace.project.revision(),
+            self.workspace.content.project.revision(),
         )
     }
 
@@ -1048,7 +1054,7 @@ impl ProjectFile {
         view_index: &ValidatedLibraryIndex,
     ) -> Result<(), ProjectIoError> {
         let mut owned_veriloga_views = HashSet::new();
-        for bundle in self.workspace.project_sources.iter_bundles() {
+        for bundle in self.workspace.content.project_sources.iter_bundles() {
             let crate::state::ProjectSourceOwner::CellView { reference } = bundle.owner() else {
                 continue;
             };
@@ -1108,33 +1114,35 @@ impl ProjectFile {
 
         validate_lcv_name(
             "workspace.project.root_library",
-            &self.workspace.project.root_library,
+            &self.workspace.content.project.root_library,
         )?;
         validate_lcv_name(
             "workspace.project.top_cell",
-            &self.workspace.project.top_cell,
+            &self.workspace.content.project.top_cell,
         )?;
         let root_library = self
             .libraries
-            .get_library(&self.workspace.project.root_library)
+            .get_library(&self.workspace.content.project.root_library)
             .ok_or_else(|| {
                 ProjectIoError::InvalidData(format!(
                     "workspace.project.root_library '{}' was not found",
-                    self.workspace.project.root_library
+                    self.workspace.content.project.root_library
                 ))
             })?;
         if root_library
-            .get_cell(&self.workspace.project.top_cell)
+            .get_cell(&self.workspace.content.project.top_cell)
             .is_none()
         {
             return Err(ProjectIoError::InvalidData(format!(
                 "workspace.project.top_cell '{}' was not found in root library '{}'",
-                self.workspace.project.top_cell, self.workspace.project.root_library
+                self.workspace.content.project.top_cell,
+                self.workspace.content.project.root_library
             )));
         }
 
         for (index, configuration) in self
             .workspace
+            .content
             .configuration_sets
             .configurations()
             .iter()
@@ -1155,13 +1163,16 @@ impl ProjectFile {
             required_schematic_buffers.insert(configuration.root().key());
         }
 
-        let active_view_type =
-            self.validate_library_reference("workspace.active_view", &self.workspace.active_view)?;
+        let active_view_type = self.validate_library_reference(
+            "workspace.active_view",
+            &self.workspace.content.active_view,
+        )?;
         if !self
             .workspace
+            .content
             .open_views
             .iter()
-            .any(|open_view| open_view.reference == self.workspace.active_view)
+            .any(|open_view| open_view.reference == self.workspace.content.active_view)
         {
             return Err(ProjectIoError::InvalidData(format!(
                 "workspace.active_view references '{}', but workspace.open_views does not contain it",
@@ -1172,7 +1183,7 @@ impl ProjectFile {
             required_schematic_buffers.insert(self.workspace.active_key());
         }
         let mut open_view_keys = HashSet::new();
-        for (index, open_view) in self.workspace.open_views.iter().enumerate() {
+        for (index, open_view) in self.workspace.content.open_views.iter().enumerate() {
             let open_key = open_view.reference.key();
             if !open_view_keys.insert(open_key.clone()) {
                 return Err(ProjectIoError::InvalidData(format!(
@@ -1207,13 +1218,14 @@ impl ProjectFile {
 
         let mut schematic_buffer_keys = self
             .workspace
+            .content
             .schematic_buffers
             .keys()
             .map(String::as_str)
             .collect::<Vec<_>>();
         schematic_buffer_keys.sort_unstable();
         for key in schematic_buffer_keys {
-            let Some(schematic) = self.workspace.schematic_buffers.get(key) else {
+            let Some(schematic) = self.workspace.content.schematic_buffers.get(key) else {
                 return Err(ProjectIoError::InvalidData(format!(
                     "workspace schematic buffer '{key}' disappeared during validation"
                 )));
@@ -1248,7 +1260,7 @@ impl ProjectFile {
             required_schematic_buffers.into_iter().collect::<Vec<_>>();
         required_schematic_buffers.sort_unstable();
         for key in required_schematic_buffers {
-            if !self.workspace.schematic_buffers.contains_key(&key) {
+            if !self.workspace.content.schematic_buffers.contains_key(&key) {
                 return Err(ProjectIoError::InvalidData(format!(
                     "workspace references schematic/testbench buffer '{key}', but no backing buffer was found"
                 )));
@@ -1633,8 +1645,8 @@ pub(crate) fn load_project_text(
                 .map_err(|error| ProjectIoError::ParseError(error.to_string()))?
         }
     };
-    let project_id = project.workspace.project.id();
-    project.workspace.migrate_owned_netlist_deck_ids();
+    let project_id = project.workspace.content.project.id();
+    project.workspace.content.migrate_owned_netlist_deck_ids();
     let mut load_repairs = Vec::new();
     let repaired_markers = project
         .result_presentation
@@ -1648,7 +1660,7 @@ pub(crate) fn load_project_text(
     load_repairs.extend(project.workspace.migrate_document_occurrences());
     let mut migrated_generated_bindings = 0usize;
     let mut unresolved_generated_bindings = 0usize;
-    for schematic in project.workspace.schematic_buffers.values_mut() {
+    for schematic in project.workspace.content.schematic_buffers.values_mut() {
         let (migrated, unresolved) = schematic.migrate_generated_bindings();
         migrated_generated_bindings += migrated;
         unresolved_generated_bindings += unresolved;
@@ -1668,10 +1680,16 @@ pub(crate) fn load_project_text(
             ProjectIoError::InvalidData(format!("execution context migration failed: {error}"))
         })?;
         if let Some(plan) = &context.simulation_plan.analysis_plan {
-            project.workspace.migrate_active_plan_data(plan.id());
+            project
+                .workspace
+                .content
+                .migrate_active_plan_data(plan.id());
         }
         for plan in context.simulation_plan.inactive_plans() {
-            project.workspace.migrate_inactive_plan_data(plan.id());
+            project
+                .workspace
+                .content
+                .migrate_inactive_plan_data(plan.id());
         }
     }
     let annotated = project
@@ -1711,8 +1729,12 @@ pub(crate) fn load_project_text(
         }
     }
     match source_path {
-        Some(path) => project.workspace.project.set_path(path.to_path_buf()),
-        None => project.workspace.project.path = None,
+        Some(path) => project
+            .workspace
+            .content
+            .project
+            .set_path(path.to_path_buf()),
+        None => project.workspace.content.project.path = None,
     }
     Ok(project)
 }

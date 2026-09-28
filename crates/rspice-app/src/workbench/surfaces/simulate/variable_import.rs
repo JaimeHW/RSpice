@@ -446,6 +446,7 @@ fn mark_collisions(
     let owned = app
         .state
         .workspace
+        .content
         .plan_data(plan_id)
         .map(|payload| {
             payload
@@ -918,6 +919,7 @@ fn commit_selected_rows(
     );
     commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
         workspace
+            .content
             .add_design_variables(plan_id, variables)
             .map_err(|error| error.to_string())
     });
@@ -1137,6 +1139,7 @@ mod tests {
     fn registry(app: &RSpiceApp, plan_id: SimulationPlanId) -> Vec<String> {
         app.state
             .workspace
+            .content
             .plan_data(plan_id)
             .map(|payload| {
                 payload
@@ -1198,6 +1201,7 @@ mod tests {
         let imported = &app
             .state
             .workspace
+            .content
             .plan_data(plan_id)
             .expect("plan payload")
             .design_variables[0];
@@ -1219,6 +1223,7 @@ mod tests {
         assert!(
             app.state
                 .workspace
+                .content
                 .plan_data(plan_id)
                 .expect("plan payload")
                 .design_variables[2]
@@ -1451,6 +1456,7 @@ mod tests {
         assert!(
             app.state
                 .workspace
+                .content
                 .plan_data(plan_id)
                 .expect("plan payload")
                 .design_variables
@@ -1544,7 +1550,7 @@ mod tests {
             DesignVariableScope::Testbench,
             DesignVariableScope::Project,
             DesignVariableScope::SelectedCell {
-                cell: app.state.workspace.active_view.clone(),
+                cell: app.state.workspace.content.active_view.clone(),
             },
             DesignVariableScope::SelectedAnalysis {
                 analysis_id: crate::product::AnalysisInstanceId::new(),

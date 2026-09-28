@@ -558,7 +558,7 @@ fn project_library_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     }
 
-    let active_configuration = app.state.workspace.configuration_sets.active();
+    let active_configuration = app.state.workspace.content.configuration_sets.active();
     section_header(
         ui,
         "Active simulation context",
@@ -589,7 +589,13 @@ fn project_library_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     nav_property(
         ui,
         "Revision",
-        &app.state.workspace.project.revision().get().to_string(),
+        &app.state
+            .workspace
+            .content
+            .project
+            .revision()
+            .get()
+            .to_string(),
     );
 
     section_header(ui, "Project source", None);
@@ -598,6 +604,7 @@ fn project_library_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         "Path",
         &app.state
             .workspace
+            .content
             .project
             .path
             .as_ref()
@@ -624,11 +631,13 @@ fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     let active_id = app
         .state
         .workspace
+        .content
         .configuration_sets
         .active_configuration_id();
     let configurations = app
         .state
         .workspace
+        .content
         .configuration_sets
         .configurations()
         .iter()
@@ -657,6 +666,7 @@ fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
             configurations.len(),
             app.state
                 .workspace
+                .content
                 .configuration_sets
                 .configurations()
                 .len()
@@ -681,7 +691,7 @@ fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     }
     section_header(ui, "Active binding", None);
-    if let Some(configuration) = app.state.workspace.configuration_sets.active() {
+    if let Some(configuration) = app.state.workspace.content.configuration_sets.active() {
         nav_property(ui, "Testbench", &configuration.root().display_path());
         nav_property(ui, "DUT", configuration.dut_path());
         nav_property(
@@ -780,7 +790,14 @@ fn project_dependency_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     nav_property(
         ui,
         "Technology",
-        if app.state.workspace.project.technology_binding().is_some() {
+        if app
+            .state
+            .workspace
+            .content
+            .project
+            .technology_binding()
+            .is_some()
+        {
             "attached"
         } else {
             "not attached"
@@ -1098,7 +1115,7 @@ fn simulate_nav_meta(
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())
-        .and_then(|plan_id| app.state.workspace.plan_data(plan_id));
+        .and_then(|plan_id| app.state.workspace.content.plan_data(plan_id));
     let count = |value: usize| (value > 0).then(|| value.to_string());
     match page {
         SimulationPage::Analyses => Some(analyses.to_owned()),
@@ -2216,7 +2233,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             .toggle_expression_visibility_by_key(&app.state.simulation, &identity)
                         {
                             Ok(()) => {
-                                app.state.workspace.visualization_documents_dirty = true;
+                                app.state.workspace.content.visualization_documents_dirty = true;
                             }
                             Err(error) => app.state.push_user_message(
                                 crate::diagnostics::ConsoleMessage::warning(error),
@@ -6329,7 +6346,7 @@ fn verification_flow_presentation(
                 .sim_setup
                 .stable_analysis_plan()
                 .ok()
-                .and_then(|plan| app.state.workspace.plan_data(plan.id()))
+                .and_then(|plan| app.state.workspace.content.plan_data(plan.id()))
                 .map_or(0, |payload| payload.design_variables.len());
             let dirty_count = app
                 .state
@@ -6496,10 +6513,11 @@ struct VerificationCoverage {
 
 fn verification_coverage(app: &RSpiceApp) -> VerificationCoverage {
     let run = app.state.simulation.active_run();
-    let total = app.state.workspace.specs.len();
+    let total = app.state.workspace.content.specs.len();
     let values =
         app.state
             .workspace
+            .content
             .specs
             .iter()
             .map(|spec| {
@@ -6528,6 +6546,7 @@ fn verification_coverage(app: &RSpiceApp) -> VerificationCoverage {
     let mapped = app
         .state
         .workspace
+        .content
         .specs
         .iter()
         .filter(|spec| !spec.measurement.trim().is_empty())
@@ -6536,6 +6555,7 @@ fn verification_coverage(app: &RSpiceApp) -> VerificationCoverage {
     let passed = app
         .state
         .workspace
+        .content
         .specs
         .iter()
         .zip(&values)

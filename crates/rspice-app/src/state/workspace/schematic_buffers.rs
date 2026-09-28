@@ -5,7 +5,8 @@ use crate::state::schematic::{SchematicEditorMut, SchematicEditorRef, SchematicS
 
 impl ProjectWorkspace {
     pub(crate) fn schematic_editor(&self, key: &str) -> Option<SchematicEditorRef<'_>> {
-        self.schematic_buffers
+        self.content
+            .schematic_buffers
             .get(key)
             .map(|design| SchematicEditorRef {
                 design,
@@ -19,7 +20,7 @@ impl ProjectWorkspace {
     }
 
     pub(crate) fn schematic_editor_mut(&mut self, key: &str) -> Option<SchematicEditorMut<'_>> {
-        let design = self.schematic_buffers.get_mut(key)?;
+        let design = self.content.schematic_buffers.get_mut(key)?;
         let session = self.schematic_sessions.entry(key.to_owned()).or_default();
         Some(SchematicState::borrow_parts(design, session))
     }
@@ -28,7 +29,7 @@ impl ProjectWorkspace {
         &mut self,
         mut edit: impl FnMut(&str, &mut SchematicState),
     ) {
-        for (key, design) in &mut self.schematic_buffers {
+        for (key, design) in &mut self.content.schematic_buffers {
             let session = self.schematic_sessions.entry(key.clone()).or_default();
             let mut borrowed = SchematicState::borrow_parts(design, session);
             edit(key, &mut borrowed.editor);
@@ -41,14 +42,14 @@ impl ProjectWorkspace {
         editor: SchematicState,
     ) -> Option<SchematicState> {
         let (design, session) = editor.into_parts();
-        let previous_design = self.schematic_buffers.insert(key.clone(), design);
+        let previous_design = self.content.schematic_buffers.insert(key.clone(), design);
         let previous_session = self.schematic_sessions.insert(key, session);
         previous_design
             .map(|design| SchematicState::from_parts(design, previous_session.unwrap_or_default()))
     }
 
     pub(crate) fn remove_schematic_editor(&mut self, key: &str) -> Option<SchematicState> {
-        let design = self.schematic_buffers.remove(key);
+        let design = self.content.schematic_buffers.remove(key);
         let session = self.schematic_sessions.remove(key);
         design.map(|design| SchematicState::from_parts(design, session.unwrap_or_default()))
     }

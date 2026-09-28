@@ -111,6 +111,7 @@ fn library_deletion_impact(state: &AppState, library: &str) -> LibraryDeletionIm
         views: owned.map_or(0, crate::state::Library::total_view_count),
         open_views: state
             .workspace
+            .content
             .open_views
             .iter()
             .filter(|open| open.reference.library == library)
@@ -118,6 +119,7 @@ fn library_deletion_impact(state: &AppState, library: &str) -> LibraryDeletionIm
         instance_references: state.external_instance_references_to_library(library),
         source_bundles: state
             .workspace
+            .content
             .project_sources
             .iter_bundles()
             .filter(|bundle| {
@@ -130,12 +132,13 @@ fn library_deletion_impact(state: &AppState, library: &str) -> LibraryDeletionIm
             .count(),
         configuration_roots: state
             .workspace
+            .content
             .configuration_sets
             .configurations()
             .iter()
             .filter(|configuration| configuration.root().library == library)
             .count(),
-        project_root: state.workspace.project.root_library == library,
+        project_root: state.workspace.content.project.root_library == library,
     }
 }
 

@@ -235,7 +235,7 @@ fn preflight_currency(app: &RSpiceApp) -> PreflightCurrency {
     let (topology_root, topology_revision, topology_closure) =
         app.state.configured_topology_revision();
     app.state.workbench.preflight.currency(
-        app.state.workspace.project.revision().get(),
+        app.state.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
@@ -349,7 +349,7 @@ fn plan_payload(app: &RSpiceApp) -> Option<&crate::state::SimulationPlanPayload>
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())
-        .and_then(|plan_id| app.state.workspace.plan_data(plan_id))
+        .and_then(|plan_id| app.state.workspace.content.plan_data(plan_id))
 }
 
 /// A count and the thing it counts, pluralized: `3 VARIABLES`, `1 VARIABLE`.
@@ -576,7 +576,7 @@ mod tests {
             state.configured_topology_revision();
         let plan = state.active_plan_revision();
         PreflightReport {
-            project_revision: state.workspace.project.revision().get(),
+            project_revision: state.workspace.content.project.revision().get(),
             topology_root,
             topology_revision,
             topology_closure,

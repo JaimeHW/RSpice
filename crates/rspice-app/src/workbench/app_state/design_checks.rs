@@ -94,7 +94,7 @@ impl AppState {
             .workspace
             .design_projection(
                 &self.library_manager,
-                &self.workspace.active_view,
+                &self.workspace.content.active_view,
                 &self.schematic,
             )
             .map_err(|error| error.to_string())?;
@@ -155,9 +155,9 @@ impl AppState {
             owner_key(&subject) == owner_key(&self.workspace.active_schematic_reference());
         let input_digest = design_check_input_digest(self, &subject, &config)?;
         self.design_checks.insert(CellViewCheckReceipt {
-            project_id: self.workspace.project.id(),
+            project_id: self.workspace.content.project.id(),
             subject,
-            checked_project_revision: self.workspace.project.revision(),
+            checked_project_revision: self.workspace.content.project.revision(),
             input_digest,
             result,
         });
@@ -172,7 +172,7 @@ impl AppState {
         let Some(receipt) = last else {
             return DesignCheckStatus::NotRun;
         };
-        if receipt.project_id != self.workspace.project.id() {
+        if receipt.project_id != self.workspace.content.project.id() {
             return DesignCheckStatus::Stale(receipt);
         }
         let config = design_check_config(self, subject);
@@ -249,8 +249,8 @@ fn owner_key(subject: &CellViewRef) -> CanonicalCellViewOwnerKey {
 
 fn project_root_reference(state: &AppState) -> CellViewRef {
     CellViewRef::new(
-        &state.workspace.project.root_library,
-        &state.workspace.project.top_cell,
+        &state.workspace.content.project.root_library,
+        &state.workspace.content.project.top_cell,
         crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     )
 }
@@ -272,6 +272,7 @@ fn design_check_input_digest(
     }
     let mut live_buffers = state
         .workspace
+        .content
         .schematic_buffers
         .iter()
         .map(|(key, schematic)| (key.clone(), schematic))
@@ -281,7 +282,7 @@ fn design_check_input_digest(
         ViewType::Schematic | ViewType::Testbench
     ) {
         live_buffers.insert(
-            state.workspace.active_view.key(),
+            state.workspace.content.active_view.key(),
             state.schematic.editor_ref().design,
         );
     }
@@ -319,13 +320,13 @@ fn design_check_input_digest(
     // schematic. A receipt that ignored them would read "current" for a design
     // nobody checked.
     let material = serde_json::to_vec(&(
-        state.workspace.project.id(),
+        state.workspace.content.project.id(),
         owner_key(subject).to_string(),
         schematic_digests,
         state.library_manager.revision(),
-        &state.workspace.connectivity,
-        &state.workspace.design_management,
-        &state.workspace.configuration_sets,
+        &state.workspace.content.connectivity,
+        &state.workspace.content.design_management,
+        &state.workspace.content.configuration_sets,
         profile,
     ))
     .map_err(|error| format!("could not encode design-check inputs: {error}"))?;
@@ -360,7 +361,7 @@ mod tests {
         state
             .workspace
             .insert_schematic_editor(root.key(), state.schematic.clone());
-        state.workspace.active_view = other;
+        state.workspace.content.active_view = other;
         state.schematic = crate::state::SchematicState::default();
         state.refresh_active_design_check_projection();
 
@@ -409,7 +410,7 @@ mod tests {
             DesignCheckStatus::Current(_)
         ));
 
-        state.workspace.connectivity.policy.width_mismatch =
+        state.workspace.content.connectivity.policy.width_mismatch =
             crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
 
         assert!(matches!(
@@ -437,7 +438,7 @@ mod tests {
     #[test]
     fn focusing_a_non_schematic_view_does_not_stale_root_evidence() {
         let mut state = AppState::default();
-        let root = state.workspace.active_view.clone();
+        let root = state.workspace.content.active_view.clone();
         state
             .publish_active_design_check_result(completed_result())
             .expect("publish root receipt");
@@ -447,12 +448,13 @@ mod tests {
         let layout = CellViewRef::new(&root.library, &root.cell, "layout");
         state
             .workspace
+            .content
             .open_views
             .push(crate::state::OpenCellView::new(
                 layout.clone(),
                 ViewType::Layout,
             ));
-        state.workspace.active_view = layout;
+        state.workspace.content.active_view = layout;
         state.schematic = crate::state::SchematicState::default();
 
         assert!(matches!(
@@ -464,19 +466,20 @@ mod tests {
     #[test]
     fn symbol_focus_never_aliases_or_clears_its_sibling_schematic_receipt() {
         let mut state = AppState::default();
-        let root = state.workspace.active_view.clone();
+        let root = state.workspace.content.active_view.clone();
         state
             .publish_active_design_check_result(completed_result())
             .expect("publish root receipt");
         let symbol = CellViewRef::new(&root.library, &root.cell, "symbol");
         state
             .workspace
+            .content
             .open_views
             .push(crate::state::OpenCellView::new(
                 symbol.clone(),
                 ViewType::Symbol,
             ));
-        state.workspace.active_view = symbol;
+        state.workspace.content.active_view = symbol;
 
         state.refresh_active_design_check_projection();
 
@@ -532,11 +535,13 @@ mod tests {
         let key = state.workspace.active_schematic_reference().key();
         let first = state
             .workspace
+            .content
             .design_management
             .bootstrap_for_cell_view(&key, "Page 1", [FIRST_WIRE])
             .expect("a fresh cell view accepts its first governed sheet");
         let catalog = state
             .workspace
+            .content
             .design_management
             .sheet_catalog_mut(&key)
             .expect("the sheet catalog was just created");
@@ -570,7 +575,7 @@ mod tests {
             .workspace
             .design_projection(
                 &state.library_manager,
-                &state.workspace.active_view,
+                &state.workspace.content.active_view,
                 &state.schematic,
             )
             .expect("the fixture configuration resolves");
@@ -578,7 +583,7 @@ mod tests {
             crate::simulation::netlist_gen::projection_nets(
                 &state.library_manager,
                 &projection,
-                &state.workspace.active_view.key(),
+                &state.workspace.content.active_view.key(),
             )
             .len(),
             2,
@@ -594,9 +599,10 @@ mod tests {
     #[test]
     fn design_checks_state_an_unresolved_configuration_rather_than_checking_the_buffer() {
         let mut state = AppState::default();
-        let root = state.workspace.active_view.clone();
+        let root = state.workspace.content.active_view.clone();
         state
             .workspace
+            .content
             .configuration_sets
             .create(crate::state::ConfigurationSetDefinition {
                 name: "Unresolvable DUT".to_owned(),

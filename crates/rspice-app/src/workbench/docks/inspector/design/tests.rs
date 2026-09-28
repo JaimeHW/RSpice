@@ -178,6 +178,7 @@ fn app_with_probe_on_last_sheet(sheets: usize) -> (RSpiceApp, u64) {
     let first = app
         .state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&key, "Input stage", [PROBE])
         .expect("the fixture cell view takes a sheet catalog");
@@ -185,6 +186,7 @@ fn app_with_probe_on_last_sheet(sheets: usize) -> (RSpiceApp, u64) {
         let catalog = app
             .state
             .workspace
+            .content
             .design_management
             .sheet_catalog_mut(&key)
             .expect("the catalog was just bootstrapped");
@@ -788,6 +790,7 @@ fn literal_value_tuning_stages_a_typed_variable_without_mutating_authority() {
     let variables_before = app
         .state
         .workspace
+        .content
         .plan_data(plan_id)
         .unwrap()
         .design_variables
@@ -801,6 +804,7 @@ fn literal_value_tuning_stages_a_typed_variable_without_mutating_authority() {
     assert_eq!(
         app.state
             .workspace
+            .content
             .plan_data(plan_id)
             .unwrap()
             .design_variables
@@ -855,6 +859,7 @@ fn parameter_bound_value_tuning_selects_the_existing_typed_variable() {
     let variable_id = variable.id;
     app.state
         .workspace
+        .content
         .add_design_variable(plan_id, variable)
         .unwrap();
 
@@ -874,6 +879,7 @@ fn parameter_bound_value_tuning_selects_the_existing_typed_variable() {
     assert_eq!(
         app.state
             .workspace
+            .content
             .plan_data(plan_id)
             .unwrap()
             .design_variables
@@ -1371,11 +1377,13 @@ fn the_net_inspector_states_the_sheets_a_connector_partners_with() {
 
     let first = state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&key, "Input", [1, 2])
         .expect("sheet ownership");
     let catalog = state
         .workspace
+        .content
         .design_management
         .sheet_catalog_mut(&key)
         .expect("sheet catalog");
@@ -1404,6 +1412,7 @@ fn the_net_inspector_states_the_sheets_a_connector_partners_with() {
     // Read from the far side the answer is the other page, never both.
     state
         .workspace
+        .content
         .design_management
         .sheet_catalog_mut(&key)
         .expect("sheet catalog")
@@ -1433,9 +1442,10 @@ fn the_net_inspector_states_the_sheets_a_connector_partners_with() {
 /// projection refuses such a configuration, so a surface that still shows
 /// connectivity afterwards is showing the editor buffer's.
 fn unresolve_configuration(state: &mut AppState) {
-    let root = state.workspace.active_view.clone();
+    let root = state.workspace.content.active_view.clone();
     state
         .workspace
+        .content
         .configuration_sets
         .create(crate::state::ConfigurationSetDefinition {
             name: "Unresolvable DUT".to_owned(),
@@ -1526,11 +1536,13 @@ fn the_inspector_reads_the_projection_so_coincident_pages_stay_two_nets() {
     let key = state.workspace.active_schematic_reference().key();
     let first = state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&key, "Page 1", [FIRST_WIRE])
         .expect("a fresh cell view accepts its first governed sheet");
     let catalog = state
         .workspace
+        .content
         .design_management
         .sheet_catalog_mut(&key)
         .expect("the sheet catalog was just created");

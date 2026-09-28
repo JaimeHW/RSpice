@@ -815,7 +815,7 @@ fn capture_group_from_draft(
         }
     }
     let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
-    if let Some(payload) = app.state.workspace.plan_data(plan_id)
+    if let Some(payload) = app.state.workspace.content.plan_data(plan_id)
         && let Some(holder) = payload.capture_groups.iter().find(|existing| {
             existing.id != group.id
                 && crate::state::workspace::capture_group_collation_key(&existing.name)
@@ -838,6 +838,7 @@ fn existing_capture_group(
     let plan_id = app.state.sim_setup.stable_analysis_plan().ok()?.id();
     app.state
         .workspace
+        .content
         .plan_data(plan_id)?
         .capture_groups
         .iter()
@@ -870,6 +871,7 @@ fn capture_group_claim_preview(app: &RSpiceApp, draft: &CaptureGroupDraft) -> St
     let matched = app
         .state
         .workspace
+        .content
         .plan_data(plan_id)
         .map(|payload| {
             payload
@@ -921,11 +923,13 @@ pub(super) fn commit_capture_group(
     let committed = commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
         if let Some(id) = draft.group {
             workspace
+                .content
                 .replace_capture_group(plan_id, id, group)
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         } else {
             workspace
+                .content
                 .add_capture_group(plan_id, group)
                 .map(|_| ())
                 .map_err(|error| error.to_string())
@@ -1002,12 +1006,14 @@ pub(super) fn commit_clone_plan(
     let mut setup = app.state.sim_setup.clone();
     let mut workspace = app.state.workspace.clone();
     let current_plan_id = setup.stable_analysis_plan()?.id();
-    workspace.migrate_active_plan_data(current_plan_id);
+    workspace.content.migrate_active_plan_data(current_plan_id);
     if current_plan_id != draft.source_plan_id {
         setup
             .activate_plan(draft.source_plan_id)
             .map_err(|error| error.to_string())?;
-        workspace.sync_legacy_specs_projection(draft.source_plan_id);
+        workspace
+            .content
+            .sync_legacy_specs_projection(draft.source_plan_id);
     }
     let options = crate::workbench::app_state::SimulationPlanCloneOptions {
         copy_analyses: draft.copy_analyses_options,
@@ -1020,6 +1026,7 @@ pub(super) fn commit_clone_plan(
         .clone_active_plan(draft.name.clone(), options)
         .map_err(|error| error.to_string())?;
     workspace
+        .content
         .clone_plan_data(
             outcome.source_plan_id,
             outcome.cloned_plan_id,
@@ -1029,6 +1036,7 @@ pub(super) fn commit_clone_plan(
         )
         .map_err(|error| error.to_string())?;
     workspace
+        .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
 
@@ -1115,7 +1123,7 @@ pub(super) fn design_variable_from_draft_categorized(
         0 => DesignVariableScope::Testbench,
         1 => DesignVariableScope::Project,
         2 => DesignVariableScope::SelectedCell {
-            cell: app.state.workspace.active_view.clone(),
+            cell: app.state.workspace.content.active_view.clone(),
         },
         3 => DesignVariableScope::SelectedAnalysis {
             analysis_id: app
@@ -1183,9 +1191,11 @@ pub(super) fn validate_design_variable_draft(
     let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
     let mut workspace = app.state.workspace.clone();
     workspace
+        .content
         .add_design_variable(plan_id, variable)
         .map_err(|error| error.to_string())?;
     workspace
+        .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())
 }
@@ -1200,9 +1210,11 @@ pub(super) fn commit_design_variable(
     let mut workspace = app.state.workspace.clone();
     let plan_id = setup.stable_analysis_plan()?.id();
     workspace
+        .content
         .add_design_variable(plan_id, variable)
         .map_err(|error| error.to_string())?;
     workspace
+        .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
     let receipt = setup
@@ -1269,9 +1281,11 @@ pub(super) fn validate_saved_output_draft(
     let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
     let mut workspace = app.state.workspace.clone();
     workspace
+        .content
         .add_saved_output(plan_id, output)
         .map_err(|error| error.to_string())?;
     workspace
+        .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
     Ok(())
@@ -1288,9 +1302,11 @@ pub(super) fn commit_saved_output(
     let mut workspace = app.state.workspace.clone();
     let plan_id = setup.stable_analysis_plan()?.id();
     workspace
+        .content
         .add_saved_output(plan_id, output)
         .map_err(|error| error.to_string())?;
     workspace
+        .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
     let receipt = setup
@@ -1337,6 +1353,7 @@ pub(super) fn commit_plan_change(
     let outcome = change(&mut workspace, plan_id)
         .and_then(|()| {
             workspace
+                .content
                 .validate_simulation_configuration()
                 .map_err(|error| error.to_string())
         })
@@ -1382,7 +1399,7 @@ fn plan_capture_state(
     workspace: &crate::state::ProjectWorkspace,
     plan_id: crate::product::SimulationPlanId,
 ) -> PlanCaptureState {
-    let payload = workspace.plan_data(plan_id);
+    let payload = workspace.content.plan_data(plan_id);
     let groups = payload
         .map(|payload| payload.capture_groups.clone())
         .unwrap_or_default();

@@ -1209,7 +1209,7 @@ pub(super) fn retained_component_soa(
     let Some(receipt) = run.prepared_receipt() else {
         return no_component_soa();
     };
-    if receipt.project_revision() != state.workspace.project.revision() {
+    if receipt.project_revision() != state.workspace.content.project.revision() {
         return no_component_soa();
     }
 

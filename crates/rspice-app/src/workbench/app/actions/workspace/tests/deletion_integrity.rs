@@ -25,7 +25,7 @@ fn copy_cell_resets_the_validated_revision_journal() {
     state
         .schematic
         .add_component(ComponentType::Resistor, Point::new(10, 10));
-    let project_id = state.workspace.project.id().to_string();
+    let project_id = state.workspace.content.project.id().to_string();
     let accepted = state.schematic.clone();
     state
         .schematic
@@ -38,6 +38,7 @@ fn copy_cell_resets_the_validated_revision_journal() {
 
     let source = state
         .workspace
+        .content
         .schematic_buffers
         .get(&CellViewRef::new("work", "amp", "schematic").key())
         .expect("the source buffer survives the copy");
@@ -48,6 +49,7 @@ fn copy_cell_resets_the_validated_revision_journal() {
     );
     let copy = state
         .workspace
+        .content
         .schematic_buffers
         .get(&CellViewRef::new("work", "amp_copy", "schematic").key())
         .expect("the copy carries the drawn content");
@@ -91,7 +93,11 @@ fn deleting_a_cell_removes_the_physical_layout_of_every_view_it_owned() {
 
     for owner in &owned {
         assert!(
-            state.workspace.physical_layout_document(owner).is_none(),
+            state
+                .workspace
+                .content
+                .physical_layout_document(owner)
+                .is_none(),
             "{} outlived the cell that owned it",
             owner.display_path()
         );

@@ -14,7 +14,7 @@ fn keyboard_configuration_activation_does_not_insert_its_space() {
             ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
             let (mut app, _) = valid_configuration_app();
             open_configuration_sets_dialog(&mut app.state);
-            let catalog = app.state.workspace.configuration_sets.clone();
+            let catalog = app.state.workspace.content.configuration_sets.clone();
             let mut render = |events| {
                 let output = ctx.run_ui(
                     egui::RawInput {
@@ -88,7 +88,7 @@ fn keyboard_configuration_activation_does_not_insert_its_space() {
                 egui::Event::Paste("Production bias sweep".to_owned()),
             ]);
             assert_eq!(edited, "Production bias sweep");
-            assert_eq!(app.state.workspace.configuration_sets, catalog);
+            assert_eq!(app.state.workspace.content.configuration_sets, catalog);
             assert!(app.state.dialogs.configuration_sets.query.is_empty());
         }
     }
@@ -103,7 +103,7 @@ fn configuration_page_handoff_keeps_immediate_name_input() {
         ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
         let (mut app, _) = valid_configuration_app();
         open_configuration_sets_dialog(&mut app.state);
-        let catalog = app.state.workspace.configuration_sets.clone();
+        let catalog = app.state.workspace.content.configuration_sets.clone();
         let mut render = |events| {
             ctx.run_ui(
                 egui::RawInput {
@@ -156,7 +156,7 @@ fn configuration_page_handoff_keeps_immediate_name_input() {
             app.state.dialogs.configuration_sets.new_name, "Production bias sweep",
             "{label} opening input"
         );
-        assert_eq!(app.state.workspace.configuration_sets, catalog);
+        assert_eq!(app.state.workspace.content.configuration_sets, catalog);
         assert!(
             app.state.dialogs.configuration_sets.query.is_empty(),
             "new page typing must not change the manager filter"
@@ -178,7 +178,7 @@ fn opening_configuration_text(page: ConfigurationDialogPage) {
             app.handle_configuration_body_action(BodyAction::Binding)
         }
     }
-    let catalog = app.state.workspace.configuration_sets.clone();
+    let catalog = app.state.workspace.content.configuration_sets.clone();
     let _ = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -210,7 +210,7 @@ fn opening_configuration_text(page: ConfigurationDialogPage) {
             assert_eq!(dialog.new_name, "Production bias sweep")
         }
     }
-    assert_eq!(app.state.workspace.configuration_sets, catalog);
+    assert_eq!(app.state.workspace.content.configuration_sets, catalog);
 }
 
 #[test]
@@ -264,7 +264,7 @@ fn initial_focus_keeps_inspection_only_configuration_fields_read_only() {
             "UI focus qualification".to_owned(),
         );
         let before = app.state.dialogs.configuration_sets.clone();
-        let catalog = app.state.workspace.configuration_sets.clone();
+        let catalog = app.state.workspace.content.configuration_sets.clone();
         let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -279,7 +279,7 @@ fn initial_focus_keeps_inspection_only_configuration_fields_read_only() {
         let dialog = &app.state.dialogs.configuration_sets;
         assert_eq!(dialog.new_name, before.new_name);
         assert_eq!(dialog.draft, before.draft);
-        assert_eq!(app.state.workspace.configuration_sets, catalog);
+        assert_eq!(app.state.workspace.content.configuration_sets, catalog);
         if page == ConfigurationDialogPage::Manager {
             assert_eq!(dialog.query, "Inspection filter");
         } else {
@@ -310,7 +310,7 @@ fn editing_frame_keeps_the_configuration_draft(escape: bool, prior_confirmation:
     ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
     let (mut app, _) = valid_configuration_app();
     open_configuration_sets_dialog(&mut app.state);
-    let catalog = app.state.workspace.configuration_sets.clone();
+    let catalog = app.state.workspace.content.configuration_sets.clone();
     if prior_confirmation {
         let dialog = &mut app.state.dialogs.configuration_sets;
         dialog.draft.as_mut().unwrap().name.push_str(" prior edit");
@@ -399,7 +399,7 @@ fn editing_frame_keeps_the_configuration_draft(escape: bool, prior_confirmation:
     assert!(dialog.open);
     assert!(dialog.discard_confirmation);
     assert!(dialog.draft.as_ref().unwrap().name.contains(" updated"));
-    assert_eq!(app.state.workspace.configuration_sets, catalog);
+    assert_eq!(app.state.workspace.content.configuration_sets, catalog);
     if escape {
         // Enter after Escape belongs to the newly focused discard action.
         // It must not submit the original editor or bypass its dirty check.
@@ -414,7 +414,7 @@ fn editing_frame_keeps_the_configuration_draft(escape: bool, prior_confirmation:
             |ui| app.render_frame_dialogs(ui),
         );
         assert!(!app.state.dialogs.configuration_sets.open);
-        assert_eq!(app.state.workspace.configuration_sets, catalog);
+        assert_eq!(app.state.workspace.content.configuration_sets, catalog);
         assert_eq!(ctx.memory(|memory| memory.focused()), None);
     }
 }
@@ -477,6 +477,7 @@ fn valid_configuration_app() -> (RSpiceApp, ConfigurationSetId) {
     let id = app
         .state
         .workspace
+        .content
         .configuration_sets
         .create(definition)
         .expect("valid configuration");
@@ -561,12 +562,14 @@ fn same_row_and_subordinate_actions_never_discard_a_dirty_draft() {
     let selected = app
         .state
         .workspace
+        .content
         .configuration_sets
         .create(definition("Release"))
         .expect("configuration");
     let other = app
         .state
         .workspace
+        .content
         .configuration_sets
         .create(definition("Characterization"))
         .expect("second configuration");
@@ -633,7 +636,7 @@ fn comma_editor_preserves_an_in_progress_trailing_entry() {
 #[test]
 fn new_configuration_requires_a_real_dut_in_the_selected_root() {
     let mut app = RSpiceApp::test_instance();
-    let root = app.state.workspace.active_view.clone();
+    let root = app.state.workspace.content.active_view.clone();
     assert!(default_dut_path_for_root(&app.state.workspace, &app.state.schematic, &root).is_none());
 
     for (id, name) in [(1u64, "XB"), (2, "XA")] {
@@ -688,7 +691,7 @@ fn a_new_override_starts_one_instance_below_the_design_root() {
 fn normalization_only_save_revalidates_without_mutating_project_authority() {
     let (mut app, id) = valid_configuration_app();
     open_configuration_sets_dialog(&mut app.state);
-    let revision = app.state.workspace.project.revision();
+    let revision = app.state.workspace.content.project.revision();
     app.state
         .dialogs
         .configuration_sets
@@ -700,10 +703,11 @@ fn normalization_only_save_revalidates_without_mutating_project_authority() {
     app.commit_configuration_update()
         .expect("normalization-only save validates and reloads");
 
-    assert_eq!(app.state.workspace.project.revision(), revision);
+    assert_eq!(app.state.workspace.content.project.revision(), revision);
     assert_eq!(
         app.state
             .workspace
+            .content
             .configuration_sets
             .find(id)
             .expect("configuration remains")
@@ -725,8 +729,8 @@ fn normalization_only_save_revalidates_without_mutating_project_authority() {
 fn invalid_save_preserves_catalog_and_project_revision() {
     let (mut app, _) = valid_configuration_app();
     open_configuration_sets_dialog(&mut app.state);
-    let catalog = app.state.workspace.configuration_sets.clone();
-    let revision = app.state.workspace.project.revision();
+    let catalog = app.state.workspace.content.configuration_sets.clone();
+    let revision = app.state.workspace.content.project.revision();
     app.state
         .dialogs
         .configuration_sets
@@ -740,6 +744,6 @@ fn invalid_save_preserves_catalog_and_project_revision() {
         .expect_err("unresolved configured DUT must block publication");
 
     assert!(error.contains("does not exist"), "{error}");
-    assert_eq!(app.state.workspace.configuration_sets, catalog);
-    assert_eq!(app.state.workspace.project.revision(), revision);
+    assert_eq!(app.state.workspace.content.configuration_sets, catalog);
+    assert_eq!(app.state.workspace.content.project.revision(), revision);
 }

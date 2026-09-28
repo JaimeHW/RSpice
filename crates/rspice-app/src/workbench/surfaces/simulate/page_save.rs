@@ -235,6 +235,7 @@ fn plan_payload(app: &RSpiceApp) -> Result<SimulationPlanPayload, String> {
     let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
     app.state
         .workspace
+        .content
         .plan_data(plan_id)
         .cloned()
         .ok_or_else(|| format!("simulation plan {plan_id} has no payload record in this workspace"))
@@ -483,6 +484,7 @@ fn retention_contract(ui: &mut Ui, state: &mut AppState) {
     let active_run_id = simulation.active_run().map(|run| run.run_id);
     let regression_baseline = state
         .workspace
+        .content
         .plan_data(plan_id)
         .and_then(|payload| payload.regression_baseline_run);
     let (rows, summarized, decks) =

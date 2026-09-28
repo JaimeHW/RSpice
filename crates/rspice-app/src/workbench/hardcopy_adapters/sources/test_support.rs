@@ -22,11 +22,11 @@ pub(crate) fn resolve_retained_hardcopy_source(
     if !descriptor.supports_scope(&scope) {
         return Err(HardcopySourceError::UnsupportedScope(scope));
     }
-    if let Some(source_set) = state.workspace.hardcopy_source_set(source_key) {
+    if let Some(source_set) = state.workspace.content.hardcopy_source_set(source_key) {
         return resolve_retained_hardcopy_source_set(state, source_set);
     }
 
-    let project_id = state.workspace.project.id();
+    let project_id = state.workspace.content.project.id();
     let design_key = format!(
         "project:{}:cell-view:{}",
         project_id.as_uuid(),
@@ -37,15 +37,21 @@ pub(crate) fn resolve_retained_hardcopy_source(
         ViewType::Schematic | ViewType::Testbench
     ) {
         let active_key = state.workspace.active_key();
-        if let Some(catalog) = state.workspace.design_management.sheet_catalog(&active_key)
+        if let Some(catalog) = state
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog(&active_key)
             && let Some(sheet) = catalog
                 .sheets()
                 .iter()
                 .find(|sheet| format!("{design_key}:sheet:{}", sheet.id()) == source_key)
         {
             let base_identity = active_cell_view_identity(state)?;
-            let resolver =
-                SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers);
+            let resolver = SymbolResolver::new(
+                &state.library_manager,
+                &state.workspace.content.schematic_buffers,
+            );
             let identity = schematic_sheet_identity(&base_identity, sheet)?;
             return resolve_schematic_source(SchematicHardcopySource {
                 identity,
@@ -57,6 +63,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
                 project_default_drawing_sheet: Some(
                     &state
                         .workspace
+                        .content
                         .design_management
                         .drawing_sheet_settings()
                         .default_format,
@@ -64,6 +71,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
                 project_title_block_field_values: Some(
                     &state
                         .workspace
+                        .content
                         .design_management
                         .drawing_sheet_settings()
                         .title_block_field_values,
@@ -76,12 +84,15 @@ pub(crate) fn resolve_retained_hardcopy_source(
         let identity = active_cell_view_identity(state)?;
         return match state.workspace.active_view_type() {
             ViewType::Schematic | ViewType::Testbench => {
-                let resolver =
-                    SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers);
+                let resolver = SymbolResolver::new(
+                    &state.library_manager,
+                    &state.workspace.content.schematic_buffers,
+                );
                 if matches!(scope, HardcopyScope::AllSheetsOrPanes) {
                     let active_key = state.workspace.active_key();
                     let sheet_catalog = state
                         .workspace
+                        .content
                         .design_management
                         .sheet_catalog(&active_key)
                         .ok_or_else(|| {
@@ -97,11 +108,13 @@ pub(crate) fn resolve_retained_hardcopy_source(
                         sheet_catalog,
                         project_default_drawing_sheet: &state
                             .workspace
+                            .content
                             .design_management
                             .drawing_sheet_settings()
                             .default_format,
                         project_title_block_field_values: &state
                             .workspace
+                            .content
                             .design_management
                             .drawing_sheet_settings()
                             .title_block_field_values,
@@ -109,7 +122,13 @@ pub(crate) fn resolve_retained_hardcopy_source(
                 }
                 let active_key = state.workspace.active_key();
                 let sheet_catalog = matches!(scope, HardcopyScope::CurrentSheet)
-                    .then(|| state.workspace.design_management.sheet_catalog(&active_key))
+                    .then(|| {
+                        state
+                            .workspace
+                            .content
+                            .design_management
+                            .sheet_catalog(&active_key)
+                    })
                     .flatten();
                 let sheet_id = sheet_catalog.and_then(SheetCatalog::active_sheet_id);
                 let identity = if let (Some(catalog), Some(sheet_id)) = (sheet_catalog, sheet_id) {
@@ -137,6 +156,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
                     .then_some(
                         &state
                             .workspace
+                            .content
                             .design_management
                             .drawing_sheet_settings()
                             .default_format,
@@ -144,6 +164,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
                     project_title_block_field_values: Some(
                         &state
                             .workspace
+                            .content
                             .design_management
                             .drawing_sheet_settings()
                             .title_block_field_values,
@@ -243,6 +264,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
         if source_key == report_key {
             let document = state
                 .workspace
+                .content
                 .report_documents
                 .iter()
                 .find(|document| document.id() == document_id)

@@ -74,7 +74,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         .fill(Tokens::get(ui.ctx()).color.bg_app)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            header(ui, app.state.workspace.project.name());
+            header(ui, app.state.workspace.content.project.name());
             body(ui, &mut app.state, &mut action);
         });
     if let Some(action) = action {
@@ -534,9 +534,10 @@ struct DeckFacts {
 }
 
 fn deck_facts(state: &AppState, index: &NetlistSourceIndex) -> DeckFacts {
-    let document = state.workspace.netlist_document.as_ref();
+    let document = state.workspace.content.netlist_document.as_ref();
     let name = state
         .workspace
+        .content
         .netlist_descriptor
         .as_ref()
         .map(|descriptor| descriptor.artifact_name.clone())
@@ -551,6 +552,7 @@ fn deck_facts(state: &AppState, index: &NetlistSourceIndex) -> DeckFacts {
         .unwrap_or_else(|| "Untitled deck".to_owned());
     let dialect = state
         .workspace
+        .content
         .netlist_descriptor
         .as_ref()
         .and_then(|descriptor| descriptor.imported_dialect)

@@ -133,6 +133,7 @@ fn plan_payload(app: &RSpiceApp) -> Result<SimulationPlanPayload, String> {
     let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
     app.state
         .workspace
+        .content
         .plan_data(plan_id)
         .cloned()
         .ok_or_else(|| format!("simulation plan {plan_id} has no payload record in this workspace"))
@@ -1098,14 +1099,14 @@ pub(super) fn commit_scope(app: &mut RSpiceApp, measurement: &str, scope: SpecPo
     );
     let measurement = measurement.to_owned();
     commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
-        let mut specs = workspace.active_specs(plan_id).to_vec();
+        let mut specs = workspace.content.active_specs(plan_id).to_vec();
         let target = specs
             .iter_mut()
             .find(|spec| spec.measurement.eq_ignore_ascii_case(&measurement))
             .ok_or_else(|| format!("specification {measurement} no longer exists"))?;
         target.scope = scope;
         target.validate()?;
-        workspace.replace_active_specs(plan_id, specs);
+        workspace.content.replace_active_specs(plan_id, specs);
         Ok(())
     });
 }
@@ -1390,6 +1391,7 @@ pub(super) fn commit_specification_policy(app: &mut RSpiceApp, policy: Specifica
     commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
         policy.validate()?;
         let payload = workspace
+            .content
             .plan_data_mut(plan_id)
             .ok_or_else(|| format!("simulation plan {plan_id} has no active payload"))?;
         payload.specification_policy = policy;

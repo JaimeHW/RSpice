@@ -93,7 +93,7 @@ fn validate_draft(app: &RSpiceApp) -> Result<(), String> {
     }
     if draft.design_execution_epoch != app.state.design_execution_epoch
         || draft.active_schematic_epoch != app.state.active_schematic_epoch
-        || draft.view_path != app.state.workspace.active_view.display_path()
+        || draft.view_path != app.state.workspace.content.active_view.display_path()
     {
         return Err(
             "The active design or cell view changed. Close and reopen the device configuration."
@@ -208,7 +208,7 @@ mod tests {
             ports,
             app.state.design_execution_epoch,
             app.state.active_schematic_epoch,
-            app.state.workspace.active_view.display_path(),
+            app.state.workspace.content.active_view.display_path(),
         );
         app.state
             .dialogs

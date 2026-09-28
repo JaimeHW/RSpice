@@ -2244,7 +2244,7 @@ fn analysis_form_body(
     option_edits: &mut Vec<advanced_options::OptionEdit>,
     checkpoint_action: &mut Option<checkpoint_exchange::Action>,
 ) -> f32 {
-    let project_revision = app.state.workspace.project.revision();
+    let project_revision = app.state.workspace.content.project.revision();
     let previous_state = app
         .state
         .simulation
@@ -2278,7 +2278,7 @@ fn analysis_form_body(
             .stable_analysis_plan()
             .ok()
             .map(|plan| plan.id())
-            .and_then(|plan_id| app.state.workspace.plan_data(plan_id))
+            .and_then(|plan_id| app.state.workspace.content.plan_data(plan_id))
             .map(|payload| payload.specification_policy.nominal_failure)
             .unwrap_or_default(),
         model_binding_count: app.state.sim_setup.model_bindings.len(),

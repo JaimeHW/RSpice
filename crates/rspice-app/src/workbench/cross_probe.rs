@@ -84,7 +84,7 @@ pub(crate) fn synchronize_schematic_cross_probe(state: &mut AppState) {
     }
 
     let selection = SelectionObservation {
-        active_view_key: state.workspace.active_view.key(),
+        active_view_key: state.workspace.content.active_view.key(),
         topology_version: state.schematic.topology_version(),
         selection: state.schematic.session.selection.clone(),
     };
@@ -98,7 +98,7 @@ pub(crate) fn synchronize_schematic_cross_probe(state: &mut AppState) {
     let generated_input_digest =
         current_generated_artifact(state).map(|artifact| artifact.provenance().input().digest());
     let key = SynchronizationKey {
-        active_view_key: state.workspace.active_view.key(),
+        active_view_key: state.workspace.content.active_view.key(),
         occurrence: state.workspace.occurrence_path(),
         topology_version: state.schematic.topology_version(),
         target: target.clone(),
@@ -285,13 +285,13 @@ fn emitted_instance_name(component: &crate::state::Component) -> String {
 fn active_design_nets(state: &AppState) -> std::sync::Arc<Vec<DesignNet>> {
     match state.workspace.design_projection(
         &state.library_manager,
-        &state.workspace.active_view,
+        &state.workspace.content.active_view,
         &state.schematic,
     ) {
         Ok(projection) => projection_nets(
             &state.library_manager,
             &projection,
-            &state.workspace.active_view.key(),
+            &state.workspace.content.active_view.key(),
         ),
         Err(error) => {
             log::warn!("Schematic cross-probe has no design projection: {error}");
@@ -364,14 +364,14 @@ fn compatible_result_trace(
     target: &SchematicCrossProbeTarget,
 ) -> Option<SelectedResultTrace> {
     if !state.simulation.cross_probe.is_current_for(
-        &state.workspace.active_view,
+        &state.workspace.content.active_view,
         state.schematic.topology_version(),
     ) {
         return None;
     }
     let run = state.simulation.active_run()?;
     let receipt = run.prepared_receipt()?;
-    if receipt.project_revision() != state.workspace.project.revision() {
+    if receipt.project_revision() != state.workspace.content.project.revision() {
         return None;
     }
 
@@ -422,7 +422,7 @@ fn current_generated_artifact(state: &AppState) -> Option<&GeneratedArtifact> {
     let retained = state.ui.netlist.generated_input_digest?;
     if state.ui.netlist.current_generation_input_digest != Some(retained)
         || input.digest() != retained
-        || input.revision() != state.workspace.project.revision()
+        || input.revision() != state.workspace.content.project.revision()
     {
         return None;
     }
@@ -434,7 +434,7 @@ fn compatible_generated_source_line(
     target: &SchematicCrossProbeTarget,
 ) -> Option<usize> {
     let artifact = current_generated_artifact(state)?;
-    source_line_for_target(artifact, &state.workspace.active_view, target)
+    source_line_for_target(artifact, &state.workspace.content.active_view, target)
 }
 
 fn source_line_for_target(
@@ -653,7 +653,7 @@ mod tests {
     fn install_current_map(state: &mut AppState, net: &str) {
         let point = crate::state::Point::new(0, 0);
         state.simulation.cross_probe.update(
-            state.workspace.active_view.clone(),
+            state.workspace.content.active_view.clone(),
             std::collections::HashMap::from([(point, net.to_owned())]),
             std::collections::HashMap::from([(net.to_owned(), vec![point])]),
             std::collections::HashMap::new(),
@@ -705,7 +705,7 @@ mod tests {
             ));
         state.schematic.session.selection.select_net_label(7);
         install_current_map(&mut state, "OUT");
-        let revision = state.workspace.project.revision();
+        let revision = state.workspace.content.project.revision();
         state.simulation.runs.push(prepared_run(revision, "V(OUT)"));
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
@@ -747,7 +747,7 @@ mod tests {
             ));
         state.schematic.session.selection.select_net_label(7);
         install_current_map(&mut state, "n1");
-        let revision = state.workspace.project.revision();
+        let revision = state.workspace.content.project.revision();
         state.simulation.runs.push(prepared_run_in(
             revision,
             "V(x1.n1)",
@@ -791,7 +791,7 @@ mod tests {
             ));
         state.schematic.session.selection.select_net_label(7);
         install_current_map(&mut state, "OUT");
-        let revision = state.workspace.project.revision();
+        let revision = state.workspace.content.project.revision();
         state.simulation.runs.push(prepared_run(revision, "V(OUT)"));
         state.simulation.active_run_idx = Some(0);
 
@@ -822,7 +822,7 @@ mod tests {
             .selection
             .select_only_component(component_id);
         install_current_map(&mut state, "OUT");
-        let revision = state.workspace.project.revision();
+        let revision = state.workspace.content.project.revision();
         let signal = format!("I({emitted})");
         state.simulation.runs.push(prepared_run(revision, &signal));
         state.simulation.active_run_idx = Some(0);

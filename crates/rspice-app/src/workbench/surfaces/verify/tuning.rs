@@ -29,6 +29,7 @@ pub(super) fn sync_tuning_session(app: &mut RSpiceApp) {
         .and_then(|(plan_id, revision)| {
             app.state
                 .workspace
+                .content
                 .plan_data(plan_id)
                 .map(|payload| (plan_id, revision, payload.design_variables.clone()))
         });
@@ -153,7 +154,7 @@ fn tuning_session_variables(app: &RSpiceApp) -> Vec<crate::state::DesignVariable
     let session = &app.state.workbench.verification;
     let mut variables = session
         .tuning_plan_id
-        .and_then(|plan_id| app.state.workspace.plan_data(plan_id))
+        .and_then(|plan_id| app.state.workspace.content.plan_data(plan_id))
         .map(|payload| payload.design_variables.clone())
         .unwrap_or_default();
     if let Some(binding) = session
@@ -254,11 +255,13 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
     let mut schematic = original_schematic.clone();
     if !changes.is_empty() {
         workspace
+            .content
             .update_design_variable_expressions(plan_id, &changes)
             .map_err(|error| error.to_string())?;
     }
     if let Some(variable) = proposed_variable {
         workspace
+            .content
             .add_design_variable(plan_id, variable)
             .map_err(|error| error.to_string())?;
     }
@@ -318,6 +321,7 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
         workspace.save_active_schematic(&schematic);
     }
     workspace
+        .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
     let binding_change_count = usize::from(binding_changed);
@@ -588,14 +592,18 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
         .ok()
         .map(|plan| (plan.id(), plan.revision()))
         .and_then(|(plan_id, revision)| {
-            app.state.workspace.plan_data(plan_id).map(|payload| {
-                (
-                    plan_id,
-                    revision,
-                    payload.design_variables.clone(),
-                    payload.specs.clone(),
-                )
-            })
+            app.state
+                .workspace
+                .content
+                .plan_data(plan_id)
+                .map(|payload| {
+                    (
+                        plan_id,
+                        revision,
+                        payload.design_variables.clone(),
+                        payload.specs.clone(),
+                    )
+                })
         })
     else {
         card(ui, "Exploration variables", |ui| {

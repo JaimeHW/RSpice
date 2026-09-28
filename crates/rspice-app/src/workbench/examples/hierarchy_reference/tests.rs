@@ -47,6 +47,7 @@ fn the_reference_project_round_trips_through_the_persisted_format() {
         assert!(
             restored
                 .workspace
+                .content
                 .schematic_buffers
                 .contains_key(&view.key()),
             "{} lost its schematic buffer",
@@ -65,6 +66,7 @@ fn the_reference_project_round_trips_through_the_persisted_format() {
 
     let catalog = restored
         .workspace
+        .content
         .design_management
         .sheet_catalog(&reference.amp_schematic.key())
         .expect("the amp sheet catalog is retained");
@@ -87,6 +89,7 @@ fn the_reference_project_round_trips_through_the_persisted_format() {
 
     let configuration = restored
         .workspace
+        .content
         .configuration_sets
         .active()
         .expect("the reference configuration stays active");
@@ -98,6 +101,7 @@ fn the_reference_project_round_trips_through_the_persisted_format() {
     assert_eq!(
         restored
             .workspace
+            .content
             .plan_data(reference.plan)
             .map(|payload| payload
                 .saved_outputs
@@ -116,7 +120,7 @@ fn the_reference_project_netlists_through_the_configured_execution_projection() 
         .workspace
         .configuration_execution_projection(
             &state.library_manager,
-            &state.workspace.active_view,
+            &state.workspace.content.active_view,
             &state.schematic,
         )
         .expect("the active configuration resolves into an execution plan");
@@ -303,6 +307,7 @@ fn the_reference_top_carries_the_typed_bus_and_its_scalar_tap() {
     let top = reference
         .state
         .workspace
+        .content
         .schematic_buffers
         .get(&reference.top.key())
         .expect("the testbench buffer is saved");

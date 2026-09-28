@@ -1044,11 +1044,12 @@ impl LiveSessionEngine {
         };
         let mut current: Vec<String> = state
             .workspace
+            .content
             .schematic_buffers
             .keys()
             .map(|key| schematic_doc_key(key))
             .collect();
-        if state.workspace.netlist_document.is_some() {
+        if state.workspace.content.netlist_document.is_some() {
             current.push(NETLIST_DOC.to_owned());
         }
         current.push(PROJECT_DOC.to_owned());
@@ -1686,6 +1687,7 @@ fn host_document_version(state: &AppState, doc: &str) -> Option<u64> {
     if doc == NETLIST_DOC {
         state
             .workspace
+            .content
             .netlist_document
             .as_ref()
             .map(|document| document.revision().get())
@@ -1693,6 +1695,7 @@ fn host_document_version(state: &AppState, doc: &str) -> Option<u64> {
         let cell_key = doc.strip_prefix(SCHEMATIC_DOC_PREFIX)?;
         state
             .workspace
+            .content
             .schematic_buffers
             .get(cell_key)
             .map(|schematic| schematic.content_version())
@@ -1718,7 +1721,7 @@ fn serialize_host_document(state: &AppState, doc: &str) -> Option<Vec<u8>> {
         // host's on-disk path is machine-local, so neither crosses the wire.
         project.simulation_results = Default::default();
         project.simulation_results_warning = None;
-        project.workspace.project.path = None;
+        project.workspace.content.project.path = None;
         return match crate::io::project_io::serialize_project_file(&project) {
             Ok(text) => Some(text.into_bytes()),
             Err(error) => {
@@ -1730,12 +1733,13 @@ fn serialize_host_document(state: &AppState, doc: &str) -> Option<Vec<u8>> {
     if doc == NETLIST_DOC {
         state
             .workspace
+            .content
             .netlist_document
             .as_ref()
             .map(|document| document.source_bytes().to_vec())
     } else {
         let cell_key = doc.strip_prefix(SCHEMATIC_DOC_PREFIX)?;
-        let buffer = state.workspace.schematic_buffers.get(cell_key)?;
+        let buffer = state.workspace.content.schematic_buffers.get(cell_key)?;
         serialize_schematic_for_wire(buffer).ok()
     }
 }

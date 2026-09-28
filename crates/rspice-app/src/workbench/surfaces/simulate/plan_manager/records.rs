@@ -185,7 +185,7 @@ pub(super) fn plan_catalog_records(app: &RSpiceApp) -> Vec<PlanCatalogRecord> {
             })
             .count()
     };
-    let payload = |id: SimulationPlanId| app.state.workspace.plan_data(id);
+    let payload = |id: SimulationPlanId| app.state.workspace.content.plan_data(id);
     let mut records = Vec::with_capacity(app.state.sim_setup.plan_count());
     if let Ok(plan) = app.state.sim_setup.stable_analysis_plan() {
         let id = plan.id();
@@ -514,8 +514,11 @@ mod tests {
         let second = setup
             .create_plan("Second characterization")
             .expect("a fresh root plan is created");
-        app.state.workspace.migrate_active_plan_data(first);
-        app.state.workspace.migrate_inactive_plan_data(second);
+        app.state.workspace.content.migrate_active_plan_data(first);
+        app.state
+            .workspace
+            .content
+            .migrate_inactive_plan_data(second);
         app.state.sim_setup = setup;
         // `create_plan` activates what it creates, so the original plan is now
         // the retained inactive entry.
@@ -536,7 +539,7 @@ mod tests {
             .set_reference_pvt(ProcessCorner::FF, -40.0)
             .expect("a physical reference corner");
         app.state.sim_setup = setup;
-        app.state.workspace.migrate_active_plan_data(id);
+        app.state.workspace.content.migrate_active_plan_data(id);
 
         let records = plan_catalog_records(&app);
         let record = records.first().expect("the active plan is projected");
@@ -572,6 +575,7 @@ mod tests {
         let payload = app
             .state
             .workspace
+            .content
             .plan_data(id)
             .expect("the active plan owns a payload");
         assert_eq!(record.design_variables, payload.design_variables.len());
@@ -643,7 +647,7 @@ mod tests {
         // The counts belong to this plan's own payload, never to the active
         // plan's: reading a neighbour's payload would be a lie, so an absent
         // record reports zero.
-        let own = app.state.workspace.plan_data(inactive_id);
+        let own = app.state.workspace.content.plan_data(inactive_id);
         assert_eq!(
             record.design_variables,
             own.map_or(0, |payload| payload.design_variables.len())
@@ -667,6 +671,7 @@ mod tests {
         let (mut app, active_id, inactive_id) = app_with_an_inactive_plan();
         app.state
             .workspace
+            .content
             .ensure_active_plan_data(active_id)
             .saved_outputs
             .push(
@@ -683,6 +688,7 @@ mod tests {
             );
         app.state
             .workspace
+            .content
             .simulation_plan_payloads
             .retain(|record| record.plan_id != inactive_id);
 

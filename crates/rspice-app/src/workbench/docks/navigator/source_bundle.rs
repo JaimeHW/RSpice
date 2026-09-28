@@ -64,7 +64,13 @@ struct BundleRow {
 
 fn bundle_rows(app: &RSpiceApp, language: ProjectSourceLanguage) -> Vec<BundleRow> {
     let owner = ProjectSourceOwner::code_workspace(language);
-    let Some(bundle) = app.state.workspace.project_sources.bundle_for_owner(&owner) else {
+    let Some(bundle) = app
+        .state
+        .workspace
+        .content
+        .project_sources
+        .bundle_for_owner(&owner)
+    else {
         return Vec::new();
     };
     let root = bundle.root();
@@ -129,6 +135,7 @@ fn select(app: &mut RSpiceApp, language: ProjectSourceLanguage, logical_path: &s
     let Some(bundle_id) = app
         .state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&owner)
         .map(crate::state::ProjectSourceBundle::id)
@@ -163,8 +170,8 @@ fn show_rail(
         .as_deref()
         .map(|path| {
             document_outline(
-                app.state.workspace.project.id(),
-                &app.state.workspace.project_sources,
+                app.state.workspace.content.project.id(),
+                &app.state.workspace.content.project_sources,
                 &mut app.state.ui.code_workspace.source_index_cache,
                 language,
                 path,
@@ -283,6 +290,7 @@ fn code_editor_id(
     let bundle_id = app
         .state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&owner)
         .map(crate::state::ProjectSourceBundle::id)?;

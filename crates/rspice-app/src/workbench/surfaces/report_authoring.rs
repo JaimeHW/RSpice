@@ -307,7 +307,7 @@ pub(crate) fn can_save_document(state: &AppState) -> bool {
     state.workbench.current_route().surface_id() == SurfaceId::ReportAuthoring
         && report_mutation_allowed(state)
         && active_document(state).is_some()
-        && state.workspace.report_documents_dirty
+        && state.workspace.content.report_documents_dirty
 }
 
 pub(crate) fn can_add_page(state: &AppState) -> bool {
@@ -336,6 +336,7 @@ pub(crate) fn save_document(app: &mut RSpiceApp) {
     let invalid = app
         .state
         .workspace
+        .content
         .report_documents
         .iter()
         .find_map(|document| document.validate().err());
@@ -460,7 +461,7 @@ fn move_selected_page(app: &mut RSpiceApp, direction: PageMoveDirection) {
             app.state.workbench.report_authoring.selected_page = Some(page_id);
             app.state.workbench.report_authoring.preview_block_page = 0;
             app.state.workbench.report_authoring.transaction_error = None;
-            app.state.workspace.report_documents_dirty |= changed;
+            app.state.workspace.content.report_documents_dirty |= changed;
         }
         Err(error) => {
             app.state.workbench.report_authoring.transaction_error = Some(error.clone());
@@ -551,7 +552,7 @@ fn commit_page_setting(app: &mut RSpiceApp, page_id: ReportPageId, setting: Page
             app.state.workbench.report_authoring.selected_page = Some(page_id);
             app.state.workbench.report_authoring.preview_block_page = 0;
             app.state.workbench.report_authoring.transaction_error = None;
-            app.state.workspace.report_documents_dirty |= changed;
+            app.state.workspace.content.report_documents_dirty |= changed;
         }
         Err(error) => {
             app.state.workbench.report_authoring.transaction_error = Some(error.clone());
@@ -613,7 +614,7 @@ fn commit_document_publication_setting(
     });
     match result {
         Ok(changed) => {
-            app.state.workspace.report_documents_dirty |= changed;
+            app.state.workspace.content.report_documents_dirty |= changed;
             app.state.workbench.report_authoring.transaction_error = None;
         }
         Err(error) => {
@@ -674,7 +675,7 @@ fn set_report_block_enabled(
             app.state.workbench.report_authoring.selected_report_block = Some(block_id);
             app.state.workbench.report_authoring.preview_block_page = 0;
             app.state.workbench.report_authoring.transaction_error = None;
-            app.state.workspace.report_documents_dirty |= changed;
+            app.state.workspace.content.report_documents_dirty |= changed;
         }
         Err(error) => {
             app.state.workbench.report_authoring.transaction_error = Some(error.clone());
@@ -1546,9 +1547,10 @@ struct ReportSummaryMetrics {
 impl ReportSummaryMetrics {
     fn from_state(state: &AppState) -> Self {
         let run = state.simulation.active_run();
-        let checks_total = state.workspace.specs.len();
+        let checks_total = state.workspace.content.specs.len();
         let checks_passing = state
             .workspace
+            .content
             .specs
             .iter()
             .filter(|spec| {
@@ -1933,6 +1935,7 @@ fn report_reference_resolves(state: &AppState, reference: &ReportReferenceMode) 
     match &snapshot.source {
         ReportSourceId::VisualizationDocument { document_id } => state
             .workspace
+            .content
             .visualization_documents
             .iter()
             .find(|document| document.id() == *document_id)
@@ -2648,8 +2651,8 @@ fn commit_create_document(app: &mut RSpiceApp) {
         Ok(document) => {
             let document_id = document.id();
             let page_id = document.pages().first().map(|page| page.id());
-            app.state.workspace.report_documents.push(document);
-            app.state.workspace.report_documents_dirty = true;
+            app.state.workspace.content.report_documents.push(document);
+            app.state.workspace.content.report_documents_dirty = true;
             let editor = &mut app.state.workbench.report_authoring;
             editor.selected_document = Some(document_id);
             editor.selected_page = page_id;
@@ -2737,7 +2740,7 @@ fn commit_add_page(app: &mut RSpiceApp) {
             app.state.workbench.report_authoring.preview_block_page = 0;
             app.state.workbench.report_authoring.add_page_open = false;
             app.state.workbench.report_authoring.transaction_error = None;
-            app.state.workspace.report_documents_dirty = true;
+            app.state.workspace.content.report_documents_dirty = true;
         }
         Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
     }
@@ -3501,7 +3504,7 @@ fn commit_add_report_element(app: &mut RSpiceApp) {
             app.state.workbench.report_authoring.add_report_element_open = false;
             app.state.workbench.report_authoring.preview_block_page = 0;
             app.state.workbench.report_authoring.transaction_error = None;
-            app.state.workspace.report_documents_dirty = true;
+            app.state.workspace.content.report_documents_dirty = true;
         }
         Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
     }
@@ -3628,7 +3631,7 @@ fn commit_remove_report_block(app: &mut RSpiceApp) {
                 .remove_report_block_open = false;
             app.state.workbench.report_authoring.preview_block_page = 0;
             app.state.workbench.report_authoring.transaction_error = None;
-            app.state.workspace.report_documents_dirty = true;
+            app.state.workspace.content.report_documents_dirty = true;
         }
         Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
     }
@@ -3713,30 +3716,22 @@ fn commit_page_properties(app: &mut RSpiceApp) {
             app.state.workbench.report_authoring.inline_page_title_draft = inline_title;
             app.state.workbench.report_authoring.page_properties_open = false;
             app.state.workbench.report_authoring.transaction_error = None;
-            app.state.workspace.report_documents_dirty |= changed;
+            app.state.workspace.content.report_documents_dirty |= changed;
         }
         Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
     }
 }
 
 fn synchronize_report_selection(state: &mut AppState) {
+    let documents = &state.workspace.content.report_documents;
     let selected_is_valid = state
         .workbench
         .report_authoring
         .selected_document
-        .is_some_and(|id| {
-            state
-                .workspace
-                .report_documents
-                .iter()
-                .any(|doc| doc.id() == id)
-        });
+        .is_some_and(|id| documents.iter().any(|doc| doc.id() == id));
     if !selected_is_valid {
-        state.workbench.report_authoring.selected_document = state
-            .workspace
-            .report_documents
-            .first()
-            .map(ReportDocument::id);
+        state.workbench.report_authoring.selected_document =
+            documents.first().map(ReportDocument::id);
         state.workbench.report_authoring.preview_block_page = 0;
     }
     let current_page = state.workbench.report_authoring.selected_page;
@@ -3779,23 +3774,19 @@ fn synchronize_report_selection(state: &mut AppState) {
 }
 
 fn active_document(state: &AppState) -> Option<&ReportDocument> {
+    let documents = &state.workspace.content.report_documents;
     let id = state.workbench.report_authoring.selected_document?;
-    state
-        .workspace
-        .report_documents
-        .iter()
-        .find(|document| document.id() == id)
+    documents.iter().find(|document| document.id() == id)
 }
 
 fn active_document_mut(state: &mut AppState) -> Result<&mut ReportDocument, String> {
+    let documents = &mut state.workspace.content.report_documents;
     let id = state
         .workbench
         .report_authoring
         .selected_document
         .ok_or_else(|| "No report document is selected.".to_owned())?;
-    state
-        .workspace
-        .report_documents
+    documents
         .iter_mut()
         .find(|document| document.id() == id)
         .ok_or_else(|| "The selected report document no longer exists.".to_owned())

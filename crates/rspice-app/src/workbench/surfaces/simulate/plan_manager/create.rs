@@ -436,7 +436,7 @@ pub(super) fn commit_create_plan(
     let mut setup = app.state.sim_setup.clone();
     let mut workspace = app.state.workspace.clone();
     let current_id = setup.stable_analysis_plan()?.id();
-    workspace.migrate_active_plan_data(current_id);
+    workspace.content.migrate_active_plan_data(current_id);
     // Read before the transaction, because `create_plan` retires the active plan
     // into the catalog and installs an empty closure and default options in its
     // place. After it returns, the plan being inherited from is no longer active.
@@ -447,9 +447,10 @@ pub(super) fn commit_create_plan(
     };
     let id = setup.create_plan(name).map_err(|error| error.to_string())?;
     apply_new_plan_configuration(&mut setup, new_plan, inherited)?;
-    workspace.migrate_inactive_plan_data(id);
-    workspace.sync_legacy_specs_projection(id);
+    workspace.content.migrate_inactive_plan_data(id);
+    workspace.content.sync_legacy_specs_projection(id);
     workspace
+        .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
     let first_instance = setup
@@ -824,6 +825,7 @@ mod tests {
             .id();
         app.state
             .workspace
+            .content
             .ensure_active_plan_data(retired)
             .saved_outputs
             .push(retained_output());

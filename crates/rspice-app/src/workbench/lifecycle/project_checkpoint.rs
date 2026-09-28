@@ -212,15 +212,15 @@ fn prepare_checkpoint(
     let serialized = crate::io::project_io::serialize_project_file(&project)
         .map_err(|error| format!("project checkpoint serialization failed: {error}"))?;
     let bytes = serialized.as_bytes();
-    let project_id = project.workspace.project.id().to_string();
+    let project_id = project.workspace.content.project.id().to_string();
     let checkpoint_id = Uuid::new_v4();
     let snapshot_name = format!("{created_unix_ms}-{checkpoint_id}{SNAPSHOT_SUFFIX}");
     let manifest = ProjectCheckpointManifest {
         schema_version: MANIFEST_SCHEMA_VERSION,
         checkpoint_id,
         project_id: project_id.clone(),
-        project_name: project.workspace.project.name().to_owned(),
-        project_revision: project.workspace.project.revision().get(),
+        project_name: project.workspace.content.project.name().to_owned(),
+        project_revision: project.workspace.content.project.revision().get(),
         reason,
         created_unix_ms,
         snapshot_digest: digest(bytes),
@@ -285,7 +285,7 @@ pub(crate) fn start_create(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn list(state: &AppState) -> Result<ProjectCheckpointCatalog, String> {
-    let project_id = state.workspace.project.id().to_string();
+    let project_id = state.workspace.content.project.id().to_string();
     list_native(state, &project_id)
 }
 
@@ -301,8 +301,9 @@ pub(crate) fn recovery_copy_bytes(
     destination: &Path,
 ) -> Result<Vec<u8>, String> {
     let mut project = load(summary)?;
-    project.workspace.project = project
+    project.workspace.content.project = project
         .workspace
+        .content
         .project
         .fork_copy_at(destination.to_path_buf());
     let serialized = crate::io::project_io::serialize_project_file(&project)
@@ -336,9 +337,9 @@ fn validate_snapshot_bytes(
         .map_err(|error| format!("project checkpoint is not valid UTF-8: {error}"))?;
     let project = crate::io::project_io::load_project_text(text, None)
         .map_err(|error| format!("project checkpoint cannot be restored: {error}"))?;
-    if project.workspace.project.id().to_string() != summary.project_id
-        || project.workspace.project.revision().get() != summary.project_revision
-        || project.workspace.project.name() != summary.project_name
+    if project.workspace.content.project.id().to_string() != summary.project_id
+        || project.workspace.content.project.revision().get() != summary.project_revision
+        || project.workspace.content.project.name() != summary.project_name
     {
         return Err("project checkpoint identity does not match its manifest".to_owned());
     }
@@ -420,7 +421,7 @@ fn sort_newest_first(checkpoints: &mut [ProjectCheckpointSummary]) {
 /// Where this project's checkpoints are kept, as the reader would look for them.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn storage_location(state: &AppState) -> Result<PathBuf, String> {
-    checkpoint_directory(state, &state.workspace.project.id().to_string())
+    checkpoint_directory(state, &state.workspace.content.project.id().to_string())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -428,6 +429,7 @@ fn checkpoint_directory(state: &AppState, project_id: &str) -> Result<PathBuf, S
     let _ = project_id;
     let base = state
         .workspace
+        .content
         .project
         .path
         .as_deref()
@@ -771,7 +773,7 @@ pub(crate) fn start_list(
     state: &AppState,
     complete: impl FnOnce(Result<ProjectCheckpointCatalog, String>) + 'static,
 ) {
-    let project_id = state.workspace.project.id().to_string();
+    let project_id = state.workspace.content.project.id().to_string();
     let prefix = browser_project_prefix(&project_id);
     let accumulator = std::rc::Rc::new(std::cell::RefCell::new(BrowserCheckpointAccumulator {
         project_id,
@@ -825,7 +827,8 @@ pub(crate) fn start_recovery_copy_bytes(
         move |result| {
             complete(result.and_then(|bytes| {
                 let mut project = validate_snapshot_bytes(&summary, &bytes)?;
-                project.workspace.project = project.workspace.project.fork_copy_at(destination);
+                project.workspace.content.project =
+                    project.workspace.content.project.fork_copy_at(destination);
                 crate::io::project_io::serialize_project_file(&project)
                     .map(String::into_bytes)
                     .map_err(|error| format!("recovery copy serialization failed: {error}"))
@@ -885,9 +888,9 @@ mod tests {
             .into_bytes();
         let summary = ProjectCheckpointSummary {
             checkpoint_id: Uuid::new_v4(),
-            project_id: project.workspace.project.id().to_string(),
-            project_name: project.workspace.project.name().to_owned(),
-            project_revision: project.workspace.project.revision().get(),
+            project_id: project.workspace.content.project.id().to_string(),
+            project_name: project.workspace.content.project.name().to_owned(),
+            project_revision: project.workspace.content.project.revision().get(),
             reason: ProjectCheckpointReason::TechnologyAttachment,
             created_unix_ms: 1,
             snapshot_digest: digest(&bytes),
@@ -907,7 +910,7 @@ mod tests {
         assert!(validate_snapshot_bytes(&summary, &changed).is_err());
 
         let mut changed_state = state;
-        changed_state.workspace.netlist_source = Some("R1 1 0 1k\n.end\n".to_owned());
+        changed_state.workspace.content.netlist_source = Some("R1 1 0 1k\n.end\n".to_owned());
         assert!(
             !matches_current_state(&summary, &changed_state)
                 .expect("changed state digest compares")
@@ -1006,11 +1009,11 @@ mod tests {
         let automation_id = automation.id();
 
         let mut state = AppState::default();
-        assert!(state.workspace.make_netlist_editable_copy(netlist));
-        state.workspace.project_sources =
+        assert!(state.workspace.content.make_netlist_editable_copy(netlist));
+        state.workspace.content.project_sources =
             ProjectSourceRegistry::try_from_bundles([veriloga, automation])
                 .expect("source registry is valid");
-        state.workspace.project_sources_dirty = true;
+        state.workspace.content.project_sources_dirty = true;
 
         let (manifest, serialized) = prepare_checkpoint(&state, ProjectCheckpointReason::Manual)
             .expect("complete Code workspace checkpoint prepares");
@@ -1019,10 +1022,14 @@ mod tests {
 
         let restored = crate::io::project_io::load_project_text(&serialized, None)
             .expect("checkpoint project restores");
-        assert_eq!(restored.workspace.netlist_source.as_deref(), Some(netlist));
+        assert_eq!(
+            restored.workspace.content.netlist_source.as_deref(),
+            Some(netlist)
+        );
 
         let restored_veriloga = restored
             .workspace
+            .content
             .project_sources
             .get_bundle(veriloga_id)
             .expect("Verilog-A closure restores by stable identity");
@@ -1038,6 +1045,7 @@ mod tests {
 
         let restored_automation = restored
             .workspace
+            .content
             .project_sources
             .get_bundle(automation_id)
             .expect("Automation closure restores by stable identity");
@@ -1066,14 +1074,16 @@ mod tests {
         assert!(
             state
                 .workspace
+                .content
                 .replace_editable_netlist_source("* changed after checkpoint\n.end\n".to_owned())
         );
         assert_ne!(
             crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
                 .expect("changed project snapshots")
                 .workspace
+                .content
                 .netlist_source,
-            restored.workspace.netlist_source
+            restored.workspace.content.netlist_source
         );
         assert_eq!(manifest.snapshot_digest, digest(serialized.as_bytes()));
     }
@@ -1086,10 +1096,11 @@ mod tests {
         let mut state = AppState::default();
         state
             .workspace
+            .content
             .project
             .set_path(directory.join("source.rspiceproj"));
-        let source_id = state.workspace.project.id();
-        let source_revision = state.workspace.project.revision();
+        let source_id = state.workspace.content.project.id();
+        let source_revision = state.workspace.content.project.revision();
 
         let checkpoint = create(&state, ProjectCheckpointReason::TechnologyAttachment)
             .expect("checkpoint publishes");
@@ -1123,13 +1134,13 @@ mod tests {
             checkpoint.checkpoint_id()
         );
         let restored = load(&listed.checkpoints[0]).expect("checkpoint bytes restore");
-        assert_eq!(restored.workspace.project.id(), source_id);
+        assert_eq!(restored.workspace.content.project.id(), source_id);
 
         let destination = directory.join("recovered.rspiceproj");
         publish_recovery_copy(&listed.checkpoints[0], &destination).expect("copy publishes");
         let copy = crate::io::load_project_file(&destination).expect("copy loads");
-        assert_ne!(copy.workspace.project.id(), source_id);
-        assert_eq!(copy.workspace.project.revision().get(), 1);
+        assert_ne!(copy.workspace.content.project.id(), source_id);
+        assert_eq!(copy.workspace.content.project.revision().get(), 1);
 
         std::fs::write(&destination, b"external bytes").expect("replace fixture copy");
         assert!(publish_recovery_copy(&listed.checkpoints[0], &destination).is_err());
@@ -1148,6 +1159,7 @@ mod tests {
         let mut state = AppState::default();
         state
             .workspace
+            .content
             .project
             .set_path(directory.join("source.rspiceproj"));
         let checkpoint = create(&state, ProjectCheckpointReason::TechnologyAttachment)

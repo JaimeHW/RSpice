@@ -44,7 +44,7 @@ fn retain_annotation(
             })
             .collect(),
     };
-    let annotation = workspace.design_management.annotation_mut();
+    let annotation = workspace.content.design_management.annotation_mut();
     let preview = annotation.preview_renumbering(&request).unwrap();
     annotation.commit_renumbering(&preview, &request).unwrap();
 }
@@ -64,7 +64,7 @@ fn unapplied_annotation_projects_controlled_source_references_with_names() {
         .params = "vref=V42 gain=2".to_owned();
     retain_annotation(&mut workspace, &reference, &active, &[voltage]);
     let original = crate::state::SchematicSnapshot::capture(&active.document());
-    let catalog = workspace.design_management.clone();
+    let catalog = workspace.content.design_management.clone();
     let projection = projection_of(&workspace, &libraries, &reference, &active);
     let projected = projection.root_schematic().unwrap();
     assert_eq!(
@@ -87,7 +87,7 @@ fn unapplied_annotation_projects_controlled_source_references_with_names() {
     assert_eq!(parameters["vref"], "V1");
     assert_eq!(parameters["gain"], "2");
     assert!(original.is_equal_document(&active.document()));
-    assert_eq!(workspace.design_management, catalog);
+    assert_eq!(workspace.content.design_management, catalog);
     assert!(Arc::ptr_eq(
         &projection,
         &projection_of(&workspace, &libraries, &reference, &active)
@@ -176,14 +176,14 @@ fn a_failed_annotation_projection_leaves_the_source_and_cached_projection_intact
             set_name(&mut active, collision, "V1");
         }
         let original = crate::state::SchematicSnapshot::capture(&active.document());
-        let catalog = workspace.design_management.clone();
+        let catalog = workspace.content.design_management.clone();
         let error = workspace
             .design_projection(&libraries, &reference, &active)
             .unwrap_err();
         assert!(error.to_string().contains("reference annotation"));
         assert!(error.to_string().contains(&reference.key()));
         assert!(original.is_equal_document(&active.document()));
-        assert_eq!(workspace.design_management, catalog);
+        assert_eq!(workspace.content.design_management, catalog);
         assert!(Arc::ptr_eq(
             &cached,
             &projection_of(&workspace, &libraries, &reference, &valid)
@@ -209,6 +209,7 @@ fn omitted_variant_components_do_not_participate_in_annotation_references() {
         .params = "vref='unfinished".to_owned();
     retain_annotation(&mut workspace, &reference, &active, &[voltage]);
     let variant = workspace
+        .content
         .design_management
         .variants_mut()
         .create(AssemblyVariantDraft {
@@ -225,6 +226,7 @@ fn omitted_variant_components_do_not_participate_in_annotation_references() {
         })
         .unwrap();
     workspace
+        .content
         .design_management
         .variants_mut()
         .set_active(variant)

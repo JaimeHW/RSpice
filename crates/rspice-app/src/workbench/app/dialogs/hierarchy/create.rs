@@ -451,7 +451,7 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
 
     let cell_name = state.dialogs.create_hierarchy.cell_name.trim();
     let target = CellViewRef::new(
-        &state.workspace.active_view.library,
+        &state.workspace.content.active_view.library,
         cell_name,
         state.dialogs.create_hierarchy.target_view.display_name(),
     );
@@ -485,6 +485,7 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
         let reference = CellViewRef::new(&target.library, cell_name, view);
         if state
             .workspace
+            .content
             .schematic_buffers
             .contains_key(&reference.key())
         {
@@ -532,7 +533,7 @@ fn source_plan(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
     let result = generated_for(
         state,
         &state.schematic,
-        &state.workspace.schematic_buffers,
+        &state.workspace.content.schematic_buffers,
         &state.library_manager,
     );
     state
@@ -582,7 +583,12 @@ fn resolved_terminal_contract(
         return fallback;
     };
     let reference = CellViewRef::new(&binding.library, &binding.cell, "schematic");
-    let Some(master) = state.workspace.schematic_buffers.get(&reference.key()) else {
+    let Some(master) = state
+        .workspace
+        .content
+        .schematic_buffers
+        .get(&reference.key())
+    else {
         return fallback;
     };
     master
@@ -618,7 +624,7 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
         return Err("The resolved connectivity or symbol geometry changed. Close and reopen Create hierarchy.".to_owned());
     }
 
-    let parent_ref = state.workspace.active_view.clone();
+    let parent_ref = state.workspace.content.active_view.clone();
     let library_name = parent_ref.library.clone();
     let cell_name = state.dialogs.create_hierarchy.cell_name.trim().to_owned();
     let target_view_type = state.dialogs.create_hierarchy.target_view;
@@ -669,9 +675,9 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
     symbol_view.modified = true;
     target_cell.add_view(symbol_view);
 
-    let open_views_before = state.workspace.open_views.clone();
-    let hierarchy_stack_before = state.workspace.hierarchy_stack.clone();
-    let hierarchy_instances_before = state.workspace.hierarchy_instances.clone();
+    let open_views_before = state.workspace.content.open_views.clone();
+    let hierarchy_stack_before = state.workspace.content.hierarchy_stack.clone();
+    let hierarchy_instances_before = state.workspace.content.hierarchy_instances.clone();
     let before_parent = source_schematic_with_canonical_connections(state);
     let baseline_resolution = state.workspace.resolve_hierarchy_with_active(
         &state.library_manager,
@@ -682,7 +688,7 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
     let baseline_generation = generated_for(
         state,
         &state.schematic,
-        &state.workspace.schematic_buffers,
+        &state.workspace.content.schematic_buffers,
         &state.library_manager,
     );
 
@@ -708,13 +714,13 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
     let parent_generation = generated_for(
         state,
         &candidate.parent,
-        &next_workspace.schematic_buffers,
+        &next_workspace.content.schematic_buffers,
         &next_libraries,
     );
     let child_generation = generated_for(
         state,
         &candidate.child,
-        &next_workspace.schematic_buffers,
+        &next_workspace.content.schematic_buffers,
         &next_libraries,
     );
     reject_new_netlist_errors(&baseline_generation.errors, &parent_generation.errors)?;
@@ -728,8 +734,8 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
         &state.schematic,
         &candidate.parent,
         &candidate.child,
-        &state.workspace.schematic_buffers,
-        &next_workspace.schematic_buffers,
+        &state.workspace.content.schematic_buffers,
+        &next_workspace.content.schematic_buffers,
         &state.library_manager,
         &next_libraries,
     )?;
@@ -746,9 +752,9 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
         target_open_ref.clone(),
         target_view_type,
     );
-    let open_views_after = next_workspace.open_views.clone();
-    let hierarchy_stack_after = next_workspace.hierarchy_stack.clone();
-    let hierarchy_instances_after = next_workspace.hierarchy_instances.clone();
+    let open_views_after = next_workspace.content.open_views.clone();
+    let hierarchy_stack_after = next_workspace.content.hierarchy_stack.clone();
+    let hierarchy_instances_after = next_workspace.content.hierarchy_instances.clone();
 
     state.library_manager = next_libraries;
     state.workspace = next_workspace;
@@ -1006,7 +1012,7 @@ mod tests {
             .add_wire(vec![Point::new(100, 0), Point::new(140, 0)]);
         state.schematic.session.selection.select_component(r1);
         state.schematic.session.selection.select_component(r2);
-        let parent_ref = state.workspace.active_view.clone();
+        let parent_ref = state.workspace.content.active_view.clone();
         let library_name = parent_ref.library.clone();
 
         open_create_hierarchy_dialog(&mut state);
@@ -1014,7 +1020,7 @@ mod tests {
         commit_create_hierarchy(&mut state).expect("transaction commits");
 
         let target_ref = CellViewRef::new(&library_name, DEFAULT_CELL, "schematic");
-        assert_eq!(state.workspace.active_view, target_ref);
+        assert_eq!(state.workspace.content.active_view, target_ref);
         let target_cell = state
             .library_manager
             .get_library(&library_name)
@@ -1030,6 +1036,7 @@ mod tests {
         assert!(
             state
                 .workspace
+                .content
                 .schematic_buffers
                 .get(&parent_ref.key())
                 .expect("parent buffer")
@@ -1056,7 +1063,7 @@ mod tests {
             state.undo_project_design().expect("undo"),
             Some("create hierarchical cell".to_owned())
         );
-        assert_eq!(state.workspace.active_view, parent_ref);
+        assert_eq!(state.workspace.content.active_view, parent_ref);
         assert!(
             state
                 .library_manager
@@ -1069,7 +1076,7 @@ mod tests {
             state.redo_project_design().expect("redo"),
             Some("create hierarchical cell".to_owned())
         );
-        assert_eq!(state.workspace.active_view, target_ref);
+        assert_eq!(state.workspace.content.active_view, target_ref);
     }
 
     #[test]
@@ -1096,6 +1103,7 @@ mod tests {
             .id();
         state
             .workspace
+            .content
             .ensure_active_plan_data(plan_id)
             .saved_outputs
             .push(
@@ -1120,7 +1128,7 @@ mod tests {
         assert!(
             state
                 .library_manager
-                .get_library(&state.workspace.active_view.library)
+                .get_library(&state.workspace.content.active_view.library)
                 .and_then(|library| library.get_cell(DEFAULT_CELL))
                 .is_none()
         );

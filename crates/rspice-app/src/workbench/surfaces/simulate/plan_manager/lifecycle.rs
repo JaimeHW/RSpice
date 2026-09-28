@@ -297,11 +297,12 @@ pub(super) fn commit_activate_plan(
     let mut setup = app.state.sim_setup.clone();
     let mut workspace = app.state.workspace.clone();
     let current_id = setup.stable_analysis_plan()?.id();
-    workspace.migrate_active_plan_data(current_id);
-    workspace.migrate_inactive_plan_data(id);
+    workspace.content.migrate_active_plan_data(current_id);
+    workspace.content.migrate_inactive_plan_data(id);
     setup.activate_plan(id).map_err(|error| error.to_string())?;
-    workspace.sync_legacy_specs_projection(id);
+    workspace.content.sync_legacy_specs_projection(id);
     workspace
+        .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
     let first_instance = setup
@@ -466,8 +467,14 @@ mod tests {
         let active = setup
             .create_plan("Corner characterization")
             .expect("a fresh root plan is created");
-        app.state.workspace.migrate_active_plan_data(retained);
-        app.state.workspace.migrate_inactive_plan_data(active);
+        app.state
+            .workspace
+            .content
+            .migrate_active_plan_data(retained);
+        app.state
+            .workspace
+            .content
+            .migrate_inactive_plan_data(active);
         app.state.sim_setup = setup;
         app.state.simulation.runs.push(run_referencing(retained));
         (app, active, retained)

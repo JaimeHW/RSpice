@@ -41,9 +41,9 @@ pub(crate) fn run_preflight_block_reason(
     if enabled.is_empty() {
         return Some("Enable at least one analysis instance in the simulation plan".to_owned());
     }
-    let configured_root = workspace.simulation_root_reference();
+    let configured_root = workspace.content.simulation_root_reference();
     let Some(configured_schematic) =
-        workspace.simulation_root_schematic(&workspace.active_view, schematic)
+        workspace.simulation_root_schematic(&workspace.content.active_view, schematic)
     else {
         return Some(format!(
             "Resolve the configured simulation root '{}' before running",
@@ -72,8 +72,12 @@ pub(crate) fn run_preflight_block_reason(
     }
     // The technology demand row owns this failure when nothing is attached and
     // the plan demands a technology; reporting both would name two remedies.
-    let technology_attached = workspace.project.technology_binding().is_some()
-        && !workspace.project.technology_change_audit().is_empty();
+    let technology_attached = workspace.content.project.technology_binding().is_some()
+        && !workspace
+            .content
+            .project
+            .technology_change_audit()
+            .is_empty();
     if (technology_attached || technology_demand(sim_setup, workspace).is_empty())
         && let Err(error) =
             model_library.reference_process_model_cards(sim_setup.reference_pvt.process)
@@ -86,7 +90,7 @@ pub(crate) fn run_preflight_block_reason(
     // block (or clear) the configured design's run eligibility.
     let configured_root_is_active = configured_root
         .key()
-        .eq_ignore_ascii_case(&workspace.active_view.key());
+        .eq_ignore_ascii_case(&workspace.content.active_view.key());
     if configured_root_is_active && let Some(result) = blocking_drc {
         let summary = result.summary();
         return Some(format!(

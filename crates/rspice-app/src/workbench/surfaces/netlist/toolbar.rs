@@ -187,7 +187,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
             dependency_visible,
             dependency_owned,
             generated_ready,
-            source_exists: app.state.workspace.netlist_source.is_some(),
+            source_exists: app.state.workspace.content.netlist_source.is_some(),
         },
     );
     // Dock collapse can make the document wider at a smaller outer viewport.
@@ -201,8 +201,13 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
     );
     let language = match active {
         ActiveNetlistDocument::Generated => messages.text(MessageId::NetlistLanguageGenerated),
-        ActiveNetlistDocument::OwnedSource => {
-            app.state.workspace.netlist_descriptor.as_ref().map_or_else(
+        ActiveNetlistDocument::OwnedSource => app
+            .state
+            .workspace
+            .content
+            .netlist_descriptor
+            .as_ref()
+            .map_or_else(
                 || messages.text(MessageId::NetlistLanguageOwned),
                 |descriptor| {
                     messages.text(match descriptor.strategy {
@@ -220,8 +225,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                         }
                     })
                 },
-            )
-        }
+            ),
         ActiveNetlistDocument::GeneratedDiff => messages.text(MessageId::NetlistLanguageDiff),
         ActiveNetlistDocument::RunSnapshot => messages.text(MessageId::NetlistLanguageRunSnapshot),
     };
@@ -381,7 +385,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
             } else {
             match active {
                 ActiveNetlistDocument::Generated => {
-                    let source_exists = app.state.workspace.netlist_source.is_some();
+                    let source_exists = app.state.workspace.content.netlist_source.is_some();
                     let (label, full_label, candidate) = if source_exists {
                         (
                             messages.text(MessageId::NetlistOpenEditableCompact),
@@ -545,7 +549,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
             match active {
                 ActiveNetlistDocument::Generated => {
                     let mut override_clicked = false;
-                    if !compact && app.state.workspace.netlist_source.is_none() {
+                    if !compact && app.state.workspace.content.netlist_source.is_none() {
                         ui.add_enabled_ui(generated_ready, |ui| {
                             override_clicked = icon_button(
                                 ui,
@@ -564,7 +568,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                             crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
                         ));
                     }
-                    let source_exists = app.state.workspace.netlist_source.is_some();
+                    let source_exists = app.state.workspace.content.netlist_source.is_some();
                     let (label, candidate) = if source_exists {
                         (
                             messages.text(MessageId::NetlistOpenEditable),
@@ -1190,7 +1194,7 @@ mod tests {
         const DECK: &str = "toolbar fixture\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-        app.state.workspace.netlist_source = Some(DECK.to_owned());
+        app.state.workspace.content.netlist_source = Some(DECK.to_owned());
         app.state.simulation.netlist_content = DECK.to_owned();
         app.state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         app.state.ui.netlist.active_document_initialized = true;

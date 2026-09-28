@@ -204,13 +204,14 @@ mod tests {
         let bundle = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&owner)
             .unwrap();
         let editor_id =
             code_workspace::source_editor_id(language, bundle.id(), bundle.root().logical_path());
         let original = bundle.root().content().to_owned();
-        let sources = app.state.workspace.project_sources.clone();
+        let sources = app.state.workspace.content.project_sources.clone();
         let mut render = |events| {
             let _ = ctx.run_ui(
                 egui::RawInput {
@@ -254,12 +255,13 @@ mod tests {
         let bundle = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&owner)
             .unwrap();
         if preceding.is_empty() {
             assert!(
-                app.state.workspace.project_sources == sources,
+                app.state.workspace.content.project_sources == sources,
                 "search text must not edit {language:?} source code"
             );
         } else {

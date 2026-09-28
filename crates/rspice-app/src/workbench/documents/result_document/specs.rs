@@ -260,6 +260,7 @@ fn untracked_measurements(state: &AppState) -> Vec<String> {
         .filter(|name| {
             !state
                 .workspace
+                .content
                 .specs
                 .iter()
                 .any(|spec| spec.measurement.eq_ignore_ascii_case(name))
@@ -279,8 +280,8 @@ fn untracked_measurements(state: &AppState) -> Vec<String> {
 /// immutable result.
 pub(crate) fn active_run_specifications(state: &AppState) -> Vec<SpecEntry> {
     state.simulation.active_run().map_or_else(
-        || state.workspace.specs.clone(),
-        |run| resolved_specifications(run, &state.workspace.specs).into_owned(),
+        || state.workspace.content.specs.clone(),
+        |run| resolved_specifications(run, &state.workspace.content.specs).into_owned(),
     )
 }
 
@@ -1014,6 +1015,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let Some(run) = state.simulation.active_run() else {
         let bounded = state
             .workspace
+            .content
             .specs
             .iter()
             .filter(|spec| spec.min.is_some() || spec.max.is_some())
@@ -1043,7 +1045,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let run_id = run.id;
     let dataset_id = run.dataset_id;
     let lifecycle = run.lifecycle;
-    let specs = resolved_specifications(run, &state.workspace.specs);
+    let specs = resolved_specifications(run, &state.workspace.content.specs);
     let rows = result_rows(run, &specs);
     let summary = summarize_rows(&rows);
     let passing = summary.passing;
@@ -1504,8 +1506,14 @@ pub fn apply_drafts(state: &mut AppState) -> bool {
         return false;
     };
     let mut workspace = state.workspace.clone();
-    workspace.replace_active_specification_definitions(plan_id, specs);
-    if workspace.validate_simulation_configuration().is_err() {
+    workspace
+        .content
+        .replace_active_specification_definitions(plan_id, specs);
+    if workspace
+        .content
+        .validate_simulation_configuration()
+        .is_err()
+    {
         return false;
     }
     let mut setup = state.sim_setup.clone();
@@ -1532,6 +1540,7 @@ pub fn open_editor(state: &mut AppState) {
         .map_or_else(Vec::new, |plan_id| {
             state
                 .workspace
+                .content
                 .plan_data(plan_id)
                 .filter(|payload| !payload.specification_definitions.is_empty())
                 .map(|payload| {
@@ -1544,6 +1553,7 @@ pub fn open_editor(state: &mut AppState) {
                 .unwrap_or_else(|| {
                     state
                         .workspace
+                        .content
                         .specs
                         .iter()
                         .enumerate()
@@ -1560,7 +1570,7 @@ pub fn open_editor(state: &mut AppState) {
 /// Right panel: the same active-dataset projection shown in the document.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let Some(run) = state.simulation.active_run() else {
-        let specs = &state.workspace.specs;
+        let specs = &state.workspace.content.specs;
         if specs.is_empty() {
             section_header(ui, "Specs", None);
             measurement_table(ui, &[("Bounds", "none defined")]);
@@ -1588,7 +1598,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     // Results are immutable evidence. The side inspector must therefore use
     // the same frozen receipt requirements as the document, even after the
     // active plan is edited or switched.
-    let specs = resolved_specifications(run, &state.workspace.specs);
+    let specs = resolved_specifications(run, &state.workspace.content.specs);
     if specs.is_empty() {
         section_header(ui, "Specs · active dataset", None);
         measurement_table(

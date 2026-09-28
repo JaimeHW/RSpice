@@ -62,7 +62,7 @@ fn placement_authority_matches(state: &AppState, sequence: &PendingPortSequence)
         authority.matches(
             state.design_execution_epoch,
             state.active_schematic_epoch,
-            &state.workspace.active_view.display_path(),
+            &state.workspace.content.active_view.display_path(),
         )
     })
 }

@@ -79,7 +79,7 @@ fn digest_of(bytes: &[u8]) -> String {
 /// depend on, and the reason neither of them carries a counter.
 fn scope(state: &AppState) -> ModelSourceDriftScope {
     ModelSourceDriftScope {
-        project_revision: state.workspace.project.revision().get(),
+        project_revision: state.workspace.content.project.revision().get(),
         // Cheap by construction: it hashes pins, paths and byte *lengths*, and
         // reads no source byte — so asking it every frame costs nothing the
         // paint-path hash gate would notice.

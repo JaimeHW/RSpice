@@ -555,7 +555,8 @@ mod tests {
         app.dialogs.symbol_import.source_text =
             r#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="40" height="20"/></svg>"#
                 .to_owned();
-        app.dialogs.symbol_import.target_library = app.workspace.active_view.library.clone();
+        app.dialogs.symbol_import.target_library =
+            app.workspace.content.active_view.library.clone();
         app.dialogs.symbol_import.target_name = "review_graphic".to_owned();
         app.dialogs.symbol_import.binding_choice = SymbolImportBindingChoice::UnboundForReview;
 
@@ -585,7 +586,7 @@ mod tests {
     fn import_candidate_never_overwrites_an_existing_cell() {
         let mut app = crate::workbench::app_state::AppState::default();
         app.project_lifecycle.project_open = true;
-        let library_name = app.workspace.active_view.library.clone();
+        let library_name = app.workspace.content.active_view.library.clone();
         app.dialogs.symbol_import.source_name = "review.svg".to_owned();
         app.dialogs.symbol_import.source_text =
             r#"<svg><line x1="0" y1="0" x2="10" y2="10"/></svg>"#.to_owned();

@@ -98,16 +98,17 @@ pub(crate) fn commit_dependency_relink(
             candidate.ui.netlist.generated_source = next.source().to_owned();
         }
         ActiveNetlistDocument::OwnedSource => {
-            if let Some(include) =
-                candidate
-                    .workspace
-                    .netlist_descriptor
-                    .as_mut()
-                    .and_then(|descriptor| {
-                        descriptor.owned_includes.iter_mut().find(|include| {
-                            include.logical_identity == transaction.logical_identity
-                        })
-                    })
+            if let Some(include) = candidate
+                .workspace
+                .content
+                .netlist_descriptor
+                .as_mut()
+                .and_then(|descriptor| {
+                    descriptor
+                        .owned_includes
+                        .iter_mut()
+                        .find(|include| include.logical_identity == transaction.logical_identity)
+                })
             {
                 include.revision = include
                     .revision
@@ -115,11 +116,12 @@ pub(crate) fn commit_dependency_relink(
                     .ok_or_else(|| "Owned include revision overflowed.".to_owned())?;
                 include.content_digest = crate::state::content_digest(&source);
             }
-            candidate.workspace.netlist_document = Some(next.clone());
-            candidate.workspace.netlist_source_dirty = true;
+            candidate.workspace.content.netlist_document = Some(next.clone());
+            candidate.workspace.content.netlist_source_dirty = true;
             candidate.ui.netlist.owned_document = Some(next);
             candidate
                 .workspace
+                .content
                 .validate_simulation_configuration()
                 .map_err(|error| error.to_string())?;
         }

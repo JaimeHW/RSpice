@@ -26,7 +26,7 @@ impl SchematicEditAuthority {
             design_execution_epoch: state.design_execution_epoch,
             active_schematic_epoch: state.active_schematic_epoch,
             topology_version: state.schematic.topology_version(),
-            view_path: state.workspace.active_view.display_path(),
+            view_path: state.workspace.content.active_view.display_path(),
             grid_size: state.schematic.document().grid_size,
             document_policy: state.schematic.document().document_policy,
             snapshot: SchematicSnapshot::capture(&state.schematic.document()),
@@ -61,7 +61,7 @@ impl SchematicEditAuthority {
         if self.topology_version != state.schematic.topology_version() {
             return Err(reopen("The schematic topology changed"));
         }
-        if self.view_path != state.workspace.active_view.display_path() {
+        if self.view_path != state.workspace.content.active_view.display_path() {
             return Err(reopen("The active cell/view changed"));
         }
         if self.grid_size != state.schematic.document().grid_size

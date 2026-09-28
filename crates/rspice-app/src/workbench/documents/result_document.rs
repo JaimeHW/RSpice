@@ -1530,6 +1530,7 @@ pub(super) fn place_marker(
         .and_then(|context| {
             let document = state
                 .workspace
+                .content
                 .visualization_document(context.document_id)?;
             let trace = document
                 .traces()
@@ -1565,7 +1566,7 @@ pub(super) fn place_marker(
         return quick_fallback(state, reason);
     };
 
-    let receipt = match state.workspace.transact_visualization_document(
+    let receipt = match state.workspace.content.transact_visualization_document(
         context.document_id,
         revision,
         vec![
@@ -1628,12 +1629,13 @@ pub(super) fn remove_marker(state: &mut AppState, selector: MarkerSelector) {
         } => {
             let Some(revision) = state
                 .workspace
+                .content
                 .visualization_document(document_id)
                 .map(|document| document.revision())
             else {
                 return;
             };
-            if let Err(error) = state.workspace.transact_visualization_document(
+            if let Err(error) = state.workspace.content.transact_visualization_document(
                 document_id,
                 revision,
                 vec![
@@ -1700,6 +1702,7 @@ pub(super) fn commit_marker_edit(
             let label = retained_marker_label(note, &trace_name).to_owned();
             let retained = state
                 .workspace
+                .content
                 .visualization_document(document_id)
                 .and_then(|document| {
                     let marker = document
@@ -1720,6 +1723,7 @@ pub(super) fn commit_marker_edit(
             };
             state
                 .workspace
+                .content
                 .transact_visualization_document(
                     document_id,
                     revision,
@@ -1846,6 +1850,7 @@ fn is_document_marker_projection(state: &AppState, marker: &ResultMarker) -> boo
     }
     state
         .workspace
+        .content
         .visualization_documents
         .iter()
         .any(|document| {
@@ -5015,7 +5020,7 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
                     .iter()
                     .any(|analysis| !analysis.measurements.is_empty())
             });
-            if !state.workspace.specs.is_empty() || has_measurements {
+            if !state.workspace.content.specs.is_empty() || has_measurements {
                 ViewerAvailability::available("Specification or measurement data is available")
             } else {
                 ViewerAvailability::unavailable("Requires specifications or measured results")

@@ -176,13 +176,13 @@ fn contextual_report_commands_stay_out_of_the_searchable_registry() {
 #[test]
 fn opening_report_authoring_never_mutates_an_empty_project() {
     let mut state = AppState::default();
-    assert!(state.workspace.report_documents.is_empty());
-    assert!(!state.workspace.report_documents_dirty);
+    assert!(state.workspace.content.report_documents.is_empty());
+    assert!(!state.workspace.content.report_documents_dirty);
 
     synchronize_report_selection(&mut state);
 
-    assert!(state.workspace.report_documents.is_empty());
-    assert!(!state.workspace.report_documents_dirty);
+    assert!(state.workspace.content.report_documents.is_empty());
+    assert!(!state.workspace.content.report_documents_dirty);
     assert_eq!(state.workbench.report_authoring.selected_document, None);
     assert_eq!(state.workbench.report_authoring.selected_page, None);
 }
@@ -204,13 +204,13 @@ fn explicit_report_plan_creates_the_exact_mockup_outline_once() {
     for (page, (_, expected)) in document.pages().iter().zip(INITIAL_PAGES) {
         assert_eq!(page.title(), expected);
     }
-    assert!(app.state.workspace.report_documents_dirty);
+    assert!(app.state.workspace.content.report_documents_dirty);
     assert_eq!(app.state.workbench.report_authoring.preview_block_page, 0);
     let document_id = app.state.workbench.report_authoring.selected_document;
     let page_id = app.state.workbench.report_authoring.selected_page;
     synchronize_report_selection(&mut app.state);
     synchronize_report_selection(&mut app.state);
-    assert_eq!(app.state.workspace.report_documents.len(), 1);
+    assert_eq!(app.state.workspace.content.report_documents.len(), 1);
     assert_eq!(
         app.state.workbench.report_authoring.selected_document,
         document_id
@@ -267,7 +267,7 @@ fn report_page_settings_commit_canonical_revision_checked_transactions() {
     let initial_revision = active_document(&app.state)
         .expect("active report")
         .revision();
-    app.state.workspace.report_documents_dirty = false;
+    app.state.workspace.content.report_documents_dirty = false;
 
     commit_page_setting(
         &mut app,
@@ -303,7 +303,7 @@ fn report_page_settings_commit_canonical_revision_checked_transactions() {
         ReportBlockedGateTextPolicy::SummarizeWithLink
     );
     assert_eq!(document.revision().get(), initial_revision.get() + 4);
-    assert!(app.state.workspace.report_documents_dirty);
+    assert!(app.state.workspace.content.report_documents_dirty);
     assert!(
         app.state
             .workbench
@@ -326,7 +326,7 @@ fn report_page_order_controls_commit_revision_checked_moves() {
         .collect::<Vec<_>>();
     let page_to_move = page_ids[1];
     app.state.workbench.report_authoring.selected_page = Some(page_to_move);
-    app.state.workspace.report_documents_dirty = false;
+    app.state.workspace.content.report_documents_dirty = false;
 
     assert!(can_move_selected_page(
         &app.state,
@@ -347,13 +347,13 @@ fn report_page_order_controls_commit_revision_checked_moves() {
             .revision_note(),
         "Move report page earlier"
     );
-    assert!(app.state.workspace.report_documents_dirty);
+    assert!(app.state.workspace.content.report_documents_dirty);
     assert_eq!(
         app.state.workbench.report_authoring.selected_page,
         Some(page_to_move)
     );
 
-    app.state.workspace.report_documents_dirty = false;
+    app.state.workspace.content.report_documents_dirty = false;
     move_selected_page(&mut app, PageMoveDirection::Later);
     let document = active_document(&app.state).expect("active report");
     assert_eq!(
@@ -373,7 +373,7 @@ fn report_page_order_controls_commit_revision_checked_moves() {
             .revision_note(),
         "Move report page later"
     );
-    assert!(app.state.workspace.report_documents_dirty);
+    assert!(app.state.workspace.content.report_documents_dirty);
 }
 
 #[test]
@@ -383,7 +383,7 @@ fn report_page_order_controls_fail_closed_at_document_boundaries() {
     commit_create_document(&mut app);
     let first_page = active_document(&app.state).expect("active report").pages()[0].id();
     app.state.workbench.report_authoring.selected_page = Some(first_page);
-    app.state.workspace.report_documents_dirty = false;
+    app.state.workspace.content.report_documents_dirty = false;
     let revision = active_document(&app.state)
         .expect("active report")
         .revision();
@@ -400,7 +400,7 @@ fn report_page_order_controls_fail_closed_at_document_boundaries() {
             .revision(),
         revision
     );
-    assert!(!app.state.workspace.report_documents_dirty);
+    assert!(!app.state.workspace.content.report_documents_dirty);
 }
 
 #[test]
@@ -533,7 +533,7 @@ fn publication_inspector_edits_are_canonical_document_transactions() {
     assert_eq!(document.output_formats(), output_formats);
     assert_eq!(document.publication_profile(), publication_profile);
     assert_eq!(document.revision().get(), initial_revision.get() + 2);
-    assert!(app.state.workspace.report_documents_dirty);
+    assert!(app.state.workspace.content.report_documents_dirty);
     assert!(
         app.state
             .workbench
@@ -589,7 +589,11 @@ fn inserting_result_document_binds_exact_revision_digest_and_dataset() {
     let source_digest = source.content_digest().unwrap();
     let expected_page_id = source.pages()[0].id.get();
     let expected_pane_id = source.panes()[0].id.get();
-    app.state.workspace.visualization_documents.push(source);
+    app.state
+        .workspace
+        .content
+        .visualization_documents
+        .push(source);
 
     open_insert_result_document(&mut app);
     commit_insert_result_document(&mut app);
@@ -649,8 +653,8 @@ fn direct_report_creation_fails_closed_in_read_only_safe_mode() {
 
     commit_create_document(&mut app);
 
-    assert!(app.state.workspace.report_documents.is_empty());
-    assert!(!app.state.workspace.report_documents_dirty);
+    assert!(app.state.workspace.content.report_documents.is_empty());
+    assert!(!app.state.workspace.content.report_documents_dirty);
     assert_eq!(
         app.state
             .workbench
@@ -773,7 +777,7 @@ fn report_summary_uses_verified_spec_and_exact_corner_evidence() {
     }
 
     let mut app = RSpiceApp::test_instance();
-    app.state.workspace.specs = vec![
+    app.state.workspace.content.specs = vec![
         crate::state::SpecEntry {
             measurement: "gain".to_owned(),
             expression: String::new(),

@@ -49,8 +49,8 @@ pub use connectivity_contract::{
 };
 pub use engineering_table::{
     EngineeringDataset, EngineeringFilterGrammar, EngineeringSortRule, EngineeringTableView,
-    EngineeringTableViewStore, EngineeringViewScope, EngineeringVirtualizationPolicy,
-    FrozenIdentifierPolicy, SavedEngineeringTableView, SortDirection,
+    EngineeringViewScope, EngineeringVirtualizationPolicy, FrozenIdentifierPolicy,
+    SavedEngineeringTableView, SortDirection,
 };
 // The one hierarchical path grammar. Every consumer of an instance path,
 // pattern, or probe target names these types; nothing else may split a path.
@@ -77,12 +77,14 @@ pub use model_bound_symbol::{
     load_model_bound_symbol, materialize_symbol_document, prepare_symbol_construction,
 };
 pub use model_library::ModelLibraryManager;
+#[cfg(test)]
+pub use netlist_document::DocumentOwnership;
 pub use netlist_document::{
     BoundedFindMatches, DependencyMetadata, DependencyResolution, DependencySourceAuthority,
-    DiagnosticSeverity, DocumentOwnership, FindDirection, FindError, FindMatch, FindOptions,
-    GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,
-    NetlistDocument, NetlistDocumentId, NetlistSourceIndex, OutlineEntry, OutlineEntryKind,
-    OutlineSection, OutlineSectionKind, SourceLocator, ValidationDiagnostic, content_digest,
+    DiagnosticSeverity, FindDirection, FindError, FindMatch, FindOptions, GeneratedArtifact,
+    GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput, NetlistDocument,
+    NetlistDocumentId, NetlistSourceIndex, OutlineEntry, OutlineEntryKind, OutlineSection,
+    OutlineSectionKind, SourceLocator, ValidationDiagnostic, content_digest,
     find_all_in_source_bounded, replace_source_ranges,
 };
 pub(crate) use netlist_document::{
@@ -91,8 +93,8 @@ pub(crate) use netlist_document::{
 };
 pub use params_string::{format_params_string, parse_params_string};
 pub use physical_layout::{
-    LayoutDocumentError, LayoutEdit, LayoutGeometry, LayoutLayerPurpose, LayoutObjectId,
-    LayoutPoint, LayoutShape, LayoutTechnologyBinding, PhysicalLayoutDocument,
+    LayoutEdit, LayoutGeometry, LayoutLayerPurpose, LayoutObjectId, LayoutPoint, LayoutShape,
+    LayoutTechnologyBinding, PhysicalLayoutDocument,
 };
 #[cfg(test)]
 pub use physical_layout::{LayoutInstance, LayoutOrientation, LayoutTransform};

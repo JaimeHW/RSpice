@@ -595,9 +595,10 @@ fn project_callback_workflow_executes_exact_pin_and_exposes_durable_receipt() {
             callback_id: "derive-device".to_owned(),
         },
     );
-    assert_eq!(app.state.workspace.pdk_callback_receipts().len(), 1);
+    assert_eq!(app.state.workspace.content.pdk_callback_receipts().len(), 1);
     app.state
         .workspace
+        .content
         .validate_pdk_callback_receipts()
         .expect("committed callback ledger validates");
     ctx.data_mut(|data| {

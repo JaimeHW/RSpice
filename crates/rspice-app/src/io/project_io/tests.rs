@@ -154,6 +154,7 @@ fn project_with_two_authoritative_layout_documents() -> (ProjectFile, CellViewRe
 fn insert_layout_instance(project: &mut ProjectFile, owner: &CellViewRef, master: CellViewRef) {
     let mut document = project
         .workspace
+        .content
         .physical_layout_document(owner)
         .expect("layout owner document")
         .clone();
@@ -178,6 +179,7 @@ fn insert_layout_instance(project: &mut ProjectFile, owner: &CellViewRef, master
         .expect("layout instance transaction is locally valid");
     project
         .workspace
+        .content
         .commit_physical_layout_document(document)
         .expect("layout document commits");
 }
@@ -186,7 +188,12 @@ fn insert_layout_instance(project: &mut ProjectFile, owner: &CellViewRef, master
 fn project_validation_rejects_layout_hierarchy_without_authoritative_master_document() {
     let (mut project, top, child) = project_with_two_authoritative_layout_documents();
     insert_layout_instance(&mut project, &top, child.clone());
-    assert!(project.workspace.remove_physical_layout_document(&child));
+    assert!(
+        project
+            .workspace
+            .content
+            .remove_physical_layout_document(&child)
+    );
 
     let error = project
         .validate()
@@ -571,7 +578,7 @@ fn project_with_execution_context() -> ProjectFile {
     // retaining every legacy fixture edit above.
     setup.analysis_plan = None;
     setup
-        .migrate_legacy_analysis_plan(workspace.project.id())
+        .migrate_legacy_analysis_plan(workspace.content.project.id())
         .expect("legacy execution fixture migrates at the load boundary");
     let execution_context = crate::io::capture_execution_context(&setup, &model_manager)
         .expect("execution fixture validates");
@@ -611,8 +618,8 @@ fn cell_source_bundle(reference: CellViewRef) -> crate::state::ProjectSourceBund
 fn project_validation_requires_cell_source_owner_to_be_an_exact_veriloga_view() {
     let mut valid = project_with_execution_context();
     let reference = CellViewRef::new(
-        valid.workspace.project.root_library.clone(),
-        valid.workspace.project.top_cell.clone(),
+        valid.workspace.content.project.root_library.clone(),
+        valid.workspace.content.project.top_cell.clone(),
         "behavior",
     );
     valid
@@ -626,13 +633,14 @@ fn project_validation_requires_cell_source_owner_to_be_an_exact_veriloga_view() 
         ));
     valid
         .workspace
+        .content
         .project_sources
         .insert_bundle(cell_source_bundle(reference.clone()))
         .expect("unique source owner");
     valid.validate().expect("exact Verilog-A owner is valid");
 
     let mut missing_source = valid.clone();
-    missing_source.workspace.project_sources = Default::default();
+    missing_source.workspace.content.project_sources = Default::default();
     assert!(
         missing_source
             .validate()
@@ -642,9 +650,10 @@ fn project_validation_requires_cell_source_owner_to_be_an_exact_veriloga_view() 
     );
 
     let mut canonical_alias = valid.clone();
-    canonical_alias.workspace.project_sources = Default::default();
+    canonical_alias.workspace.content.project_sources = Default::default();
     canonical_alias
         .workspace
+        .content
         .project_sources
         .insert_bundle(cell_source_bundle(CellViewRef::new(
             reference.library.to_uppercase(),
@@ -661,9 +670,10 @@ fn project_validation_requires_cell_source_owner_to_be_an_exact_veriloga_view() 
     );
 
     let mut missing = valid.clone();
-    missing.workspace.project_sources = Default::default();
+    missing.workspace.content.project_sources = Default::default();
     missing
         .workspace
+        .content
         .project_sources
         .insert_bundle(cell_source_bundle(CellViewRef::new(
             &reference.library,
@@ -680,14 +690,15 @@ fn project_validation_requires_cell_source_owner_to_be_an_exact_veriloga_view() 
     );
 
     let mut wrong_type = valid;
-    wrong_type.workspace.project_sources = Default::default();
+    wrong_type.workspace.content.project_sources = Default::default();
     let schematic = CellViewRef::new(
-        &wrong_type.workspace.project.root_library,
-        &wrong_type.workspace.project.top_cell,
+        &wrong_type.workspace.content.project.root_library,
+        &wrong_type.workspace.content.project.top_cell,
         crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
     wrong_type
         .workspace
+        .content
         .project_sources
         .insert_bundle(cell_source_bundle(schematic))
         .expect("registry validates owner shape");
@@ -765,10 +776,11 @@ fn project_file_round_trips_configuration_execution_authority() {
     let mut libraries = LibraryManager::with_primitives();
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     workspace
+        .content
         .configuration_sets
         .create(crate::state::ConfigurationSetDefinition {
             name: "Browser-qualified release".to_owned(),
-            root: workspace.active_view.clone(),
+            root: workspace.content.active_view.clone(),
             dut_path: "/top/XDUT".to_owned(),
             executable_view_policy: vec!["schematic".to_owned(), "spice".to_owned()],
             stop_views: vec!["spice".to_owned()],
@@ -786,34 +798,36 @@ fn project_file_round_trips_configuration_execution_authority() {
             owner: "Verification".to_owned(),
         })
         .expect("configuration fixture");
-    let expected = workspace.configuration_sets.clone();
+    let expected = workspace.content.configuration_sets.clone();
     let project = ProjectFile::new(workspace, libraries);
 
     let json = serialize_project_file(&project).expect("configuration project serializes");
     let loaded = load_project_text(&json, None).expect("configuration project loads");
 
-    assert_eq!(loaded.workspace.configuration_sets, expected);
+    assert_eq!(loaded.workspace.content.configuration_sets, expected);
 }
 
 #[test]
 fn project_file_round_trips_design_management_authority() {
     let mut libraries = LibraryManager::with_primitives();
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let owner = workspace.active_view.key();
+    let owner = workspace.content.active_view.key();
     workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&owner, "Main", [11, 12])
         .expect("design-management fixture");
-    let expected = workspace.design_management.clone();
+    let expected = workspace.content.design_management.clone();
     let project = ProjectFile::new(workspace, libraries);
 
     let json = serialize_project_file(&project).expect("design project serializes");
     let loaded = load_project_text(&json, None).expect("design project loads");
 
-    assert_eq!(loaded.workspace.design_management, expected);
+    assert_eq!(loaded.workspace.content.design_management, expected);
     assert_eq!(
         loaded
             .workspace
+            .content
             .design_management
             .semantic_digest()
             .expect("loaded semantic digest"),
@@ -828,8 +842,9 @@ fn project_file_rejects_unsupported_design_management_schema() {
     let mut libraries = LibraryManager::with_primitives();
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     workspace
+        .content
         .design_management
-        .bootstrap_for_cell_view(&workspace.active_view.key(), "Main", [11])
+        .bootstrap_for_cell_view(&workspace.content.active_view.key(), "Main", [11])
         .expect("design-management fixture");
     let project = ProjectFile::new(workspace, libraries);
     let mut value = serde_json::to_value(project).expect("project JSON value");
@@ -899,15 +914,15 @@ fn project_file_round_trips_project_owned_report_documents() {
             11,
         )
         .expect("set page publication policies");
-    workspace.report_documents.push(report.clone());
-    workspace.report_documents_dirty = true;
+    workspace.content.report_documents.push(report.clone());
+    workspace.content.report_documents_dirty = true;
     let project = ProjectFile::new(workspace, libraries);
 
     let json = serialize_project_file(&project).expect("project serializes");
     let restored = load_project_text(&json, None).expect("project reloads");
 
-    assert_eq!(restored.workspace.report_documents, vec![report]);
-    let restored_report = &restored.workspace.report_documents[0];
+    assert_eq!(restored.workspace.content.report_documents, vec![report]);
+    let restored_report = &restored.workspace.content.report_documents[0];
     assert_eq!(restored_report.revision_history().records().len(), 3);
     assert_eq!(
         restored_report
@@ -923,7 +938,7 @@ fn project_file_round_trips_project_owned_report_documents() {
             .pages()
             .is_empty()
     );
-    assert!(!restored.workspace.report_documents_dirty);
+    assert!(!restored.workspace.content.report_documents_dirty);
 }
 
 #[test]
@@ -1146,7 +1161,7 @@ fn unfinished_analysis_drafts_are_project_data_not_file_corruption() {
         .expect("draft syntax is validated by run preflight, not project loading");
     let (plan, _, _) = crate::io::restore_execution_context(
         loaded.execution_context.expect("context retained"),
-        loaded.workspace.project.id(),
+        loaded.workspace.content.project.id(),
     )
     .expect("context enters application state");
 

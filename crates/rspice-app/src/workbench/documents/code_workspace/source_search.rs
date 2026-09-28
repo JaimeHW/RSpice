@@ -54,6 +54,7 @@ pub(crate) fn open_source_search(
     let bundle = app
         .state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&owner)
         .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
@@ -75,6 +76,7 @@ pub(crate) fn open_source_search_in_bundle(
     let bundle = app
         .state
         .workspace
+        .content
         .project_sources
         .get_bundle(bundle_id)
         .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
@@ -101,7 +103,7 @@ pub(crate) fn open_source_search_in_bundle(
         .source_search
         .as_ref()
         .is_some_and(|search| {
-            search.project_id == app.state.workspace.project.id()
+            search.project_id == app.state.workspace.content.project.id()
                 && search.bundle_id == bundle.id()
                 && search.bundle_revision == bundle.revision().get()
                 && search.closure_digest == bundle.closure_digest()
@@ -119,7 +121,7 @@ pub(crate) fn open_source_search_in_bundle(
         return Ok(());
     }
     app.state.ui.code_workspace.source_search = Some(CodeSourceSearchState {
-        project_id: app.state.workspace.project.id(),
+        project_id: app.state.workspace.content.project.id(),
         bundle_id: bundle.id(),
         bundle_revision: bundle.revision().get(),
         closure_digest: bundle.closure_digest(),
@@ -165,6 +167,7 @@ pub(crate) fn open_active_source_search(app: &mut RSpiceApp) -> Result<(), Strin
             let bundle = app
                 .state
                 .workspace
+                .content
                 .project_sources
                 .bundle_for_owner(&ProjectSourceOwner::code_workspace(
                     ProjectSourceLanguage::RSpiceAutomation,
@@ -341,6 +344,7 @@ pub(crate) fn commit_source_search_replace(app: &mut RSpiceApp) -> Result<String
     let changed_files = app
         .state
         .workspace
+        .content
         .replace_project_source_bundle_files_transactionally(search.bundle_id, replacements)
         .map_err(|error| error.to_string())?;
     match search.language {
@@ -376,12 +380,13 @@ fn current_bundle<'a>(
     app: &'a RSpiceApp,
     search: &CodeSourceSearchState,
 ) -> Result<&'a ProjectSourceBundle, String> {
-    if search.project_id != app.state.workspace.project.id() {
+    if search.project_id != app.state.workspace.content.project.id() {
         return Err("The active project changed while search results were open.".to_owned());
     }
     let bundle = app
         .state
         .workspace
+        .content
         .project_sources
         .get_bundle(search.bundle_id)
         .ok_or_else(|| "The searched source bundle no longer exists.".to_owned())?;
@@ -848,6 +853,7 @@ mod tests {
             let bundle = app
                 .state
                 .workspace
+                .content
                 .project_sources
                 .bundle_for_owner(&ProjectSourceOwner::code_workspace(
                     ProjectSourceLanguage::VerilogA,
@@ -857,6 +863,7 @@ mod tests {
         };
         app.state
             .workspace
+            .content
             .replace_project_source_bundle_file(
                 bundle_id,
                 &root,
@@ -886,6 +893,7 @@ mod tests {
         let bundle = app
             .state
             .workspace
+            .content
             .project_sources
             .get_bundle(bundle_id)
             .unwrap();
@@ -903,6 +911,7 @@ mod tests {
             let bundle = app
                 .state
                 .workspace
+                .content
                 .project_sources
                 .bundle_for_owner(&ProjectSourceOwner::code_workspace(
                     ProjectSourceLanguage::VerilogA,
@@ -913,10 +922,12 @@ mod tests {
         let retained_path = "Models/étage.va";
         app.state
             .workspace
+            .content
             .rename_project_source_bundle_file(bundle_id, &original_path, retained_path)
             .unwrap();
         app.state
             .workspace
+            .content
             .replace_project_source_bundle_file(
                 bundle_id,
                 retained_path,
@@ -943,6 +954,7 @@ mod tests {
         let active_path = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&ProjectSourceOwner::code_workspace(
                 ProjectSourceLanguage::VerilogA,
@@ -964,13 +976,14 @@ mod tests {
         let bundle = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&ProjectSourceOwner::code_workspace(
                 ProjectSourceLanguage::VerilogA,
             ))
             .unwrap();
         assert!(bundle.root().content().contains("stage_gain"));
-        assert!(app.state.workspace.project_sources_dirty);
+        assert!(app.state.workspace.content.project_sources_dirty);
         let root = bundle.root().logical_path().to_owned();
 
         open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &active_path).unwrap();
@@ -984,6 +997,7 @@ mod tests {
             .bundle_id;
         app.state
             .workspace
+            .content
             .replace_project_source_bundle_file(
                 bundle_id,
                 &root,
@@ -1002,6 +1016,7 @@ mod tests {
             let bundle = app
                 .state
                 .workspace
+                .content
                 .project_sources
                 .bundle_for_owner(&ProjectSourceOwner::code_workspace(
                     ProjectSourceLanguage::VerilogA,
@@ -1012,6 +1027,7 @@ mod tests {
         let source = "module gain; // gain\nreal gain; /* gain */\nendmodule\n";
         app.state
             .workspace
+            .content
             .replace_project_source_bundle_file(bundle_id, &root, source.to_owned())
             .unwrap();
         open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &root).unwrap();
@@ -1031,6 +1047,7 @@ mod tests {
         assert_eq!(
             app.state
                 .workspace
+                .content
                 .project_sources
                 .get_bundle(bundle_id)
                 .unwrap()
@@ -1048,6 +1065,7 @@ mod tests {
         let active_path = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&ProjectSourceOwner::code_workspace(
                 ProjectSourceLanguage::VerilogA,
@@ -1090,6 +1108,7 @@ mod tests {
             let bundle = app
                 .state
                 .workspace
+                .content
                 .project_sources
                 .bundle_for_owner(&ProjectSourceOwner::code_workspace(
                     ProjectSourceLanguage::VerilogA,
@@ -1099,6 +1118,7 @@ mod tests {
         };
         app.state
             .workspace
+            .content
             .replace_project_source_bundle_file(bundle_id, &root, "gain ".repeat(600))
             .unwrap();
         open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &root).unwrap();
@@ -1125,6 +1145,7 @@ mod tests {
             let bundle = app
                 .state
                 .workspace
+                .content
                 .project_sources
                 .bundle_for_owner(&ProjectSourceOwner::code_workspace(
                     ProjectSourceLanguage::VerilogA,
@@ -1134,6 +1155,7 @@ mod tests {
         };
         app.state
             .workspace
+            .content
             .replace_project_source_bundle_file(
                 bundle_id,
                 &root,
@@ -1155,6 +1177,7 @@ mod tests {
 
         app.state
             .workspace
+            .content
             .replace_project_source_bundle_file(
                 bundle_id,
                 &root,

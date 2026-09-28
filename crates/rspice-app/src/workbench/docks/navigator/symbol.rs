@@ -19,7 +19,7 @@ use crate::workbench::RSpiceApp;
 use super::super::super::design_system::{WorkbenchIcon, property_row, section_header};
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let reference = app.state.workspace.active_view.clone();
+    let reference = app.state.workspace.content.active_view.clone();
     let ports = app.state.active_symbol_ports();
     let Ok(mut document) = app.state.load_active_symbol_document() else {
         // The document could not be read. The editor surface reports the
@@ -335,7 +335,8 @@ fn interface_section(
         "Cell",
         &format!(
             "{}/{}",
-            app.state.workspace.active_view.library, app.state.workspace.active_view.cell
+            app.state.workspace.content.active_view.library,
+            app.state.workspace.content.active_view.cell
         ),
     );
 

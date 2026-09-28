@@ -351,7 +351,7 @@ fn project_revision_label(ui: &mut Ui, app: &RSpiceApp, tokens: &Tokens) {
     ui.label(
         egui::RichText::new(format!(
             "main @ r{}",
-            app.state.workspace.project.revision().get()
+            app.state.workspace.content.project.revision().get()
         ))
         .font(theme::mono(tokens::FS_0, FontWeight::Medium))
         .color(tokens.color.text_faint),
@@ -365,7 +365,7 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
         let (label, description, tone) = app
             .state
             .workspace
-            .netlist_document
+            .content.netlist_document
             .as_ref()
             .map_or_else(
                 || {
@@ -410,8 +410,8 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     } else {
         let root = crate::state::CellViewRef::new(
-            &app.state.workspace.project.root_library,
-            &app.state.workspace.project.top_cell,
+            &app.state.workspace.content.project.root_library,
+            &app.state.workspace.content.project.top_cell,
             crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
         );
         let (checks_label, checks_description, checks_tone) = match app
@@ -466,7 +466,7 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     }
 
-    let active_configuration = app.state.workspace.configuration_sets.active();
+    let active_configuration = app.state.workspace.content.configuration_sets.active();
     let configuration = active_configuration.map_or("none", |configuration| configuration.name());
     if project_status_chip(
         ui,
@@ -1004,7 +1004,12 @@ mod tests {
 
         let mut app = RSpiceApp::test_instance();
         app.state.project_lifecycle.project_open = true;
-        let _ = app.state.workspace.project.rename("lna-frontend-28g");
+        let _ = app
+            .state
+            .workspace
+            .content
+            .project
+            .rename("lna-frontend-28g");
         let now = crate::time_compat::unix_epoch().as_secs_f64();
         {
             let run = app.state.simulation.start_run();
@@ -1063,9 +1068,9 @@ mod tests {
             use crate::services::drc::{
                 DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
             };
-            app.state.workspace.active_view = crate::state::CellViewRef::new(
-                &app.state.workspace.project.root_library,
-                &app.state.workspace.project.top_cell,
+            app.state.workspace.content.active_view = crate::state::CellViewRef::new(
+                &app.state.workspace.content.project.root_library,
+                &app.state.workspace.content.project.top_cell,
                 crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
             );
             let mut result = DrcResult::new();
@@ -1179,8 +1184,8 @@ mod tests {
         let mut app = populated_project_app();
         app.state.workbench.project_page = ProjectPage::Recovery;
         let now = crate::time_compat::checked_unix_time_ms().expect("clock");
-        let name = app.state.workspace.project.name().to_owned();
-        let project_id = app.state.workspace.project.id().to_string();
+        let name = app.state.workspace.content.project.name().to_owned();
+        let project_id = app.state.workspace.content.project.id().to_string();
         let catalog = [
             (ProjectCheckpointReason::Manual, 3, 6 * 60_000, 48_214),
             (

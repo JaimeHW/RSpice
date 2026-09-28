@@ -162,7 +162,7 @@ fn writable_library_name(state: &AppState) -> Option<String> {
 }
 
 fn selected_symbol_reference(state: &AppState) -> Option<CellViewRef> {
-    let active = &state.workspace.active_view;
+    let active = &state.workspace.content.active_view;
     if state
         .library_manager
         .get_library(&active.library)
@@ -251,7 +251,7 @@ mod tests {
         assert!(state.dialogs.symbol_import.open);
         assert_eq!(
             state.dialogs.symbol_import.target_library,
-            state.workspace.active_view.library
+            state.workspace.content.active_view.library
         );
         assert!(state.dialogs.symbol_import.source_text.is_empty());
         assert!(!state.dialogs.symbol_import.dirty);
@@ -261,7 +261,7 @@ mod tests {
     fn form_action_loads_the_selected_typed_definition_as_the_next_revision() {
         let mut state = AppState::default();
         state.project_lifecycle.project_open = true;
-        let library_name = state.workspace.active_view.library.clone();
+        let library_name = state.workspace.content.active_view.library.clone();
         let cell_name = "review_form";
         let template = ModelBoundSymbolDefinition::review_only(&library_name, cell_name);
         let imported = SymbolDefinitionImport::from_bytes(

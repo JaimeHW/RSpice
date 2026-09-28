@@ -121,6 +121,7 @@ fn a_selected_record_paints_every_field_of_its_contract() {
         .expect("valid saved output");
         app.state
             .workspace
+            .content
             .add_saved_output(id, output)
             .expect("the plan accepts it");
         app.state.workbench.selected_saved_output = Some("vout".to_owned());
@@ -154,6 +155,7 @@ fn a_selected_record_paints_every_field_of_its_contract() {
         .expect("valid design variable");
         app.state
             .workspace
+            .content
             .add_design_variable(id, variable)
             .expect("the plan accepts it");
         app.state.workbench.selected_design_variable = Some("rload".to_owned());
@@ -606,11 +608,13 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
     let output_id = output.id;
     app.state
         .workspace
+        .content
         .add_saved_output(plan_id, output)
         .expect("the plan accepts a valid output");
     assert_eq!(
         app.state
             .workspace
+            .content
             .plan_data(plan_id)
             .expect("payload")
             .saved_outputs
@@ -621,12 +625,14 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
     let removed = app
         .state
         .workspace
+        .content
         .remove_saved_output(plan_id, output_id)
         .expect("the output it just accepted can be removed");
     assert_eq!(removed.name, "vout");
     assert!(
         app.state
             .workspace
+            .content
             .plan_data(plan_id)
             .expect("payload")
             .saved_outputs
@@ -637,12 +643,14 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
     assert!(
         app.state
             .workspace
+            .content
             .remove_saved_output(plan_id, output_id)
             .is_err()
     );
     assert!(
         app.state
             .workspace
+            .content
             .remove_saved_output(plan_id, SavedOutputId::new())
             .is_err()
     );
@@ -678,17 +686,24 @@ fn a_duplicated_saved_output_inherits_everything_but_its_identity_and_name() {
     let source = output.clone();
     app.state
         .workspace
+        .content
         .add_saved_output(plan_id, output)
         .expect("the plan accepts a valid output");
 
     let copy_id = app
         .state
         .workspace
+        .content
         .duplicate_saved_output(plan_id, output_id, "vout_copy")
         .expect("a free name duplicates");
     assert!(copy_id != output_id, "the copy is its own record");
 
-    let payload = app.state.workspace.plan_data(plan_id).expect("payload");
+    let payload = app
+        .state
+        .workspace
+        .content
+        .plan_data(plan_id)
+        .expect("payload");
     assert_eq!(payload.saved_outputs.len(), 2);
     let copy = payload
         .saved_outputs
@@ -713,18 +728,21 @@ fn a_duplicated_saved_output_inherits_everything_but_its_identity_and_name() {
     assert!(
         app.state
             .workspace
+            .content
             .duplicate_saved_output(plan_id, output_id, "VOUT")
             .is_err()
     );
     assert!(
         app.state
             .workspace
+            .content
             .duplicate_saved_output(plan_id, SavedOutputId::new(), "orphan")
             .is_err()
     );
     assert_eq!(
         app.state
             .workspace
+            .content
             .plan_data(plan_id)
             .expect("payload")
             .saved_outputs
@@ -787,6 +805,7 @@ fn a_selected_specification_is_identified_by_its_measurement_not_its_row() {
         app.state.workbench.selected_specification = Some("bandwidth".to_owned());
         app.state
             .workspace
+            .content
             .replace_active_specs(id, vec![spec("bandwidth")]);
     });
     assert!(
@@ -801,6 +820,7 @@ fn a_selected_specification_is_identified_by_its_measurement_not_its_row() {
         app.state.workbench.selected_specification = Some("gain".to_owned());
         app.state
             .workspace
+            .content
             .replace_active_specs(id, vec![spec("bandwidth")]);
     });
     assert!(
@@ -845,6 +865,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     let original_revision = output.revision;
     app.state
         .workspace
+        .content
         .add_saved_output(plan_id, output.clone())
         .expect("the plan accepts a valid output");
 
@@ -855,6 +876,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     let revision = app
         .state
         .workspace
+        .content
         .replace_saved_output(plan_id, output_id, replacement)
         .expect("a valid capture contract is accepted");
     assert_ne!(
@@ -864,6 +886,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     let stored = app
         .state
         .workspace
+        .content
         .plan_data(plan_id)
         .expect("payload")
         .saved_outputs
@@ -893,6 +916,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     let unchanged = app
         .state
         .workspace
+        .content
         .replace_saved_output(plan_id, output_id, stored.clone())
         .expect("an unchanged contract is accepted");
     assert_eq!(
@@ -913,6 +937,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     .expect("valid saved output");
     app.state
         .workspace
+        .content
         .add_saved_output(plan_id, other)
         .expect("the plan accepts a second output");
     let mut collision = stored;
@@ -920,6 +945,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     assert!(
         app.state
             .workspace
+            .content
             .replace_saved_output(plan_id, output_id, collision)
             .is_err(),
         "a name that collides case-insensitively with another output must be refused"
@@ -927,6 +953,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     assert_eq!(
         app.state
             .workspace
+            .content
             .plan_data(plan_id)
             .expect("payload")
             .saved_outputs
@@ -963,6 +990,7 @@ fn a_saved_output_can_be_renamed_and_its_expression_rewritten() {
     let output_id = output.id;
     app.state
         .workspace
+        .content
         .add_saved_output(plan_id, output.clone())
         .expect("the plan accepts it");
 
@@ -971,12 +999,14 @@ fn a_saved_output_can_be_renamed_and_its_expression_rewritten() {
     corrected.source_expression = "V(out)".to_owned();
     app.state
         .workspace
+        .content
         .replace_saved_output(plan_id, output_id, corrected)
         .expect("a corrected contract is accepted");
 
     let stored = app
         .state
         .workspace
+        .content
         .plan_data(plan_id)
         .expect("payload")
         .saved_outputs
@@ -1062,12 +1092,14 @@ fn a_design_variable_expression_can_be_edited_in_place() {
     let original_revision = variable.revision;
     app.state
         .workspace
+        .content
         .add_design_variable(plan_id, variable)
         .expect("the plan accepts a valid variable");
 
     let revision = app
         .state
         .workspace
+        .content
         .update_design_variable_expression(plan_id, variable_id, "2kohm")
         .expect("a valid expression is accepted");
     assert_ne!(
@@ -1077,6 +1109,7 @@ fn a_design_variable_expression_can_be_edited_in_place() {
     let stored = app
         .state
         .workspace
+        .content
         .plan_data(plan_id)
         .expect("payload")
         .design_variables
@@ -1122,6 +1155,7 @@ fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() 
     let variable_id = variable.id;
     app.state
         .workspace
+        .content
         .add_design_variable(plan_id, variable.clone())
         .expect("the plan accepts a valid variable");
     assert!(
@@ -1139,12 +1173,14 @@ fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() 
     });
     app.state
         .workspace
+        .content
         .replace_design_variable(plan_id, variable_id, replacement)
         .expect("a valid contract is accepted");
 
     let stored = app
         .state
         .workspace
+        .content
         .plan_data(plan_id)
         .expect("payload")
         .design_variables
@@ -1180,11 +1216,13 @@ fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() 
     unbounded.allowed_range = None;
     app.state
         .workspace
+        .content
         .replace_design_variable(plan_id, variable_id, unbounded)
         .expect("removing the bound is accepted");
     assert!(
         app.state
             .workspace
+            .content
             .plan_data(plan_id)
             .expect("payload")
             .design_variables
@@ -1410,6 +1448,7 @@ fn the_applies_to_control_is_built_from_the_declared_run_set() {
         app.state.workbench.selected_specification = Some("gain".to_owned());
         app.state
             .workspace
+            .content
             .replace_active_specs(id, vec![spec(SpecPointScope::AllPoints)]);
     });
     assert!(
@@ -1427,7 +1466,7 @@ fn the_applies_to_control_is_built_from_the_declared_run_set() {
         let id = plan_id(app);
         app.state.sim_setup.run_set = six_point_run_set();
         app.state.workbench.selected_specification = Some("gain".to_owned());
-        app.state.workspace.replace_active_specs(
+        app.state.workspace.content.replace_active_specs(
             id,
             vec![spec(SpecPointScope::SelectedCorners {
                 corners: vec!["FF".to_owned()],
@@ -1449,7 +1488,7 @@ fn the_applies_to_control_is_built_from_the_declared_run_set() {
         let id = plan_id(app);
         app.state.sim_setup.run_set = six_point_run_set();
         app.state.workbench.selected_specification = Some("gain".to_owned());
-        app.state.workspace.replace_active_specs(
+        app.state.workspace.content.replace_active_specs(
             id,
             vec![spec(SpecPointScope::SelectedCorners {
                 corners: vec!["SS".to_owned()],
@@ -1476,7 +1515,7 @@ fn a_scope_change_commits_as_a_plan_transaction_and_a_rejected_one_changes_nothi
 
     let mut app = RSpiceApp::test_instance();
     let id = plan_id(&app);
-    app.state.workspace.replace_active_specs(
+    app.state.workspace.content.replace_active_specs(
         id,
         vec![SpecEntry {
             measurement: "gain".to_owned(),
@@ -1499,7 +1538,7 @@ fn a_scope_change_commits_as_a_plan_transaction_and_a_rejected_one_changes_nothi
     // Matched case-insensitively, exactly as the selection resolves it.
     super::page_specs::commit_scope(&mut app, "GAIN", SpecPointScope::Nominal);
     assert_eq!(
-        app.state.workspace.active_specs(id)[0].scope,
+        app.state.workspace.content.active_specs(id)[0].scope,
         SpecPointScope::Nominal
     );
     assert_ne!(
@@ -1521,7 +1560,7 @@ fn a_scope_change_commits_as_a_plan_transaction_and_a_rejected_one_changes_nothi
         },
     );
     assert_eq!(
-        app.state.workspace.active_specs(id)[0].scope,
+        app.state.workspace.content.active_specs(id)[0].scope,
         SpecPointScope::Nominal,
         "a rejected scope leaves the stored requirement untouched"
     );
@@ -1561,6 +1600,7 @@ fn specification_policy_commits_atomically_and_rejects_an_invalid_yield_gate() {
     let stored = &app
         .state
         .workspace
+        .content
         .plan_data(id)
         .expect("plan payload")
         .specification_policy;
@@ -1582,6 +1622,7 @@ fn specification_policy_commits_atomically_and_rejects_an_invalid_yield_gate() {
     let stored = &app
         .state
         .workspace
+        .content
         .plan_data(id)
         .expect("plan payload")
         .specification_policy;
@@ -1875,6 +1916,7 @@ fn seed_three_outputs(state: &mut AppState) {
         .expect("valid saved output");
         state
             .workspace
+            .content
             .add_saved_output(id, output)
             .expect("the plan accepts it");
     }
@@ -1924,10 +1966,10 @@ fn the_output_filter_narrows_the_rendered_rows_and_not_the_plan() {
     let mut app = RSpiceApp::test_instance();
     seed_three_outputs(&mut app.state);
     let id = plan_id(&app);
-    let before = app.state.workspace.plan_data(id).cloned();
+    let before = app.state.workspace.content.plan_data(id).cloned();
     app.state.workbench.saved_output_filter = "db20".to_owned();
     assert_eq!(
-        app.state.workspace.plan_data(id).cloned(),
+        app.state.workspace.content.plan_data(id).cloned(),
         before,
         "a filter is a view: it must not move one byte of plan-owned data"
     );
@@ -1982,7 +2024,7 @@ fn seed_two_specifications(state: &mut AppState) {
     };
 
     let id = seeded_plan_id(state);
-    state.workspace.replace_active_specs(
+    state.workspace.content.replace_active_specs(
         id,
         vec![
             SpecEntry {
@@ -2202,6 +2244,7 @@ fn the_variables_page_states_the_rules_it_enforces_instead_of_offering_them() {
         .expect("valid design variable");
         app.state
             .workspace
+            .content
             .add_design_variable(id, variable)
             .expect("the plan accepts it");
         app.state.workbench.selected_design_variable = Some("rload".to_owned());
@@ -2285,17 +2328,20 @@ fn a_bounded_variable_is_refused_on_every_path_a_test_can_reach() {
     assert!(
         app.state
             .workspace
+            .content
             .validate_simulation_configuration()
             .is_ok(),
         "the seeded workspace is valid before the tampered record is planted"
     );
     app.state
         .workspace
+        .content
         .ensure_active_plan_data(id)
         .design_variables = vec![variable];
     assert!(
         app.state
             .workspace
+            .content
             .validate_simulation_configuration()
             .is_err(),
         "workspace validation refuses the stored configuration"

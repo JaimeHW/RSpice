@@ -343,11 +343,13 @@ mod tests {
         let key = state.workspace.active_schematic_reference().key();
         let first = state
             .workspace
+            .content
             .design_management
             .bootstrap_for_cell_view(&key, "Sheet 1", [hidden_id])
             .unwrap();
         let catalog = state
             .workspace
+            .content
             .design_management
             .sheet_catalog_mut(&key)
             .unwrap();

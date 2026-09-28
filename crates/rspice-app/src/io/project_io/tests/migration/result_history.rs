@@ -268,6 +268,7 @@ fn project_load_clears_legacy_regression_baseline_after_result_migration() {
     project.simulation_results = crate::io::capture_simulation_results(&simulation);
     project
         .workspace
+        .content
         .plan_data_mut(plan_id)
         .expect("active plan payload")
         .regression_baseline_run = Some(baseline_id);
@@ -279,6 +280,7 @@ fn project_load_clears_legacy_regression_baseline_after_result_migration() {
     assert!(
         loaded
             .workspace
+            .content
             .plan_data(plan_id)
             .expect("active plan payload")
             .regression_baseline_run
@@ -352,7 +354,7 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
         &mut run,
         AnalysisResultSourceDomain::SimulationPlan,
         Some(plan_id),
-        project.workspace.project.revision(),
+        project.workspace.content.project.revision(),
         ContentDigest::from_bytes([0xd2; 32]),
         PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0xd3; 32])),
         &[analysis_kind_tag_for_plan_kind(AnalysisKind::Noise)],
@@ -378,6 +380,7 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
     );
     project
         .workspace
+        .content
         .plan_data_mut(plan_id)
         .expect("active plan payload")
         .regression_baseline_run = Some(baseline_id);
@@ -408,6 +411,7 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
     assert_eq!(
         loaded
             .workspace
+            .content
             .plan_data(plan_id)
             .expect("active plan payload")
             .regression_baseline_run,
@@ -440,6 +444,7 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
     assert!(
         rejected
             .workspace
+            .content
             .plan_data(plan_id)
             .expect("active plan payload")
             .regression_baseline_run
@@ -467,6 +472,7 @@ fn project_load_clears_dangling_regression_baseline_without_rejecting_project() 
         .id();
     project
         .workspace
+        .content
         .plan_data_mut(plan_id)
         .expect("active plan payload")
         .regression_baseline_run = Some(crate::product::RunId::new());
@@ -478,6 +484,7 @@ fn project_load_clears_dangling_regression_baseline_without_rejecting_project() 
     assert!(
         loaded
             .workspace
+            .content
             .plan_data(plan_id)
             .expect("active plan payload")
             .regression_baseline_run
@@ -1132,6 +1139,7 @@ fn project_text_load_updates_source_path_without_renaming_identity() {
     let mut libraries = LibraryManager::with_primitives();
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     workspace
+        .content
         .project
         .set_path(PathBuf::from("stale-native-path.rspiceproj"));
     let project = ProjectFile::new(workspace, libraries);
@@ -1141,11 +1149,11 @@ fn project_text_load_updates_source_path_without_renaming_identity() {
         .expect("project text loads");
 
     assert_eq!(
-        loaded.workspace.project.path.as_deref(),
+        loaded.workspace.content.project.path.as_deref(),
         Some(Path::new("browser-import.rspiceproj"))
     );
     assert_eq!(
-        loaded.workspace.project.display_name(),
+        loaded.workspace.content.project.display_name(),
         "stale-native-path",
         "moving a project file must not silently rename its logical identity"
     );
@@ -1156,6 +1164,7 @@ fn project_text_load_without_source_path_clears_stale_file_identity() {
     let mut libraries = LibraryManager::with_primitives();
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     workspace
+        .content
         .project
         .set_path(PathBuf::from("stale-native-path.rspiceproj"));
     let project = ProjectFile::new(workspace, libraries);
@@ -1163,8 +1172,11 @@ fn project_text_load_without_source_path_clears_stale_file_identity() {
 
     let loaded = load_project_text(&json, None).expect("project text loads");
 
-    assert!(loaded.workspace.project.path.is_none());
-    assert_eq!(loaded.workspace.project.display_name(), "stale-native-path");
+    assert!(loaded.workspace.content.project.path.is_none());
+    assert_eq!(
+        loaded.workspace.content.project.display_name(),
+        "stale-native-path"
+    );
 }
 
 #[test]
@@ -1198,15 +1210,15 @@ fn legacy_project_migration_assigns_stable_identity_metadata() {
     let migrated = load_project_text(&legacy, None).expect("legacy project migrates");
     let replay = load_project_text(&legacy, None).expect("identical legacy bytes migrate again");
 
-    assert!(!migrated.workspace.project.id().as_uuid().is_nil());
+    assert!(!migrated.workspace.content.project.id().as_uuid().is_nil());
     assert_eq!(
-        migrated.workspace.project.schema_version(),
+        migrated.workspace.content.project.schema_version(),
         crate::state::PROJECT_DESCRIPTOR_SCHEMA_VERSION
     );
-    assert_eq!(migrated.workspace.project.revision().get(), 1);
+    assert_eq!(migrated.workspace.content.project.revision().get(), 1);
     assert_eq!(
-        migrated.workspace.project.id(),
-        replay.workspace.project.id()
+        migrated.workspace.content.project.id(),
+        replay.workspace.content.project.id()
     );
     let migrated_plan = migrated
         .execution_context
@@ -1244,12 +1256,12 @@ fn legacy_project_migration_assigns_stable_identity_metadata() {
     );
     let reloaded = load_project_text(&migrated_json, None).expect("migrated project reloads");
     assert_eq!(
-        reloaded.workspace.project.id(),
-        migrated.workspace.project.id()
+        reloaded.workspace.content.project.id(),
+        migrated.workspace.content.project.id()
     );
     assert_eq!(
-        reloaded.workspace.project.revision(),
-        migrated.workspace.project.revision()
+        reloaded.workspace.content.project.revision(),
+        migrated.workspace.content.project.revision()
     );
 }
 
@@ -1351,15 +1363,16 @@ fn project_text_load_rejects_workspace_references_missing_from_libraries() {
     let ghost = CellViewRef::new("ghost", "amp", "schematic");
     let ghost_key = ghost.key();
     let schematic = workspace
+        .content
         .schematic_buffers
         .keys()
         .next()
         .and_then(|key| workspace.clone_schematic_editor(key))
         .expect("default project has a schematic buffer");
-    workspace.active_view = ghost.clone();
-    workspace.open_views = vec![OpenCellView::new(ghost.clone(), ViewType::Schematic)];
-    workspace.hierarchy_stack = vec![ghost.clone()];
-    workspace.schematic_buffers.clear();
+    workspace.content.active_view = ghost.clone();
+    workspace.content.open_views = vec![OpenCellView::new(ghost.clone(), ViewType::Schematic)];
+    workspace.content.hierarchy_stack = vec![ghost.clone()];
+    workspace.content.schematic_buffers.clear();
     workspace.schematic_sessions.clear();
     workspace.insert_schematic_editor(ghost_key.clone(), schematic);
     let project = ProjectFile::new(workspace, libraries);
@@ -1379,8 +1392,8 @@ fn project_text_load_rejects_workspace_references_missing_from_libraries() {
 fn project_text_load_rejects_workspace_view_type_mismatch() {
     let mut libraries = LibraryManager::with_primitives();
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let active = workspace.active_view.clone();
-    workspace.open_views = vec![OpenCellView::new(active.clone(), ViewType::Symbol)];
+    let active = workspace.content.active_view.clone();
+    workspace.content.open_views = vec![OpenCellView::new(active.clone(), ViewType::Symbol)];
     let active_key = active.key();
     let project = ProjectFile::new(workspace, libraries);
     let json = serde_json::to_string_pretty(&project).expect("corrupt fixture serializes");
@@ -1401,8 +1414,8 @@ fn project_text_load_rejects_active_view_missing_from_open_views() {
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     add_top_symbol_view(&mut libraries);
     let active = CellViewRef::new("user", "top", "symbol");
-    workspace.active_view = active.clone();
-    workspace.hierarchy_stack = vec![active.clone()];
+    workspace.content.active_view = active.clone();
+    workspace.content.hierarchy_stack = vec![active.clone()];
     let project = ProjectFile::new(workspace, libraries);
     let json = serde_json::to_string_pretty(&project).expect("corrupt fixture serializes");
 
@@ -1447,7 +1460,7 @@ fn project_text_load_rejects_library_tree_key_name_mismatch() {
     for (case, mutate) in cases {
         let mut libraries = LibraryManager::with_primitives();
         let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-        let active = workspace.active_view.clone();
+        let active = workspace.content.active_view.clone();
         let project = ProjectFile::new(workspace, libraries);
         let mut value = serde_json::to_value(&project).expect("project converts to json value");
         mutate(&mut value, &active);
@@ -1566,6 +1579,7 @@ fn project_load_rejects_orphan_and_malformed_schematic_buffers() {
         let mut libraries = LibraryManager::with_primitives();
         let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
         let buffer = workspace
+            .content
             .schematic_buffers
             .keys()
             .next()
@@ -1590,6 +1604,7 @@ fn project_load_rejects_schematic_buffer_bound_to_symbol_view() {
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     add_top_symbol_view(&mut libraries);
     let buffer = workspace
+        .content
         .schematic_buffers
         .keys()
         .next()
@@ -1610,7 +1625,10 @@ fn project_load_rejects_schematic_buffer_bound_to_symbol_view() {
 fn project_load_rejects_duplicate_open_view_keys() {
     let mut libraries = LibraryManager::with_primitives();
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    workspace.open_views.push(workspace.open_views[0].clone());
+    workspace
+        .content
+        .open_views
+        .push(workspace.content.open_views[0].clone());
     let project = ProjectFile::new(workspace, libraries);
     let json = serde_json::to_string_pretty(&project).expect("duplicate fixture serializes");
 

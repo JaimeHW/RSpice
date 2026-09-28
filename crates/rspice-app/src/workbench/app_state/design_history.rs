@@ -320,18 +320,20 @@ pub(crate) fn publish_model_definition_candidate(
 
     let expected_revision = state
         .workspace
+        .content
         .project
         .next_revision()
         .map_err(|error| error.to_string())?;
     let committed_revision = state
         .workspace
+        .content
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
     debug_assert_eq!(committed_revision, expected_revision);
     candidate.invalidate_model_validation_receipt();
     state.model_library_manager = candidate;
-    state.workspace.project_metadata_dirty = true;
+    state.workspace.content.project_metadata_dirty = true;
     if commit.affects_execution {
         state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         state.ui.netlist.current_generation_input_digest = None;
@@ -396,12 +398,13 @@ pub(crate) fn publish_model_library_candidate(
     )?;
     let committed_revision = state
         .workspace
+        .content
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
     candidate.invalidate_model_validation_receipt();
     state.model_library_manager = candidate;
-    state.workspace.project_metadata_dirty = true;
+    state.workspace.content.project_metadata_dirty = true;
     state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
     state.ui.netlist.current_generation_input_digest = None;
     state.record_model_definition_transaction(ModelDefinitionRecord {
@@ -441,12 +444,13 @@ pub(crate) fn publish_model_library_set_candidate(
     }
     let committed_revision = state
         .workspace
+        .content
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
     candidate.invalidate_model_validation_receipt();
     state.model_library_manager = candidate;
-    state.workspace.project_metadata_dirty = true;
+    state.workspace.content.project_metadata_dirty = true;
     state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
     state.ui.netlist.current_generation_input_digest = None;
     state.record_model_libraries_transaction(ModelLibrariesRecord {
@@ -490,12 +494,13 @@ pub(crate) fn publish_model_resolution_candidate(
     validated.restore_model_resolution_records(after.clone())?;
     let committed_revision = state
         .workspace
+        .content
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
     candidate.invalidate_model_validation_receipt();
     state.model_library_manager = candidate;
-    state.workspace.project_metadata_dirty = true;
+    state.workspace.content.project_metadata_dirty = true;
     state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
     state.ui.netlist.current_generation_input_digest = None;
     state.record_model_resolution_transaction(ModelResolutionRecordsRecord {
@@ -592,11 +597,13 @@ pub(crate) fn publish_symbol_definition_candidate_with_fixture(
     // owner changes. `advance_revision` cannot then fail in this transaction.
     let expected_revision = state
         .workspace
+        .content
         .project
         .next_revision()
         .map_err(|error| error.to_string())?;
     let committed_revision = state
         .workspace
+        .content
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
@@ -605,7 +612,7 @@ pub(crate) fn publish_symbol_definition_candidate_with_fixture(
     if let Some(fixture) = fixture.as_ref() {
         apply_symbol_fixture(state, &fixture.reference, fixture.after.as_ref());
     }
-    state.workspace.project_metadata_dirty = true;
+    state.workspace.content.project_metadata_dirty = true;
     state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
     state.record_symbol_definition_transaction(SymbolDefinitionHistoryEntry {
         description: description.into(),
@@ -1063,11 +1070,12 @@ impl AppState {
     /// retained snapshot against; the step's own restore does that afterwards,
     /// once the design is the one it recorded.
     fn activate_history_document(&mut self, reference: &CellViewRef, operation: &str) {
-        if self.workspace.active_view == *reference {
+        if self.workspace.content.active_view == *reference {
             return;
         }
         let Some(view_type) = self
             .workspace
+            .content
             .open_views
             .iter()
             .find(|open| open.reference == *reference)
@@ -1252,7 +1260,7 @@ impl ProjectDesignBody {
 impl ModelLibrariesRecord {
     fn after_design_matches(&self, state: &AppState) -> bool {
         model_library_snapshots_match(&state.model_library_manager.library_snapshot(), &self.after)
-            && state.workspace.project.revision() == self.undo_guard_revision
+            && state.workspace.content.project.revision() == self.undo_guard_revision
     }
 
     fn before_design_matches(&self, state: &AppState) -> bool {
@@ -1261,7 +1269,7 @@ impl ModelLibrariesRecord {
             &self.before,
         ) && self
             .redo_guard_revision
-            .is_some_and(|revision| state.workspace.project.revision() == revision)
+            .is_some_and(|revision| state.workspace.content.project.revision() == revision)
     }
 
     fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
@@ -1306,14 +1314,14 @@ impl ModelLibrariesRecord {
 impl ModelResolutionRecordsRecord {
     fn after_design_matches(&self, state: &AppState) -> bool {
         state.model_library_manager.owned_model_resolution_records() == self.after
-            && state.workspace.project.revision() == self.undo_guard_revision
+            && state.workspace.content.project.revision() == self.undo_guard_revision
     }
 
     fn before_design_matches(&self, state: &AppState) -> bool {
         state.model_library_manager.owned_model_resolution_records() == self.before
             && self
                 .redo_guard_revision
-                .is_some_and(|revision| state.workspace.project.revision() == revision)
+                .is_some_and(|revision| state.workspace.content.project.revision() == revision)
     }
 
     fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
@@ -1360,7 +1368,7 @@ impl ModelDefinitionRecord {
         model_library_semantics_match(
             state.model_library_manager.get_library(&self.library),
             self.after.as_ref(),
-        ) && state.workspace.project.revision() == self.undo_guard_revision
+        ) && state.workspace.content.project.revision() == self.undo_guard_revision
     }
 
     fn before_design_matches(&self, state: &AppState) -> bool {
@@ -1369,7 +1377,7 @@ impl ModelDefinitionRecord {
             self.before.as_ref(),
         ) && self
             .redo_guard_revision
-            .is_some_and(|revision| state.workspace.project.revision() == revision)
+            .is_some_and(|revision| state.workspace.content.project.revision() == revision)
     }
 
     fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
@@ -1457,6 +1465,7 @@ fn replace_model_library_snapshot(
 ) -> Result<ObjectRevision, String> {
     let revision = state
         .workspace
+        .content
         .project
         .next_revision()
         .map_err(|error| error.to_string())?;
@@ -1468,11 +1477,12 @@ fn replace_model_library_snapshot(
         .invalidate_model_validation_receipt();
     state
         .workspace
+        .content
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
-    debug_assert_eq!(state.workspace.project.revision(), revision);
-    state.workspace.project_metadata_dirty = true;
+    debug_assert_eq!(state.workspace.content.project.revision(), revision);
+    state.workspace.content.project_metadata_dirty = true;
     state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
     state.ui.netlist.current_generation_input_digest = None;
     Ok(revision)
@@ -1484,6 +1494,7 @@ fn replace_model_resolution_records(
 ) -> Result<ObjectRevision, String> {
     let revision = state
         .workspace
+        .content
         .project
         .next_revision()
         .map_err(|error| error.to_string())?;
@@ -1495,11 +1506,12 @@ fn replace_model_resolution_records(
         .invalidate_model_validation_receipt();
     state
         .workspace
+        .content
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
-    debug_assert_eq!(state.workspace.project.revision(), revision);
-    state.workspace.project_metadata_dirty = true;
+    debug_assert_eq!(state.workspace.content.project.revision(), revision);
+    state.workspace.content.project_metadata_dirty = true;
     state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
     state.ui.netlist.current_generation_input_digest = None;
     Ok(revision)
@@ -1512,6 +1524,7 @@ fn replace_model_library(
 ) -> Result<ObjectRevision, String> {
     let revision = state
         .workspace
+        .content
         .project
         .next_revision()
         .map_err(|error| error.to_string())?;
@@ -1553,11 +1566,12 @@ fn replace_model_library(
     }
     state
         .workspace
+        .content
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
-    debug_assert_eq!(state.workspace.project.revision(), revision);
-    state.workspace.project_metadata_dirty = true;
+    debug_assert_eq!(state.workspace.content.project.revision(), revision);
+    state.workspace.content.project_metadata_dirty = true;
     state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
     state.ui.netlist.current_generation_input_digest = None;
     Ok(revision)
@@ -1573,7 +1587,7 @@ impl SymbolDefinitionRecord {
                 schematic_for_reference(state, &fixture.reference),
                 fixture.after.as_ref(),
             )
-        }) && state.workspace.project.revision() == self.undo_guard_revision
+        }) && state.workspace.content.project.revision() == self.undo_guard_revision
     }
 
     fn before_design_matches(&self, state: &AppState) -> bool {
@@ -1587,7 +1601,7 @@ impl SymbolDefinitionRecord {
             )
         }) && self
             .redo_guard_revision
-            .is_some_and(|revision| state.workspace.project.revision() == revision)
+            .is_some_and(|revision| state.workspace.content.project.revision() == revision)
     }
 
     fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
@@ -1612,7 +1626,7 @@ impl SymbolDefinitionRecord {
             ));
         }
         if self.before.is_none()
-            && state.workspace.open_views.iter().any(|open| {
+            && state.workspace.content.open_views.iter().any(|open| {
                 open.reference.library.eq_ignore_ascii_case(&self.library)
                     && open.reference.cell.eq_ignore_ascii_case(&self.cell)
             })
@@ -1635,6 +1649,7 @@ impl SymbolDefinitionRecord {
                 state.workspace.active_schematic_reference() == fixture.reference
                     || state
                         .workspace
+                        .content
                         .open_views
                         .iter()
                         .any(|open| open.reference == fixture.reference)
@@ -1705,7 +1720,7 @@ fn restore_placement_binding(schematic: &mut SchematicState, placement: &Strande
 /// currently carries — the exact set the sweep for those masters will clear.
 fn placements_of_masters(state: &AppState, masters: &[(String, String)]) -> Vec<StrandedPlacement> {
     let mut stranded = Vec::new();
-    for (document, schematic) in &state.workspace.schematic_buffers {
+    for (document, schematic) in &state.workspace.content.schematic_buffers {
         for component in &schematic.document().components {
             if component.kind != ComponentType::CellInstance {
                 continue;
@@ -1789,6 +1804,7 @@ fn apply_symbol_fixture(
             }
             if let Some(open) = state
                 .workspace
+                .content
                 .open_views
                 .iter_mut()
                 .find(|open| open.reference == *reference)
@@ -1810,6 +1826,7 @@ fn replace_symbol_cell(
 ) -> Result<ObjectRevision, String> {
     let revision = state
         .workspace
+        .content
         .project
         .next_revision()
         .map_err(|error| error.to_string())?;
@@ -1840,30 +1857,31 @@ fn replace_symbol_cell(
     }
     state
         .workspace
+        .content
         .project
         .advance_revision()
         .map_err(|error| error.to_string())?;
-    debug_assert_eq!(state.workspace.project.revision(), revision);
-    state.workspace.project_metadata_dirty = true;
+    debug_assert_eq!(state.workspace.content.project.revision(), revision);
+    state.workspace.content.project_metadata_dirty = true;
     state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
     Ok(revision)
 }
 
 impl DesignManagementRecord {
     fn after_design_matches(&self, state: &AppState) -> bool {
-        design_management_semantics_match(&state.workspace.design_management, &self.after)
+        design_management_semantics_match(&state.workspace.content.design_management, &self.after)
             && schematic_map_matches(state, &self.after_schematics)
             && self.references.matches(&state.workspace, false)
-            && state.workspace.project.revision() == self.undo_guard_revision
+            && state.workspace.content.project.revision() == self.undo_guard_revision
     }
 
     fn before_design_matches(&self, state: &AppState) -> bool {
-        design_management_semantics_match(&state.workspace.design_management, &self.before)
+        design_management_semantics_match(&state.workspace.content.design_management, &self.before)
             && schematic_map_matches(state, &self.before_schematics)
             && self.references.matches(&state.workspace, true)
             && self
                 .redo_guard_revision
-                .is_some_and(|revision| state.workspace.project.revision() == revision)
+                .is_some_and(|revision| state.workspace.content.project.revision() == revision)
     }
 
     fn validate_authority(&self, state: &AppState, forward: bool) -> Result<(), String> {
@@ -1886,7 +1904,7 @@ impl DesignManagementRecord {
             reference_preparation::validate_reference_document(state, key, source)?;
         }
         self.references.prepare(&state.workspace, forward)?;
-        let current = &state.workspace.design_management;
+        let current = &state.workspace.content.design_management;
         let mut prepared_catalog = current.clone();
         prepared_catalog
             .publish_reviewed_candidate(
@@ -1896,6 +1914,7 @@ impl DesignManagementRecord {
             .map_err(|error| error.to_string())?;
         state
             .workspace
+            .content
             .project
             .revision()
             .next()
@@ -1923,6 +1942,7 @@ impl DesignManagementRecord {
     ) -> Result<(), String> {
         let revision = state
             .workspace
+            .content
             .replace_design_management(self.before.clone())
             .map_err(|error| error.to_string())?;
         apply_schematic_map(state, &history.before, false)?;
@@ -1944,6 +1964,7 @@ impl DesignManagementRecord {
     ) -> Result<(), String> {
         let revision = state
             .workspace
+            .content
             .replace_design_management(self.after.clone())
             .map_err(|error| error.to_string())?;
         apply_schematic_map(state, &history.after, false)?;
@@ -2060,6 +2081,7 @@ fn schematic_map_matches(state: &AppState, expected: &BTreeMap<String, Schematic
         } else {
             state
                 .workspace
+                .content
                 .schematic_buffers
                 .iter()
                 .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
@@ -2088,6 +2110,7 @@ fn apply_schematic_map(
         }
         let Some(existing_key) = state
             .workspace
+            .content
             .schematic_buffers
             .keys()
             .find(|candidate| candidate.eq_ignore_ascii_case(key))
@@ -2108,7 +2131,7 @@ fn apply_schematic_map(
             schematic.session.selection = selection;
         }
     }
-    for open in &mut state.workspace.open_views {
+    for open in &mut state.workspace.content.open_views {
         if snapshots
             .keys()
             .any(|key| key.eq_ignore_ascii_case(&open.reference.key()))
@@ -2142,6 +2165,7 @@ pub(crate) fn validate_hierarchy_target_unreferenced(
     if references_target(state.schematic.document())
         || state
             .workspace
+            .content
             .schematic_buffers
             .values()
             .any(|schematic| references_target(schematic.document()))
@@ -2176,6 +2200,7 @@ impl HierarchyExtractionRecord {
                 .is_none()
             && !state
                 .workspace
+                .content
                 .schematic_buffers
                 .contains_key(&self.target_schematic_ref.key())
             && open_documents_match(state, &self.open_views_before)
@@ -2228,7 +2253,7 @@ impl HierarchyExtractionRecord {
             .and_then(|library| library.get_cell(&self.target_schematic_ref.cell))
             .cloned()
             .ok_or_else(|| "The generated hierarchy cell no longer exists.".to_owned())?;
-        let current_open_views = state.workspace.open_views.clone();
+        let current_open_views = state.workspace.content.open_views.clone();
         let mut library = state
             .library_manager
             .edit_library(&self.target_schematic_ref.library)
@@ -2240,24 +2265,26 @@ impl HierarchyExtractionRecord {
             .workspace
             .remove_schematic_editor(&self.target_schematic_ref.key());
         apply_design_snapshot(state, &self.parent_ref, &self.before_parent)?;
-        state.workspace.open_views = restored_open_views(
+        state.workspace.content.open_views = restored_open_views(
             &self.open_views_before,
             &current_open_views,
             [(&self.parent_ref, true)],
         );
         state
             .workspace
+            .content
             .hierarchy_stack
             .clone_from(&self.hierarchy_stack_before);
         state
             .workspace
+            .content
             .hierarchy_instances
             .clone_from(&self.hierarchy_instances_before);
         // The restored tabs carry their own occurrences, so the document this
         // step re-activates is already at the occurrence it was edited at. The
         // snapshot breadcrumb must not re-derive that: it describes where the
         // session was, not which document the record owns.
-        state.workspace.active_view = self.parent_ref.clone();
+        state.workspace.content.active_view = self.parent_ref.clone();
         state.restore_active_schematic_from_workspace();
         Ok(())
     }
@@ -2270,7 +2297,7 @@ impl HierarchyExtractionRecord {
             );
         }
         self.validate_mutation(state, "redone")?;
-        let current_open_views = state.workspace.open_views.clone();
+        let current_open_views = state.workspace.content.open_views.clone();
         let mut library = state
             .library_manager
             .edit_library(&self.target_schematic_ref.library)
@@ -2280,20 +2307,22 @@ impl HierarchyExtractionRecord {
         state
             .workspace
             .insert_schematic_editor(self.target_schematic_ref.key(), self.child_template.clone());
-        state.workspace.open_views = restored_open_views(
+        state.workspace.content.open_views = restored_open_views(
             &self.open_views_after,
             &current_open_views,
             [(&self.parent_ref, true), (&self.target_open_ref, true)],
         );
         state
             .workspace
+            .content
             .hierarchy_stack
             .clone_from(&self.hierarchy_stack_after);
         state
             .workspace
+            .content
             .hierarchy_instances
             .clone_from(&self.hierarchy_instances_after);
-        state.workspace.active_view = self.target_open_ref.clone();
+        state.workspace.content.active_view = self.target_open_ref.clone();
         state.restore_active_schematic_from_workspace();
         Ok(())
     }
@@ -2309,6 +2338,7 @@ fn schematic_matches(
     } else {
         state
             .workspace
+            .content
             .schematic_buffers
             .get(&reference.key())
             .is_some_and(|schematic| expected.is_equal_document(&schematic.document()))
@@ -2362,6 +2392,7 @@ fn document_read_only(state: &AppState, reference: &CellViewRef) -> bool {
     state.workbench.safe_mode.project_read_only()
         || state
             .workspace
+            .content
             .open_views
             .iter()
             .any(|open| open.reference == *reference && open.read_only_reference)
@@ -2414,9 +2445,10 @@ fn restored_open_views<const N: usize>(
 /// brings the tab it restores forward before restoring anything. The step
 /// still puts the breadcrumb back; it just does not refuse over it.
 fn open_documents_match(state: &AppState, expected_views: &[OpenCellView]) -> bool {
-    state.workspace.open_views.len() == expected_views.len()
+    state.workspace.content.open_views.len() == expected_views.len()
         && state
             .workspace
+            .content
             .open_views
             .iter()
             .zip(expected_views)
@@ -2436,6 +2468,7 @@ fn has_external_master_reference(state: &AppState, record: &HierarchyExtractionR
 
     state
         .workspace
+        .content
         .schematic_buffers
         .iter()
         .any(|(key, schematic)| is_external(key) && references_target(schematic.document()))

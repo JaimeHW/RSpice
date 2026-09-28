@@ -74,12 +74,14 @@ fn state_with_selected_source(library_edits: usize, adopt: bool) -> AppState {
     }
     state
         .workspace
+        .content
         .stimulus_library
         .insert(definition)
         .expect("insert");
     for edit in 0..library_edits {
         let held = state
             .workspace
+            .content
             .stimulus_library
             .get("sensor_drive")
             .expect("held")
@@ -88,6 +90,7 @@ fn state_with_selected_source(library_edits: usize, adopt: bool) -> AppState {
         draft.edit(|working| working.params = format!("va=1 freq={}k", edit + 2));
         state
             .workspace
+            .content
             .stimulus_library
             .apply(&mut draft, crate::state::stimulus_library::now_unix_ms);
     }
@@ -215,6 +218,7 @@ fn a_stimulus_verb_goes_where_component_properties_sends_it() {
     assert_eq!(
         behind
             .workspace
+            .content
             .stimulus_library
             .provenance_state(source)
             .label(),
@@ -235,7 +239,7 @@ fn a_stimulus_verb_goes_where_component_properties_sends_it() {
     // With nothing in the library there is nothing to adopt, and the row says
     // what to do about it rather than opening a dialog that refuses.
     let mut empty = state_with_selected_source(0, false);
-    empty.workspace.stimulus_library = crate::state::StimulusLibrary::default();
+    empty.workspace.content.stimulus_library = crate::state::StimulusLibrary::default();
     let (enabled, reason) = action_availability(ContextAction::AdoptStimulus, &empty);
     assert!(!enabled);
     assert!(reason.contains("save this source"), "{reason}");

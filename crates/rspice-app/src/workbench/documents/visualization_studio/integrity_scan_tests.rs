@@ -94,6 +94,7 @@ fn activate_project_visualization_document(app: &mut RSpiceApp) -> ResultDocumen
     let document_id = app
         .state
         .workspace
+        .content
         .insert_visualization_document(document)
         .expect("document inserted");
     app.state.workbench.activate(Workspace::Results);
@@ -113,6 +114,7 @@ fn document_properties_commit_to_the_active_project_document() {
     let before = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .expect("active document")
         .revision();
@@ -122,12 +124,13 @@ fn document_properties_commit_to_the_active_project_document() {
     let document = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .expect("active document");
     assert!(document.revision() > before);
     assert_eq!(document.presentation().significant_digits, 13);
     assert!(document.presentation().phase_continuous);
-    assert!(app.state.workspace.visualization_documents_dirty);
+    assert!(app.state.workspace.content.visualization_documents_dirty);
 }
 
 #[test]
@@ -155,6 +158,7 @@ fn canonical_result_entities_commit_and_project_without_parallel_authority() {
     let document = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .expect("active document");
     assert_eq!(document.traces().len(), 2);
@@ -192,6 +196,7 @@ fn canonical_result_entities_commit_and_project_without_parallel_authority() {
     let document = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .expect("active document");
     assert_eq!(document.markers().len(), 1);
@@ -214,6 +219,7 @@ fn canonical_result_entities_commit_and_project_without_parallel_authority() {
     assert!(
         app.state
             .workspace
+            .content
             .visualization_document(document_id)
             .expect("active document")
             .markers()
@@ -239,6 +245,7 @@ fn canonical_ab_cursors_persist_link_move_and_clear_as_document_entities() {
     let document = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .expect("active document");
     assert_eq!(document.cursors().len(), 2);
@@ -255,6 +262,7 @@ fn canonical_ab_cursors_persist_link_move_and_clear_as_document_entities() {
     assert!(
         app.state
             .workspace
+            .content
             .visualization_document(document_id)
             .expect("active document")
             .cursors()
@@ -265,6 +273,7 @@ fn canonical_ab_cursors_persist_link_move_and_clear_as_document_entities() {
         let document = app
             .state
             .workspace
+            .content
             .visualization_document(document_id)
             .expect("active document");
         let pane = &document.panes()[0];
@@ -298,6 +307,7 @@ fn canonical_ab_cursors_persist_link_move_and_clear_as_document_entities() {
         let document = app
             .state
             .workspace
+            .content
             .visualization_document(document_id)
             .expect("active document");
         [anchor_pane, second_pane]
@@ -332,6 +342,7 @@ fn canonical_ab_cursors_persist_link_move_and_clear_as_document_entities() {
     let document = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .expect("active document");
     assert_eq!(document.link_groups().len(), 2);
@@ -349,6 +360,7 @@ fn canonical_ab_cursors_persist_link_move_and_clear_as_document_entities() {
     let document = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .expect("active document");
     assert!(document.cursors().is_empty());
@@ -417,7 +429,7 @@ fn robust_fit_is_available_for_non_wave_renderers() {
 #[test]
 fn specification_bound_fit_requires_an_exact_visible_quantity_binding() {
     let mut app = app_with_exact_source();
-    app.state.workspace.specs.push(SpecEntry {
+    app.state.workspace.content.specs.push(SpecEntry {
         measurement: "v(OUT)".to_owned(),
         expression: String::new(),
         min: Some(-2.0),
@@ -431,7 +443,7 @@ fn specification_bound_fit_requires_an_exact_visible_quantity_binding() {
         Some(((0.0, 20.0), (-2.0, 5.0)))
     );
 
-    app.state.workspace.specs[0].measurement = "V(unrelated)".to_owned();
+    app.state.workspace.content.specs[0].measurement = "V(unrelated)".to_owned();
     assert_eq!(specification_bound_fit(&app.state), None);
 }
 
@@ -439,7 +451,7 @@ fn specification_bound_fit_requires_an_exact_visible_quantity_binding() {
 fn specification_bound_autoscale_commits_the_exact_data_and_limit_envelope() {
     let mut app = app_with_exact_source();
     let analysis_key = activate_voltage_wave_pane(&mut app);
-    app.state.workspace.specs.push(SpecEntry {
+    app.state.workspace.content.specs.push(SpecEntry {
         measurement: "V(out)".to_owned(),
         expression: String::new(),
         min: Some(-2.0),
@@ -733,6 +745,7 @@ fn project_document_owns_comparison_receipts_and_studio_only_projects_them() {
     let document = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .unwrap();
     assert_eq!(document.comparisons(), &[expected_receipt.clone()]);

@@ -161,8 +161,11 @@ pub(crate) fn omit_missing_instance(state: &mut AppState) -> u64 {
     );
     activate_variant_override(
         state,
-        crate::state::SchematicObjectKey::new(&state.workspace.active_view.key(), component)
-            .unwrap(),
+        crate::state::SchematicObjectKey::new(
+            &state.workspace.content.active_view.key(),
+            component,
+        )
+        .unwrap(),
         crate::state::VariantObjectOverride::DoNotPopulate {
             approval_reference: "reviewed omission".to_owned(),
         },
@@ -180,6 +183,7 @@ pub(crate) fn activate_variant_override(
 
     let variant = state
         .workspace
+        .content
         .design_management
         .variants_mut()
         .create(AssemblyVariantDraft {
@@ -192,6 +196,7 @@ pub(crate) fn activate_variant_override(
         .unwrap();
     state
         .workspace
+        .content
         .design_management
         .variants_mut()
         .set_active(variant)
@@ -310,12 +315,13 @@ fn split_amp_across_sheets(
     let objects = live_object_ids(
         state
             .workspace
+            .content
             .schematic_buffers
             .get(&key)
             .expect("the amp schematic was saved to the workspace"),
     );
 
-    let mut candidate = state.workspace.design_management.clone();
+    let mut candidate = state.workspace.content.design_management.clone();
     let first = candidate
         .bootstrap_for_cell_view(&key, AMP_SHEET_NAMES[0], objects)
         .expect("a fresh cell view accepts its first governed sheet");
@@ -364,6 +370,7 @@ fn split_amp_across_sheets(
         .expect("the reviewed boundary contract moves the output half");
     state
         .workspace
+        .content
         .replace_design_management(candidate)
         .expect("the reviewed sheet catalog publishes");
     [first, second]
@@ -375,6 +382,7 @@ fn split_amp_across_sheets(
 fn author_amp_symbol(state: &mut AppState, schematic: &CellViewRef, symbol: &CellViewRef) {
     let ports = state
         .workspace
+        .content
         .schematic_buffers
         .get(&schematic.key())
         .expect("the amp schematic was saved to the workspace")
@@ -567,7 +575,7 @@ fn stub_with_label(schematic: &mut SchematicState, origin: Point, terminal: Poin
 /// The active configuration: `top`'s schematic as the executable root, `X1` as
 /// the device under test, and one path-scoped override on `X2`.
 fn install_configuration(state: &mut AppState, top: &CellViewRef) -> ConfigurationSetId {
-    let mut candidate = state.workspace.configuration_sets.clone();
+    let mut candidate = state.workspace.content.configuration_sets.clone();
     let configuration = candidate
         .create(ConfigurationSetDefinition {
             name: "Reference hierarchy".to_owned(),
@@ -593,6 +601,7 @@ fn install_configuration(state: &mut AppState, top: &CellViewRef) -> Configurati
         .expect("the reference configuration is well formed");
     state
         .workspace
+        .content
         .replace_configuration_sets(candidate)
         .expect("the reviewed configuration catalog publishes");
     configuration
@@ -617,6 +626,7 @@ fn install_saved_output(state: &mut AppState) -> SimulationPlanId {
     .expect("a raw node probe is a valid saved output");
     state
         .workspace
+        .content
         .add_saved_output(plan, output)
         .expect("the plan accepts its first saved output");
     plan
@@ -660,6 +670,7 @@ fn interface_of(state: &AppState, library: &str, cell: &str) -> Vec<PortSpec> {
     let reference = CellViewRef::new(library, cell, SCHEMATIC_VIEW);
     state
         .workspace
+        .content
         .schematic_buffers
         .get(&reference.key())
         .expect("the master schematic was saved to the workspace")

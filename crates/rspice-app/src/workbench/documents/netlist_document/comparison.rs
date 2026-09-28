@@ -70,6 +70,7 @@ pub fn compare_generated_revision(state: &mut AppState, index: usize) -> Result<
 pub fn compare_owned_revision(state: &mut AppState, index: usize) -> Result<(), String> {
     let snapshot = state
         .workspace
+        .content
         .netlist_descriptor
         .as_ref()
         .and_then(|descriptor| descriptor.revision_history.get(index))
@@ -115,6 +116,7 @@ pub fn compare_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
 pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), String> {
     let snapshot = state
         .workspace
+        .content
         .netlist_descriptor
         .as_ref()
         .and_then(|descriptor| descriptor.revision_history.get(index))
@@ -149,6 +151,7 @@ pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
 
     let mut descriptor = state
         .workspace
+        .content
         .netlist_descriptor
         .as_ref()
         .cloned()
@@ -163,10 +166,10 @@ pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
     )?;
 
     let mut candidate = state.clone();
-    candidate.workspace.netlist_source = Some(snapshot.source.clone());
-    candidate.workspace.netlist_source_dirty = true;
-    candidate.workspace.netlist_document = Some(next_document.clone());
-    candidate.workspace.netlist_descriptor = Some(descriptor);
+    candidate.workspace.content.netlist_source = Some(snapshot.source.clone());
+    candidate.workspace.content.netlist_source_dirty = true;
+    candidate.workspace.content.netlist_document = Some(next_document.clone());
+    candidate.workspace.content.netlist_descriptor = Some(descriptor);
     candidate.ui.netlist.owned_document = Some(next_document);
     candidate.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
     candidate.ui.netlist.active_dependency_identity = None;
@@ -178,6 +181,7 @@ pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
     invalidate_source_evidence(&mut candidate.ui.netlist);
     candidate
         .workspace
+        .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
     *state = candidate;
@@ -192,7 +196,7 @@ pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
 fn return_to_working_deck(state: &mut AppState, root: ActiveNetlistDocument) {
     state.ui.netlist.active_dependency_identity = None;
     state.ui.netlist.active_dependency_root = None;
-    match (root, state.workspace.netlist_source.clone()) {
+    match (root, state.workspace.content.netlist_source.clone()) {
         (ActiveNetlistDocument::OwnedSource, Some(source)) => {
             state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
             state.simulation.netlist_content = source;
@@ -395,6 +399,7 @@ pub fn compare_run_deck_snapshot(state: &mut AppState) -> Result<(), String> {
                 (
                     state
                         .workspace
+                        .content
                         .netlist_source
                         .clone()
                         .unwrap_or_else(|| document.source().to_owned()),

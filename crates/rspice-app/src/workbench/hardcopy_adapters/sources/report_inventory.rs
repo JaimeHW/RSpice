@@ -49,7 +49,7 @@ pub(super) fn resolve(
     resolve_report_source(ReportHardcopySource {
         source_key: format!(
             "project:{}:report:{}",
-            state.workspace.project.id().as_uuid(),
+            state.workspace.content.project.id().as_uuid(),
             document.id()
         ),
         document,
@@ -142,6 +142,7 @@ fn resolve_inventory_entry(
         ReportSourceId::VisualizationDocument { document_id } => {
             let matches = state
                 .workspace
+                .content
                 .visualization_documents
                 .iter()
                 .filter(|document| document.id() == *document_id)
@@ -234,6 +235,7 @@ fn resolve_linked_figure_artifact(
     })?;
     let matches = state
         .workspace
+        .content
         .visualization_documents
         .iter()
         .filter(|document| document.id() == *document_id)

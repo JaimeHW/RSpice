@@ -90,7 +90,7 @@ fn fetching_the_catalog_proves_it_and_changes_no_project_state() {
     let transport = StubTransport::with_snapshot(snapshot);
     let (mut hub, handle, _store) = fixture_hub(&key);
     let mut state = open_project();
-    let revision_before = state.workspace.project.revision().get();
+    let revision_before = state.workspace.content.project.revision().get();
 
     let request = ModelHubRequest::FetchSnapshot;
     let output = execute(
@@ -123,7 +123,7 @@ fn fetching_the_catalog_proves_it_and_changes_no_project_state() {
             .is_ok()
     );
     assert_eq!(
-        state.workspace.project.revision().get(),
+        state.workspace.content.project.revision().get(),
         revision_before,
         "proving a catalog is not a project edit"
     );
@@ -521,7 +521,7 @@ fn a_failed_transfer_leaves_no_partial_state_and_reports_the_failure() {
     let (mut hub, _handle, store) = fixture_hub(&key);
     hub.refresh_catalog(&transport).expect("catalog");
     let mut state = open_project();
-    let revision_before = state.workspace.project.revision().get();
+    let revision_before = state.workspace.content.project.revision().get();
 
     let request = ModelHubRequest::InstallPack {
         pack_id: PACK_ID.to_owned(),
@@ -563,7 +563,10 @@ fn a_failed_transfer_leaves_no_partial_state_and_reports_the_failure() {
             .unwrap()
             .is_err()
     );
-    assert_eq!(state.workspace.project.revision().get(), revision_before);
+    assert_eq!(
+        state.workspace.content.project.revision().get(),
+        revision_before
+    );
     assert!(state.schematic.session.pending_library_cell.is_none());
     assert!(state.schematic.session.pending_part_model.is_none());
     assert!(

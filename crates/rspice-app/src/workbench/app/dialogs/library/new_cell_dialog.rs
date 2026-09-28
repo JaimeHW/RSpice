@@ -307,31 +307,32 @@ mod tests {
         app.state.dialogs.new_cell_create_schematic = true;
         app.state.dialogs.new_cell_create_testbench = true;
         app.state.dialogs.new_cell_library_revision = app.state.library_manager.revision();
-        let project_revision_before = app.state.workspace.project.revision().get();
+        let project_revision_before = app.state.workspace.content.project.revision().get();
 
         let outcome = app.handle_new_cell_create_action();
 
         assert!(outcome.close);
         assert_eq!(
-            app.state.workspace.project.revision().get(),
+            app.state.workspace.content.project.revision().get(),
             project_revision_before + 1
         );
         assert!(matches!(
             app.state
                 .workspace
-                .project
+                .content.project
                 .library_mutation_audit()
                 .last()
                 .map(|receipt| receipt.mutation()),
             Some(crate::state::ProjectLibraryMutation::CreateCell { library, cell })
                 if library == "policy_test" && cell == "amp"
         ));
-        assert!(app.state.workspace.project_metadata_dirty);
+        assert!(app.state.workspace.content.project_metadata_dirty);
         for view in ["schematic", "testbench"] {
             let key = crate::state::CellViewRef::new("policy_test", "amp", view).key();
             let document = app
                 .state
                 .workspace
+                .content
                 .schematic_buffers
                 .get(&key)
                 .expect("document seeded when view is created");
@@ -369,7 +370,7 @@ mod tests {
 
         assert!(outcome.close);
         assert_eq!(
-            app.state.workspace.active_view,
+            app.state.workspace.content.active_view,
             CellViewRef::new("tracking_test", "amp", "schematic")
         );
         let created = cell_symbol_view(&app, "tracking_test", "amp");
@@ -425,7 +426,7 @@ mod tests {
         app.state.dialogs.new_cell_name = "\u{e9}TAGE".to_owned();
         app.state.dialogs.new_cell_create_schematic = true;
         app.state.dialogs.new_cell_library_revision = app.state.library_manager.revision();
-        let buffers_before = app.state.workspace.schematic_buffers.len();
+        let buffers_before = app.state.workspace.content.schematic_buffers.len();
 
         let outcome = app.handle_new_cell_create_action();
 
@@ -437,7 +438,10 @@ mod tests {
             .expect("identity library remains");
         assert_eq!(library.cell_count(), 1);
         assert!(library.get_cell("\u{c9}tage").is_some());
-        assert_eq!(app.state.workspace.schematic_buffers.len(), buffers_before);
+        assert_eq!(
+            app.state.workspace.content.schematic_buffers.len(),
+            buffers_before
+        );
         assert!(
             app.state
                 .dialogs
@@ -456,7 +460,7 @@ mod tests {
         app.state.dialogs.new_cell_library = "read_only_test".to_owned();
         app.state.dialogs.new_cell_name = "amp".to_owned();
         app.state.dialogs.new_cell_library_revision = app.state.library_manager.revision();
-        let revision_before = app.state.workspace.project.revision();
+        let revision_before = app.state.workspace.content.project.revision();
 
         let outcome = app.handle_new_cell_create_action();
 
@@ -467,7 +471,10 @@ mod tests {
                 .get_library("read_only_test")
                 .is_some_and(|library| library.get_cell("amp").is_none())
         );
-        assert_eq!(app.state.workspace.project.revision(), revision_before);
+        assert_eq!(
+            app.state.workspace.content.project.revision(),
+            revision_before
+        );
         assert!(
             app.state
                 .dialogs
@@ -489,7 +496,7 @@ mod tests {
         app.state
             .library_manager
             .add_library(Library::new("intervening_change"));
-        let project_revision_before = app.state.workspace.project.revision();
+        let project_revision_before = app.state.workspace.content.project.revision();
 
         let outcome = app.handle_new_cell_create_action();
 
@@ -501,7 +508,7 @@ mod tests {
                 .is_some_and(|library| library.get_cell("amp").is_none())
         );
         assert_eq!(
-            app.state.workspace.project.revision(),
+            app.state.workspace.content.project.revision(),
             project_revision_before
         );
         assert_eq!(

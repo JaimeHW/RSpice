@@ -29,7 +29,7 @@ fn resolved_model_and_subcircuit_rows_reopen_and_clear_their_provider_decisions(
         app.state.workbench.models_page = ModelsPage::Include;
         app.state.workbench.models_view.include_definition_query = "shared".to_owned();
         let mut studio = ModelsStudio::open(app);
-        let revision = studio.app.state.workspace.project.revision();
+        let revision = studio.app.state.workspace.content.project.revision();
         let row = format!("shared · {} ·", scope.label());
         studio.click(|label| label.starts_with(&row));
         let Some(ModelsWorkbenchDialog::DefinitionConflict {
@@ -53,7 +53,7 @@ fn resolved_model_and_subcircuit_rows_reopen_and_clear_their_provider_decisions(
                 .is_none()
         );
         assert_eq!(
-            studio.app.state.workspace.project.revision().get(),
+            studio.app.state.workspace.content.project.revision().get(),
             revision.get() + 1
         );
     }
@@ -84,7 +84,7 @@ fn failed_provider_publication_preserves_the_dialog_draft_and_accepted_decision(
         error: None,
     });
     let mut studio = ModelsStudio::open(app);
-    let revision = studio.app.state.workspace.project.revision();
+    let revision = studio.app.state.workspace.content.project.revision();
     let execution_epoch = studio.app.state.design_execution_epoch;
 
     for epoch in [
@@ -123,7 +123,10 @@ fn failed_provider_publication_preserves_the_dialog_draft_and_accepted_decision(
                 .model_resolution_record(scope, "nch"),
             Some(&original)
         );
-        assert_eq!(studio.app.state.workspace.project.revision(), revision);
+        assert_eq!(
+            studio.app.state.workspace.content.project.revision(),
+            revision
+        );
         assert_eq!(studio.app.state.design_execution_epoch, execution_epoch);
     }
 
@@ -142,7 +145,7 @@ fn failed_provider_publication_preserves_the_dialog_draft_and_accepted_decision(
     assert_eq!(accepted.provider_library, "beta");
     assert_eq!(accepted.audit_reason, draft);
     assert_eq!(
-        studio.app.state.workspace.project.revision().get(),
+        studio.app.state.workspace.content.project.revision().get(),
         revision.get() + 1
     );
     assert_eq!(

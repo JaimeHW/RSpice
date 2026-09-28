@@ -276,7 +276,7 @@ impl RSpiceApp {
             }
             ReviewAction::NewComment => {
                 self.state.dialogs.design_review_comments.close();
-                let view_path = self.state.workspace.active_view.display_path();
+                let view_path = self.state.workspace.content.active_view.display_path();
                 self.state.dialogs.design_note.open(
                     self.state.design_execution_epoch,
                     self.state.active_schematic_epoch,

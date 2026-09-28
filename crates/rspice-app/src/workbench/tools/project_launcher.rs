@@ -1363,8 +1363,8 @@ fn project_entries(app: &RSpiceApp) -> Vec<ProjectEntry> {
         .project_launcher_query
         .trim()
         .to_lowercase();
-    let current_path = app.state.workspace.project.path.as_deref();
-    let current_name = app.state.workspace.project.display_name();
+    let current_path = app.state.workspace.content.project.path.as_deref();
+    let current_name = app.state.workspace.content.project.display_name();
     let filter = app.state.workbench.project_launcher_filter;
     let mut entries = app
         .state

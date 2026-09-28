@@ -53,6 +53,7 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
     });
     state
         .workspace
+        .content
         .replace_active_specification_definitions(plan_id, vec![spec.clone()]);
     let controller = SimulationController::new();
     let snapshot = controller
@@ -72,6 +73,7 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
     assert_eq!(
         loaded
             .workspace
+            .content
             .plan_data(plan_id)
             .unwrap()
             .specification_definitions,
@@ -82,6 +84,7 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
     spec.measurement_reference.as_mut().unwrap().contents = "TIME,V(out)\n0,0\n0.000001,0\n".into();
     state
         .workspace
+        .content
         .replace_active_specification_definitions(plan_id, vec![spec.clone()]);
     let changed = controller
         .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
@@ -128,9 +131,10 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
     spec.expression = "Manual comparison".into();
     state
         .workspace
+        .content
         .replace_active_specification_definitions(plan_id, vec![spec.clone()]);
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.netlist_source = Some("Manual reference\nV1 out 0 2.5\nR1 out 0 1k\n.tran 100n 1u\n.MEAS TRAN fit ERROR V(out) FILE=studio-reference.csv COMP_FUNCTION=INFNORM INDEPVARCOL=0 DEPVARCOL=1\n.end\n".into());
+    state.workspace.content.netlist_source = Some("Manual reference\nV1 out 0 2.5\nR1 out 0 1k\n.tran 100n 1u\n.MEAS TRAN fit ERROR V(out) FILE=studio-reference.csv COMP_FUNCTION=INFNORM INDEPVARCOL=0 DEPVARCOL=1\n.end\n".into());
     let manual = controller
         .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
         .unwrap();
@@ -145,6 +149,7 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
         spec.measurement_reference = reference;
         state
             .workspace
+            .content
             .replace_active_specification_definitions(plan_id, vec![spec.clone()]);
         assert!(
             controller
@@ -197,6 +202,7 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
     }
     state
         .workspace
+        .content
         .replace_active_specification_definitions(plan_id, definitions.clone());
     let snapshot = controller
         .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
@@ -255,6 +261,7 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
     assert_eq!(
         loaded
             .workspace
+            .content
             .plan_data(plan_id)
             .unwrap()
             .specification_definitions,
@@ -275,6 +282,7 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
     );
     state
         .workspace
+        .content
         .replace_active_specification_definitions(plan_id, legacy);
     let reference = controller
         .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)

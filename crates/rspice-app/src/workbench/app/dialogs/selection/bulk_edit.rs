@@ -118,6 +118,7 @@ impl SelectionBulkEditAuthority {
         let active_key = state.workspace.active_schematic_reference().key();
         let mut project_buffers = state
             .workspace
+            .content
             .schematic_buffers
             .iter()
             .filter(|(key, _)| !key.eq_ignore_ascii_case(&active_key))
@@ -132,7 +133,7 @@ impl SelectionBulkEditAuthority {
         Self {
             active: SchematicEditAuthority::capture(state),
             active_key,
-            design_management_revision: state.workspace.design_management.revision(),
+            design_management_revision: state.workspace.content.design_management.revision(),
             project_buffers,
         }
     }
@@ -155,7 +156,7 @@ impl SelectionBulkEditAuthority {
         {
             return Some(reopen("The active schematic changed"));
         }
-        if self.active.view_path != state.workspace.active_view.display_path()
+        if self.active.view_path != state.workspace.content.active_view.display_path()
             || self.active_key != state.workspace.active_schematic_reference().key()
         {
             return Some(reopen("The active cell/view changed"));
@@ -168,11 +169,12 @@ impl SelectionBulkEditAuthority {
         if self.active.selection != state.schematic.session.selection {
             return Some(reopen("The selected-object set changed"));
         }
-        if self.design_management_revision != state.workspace.design_management.revision() {
+        if self.design_management_revision != state.workspace.content.design_management.revision() {
             return Some(reopen("The sheet ownership catalog changed"));
         }
         let live_external = state
             .workspace
+            .content
             .schematic_buffers
             .iter()
             .filter(|(key, _)| !key.eq_ignore_ascii_case(&self.active_key))
@@ -181,7 +183,7 @@ impl SelectionBulkEditAuthority {
             return Some(reopen("The project schematic set changed"));
         }
         for (key, expected) in &self.project_buffers {
-            let Some(live) = state.workspace.schematic_buffers.get(key) else {
+            let Some(live) = state.workspace.content.schematic_buffers.get(key) else {
                 return Some(reopen("A project schematic was closed"));
             };
             if !expected.is_equal_document(&live.document()) {
@@ -1100,11 +1102,12 @@ fn build_rows(
         SelectionBulkHierarchyScope::ActiveHierarchyPath => {
             let hierarchy_keys = state
                 .workspace
+                .content
                 .hierarchy_stack
                 .iter()
                 .map(|reference| reference.key())
                 .collect::<HashSet<_>>();
-            for (key, schematic) in &state.workspace.schematic_buffers {
+            for (key, schematic) in &state.workspace.content.schematic_buffers {
                 if !key.eq_ignore_ascii_case(&active_key) && hierarchy_keys.contains(key) {
                     buffers.push((
                         key.clone(),
@@ -1117,7 +1120,7 @@ fn build_rows(
         }
         SelectionBulkHierarchyScope::CurrentSheet => {}
         SelectionBulkHierarchyScope::CompleteProject => {
-            for (key, schematic) in &state.workspace.schematic_buffers {
+            for (key, schematic) in &state.workspace.content.schematic_buffers {
                 if !key.eq_ignore_ascii_case(&active_key) {
                     buffers.push((
                         key.clone(),
@@ -1132,6 +1135,7 @@ fn build_rows(
     buffers.sort_by(|(left, _, _, _), (right, _, _, _)| left.cmp(right));
     let active_sheet = state
         .workspace
+        .content
         .design_management
         .sheet_catalog(&active_key)
         .and_then(|catalog| catalog.active_sheet_id());
@@ -1150,7 +1154,7 @@ fn build_rows(
             } else {
                 None
             },
-            &state.workspace.design_management,
+            &state.workspace.content.design_management,
         );
     }
     rows.retain(|row| row_matches_query(row, filter));

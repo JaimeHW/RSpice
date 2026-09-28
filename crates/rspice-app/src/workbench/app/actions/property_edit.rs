@@ -562,11 +562,12 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
                 component,
                 state.design_execution_epoch,
                 state.active_schematic_epoch,
-                state.workspace.active_view.display_path(),
+                state.workspace.content.active_view.display_path(),
             )
             .with_data_root(
                 state
                     .workspace
+                    .content
                     .project
                     .data_root()
                     .map(std::path::Path::to_path_buf),
@@ -655,7 +656,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
             state.design_execution_epoch,
             state.active_schematic_epoch,
             state.schematic.topology_version(),
-            state.workspace.active_view.display_path(),
+            state.workspace.content.active_view.display_path(),
         );
         return true;
     }
@@ -667,7 +668,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
             state.design_execution_epoch,
             state.active_schematic_epoch,
             state.schematic.topology_version(),
-            state.workspace.active_view.display_path(),
+            state.workspace.content.active_view.display_path(),
         );
         return true;
     }
@@ -684,7 +685,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
             state.design_execution_epoch,
             state.active_schematic_epoch,
             state.schematic.topology_version(),
-            state.workspace.active_view.display_path(),
+            state.workspace.content.active_view.display_path(),
         );
         return true;
     }
@@ -705,7 +706,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
             state.design_execution_epoch,
             state.active_schematic_epoch,
             state.schematic.topology_version(),
-            state.workspace.active_view.display_path(),
+            state.workspace.content.active_view.display_path(),
         );
         return true;
     }
@@ -722,7 +723,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
             state.design_execution_epoch,
             state.active_schematic_epoch,
             state.schematic.topology_version(),
-            state.workspace.active_view.display_path(),
+            state.workspace.content.active_view.display_path(),
         );
         return true;
     }
@@ -739,7 +740,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
             state.design_execution_epoch,
             state.active_schematic_epoch,
             state.schematic.topology_version(),
-            state.workspace.active_view.display_path(),
+            state.workspace.content.active_view.display_path(),
         );
         return true;
     }

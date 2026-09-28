@@ -457,7 +457,7 @@ fn opening_another_document_commits_to_the_original_component_and_preserves_refu
                 "V1"
             );
             assert_eq!(
-                editor.app.state.workspace.schematic_buffers[&original.key()]
+                editor.app.state.workspace.content.schematic_buffers[&original.key()]
                     .document()
                     .components[0]
                     .name,
@@ -505,9 +505,10 @@ fn changed_document_authority_or_component_never_reauthorizes_an_old_draft() {
             "design" => editor.app.state.design_execution_epoch += 1,
             "buffer" => editor.app.state.active_schematic_epoch += 1,
             "project" => {
-                editor.app.state.workspace.project = crate::state::ProjectDescriptor::default()
+                editor.app.state.workspace.content.project =
+                    crate::state::ProjectDescriptor::default()
             }
-            "view" => editor.app.state.workspace.active_view.cell = "different".to_owned(),
+            "view" => editor.app.state.workspace.content.active_view.cell = "different".to_owned(),
             "component" => {
                 editor
                     .app
@@ -568,6 +569,7 @@ fn rendered_instance_name_is_a_draft_until_one_reference_transaction_commits() {
         .app
         .state
         .workspace
+        .content
         .add_saved_output(plan, output)
         .unwrap();
     editor.pass(Vec::new());
@@ -598,6 +600,7 @@ fn rendered_instance_name_is_a_draft_until_one_reference_transaction_commits() {
             .app
             .state
             .workspace
+            .content
             .plan_data(plan)
             .unwrap()
             .saved_outputs[0]
@@ -614,6 +617,7 @@ fn rendered_instance_name_is_a_draft_until_one_reference_transaction_commits() {
             .app
             .state
             .workspace
+            .content
             .plan_data(plan)
             .unwrap()
             .saved_outputs[0]
@@ -632,6 +636,7 @@ fn rendered_instance_name_is_a_draft_until_one_reference_transaction_commits() {
             .app
             .state
             .workspace
+            .content
             .plan_data(plan)
             .unwrap()
             .saved_outputs[0]

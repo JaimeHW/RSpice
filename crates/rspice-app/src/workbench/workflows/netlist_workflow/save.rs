@@ -40,7 +40,7 @@ pub(crate) fn save_owned_netlist_source(
     } else {
         commit_message
     };
-    let Some(source) = state.workspace.netlist_source.clone() else {
+    let Some(source) = state.workspace.content.netlist_source.clone() else {
         state.push_user_message(ConsoleMessage::warning(
             "Create an editable source deck before saving source bytes.",
         ));
@@ -55,6 +55,7 @@ pub(crate) fn save_owned_netlist_source(
     let visible_digest = crate::state::content_digest(&source);
     let default_name = state
         .workspace
+        .content
         .netlist_source_path
         .as_deref()
         .and_then(std::path::Path::file_name)
@@ -62,6 +63,7 @@ pub(crate) fn save_owned_netlist_source(
         .or_else(|| {
             state
                 .workspace
+                .content
                 .netlist_descriptor
                 .as_ref()
                 .map(|descriptor| {
@@ -76,16 +78,18 @@ pub(crate) fn save_owned_netlist_source(
         .unwrap_or_else(|| "top.cir".to_owned());
     let reopenable_origin = io
         .saved_paths_are_reopenable()
-        .then(|| state.workspace.netlist_source_path.clone())
+        .then(|| state.workspace.content.netlist_source_path.clone())
         .flatten();
     let ordinary_save_to_origin = !save_as && reopenable_origin.is_some();
     let expected_external_sha256 = state
         .workspace
+        .content
         .netlist_descriptor
         .as_ref()
         .and_then(|descriptor| descriptor.external_file_sha256);
     let source_encoding = state
         .workspace
+        .content
         .netlist_descriptor
         .as_ref()
         .map_or(crate::state::NetlistTextEncoding::Utf8, |descriptor| {
@@ -180,7 +184,7 @@ pub(crate) fn save_owned_netlist_source(
     };
     let next_descriptor = match (
         canonical_publication
-            .then_some(state.workspace.netlist_descriptor.as_ref())
+            .then_some(state.workspace.content.netlist_descriptor.as_ref())
             .flatten(),
         next_owned_document.as_ref(),
     ) {
@@ -238,13 +242,13 @@ pub(crate) fn save_owned_netlist_source(
     match result {
         Ok(()) => {
             if canonical_publication {
-                state.workspace.netlist_source_path = Some(path.clone());
+                state.workspace.content.netlist_source_path = Some(path.clone());
             }
             if let Some(descriptor) = next_descriptor {
-                state.workspace.netlist_descriptor = Some(descriptor);
+                state.workspace.content.netlist_descriptor = Some(descriptor);
             }
             if let Some(document) = next_owned_document {
-                state.workspace.netlist_document = Some(document.clone());
+                state.workspace.content.netlist_document = Some(document.clone());
                 state.ui.netlist.owned_document = Some(document);
             }
             if canonical_publication {

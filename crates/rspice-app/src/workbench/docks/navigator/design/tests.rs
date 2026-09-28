@@ -66,7 +66,7 @@ fn placed(id: u64, name: &str, library: &str, cell: &str) -> crate::state::Compo
 /// `/XA/XLOOP` is the occurrence the resolver refuses to descend.
 fn recursive_design() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    let root = app.state.workspace.active_view.clone();
+    let root = app.state.workspace.content.active_view.clone();
     app.state
         .schematic
         .document_mut_for_test()
@@ -107,12 +107,14 @@ fn two_sheet_named_signals() -> RSpiceApp {
     let first = app
         .state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&key, "Input stage", [301, 302])
         .expect("the fixture cell view takes a sheet catalog");
     let catalog = app
         .state
         .workspace
+        .content
         .design_management
         .sheet_catalog_mut(&key)
         .expect("the catalog was just bootstrapped");
@@ -213,16 +215,19 @@ fn moving_the_sheet_scope_never_touches_the_project() {
     let mut app = two_sheet_named_signals();
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
-    let revision = app.state.workspace.project.revision().get();
-    let catalog = app.state.workspace.design_management.clone();
+    let revision = app.state.workspace.content.project.revision().get();
+    let catalog = app.state.workspace.content.design_management.clone();
 
     for scope in SheetScope::OPTIONS {
         sheet_visibility::set_sheet_scope(&ctx, scope);
         let _ = painted_panel(&ctx, |ui| navigator(ui, &mut app));
     }
 
-    assert_eq!(app.state.workspace.project.revision().get(), revision);
-    assert_eq!(app.state.workspace.design_management, catalog);
+    assert_eq!(
+        app.state.workspace.content.project.revision().get(),
+        revision
+    );
+    assert_eq!(app.state.workspace.content.design_management, catalog);
 }
 
 /// The occurrence rows of one app against one reading position.
@@ -232,14 +237,14 @@ fn occurrence_rows(app: &RSpiceApp, tree: &NavigatorTreeState) -> Vec<DesignTree
         .workspace
         .design_projection(
             &app.state.library_manager,
-            &app.state.workspace.active_view,
+            &app.state.workspace.content.active_view,
             &app.state.schematic,
         )
         .expect("the fixture design projects");
     hierarchy_tree::occurrence_rows(
         &hierarchy_tree::TreeSource {
             projection: projection.as_ref(),
-            sheets: &app.state.workspace.design_management,
+            sheets: &app.state.workspace.content.design_management,
             query: "",
         },
         tree,
@@ -313,14 +318,14 @@ fn an_occurrence_row_lands_the_session_on_that_occurrence() {
     hierarchy_tree::open_occurrence(&mut app.state, &leaf);
     assert_eq!(app.state.workspace.occurrence_path(), leaf);
     assert_eq!(
-        app.state.workspace.active_view,
+        app.state.workspace.content.active_view,
         CellViewRef::new("work", "leaf", "schematic")
     );
 
     hierarchy_tree::open_occurrence(&mut app.state, &instance);
     assert_eq!(app.state.workspace.occurrence_path(), instance);
     assert_eq!(
-        app.state.workspace.active_view,
+        app.state.workspace.content.active_view,
         CellViewRef::new("work", "child", "schematic")
     );
 }
@@ -330,21 +335,16 @@ fn an_occurrence_row_lands_the_session_on_that_occurrence() {
 #[test]
 fn sheet_nodes_appear_only_above_one_sheet() {
     let mut app = RSpiceApp::test_instance();
-    let reference = app.state.workspace.active_view.clone();
+    let project = &mut app.state.workspace.content;
+    let reference = project.active_view.clone();
     let key = reference.key();
-    let first = app
-        .state
-        .workspace
+    let first = project
         .design_management
         .bootstrap_for_cell_view(&key, "Sheet 1", [10])
         .expect("the fixture cell view takes a sheet catalog");
-    assert!(
-        hierarchy_tree::sheets_of(&app.state.workspace.design_management, &reference).is_empty()
-    );
+    assert!(hierarchy_tree::sheets_of(&project.design_management, &reference).is_empty());
 
-    let catalog = app
-        .state
-        .workspace
+    let catalog = project
         .design_management
         .sheet_catalog_mut(&key)
         .expect("the catalog was just bootstrapped");
@@ -363,7 +363,7 @@ fn sheet_nodes_appear_only_above_one_sheet() {
         .set_active(first)
         .expect("the first sheet is active");
 
-    let sheets = hierarchy_tree::sheets_of(&app.state.workspace.design_management, &reference);
+    let sheets = hierarchy_tree::sheets_of(&project.design_management, &reference);
     assert_eq!(
         sheets
             .iter()
@@ -623,9 +623,10 @@ fn wireless_navigator_net_selection_is_exact_and_self_invalidating() {
 /// design projection refuses such a configuration, so a rail that still
 /// lists nets afterwards is listing the editor buffer's.
 fn unresolve_configuration(state: &mut crate::workbench::app_state::AppState) {
-    let root = state.workspace.active_view.clone();
+    let root = state.workspace.content.active_view.clone();
     state
         .workspace
+        .content
         .configuration_sets
         .create(crate::state::ConfigurationSetDefinition {
             name: "Unresolvable DUT".to_owned(),
@@ -1944,7 +1945,7 @@ fn an_excitation_row_stands_for_the_instance_the_object_menu_acts_on() {
 
     let sources = crate::simulation::placed_sources::placed_sources(
         &app.state.schematic,
-        &app.state.workspace.stimulus_library,
+        &app.state.workspace.content.stimulus_library,
         app.state.sim_setup.analysis_plan.as_ref(),
     );
     let placed = sources
@@ -2328,7 +2329,7 @@ fn an_excitation_of_another_occurrence_opens_it_rather_than_selecting_here() {
         "the click lands the session on the occurrence the row names"
     );
     assert_eq!(
-        state.workspace.active_view,
+        state.workspace.content.active_view,
         CellViewRef::new("work", "afe", "schematic")
     );
     assert!(

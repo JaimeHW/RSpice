@@ -315,7 +315,7 @@ fn configure_platform_input_contract(ctx: &Context) {
 
 impl RSpiceApp {
     fn terminate_automation_runtime_after_project_change(&mut self) {
-        let project_id = self.state.workspace.project.id();
+        let project_id = self.state.workspace.content.project.id();
         if project_id == self.automation_runtime_project_id {
             return;
         }
@@ -373,7 +373,7 @@ impl RSpiceApp {
     #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) fn test_instance() -> Self {
         let state = AppState::default();
-        let automation_runtime_project_id = state.workspace.project.id();
+        let automation_runtime_project_id = state.workspace.content.project.id();
         Self {
             state,
             first_frame: false,
@@ -418,7 +418,7 @@ impl RSpiceApp {
             .is_open();
         state.workbench.apply_console_launch_behavior(console_open);
         state.workbench.window_session.normalize_after_restore();
-        state.workspace.migrate_owned_netlist_deck_ids();
+        state.workspace.content.migrate_owned_netlist_deck_ids();
 
         state.initialize_shortcut_library_persistence(&cc.egui_ctx);
         state
@@ -492,7 +492,7 @@ impl RSpiceApp {
             controller.set_engine_wakeup(std::sync::Arc::new(move || ctx.request_repaint()));
             controller
         };
-        let automation_runtime_project_id = state.workspace.project.id();
+        let automation_runtime_project_id = state.workspace.content.project.id();
         Self {
             state,
             first_frame: true,
@@ -618,7 +618,7 @@ impl RSpiceApp {
         #[cfg(target_arch = "wasm32")]
         crate::workbench::browser::accessibility::publish_workspace_context(
             self.state.workbench.workspace.label(),
-            &self.state.workspace.active_view.display_path(),
+            &self.state.workspace.content.active_view.display_path(),
             self.state.simulation.has_active_execution(),
         );
         if self.state.simulation.has_active_execution() {
@@ -657,11 +657,11 @@ impl RSpiceApp {
         } else {
             ""
         };
-        let view = &self.state.workspace.active_view;
+        let view = &self.state.workspace.content.active_view;
         let title = format!(
             "{}{dirty} — {} — RSpice",
             view.cell,
-            self.state.workspace.project.display_name()
+            self.state.workspace.content.project.display_name()
         );
         if self.last_window_title != title {
             #[cfg(not(target_arch = "wasm32"))]
@@ -1702,7 +1702,7 @@ mod tests {
         let mut state = AppState::default();
         // These readiness tests isolate schematic/DRC policy. Project-owned
         // behavioral sources have their own compile-before-run contract.
-        state.workspace.project_sources = Default::default();
+        state.workspace.content.project_sources = Default::default();
         state
             .schematic
             .add_component(ComponentType::Resistor, Point::new(0, 0));
@@ -1773,6 +1773,7 @@ mod tests {
             .expect("valid alternate configuration");
         state
             .workspace
+            .content
             .replace_configuration_sets(catalog)
             .expect("materialized alternate root publishes");
     }
@@ -1896,6 +1897,7 @@ mod tests {
         let mut state = runnable_state();
         state
             .workspace
+            .content
             .project_sources
             .insert(
                 crate::state::ProjectSourceDocument::try_new(
@@ -1909,6 +1911,7 @@ mod tests {
         assert!(
             state
                 .workspace
+                .content
                 .project_sources
                 .get(crate::state::ProjectSourceLanguage::VerilogA)
                 .is_some()
@@ -1953,8 +1956,9 @@ mod tests {
         state.provision_test_project_technology_contract();
         // A project copy retains the exact binding and starts a fresh audit
         // history, which is precisely the binding-without-receipts state.
-        state.workspace.project = state
+        state.workspace.content.project = state
             .workspace
+            .content
             .project
             .fork_copy_at(std::path::PathBuf::from("run_readiness_fixture.rspice"));
 
@@ -1980,6 +1984,7 @@ mod tests {
 
         let attached_library = state
             .workspace
+            .content
             .project
             .technology_binding()
             .expect("the provisioned project owns an exact binding")
@@ -1998,7 +2003,7 @@ mod tests {
     #[test]
     fn generated_and_manual_runs_have_separate_drc_readiness() {
         let mut state = runnable_state();
-        state.workspace.netlist_source = Some("V1 in 0 1\nR1 in 0 1k\n.end\n".to_string());
+        state.workspace.content.netlist_source = Some("V1 in 0 1\nR1 in 0 1k\n.end\n".to_string());
         publish_drc_result(
             &mut state,
             drc_result(DrcViolationType::MissingGround, None),
@@ -2299,8 +2304,8 @@ mod tests {
             .expect("RSpice must be able to restore a session it just saved");
 
         assert_eq!(
-            restored.workspace.project.id(),
-            expected.workspace.project.id()
+            restored.workspace.content.project.id(),
+            expected.workspace.content.project.id()
         );
         assert_eq!(
             restored.schematic.document().components,

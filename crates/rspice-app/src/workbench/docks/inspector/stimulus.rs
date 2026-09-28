@@ -63,7 +63,7 @@ enum Verb {
 
 pub(in crate::workbench::docks) fn show(ui: &mut Ui, state: &mut AppState) {
     let messages = state.ui.messages();
-    let library = &state.workspace.stimulus_library;
+    let library = &state.workspace.content.stimulus_library;
     let Some(definition) = state
         .workbench
         .selected_stimulus_definition

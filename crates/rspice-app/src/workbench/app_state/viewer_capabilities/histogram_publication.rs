@@ -71,7 +71,7 @@ fn distribution() -> (AppState, String) {
     state.ui.results.viewer = ResultViewer::Hist;
     let key = format!(
         "project:{}:result-dataset:{}",
-        state.workspace.project.id().as_uuid(),
+        state.workspace.content.project.id().as_uuid(),
         dataset
     );
     (state, key)

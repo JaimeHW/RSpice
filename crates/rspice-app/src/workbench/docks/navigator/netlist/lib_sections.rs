@@ -204,9 +204,9 @@ mod tests {
             .unwrap();
 
         let mut state = AppState::default();
-        state.workspace.netlist_source = Some(root.to_owned());
-        state.workspace.netlist_document = Some(owned.clone());
-        state.workspace.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
+        state.workspace.content.netlist_source = Some(root.to_owned());
+        state.workspace.content.netlist_document = Some(owned.clone());
+        state.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
             deck_id: uuid::Uuid::new_v4(),
             artifact_name: "owned.cir".to_owned(),
             strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
@@ -226,7 +226,11 @@ mod tests {
         state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         state.ui.netlist.active_document_initialized = true;
         state.simulation.netlist_content = root.to_owned();
-        state.workspace.validate_simulation_configuration().unwrap();
+        state
+            .workspace
+            .content
+            .validate_simulation_configuration()
+            .unwrap();
         state
     }
 
@@ -260,7 +264,7 @@ mod tests {
 
         // A locator that leaves the closure leaves the cache with it.
         state.ui.netlist.owned_document = None;
-        state.workspace.netlist_document = None;
+        state.workspace.content.netlist_document = None;
         refresh(&mut state);
         assert!(state.ui.code_workspace.include_lib_sections.is_empty());
     }
@@ -271,19 +275,19 @@ mod tests {
 
         use_section(&mut state, 2, "ff").expect("the owned root is editable");
         assert_eq!(
-            state.workspace.netlist_source.as_deref(),
+            state.workspace.content.netlist_source.as_deref(),
             Some("corner deck\n.lib \"corners.lib\" ff\nV1 out 0 1\nR1 out 0 rmodel\n.op\n.end\n"),
             "the locator, its quotes, and every other card stay exactly as \
              written"
         );
         assert!(
-            state.workspace.netlist_source_dirty,
+            state.workspace.content.netlist_source_dirty,
             "a rewritten card is an unsaved change"
         );
 
         undo_netlist_edit(&mut state).expect("the rewrite is one journal entry");
         assert_eq!(
-            state.workspace.netlist_source.as_deref(),
+            state.workspace.content.netlist_source.as_deref(),
             Some(ROOT),
             "undo must restore the card the deck was authored with"
         );
@@ -310,7 +314,7 @@ mod tests {
             "a generated document is reviewed, not authored"
         );
         assert_eq!(
-            state.workspace.netlist_source.as_deref(),
+            state.workspace.content.netlist_source.as_deref(),
             Some(ROOT),
             "a refused rewrite changes nothing"
         );

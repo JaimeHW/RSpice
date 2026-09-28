@@ -199,6 +199,7 @@ fn unscoped_network_and_process_permissions_fail_closed() {
     let bundle = app
         .state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&owner)
         .unwrap();
@@ -215,12 +216,14 @@ fn unscoped_network_and_process_permissions_fail_closed() {
         .replace("process_spawn = \"deny\"", "process_spawn = \"allow\"");
     app.state
         .workspace
+        .content
         .replace_project_source_bundle_file(bundle_id, &permissions_path, permissions)
         .unwrap();
 
     let bundle = app
         .state
         .workspace
+        .content
         .project_sources
         .get_bundle(bundle_id)
         .unwrap();

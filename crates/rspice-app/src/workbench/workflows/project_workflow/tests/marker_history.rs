@@ -102,7 +102,7 @@ fn removed_marker_id_is_not_reused_after_scoped_save_and_reopen() {
             let written = crate::io::load_project_file(&path).unwrap();
             let expected_components = usize::from(scope == SaveScope::AllDocuments);
             assert_eq!(
-                written.workspace.schematic_buffers[&state.workspace.active_key()]
+                written.workspace.content.schematic_buffers[&state.workspace.active_key()]
                     .document()
                     .components
                     .len(),
@@ -235,7 +235,7 @@ fn clearing_results_or_replacing_a_drawing_preserves_project_marker_history() {
         let path = unique_path("marker-history-design-reset");
         let (mut state, analysis) = retained_results();
         let published = add_marker(&mut state, analysis);
-        let project_id = state.workspace.project.id();
+        let project_id = state.workspace.content.project.id();
         save_native(
             &mut state,
             SaveScope::AllDocuments,
@@ -264,7 +264,7 @@ fn clearing_results_or_replacing_a_drawing_preserves_project_marker_history() {
             .ui
             .results
             .reconcile_retained_datasets(&state.simulation);
-        assert_eq!(state.workspace.project.id(), project_id);
+        assert_eq!(state.workspace.content.project.id(), project_id);
         assert!(state.ui.results.markers.is_empty());
         save_native(
             &mut state,
@@ -280,7 +280,7 @@ fn clearing_results_or_replacing_a_drawing_preserves_project_marker_history() {
         assert!(add_marker(&mut reopened, analysis) > published);
 
         create_new_project(&mut reopened);
-        assert_ne!(reopened.workspace.project.id(), project_id);
+        assert_ne!(reopened.workspace.content.project.id(), project_id);
         let analysis = install_retained_results(&mut reopened);
         assert_eq!(add_marker(&mut reopened, analysis), 1);
         remove_project_artifacts(&path);

@@ -536,7 +536,7 @@ fn the_specs_tab_speaks_for_the_active_run_and_not_the_history() {
 
     let mut state = AppState::default();
     state.simulation.runs = vec![measured, unmeasured].into();
-    assert!(state.workspace.specs.is_empty());
+    assert!(state.workspace.content.specs.is_empty());
 
     assert!(state.simulation.select_run(0));
     assert!(

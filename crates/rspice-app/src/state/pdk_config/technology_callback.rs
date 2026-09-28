@@ -4,8 +4,8 @@
 //! registry transactions consume the canonical portable evidence records.
 
 pub use rspice_model_library::pdk::callback::{
-    MAX_PROJECT_PDK_CALLBACK_RECEIPTS, PdkCallbackError, PdkCallbackExecutionInput,
-    PdkCallbackExecutionReceipt, ProjectPdkCallbackReceipt,
+    PdkCallbackError, PdkCallbackExecutionInput, PdkCallbackExecutionReceipt,
+    ProjectPdkCallbackReceipt,
 };
 
 #[cfg(test)]

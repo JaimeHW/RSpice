@@ -72,6 +72,7 @@ fn document_digests_with_results_cache(
     let mut documents = HashMap::new();
     let mut plan_payloads = project
         .workspace
+        .content
         .simulation_plan_payloads
         .iter()
         .map(|record| (record.plan_id, &record.payload))
@@ -82,11 +83,11 @@ fn document_digests_with_results_cache(
     documents.insert(
         ProjectDocumentId::ProjectConfiguration,
         digest(&project_configuration_value(
-            &project.workspace.project,
+            &project.workspace.content.project,
             &project.libraries,
-            &project.workspace.configuration_sets,
-            &project.workspace.design_management,
-            project.workspace.pdk_callback_receipts(),
+            &project.workspace.content.configuration_sets,
+            &project.workspace.content.design_management,
+            project.workspace.content.pdk_callback_receipts(),
         )?)?,
     );
     documents.insert(
@@ -114,14 +115,14 @@ fn document_digests_with_results_cache(
         match results_cache {
             Some(cache) => cache.digest(
                 &project.simulation_results,
-                &project.workspace.report_documents,
-                &project.workspace.visualization_documents,
+                &project.workspace.content.report_documents,
+                &project.workspace.content.visualization_documents,
                 &project.result_presentation,
             )?,
             None => result_fingerprint::digest(
                 &project.simulation_results,
-                &project.workspace.report_documents,
-                &project.workspace.visualization_documents,
+                &project.workspace.content.report_documents,
+                &project.workspace.content.visualization_documents,
                 &project.result_presentation,
             )?,
         },
@@ -132,7 +133,7 @@ fn document_digests_with_results_cache(
     // "no unsaved changes" over a library that had just been republished.
     documents.insert(
         ProjectDocumentId::StimulusLibrary,
-        digest(&project.workspace.stimulus_library)?,
+        digest(&project.workspace.content.stimulus_library)?,
     );
     documents.insert(
         ProjectDocumentId::VerificationSpecifications,
@@ -142,6 +143,7 @@ fn document_digests_with_results_cache(
     );
     let code_workspace_sources = project
         .workspace
+        .content
         .project_sources
         .iter_bundles()
         .filter(|bundle| {
@@ -154,22 +156,22 @@ fn document_digests_with_results_cache(
     documents.insert(
         ProjectDocumentId::NetlistSource,
         digest(&(
-            &project.workspace.netlist_source,
-            &project.workspace.netlist_source_path,
-            &project.workspace.netlist_document,
-            &project.workspace.netlist_descriptor,
-            &project.workspace.retained_netlist_decks,
+            &project.workspace.content.netlist_source,
+            &project.workspace.content.netlist_source_path,
+            &project.workspace.content.netlist_document,
+            &project.workspace.content.netlist_descriptor,
+            &project.workspace.content.retained_netlist_decks,
             code_workspace_sources,
         ))?,
     );
 
     let mut references = HashSet::new();
-    for key in project.workspace.schematic_buffers.keys() {
+    for key in project.workspace.content.schematic_buffers.keys() {
         if let Some(reference) = reference_from_key(key) {
             references.insert(reference);
         }
     }
-    for key in project.workspace.physical_layout_documents().keys() {
+    for key in project.workspace.content.physical_layout_documents().keys() {
         if let Some(reference) = reference_from_key(key) {
             references.insert(reference);
         }
@@ -184,17 +186,21 @@ fn document_digests_with_results_cache(
     for reference in references {
         let schematic = project
             .workspace
+            .content
             .schematic_buffers
             .get(&reference.key())
             .map(|schematic| SchematicDocumentContent::from(schematic.document()));
-        let physical_layout = project.workspace.physical_layout_document(&reference);
+        let physical_layout = project
+            .workspace
+            .content
+            .physical_layout_document(&reference);
         let view = project
             .libraries
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
             .and_then(|cell| cell.get_view(&reference.view))
             .map(ViewDocumentContent::from);
-        let project_source = project.workspace.project_sources.bundle_for_owner(
+        let project_source = project.workspace.content.project_sources.bundle_for_owner(
             &crate::state::ProjectSourceOwner::cell_view(reference.clone()),
         );
         documents.insert(
@@ -224,7 +230,7 @@ mod tests {
             .schematic
             .add_component(ComponentType::Resistor, Point::new(4, 6));
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
-        let active = state.workspace.active_view.clone();
+        let active = state.workspace.content.active_view.clone();
 
         state
             .schematic
@@ -235,7 +241,7 @@ mod tests {
         state.schematic.session.pan = (125.0, -40.0);
         state.schematic.session.zoom = 2.25;
         state.schematic.session.current_file = Some(std::path::PathBuf::from("presentation.rsch"));
-        state.workspace.open_views[0].dirty = true;
+        state.workspace.content.open_views[0].dirty = true;
         state.library_manager.filter_text = "presentation filter".to_owned();
         state.library_manager.show_read_only = !state.library_manager.show_read_only;
         state
@@ -278,7 +284,7 @@ mod tests {
     #[test]
     fn typed_bus_and_tap_edits_mark_the_schematic_document_dirty() {
         let mut state = AppState::default();
-        let active = state.workspace.active_view.clone();
+        let active = state.workspace.content.active_view.clone();
         let empty = super::super::snapshot(&state).expect("empty baseline");
         let declaration = BusDeclaration::parse("DATA[15:0]").expect("valid declaration");
         let bus_id = state
@@ -315,7 +321,7 @@ mod tests {
     #[test]
     fn design_note_edits_participate_in_the_schematic_document_digest() {
         let mut state = AppState::default();
-        let active = state.workspace.active_view.clone();
+        let active = state.workspace.content.active_view.clone();
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
         state.schematic.document_mut_for_test().design_notes.push(
             DesignNote::new(
@@ -350,7 +356,7 @@ mod tests {
     #[test]
     fn documentation_shape_edits_participate_in_the_schematic_document_digest() {
         let mut state = AppState::default();
-        let active = state.workspace.active_view.clone();
+        let active = state.workspace.content.active_view.clone();
         state
             .schematic
             .document_mut_for_test()
@@ -395,13 +401,15 @@ mod tests {
         let mut second = first.clone();
         first
             .workspace
+            .content
             .simulation_plan_payloads
             .push(SimulationPlanPayloadRecord {
                 plan_id: crate::product::SimulationPlanId::new(),
                 payload: Default::default(),
             });
-        second.workspace.simulation_plan_payloads = first
+        second.workspace.content.simulation_plan_payloads = first
             .workspace
+            .content
             .simulation_plan_payloads
             .iter()
             .cloned()
@@ -436,7 +444,7 @@ mod tests {
                 1,
             )
             .expect("report page transaction");
-        edited.workspace.report_documents.push(report);
+        edited.workspace.content.report_documents.push(report);
 
         let baseline_digest = document_digests(&baseline)
             .unwrap()
@@ -476,8 +484,8 @@ mod tests {
             // change generated-netlist authority for otherwise unchanged input.
             let legacy = digest(&(
                 &project.simulation_results,
-                &project.workspace.report_documents,
-                &project.workspace.visualization_documents,
+                &project.workspace.content.report_documents,
+                &project.workspace.content.visualization_documents,
                 &project.result_presentation.markers,
                 &project.result_presentation.log_y_panes,
                 &project.result_presentation.expression_groups,
@@ -530,6 +538,7 @@ mod tests {
         .unwrap();
         state
             .workspace
+            .content
             .ensure_active_plan_data(plan_id)
             .design_variables
             .push(variable);
@@ -549,12 +558,14 @@ mod tests {
         let mut state = AppState::default();
         if state
             .workspace
+            .content
             .project_sources
             .get(crate::state::ProjectSourceLanguage::VerilogA)
             .is_none()
         {
             state
                 .workspace
+                .content
                 .project_sources
                 .insert(
                     crate::state::ProjectSourceDocument::try_new(
@@ -570,6 +581,7 @@ mod tests {
 
         state
             .workspace
+            .content
             .replace_project_source(
                 crate::state::ProjectSourceLanguage::VerilogA,
                 "module sensor_bridge; analog begin end endmodule".to_owned(),
@@ -591,8 +603,8 @@ mod tests {
         let mut state = AppState::default();
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
         let reference = CellViewRef::new(
-            state.workspace.active_view.library.clone(),
-            state.workspace.active_view.cell.clone(),
+            state.workspace.content.active_view.library.clone(),
+            state.workspace.content.active_view.cell.clone(),
             "behavior",
         );
         state
@@ -606,6 +618,7 @@ mod tests {
             ));
         state
             .workspace
+            .content
             .project_sources
             .insert_bundle(
                 crate::state::ProjectSourceBundle::try_new(

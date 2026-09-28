@@ -51,12 +51,12 @@ impl AppState {
     /// caller because open/import/new workflows each own those semantics.
     pub(crate) fn clear_design_execution_context(&mut self) {
         self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
-        self.workspace.netlist_source = None;
-        self.workspace.netlist_document = None;
-        self.workspace.netlist_descriptor = None;
-        self.workspace.retained_netlist_decks.clear();
-        self.workspace.netlist_source_path = None;
-        self.workspace.netlist_source_dirty = false;
+        self.workspace.content.netlist_source = None;
+        self.workspace.content.netlist_document = None;
+        self.workspace.content.netlist_descriptor = None;
+        self.workspace.content.retained_netlist_decks.clear();
+        self.workspace.content.netlist_source_path = None;
+        self.workspace.content.netlist_source_dirty = false;
         self.simulation = crate::state::SimulationState::default();
         self.ui.netlist = Default::default();
         self.ui.code_workspace = Default::default();

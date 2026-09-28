@@ -160,6 +160,7 @@ fn placement(
 fn retained_markers(app: &RSpiceApp, document_id: ResultDocumentId) -> Vec<Marker> {
     app.state
         .workspace
+        .content
         .visualization_document(document_id)
         .expect("retained document")
         .markers()
@@ -181,12 +182,14 @@ fn projecting_a_retained_marker_never_adopts_it_into_the_quick_list() {
         let document = app
             .state
             .workspace
+            .content
             .visualization_document(document_id)
             .expect("retained document");
         (document.traces()[0].id, document.revision())
     };
     app.state
         .workspace
+        .content
         .transact_visualization_document(
             document_id,
             revision,
@@ -230,6 +233,7 @@ fn placing_a_marker_on_a_persistent_pane_transacts_against_the_document() {
     let revision_before = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .expect("retained document")
         .revision();
@@ -255,6 +259,7 @@ fn placing_a_marker_on_a_persistent_pane_transacts_against_the_document() {
     assert_ne!(
         app.state
             .workspace
+            .content
             .visualization_document(document_id)
             .expect("retained document")
             .revision(),
@@ -483,6 +488,7 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
     let revision_before = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .expect("retained document")
         .revision();
@@ -494,6 +500,7 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
     assert_eq!(
         app.state
             .workspace
+            .content
             .visualization_document(document_id)
             .expect("retained document")
             .revision(),
@@ -508,6 +515,7 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
     assert_ne!(
         app.state
             .workspace
+            .content
             .visualization_document(document_id)
             .expect("retained document")
             .revision(),
@@ -619,6 +627,7 @@ fn projection_carries_every_document_owned_pane_entity() {
     let document = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .expect("retained document");
 
@@ -649,6 +658,7 @@ fn persistent_trace_axis_and_cursor_interactions_commit_without_mutating_results
     assert!(
         !app.state
             .workspace
+            .content
             .visualization_document(document_id)
             .expect("document remains retained")
             .traces()[0]
@@ -672,6 +682,7 @@ fn persistent_trace_axis_and_cursor_interactions_commit_without_mutating_results
     let document = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .expect("captured document");
     assert_eq!(
@@ -688,7 +699,7 @@ fn persistent_trace_axis_and_cursor_interactions_commit_without_mutating_results
             .iter()
             .any(|cursor| { cursor.label == "A" && cursor.position == TypedValue::Real(0.5) })
     );
-    assert!(app.state.workspace.visualization_documents_dirty);
+    assert!(app.state.workspace.content.visualization_documents_dirty);
 }
 
 fn completed_prepared_run(
@@ -763,6 +774,7 @@ fn pane_selection_belongs_to_the_document_it_was_made_in() {
     let second_panes: Vec<PaneId> = app
         .state
         .workspace
+        .content
         .visualization_document(second)
         .expect("the second document is retained")
         .panes()
@@ -902,6 +914,7 @@ fn zooming_one_unit_pane_of_a_document_never_restates_another_pane_axis() {
     let vertical = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .expect("captured document")
         .axes()
@@ -1001,7 +1014,7 @@ fn latest_tracking_fixture() -> LatestFixture {
 
     let plan_id = SimulationPlanId::new();
     let authored_analysis_id = AnalysisInstanceId::new();
-    let project_revision = app.state.workspace.project.revision();
+    let project_revision = app.state.workspace.content.project.revision();
     let run = authored_run(
         1,
         plan_id,
@@ -1029,11 +1042,13 @@ fn latest_tracking_fixture() -> LatestFixture {
     let revision = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .expect("retained document")
         .revision();
     app.state
         .workspace
+        .content
         .transact_visualization_document(
             document_id,
             revision,
@@ -1068,7 +1083,7 @@ fn a_latest_document_that_cannot_retarget_keeps_its_last_good_binding() {
         source_digest,
     } = latest_tracking_fixture();
     let good_dataset = app.state.simulation.runs[0].dataset_id;
-    let project_revision = app.state.workspace.project.revision();
+    let project_revision = app.state.workspace.content.project.revision();
     // The newest run of the same authored analysis no longer carries the
     // signal this document's traces name.
     app.state.simulation.runs.push(authored_run(
@@ -1129,7 +1144,7 @@ fn a_refused_latest_retarget_is_not_re_attempted_every_frame() {
         authored_analysis_id,
         source_digest,
     } = latest_tracking_fixture();
-    let project_revision = app.state.workspace.project.revision();
+    let project_revision = app.state.workspace.content.project.revision();
     app.state.simulation.runs.push(authored_run(
         2,
         plan_id,
@@ -1154,6 +1169,7 @@ fn a_refused_latest_retarget_is_not_re_attempted_every_frame() {
     let revision_after_first = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .expect("retained document")
         .revision();
@@ -1175,6 +1191,7 @@ fn a_refused_latest_retarget_is_not_re_attempted_every_frame() {
     assert_eq!(
         app.state
             .workspace
+            .content
             .visualization_document(document_id)
             .expect("retained document")
             .revision(),

@@ -30,7 +30,7 @@ fn model_validation_receipt_is_dirty_and_survives_save_reload_and_revert() {
         let receipt = state
             .model_library_manager
             .issue_model_validation_receipt(
-                state.workspace.project.revision(),
+                state.workspace.content.project.revision(),
                 plan.digest(),
                 None,
                 crate::io::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,

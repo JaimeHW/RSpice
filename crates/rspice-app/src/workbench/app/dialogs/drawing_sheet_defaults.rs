@@ -65,6 +65,7 @@ pub(crate) fn open_drawing_sheet_defaults(state: &mut AppState) -> bool {
     }
     let project = state
         .workspace
+        .content
         .design_management
         .drawing_sheet_settings()
         .clone();
@@ -72,7 +73,7 @@ pub(crate) fn open_drawing_sheet_defaults(state: &mut AppState) -> bool {
     state.dialogs.drawing_sheet_defaults = DrawingSheetDefaultsDialogState {
         open: true,
         edit: Some(SchematicEditAuthority::capture(state)),
-        catalog_revision: state.workspace.design_management.revision(),
+        catalog_revision: state.workspace.content.design_management.revision(),
         baseline_project: project.clone(),
         draft_project: project,
         baseline_personal: personal.clone(),
@@ -91,13 +92,14 @@ pub(crate) fn open_drawing_sheet_defaults(state: &mut AppState) -> bool {
 /// current; a touched draft keeps its baseline and the authority check
 /// reports the conflict instead.
 fn refresh_untouched_baselines(state: &mut AppState) {
-    let catalog_revision = state.workspace.design_management.revision();
+    let catalog_revision = state.workspace.content.design_management.revision();
     if state.dialogs.drawing_sheet_defaults.catalog_revision != catalog_revision
         && state.dialogs.drawing_sheet_defaults.draft_project
             == state.dialogs.drawing_sheet_defaults.baseline_project
     {
         let project = state
             .workspace
+            .content
             .design_management
             .drawing_sheet_settings()
             .clone();
@@ -127,6 +129,7 @@ impl RSpiceApp {
             let key = self.state.workspace.active_key();
             self.state
                 .workspace
+                .content
                 .design_management
                 .sheet_catalog(&key)
                 .map(|catalog| {
@@ -1620,7 +1623,7 @@ fn validate_project_authority(
         .as_ref()
         .ok_or_else(|| "Drawing-sheet Defaults has no project edit authority.".to_owned())?
         .validate(app, "Drawing-sheet Defaults")?;
-    if app.workspace.design_management.revision() != state.catalog_revision {
+    if app.workspace.content.design_management.revision() != state.catalog_revision {
         return Err(
             "Project drawing-sheet settings changed. Close and reopen Defaults.".to_owned(),
         );
@@ -1682,7 +1685,7 @@ fn apply_drawing_sheet_defaults(app: &mut RSpiceApp) -> Result<String, String> {
 
     if project_changed {
         validate_project_authority(&app.state, &transaction)?;
-        let before = app.state.workspace.design_management.clone();
+        let before = app.state.workspace.content.design_management.clone();
         let mut candidate = before.clone();
         candidate
             .update_drawing_sheet_settings(candidate.revision(), transaction.draft_project.clone())
@@ -1736,11 +1739,12 @@ pub(super) fn commit_project_candidate(
     let committed_revision = app
         .state
         .workspace
+        .content
         .replace_design_management(candidate)
         .map_err(|error| error.to_string())?;
     app.state
         .apply_design_management_schematic_transaction(&schematic_tx);
-    let after = app.state.workspace.design_management.clone();
+    let after = app.state.workspace.content.design_management.clone();
     app.state
         .record_design_management_transaction(DesignManagementHistoryEntry {
             description: description.to_owned(),
@@ -1763,13 +1767,16 @@ mod tests {
     fn unchanged_defaults_are_a_real_no_op() {
         let mut app = RSpiceApp::test_instance();
         open_drawing_sheet_defaults(&mut app.state);
-        let revision = app.state.workspace.design_management.revision();
+        let revision = app.state.workspace.content.design_management.revision();
 
         assert_eq!(
             apply_drawing_sheet_defaults(&mut app).unwrap(),
             "Drawing-sheet defaults already matched the saved values."
         );
-        assert_eq!(app.state.workspace.design_management.revision(), revision);
+        assert_eq!(
+            app.state.workspace.content.design_management.revision(),
+            revision
+        );
     }
 
     #[test]
@@ -1801,10 +1808,13 @@ mod tests {
         })
         .unwrap();
 
-        let before = app.state.workspace.design_management.revision();
+        let before = app.state.workspace.content.design_management.revision();
         apply_drawing_sheet_defaults(&mut app).unwrap();
 
-        assert_eq!(app.state.workspace.design_management.revision(), before + 1);
+        assert_eq!(
+            app.state.workspace.content.design_management.revision(),
+            before + 1
+        );
         assert!(app.state.can_undo_project_design());
         assert_eq!(
             app.state
@@ -1824,6 +1834,7 @@ mod tests {
         let mut settings = app
             .state
             .workspace
+            .content
             .design_management
             .drawing_sheet_settings()
             .clone();
@@ -1834,9 +1845,10 @@ mod tests {
                 draft.title_block.template = DrawingSheetTitleBlockTemplate::OrganizationManaged;
             })
             .unwrap();
-        let revision = app.state.workspace.design_management.revision();
+        let revision = app.state.workspace.content.design_management.revision();
         app.state
             .workspace
+            .content
             .design_management
             .update_drawing_sheet_settings(revision, settings)
             .unwrap();
@@ -1860,6 +1872,7 @@ mod tests {
         let saved = &app
             .state
             .workspace
+            .content
             .design_management
             .drawing_sheet_settings()
             .default_format;

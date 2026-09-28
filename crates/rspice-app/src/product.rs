@@ -9,7 +9,7 @@ pub use command::CommandId;
 pub use rspice_app_types::product::{
     AnalysisInstanceId, CaptureGroupId, ContentDigest, DatasetBinding, DatasetId,
     DerivedAnalysisIdentity, DesignVariableId, ModelSourceId, ObjectRef, ObjectRevision,
-    ProcessCorner, ProductObjectKind, ProjectId, ResultDocumentId, RevisionError, RunId,
-    SavedOutputId, SimulationCampaignId, SimulationPlanId, SpecificationId, TransactionId,
-    VerificationEvidenceId, manual_deck_analysis_instance_id_from_tag, short_identity,
+    ProcessCorner, ProductObjectKind, ProjectId, ResultDocumentId, RunId, SavedOutputId,
+    SimulationCampaignId, SimulationPlanId, TransactionId, VerificationEvidenceId,
+    manual_deck_analysis_instance_id_from_tag, short_identity,
 };

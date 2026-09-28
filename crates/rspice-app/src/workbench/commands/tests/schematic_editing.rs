@@ -54,14 +54,14 @@ fn descend_requires_a_resolved_schematic_master() {
         Command::DescendHierarchy.availability(&app).is_available(),
         "a resolved schematic master is descendable"
     );
-    let parent = app.state.workspace.active_view.clone();
+    let parent = app.state.workspace.content.active_view.clone();
     Command::DescendHierarchy.execute(&mut app);
     assert!(
         app.state.dialogs.descend_hierarchy.open,
         "the menu/palette command owns the explicit edit-context transaction"
     );
     assert_eq!(
-        app.state.workspace.active_view, parent,
+        app.state.workspace.content.active_view, parent,
         "opening the transaction must not navigate before commit"
     );
     app.state.dialogs.descend_hierarchy.close();
@@ -940,7 +940,8 @@ fn repairing_a_stale_instance_restores_its_x_line() {
     );
 
     let stale = {
-        let hierarchy = HierarchySource::from_buffers(&app.state.workspace.schematic_buffers);
+        let hierarchy =
+            HierarchySource::from_buffers(&app.state.workspace.content.schematic_buffers);
         generate_netlist_hierarchical(&app.state.schematic, &[], &hierarchy)
     };
     assert!(
@@ -963,7 +964,8 @@ fn repairing_a_stale_instance_restores_its_x_line() {
     Command::UpdateInstanceInterface.execute(&mut app);
 
     let repaired = {
-        let hierarchy = HierarchySource::from_buffers(&app.state.workspace.schematic_buffers);
+        let hierarchy =
+            HierarchySource::from_buffers(&app.state.workspace.content.schematic_buffers);
         generate_netlist_hierarchical(&app.state.schematic, &[], &hierarchy)
     };
     assert!(

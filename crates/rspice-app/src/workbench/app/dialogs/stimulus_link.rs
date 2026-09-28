@@ -164,7 +164,7 @@ pub(crate) fn open_stimulus_link(
                 .to_owned(),
         );
     };
-    if mode == StimulusLinkMode::Adopt && state.workspace.stimulus_library.is_empty() {
+    if mode == StimulusLinkMode::Adopt && state.workspace.content.stimulus_library.is_empty() {
         return Err(
             "This project holds no stimulus definitions yet. Save this source as one first, or \
              author one in the Stimulus Library workspace."
@@ -189,10 +189,11 @@ pub(crate) fn open_stimulus_link(
         .stimulus_provenance
         .as_ref()
         .map(|provenance| provenance.definition.clone())
-        .filter(|name| state.workspace.stimulus_library.get(name).is_some())
+        .filter(|name| state.workspace.content.stimulus_library.get(name).is_some())
         .or_else(|| first_equal_definition(state, &component));
     let provenance = state
         .workspace
+        .content
         .stimulus_library
         .provenance_state(&component);
 
@@ -208,11 +209,13 @@ pub(crate) fn open_stimulus_link(
         timing: crate::workbench::app::actions::property_edit::stimulus_preview_timing(state),
         data_root: state
             .workspace
+            .content
             .project
             .data_root()
             .map(std::path::Path::to_path_buf),
         retained_table: state
             .workspace
+            .content
             .stimulus_library
             .retained_pwl_table(&component)
             .and_then(|table| crate::simulation::table_route::materialized(table).ok()),
@@ -229,6 +232,7 @@ pub(crate) fn open_stimulus_link(
 fn first_equal_definition(state: &AppState, component: &Component) -> Option<String> {
     state
         .workspace
+        .content
         .stimulus_library
         .definitions()
         .iter()
@@ -276,7 +280,7 @@ fn instance_nets(state: &AppState, component_id: u64) -> [String; 2] {
     };
     let sources = crate::simulation::placed_sources::placed_sources(
         &state.schematic,
-        &state.workspace.stimulus_library,
+        &state.workspace.content.stimulus_library,
         None,
     );
     let Some(source) = sources
@@ -338,6 +342,7 @@ fn extract_refusal(state: &AppState, component: &Component, name: &str) -> Optio
     }
     state
         .workspace
+        .content
         .stimulus_library
         .get(name)
         .map(|held| StimulusDefinitionError::DuplicateName(held.name().to_owned()).to_string())
@@ -470,6 +475,7 @@ pub(crate) fn commit_readoption(
 ) -> Result<String, String> {
     let held = state
         .workspace
+        .content
         .stimulus_library
         .get(definition)
         .cloned()
@@ -522,13 +528,14 @@ fn commit_extraction(state: &mut AppState, component_id: u64) -> Result<String, 
     // removed`, over an extraction the reader was told had failed.
     state
         .workspace
+        .content
         .stimulus_library
         .insert(definition)
         .map_err(|error| error.to_string())?;
     if let Err(refusal) =
         state.edit_component_transaction(&expected, candidate, "save stimulus definition")
     {
-        let _ = state.workspace.stimulus_library.delete(&name);
+        let _ = state.workspace.content.stimulus_library.delete(&name);
         return Err(refusal);
     }
     state.workbench.selected_stimulus_definition = Some(name.clone());

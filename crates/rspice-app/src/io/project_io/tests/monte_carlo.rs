@@ -147,7 +147,7 @@ fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_abse
     let digest = state.runs[0].dataset_content_digest();
     legacy.schema_version = 34;
     legacy
-        .migrate_to_current(project.workspace.project.id())
+        .migrate_to_current(project.workspace.content.project.id())
         .unwrap();
     let restored = crate::io::simulation_state_from_results(legacy).unwrap();
     assert!(

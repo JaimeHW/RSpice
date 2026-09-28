@@ -753,6 +753,7 @@ pub(crate) fn begin_owned_netlist_profile_review(state: &mut AppState) -> bool {
         }
         let descriptor = state
             .workspace
+            .content
             .netlist_descriptor
             .as_ref()
             .ok_or_else(|| "No owned netlist descriptor is available.".to_owned())?;
@@ -761,11 +762,13 @@ pub(crate) fn begin_owned_netlist_profile_review(state: &mut AppState) -> bool {
         }
         let document = state
             .workspace
+            .content
             .netlist_document
             .as_ref()
             .ok_or_else(|| "No canonical owned netlist document is available.".to_owned())?;
         let source = state
             .workspace
+            .content
             .netlist_source
             .as_ref()
             .filter(|source| source.as_str() == document.source())
@@ -1043,7 +1046,7 @@ pub(super) fn commit_owned_netlist_profile_review(
         }
         return false;
     };
-    if state.workspace.netlist_source.as_deref() != Some(review.source.as_str())
+    if state.workspace.content.netlist_source.as_deref() != Some(review.source.as_str())
         || sha256(review.source.as_bytes()) != review.original_sha256
     {
         if let Some(current) = state.ui.netlist.import_review.as_mut() {
@@ -1057,7 +1060,7 @@ pub(super) fn commit_owned_netlist_profile_review(
 
     let mut committed = state.clone();
     crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut committed);
-    let Some(descriptor) = committed.workspace.netlist_descriptor.as_mut() else {
+    let Some(descriptor) = committed.workspace.content.netlist_descriptor.as_mut() else {
         if let Some(current) = state.ui.netlist.import_review.as_mut() {
             current.error = Some("The owned netlist descriptor is no longer available.".to_owned());
         }
@@ -1066,9 +1069,13 @@ pub(super) fn commit_owned_netlist_profile_review(
     descriptor.imported_dialect = Some(review.selected_dialect);
     descriptor.compatibility_reviewed = review.selected_dialect.requires_compatibility_review();
     descriptor.execution_profile = Some(profile);
-    committed.workspace.project_metadata_dirty = true;
+    committed.workspace.content.project_metadata_dirty = true;
     committed.ui.netlist.import_review = None;
-    if let Err(error) = committed.workspace.validate_simulation_configuration() {
+    if let Err(error) = committed
+        .workspace
+        .content
+        .validate_simulation_configuration()
+    {
         if let Some(current) = state.ui.netlist.import_review.as_mut() {
             current.error = Some(format!(
                 "The reviewed profile could not be recorded without invalidating project state: {error}"

@@ -15,7 +15,7 @@ pub(super) fn open_ownership_dialog(
     state: &mut AppState,
     strategy: crate::state::OwnedNetlistEditStrategy,
 ) {
-    if state.workspace.netlist_source.is_some() {
+    if state.workspace.content.netlist_source.is_some() {
         let _ = open_owned_source(state);
         return;
     }
@@ -180,7 +180,7 @@ pub(super) fn create_owned_source(
     {
         return Err("Artifact name must be one trimmed file name.".to_owned());
     }
-    if state.workspace.netlist_source.is_some() {
+    if state.workspace.content.netlist_source.is_some() {
         return Err("An owned SPICE source artifact already exists.".to_owned());
     }
     let generated = state
@@ -197,10 +197,10 @@ pub(super) fn create_owned_source(
         .replace_editable_source(owned.content_digest(), source.as_bytes().to_vec())
         .map_err(|error| error.to_string())?;
 
-    state.workspace.netlist_source = Some(source.clone());
-    state.workspace.netlist_source_path = None;
-    state.workspace.netlist_source_dirty = true;
-    state.workspace.netlist_document = Some(owned.clone());
+    state.workspace.content.netlist_source = Some(source.clone());
+    state.workspace.content.netlist_source_path = None;
+    state.workspace.content.netlist_source_dirty = true;
+    state.workspace.content.netlist_document = Some(owned.clone());
     let mut descriptor = crate::state::OwnedNetlistDescriptor {
         deck_id: uuid::Uuid::new_v4(),
         artifact_name: name.to_owned(),
@@ -216,7 +216,7 @@ pub(super) fn create_owned_source(
         owned_includes: Vec::new(),
     };
     descriptor.retain_revision(&owned, "Created editable source baseline")?;
-    state.workspace.netlist_descriptor = Some(descriptor);
+    state.workspace.content.netlist_descriptor = Some(descriptor);
     state.ui.netlist.owned_document = Some(owned);
     state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
     state.ui.netlist.active_document_initialized = true;
@@ -313,7 +313,7 @@ fn is_analysis_card(head: &str) -> bool {
 /// Open (or explicitly create) the project-owned source derived from the
 /// immutable generated primary. Existing owned bytes are never overwritten.
 pub(super) fn open_owned_source(state: &mut AppState) -> bool {
-    if state.workspace.netlist_source.is_none() {
+    if state.workspace.content.netlist_source.is_none() {
         return false;
     }
     if state.ui.netlist.owned_document.is_none() {
@@ -322,6 +322,7 @@ pub(super) fn open_owned_source(state: &mut AppState) -> bool {
         };
         let source = state
             .workspace
+            .content
             .netlist_source
             .as_deref()
             .unwrap_or_else(|| generated.source());
@@ -336,7 +337,7 @@ pub(super) fn open_owned_source(state: &mut AppState) -> bool {
                 return false;
             }
         };
-        let transition = if let Some(path) = state.workspace.netlist_source_path.as_ref() {
+        let transition = if let Some(path) = state.workspace.content.netlist_source_path.as_ref() {
             let display_name = path
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
@@ -367,17 +368,18 @@ pub(super) fn open_owned_source(state: &mut AppState) -> bool {
     else {
         return false;
     };
-    state.workspace.netlist_source = Some(source.clone());
-    state.workspace.netlist_document = state.ui.netlist.owned_document.clone();
-    if state.workspace.netlist_descriptor.is_none() {
+    state.workspace.content.netlist_source = Some(source.clone());
+    state.workspace.content.netlist_document = state.ui.netlist.owned_document.clone();
+    if state.workspace.content.netlist_descriptor.is_none() {
         let artifact_name = state
             .workspace
+            .content
             .netlist_source_path
             .as_deref()
             .and_then(std::path::Path::file_name)
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "top_override.sp".to_owned());
-        state.workspace.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
+        state.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
             deck_id: uuid::Uuid::new_v4(),
             artifact_name,
             strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,

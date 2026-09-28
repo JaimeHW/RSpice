@@ -82,7 +82,7 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.project_open = true;
-    let initial_project_revision = app.state.workspace.project.revision();
+    let initial_project_revision = app.state.workspace.content.project.revision();
     let mut built_in = ModelLibrary::new("command copy built-in");
     built_in.pdk_name = "Example PDK".to_owned();
     built_in.technology_node = "45nm".to_owned();
@@ -107,10 +107,10 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
     Command::ModelCreateProjectCopy.execute(&mut app);
 
     assert!(
-        app.state.workspace.project.revision() > initial_project_revision,
+        app.state.workspace.content.project.revision() > initial_project_revision,
         "copy publication advances the guarded project revision"
     );
-    assert!(app.state.workspace.project_metadata_dirty);
+    assert!(app.state.workspace.content.project_metadata_dirty);
     assert_eq!(
         app.state.model_library_manager.selected_library.as_deref(),
         Some("copy_nch project")
@@ -145,7 +145,7 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
     assert_eq!(draft.model_name, "copy_nch");
     assert_eq!(
         draft.base_project_revision,
-        app.state.workspace.project.revision()
+        app.state.workspace.content.project.revision()
     );
     assert!(Command::ModelEditor.is_enabled(&app));
 
@@ -373,7 +373,7 @@ fn qualification_command_requires_a_suite_for_the_exact_open_source() {
             },
         )
         .expect("create project model");
-    let project_revision = app.state.workspace.project.revision();
+    let project_revision = app.state.workspace.content.project.revision();
     app.state
         .workbench
         .model_editor

@@ -174,7 +174,7 @@ fn studio_surface(viewport: Vec2) -> Rect {
 #[cfg(not(target_arch = "wasm32"))]
 fn studio_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    let reference = app.state.workspace.active_view.clone();
+    let reference = app.state.workspace.content.active_view.clone();
     app.state
         .workbench
         .documents

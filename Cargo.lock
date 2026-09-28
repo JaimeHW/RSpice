@@ -5631,6 +5631,7 @@ dependencies = [
  "rspice-core",
  "rspice-design",
  "rspice-design-model",
+ "rspice-hardcopy-contract",
  "rspice-model-library",
  "rspice-results",
  "rspice-simulation-contract",

@@ -44,12 +44,14 @@ fn app_with_sheets(count: usize) -> RSpiceApp {
     let first = app
         .state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&key, "Sheet 1", [10])
         .expect("first sheet");
     let catalog = app
         .state
         .workspace
+        .content
         .design_management
         .sheet_catalog_mut(&key)
         .expect("sheet catalog");

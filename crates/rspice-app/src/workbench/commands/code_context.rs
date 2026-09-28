@@ -86,6 +86,7 @@ pub(crate) fn resolve_veriloga_compile(app: &RSpiceApp) -> Option<CodeCommandCon
         crate::workbench::documents::code_workspace::selected_veriloga_editor_snapshot(app).ok()?;
     app.state
         .workspace
+        .content
         .project_sources
         .get_bundle(selected.bundle_id())
         .filter(|bundle| !bundle.root().content().trim().is_empty())?;
@@ -99,7 +100,7 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
 
     let state = &app.state;
     let page = CodeWorkspacePage::Netlist;
-    let project_id = state.workspace.project.id();
+    let project_id = state.workspace.content.project.id();
     let active = state.ui.netlist.active_document;
     if let Some(dependency) = active_dependency(state) {
         let source = dependency.source()?;
@@ -116,6 +117,7 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
         let owned_descriptor = owned.then(|| {
             state
                 .workspace
+                .content
                 .netlist_descriptor
                 .as_ref()?
                 .owned_include(dependency.locator().logical_identity())
@@ -175,9 +177,9 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
             }
             ActiveNetlistDocument::OwnedSource => {
                 let document = state.ui.netlist.owned_document.as_ref()?;
-                let descriptor = state.workspace.netlist_descriptor.as_ref()?;
-                let canonical = state.workspace.netlist_document.as_ref()?;
-                if state.workspace.netlist_source.as_deref() != Some(document.source())
+                let descriptor = state.workspace.content.netlist_descriptor.as_ref()?;
+                let canonical = state.workspace.content.netlist_document.as_ref()?;
+                if state.workspace.content.netlist_source.as_deref() != Some(document.source())
                     || state.simulation.netlist_content != document.source()
                     || canonical.id() != document.id()
                     || canonical.revision() != document.revision()
@@ -299,11 +301,16 @@ fn resolve_project_source(
     let bundle = match language {
         ProjectSourceLanguage::VerilogA => state
             .workspace
+            .content
             .project_sources
             .get_bundle(selected_veriloga.as_ref()?.bundle_id())?,
         ProjectSourceLanguage::RSpiceAutomation => {
             let owner = ProjectSourceOwner::code_workspace(language);
-            state.workspace.project_sources.bundle_for_owner(&owner)?
+            state
+                .workspace
+                .content
+                .project_sources
+                .bundle_for_owner(&owner)?
         }
     };
     let selected_path = match language {
@@ -338,7 +345,7 @@ fn resolve_project_source(
     };
     let project_writable = !state.workbench.safe_mode.project_read_only();
     Some(CodeCommandContext {
-        project_id: state.workspace.project.id(),
+        project_id: state.workspace.content.project.id(),
         page,
         document_kind: match language {
             ProjectSourceLanguage::VerilogA => CodeDocumentKind::VerilogA,

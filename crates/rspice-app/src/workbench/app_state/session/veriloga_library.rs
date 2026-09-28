@@ -88,9 +88,11 @@ pub(in crate::workbench) fn restore_global_veriloga_library(
                 return;
             }
         };
-        if let Err(error) =
-            install_loaded_veriloga_library(library_manager, &mut workspace.project_sources, loaded)
-        {
+        if let Err(error) = install_loaded_veriloga_library(
+            library_manager,
+            &mut workspace.content.project_sources,
+            loaded,
+        ) {
             log::warn!("Failed to install global Verilog-A library: {error}");
         }
     }
@@ -113,7 +115,7 @@ pub(in crate::workbench) fn save_global_veriloga_library(
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let sources = global_sources_from_registry(&workspace.project_sources)?;
+        let sources = global_sources_from_registry(&workspace.content.project_sources)?;
         save_global_veriloga_library_to_path(&global_veriloga_library_path(), library, &sources)
     }
 }

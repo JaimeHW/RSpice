@@ -137,12 +137,13 @@ impl RSpiceApp {
         let stale = self
             .state
             .workspace
+            .content
             .project_sources
             .get_bundle(tools.index.bundle_id)
             .is_none_or(|bundle| {
                 !tools
                     .index
-                    .is_current(self.state.workspace.project.id(), bundle)
+                    .is_current(self.state.workspace.content.project.id(), bundle)
             });
 
         let messages = self.state.ui.messages();

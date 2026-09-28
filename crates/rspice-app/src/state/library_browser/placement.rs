@@ -54,7 +54,7 @@ pub fn library_cell_placement_candidates(
     libraries: &LibraryManager,
     workspace: &ProjectWorkspace,
 ) -> Vec<LibraryCellPlacementCandidate> {
-    let active = &workspace.active_view;
+    let active = &workspace.content.active_view;
     let mut candidates = Vec::new();
     for library in libraries.libraries_sorted() {
         for cell in library.cells_sorted() {
@@ -79,7 +79,9 @@ pub fn library_cell_placement_candidates(
                 let (mut ready, mut unavailable_reason) = match view.view_type {
                     ViewType::Schematic => {
                         let reference = CellViewRef::new(&library.name, &cell.name, &view.name);
-                        if let Some(master) = workspace.schematic_buffers.get(&reference.key()) {
+                        if let Some(master) =
+                            workspace.content.schematic_buffers.get(&reference.key())
+                        {
                             binding.bind_interface(&master.document().interface_ports());
                             (
                                 !is_current,

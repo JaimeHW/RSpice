@@ -56,7 +56,7 @@ fn monte_carlo(members: Vec<FamilyMemberMeasurements>, samples: Vec<f64>) -> Ana
 
 fn workspace_with_limit(min: Option<f64>, max: Option<f64>) -> ProjectWorkspace {
     let mut workspace = ProjectWorkspace::default();
-    workspace.specs.push(SpecEntry {
+    workspace.content.specs.push(SpecEntry {
         measurement: "gain_dc".to_owned(),
         expression: String::new(),
         min,
@@ -114,7 +114,7 @@ fn population_cache_refreshes_a_same_length_measurement_rename() {
     let original = cached_population(&simulation, &workspace, &mut results).unwrap();
     assert_eq!(original.failing_count(), 1);
 
-    workspace.specs[0].measurement = "gain_ac".to_owned();
+    workspace.content.specs[0].measurement = "gain_ac".to_owned();
     let renamed = cached_population(&simulation, &workspace, &mut results).unwrap();
     let column = &renamed.columns[renamed.column_index("gain_dc").unwrap()];
     assert!(
@@ -124,7 +124,7 @@ fn population_cache_refreshes_a_same_length_measurement_rename() {
     assert!(column.unit.is_empty());
     assert_eq!(renamed.failing_count(), 0);
 
-    workspace.specs[0].measurement = "gain_dc".to_owned();
+    workspace.content.specs[0].measurement = "gain_dc".to_owned();
     assert_eq!(
         cached_population(&simulation, &workspace, &mut results)
             .unwrap()
@@ -139,13 +139,13 @@ fn population_cache_refreshes_requirement_units_and_limit_text() {
     let mut workspace = workspace_with_limit(Some(1.0), None);
     let mut results = super::super::ResultsState::default();
     let original = cached_population(&simulation, &workspace, &mut results).unwrap();
-    workspace.specs[0].unit = "V".to_owned();
+    workspace.content.specs[0].unit = "V".to_owned();
     let changed = cached_population(&simulation, &workspace, &mut results).unwrap();
     let column = &changed.columns[changed.column_index("gain_dc").unwrap()];
     assert_eq!(column.unit, "V");
     assert_eq!(
         column.limit.as_ref().unwrap().text,
-        workspace.specs[0].limit_text()
+        workspace.content.specs[0].limit_text()
     );
     assert_eq!(changed.status, original.status);
 }
@@ -158,7 +158,7 @@ fn population_cache_distinguishes_an_absent_bound_from_zero() {
     let original = cached_population(&simulation, &workspace, &mut results).unwrap();
     assert_eq!(original.failing_count(), 0);
 
-    workspace.specs[0].max = Some(0.0);
+    workspace.content.specs[0].max = Some(0.0);
     let bounded = cached_population(&simulation, &workspace, &mut results).unwrap();
     assert_eq!(bounded.failing_count(), 2);
     assert_eq!(
@@ -170,7 +170,7 @@ fn population_cache_distinguishes_an_absent_bound_from_zero() {
         Some(0.0)
     );
 
-    workspace.specs[0].max = None;
+    workspace.content.specs[0].max = None;
     let unbounded = cached_population(&simulation, &workspace, &mut results).unwrap();
     assert!(
         unbounded.columns[unbounded.column_index("gain_dc").unwrap()]
@@ -295,8 +295,11 @@ fn prepared_population_contract(
     };
     let producer = AnalysisInstanceId::new();
     let workspace = workspace_with_limit(Some(1.0), None);
-    let mut requirement =
-        SpecificationDefinition::from_legacy(SimulationPlanId::new(), 0, &workspace.specs[0]);
+    let mut requirement = SpecificationDefinition::from_legacy(
+        SimulationPlanId::new(),
+        0,
+        &workspace.content.specs[0],
+    );
     requirement.producing_analysis = Some(producer);
     let retain_requirement = configure(&mut requirement);
     let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
@@ -399,8 +402,8 @@ fn population_contract_nominal_requires_the_retained_point_attribution() {
 fn population_contract_uses_the_frozen_requirement_and_ignores_later_drafts() {
     let (mut simulation, mut workspace) =
         prepared_population(&[0.0, 1.0, 2.0], |spec| spec.guard_band = Some(0.25));
-    workspace.specs[0].min = Some(-10.0);
-    workspace.specs[0].unit = "V".into();
+    workspace.content.specs[0].min = Some(-10.0);
+    workspace.content.specs[0].unit = "V".into();
     let mut results = super::super::ResultsState::default();
     let plan = cached_population(&simulation, &workspace, &mut results).unwrap();
     let column = &plan.columns[plan.column_index("gain_dc").unwrap()];
@@ -420,12 +423,12 @@ fn population_contract_uses_the_frozen_requirement_and_ignores_later_drafts() {
         plan.trial_count() - plan.failing_count()
     );
 
-    workspace.specs[0].min = Some(f64::NAN);
+    workspace.content.specs[0].min = Some(f64::NAN);
     assert!(Arc::ptr_eq(
         &plan,
         &cached_population(&simulation, &workspace, &mut results).unwrap()
     ));
-    workspace.specs.clear();
+    workspace.content.specs.clear();
     assert!(Arc::ptr_eq(
         &plan,
         &cached_population(&simulation, &workspace, &mut results).unwrap()
@@ -546,15 +549,15 @@ fn population_contract_guard_band_keeps_the_verdicts_exact_margin_order() {
 fn population_contract_keeps_missing_measurements_in_the_trial_verdict() {
     let mut simulation = retained_population(3);
     let mut workspace = workspace_with_limit(Some(-1.0), None);
-    let mut missing = workspace.specs[0].clone();
+    let mut missing = workspace.content.specs[0].clone();
     missing.measurement = "missing".into();
-    workspace.specs.push(missing);
+    workspace.content.specs.push(missing);
     let mut results = super::super::ResultsState::default();
     let plan = cached_population(&simulation, &workspace, &mut results).unwrap();
     assert_eq!(plan.status, vec![TrialStatus::Unmeasured; 3]);
     let column = &plan.columns[plan.column_index("missing").unwrap()];
     assert!(column.values.iter().all(Option::is_none));
-    workspace.specs.pop();
+    workspace.content.specs.pop();
     if let Some(AnalysisResultFamilyMetadata::MonteCarlo {
         member_measurements,
         ..
@@ -576,9 +579,12 @@ fn population_contract_never_accepts_invalid_or_duplicate_legacy_requirements() 
     for duplicate in [false, true] {
         let mut workspace = workspace_with_limit(Some(-1.0), None);
         if duplicate {
-            workspace.specs.push(workspace.specs[0].clone());
+            workspace
+                .content
+                .specs
+                .push(workspace.content.specs[0].clone());
         } else {
-            workspace.specs[0].min = Some(f64::NAN);
+            workspace.content.specs[0].min = Some(f64::NAN);
         }
         let mut results = super::super::ResultsState::default();
         let plan = cached_population(&simulation, &workspace, &mut results).unwrap();
@@ -592,7 +598,7 @@ fn population_contract_never_accepts_invalid_or_duplicate_legacy_requirements() 
             plan.requirement_note
                 .starts_with("Requirements unavailable:")
         );
-        workspace.specs = workspace_with_limit(Some(-1.0), None).specs;
+        workspace.content.specs = workspace_with_limit(Some(-1.0), None).content.specs;
         let repaired = cached_population(&simulation, &workspace, &mut results).unwrap();
         assert_eq!(repaired.status, vec![TrialStatus::Passing; 3]);
     }
@@ -609,11 +615,11 @@ fn population_contract_legacy_scope_edits_cannot_reuse_an_earlier_binding() {
             .failing_count(),
         1
     );
-    workspace.specs[0].scope = SpecPointScope::Nominal;
+    workspace.content.specs[0].scope = SpecPointScope::Nominal;
     let narrowed = cached_population(&simulation, &workspace, &mut results).unwrap();
     assert_eq!(narrowed.status, vec![TrialStatus::NotEvaluated; 3]);
     assert!(narrowed.columns.iter().all(|column| column.limit.is_none()));
-    workspace.specs[0].scope = SpecPointScope::AllPoints;
+    workspace.content.specs[0].scope = SpecPointScope::AllPoints;
     assert_eq!(
         cached_population(&simulation, &workspace, &mut results)
             .unwrap()
@@ -878,7 +884,7 @@ fn measurement_units_scale_distribution_values_limits_and_failure_counts_togethe
     }
     let analysis = monte_carlo(members, vec![1.0, 2.0, 3.0]);
     let mut workspace = workspace_with_limit(Some(200.0), Some(300.0));
-    workspace.specs[0].unit = "mV".into();
+    workspace.content.specs[0].unit = "mV".into();
     let plan = build(
         &analysis,
         key(),
@@ -891,7 +897,7 @@ fn measurement_units_scale_distribution_values_limits_and_failure_counts_togethe
     assert_eq!(column.values, vec![Some(250.0), Some(350.0), Some(200.0)]);
     assert_eq!(column.unit, "mV");
     assert_eq!(plan.failing_count(), 1);
-    workspace.specs[0].unit = "mA".into();
+    workspace.content.specs[0].unit = "mA".into();
     let plan = build(
         &analysis,
         key(),

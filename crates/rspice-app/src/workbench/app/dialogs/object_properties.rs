@@ -471,7 +471,7 @@ fn draft_resolution_key(
         design_execution_epoch: state.design_execution_epoch,
         active_schematic_epoch: state.active_schematic_epoch,
         topology_version: state.schematic.topology_version(),
-        view_path: state.workspace.active_view.display_path(),
+        view_path: state.workspace.content.active_view.display_path(),
         target_matches_baseline,
         draft_source,
     }
@@ -500,7 +500,7 @@ fn object_property_session_error(state: &crate::workbench::app_state::AppState) 
                 .to_owned(),
         );
     }
-    (dialog.view_path != state.workspace.active_view.display_path()).then(|| {
+    (dialog.view_path != state.workspace.content.active_view.display_path()).then(|| {
         "The active cell/view changed while properties were open. Close and reopen the current object."
             .to_owned()
     })
@@ -1713,7 +1713,7 @@ mod tests {
             app.state.design_execution_epoch,
             app.state.active_schematic_epoch,
             app.state.schematic.topology_version(),
-            app.state.workspace.active_view.display_path(),
+            app.state.workspace.content.active_view.display_path(),
         );
     }
 

@@ -556,7 +556,7 @@ impl SimulationController {
     #[cfg(test)]
     fn analysis_source_path(state: &AppState) -> Option<PathBuf> {
         match state.simulation.run_intent {
-            SimulationRunIntent::ManualDeck => state.workspace.netlist_source_path.clone(),
+            SimulationRunIntent::ManualDeck => state.workspace.content.netlist_source_path.clone(),
             SimulationRunIntent::SimulateRunSet => state.schematic.session.current_file.clone(),
         }
     }

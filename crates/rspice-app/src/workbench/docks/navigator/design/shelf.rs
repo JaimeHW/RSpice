@@ -939,7 +939,7 @@ fn observe_placements(ui: &Ui, state: &mut AppState) {
     let authority = (
         state.design_execution_epoch,
         state.active_schematic_epoch,
-        state.workspace.active_view.display_path(),
+        state.workspace.content.active_view.display_path(),
     );
     let components = state.schematic.document().components.len();
     let live = armed_shelf_entry(state).or_else(|| dragged_shelf_entry(ui.ctx()));
@@ -1492,6 +1492,7 @@ struct StimulusShelfRow {
 fn stimulus_library_rows(state: &AppState, query: &str) -> Vec<StimulusShelfRow> {
     state
         .workspace
+        .content
         .stimulus_library
         .definitions()
         .iter()
@@ -1644,7 +1645,7 @@ pub(super) fn place_builtin_xspice(
                 vector_ports,
                 state.design_execution_epoch,
                 state.active_schematic_epoch,
-                state.workspace.active_view.display_path(),
+                state.workspace.content.active_view.display_path(),
             );
             None
         }

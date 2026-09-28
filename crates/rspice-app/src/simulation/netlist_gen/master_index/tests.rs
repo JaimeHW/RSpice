@@ -735,13 +735,13 @@ fn configured_exact_paths_materialize_distinct_schematic_and_source_views() {
     let mut top = SchematicState::default();
     top.add_library_cell_component(Point::new(100, 0), binding("div", &["a", "b"]));
     top.add_library_cell_component(Point::new(240, 0), binding("div", &["a", "b"]));
-    workspace.insert_schematic_editor(workspace.active_view.key(), top.clone());
+    workspace.insert_schematic_editor(workspace.content.active_view.key(), top.clone());
 
     let mut catalog = ConfigurationSetCatalog::default();
     catalog
         .create(ConfigurationSetDefinition {
             name: "Mixed implementation".to_owned(),
-            root: workspace.active_view.clone(),
+            root: workspace.content.active_view.clone(),
             dut_path: "/X1".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: Vec::new(),
@@ -759,9 +759,9 @@ fn configured_exact_paths_materialize_distinct_schematic_and_source_views() {
             owner: "test".to_owned(),
         })
         .expect("configuration creates");
-    workspace.configuration_sets = catalog;
+    workspace.content.configuration_sets = catalog;
 
-    let active = workspace.active_view.clone();
+    let active = workspace.content.active_view.clone();
     let projection = workspace
         .configuration_execution_projection(&libraries, &active, &top)
         .expect("configuration resolves into an execution plan");
@@ -810,6 +810,7 @@ fn configured_exact_paths_materialize_distinct_schematic_and_source_views() {
     assert!(instance_line(&result.netlist, "X2").ends_with(" div_sp"));
 
     let active_configuration = workspace
+        .content
         .configuration_sets
         .active()
         .expect("active configuration")
@@ -818,6 +819,7 @@ fn configured_exact_paths_materialize_distinct_schematic_and_source_views() {
     desktop_incompatible.overrides[0].eligible_platforms =
         vec![crate::state::ConfigurationPlatform::Browser];
     workspace
+        .content
         .configuration_sets
         .update(
             active_configuration.id(),
@@ -891,13 +893,13 @@ fn two_instances_with_different_descendant_bindings_emit_v2() {
     let mut top = SchematicState::default();
     top.add_library_cell_component(Point::new(100, 0), binding("wrap", &["p", "q"]));
     top.add_library_cell_component(Point::new(400, 0), binding("wrap", &["p", "q"]));
-    workspace.insert_schematic_editor(workspace.active_view.key(), top.clone());
+    workspace.insert_schematic_editor(workspace.content.active_view.key(), top.clone());
 
     let mut catalog = ConfigurationSetCatalog::default();
     catalog
         .create(ConfigurationSetDefinition {
             name: "Split descendant".to_owned(),
-            root: workspace.active_view.clone(),
+            root: workspace.content.active_view.clone(),
             dut_path: "/X1".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: Vec::new(),
@@ -915,9 +917,9 @@ fn two_instances_with_different_descendant_bindings_emit_v2() {
             owner: "test".to_owned(),
         })
         .expect("configuration creates");
-    workspace.configuration_sets = catalog;
+    workspace.content.configuration_sets = catalog;
 
-    let active = workspace.active_view.clone();
+    let active = workspace.content.active_view.clone();
     let projection = workspace
         .configuration_execution_projection(&libraries, &active, &top)
         .expect("configuration resolves into an execution plan");
@@ -971,6 +973,7 @@ fn configured_builtin_xspice_is_a_valid_executable_leaf() {
     drop(stored_top);
 
     workspace
+        .content
         .configuration_sets
         .create(ConfigurationSetDefinition {
             name: "Built-in code model".to_owned(),
@@ -987,7 +990,7 @@ fn configured_builtin_xspice_is_a_valid_executable_leaf() {
         })
         .expect("configuration creates");
 
-    let active = workspace.active_view.clone();
+    let active = workspace.content.active_view.clone();
     let top = workspace
         .clone_schematic_editor(&CellViewRef::default_top().key())
         .expect("top schematic");

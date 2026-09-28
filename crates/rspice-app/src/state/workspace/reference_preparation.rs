@@ -18,6 +18,7 @@ impl ProjectWorkspace {
     ) -> BTreeMap<String, SchematicEditorRef<'a>> {
         let active = active_reference.key();
         let mut sources: BTreeMap<_, _> = self
+            .content
             .schematic_buffers
             .iter()
             .filter(|(key, _)| !key.eq_ignore_ascii_case(&active))
@@ -51,10 +52,10 @@ impl ProjectWorkspace {
         }
         let active = active_reference.clone();
         let projected = self.schematic_reference_sources(active_reference, active_schematic);
-        let mut configurations = self.configuration_sets.clone();
+        let mut configurations = self.content.configuration_sets.clone();
         let mut probe_roots: BTreeMap<String, PathMappings> = BTreeMap::new();
         if !before.is_empty() {
-            for configuration in self.configuration_sets.configurations() {
+            for configuration in self.content.configuration_sets.configurations() {
                 let resolution = self.resolve_hierarchy_for_reference(
                     libraries,
                     configuration.root(),
@@ -72,7 +73,9 @@ impl ProjectWorkspace {
                 configurations
                     .remap_configuration_instance_paths(configuration.id(), &mappings)
                     .map_err(|error| error.to_string())?;
-                if self.configuration_sets.active_configuration_id() == Some(configuration.id()) {
+                if self.content.configuration_sets.active_configuration_id()
+                    == Some(configuration.id())
+                {
                     probe_roots.insert(
                         configuration.root().key().to_ascii_lowercase(),
                         hierarchy_reference_paths(
@@ -85,7 +88,7 @@ impl ProjectWorkspace {
                     );
                 }
             }
-            let root = self.simulation_root_reference();
+            let root = self.content.simulation_root_reference();
             if let std::collections::btree_map::Entry::Vacant(entry) =
                 probe_roots.entry(root.key().to_ascii_lowercase())
             {
@@ -126,10 +129,14 @@ impl ProjectWorkspace {
             }
         }
         let mut outputs = Vec::new();
-        if let Some(mappings) =
-            probe_roots.get(&self.simulation_root_reference().key().to_ascii_lowercase())
-        {
-            for record in &self.simulation_plan_payloads {
+        if let Some(mappings) = probe_roots.get(
+            &self
+                .content
+                .simulation_root_reference()
+                .key()
+                .to_ascii_lowercase(),
+        ) {
+            for record in &self.content.simulation_plan_payloads {
                 for output in &record.payload.saved_outputs {
                     if let Some(expression) =
                         remap_instance_probes_many(&output.source_expression, mappings)?
@@ -217,6 +224,7 @@ fn hierarchy_reference_paths(
 
 fn reference_document_root(workspace: &ProjectWorkspace, key: &str) -> Result<CellViewRef, String> {
     if let Some(open) = workspace
+        .content
         .open_views
         .iter()
         .find(|open| open.reference.key().eq_ignore_ascii_case(key))

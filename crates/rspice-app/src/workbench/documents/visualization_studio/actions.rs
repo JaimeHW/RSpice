@@ -166,7 +166,11 @@ pub(super) fn add_cursor_at_midpoint(app: &mut RSpiceApp) {
                 .visualization_studio
                 .active_pane
                 .and_then(|pane_id| {
-                    let document = app.state.workspace.visualization_document(document_id)?;
+                    let document = app
+                        .state
+                        .workspace
+                        .content
+                        .visualization_document(document_id)?;
                     let canonical_pane = document
                         .panes()
                         .iter()
@@ -336,7 +340,7 @@ pub(super) fn specification_bound_fit(state: &AppState) -> Option<((f64, f64), (
         .iter()
         .filter(|waveform| waveform.visible)
     {
-        let matching_specs = state.workspace.specs.iter().filter(|spec| {
+        let matching_specs = state.workspace.content.specs.iter().filter(|spec| {
             spec.measurement.eq_ignore_ascii_case(&waveform.name)
                 && (spec.min.is_some() || spec.max.is_some())
         });
@@ -412,6 +416,7 @@ pub(super) fn add_marker_at_midpoint(app: &mut RSpiceApp) {
         let next_label = app
             .state
             .workspace
+            .content
             .visualization_document(
                 active_project_visualization_document_id(&app.state)
                     .expect("canonical branch has an active document"),

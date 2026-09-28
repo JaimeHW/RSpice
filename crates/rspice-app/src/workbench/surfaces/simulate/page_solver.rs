@@ -1797,11 +1797,16 @@ mod transaction_tests {
             .stable_analysis_plan()
             .map(|plan| (plan.id(), plan.revision()))
             .expect("default plan");
-        let topology_root = app.state.workspace.simulation_root_reference().key();
+        let topology_root = app
+            .state
+            .workspace
+            .content
+            .simulation_root_reference()
+            .key();
         let topology_revision = app.state.schematic.topology_version();
         let topology_closure = vec![(topology_root.to_ascii_lowercase(), topology_revision)];
         app.state.workbench.preflight.report = Some(crate::workbench::state::PreflightReport {
-            project_revision: app.state.workspace.project.revision().get(),
+            project_revision: app.state.workspace.content.project.revision().get(),
             topology_root,
             topology_revision,
             topology_closure,

@@ -195,7 +195,11 @@ pub(crate) struct ActiveDrawingSheet {
 impl ActiveDrawingSheet {
     pub(crate) fn resolve(state: &AppState) -> Self {
         let key = state.workspace.active_schematic_reference().key();
-        if let Some(catalog) = state.workspace.design_management.sheet_catalog(&key)
+        if let Some(catalog) = state
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog(&key)
             && let Some(sheet) = catalog.active()
         {
             let (page, page_count) = catalog
@@ -204,6 +208,7 @@ impl ActiveDrawingSheet {
             let format = match sheet.page_format().inheritance {
                 crate::state::DrawingSheetInheritance::ProjectDefault => state
                     .workspace
+                    .content
                     .design_management
                     .drawing_sheet_settings()
                     .default_format
@@ -221,6 +226,7 @@ impl ActiveDrawingSheet {
 
         let format = state
             .workspace
+            .content
             .design_management
             .drawing_sheet_settings()
             .default_format
@@ -228,7 +234,7 @@ impl ActiveDrawingSheet {
         Self {
             geometry: DrawingSheetGeometry::from_format(&format),
             format,
-            sheet_name: state.workspace.active_view.cell.clone(),
+            sheet_name: state.workspace.content.active_view.cell.clone(),
             page_label: "1 of 1".to_owned(),
         }
     }
@@ -1525,12 +1531,18 @@ fn default_title_field_value(
     sheet: &ActiveDrawingSheet,
 ) -> String {
     match field {
-        DrawingSheetTitleFieldId::Project => state.workspace.project.name().to_owned(),
-        DrawingSheetTitleFieldId::CellView => state.workspace.active_view.display_path().to_owned(),
+        DrawingSheetTitleFieldId::Project => state.workspace.content.project.name().to_owned(),
+        DrawingSheetTitleFieldId::CellView => state
+            .workspace
+            .content
+            .active_view
+            .display_path()
+            .to_owned(),
         DrawingSheetTitleFieldId::SheetTitle => sheet.sheet_name.clone(),
         DrawingSheetTitleFieldId::Page => sheet.page_label.clone(),
         DrawingSheetTitleFieldId::Revision => state
             .workspace
+            .content
             .design_management
             .drawing_sheet_settings()
             .document_control
@@ -1546,6 +1558,7 @@ fn default_title_field_value(
         },
         DrawingSheetTitleFieldId::Date => state
             .workspace
+            .content
             .design_management
             .drawing_sheet_settings()
             .document_control
@@ -1555,6 +1568,7 @@ fn default_title_field_value(
         | DrawingSheetTitleFieldId::DocumentId
         | DrawingSheetTitleFieldId::Classification => state
             .workspace
+            .content
             .design_management
             .drawing_sheet_settings()
             .title_block_field_values

@@ -86,6 +86,7 @@ fn plan_payload(app: &RSpiceApp) -> Result<SimulationPlanPayload, String> {
     let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
     app.state
         .workspace
+        .content
         .plan_data(plan_id)
         .cloned()
         .ok_or_else(|| format!("simulation plan {plan_id} has no payload record in this workspace"))
@@ -395,6 +396,7 @@ fn registry(
             let committed = copy.clone();
             if commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
                 workspace
+                    .content
                     .duplicate_saved_output(plan_id, output_id, copy)
                     .map(|_| ())
                     .map_err(|error| error.to_string())
@@ -432,6 +434,7 @@ fn registry(
         // close the editor on a row that is still there.
         if commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
             workspace
+                .content
                 .remove_saved_output(plan_id, output_id)
                 .map(|_| ())
                 .map_err(|error| error.to_string())
@@ -672,7 +675,7 @@ pub(super) fn empty_registry_outcome(
 fn enabled_schematic_probe_outputs(app: &RSpiceApp) -> usize {
     app.state
         .workspace
-        .simulation_root_schematic(&app.state.workspace.active_view, &app.state.schematic)
+        .simulation_root_schematic(&app.state.workspace.content.active_view, &app.state.schematic)
         .map_or(0, |schematic| {
             crate::simulation::controller::prepared_run::occurrence_outputs::enabled_probe_output_count(
                 &schematic.document().probes,
@@ -1035,6 +1038,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
             };
             commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
                 workspace
+                    .content
                     .set_capture_group_member(plan_id, target, output_id, named)
                     .map_err(|error| error.to_string())
             });
@@ -1452,18 +1456,25 @@ fn replace_output(
     else {
         return false;
     };
-    let Some(mut replacement) = app.state.workspace.plan_data(plan_id).and_then(|payload| {
-        payload
-            .saved_outputs
-            .iter()
-            .find(|output| output.id == output_id)
-            .cloned()
-    }) else {
+    let Some(mut replacement) =
+        app.state
+            .workspace
+            .content
+            .plan_data(plan_id)
+            .and_then(|payload| {
+                payload
+                    .saved_outputs
+                    .iter()
+                    .find(|output| output.id == output_id)
+                    .cloned()
+            })
+    else {
         return false;
     };
     apply(&mut replacement);
     commit_plan_change(app, plan_id, detail, move |workspace, plan_id| {
         workspace
+            .content
             .replace_saved_output(plan_id, output_id, replacement)
             .map(|_| ())
             .map_err(|error| error.to_string())

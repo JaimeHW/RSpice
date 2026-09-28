@@ -141,6 +141,7 @@ fn a_failed_projection_has_no_invented_resolution_count() {
     let mut invalid = fixture
         .state
         .workspace
+        .content
         .configuration_sets
         .find(fixture.configuration)
         .unwrap()

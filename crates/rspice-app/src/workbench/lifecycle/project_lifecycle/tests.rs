@@ -157,12 +157,14 @@ fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
 fn ensure_veriloga_source(state: &mut AppState, content: &str) {
     if state
         .workspace
+        .content
         .project_sources
         .get(crate::state::ProjectSourceLanguage::VerilogA)
         .is_none()
     {
         state
             .workspace
+            .content
             .project_sources
             .insert(
                 crate::state::ProjectSourceDocument::try_new(
@@ -182,8 +184,8 @@ fn insert_cell_veriloga_source(
     content: &str,
 ) -> (CellViewRef, crate::state::ProjectSourceId) {
     let reference = CellViewRef::new(
-        state.workspace.active_view.library.clone(),
-        state.workspace.active_view.cell.clone(),
+        state.workspace.content.active_view.library.clone(),
+        state.workspace.content.active_view.cell.clone(),
         view_name,
     );
     state
@@ -207,6 +209,7 @@ fn insert_cell_veriloga_source(
     let id = bundle.id();
     state
         .workspace
+        .content
         .project_sources
         .insert_bundle(bundle)
         .expect("unique cell source owner");
@@ -220,6 +223,7 @@ fn insert_configuration_root(
 ) -> crate::state::ConfigurationSetId {
     state
         .workspace
+        .content
         .configuration_sets
         .create(crate::state::ConfigurationSetDefinition {
             name: name.to_owned(),
@@ -251,6 +255,7 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
     );
     state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view("user/top/schematic", "Main", [1])
         .expect("design-management catalog");
@@ -275,26 +280,28 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
     )
     .expect("overlay project configuration");
     assert_eq!(
-        accepted.workspace.configuration_sets,
-        edited.workspace.configuration_sets
+        accepted.workspace.content.configuration_sets,
+        edited.workspace.content.configuration_sets
     );
     assert_eq!(
-        accepted.workspace.design_management,
-        edited.workspace.design_management
+        accepted.workspace.content.design_management,
+        edited.workspace.content.design_management
     );
     assert_eq!(
-        accepted.workspace.pdk_callback_receipts(),
+        accepted.workspace.content.pdk_callback_receipts(),
         [callback_receipt.clone()]
     );
     assert_eq!(
         accepted
             .workspace
+            .content
             .configuration_sets
             .find(id)
             .expect("configuration persisted")
             .semantic_digest(),
         edited
             .workspace
+            .content
             .configuration_sets
             .find(id)
             .unwrap()
@@ -303,14 +310,14 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
 
     revert_document(&mut state, ProjectDocumentId::ProjectConfiguration).expect("revert catalog");
     assert_eq!(
-        state.workspace.configuration_sets,
-        baseline.workspace.configuration_sets
+        state.workspace.content.configuration_sets,
+        baseline.workspace.content.configuration_sets
     );
     assert_eq!(
-        state.workspace.design_management,
-        baseline.workspace.design_management
+        state.workspace.content.design_management,
+        baseline.workspace.content.design_management
     );
-    assert!(state.workspace.pdk_callback_receipts().is_empty());
+    assert!(state.workspace.content.pdk_callback_receipts().is_empty());
     snapshot(&state).expect("reverted state remains valid");
 }
 
@@ -322,9 +329,10 @@ fn cell_veriloga_view_and_source_are_one_lifecycle_document() {
         "behavior",
         "module behavior(p, n); inout p, n; endmodule",
     );
-    state.workspace.active_view = reference.clone();
+    state.workspace.content.active_view = reference.clone();
     state
         .workspace
+        .content
         .open_views
         .push(crate::state::OpenCellView::new(
             reference.clone(),
@@ -341,6 +349,7 @@ fn cell_veriloga_view_and_source_are_one_lifecycle_document() {
     );
     state
         .workspace
+        .content
         .project_sources
         .replace_bundle_file_content(
             source_id,
@@ -358,15 +367,31 @@ fn cell_veriloga_view_and_source_are_one_lifecycle_document() {
     )
     .expect("overlay cell view");
     assert_eq!(
-        target.workspace.project_sources.get_bundle(source_id),
-        edited.workspace.project_sources.get_bundle(source_id)
+        target
+            .workspace
+            .content
+            .project_sources
+            .get_bundle(source_id),
+        edited
+            .workspace
+            .content
+            .project_sources
+            .get_bundle(source_id)
     );
 
     revert_document(&mut state, ProjectDocumentId::CellView(reference.clone()))
         .expect("revert cell source");
     assert_eq!(
-        state.workspace.project_sources.get_bundle(source_id),
-        baseline.workspace.project_sources.get_bundle(source_id)
+        state
+            .workspace
+            .content
+            .project_sources
+            .get_bundle(source_id),
+        baseline
+            .workspace
+            .content
+            .project_sources
+            .get_bundle(source_id)
     );
     assert!(
         state
@@ -410,6 +435,7 @@ fn project_configuration_never_accepts_or_discards_unsaved_cell_views() {
     assert!(
         target
             .workspace
+            .content
             .project_sources
             .get_bundle(source_id)
             .is_none()
@@ -431,6 +457,7 @@ fn project_configuration_never_accepts_or_discards_unsaved_cell_views() {
     assert!(
         working_state
             .workspace
+            .content
             .project_sources
             .get_bundle(source_id)
             .is_some()
@@ -468,6 +495,7 @@ fn reverting_new_cell_configuration_removes_orphan_sources_and_restores_focus() 
     let source_id = bundle.id();
     state
         .workspace
+        .content
         .project_sources
         .insert_bundle(bundle)
         .expect("unique source owner");
@@ -476,9 +504,10 @@ fn reverting_new_cell_configuration_removes_orphan_sources_and_restores_focus() 
         "New cell root",
         CellViewRef::new(&reference.library, &reference.cell, "schematic"),
     );
-    state.workspace.active_view = reference.clone();
+    state.workspace.content.active_view = reference.clone();
     state
         .workspace
+        .content
         .open_views
         .push(crate::state::OpenCellView::new(
             reference.clone(),
@@ -500,22 +529,24 @@ fn reverting_new_cell_configuration_removes_orphan_sources_and_restores_focus() 
     assert!(
         state
             .workspace
+            .content
             .project_sources
             .get_bundle(source_id)
             .is_none()
     );
-    assert_ne!(state.workspace.active_view, reference);
+    assert_ne!(state.workspace.content.active_view, reference);
     assert!(
         state
             .library_manager
-            .get_library(&state.workspace.active_view.library)
-            .and_then(|library| library.get_cell(&state.workspace.active_view.cell))
-            .and_then(|cell| cell.get_view(&state.workspace.active_view.view))
+            .get_library(&state.workspace.content.active_view.library)
+            .and_then(|library| library.get_cell(&state.workspace.content.active_view.cell))
+            .and_then(|cell| cell.get_view(&state.workspace.content.active_view.view))
             .is_some()
     );
     assert!(
         state
             .workspace
+            .content
             .configuration_sets
             .configurations()
             .is_empty()
@@ -527,7 +558,7 @@ fn reverting_new_cell_configuration_removes_orphan_sources_and_restores_focus() 
 fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() {
     let mut state = AppState::default();
     ensure_veriloga_source(&mut state, "module workspace_model; endmodule");
-    let code_workspace = state.workspace.project_sources.clone();
+    let code_workspace = state.workspace.content.project_sources.clone();
     let baseline = snapshot(&state).expect("baseline");
     let (reference, source_id) = insert_cell_veriloga_source(
         &mut state,
@@ -543,6 +574,7 @@ fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() 
     assert!(
         state
             .workspace
+            .content
             .project_sources
             .get_bundle(source_id)
             .is_none()
@@ -550,6 +582,7 @@ fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() 
     assert_eq!(
         state
             .workspace
+            .content
             .project_sources
             .get(crate::state::ProjectSourceLanguage::VerilogA),
         code_workspace.get(crate::state::ProjectSourceLanguage::VerilogA)
@@ -571,6 +604,7 @@ fn code_document_overlay_copies_project_sources_atomically() {
     let mut target = snapshot(&state).unwrap();
     state
         .workspace
+        .content
         .replace_project_source(
             crate::state::ProjectSourceLanguage::VerilogA,
             "module sensor_bridge; analog begin end endmodule".to_owned(),
@@ -581,12 +615,12 @@ fn code_document_overlay_copies_project_sources_atomically() {
     overlay_document(&mut target, &working, &ProjectDocumentId::NetlistSource).unwrap();
 
     assert_eq!(
-        target.workspace.project_sources,
-        working.workspace.project_sources
+        target.workspace.content.project_sources,
+        working.workspace.content.project_sources
     );
     assert_eq!(
-        target.workspace.netlist_source,
-        working.workspace.netlist_source
+        target.workspace.content.netlist_source,
+        working.workspace.content.netlist_source
     );
 }
 
@@ -598,6 +632,7 @@ fn code_sources_change_generated_netlist_and_execution_identity() {
 
     state
         .workspace
+        .content
         .replace_project_source(
             crate::state::ProjectSourceLanguage::VerilogA,
             "module sensor_bridge; analog begin end endmodule".to_owned(),
@@ -617,21 +652,22 @@ fn reverting_the_code_document_restores_sources_and_clears_dirty_state() {
     state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
     state
         .workspace
+        .content
         .replace_project_source(
             crate::state::ProjectSourceLanguage::VerilogA,
             "module sensor_bridge; analog begin end endmodule".to_owned(),
         )
         .unwrap();
-    assert!(state.workspace.project_sources_dirty);
+    assert!(state.workspace.content.project_sources_dirty);
 
     revert_document(&mut state, ProjectDocumentId::NetlistSource).unwrap();
 
     assert_eq!(
-        state.workspace.project_sources,
-        baseline.workspace.project_sources
+        state.workspace.content.project_sources,
+        baseline.workspace.content.project_sources
     );
-    assert!(!state.workspace.project_sources_dirty);
-    assert!(!state.workspace.netlist_source_dirty);
+    assert!(!state.workspace.content.project_sources_dirty);
+    assert!(!state.workspace.content.netlist_source_dirty);
 }
 
 #[test]
@@ -639,7 +675,7 @@ fn lifecycle_epoch_advances_across_new_and_close() {
     let mut state = AppState::default();
     let receipt = NativeBindingReceipt {
         canonical_path: PathBuf::from("accepted.rspiceproj"),
-        project_id: state.workspace.project.id().to_string(),
+        project_id: state.workspace.content.project.id().to_string(),
         accepted_digest: crate::product::ContentDigest::from_bytes([0x44; 32]),
     };
     state.native_project_binding_receipt = Some(receipt.clone());
@@ -682,7 +718,7 @@ fn project_replacement_clears_open_model_editor_state() {
             &state.model_library_manager,
             "owned-models",
             "nch_owned",
-            state.workspace.project.revision(),
+            state.workspace.content.project.revision(),
         )
         .expect("open editor");
     state
@@ -707,7 +743,7 @@ fn project_replacement_clears_open_model_editor_state() {
             &state.model_library_manager,
             "owned-models",
             "nch_owned",
-            state.workspace.project.revision(),
+            state.workspace.content.project.revision(),
         )
         .expect("reopen editor");
     mark_project_closed(&mut state);
@@ -786,7 +822,10 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
     let session = serde_json::to_string(state.as_ref()).expect("serialize accepted session");
 
     assert_eq!(receipt.canonical_path, canonical);
-    assert_eq!(receipt.project_id, state.workspace.project.id().to_string());
+    assert_eq!(
+        receipt.project_id,
+        state.workspace.content.project.id().to_string()
+    );
 
     let mut exact = serde_json::from_str::<Box<AppState>>(&session).expect("restore exact session");
     initialize_from_session(exact.as_mut());
@@ -797,6 +836,7 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
         Box::new(crate::io::load_project_file(&canonical).expect("load fixture"));
     same_project
         .workspace
+        .content
         .project
         .rename("Externally renamed project")
         .expect("valid project name");
@@ -823,7 +863,11 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
 
     let mut different =
         Box::new(snapshot(&AppState::default()).expect("snapshot different project"));
-    different.workspace.project.set_path(canonical.clone());
+    different
+        .workspace
+        .content
+        .project
+        .set_path(canonical.clone());
     let different_bytes = crate::io::project_io::serialize_project_file(different.as_ref())
         .expect("serialize different-UUID replacement");
     std::fs::write(&canonical, different_bytes.as_bytes())
@@ -1003,6 +1047,7 @@ fn save_active_overlays_only_active_document_on_accepted_baseline() {
     assert_eq!(
         persisted
             .workspace
+            .content
             .schematic_buffers
             .get(&state.workspace.active_key())
             .expect("active buffer")
@@ -1053,6 +1098,7 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
     );
     state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view("user/top/schematic", "Main", [1])
         .expect("design-management catalog");
@@ -1066,12 +1112,12 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
 
     let persisted = crate::io::load_project_file(&path).expect("reload configuration save");
     assert_eq!(
-        persisted.workspace.configuration_sets,
-        state.workspace.configuration_sets
+        persisted.workspace.content.configuration_sets,
+        state.workspace.content.configuration_sets
     );
     assert_eq!(
-        persisted.workspace.design_management,
-        state.workspace.design_management
+        persisted.workspace.content.design_management,
+        state.workspace.content.design_management
     );
     assert_eq!(
         state
@@ -1081,8 +1127,9 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
             .expect("accepted save")
             .baseline()
             .workspace
+            .content
             .configuration_sets,
-        state.workspace.configuration_sets
+        state.workspace.content.configuration_sets
     );
     assert_eq!(
         state
@@ -1092,17 +1139,20 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
             .expect("accepted save")
             .baseline()
             .workspace
+            .content
             .design_management,
-        state.workspace.design_management
+        state.workspace.content.design_management
     );
 
     state
         .workspace
+        .content
         .configuration_sets
         .clone_configuration(release_id, 1, "Characterization")
         .expect("unsaved catalog edit");
     state
         .workspace
+        .content
         .design_management
         .sheet_catalog_mut("user/top/schematic")
         .expect("sheet catalog")
@@ -1119,14 +1169,22 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
     revert_document(&mut state, ProjectDocumentId::ProjectConfiguration)
         .expect("revert to exact saved catalog");
     assert_eq!(
-        state.workspace.configuration_sets,
-        persisted.workspace.configuration_sets
+        state.workspace.content.configuration_sets,
+        persisted.workspace.content.configuration_sets
     );
     assert_eq!(
-        state.workspace.design_management,
-        persisted.workspace.design_management
+        state.workspace.content.design_management,
+        persisted.workspace.content.design_management
     );
-    assert_eq!(state.workspace.configuration_sets.configurations().len(), 1);
+    assert_eq!(
+        state
+            .workspace
+            .content
+            .configuration_sets
+            .configurations()
+            .len(),
+        1
+    );
     remove_project_artifacts(&path);
 }
 
@@ -1145,14 +1203,15 @@ fn save_active_design_preserves_unpublished_live_project_descriptor() {
         DestinationAuthority::UserSelected,
     )
     .expect("establish baseline");
-    let accepted_name = state.workspace.project.name().to_owned();
+    let accepted_name = state.workspace.content.project.name().to_owned();
 
     state
         .workspace
+        .content
         .project
         .rename("Unpublished descriptor draft")
         .expect("valid draft name");
-    state.workspace.project.description = "not part of design Save".to_owned();
+    state.workspace.content.project.description = "not part of design Save".to_owned();
     state
         .schematic
         .add_component(ComponentType::Resistor, Point::new(9, 4));
@@ -1166,12 +1225,12 @@ fn save_active_design_preserves_unpublished_live_project_descriptor() {
     .expect("save active design only");
 
     assert_eq!(
-        state.workspace.project.name(),
+        state.workspace.content.project.name(),
         "Unpublished descriptor draft",
         "successful design save must not roll back a different document's draft"
     );
     assert_eq!(
-        state.workspace.project.description,
+        state.workspace.content.project.description,
         "not part of design Save"
     );
     assert!(
@@ -1183,8 +1242,8 @@ fn save_active_design_preserves_unpublished_live_project_descriptor() {
     assert!(!active_document_is_dirty(&state));
 
     let persisted = crate::io::load_project_file(&path).expect("reload active save");
-    assert_eq!(persisted.workspace.project.name(), accepted_name);
-    assert!(persisted.workspace.project.description.is_empty());
+    assert_eq!(persisted.workspace.content.project.name(), accepted_name);
+    assert!(persisted.workspace.content.project.description.is_empty());
     remove_project_artifacts(&path);
 }
 
@@ -1295,7 +1354,7 @@ fn project_copy_does_not_rebind_or_clean_source_project() {
         DestinationAuthority::UserSelected,
     )
     .expect("save source");
-    let source_id = state.workspace.project.id();
+    let source_id = state.workspace.content.project.id();
     let source_receipt = state.native_project_binding_receipt.clone();
     state
         .schematic
@@ -1303,7 +1362,7 @@ fn project_copy_does_not_rebind_or_clean_source_project() {
 
     save_project_copy_native(&mut state, &copy).expect("save independent copy");
 
-    assert_eq!(state.workspace.project.id(), source_id);
+    assert_eq!(state.workspace.content.project.id(), source_id);
     assert_eq!(state.native_project_binding_receipt, source_receipt);
     assert_eq!(
         canonical_native_path(&state),
@@ -1311,7 +1370,7 @@ fn project_copy_does_not_rebind_or_clean_source_project() {
     );
     assert!(has_unsaved_changes(&state));
     let copied = crate::io::load_project_file(&copy).expect("load copy");
-    assert_ne!(copied.workspace.project.id(), source_id);
+    assert_ne!(copied.workspace.content.project.id(), source_id);
     remove_project_artifacts(&source);
     remove_project_artifacts(&copy);
 }
@@ -1406,8 +1465,8 @@ fn deleted_source_allows_recovery_copy_but_unreadable_canonical_path_is_rejected
         .expect("missing source cannot alias an independent recovery destination");
     let recovered = crate::io::load_project_file(&recovery).expect("load recovery copy");
     assert_ne!(
-        recovered.workspace.project.id(),
-        state.workspace.project.id()
+        recovered.workspace.content.project.id(),
+        state.workspace.content.project.id()
     );
 
     let unreadable = unique_path("remembered-unreadable-canonical");
@@ -1446,8 +1505,8 @@ fn save_all_preserves_live_document_presentation_while_sanitizing_persisted_copy
         DestinationAuthority::UserSelected,
     )
     .expect("save baseline");
-    let active = state.workspace.active_view.clone();
-    let open_count = state.workspace.open_views.len();
+    let active = state.workspace.content.active_view.clone();
+    let open_count = state.workspace.content.open_views.len();
     state
         .schematic
         .add_component(ComponentType::Resistor, Point::new(14, 3));
@@ -1471,8 +1530,8 @@ fn save_all_preserves_live_document_presentation_while_sanitizing_persisted_copy
     )
     .expect("save all");
 
-    assert_eq!(state.workspace.active_view, active);
-    assert_eq!(state.workspace.open_views.len(), open_count);
+    assert_eq!(state.workspace.content.active_view, active);
+    assert_eq!(state.workspace.content.open_views.len(), open_count);
     assert_eq!(
         state.library_manager.revision(),
         governed_revision,
@@ -1520,7 +1579,7 @@ fn saving_active_cell_never_dirties_project_configuration() {
         DestinationAuthority::UserSelected,
     )
     .expect("save baseline");
-    let active = state.workspace.active_view.clone();
+    let active = state.workspace.content.active_view.clone();
     state
         .schematic
         .add_component(ComponentType::Capacitor, Point::new(5, 11));
@@ -1676,6 +1735,7 @@ fn close_active_document_is_presentation_only() {
     assert!(
         !state
             .workspace
+            .content
             .open_views
             .iter()
             .any(|open| open.reference == second)
@@ -1683,6 +1743,7 @@ fn close_active_document_is_presentation_only() {
     assert_eq!(
         state
             .workspace
+            .content
             .schematic_buffers
             .get(&second.key())
             .expect("closed document data retained")
@@ -1698,7 +1759,7 @@ fn close_active_document_is_presentation_only() {
 #[cfg(not(target_arch = "wasm32"))]
 fn add_sheet(state: &mut AppState, reference: &CellViewRef, name: &str) {
     let key = reference.key();
-    let mut candidate = state.workspace.design_management.clone();
+    let mut candidate = state.workspace.content.design_management.clone();
     let catalog = candidate
         .sheet_catalog_mut(&key)
         .expect("the cell view is governed");
@@ -1716,6 +1777,7 @@ fn add_sheet(state: &mut AppState, reference: &CellViewRef, name: &str) {
         .expect("the new sheet is valid");
     state
         .workspace
+        .content
         .replace_design_management(candidate)
         .expect("publish the reviewed catalog");
 }
@@ -1724,6 +1786,7 @@ fn add_sheet(state: &mut AppState, reference: &CellViewRef, name: &str) {
 fn sheet_names(project: &ProjectFile, key: &str) -> Vec<String> {
     project
         .workspace
+        .content
         .design_management
         .sheet_catalog(key)
         .expect("the cell view is governed")
@@ -1751,6 +1814,7 @@ fn saving_one_cell_view_publishes_only_that_cell_views_sheets() {
     for reference in [&active, &other] {
         state
             .workspace
+            .content
             .design_management
             .bootstrap_for_cell_view(&reference.key(), "Main", [])
             .expect("governed sheet catalog");
@@ -1785,8 +1849,8 @@ fn saving_one_cell_view_publishes_only_that_cell_views_sheets() {
         "another cell view's sheet edit stays unsaved"
     );
     assert_eq!(
-        persisted.workspace.design_management.revision(),
-        state.workspace.design_management.revision(),
+        persisted.workspace.content.design_management.revision(),
+        state.workspace.content.design_management.revision(),
         "the merged file records the revision the session is actually at"
     );
     remove_project_artifacts(&path);
@@ -1800,6 +1864,7 @@ fn saving_a_cell_views_sheets_clears_the_unsaved_project_marker() {
     let active = state.workspace.active_schematic_reference();
     state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&active.key(), "Main", [])
         .expect("governed sheet catalog");
@@ -1810,12 +1875,12 @@ fn saving_a_cell_views_sheets_clears_the_unsaved_project_marker() {
         DestinationAuthority::UserSelected,
     )
     .expect("establish baseline");
-    assert!(!state.workspace.project_metadata_dirty);
+    assert!(!state.workspace.content.project_metadata_dirty);
 
     add_sheet(&mut state, &active, "Power");
     add_sheet(&mut state, &active, "Digital");
     assert!(
-        state.workspace.project_metadata_dirty,
+        state.workspace.content.project_metadata_dirty,
         "two unsaved sheet edits light the marker"
     );
 
@@ -1828,7 +1893,7 @@ fn saving_a_cell_views_sheets_clears_the_unsaved_project_marker() {
     .expect("save the active cell view");
 
     assert!(
-        !state.workspace.project_metadata_dirty,
+        !state.workspace.content.project_metadata_dirty,
         "the save that published the edit clears the marker instead of leaving it lit"
     );
     remove_project_artifacts(&path);

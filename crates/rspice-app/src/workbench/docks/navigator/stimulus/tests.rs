@@ -81,7 +81,7 @@ fn console_says(state: &AppState, fragment: &str) -> bool {
 /// The mockup's fourteen definitions, with nothing adopted, in the workspace
 /// whose navigator lists them.
 fn library(state: &mut AppState) {
-    state.workspace.stimulus_library = fixtures::library();
+    state.workspace.content.stimulus_library = fixtures::library();
     state.workbench.activate(Workspace::Stimulus);
     state.workbench.selected_stimulus_definition = Some("sensor_diff_1k".to_owned());
 }
@@ -90,6 +90,7 @@ fn library(state: &mut AppState) {
 fn adopt(state: &mut AppState, id: u64, reference: &str, definition: &str) {
     let held = state
         .workspace
+        .content
         .stimulus_library
         .get(definition)
         .cloned()
@@ -179,6 +180,7 @@ fn the_row_states_an_unapplied_draft_and_whether_it_is_refused() {
     let saved = app
         .state
         .workspace
+        .content
         .stimulus_library
         .get("sensor_diff_1k")
         .cloned()
@@ -200,6 +202,7 @@ fn the_row_states_an_unapplied_draft_and_whether_it_is_refused() {
     let ramp = app
         .state
         .workspace
+        .content
         .stimulus_library
         .get("vdd_ramp_1ms")
         .cloned()
@@ -345,6 +348,7 @@ fn the_footer_states_the_adoption_and_the_library_audit() {
     let mut draft = DefinitionDraft::new(
         app.state
             .workspace
+            .content
             .stimulus_library
             .get("bridge_cal_step")
             .cloned()
@@ -353,6 +357,7 @@ fn the_footer_states_the_adoption_and_the_library_audit() {
     draft.edit(|working| working.params = "v2=20m per=1m".to_owned());
     app.state
         .workspace
+        .content
         .stimulus_library
         .apply(&mut draft, crate::state::stimulus_library::now_unix_ms);
     assert!(
@@ -392,6 +397,7 @@ fn the_minis_are_evaluated_once_across_two_frames() {
     let mut draft = DefinitionDraft::new(
         app.state
             .workspace
+            .content
             .stimulus_library
             .get("sensor_diff_1k")
             .cloned()
@@ -400,6 +406,7 @@ fn the_minis_are_evaluated_once_across_two_frames() {
     draft.edit(|working| working.params = "va=9m freq=1k".to_owned());
     app.state
         .workspace
+        .content
         .stimulus_library
         .apply(&mut draft, crate::state::stimulus_library::now_unix_ms);
     let _ = browser(&mut app.state);
@@ -602,6 +609,7 @@ fn editing_the_purpose_goes_through_the_draft_and_is_undoable() {
     assert!(
         app.state
             .workspace
+            .content
             .stimulus_library
             .get("sensor_diff_1k")
             .expect("held")
@@ -641,6 +649,7 @@ fn place_arms_the_saved_revision_and_warns_about_an_unapplied_draft() {
     let saved = app
         .state
         .workspace
+        .content
         .stimulus_library
         .get("sensor_diff_1k")
         .cloned()
@@ -699,6 +708,7 @@ fn print_stimulus_docks_for_review() {
             let held = app
                 .state
                 .workspace
+                .content
                 .stimulus_library
                 .get("vdd_ramp_1ms")
                 .cloned()

@@ -56,8 +56,11 @@ impl InstanceCatalogEntry {
         state: &AppState,
     ) -> Result<SchematicReplacementTargetSpec, String> {
         let resolved = self.template.library_cell.as_ref().and_then(|binding| {
-            SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers)
-                .resolve_binding(binding)
+            SymbolResolver::new(
+                &state.library_manager,
+                &state.workspace.content.schematic_buffers,
+            )
+            .resolve_binding(binding)
         });
         let positions = self.template.terminal_positions_resolved(resolved.as_ref());
         if positions.len() != self.terminal_names.len() {

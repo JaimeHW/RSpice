@@ -1172,11 +1172,13 @@ fn transact_active_project_document(
     let revision = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .ok_or_else(|| "The active result document is no longer retained.".to_owned())?
         .revision();
     app.state
         .workspace
+        .content
         .transact_visualization_document(document_id, revision, edits)
         .map_err(|error| error.to_string())
 }
@@ -1361,6 +1363,7 @@ fn commit_active_project_cursor_pair(
     let plan = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .ok_or_else(|| "The active result document is no longer retained.".to_owned())
         .and_then(|document| {
@@ -1408,6 +1411,7 @@ fn set_active_project_cursor_links(app: &mut RSpiceApp, enabled: bool) -> bool {
     let plan = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .ok_or_else(|| "The active result document is no longer retained.".to_owned())
         .and_then(|document| {
@@ -1522,6 +1526,7 @@ fn active_project_pane_and_trace(
     })?;
     let document = state
         .workspace
+        .content
         .visualization_document(document_id)
         .ok_or_else(|| "The active result document is no longer retained.".to_owned())?;
     let pane_id = state
@@ -1649,6 +1654,7 @@ fn active_results_comparison_source(state: &AppState) -> Result<ResultsCompariso
         WorkspaceDocumentId::VisualizationDocument(document_id) => {
             let document = state
                 .workspace
+                .content
                 .visualization_document(document_id)
                 .ok_or_else(|| "The active result document is no longer retained.".to_owned())?;
             if let Some((pane, pane_binding)) = document
@@ -2141,6 +2147,7 @@ fn reconcile_document(app: &mut RSpiceApp) {
         let projected = app
             .state
             .workspace
+            .content
             .visualization_document(document_id)
             .map(|document| {
                 let analysis_sequence_for =
@@ -2457,6 +2464,7 @@ fn reconcile_document(app: &mut RSpiceApp) {
             let visibility = app
                 .state
                 .workspace
+                .content
                 .visualization_document(document_id)
                 .map(|document| {
                     document
@@ -2788,7 +2796,7 @@ fn resolved_viewer_availability_for_binding(
         }
         ResultViewer::PhaseNoise => result_document::phase_noise_analysis_is_renderable(analysis),
         ResultViewer::Specs => {
-            !analysis.measurements.is_empty() || !state.workspace.specs.is_empty()
+            !analysis.measurements.is_empty() || !state.workspace.content.specs.is_empty()
         }
         // The table lists retained samples and payload-only periodic spectra,
         // including zero-dynamic-mode results.
@@ -3044,7 +3052,12 @@ fn add_viewer_pane_bound(
             dataset: dataset_binding,
         };
         let existing_dataset = active_project_visualization_document_id(&app.state)
-            .and_then(|document_id| app.state.workspace.visualization_document(document_id))
+            .and_then(|document_id| {
+                app.state
+                    .workspace
+                    .content
+                    .visualization_document(document_id)
+            })
             .is_some_and(|document| {
                 document
                     .datasets()
@@ -3092,6 +3105,7 @@ fn add_viewer_pane_bound(
             let anchor = app
                 .state
                 .workspace
+                .content
                 .visualization_document(
                     active_project_visualization_document_id(&app.state)
                         .expect("canonical branch has active document"),
@@ -3125,6 +3139,7 @@ fn add_viewer_pane_bound(
             let page_id = app
                 .state
                 .workspace
+                .content
                 .visualization_document(
                     active_project_visualization_document_id(&app.state)
                         .expect("canonical branch has active document"),

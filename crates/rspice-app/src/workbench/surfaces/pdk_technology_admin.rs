@@ -424,6 +424,7 @@ fn browser_pdk_storage_status(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn registry_snapshot(app: &RSpiceApp) -> RegistrySnapshot {
+    let project = &app.state.workspace.content;
     let registry = &app.state.pdk_config.technology_registry;
     let display_registry = &app.state.pdk_config.display_profile_registry;
     let runtime_display_profile_valid = display_registry.active_binding().is_none()
@@ -431,9 +432,7 @@ fn registry_snapshot(app: &RSpiceApp) -> RegistrySnapshot {
             .active_package()
             .and_then(|package| display_registry.active_for_package(package))
             .is_some();
-    let project_signed_package = app
-        .state
-        .workspace
+    let project_signed_package = project
         .project
         .technology_binding()
         .and_then(|binding| binding.signed_package())
@@ -468,7 +467,7 @@ fn registry_snapshot(app: &RSpiceApp) -> RegistrySnapshot {
         active_trusted: registry.active_package().is_some(),
         project_signed_package,
         project_callback_blocker,
-        project_callback_receipts: app.state.workspace.pdk_callback_receipts().to_vec(),
+        project_callback_receipts: project.pdk_callback_receipts().to_vec(),
         technology_draft: app.state.pdk_config.technology_draft.clone(),
     }
 }

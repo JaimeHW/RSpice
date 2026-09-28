@@ -125,7 +125,13 @@ impl RSpiceApp {
             );
             return;
         };
-        let project = self.state.workspace.project.display_name().to_owned();
+        let project = self
+            .state
+            .workspace
+            .content
+            .project
+            .display_name()
+            .to_owned();
         let revision = report.project_revision().to_string();
         let note_error = revision_note_error(&self.state.dialogs.check_and_save.revision_note);
         let displayed_note_error = self
@@ -291,7 +297,7 @@ impl RSpiceApp {
             .select_only_component(component_id);
         let outcome = self.state.schematic.update_selected_instance_interface(
             &self.state.library_manager,
-            &self.state.workspace.schematic_buffers,
+            &self.state.workspace.content.schematic_buffers,
         );
         self.state.push_user_message(match outcome {
             Ok(summary) => ConsoleMessage::info(summary),

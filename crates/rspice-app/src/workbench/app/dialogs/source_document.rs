@@ -45,6 +45,7 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
     let owner = ProjectSourceOwner::code_workspace(language);
     if state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&owner)
         .is_none()
@@ -67,6 +68,7 @@ pub(crate) fn source_document_dialog_is_available(state: &AppState) -> bool {
         let owner = ProjectSourceOwner::code_workspace(language);
         state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&owner)
             .is_some()
@@ -123,13 +125,14 @@ fn netlist_lifecycle_facts(
     app: &RSpiceApp,
     messages: MessageCatalog,
 ) -> Option<NetlistLifecycleFacts> {
-    let descriptor = app.state.workspace.netlist_descriptor.as_ref();
-    let document = app.state.workspace.netlist_document.as_ref();
+    let descriptor = app.state.workspace.content.netlist_descriptor.as_ref();
+    let document = app.state.workspace.content.netlist_document.as_ref();
     if descriptor.is_some() != document.is_some() {
         return None;
     }
     let mut decks = Vec::with_capacity(
-        app.state.workspace.retained_netlist_decks.len() + usize::from(descriptor.is_some()),
+        app.state.workspace.content.retained_netlist_decks.len()
+            + usize::from(descriptor.is_some()),
     );
     if let Some(descriptor) = descriptor {
         decks.push((descriptor.deck_id, descriptor.artifact_name.clone()));
@@ -137,6 +140,7 @@ fn netlist_lifecycle_facts(
     decks.extend(
         app.state
             .workspace
+            .content
             .retained_netlist_decks
             .iter()
             .map(|deck| {
@@ -180,6 +184,7 @@ fn netlist_lifecycle_facts(
         || {
             app.state
                 .workspace
+                .content
                 .netlist_source_path
                 .as_ref()
                 .map_or_else(
@@ -305,6 +310,7 @@ fn document_facts(app: &RSpiceApp, messages: MessageCatalog) -> Option<DocumentF
     let bundle = app
         .state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&owner)?;
     let content = bundle.file_content(&logical_path).unwrap_or_default();
@@ -783,13 +789,13 @@ impl RSpiceApp {
                 if let Err(error) = self
                     .state
                     .workspace
-                    .project
+                    .content.project
                     .set_include_search_paths(paths)
                     .map_err(|error| error.to_string())
                 {
                     self.state.push_user_message(ConsoleMessage::error(error));
                 } else {
-                    self.state.workspace.project_metadata_dirty = true;
+                    self.state.workspace.content.project_metadata_dirty = true;
                     // The chain decides which file every relative include
                     // resolves to, so the deck's diagnostics are no longer
                     // evidence about the chain that is now in force.
@@ -1176,9 +1182,14 @@ fn include_search_paths(
     messages: MessageCatalog,
 ) -> Option<NetlistLifecycleAction> {
     let t = Tokens::get(ui.ctx());
-    let chain = crate::state::IncludeSearchChain::for_project(&state.workspace.project);
-    let authored = state.workspace.project.include_search_paths().to_vec();
-    let unsaved = state.workspace.project.data_root().is_none();
+    let chain = crate::state::IncludeSearchChain::for_project(&state.workspace.content.project);
+    let authored = state
+        .workspace
+        .content
+        .project
+        .include_search_paths()
+        .to_vec();
+    let unsaved = state.workspace.content.project.data_root().is_none();
     let mut action = None;
     code_inspector_section(
         ui,
@@ -2117,6 +2128,7 @@ mod tests {
         let original = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&owner)
             .map(|bundle| bundle.root().logical_path().to_owned())
@@ -2147,6 +2159,7 @@ mod tests {
         let renamed = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&owner)
             .map(|bundle| bundle.root().logical_path().to_owned())
@@ -2167,6 +2180,7 @@ mod tests {
         let locked = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&owner)
             .and_then(|bundle| {
@@ -2222,10 +2236,11 @@ mod include_search_raster {
 
     fn chain_state(entries: &[&str], root: Option<&str>) -> AppState {
         let mut state = AppState::default();
-        state.workspace.project.path =
+        state.workspace.content.project.path =
             root.map(|root| std::path::PathBuf::from(root).join("x.rspiceproj"));
         state
             .workspace
+            .content
             .project
             .set_include_search_paths(entries.iter().map(std::path::PathBuf::from).collect())
             .expect("fixture chain is valid");

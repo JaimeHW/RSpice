@@ -55,7 +55,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn plan_payload(app: &RSpiceApp) -> Option<(SimulationPlanId, SimulationPlanPayload)> {
     let plan_id = app.state.sim_setup.stable_analysis_plan().ok()?.id();
-    let payload = app.state.workspace.plan_data(plan_id)?.clone();
+    let payload = app.state.workspace.content.plan_data(plan_id)?.clone();
     Some((plan_id, payload))
 }
 
@@ -248,6 +248,7 @@ fn registry(
             let committed = copy.clone();
             if commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
                 workspace
+                    .content
                     .duplicate_design_variable(plan_id, id, copy)
                     .map(|_| ())
                     .map_err(|error| error.to_string())
@@ -281,6 +282,7 @@ fn registry(
         // close the editor on a row that is still there.
         if commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
             workspace
+                .content
                 .remove_design_variable(plan_id, id)
                 .map(|_| ())
                 .map_err(|error| error.to_string())
@@ -677,13 +679,19 @@ fn replace_variable(
     else {
         return false;
     };
-    let Some(mut replacement) = app.state.workspace.plan_data(plan_id).and_then(|payload| {
-        payload
-            .design_variables
-            .iter()
-            .find(|variable| variable.id == variable_id)
-            .cloned()
-    }) else {
+    let Some(mut replacement) =
+        app.state
+            .workspace
+            .content
+            .plan_data(plan_id)
+            .and_then(|payload| {
+                payload
+                    .design_variables
+                    .iter()
+                    .find(|variable| variable.id == variable_id)
+                    .cloned()
+            })
+    else {
         return false;
     };
     apply(&mut replacement);
@@ -730,6 +738,7 @@ fn commit_replacement(
 ) -> bool {
     commit_plan_change(app, plan_id, detail, move |workspace, plan_id| {
         workspace
+            .content
             .replace_design_variable(plan_id, variable_id, replacement)
             .map(|_| ())
             .map_err(|error| error.to_string())
@@ -760,6 +769,7 @@ fn commit_expression(
     let expression = expression.to_owned();
     commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
         workspace
+            .content
             .update_design_variable_expression(plan_id, variable_id, expression)
             .map(|_| ())
             .map_err(|error| error.to_string())

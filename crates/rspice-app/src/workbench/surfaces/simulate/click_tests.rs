@@ -405,6 +405,7 @@ fn every_capture_group_command_is_reachable_from_the_card() {
         .expect("valid saved output");
         app.state
             .workspace
+            .content
             .add_saved_output(plan, output)
             .expect("the plan accepts the output");
     }
@@ -417,6 +418,7 @@ fn every_capture_group_command_is_reachable_from_the_card() {
         ids.push(
             app.state
                 .workspace
+                .content
                 .add_capture_group(plan, group)
                 .expect("the plan accepts the group"),
         );
@@ -424,6 +426,7 @@ fn every_capture_group_command_is_reachable_from_the_card() {
     let order = |app: &RSpiceApp| {
         app.state
             .workspace
+            .content
             .plan_data(plan)
             .expect("payload")
             .capture_groups

@@ -507,7 +507,7 @@ fn render_diagnostics(ui: &mut egui::Ui, app: &RSpiceApp) {
             ui.end_row();
             ui.label("Project");
             ui.label(if app.state.project_lifecycle.project_open {
-                app.state.workspace.project.display_name()
+                app.state.workspace.content.project.display_name()
             } else {
                 "No project open"
             });

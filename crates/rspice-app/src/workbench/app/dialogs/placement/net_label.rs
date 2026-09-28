@@ -648,6 +648,7 @@ mod tests {
         let retained = app
             .state
             .workspace
+            .content
             .schematic_buffers
             .get(&key)
             .expect("active schematic is retained by the project workspace");

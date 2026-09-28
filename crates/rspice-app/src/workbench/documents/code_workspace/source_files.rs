@@ -63,6 +63,7 @@ pub(crate) fn open_source_workspace_dialog(
     if app
         .state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&owner)
         .is_some()
@@ -75,13 +76,14 @@ pub(crate) fn open_source_workspace_dialog(
     let netlist_source_path = app
         .state
         .workspace
+        .content
         .netlist_descriptor
         .as_ref()
         .map(|descriptor| descriptor.artifact_name.clone())
         .unwrap_or_else(|| "top.sp".to_owned());
     app.state.ui.code_workspace.source_workspace_dialog =
         Some(super::CodeSourceWorkspaceDialogState {
-            project_id: app.state.workspace.project.id(),
+            project_id: app.state.workspace.content.project.id(),
             language,
             root_path: match language {
                 ProjectSourceLanguage::VerilogA => "model.va",
@@ -109,7 +111,7 @@ pub(crate) fn commit_source_workspace_dialog(app: &mut RSpiceApp) -> Result<Stri
     if let Some(reason) = source_file_mutation_block_reason(app, draft.language) {
         return Err(reason.to_owned());
     }
-    if draft.project_id != app.state.workspace.project.id() {
+    if draft.project_id != app.state.workspace.content.project.id() {
         return Err(
             "The active project changed while the source-workspace transaction was open."
                 .to_owned(),
@@ -119,6 +121,7 @@ pub(crate) fn commit_source_workspace_dialog(app: &mut RSpiceApp) -> Result<Stri
     if app
         .state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&owner)
         .is_some()
@@ -137,6 +140,7 @@ pub(crate) fn commit_source_workspace_dialog(app: &mut RSpiceApp) -> Result<Stri
     let bundle_id = bundle.id();
     app.state
         .workspace
+        .content
         .insert_project_source_bundle(bundle)
         .map_err(|error| error.to_string())?;
     match draft.language {
@@ -428,6 +432,7 @@ pub(crate) fn assign_automation_source_role(
     let bundle = app
         .state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&owner)
         .ok_or_else(|| "The Automation source bundle no longer exists.".to_owned())?;
@@ -435,6 +440,7 @@ pub(crate) fn assign_automation_source_role(
     let changed = app
         .state
         .workspace
+        .content
         .set_project_source_bundle_non_entry_role(bundle_id, logical_path, role)
         .map_err(|error| error.to_string())?;
     if changed {
@@ -461,6 +467,7 @@ pub(crate) fn source_document_is_editable(
     let Some(bundle_id) = app
         .state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&ProjectSourceOwner::code_workspace(language))
         .map(ProjectSourceBundle::id)
@@ -487,6 +494,7 @@ pub(crate) fn source_bundle_document_is_editable(
             || app
                 .state
                 .workspace
+                .content
                 .project_sources
                 .get_bundle(bundle_id)
                 .and_then(|bundle| bundle.role_for_path(logical_path))
@@ -508,6 +516,7 @@ pub(crate) fn source_bundle_contains_document(
     }
     app.state
         .workspace
+        .content
         .project_sources
         .get_bundle(bundle_id)
         .is_some_and(|bundle| {
@@ -541,6 +550,7 @@ pub(crate) fn open_source_file_dialog(
     let bundle_id = app
         .state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&owner)
         .map(ProjectSourceBundle::id)
@@ -572,6 +582,7 @@ pub(crate) fn open_source_file_dialog_in_bundle(
     let bundle = app
         .state
         .workspace
+        .content
         .project_sources
         .get_bundle(bundle_id)
         .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
@@ -610,7 +621,7 @@ pub(crate) fn open_source_file_dialog_in_bundle(
     };
     app.state.ui.code_workspace.source_file_dialog = Some(CodeSourceFileDialogState {
         action,
-        project_id: app.state.workspace.project.id(),
+        project_id: app.state.workspace.content.project.id(),
         bundle_id,
         bundle_revision: bundle.revision().get(),
         closure_digest: bundle.closure_digest(),
@@ -634,7 +645,7 @@ pub(crate) fn commit_source_file_dialog(app: &mut RSpiceApp) -> Result<String, S
     if let Some(reason) = source_file_mutation_block_reason(app, draft.language) {
         return Err(reason.to_owned());
     }
-    if draft.project_id != app.state.workspace.project.id() {
+    if draft.project_id != app.state.workspace.content.project.id() {
         return Err(
             "The active project changed while the source-file transaction was open.".to_owned(),
         );
@@ -642,6 +653,7 @@ pub(crate) fn commit_source_file_dialog(app: &mut RSpiceApp) -> Result<String, S
     let bundle = app
         .state
         .workspace
+        .content
         .project_sources
         .get_bundle(draft.bundle_id)
         .ok_or_else(|| {
@@ -688,6 +700,7 @@ pub(crate) fn commit_source_file_dialog(app: &mut RSpiceApp) -> Result<String, S
                     .map_err(|error| error.to_string())?;
             app.state
                 .workspace
+                .content
                 .add_project_source_bundle_file(draft.bundle_id, &draft.importer_path, file)
                 .map_err(|error| error.to_string())?
         }
@@ -702,17 +715,20 @@ pub(crate) fn commit_source_file_dialog(app: &mut RSpiceApp) -> Result<String, S
                 ProjectSourceFile::try_new(proposed, content).map_err(|error| error.to_string())?;
             app.state
                 .workspace
+                .content
                 .add_project_source_bundle_file(draft.bundle_id, &draft.importer_path, file)
                 .map_err(|error| error.to_string())?
         }
         CodeSourceFileAction::Rename | CodeSourceFileAction::Move => app
             .state
             .workspace
+            .content
             .rename_project_source_bundle_file(draft.bundle_id, &draft.source_path, proposed)
             .map_err(|error| error.to_string())?,
         CodeSourceFileAction::Delete => app
             .state
             .workspace
+            .content
             .remove_project_source_bundle_file(draft.bundle_id, &draft.source_path)
             .map_err(|error| error.to_string())?,
     };
@@ -766,6 +782,7 @@ pub(crate) fn open_source_history(
     let bundle_id = app
         .state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&owner)
         .map(ProjectSourceBundle::id)
@@ -787,6 +804,7 @@ pub(crate) fn open_source_history_in_bundle(
     let bundle = app
         .state
         .workspace
+        .content
         .project_sources
         .get_bundle(bundle_id)
         .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
@@ -796,7 +814,7 @@ pub(crate) fn open_source_history_in_bundle(
         ));
     }
     app.state.ui.code_workspace.source_history = Some(CodeSourceHistoryState {
-        project_id: app.state.workspace.project.id(),
+        project_id: app.state.workspace.content.project.id(),
         bundle_id,
         bundle_revision: bundle.revision().get(),
         closure_digest: bundle.closure_digest(),
@@ -826,6 +844,7 @@ pub(crate) fn request_automation_source_import(
     let bundle = app
         .state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&owner)
         .ok_or_else(|| "The Automation source bundle no longer exists.".to_owned())?;
@@ -839,7 +858,7 @@ pub(crate) fn request_automation_source_import(
         );
     }
     app.state.ui.code_workspace.source_import = Some(CodeSourceImportState {
-        project_id: app.state.workspace.project.id(),
+        project_id: app.state.workspace.content.project.id(),
         bundle_id: bundle.id(),
         bundle_revision: bundle.revision().get(),
         closure_digest: bundle.closure_digest(),
@@ -1006,12 +1025,13 @@ fn apply_automation_source_import(
     {
         return Err(reason.to_owned());
     }
-    if app.state.workspace.project.id() != request.project_id {
+    if app.state.workspace.content.project.id() != request.project_id {
         return Err("The active project changed while the source picker was open.".to_owned());
     }
     let bundle = app
         .state
         .workspace
+        .content
         .project_sources
         .get_bundle(request.bundle_id)
         .ok_or_else(|| "The Automation source bundle no longer exists.".to_owned())?;
@@ -1037,6 +1057,7 @@ fn apply_automation_source_import(
         ProjectSourceFile::try_new(&logical_path, contents).map_err(|error| error.to_string())?;
     app.state
         .workspace
+        .content
         .add_project_source_bundle_file(request.bundle_id, &request.importer_path, file)
         .map_err(|error| error.to_string())?;
     app.state.ui.code_workspace.automation.selected_file = Some(logical_path.clone());
@@ -1066,6 +1087,7 @@ pub(crate) fn import_dropped_automation_source(
     let bundle = app
         .state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&owner)
         .ok_or_else(|| "The Automation source bundle no longer exists.".to_owned())?;
@@ -1080,7 +1102,7 @@ pub(crate) fn import_dropped_automation_source(
         .unwrap_or_else(|| bundle.root().logical_path())
         .to_owned();
     let request = CodeSourceImportState {
-        project_id: app.state.workspace.project.id(),
+        project_id: app.state.workspace.content.project.id(),
         bundle_id: bundle.id(),
         bundle_revision: bundle.revision().get(),
         closure_digest: bundle.closure_digest(),
@@ -1099,7 +1121,7 @@ pub(crate) fn commit_source_history_restore(app: &mut RSpiceApp) -> Result<Strin
         .source_history
         .clone()
         .ok_or_else(|| "No source-history transaction is open.".to_owned())?;
-    if app.state.workspace.project.id() != draft.project_id {
+    if app.state.workspace.content.project.id() != draft.project_id {
         return Err("The active project changed while source history was open.".to_owned());
     }
     if let Some(reason) = source_file_mutation_block_reason(app, draft.language) {
@@ -1111,6 +1133,7 @@ pub(crate) fn commit_source_history_restore(app: &mut RSpiceApp) -> Result<Strin
     let bundle = app
         .state
         .workspace
+        .content
         .project_sources
         .get_bundle(draft.bundle_id)
         .ok_or_else(|| "The source bundle no longer exists.".to_owned())?;
@@ -1133,6 +1156,7 @@ pub(crate) fn commit_source_history_restore(app: &mut RSpiceApp) -> Result<Strin
     let changed = app
         .state
         .workspace
+        .content
         .restore_project_source_bundle_revision(
             draft.bundle_id,
             expected_current,
@@ -1147,6 +1171,7 @@ pub(crate) fn commit_source_history_restore(app: &mut RSpiceApp) -> Result<Strin
     let restored_bundle = app
         .state
         .workspace
+        .content
         .project_sources
         .get_bundle(draft.bundle_id)
         .ok_or_else(|| "The restored source bundle is unavailable.".to_owned())?;
@@ -1285,6 +1310,7 @@ mod tests {
     fn verilog_a_bundle(app: &RSpiceApp) -> &crate::state::ProjectSourceBundle {
         app.state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&crate::state::ProjectSourceOwner::code_workspace(
                 ProjectSourceLanguage::VerilogA,
@@ -1324,6 +1350,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state
             .workspace
+            .content
             .project_sources
             .insert_bundle(bundle)
             .unwrap();
@@ -1349,6 +1376,7 @@ mod tests {
         let exact = app
             .state
             .workspace
+            .content
             .project_sources
             .get_bundle(bundle_id)
             .unwrap();
@@ -1388,6 +1416,7 @@ mod tests {
         let before = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&owner)
             .expect("test Automation bundle")
@@ -1412,6 +1441,7 @@ mod tests {
         let bundle = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&owner)
             .unwrap();
@@ -1420,7 +1450,7 @@ mod tests {
             bundle.file_content(&logical_path),
             Some("def characterize():\n    return 42\n")
         );
-        assert!(app.state.workspace.project_sources_dirty);
+        assert!(app.state.workspace.content.project_sources_dirty);
     }
 
     #[test]
@@ -1431,6 +1461,7 @@ mod tests {
         let automation = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&automation_owner)
             .expect("test Automation bundle");
@@ -1447,6 +1478,7 @@ mod tests {
         let verilog_root = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&verilog_owner)
             .expect("test Verilog-A bundle")
@@ -1489,7 +1521,7 @@ mod tests {
                 request_id: 41,
                 bundle_id: automation_bundle_id,
                 token: super::super::SourceOperationToken {
-                    project_id: app.state.workspace.project.id(),
+                    project_id: app.state.workspace.content.project.id(),
                     revision: automation_revision,
                     content_digest: automation_digest,
                 },
@@ -1553,6 +1585,7 @@ mod tests {
         let bundle = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&owner)
             .expect("test Automation bundle");
@@ -1634,6 +1667,7 @@ mod tests {
         assert_eq!(
             app.state
                 .workspace
+                .content
                 .project_sources
                 .get_bundle(bundle_id)
                 .expect("same exact bundle")
@@ -1647,7 +1681,7 @@ mod tests {
     #[test]
     fn source_file_actions_are_persisted_transactionally() {
         let mut app = RSpiceApp::test_instance();
-        app.state.workspace.mark_project_sources_clean();
+        app.state.workspace.content.mark_project_sources_clean();
         let root = verilog_a_bundle(&app).root().logical_path().to_owned();
 
         open_source_file_dialog(
@@ -1667,7 +1701,7 @@ mod tests {
             .proposed_path = "models/helper.va".to_owned();
         commit_source_file_dialog(&mut app).unwrap();
         assert!(verilog_a_bundle(&app).contains_file("models/helper.va"));
-        assert!(app.state.workspace.project_sources_dirty);
+        assert!(app.state.workspace.content.project_sources_dirty);
 
         open_source_file_dialog(
             &mut app,
@@ -1756,6 +1790,7 @@ mod tests {
         .unwrap();
         app.state
             .workspace
+            .content
             .replace_project_source_bundle_file(
                 bundle_id,
                 &root,
@@ -1778,6 +1813,7 @@ mod tests {
         let original = verilog_a_bundle(&app).root().content().to_owned();
         app.state
             .workspace
+            .content
             .replace_project_source_bundle_file(
                 bundle_id,
                 &root,
@@ -1792,7 +1828,7 @@ mod tests {
         assert_eq!(verilog_a_bundle(&app).root().content(), original);
         assert!(verilog_a_bundle(&app).revision().get() > edited_revision.get());
         assert!(app.state.ui.code_workspace.source_history.is_none());
-        assert!(app.state.workspace.project_sources_dirty);
+        assert!(app.state.workspace.content.project_sources_dirty);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1803,6 +1839,7 @@ mod tests {
         let root = verilog_a_bundle(&app).root().logical_path().to_owned();
         app.state
             .workspace
+            .content
             .replace_project_source_bundle_file(
                 bundle_id,
                 &root,
@@ -1812,6 +1849,7 @@ mod tests {
         open_source_history(&mut app, ProjectSourceLanguage::VerilogA, &root).unwrap();
         app.state
             .workspace
+            .content
             .replace_project_source_bundle_file(
                 bundle_id,
                 &root,
@@ -1853,6 +1891,7 @@ mod tests {
         let bundle = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&owner)
             .unwrap();
@@ -1873,6 +1912,7 @@ mod tests {
         let bundle = app
             .state
             .workspace
+            .content
             .project_sources
             .get_bundle(bundle_id)
             .unwrap();
@@ -1885,7 +1925,7 @@ mod tests {
             Some(logical_path.clone())
         );
         assert!(message.contains(&logical_path));
-        assert!(app.state.workspace.project_sources_dirty);
+        assert!(app.state.workspace.content.project_sources_dirty);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1897,6 +1937,7 @@ mod tests {
         let bundle = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&owner)
             .unwrap();
@@ -1907,6 +1948,7 @@ mod tests {
         let request = app.state.ui.code_workspace.source_import.take().unwrap();
         app.state
             .workspace
+            .content
             .replace_project_source_bundle_file(
                 bundle_id,
                 &importer,
@@ -1925,6 +1967,7 @@ mod tests {
         assert!(
             !app.state
                 .workspace
+                .content
                 .project_sources
                 .get_bundle(bundle_id)
                 .unwrap()
@@ -1941,6 +1984,7 @@ mod tests {
         let bundle = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&owner)
             .unwrap();
@@ -1968,6 +2012,7 @@ mod tests {
         let unchanged = app
             .state
             .workspace
+            .content
             .project_sources
             .get_bundle(bundle_id)
             .unwrap();
@@ -1985,6 +2030,7 @@ mod tests {
         let bundle = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&owner)
             .unwrap();
@@ -1996,6 +2042,7 @@ mod tests {
             .to_owned();
         app.state
             .workspace
+            .content
             .rename_project_source_bundle_file(
                 bundle_id,
                 &environment_path,
@@ -2011,6 +2058,7 @@ mod tests {
         let root = app
             .state
             .workspace
+            .content
             .project_sources
             .get_bundle(bundle_id)
             .unwrap()
@@ -2019,6 +2067,7 @@ mod tests {
             .to_owned();
         app.state
             .workspace
+            .content
             .add_project_source_bundle_file(
                 bundle_id,
                 &root,
@@ -2038,8 +2087,9 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state
             .workspace
+            .content
             .remove_project_source(ProjectSourceLanguage::RSpiceAutomation);
-        app.state.workspace.mark_project_sources_clean();
+        app.state.workspace.content.mark_project_sources_clean();
 
         open_source_workspace_dialog(&mut app, ProjectSourceLanguage::RSpiceAutomation).unwrap();
         let draft = app
@@ -2060,6 +2110,7 @@ mod tests {
         let bundle = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&owner)
             .unwrap();
@@ -2083,7 +2134,7 @@ mod tests {
                 .unwrap()
                 .contains("source: circuits/owned-deck.cir")
         );
-        assert!(app.state.workspace.project_sources_dirty);
+        assert!(app.state.workspace.content.project_sources_dirty);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2094,6 +2145,7 @@ mod tests {
         let bundle = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&owner)
             .unwrap();
@@ -2106,6 +2158,7 @@ mod tests {
             .to_owned();
         app.state
             .workspace
+            .content
             .add_project_source_bundle_file(
                 bundle_id,
                 &root,
@@ -2119,6 +2172,7 @@ mod tests {
         let before = app
             .state
             .workspace
+            .content
             .project_sources
             .get_bundle(bundle_id)
             .unwrap()
@@ -2134,6 +2188,7 @@ mod tests {
         let bundle = app
             .state
             .workspace
+            .content
             .project_sources
             .get_bundle(bundle_id)
             .unwrap();

@@ -829,20 +829,20 @@ impl RSpiceApp {
         snapshot: ProjectLibraryLockSnapshot,
     ) -> Result<(), String> {
         snapshot.validate()?;
-        if snapshot.project_id() != self.state.workspace.project.id() {
+        if snapshot.project_id() != self.state.workspace.content.project.id() {
             return Err(format!(
                 "project library lock snapshot belongs to project {}, not current project {}",
                 snapshot.project_id(),
-                self.state.workspace.project.id()
+                self.state.workspace.content.project.id()
             ));
         }
-        if snapshot.project_revision() != self.state.workspace.project.revision()
+        if snapshot.project_revision() != self.state.workspace.content.project.revision()
             || snapshot.library_revision() != self.state.library_manager.revision()
         {
             return Err(format!(
                 "project library lock snapshot is stale (project {} vs {}, library {} vs {})",
                 snapshot.project_revision().get(),
-                self.state.workspace.project.revision().get(),
+                self.state.workspace.content.project.revision().get(),
                 snapshot.library_revision(),
                 self.state.library_manager.revision()
             ));
@@ -902,14 +902,14 @@ impl RSpiceApp {
             ),
             snapshot_byte_len,
         };
-        let mut descriptor_preflight = self.state.workspace.project.clone();
+        let mut descriptor_preflight = self.state.workspace.content.project.clone();
         descriptor_preflight
             .publish_library_snapshot(draft.clone())
             .map_err(|error| format!("project library publication preflight failed: {error}"))?;
         Ok(ProjectLibraryPublicationCandidate {
             draft,
             artifact_bytes: bytes,
-            source_project_revision: self.state.workspace.project.revision(),
+            source_project_revision: self.state.workspace.content.project.revision(),
         })
     }
 
@@ -934,7 +934,7 @@ impl RSpiceApp {
                     .to_owned(),
             );
         }
-        if self.state.workspace.project.revision() != candidate.source_project_revision
+        if self.state.workspace.content.project.revision() != candidate.source_project_revision
             || self.state.library_manager.revision() != candidate.draft.library_revision
         {
             return Err(
@@ -962,10 +962,11 @@ impl RSpiceApp {
         let receipt = self
             .state
             .workspace
+            .content
             .project
             .publish_library_snapshot(candidate.draft)
             .map_err(|error| format!("project library publication failed: {error}"))?;
-        self.state.workspace.project_metadata_dirty = true;
+        self.state.workspace.content.project_metadata_dirty = true;
         self.state.design_execution_epoch = self.state.design_execution_epoch.wrapping_add(1);
         self.state.ui.netlist.current_generation_input_digest = None;
         self.state.clear_project_design_history();
@@ -1001,6 +1002,7 @@ impl RSpiceApp {
         let receipt = self
             .state
             .workspace
+            .content
             .project
             .library_publications()
             .iter()
@@ -1023,8 +1025,8 @@ impl RSpiceApp {
             .map_err(|error| format!("project library rollback artifact is not UTF-8: {error}"))?;
         let mut artifact = crate::io::project_io::load_project_text(artifact_text, None)
             .map_err(|error| format!("project library rollback artifact is invalid: {error}"))?;
-        if artifact.workspace.project.id() != receipt.project_id()
-            || artifact.workspace.project.revision() != receipt.source_project_revision()
+        if artifact.workspace.content.project.id() != receipt.project_id()
+            || artifact.workspace.content.project.revision() != receipt.source_project_revision()
             || artifact.libraries.revision() != receipt.library_revision()
         {
             return Err(
@@ -1034,9 +1036,16 @@ impl RSpiceApp {
         }
         let expected_prior_publications = usize::try_from(receipt.sequence() - 1)
             .map_err(|_| "project library publication sequence is invalid".to_owned())?;
-        if artifact.workspace.project.library_publications().len() != expected_prior_publications
+        if artifact
+            .workspace
+            .content
+            .project
+            .library_publications()
+            .len()
+            != expected_prior_publications
             || artifact
                 .workspace
+                .content
                 .project
                 .library_publications()
                 .last()
@@ -1048,8 +1057,8 @@ impl RSpiceApp {
                     .to_owned(),
             );
         }
-        if artifact.workspace.project.technology_binding()
-            != self.state.workspace.project.technology_binding()
+        if artifact.workspace.content.project.technology_binding()
+            != self.state.workspace.content.project.technology_binding()
         {
             return Err(
                 "project library rollback cannot cross an exact technology-binding change"
@@ -1067,7 +1076,7 @@ impl RSpiceApp {
         };
         let prepared = self.state.preflight_project_library_mutation(mutation)?;
 
-        let project_id = artifact.workspace.project.id();
+        let project_id = artifact.workspace.content.project.id();
         let (simulation_plan, model_library_manager, execution_warnings) =
             match artifact.execution_context.take() {
                 Some(context) => crate::io::restore_execution_context(context, project_id).map_err(|error| {
@@ -1086,10 +1095,10 @@ impl RSpiceApp {
             };
 
         let mut candidate = self.state.clone();
-        let mut current_project = candidate.workspace.project.clone();
-        current_project.root_library = artifact.workspace.project.root_library.clone();
-        current_project.top_cell = artifact.workspace.project.top_cell.clone();
-        artifact.workspace.project = current_project;
+        let mut current_project = candidate.workspace.content.project.clone();
+        current_project.root_library = artifact.workspace.content.project.root_library.clone();
+        current_project.top_cell = artifact.workspace.content.project.top_cell.clone();
+        artifact.workspace.content.project = current_project;
         candidate.clear_design_execution_context();
         candidate
             .library_manager
@@ -1108,6 +1117,7 @@ impl RSpiceApp {
         candidate.publish_project_library_mutation(prepared);
         candidate
             .workspace
+            .content
             .project
             .validate()
             .map_err(|error| format!("project library rollback metadata is invalid: {error}"))?;

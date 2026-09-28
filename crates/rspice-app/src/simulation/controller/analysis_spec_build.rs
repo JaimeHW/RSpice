@@ -301,7 +301,7 @@ impl SimulationController {
         config.selected_devices.dedup();
         if config.initial_guess.uses_previous_state() {
             config.previous_state = state.simulation.newest_retained_op_state(
-                state.workspace.project.revision(),
+                state.workspace.content.project.revision(),
                 config.initial_guess
                     == crate::simulation::dialog::OpInitialGuess::PreviousCompatible,
             );
@@ -312,7 +312,7 @@ impl SimulationController {
                 | crate::simulation::dialog::OpDeviceDetail::ViolationsOnly
         ) && let Some((source_digest, devices)) = state
             .simulation
-            .active_soa_violation_context(state.workspace.project.revision())
+            .active_soa_violation_context(state.workspace.content.project.revision())
         {
             config.violation_devices = devices;
             config.violation_source_content_digest = Some(source_digest);
@@ -799,7 +799,7 @@ impl SimulationController {
             .stable_analysis_plan()
             .ok()
             .map(|plan| plan.id())
-            .and_then(|plan_id| state.workspace.plan_data(plan_id))
+            .and_then(|plan_id| state.workspace.content.plan_data(plan_id))
         else {
             return Ok(());
         };

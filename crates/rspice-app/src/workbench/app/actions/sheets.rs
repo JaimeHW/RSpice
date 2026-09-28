@@ -52,6 +52,7 @@ pub(in crate::workbench) enum SheetDeletePlan {
 pub(in crate::workbench) fn active_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
     state
         .workspace
+        .content
         .design_management
         .sheet_catalog(&state.workspace.active_schematic_reference().key())
 }
@@ -404,6 +405,7 @@ fn create(
 ) -> Result<(SheetId, String), String> {
     let settings = state
         .workspace
+        .content
         .design_management
         .drawing_sheet_settings()
         .clone();
@@ -561,7 +563,7 @@ fn edit_catalog<T>(
     edit: impl FnOnce(&mut SheetCatalog) -> Result<T, String>,
 ) -> Result<T, String> {
     let key = state.workspace.active_schematic_reference().key();
-    let before = state.workspace.design_management.clone();
+    let before = state.workspace.content.design_management.clone();
     let mut candidate = before.clone();
     let catalog = candidate
         .sheet_catalog_mut(&key)
@@ -582,10 +584,11 @@ fn commit(
     let owner = state.workspace.active_schematic_reference();
     let committed_revision = state
         .workspace
+        .content
         .replace_design_management(candidate)
         .map_err(|error| error.to_string())?;
     state.apply_design_management_schematic_transaction(&schematic_tx);
-    let after = state.workspace.design_management.clone();
+    let after = state.workspace.content.design_management.clone();
     state.record_design_management_transaction(DesignManagementHistoryEntry {
         description: description.to_owned(),
         owner,

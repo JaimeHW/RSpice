@@ -132,6 +132,7 @@ pub(crate) fn technology_demand(
         reasons.push(reason);
     }
     let documents: Vec<String> = workspace
+        .content
         .physical_layout_documents()
         .keys()
         .cloned()

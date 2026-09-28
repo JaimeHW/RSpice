@@ -33,12 +33,12 @@ struct PublicationDraft {
 impl PublicationDraft {
     fn new(state: &AppState) -> Self {
         Self {
-            source_project_revision: state.workspace.project.revision().get(),
+            source_project_revision: state.workspace.content.project.revision().get(),
             source_library_revision: state.library_manager.revision(),
             label: format!(
                 "{}-library-r{}",
-                state.workspace.project.name(),
-                state.workspace.project.revision().get()
+                state.workspace.content.project.name(),
+                state.workspace.content.project.revision().get()
             ),
             actor_id: String::new(),
             authority_id: String::new(),
@@ -168,7 +168,13 @@ pub(super) fn open_publication(ctx: &Context, state: &AppState) {
 }
 
 pub(super) fn open_rollback(ctx: &Context, state: &AppState) {
-    let Some(receipt) = state.workspace.project.library_publications().last() else {
+    let Some(receipt) = state
+        .workspace
+        .content
+        .project
+        .library_publications()
+        .last()
+    else {
         return;
     };
     ctx.data_mut(|data| {
@@ -211,7 +217,7 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
     let Some(mut draft) = ctx.data(|data| data.get_temp::<PublicationDraft>(id)) else {
         return;
     };
-    let live_project_revision = app.state.workspace.project.revision().get();
+    let live_project_revision = app.state.workspace.content.project.revision().get();
     let live_library_revision = app.state.library_manager.revision();
     let stale = live_project_revision != draft.source_project_revision
         || live_library_revision != draft.source_library_revision;
@@ -241,8 +247,8 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
                 "Project",
                 &format!(
                     "{} \u{00b7} {}",
-                    app.state.workspace.project.display_name(),
-                    app.state.workspace.project.id()
+                    app.state.workspace.content.project.display_name(),
+                    app.state.workspace.content.project.id()
                 ),
             );
             property_row(
@@ -353,7 +359,13 @@ fn show_rollback_dialog(ctx: &Context, app: &mut RSpiceApp) {
     let Some(mut draft) = ctx.data(|data| data.get_temp::<RollbackDraft>(id)) else {
         return;
     };
-    let receipts = app.state.workspace.project.library_publications().to_vec();
+    let receipts = app
+        .state
+        .workspace
+        .content
+        .project
+        .library_publications()
+        .to_vec();
     if receipts.is_empty() {
         ctx.data_mut(|data| {
             data.remove::<RollbackDraft>(id);
@@ -794,7 +806,7 @@ fn start_browser_publication(
         handle_id: None,
         binding_id: uuid::Uuid::new_v4(),
         backend: BrowserBindingBackend::ExternalFile,
-        project_id: app.state.workspace.project.id().to_string(),
+        project_id: app.state.workspace.content.project.id().to_string(),
         accepted_generation: 1,
         expected_digest: None,
         persisted_generation: None,
@@ -1030,6 +1042,7 @@ fn validate_rollback_artifact(
 
     let receipt = state
         .workspace
+        .content
         .project
         .library_publications()
         .iter()
@@ -1055,7 +1068,7 @@ fn clear_rollback_artifact(draft: &mut RollbackDraft) {
 }
 
 fn publication_filename(state: &AppState, label: &str) -> String {
-    let project = safe_file_stem(state.workspace.project.name());
+    let project = safe_file_stem(state.workspace.content.project.name());
     let label = safe_file_stem(label);
     format!("{project}-{label}.{PROJECT_ARTIFACT_EXTENSION}")
 }
@@ -1184,7 +1197,7 @@ mod tests {
 
         let action = publish_native(&mut app, &draft).expect("publication succeeds");
         assert!(matches!(action, PublicationAction::Published(_)));
-        let [receipt] = app.state.workspace.project.library_publications() else {
+        let [receipt] = app.state.workspace.content.project.library_publications() else {
             panic!("exactly one publication receipt must commit");
         };
         let writes = writes.borrow();
@@ -1220,6 +1233,7 @@ mod tests {
         assert!(
             app.state
                 .workspace
+                .content
                 .project
                 .library_publications()
                 .is_empty()

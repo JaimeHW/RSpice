@@ -23,14 +23,16 @@ impl ProjectWorkspace {
     }
 
     fn apply_pending_annotation(&mut self, libraries: &LibraryManager) -> Result<usize, String> {
-        let annotation = self.design_management.annotation();
+        let annotation = self.content.design_management.annotation();
         if annotation.journal().is_empty() {
             return Ok(0);
         }
-        self.design_management
+        self.content
+            .design_management
             .validate()
             .map_err(|error| error.to_string())?;
         let sources = self
+            .content
             .schematic_buffers
             .iter()
             .flat_map(|(key, schematic)| {
@@ -55,6 +57,7 @@ impl ProjectWorkspace {
         let mut by_document: BTreeMap<String, BTreeMap<u64, String>> = BTreeMap::new();
         for (object, name) in assignments {
             let key = self
+                .content
                 .schematic_buffers
                 .keys()
                 .find(|key| key.eq_ignore_ascii_case(object.cell_view_key()))
@@ -80,6 +83,7 @@ impl ProjectWorkspace {
         // with a non-schematic document active. It never changes navigation.
         let requested = self.active_schematic_reference();
         let active_key = self
+            .content
             .schematic_buffers
             .keys()
             .find(|key| key.eq_ignore_ascii_case(&requested.key()))
@@ -100,7 +104,7 @@ impl ProjectWorkspace {
         )?;
         transaction.prepared_references.publish(self);
         for (key, schematic) in transaction.after {
-            for open in &mut self.open_views {
+            for open in &mut self.content.open_views {
                 if open.reference.key().eq_ignore_ascii_case(&key) {
                     open.dirty = true;
                 }

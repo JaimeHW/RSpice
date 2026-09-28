@@ -521,7 +521,7 @@ fn prepare_active_sheet_csv(
         // bound the sheet never showed.
         ResultViewer::Specs => Some(result_document::export_specs_csv(
             displayed.run(state)?,
-            &state.workspace.specs,
+            &state.workspace.content.specs,
         )),
         ResultViewer::Optimization => {
             result_document::export_optimization_csv(displayed.primary_analysis(state)?)

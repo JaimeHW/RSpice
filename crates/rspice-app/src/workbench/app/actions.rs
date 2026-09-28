@@ -1209,7 +1209,7 @@ mod shortcut_ownership_tests {
 
         state.project_lifecycle.project_open = true;
         let owner = state.workspace.active_schematic_reference();
-        let before = state.workspace.design_management.clone();
+        let before = state.workspace.content.design_management.clone();
         let drawn = state
             .schematic
             .document()
@@ -1223,9 +1223,10 @@ mod shortcut_ownership_tests {
             .expect("bootstrap reviewed sheet catalog");
         let committed_revision = state
             .workspace
+            .content
             .replace_design_management(candidate)
             .expect("publish reviewed catalog");
-        let after = state.workspace.design_management.clone();
+        let after = state.workspace.content.design_management.clone();
         state.record_design_management_transaction(DesignManagementHistoryEntry {
             description: "assign objects to the active sheet".to_owned(),
             owner: owner.clone(),
@@ -1267,6 +1268,7 @@ mod shortcut_ownership_tests {
         assert!(
             app.state
                 .workspace
+                .content
                 .design_management
                 .sheet_catalog(&owner.key())
                 .is_none(),
@@ -1277,6 +1279,7 @@ mod shortcut_ownership_tests {
         assert!(
             app.state
                 .workspace
+                .content
                 .design_management
                 .sheet_catalog(&owner.key())
                 .is_some()
@@ -1315,6 +1318,7 @@ mod shortcut_ownership_tests {
         assert!(
             app.state
                 .workspace
+                .content
                 .design_management
                 .sheet_catalog(&owner.key())
                 .is_some()
@@ -1324,6 +1328,7 @@ mod shortcut_ownership_tests {
         assert!(
             app.state
                 .workspace
+                .content
                 .design_management
                 .sheet_catalog(&owner.key())
                 .is_none(),

@@ -15,11 +15,11 @@ impl AppState {
         let Some(path) = &published.path else {
             return;
         };
-        let before = self.workspace.project.revision();
+        let before = self.workspace.content.project.revision();
         if before == published.revision() {
             return;
         }
-        let mut expected = self.workspace.project.clone();
+        let mut expected = self.workspace.content.project.clone();
         expected.set_path(path.clone());
         // A first save can name an untitled project. Only that exact descriptor
         // transition may carry the guards forward; delayed saves or unrelated
@@ -80,6 +80,7 @@ impl AppState {
         let projected = self.schematic_reference_sources();
         let existing = self
             .workspace
+            .content
             .design_management
             .annotation()
             .effective_mappings();
@@ -150,6 +151,7 @@ impl AppState {
                     .insert_schematic_editor(active_key.clone(), schematic.clone());
             } else if let Some(existing_key) = self
                 .workspace
+                .content
                 .schematic_buffers
                 .keys()
                 .find(|candidate| candidate.eq_ignore_ascii_case(key))
@@ -160,6 +162,7 @@ impl AppState {
             }
             if let Some(open) = self
                 .workspace
+                .content
                 .open_views
                 .iter_mut()
                 .find(|open| open.reference.key().eq_ignore_ascii_case(key))

@@ -69,6 +69,7 @@ fn document_sheet_commands_open_their_real_surfaces_only_in_schematic_context() 
     let key = app.state.workspace.active_key();
     app.state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&key, "Main", [])
         .unwrap();
@@ -98,6 +99,7 @@ fn sheet_format_manager_requires_live_schematic_edit_authority() {
     let key = app.state.workspace.active_key();
     app.state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&key, "Main", [])
         .unwrap();

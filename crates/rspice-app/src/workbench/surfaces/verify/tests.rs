@@ -136,6 +136,7 @@ fn selecting_a_golden_regression_baseline_pins_its_dataset_atomically() {
     assert_eq!(
         app.state
             .workspace
+            .content
             .plan_data(plan_id)
             .and_then(|payload| payload.regression_baseline_run),
         Some(baseline_id)
@@ -166,6 +167,7 @@ fn add_tuning_variable(app: &mut RSpiceApp) -> crate::product::DesignVariableId 
     let id = variable.id;
     app.state
         .workspace
+        .content
         .add_design_variable(plan_id, variable)
         .expect("variable enters active plan payload");
     id
@@ -235,7 +237,7 @@ fn retain_preflight_report(app: &mut RSpiceApp) {
     app.state.workbench.preflight = crate::workbench::state::PreflightDialogState {
         open: true,
         report: Some(crate::workbench::state::PreflightReport {
-            project_revision: app.state.workspace.project.revision().get(),
+            project_revision: app.state.workspace.content.project.revision().get(),
             topology_root,
             topology_revision,
             topology_closure,
@@ -299,6 +301,7 @@ fn tuning_session_discovers_real_variables_and_revert_is_non_destructive() {
     assert_eq!(
         app.state
             .workspace
+            .content
             .plan_data(plan_id)
             .unwrap()
             .design_variables[0]
@@ -311,7 +314,7 @@ fn tuning_session_discovers_real_variables_and_revert_is_non_destructive() {
 fn tuning_commit_is_one_plan_revision_and_queues_the_required_run() {
     let mut app = RSpiceApp::test_instance();
     app.state.provision_test_project_technology_contract();
-    app.state.workspace.project_sources = Default::default();
+    app.state.workspace.content.project_sources = Default::default();
     crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
     let variable_id = add_tuning_variable(&mut app);
     let plan_id = app.state.sim_setup.stable_analysis_plan().unwrap().id();
@@ -332,6 +335,7 @@ fn tuning_commit_is_one_plan_revision_and_queues_the_required_run() {
     let variable = app
         .state
         .workspace
+        .content
         .plan_data(plan_id)
         .unwrap()
         .design_variables
@@ -387,6 +391,7 @@ fn reverting_a_literal_value_proposal_discards_variable_and_binding_only() {
     assert!(
         app.state
             .workspace
+            .content
             .plan_data(plan_id)
             .unwrap()
             .design_variables
@@ -398,7 +403,7 @@ fn reverting_a_literal_value_proposal_discards_variable_and_binding_only() {
 fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
     let mut app = RSpiceApp::test_instance();
     app.state.provision_test_project_technology_contract();
-    app.state.workspace.project_sources = Default::default();
+    app.state.workspace.content.project_sources = Default::default();
     crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
     let component_id = app
         .state
@@ -437,6 +442,7 @@ fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
     let variable = app
         .state
         .workspace
+        .content
         .plan_data(plan_id)
         .unwrap()
         .design_variables
@@ -482,7 +488,7 @@ fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
 #[test]
 fn tuning_commit_rechecks_live_schematic_authority_after_staging() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workspace.project_sources = Default::default();
+    app.state.workspace.content.project_sources = Default::default();
     crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
     let component_id = app
         .state
@@ -606,6 +612,7 @@ fn failed_literal_value_run_preparation_rolls_back_plan_and_schematic() {
     assert!(
         app.state
             .workspace
+            .content
             .plan_data(plan_id)
             .unwrap()
             .design_variables
@@ -628,6 +635,7 @@ fn invalid_tuning_candidate_never_mutates_authoritative_plan_data() {
     let mut candidate = app
         .state
         .workspace
+        .content
         .plan_data(plan_id)
         .unwrap()
         .design_variables[0]
@@ -675,6 +683,7 @@ fn blocked_tuning_run_rolls_back_plan_workspace_and_preflight_state() {
     assert_eq!(
         app.state
             .workspace
+            .content
             .plan_data(plan_id)
             .unwrap()
             .design_variables[0]

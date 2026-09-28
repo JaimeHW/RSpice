@@ -585,12 +585,14 @@ pub(super) fn active_netlist_artifact_name(state: &crate::workbench::AppState) -
         ActiveNetlistDocument::Generated => "generated.sp".to_owned(),
         ActiveNetlistDocument::OwnedSource => state
             .workspace
+            .content
             .netlist_descriptor
             .as_ref()
             .map(|descriptor| descriptor.artifact_name.clone())
             .or_else(|| {
                 state
                     .workspace
+                    .content
                     .netlist_source_path
                     .as_deref()
                     .and_then(std::path::Path::file_name)

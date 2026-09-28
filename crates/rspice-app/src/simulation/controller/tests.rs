@@ -1027,7 +1027,7 @@ fn controller_plan_run_is_sealed_with_exact_prepared_receipt_before_results() {
         .find(|instance| instance.enabled())
         .expect("enabled plan task")
         .id();
-    let project_revision = state.workspace.project.revision();
+    let project_revision = state.workspace.content.project.revision();
     let mut controller = SimulationController::new();
     let metadata = controller
         .prepare_run_set_for_preflight(&state)

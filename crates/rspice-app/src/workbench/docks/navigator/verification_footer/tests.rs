@@ -537,14 +537,18 @@ fn verification_navigation_exposes_the_operational_tuning_route() {
 #[test]
 fn specification_mapping_does_not_claim_execution_without_an_active_dataset() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workspace.specs.push(crate::state::SpecEntry {
-        measurement: "gain".to_owned(),
-        expression: String::new(),
-        min: Some(1.0),
-        max: None,
-        unit: "V/V".to_owned(),
-        scope: crate::state::SpecPointScope::AllPoints,
-    });
+    app.state
+        .workspace
+        .content
+        .specs
+        .push(crate::state::SpecEntry {
+            measurement: "gain".to_owned(),
+            expression: String::new(),
+            min: Some(1.0),
+            max: None,
+            unit: "V/V".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
+        });
     app.state.simulation.active_run_idx = None;
 
     let coverage = verification_coverage(&app);
@@ -570,14 +574,18 @@ fn empty_specification_set_is_neutral_not_healthy() {
 #[test]
 fn finite_goal_miss_counts_as_executed_but_not_passed() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workspace.specs.push(crate::state::SpecEntry {
-        measurement: "gain".to_owned(),
-        expression: String::new(),
-        min: Some(41.0),
-        max: None,
-        unit: "V/V".to_owned(),
-        scope: crate::state::SpecPointScope::AllPoints,
-    });
+    app.state
+        .workspace
+        .content
+        .specs
+        .push(crate::state::SpecEntry {
+            measurement: "gain".to_owned(),
+            expression: String::new(),
+            min: Some(41.0),
+            max: None,
+            unit: "V/V".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
+        });
     let mut measurement = rspice_core::MeasureResult::success("gain", 40.0);
     measurement.passed = false;
     measurement.error = Some("value misses GOAL".to_owned());

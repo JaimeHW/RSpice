@@ -845,7 +845,7 @@ pub(crate) fn restore_native_binding(
     else {
         return Err(PersistenceError::ExternalChange);
     };
-    if project.workspace.project.id().to_string() != receipt.project_id {
+    if project.workspace.content.project.id().to_string() != receipt.project_id {
         return Err(PersistenceError::NativeReceiptMismatch(
             "project file identity differs from the accepted logical project".to_owned(),
         ));

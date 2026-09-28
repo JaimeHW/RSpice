@@ -782,7 +782,15 @@ fn execute_project_query(input: &str, app: &RSpiceApp) -> Option<CommandOutput> 
         "project.revision" => Some(CommandOutput {
             success: true,
             message: "Current mutable project revision".to_owned(),
-            data: Some(app.state.workspace.project.revision().get().to_string()),
+            data: Some(
+                app.state
+                    .workspace
+                    .content
+                    .project
+                    .revision()
+                    .get()
+                    .to_string(),
+            ),
         }),
         "project.runs" | "help(project.runs)" => {
             let runs = app
@@ -1372,9 +1380,9 @@ fn active_specifications(app: &RSpiceApp) -> Vec<crate::state::SpecEntry> {
         .sim_setup
         .analysis_plan
         .as_ref()
-        .and_then(|plan| app.state.workspace.plan_data(plan.id()))
+        .and_then(|plan| app.state.workspace.content.plan_data(plan.id()))
         .map(|payload| payload.specs.as_slice())
-        .unwrap_or(app.state.workspace.specs.as_slice());
+        .unwrap_or(app.state.workspace.content.specs.as_slice());
     active.to_vec()
 }
 

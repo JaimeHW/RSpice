@@ -690,8 +690,8 @@ fn specification_evidence(app: &RSpiceApp, run_index: Option<usize>) -> Vec<Spec
         .then(|| run_index.and_then(|index| app.state.simulation.runs.get(index)))
         .flatten();
     let specs = plan_id.map_or_else(
-        || app.state.workspace.specs.clone(),
-        |plan_id| app.state.workspace.active_specs(plan_id).to_vec(),
+        || app.state.workspace.content.specs.clone(),
+        |plan_id| app.state.workspace.content.active_specs(plan_id).to_vec(),
     );
     specs
         .into_iter()

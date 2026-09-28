@@ -32,7 +32,7 @@ pub(crate) fn arm_placement_from_definition(
              the view in an editable context first."
         ));
     }
-    let Some(definition) = state.workspace.stimulus_library.get(name) else {
+    let Some(definition) = state.workspace.content.stimulus_library.get(name) else {
         return Err(format!(
             "This project defines no '{name}', so there is no stimulus to place."
         ));
@@ -72,6 +72,7 @@ mod tests {
         definition.params = "va=3m freq=1k".to_owned();
         app.state
             .workspace
+            .content
             .stimulus_library
             .insert(definition)
             .expect("insert");
@@ -112,6 +113,7 @@ mod tests {
         assert_eq!(
             app.state
                 .workspace
+                .content
                 .stimulus_library
                 .provenance_state(component),
             ProvenanceState::Adopted { revision: 1 }

@@ -107,18 +107,15 @@ impl DrawingSheetSupportState {
 }
 
 pub(crate) fn open_sheet_format_manager(state: &mut AppState) -> Result<(), String> {
+    let designs = &state.workspace.content.design_management;
     let edit = crate::workbench::app::SchematicEditAuthority::capture(state);
     edit.validate(state, "Sheet Format Manager")?;
     let preview_content = DrawingSheetPreviewContent::from_state(state);
     let owner_key = state.workspace.active_key();
-    let catalog = state
-        .workspace
-        .design_management
-        .sheet_catalog(&owner_key)
-        .ok_or_else(|| {
-            "Create the governed drawing sheet in Page Setup before managing document formats."
-                .to_owned()
-        })?;
+    let catalog = designs.sheet_catalog(&owner_key).ok_or_else(|| {
+        "Create the governed drawing sheet in Page Setup before managing document formats."
+            .to_owned()
+    })?;
     let active_id = catalog
         .active_sheet_id()
         .ok_or_else(|| "The governed schematic has no active sheet.".to_owned())?;
@@ -151,18 +148,11 @@ pub(crate) fn open_sheet_format_manager(state: &mut AppState) -> Result<(), Stri
         open: true,
         edit: Some(edit),
         owner_key,
-        design_management_revision: state.workspace.design_management.revision(),
+        design_management_revision: designs.revision(),
         catalog_revision: catalog.revision(),
         rows,
         active_format: Some(active_format),
-        project_default: Some(
-            state
-                .workspace
-                .design_management
-                .drawing_sheet_settings()
-                .default_format
-                .clone(),
-        ),
+        project_default: Some(designs.drawing_sheet_settings().default_format.clone()),
         preview_content,
         ..SheetFormatManagerState::default()
     };
@@ -170,6 +160,7 @@ pub(crate) fn open_sheet_format_manager(state: &mut AppState) -> Result<(), Stri
 }
 
 pub(crate) fn open_title_block_fields(state: &mut AppState) -> Result<(), String> {
+    let designs = &state.workspace.content.design_management;
     // A nested editor must participate in Page Setup's transaction. Writing
     // through to the catalog here would leave Page Setup holding a stale copy
     // that could overwrite the accepted field values on its eventual apply.
@@ -177,7 +168,7 @@ pub(crate) fn open_title_block_fields(state: &mut AppState) -> Result<(), String
         return open_staged_title_block_fields(state);
     }
     let owner_key = state.workspace.active_key();
-    let catalog = state.workspace.design_management.sheet_catalog(&owner_key);
+    let catalog = designs.sheet_catalog(&owner_key);
     if catalog.is_none() {
         return open_staged_title_block_fields(state);
     }
@@ -198,7 +189,7 @@ pub(crate) fn open_title_block_fields(state: &mut AppState) -> Result<(), String
     let authority = DrawingSheetAuthority {
         edit: crate::workbench::app::SchematicEditAuthority::capture(state),
         cell_view_key: owner_key.clone(),
-        design_management_revision: state.workspace.design_management.revision(),
+        design_management_revision: designs.revision(),
         personal_preferences_digest: None,
         governed: Some(GovernedDrawingSheetAuthority {
             cell_view_key: owner_key,
@@ -207,7 +198,7 @@ pub(crate) fn open_title_block_fields(state: &mut AppState) -> Result<(), String
             sheet_revision: sheet.revision(),
         }),
     };
-    let settings = state.workspace.design_management.drawing_sheet_settings();
+    let settings = designs.drawing_sheet_settings();
     let document_control = settings.document_control.clone();
     let automatic_values = title_field_automatic_values(
         state,
@@ -249,6 +240,7 @@ pub(crate) fn open_title_block_fields(state: &mut AppState) -> Result<(), String
 }
 
 fn open_staged_title_block_fields(state: &mut AppState) -> Result<(), String> {
+    let designs = &state.workspace.content.design_management;
     let setup = &state.dialogs.drawing_sheet_setup;
     let authority = setup.authority.clone().ok_or_else(|| {
         "Open Page Setup before editing title-block fields in its transaction.".to_owned()
@@ -277,9 +269,7 @@ fn open_staged_title_block_fields(state: &mut AppState) -> Result<(), String> {
         .staged_project_title_values
         .clone()
         .unwrap_or_else(|| {
-            state
-                .workspace
-                .design_management
+            designs
                 .drawing_sheet_settings()
                 .title_block_field_values
                 .clone()
@@ -293,20 +283,13 @@ fn open_staged_title_block_fields(state: &mut AppState) -> Result<(), String> {
             project_value.clone_from(&legacy.value);
         }
     }
-    let saved_document_control = state
-        .workspace
-        .design_management
-        .drawing_sheet_settings()
-        .document_control
-        .clone();
+    let saved_document_control = designs.drawing_sheet_settings().document_control.clone();
     let document_control = setup
         .staged_document_control
         .clone()
         .unwrap_or_else(|| saved_document_control.clone());
     let (page, page_count) = authority.governed.as_ref().map_or((1, 1), |governed| {
-        state
-            .workspace
-            .design_management
+        designs
             .sheet_catalog(&governed.cell_view_key)
             .map_or((1, 1), |catalog| {
                 catalog
@@ -1175,6 +1158,7 @@ fn validate_manager_authority(
     app: &AppState,
     state: &SheetFormatManagerState,
 ) -> Result<(), String> {
+    let designs = &app.workspace.content.design_management;
     state
         .edit
         .as_ref()
@@ -1183,14 +1167,12 @@ fn validate_manager_authority(
     if app.workspace.active_key() != state.owner_key {
         return Err("The active cell/view changed. Close and reopen Sheet Formats.".to_owned());
     }
-    if app.workspace.design_management.revision() != state.design_management_revision {
+    if designs.revision() != state.design_management_revision {
         return Err(
             "Drawing-sheet project policy changed. Close and reopen Sheet Formats.".to_owned(),
         );
     }
-    let catalog = app
-        .workspace
-        .design_management
+    let catalog = designs
         .sheet_catalog(&state.owner_key)
         .ok_or_else(|| "The governed sheet catalog is unavailable.".to_owned())?;
     if catalog.revision() != state.catalog_revision {
@@ -1234,7 +1216,7 @@ fn apply_sheet_format_manager(app: &mut RSpiceApp) -> Result<String, String> {
         })
         .map_err(|error| error.to_string())?;
     format = format.without_project_owned_title_values();
-    let before = app.state.workspace.design_management.clone();
+    let before = app.state.workspace.content.design_management.clone();
     let mut candidate = before.clone();
     let mut changed = 0_usize;
     let mut applied_sheet_ids = Vec::new();
@@ -1462,7 +1444,7 @@ fn apply_title_block_fields(app: &mut RSpiceApp) -> Result<String, String> {
             }
         })
         .map_err(|error| error.to_string())?;
-    let before = app.state.workspace.design_management.clone();
+    let before = app.state.workspace.content.design_management.clone();
     let mut candidate = before.clone();
     let mut project_settings = candidate.drawing_sheet_settings().clone();
     let project_changed = project_settings.title_block_field_values != transaction.draft_project;
@@ -1530,11 +1512,12 @@ fn commit_candidate(
     let committed_revision = app
         .state
         .workspace
+        .content
         .replace_design_management(candidate)
         .map_err(|error| error.to_string())?;
     app.state
         .apply_design_management_schematic_transaction(&schematic_tx);
-    let after = app.state.workspace.design_management.clone();
+    let after = app.state.workspace.content.design_management.clone();
     app.state
         .record_design_management_transaction(DesignManagementHistoryEntry {
             description: description.to_owned(),
@@ -1560,7 +1543,7 @@ fn title_field_automatic_values(
     let mut values = BTreeMap::new();
     values.insert(
         DrawingSheetTitleFieldId::Project,
-        state.workspace.project.display_name().to_owned(),
+        state.workspace.content.project.display_name().to_owned(),
     );
     values.insert(
         DrawingSheetTitleFieldId::CellView,
@@ -2065,6 +2048,7 @@ mod tests {
         let key = app.state.workspace.active_key();
         app.state
             .workspace
+            .content
             .design_management
             .bootstrap_for_cell_view(&key, "Main", [])
             .unwrap();
@@ -2092,6 +2076,7 @@ mod tests {
         let first = app
             .state
             .workspace
+            .content
             .design_management
             .bootstrap_for_cell_view(&key, "Main", [])
             .unwrap();
@@ -2099,6 +2084,7 @@ mod tests {
             let catalog = app
                 .state
                 .workspace
+                .content
                 .design_management
                 .sheet_catalog_mut(&key)
                 .unwrap();
@@ -2155,6 +2141,7 @@ mod tests {
             let catalog = app
                 .state
                 .workspace
+                .content
                 .design_management
                 .sheet_catalog_mut(&key)
                 .unwrap();
@@ -2179,6 +2166,7 @@ mod tests {
         let catalog = app
             .state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&key)
             .unwrap();
@@ -2197,6 +2185,7 @@ mod tests {
         let receipt = app
             .state
             .workspace
+            .content
             .design_management
             .drawing_sheet_settings()
             .transaction_receipts
@@ -2221,12 +2210,13 @@ mod tests {
         assert!(
             app.state
                 .workspace
+                .content
                 .design_management
                 .sheet_catalog(&key)
                 .is_none()
         );
         assert!(open_drawing_sheet_setup_for_state(&mut app.state));
-        let revision = app.state.workspace.design_management.revision();
+        let revision = app.state.workspace.content.design_management.revision();
         open_title_block_fields(&mut app.state).unwrap();
         let fields = &mut app.state.dialogs.drawing_sheet_support.title_fields;
         assert!(fields.staged_page_setup);
@@ -2242,10 +2232,14 @@ mod tests {
 
         apply_title_block_fields(&mut app).unwrap();
 
-        assert_eq!(app.state.workspace.design_management.revision(), revision);
+        assert_eq!(
+            app.state.workspace.content.design_management.revision(),
+            revision
+        );
         assert!(
             app.state
                 .workspace
+                .content
                 .design_management
                 .sheet_catalog(&key)
                 .is_none()
@@ -2268,6 +2262,7 @@ mod tests {
         let sheet_id = app
             .state
             .workspace
+            .content
             .design_management
             .bootstrap_for_cell_view(&key, "Main", [])
             .unwrap();
@@ -2287,6 +2282,7 @@ mod tests {
             let catalog = app
                 .state
                 .workspace
+                .content
                 .design_management
                 .sheet_catalog_mut(&key)
                 .unwrap();
@@ -2298,6 +2294,7 @@ mod tests {
         let mut settings = app
             .state
             .workspace
+            .content
             .design_management
             .drawing_sheet_settings()
             .clone();
@@ -2305,13 +2302,14 @@ mod tests {
             DrawingSheetTitleFieldId::Classification,
             "INTERNAL".to_owned(),
         );
-        let revision = app.state.workspace.design_management.revision();
+        let revision = app.state.workspace.content.design_management.revision();
         app.state
             .workspace
+            .content
             .design_management
             .update_drawing_sheet_settings(revision, settings)
             .unwrap();
-        let design_revision = app.state.workspace.design_management.revision();
+        let design_revision = app.state.workspace.content.design_management.revision();
 
         open_title_block_fields(&mut app.state).unwrap();
         app.state
@@ -2329,13 +2327,14 @@ mod tests {
 
         assert!(error.contains("classification"));
         assert_eq!(
-            app.state.workspace.design_management.revision(),
+            app.state.workspace.content.design_management.revision(),
             design_revision,
             "rejected policy edits must not advance project state"
         );
         assert_eq!(
             app.state
                 .workspace
+                .content
                 .design_management
                 .drawing_sheet_settings()
                 .title_block_field_values[&DrawingSheetTitleFieldId::Classification],
@@ -2350,12 +2349,14 @@ mod tests {
         let sheet_id = app
             .state
             .workspace
+            .content
             .design_management
             .bootstrap_for_cell_view(&key, "Main", [])
             .unwrap();
         let mut settings = app
             .state
             .workspace
+            .content
             .design_management
             .drawing_sheet_settings()
             .clone();
@@ -2363,18 +2364,20 @@ mod tests {
             DrawingSheetTitleFieldId::Organization,
             "Previous organization".to_owned(),
         );
-        let revision = app.state.workspace.design_management.revision();
+        let revision = app.state.workspace.content.design_management.revision();
         app.state
             .workspace
+            .content
             .design_management
             .update_drawing_sheet_settings(revision, settings)
             .unwrap();
         assert!(open_drawing_sheet_setup_for_state(&mut app.state));
         app.state.dialogs.drawing_sheet_setup.draft.margin_top = "12".to_owned();
-        let design_revision = app.state.workspace.design_management.revision();
+        let design_revision = app.state.workspace.content.design_management.revision();
         let sheet_revision = app
             .state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&key)
             .unwrap()
@@ -2423,12 +2426,13 @@ mod tests {
         apply_title_block_fields(&mut app).unwrap();
 
         assert_eq!(
-            app.state.workspace.design_management.revision(),
+            app.state.workspace.content.design_management.revision(),
             design_revision
         );
         let unchanged_sheet = app
             .state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&key)
             .unwrap()
@@ -2438,6 +2442,7 @@ mod tests {
         assert_eq!(
             app.state
                 .workspace
+                .content
                 .design_management
                 .drawing_sheet_settings()
                 .document_control,
@@ -2461,10 +2466,8 @@ mod tests {
         crate::workbench::app::dialogs::drawing_sheet_setup::apply_drawing_sheet_setup(&mut app)
             .unwrap();
 
-        let saved = app
-            .state
-            .workspace
-            .design_management
+        let designs = &app.state.workspace.content.design_management;
+        let saved = designs
             .sheet_catalog(&key)
             .unwrap()
             .find(sheet_id)
@@ -2476,19 +2479,12 @@ mod tests {
             "Nested accepted title"
         );
         assert_eq!(
-            app.state
-                .workspace
-                .design_management
-                .drawing_sheet_settings()
-                .title_block_field_values[&DrawingSheetTitleFieldId::Organization],
+            designs.drawing_sheet_settings().title_block_field_values
+                [&DrawingSheetTitleFieldId::Organization],
             "Released organization"
         );
         assert_eq!(
-            app.state
-                .workspace
-                .design_management
-                .drawing_sheet_settings()
-                .document_control,
+            designs.drawing_sheet_settings().document_control,
             DrawingSheetDocumentControl {
                 revision: "A".to_owned(),
                 revision_date_utc: "2026-08-04".to_owned(),

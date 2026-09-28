@@ -143,8 +143,10 @@ pub(crate) struct SchematicSymbolContext {
 
 impl SchematicSymbolContext {
     pub(crate) fn from_state(state: &AppState) -> Self {
-        let resolver =
-            SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers);
+        let resolver = SymbolResolver::new(
+            &state.library_manager,
+            &state.workspace.content.schematic_buffers,
+        );
         let mut resolved_by_component_id = HashMap::new();
         let mut resolved_by_binding = Vec::new();
         for component in state
@@ -499,10 +501,15 @@ impl SchematicSymbolContext {
 fn symbol_context_revision(state: &AppState) -> u64 {
     let mut hasher = DefaultHasher::new();
     state.library_manager.revision().hash(&mut hasher);
-    state.workspace.schematic_buffers.len().hash(&mut hasher);
+    state
+        .workspace
+        .content
+        .schematic_buffers
+        .len()
+        .hash(&mut hasher);
     let mut folded_xor = 0_u64;
     let mut folded_sum = 0_u64;
-    for (key, buffer) in &state.workspace.schematic_buffers {
+    for (key, buffer) in &state.workspace.content.schematic_buffers {
         let mut entry = DefaultHasher::new();
         key.hash(&mut entry);
         buffer.topology_version().hash(&mut entry);
@@ -974,7 +981,7 @@ pub(crate) fn drawn_failure_site_count(
 /// drawn right now.
 fn result_mapping_is_current(state: &AppState) -> bool {
     state.simulation.cross_probe.is_current_for(
-        &state.workspace.active_view,
+        &state.workspace.content.active_view,
         state.schematic.topology_version(),
     )
 }
@@ -1451,7 +1458,7 @@ mod tests {
             .wires
             .push(crate::state::Wire::new(1, vec![a, b]));
         state.simulation.cross_probe.update(
-            state.workspace.active_view.clone(),
+            state.workspace.content.active_view.clone(),
             std::collections::HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),
             std::collections::HashMap::from([("OUT".to_owned(), vec![a, b])]),
             std::collections::HashMap::new(),
@@ -1516,7 +1523,7 @@ mod tests {
             .wires
             .push(crate::state::Wire::new(1, vec![a, b]));
         state.simulation.cross_probe.update(
-            state.workspace.active_view.clone(),
+            state.workspace.content.active_view.clone(),
             std::collections::HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),
             std::collections::HashMap::from([("OUT".to_owned(), vec![a, b])]),
             std::collections::HashMap::new(),

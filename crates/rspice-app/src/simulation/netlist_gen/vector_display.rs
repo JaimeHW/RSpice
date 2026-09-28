@@ -50,6 +50,7 @@ pub(crate) struct BusNotations {
 pub(crate) fn bus_notations(workspace: &ProjectWorkspace, active: &SchematicState) -> BusNotations {
     BusNotations::of_sheets(
         workspace
+            .content
             .schematic_buffers
             .values()
             .map(|schematic| schematic.document())

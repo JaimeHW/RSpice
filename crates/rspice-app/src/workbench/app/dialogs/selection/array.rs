@@ -171,8 +171,21 @@ impl RSpiceApp {
         }
         let validation = validate_draft(&self.state);
         let validation_title = validation.transaction_title();
-        let project_name = self.state.workspace.project.display_name().to_owned();
-        let project_revision = self.state.workspace.project.revision().get().to_string();
+        let project_name = self
+            .state
+            .workspace
+            .content
+            .project
+            .display_name()
+            .to_owned();
+        let project_revision = self
+            .state
+            .workspace
+            .content
+            .project
+            .revision()
+            .get()
+            .to_string();
         let validation_field_mask = validation.field_mask();
         let request_first_invalid_focus = should_focus_first_invalid(
             self.state.dialogs.array_selection.validation_field_mask,

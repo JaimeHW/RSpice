@@ -16,9 +16,9 @@ pub(super) fn action_export_svg_with_io(
     let config = SvgExportConfig::default();
     let resolver = crate::state::SymbolResolver::new(
         &state.library_manager,
-        &state.workspace.schematic_buffers,
+        &state.workspace.content.schematic_buffers,
     );
-    let view_path = state.workspace.active_view.display_path();
+    let view_path = state.workspace.content.active_view.display_path();
     let svg_content = export_to_svg_with_symbol_resolver_and_context(
         &state.schematic,
         &config,
@@ -393,7 +393,7 @@ pub(crate) fn build_menu_netlist(
 ) -> Option<String> {
     let execution_projection = match state.workspace.configuration_execution_projection(
         &state.library_manager,
-        &state.workspace.active_view,
+        &state.workspace.content.active_view,
         &state.schematic,
     ) {
         Ok(projection) => projection,
@@ -430,7 +430,7 @@ pub(crate) fn build_menu_netlist(
         ));
         return None;
     };
-    let Some(plan_payload) = state.workspace.plan_data(plan_id) else {
+    let Some(plan_payload) = state.workspace.content.plan_data(plan_id) else {
         state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
             "Simulation plan {plan_id} has no plan-owned configuration payload."
         )));
@@ -477,6 +477,7 @@ pub(crate) fn build_menu_netlist(
 
     let spice_netlist = state
         .workspace
+        .content
         .bind_generated_netlist_provenance(generation.netlist);
     let spice_netlist = match crate::simulation::controller::SimulationController::append_plan_measurements_to_generated_netlist(state, &spice_netlist) {
         Ok(source) => source,

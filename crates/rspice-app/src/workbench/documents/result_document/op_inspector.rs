@@ -566,7 +566,7 @@ fn op_plan(state: &mut AppState, analysis: AnalysisPresentationKey) -> Option<Ar
         analysis,
         filter: state.ui.results.op_filter.clone(),
         sort: state.ui.results.op_sort.clone(),
-        root: state.workspace.simulation_root_reference().cell,
+        root: state.workspace.content.simulation_root_reference().cell,
     };
     if let Some(plan) = state.ui.results.plans.op.as_ref()
         && plan.key == key
@@ -860,12 +860,12 @@ fn result_mapping_is_current(state: &AppState) -> bool {
     let Some(run) = state.simulation.active_run() else {
         return false;
     };
-    run.prepared_receipt()
-        .is_some_and(|receipt| receipt.project_revision() == state.workspace.project.revision())
-        && state.simulation.cross_probe.is_current_for(
-            &state.workspace.active_view,
-            state.schematic.topology_version(),
-        )
+    run.prepared_receipt().is_some_and(|receipt| {
+        receipt.project_revision() == state.workspace.content.project.revision()
+    }) && state.simulation.cross_probe.is_current_for(
+        &state.workspace.content.active_view,
+        state.schematic.topology_version(),
+    )
 }
 
 fn node_target_available(state: &AppState, name: &str) -> bool {
@@ -2039,7 +2039,7 @@ mod tests {
         let analysis = &state.simulation.runs[0].analyses[0];
         let dc = analysis.dc_op.as_ref().expect("retained node voltages");
         let report = analysis.device_op.as_ref().expect("retained device rows");
-        let root = state.workspace.simulation_root_reference().cell;
+        let root = state.workspace.content.simulation_root_reference().cell;
 
         let mut expected = Vec::new();
         for (scope, rows) in grouped_nodes(dc, "", &root) {

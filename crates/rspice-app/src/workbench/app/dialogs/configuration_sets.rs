@@ -194,8 +194,8 @@ pub(crate) fn open_configuration_sets_dialog(state: &mut AppState) {
         ));
         return;
     }
-    let catalog = state.workspace.configuration_sets.clone();
-    let root = state.workspace.simulation_root_reference();
+    let catalog = state.workspace.content.configuration_sets.clone();
+    let root = state.workspace.content.simulation_root_reference();
     state.dialogs.configuration_sets.open(&catalog, root);
 }
 
@@ -248,7 +248,7 @@ impl RSpiceApp {
             .state
             .dialogs
             .configuration_sets
-            .dirty(&self.state.workspace.configuration_sets);
+            .dirty(&self.state.workspace.content.configuration_sets);
         let (eyebrow, title, primary, description) = match page {
             ConfigurationDialogPage::Manager => (
                 MANAGER_EYEBROW,
@@ -296,6 +296,7 @@ impl RSpiceApp {
                             != self
                                 .state
                                 .workspace
+                                .content
                                 .configuration_sets
                                 .active_configuration_id()
                 }
@@ -338,6 +339,7 @@ impl RSpiceApp {
                             != self
                                 .state
                                 .workspace
+                                .content
                                 .configuration_sets
                                 .active_configuration_id()
                 }
@@ -397,7 +399,7 @@ impl RSpiceApp {
                         .state
                         .dialogs
                         .configuration_sets
-                        .dirty(&self.state.workspace.configuration_sets))
+                        .dirty(&self.state.workspace.content.configuration_sets))
             {
                 ui.close();
             }
@@ -416,7 +418,7 @@ impl RSpiceApp {
             .state
             .dialogs
             .configuration_sets
-            .dirty(&self.state.workspace.configuration_sets);
+            .dirty(&self.state.workspace.content.configuration_sets);
         match response.choice {
             DialogChoice::Primary => self.commit_configuration_dialog_page(),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
@@ -428,7 +430,7 @@ impl RSpiceApp {
                         self.state
                             .dialogs
                             .configuration_sets
-                            .load_selected(&self.state.workspace.configuration_sets);
+                            .load_selected(&self.state.workspace.content.configuration_sets);
                     }
                 } else if dirty && !self.state.dialogs.configuration_sets.discard_confirmation {
                     self.state.dialogs.configuration_sets.discard_confirmation = true;
@@ -452,7 +454,7 @@ impl RSpiceApp {
                     .state
                     .dialogs
                     .configuration_sets
-                    .dirty(&self.state.workspace.configuration_sets)
+                    .dirty(&self.state.workspace.content.configuration_sets)
                     && self.state.dialogs.configuration_sets.selected_id != Some(id)
                 {
                     self.state.dialogs.configuration_sets.error = Some(
@@ -465,14 +467,14 @@ impl RSpiceApp {
                 self.state
                     .dialogs
                     .configuration_sets
-                    .load_selected(&self.state.workspace.configuration_sets);
+                    .load_selected(&self.state.workspace.content.configuration_sets);
             }
             BodyAction::New => {
                 if self
                     .state
                     .dialogs
                     .configuration_sets
-                    .dirty(&self.state.workspace.configuration_sets)
+                    .dirty(&self.state.workspace.content.configuration_sets)
                 {
                     self.state.dialogs.configuration_sets.error = Some(
                         "Save or discard the current configuration edits before creating another configuration."
@@ -481,13 +483,13 @@ impl RSpiceApp {
                     return;
                 }
                 let default_name = unique_configuration_name(
-                    &self.state.workspace.configuration_sets,
+                    &self.state.workspace.content.configuration_sets,
                     "Lab characterization",
                 );
                 let dialog = &mut self.state.dialogs.configuration_sets;
                 dialog.page = ConfigurationDialogPage::New;
                 dialog.new_name = default_name;
-                dialog.new_root = Some(self.state.workspace.simulation_root_reference());
+                dialog.new_root = Some(self.state.workspace.content.simulation_root_reference());
                 dialog.new_template = ConfigurationTemplate::AnalogSchematic;
                 dialog.error = None;
             }
@@ -496,7 +498,7 @@ impl RSpiceApp {
                     .state
                     .dialogs
                     .configuration_sets
-                    .dirty(&self.state.workspace.configuration_sets)
+                    .dirty(&self.state.workspace.content.configuration_sets)
                 {
                     self.state.dialogs.configuration_sets.error = Some(
                         "Save or discard the current configuration edits before cloning a committed revision."
@@ -510,10 +512,10 @@ impl RSpiceApp {
                 dialog.clone_scope = ConfigurationCloneScope::AllBindings;
                 let stem = dialog
                     .selected_id
-                    .and_then(|id| self.state.workspace.configuration_sets.find(id))
+                    .and_then(|id| self.state.workspace.content.configuration_sets.find(id))
                     .map_or("Configuration copy", |configuration| configuration.name());
                 dialog.new_name = unique_configuration_name(
-                    &self.state.workspace.configuration_sets,
+                    &self.state.workspace.content.configuration_sets,
                     &format!("{stem} copy"),
                 );
                 dialog.error = None;
@@ -565,11 +567,11 @@ impl RSpiceApp {
         message: String,
     ) -> Result<(), String> {
         let mut projected = self.state.workspace.clone();
-        projected.configuration_sets = candidate.clone();
+        projected.content.configuration_sets = candidate.clone();
         let projection = projected
             .configuration_execution_projection(
                 &self.state.library_manager,
-                &self.state.workspace.active_view,
+                &self.state.workspace.content.active_view,
                 &self.state.schematic,
             )
             .map_err(|error| format!("Configuration cannot be published: {error}"))?;
@@ -588,25 +590,28 @@ impl RSpiceApp {
                 generated.errors.join("; ")
             ));
         }
-        let generated = projected.bind_generated_netlist_provenance(generated.netlist);
+        let generated = projected
+            .content
+            .bind_generated_netlist_provenance(generated.netlist);
         crate::simulation::controller::prepared_run::expand_generated_dependencies(
             &generated,
             root.current_file(),
-            &crate::state::IncludeSearchChain::for_project(&self.state.workspace.project),
+            &crate::state::IncludeSearchChain::for_project(&self.state.workspace.content.project),
             &self.state.model_library_manager,
         )
         .map_err(|error| {
             format!("Configuration cannot be published because source sealing failed: {error}")
         })?;
-        if candidate == self.state.workspace.configuration_sets {
+        if candidate == self.state.workspace.content.configuration_sets {
             let dialog = &mut self.state.dialogs.configuration_sets;
             dialog.page = ConfigurationDialogPage::Manager;
             dialog.selected_id = Some(selected);
-            dialog.load_selected(&self.state.workspace.configuration_sets);
+            dialog.load_selected(&self.state.workspace.content.configuration_sets);
             return Ok(());
         }
         self.state
             .workspace
+            .content
             .replace_configuration_sets(candidate)
             .map_err(|error| error.to_string())?;
         self.invalidate_simulation_preflight();
@@ -615,7 +620,7 @@ impl RSpiceApp {
         let dialog = &mut self.state.dialogs.configuration_sets;
         dialog.page = ConfigurationDialogPage::Manager;
         dialog.selected_id = Some(selected);
-        dialog.load_selected(&self.state.workspace.configuration_sets);
+        dialog.load_selected(&self.state.workspace.content.configuration_sets);
         Ok(())
     }
 
@@ -631,7 +636,7 @@ impl RSpiceApp {
             .draft
             .clone()
             .ok_or_else(|| "The selected configuration draft is unavailable.".to_owned())?;
-        let mut candidate = self.state.workspace.configuration_sets.clone();
+        let mut candidate = self.state.workspace.content.configuration_sets.clone();
         let committed = if candidate
             .find(id)
             .is_some_and(|configuration| configuration.definition() == &definition)
@@ -665,7 +670,7 @@ impl RSpiceApp {
             &self.state.workspace,
             &self.state.schematic,
         )?;
-        let mut candidate = self.state.workspace.configuration_sets.clone();
+        let mut candidate = self.state.workspace.content.configuration_sets.clone();
         let id = candidate
             .create(definition)
             .map_err(|error| error.to_string())?;
@@ -685,6 +690,7 @@ impl RSpiceApp {
         let source = self
             .state
             .workspace
+            .content
             .configuration_sets
             .find(source_id)
             .ok_or_else(|| "The selected source configuration no longer exists.".to_owned())?;
@@ -695,7 +701,7 @@ impl RSpiceApp {
             &self.state.workspace,
             &self.state.schematic,
         )?;
-        let mut candidate = self.state.workspace.configuration_sets.clone();
+        let mut candidate = self.state.workspace.content.configuration_sets.clone();
         let id = candidate
             .clone_configuration_scoped(
                 source_id,
@@ -778,7 +784,7 @@ fn manager_body(
 ) -> BodyAction {
     let mut action = BodyAction::None;
     let t = Tokens::get(ui.ctx());
-    let dirty = dialog.dirty(&workspace.configuration_sets);
+    let dirty = dialog.dirty(&workspace.content.configuration_sets);
     let selected_receipt = selected_configuration_receipt(
         dialog,
         workspace,
@@ -844,7 +850,7 @@ fn manager_body(
     configuration_table_header(ui);
     let query = dialog.query.trim().to_lowercase();
     let mut visible = 0usize;
-    for configuration in workspace.configuration_sets.configurations() {
+    for configuration in workspace.content.configuration_sets.configurations() {
         let definition = configuration.definition();
         let searchable = format!(
             "{} {} {} {} {}",
@@ -862,7 +868,10 @@ fn manager_body(
         let selected = dialog.selected_id == Some(configuration.id());
         let status = selected_receipt.as_ref().filter(|_| selected).map_or_else(
             || {
-                if workspace.configuration_sets.active_configuration_id()
+                if workspace
+                    .content
+                    .configuration_sets
+                    .active_configuration_id()
                     == Some(configuration.id())
                 {
                     "Active"
@@ -888,7 +897,12 @@ fn manager_body(
     if visible == 0 {
         empty_row(
             ui,
-            if workspace.configuration_sets.configurations().is_empty() {
+            if workspace
+                .content
+                .configuration_sets
+                .configurations()
+                .is_empty()
+            {
                 "No configuration sets exist. Create the first exact testbench binding."
             } else {
                 "No configuration matches the current filter."
@@ -1016,12 +1030,16 @@ fn configuration_receipt_cache_key(
     id: ConfigurationSetId,
     draft: Option<&ConfigurationSetDefinition>,
 ) -> Option<ConfigurationReceiptCacheKey> {
-    let design =
-        workspace.design_projection_key(libraries, &workspace.active_view, active_schematic)?;
+    let design = workspace.design_projection_key(
+        libraries,
+        &workspace.content.active_view,
+        active_schematic,
+    )?;
     // The receipt adds the selected draft and dependency-expansion environment
     // to the projection's content authority. Topology counters cannot describe
     // a live value edit or an active-variant change.
-    let publication = serde_json::to_vec(&(id, draft, &workspace.project, model_libraries)).ok()?;
+    let publication =
+        serde_json::to_vec(&(id, draft, &workspace.content.project, model_libraries)).ok()?;
     Some(ConfigurationReceiptCacheKey {
         design,
         publication: crate::product::ContentDigest::from_bytes(Sha256::digest(publication).into()),
@@ -1044,11 +1062,11 @@ fn configuration_receipt(
             );
         }
     };
-    let configuration = projected.configuration_sets.find(id);
+    let configuration = projected.content.configuration_sets.find(id);
     let overrides = configuration.map_or(0, |value| value.overrides().len());
     let inspection = match projected.inspect_design_projection(
         libraries,
-        &workspace.active_view,
+        &workspace.content.active_view,
         active_schematic,
     ) {
         Ok(inspection) => inspection,
@@ -1122,12 +1140,14 @@ fn projected_configuration_workspace(
     let mut projected = workspace.clone();
     if let Some(draft) = draft {
         let configuration = projected
+            .content
             .configuration_sets
             .find(id)
             .ok_or_else(|| "configuration no longer exists".to_owned())?;
         if configuration.definition() != draft {
             let revision = configuration.revision();
             match projected
+                .content
                 .configuration_sets
                 .update(id, revision, draft.clone())
             {
@@ -1137,6 +1157,7 @@ fn projected_configuration_workspace(
         }
     }
     projected
+        .content
         .configuration_sets
         .activate(id)
         .map_err(|error| format!("invalid identity: {error}"))?;
@@ -1160,11 +1181,13 @@ fn configuration_netlist_digest(
     if !generated.errors.is_empty() {
         return Err(generated.errors.join("; "));
     }
-    let source = workspace.bind_generated_netlist_provenance(generated.netlist);
+    let source = workspace
+        .content
+        .bind_generated_netlist_provenance(generated.netlist);
     let (source, _) = crate::simulation::controller::prepared_run::expand_generated_dependencies(
         &source,
         root.current_file(),
-        &crate::state::IncludeSearchChain::for_project(&workspace.project),
+        &crate::state::IncludeSearchChain::for_project(&workspace.content.project),
         model_libraries,
     )
     .map_err(|error| error.to_string())?;
@@ -1485,7 +1508,7 @@ fn clone_configuration_body(
                 ui,
                 "Source",
                 &mut dialog.clone_source,
-                &workspace.configuration_sets,
+                &workspace.content.configuration_sets,
             );
             enum_combo(
                 ui,
@@ -1510,7 +1533,7 @@ fn clone_configuration_body(
         property_row(ui, "Copied semantics", detail);
         let lineage = dialog
             .clone_source
-            .and_then(|id| workspace.configuration_sets.find(id))
+            .and_then(|id| workspace.content.configuration_sets.find(id))
             .map_or_else(
                 || "No source selected".to_owned(),
                 |configuration| {
@@ -1543,7 +1566,7 @@ fn binding_body(
             ui,
             "Configuration",
             &mut requested_selection,
-            &workspace.configuration_sets,
+            &workspace.content.configuration_sets,
         );
         if requested_selection != previous_selection
             && let Some(id) = requested_selection
@@ -1818,8 +1841,9 @@ fn executable_roots(
                     let reference = CellViewRef::new(library_key, cell_key, view_key);
                     let has_buffer = reference
                         .key()
-                        .eq_ignore_ascii_case(&workspace.active_view.key())
+                        .eq_ignore_ascii_case(&workspace.content.active_view.key())
                         || workspace
+                            .content
                             .schematic_buffers
                             .keys()
                             .any(|key| key.eq_ignore_ascii_case(&reference.key()));
@@ -2109,10 +2133,11 @@ fn default_dut_path_for_root(
     root: &CellViewRef,
 ) -> Option<String> {
     let root_key = root.key();
-    let schematic = if root_key.eq_ignore_ascii_case(&workspace.active_view.key()) {
+    let schematic = if root_key.eq_ignore_ascii_case(&workspace.content.active_view.key()) {
         Some(active_schematic.document())
     } else {
         workspace
+            .content
             .schematic_buffers
             .iter()
             .find(|(key, _)| key.eq_ignore_ascii_case(&root_key))

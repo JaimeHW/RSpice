@@ -147,7 +147,7 @@ fn require_netlist_source_save_confirmation_if_dirty(
     state: &mut AppState,
     action: ConfirmationAction,
 ) -> bool {
-    if !state.workspace.netlist_source_dirty {
+    if !state.workspace.content.netlist_source_dirty {
         return false;
     }
 
@@ -184,7 +184,7 @@ mod tests {
         ));
         assert!(!state.dialogs.confirmation_dialog.visible);
 
-        state.workspace.set_netlist_source_dirty(true);
+        state.workspace.content.set_netlist_source_dirty(true);
         assert!(require_netlist_source_save_confirmation_if_dirty(
             &mut state,
             ConfirmationAction::ImportNetlist,

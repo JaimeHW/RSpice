@@ -362,7 +362,7 @@ pub(super) fn expr_editor_row(
                         .add_expression_trace(&state.simulation, analysis_key, text)
                         .expect("the expression editor is bound to a retained analysis");
                     if added {
-                        state.workspace.visualization_documents_dirty = true;
+                        state.workspace.content.visualization_documents_dirty = true;
                     }
                     state.ui.results.expr_editor = None;
                 }
@@ -587,6 +587,7 @@ pub(crate) fn toggle_visibility(
     {
         let retained = state
             .workspace
+            .content
             .visualization_document(context.document_id)
             .map(|document| {
                 let traces = document
@@ -613,7 +614,7 @@ pub(crate) fn toggle_visibility(
                 })
                 .collect::<Vec<_>>();
             if !edits.is_empty()
-                && let Err(error) = state.workspace.transact_visualization_document(
+                && let Err(error) = state.workspace.content.transact_visualization_document(
                     context.document_id,
                     revision,
                     edits,

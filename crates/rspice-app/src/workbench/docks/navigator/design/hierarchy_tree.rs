@@ -723,7 +723,7 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
                         mono: false,
                         meta: Some(occurrences.as_str()),
                         alert: false,
-                        selected: state.workspace.active_view == reference,
+                        selected: state.workspace.content.active_view == reference,
                     },
                 );
                 if response
@@ -759,7 +759,7 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
     let rows = occurrence_rows(
         &TreeSource {
             projection: projection.as_ref(),
-            sheets: &app.state.workspace.design_management,
+            sheets: &app.state.workspace.content.design_management,
             query: query.as_str(),
         },
         &tree,
@@ -899,7 +899,7 @@ fn resolved_projection(
 ) -> Option<Arc<DesignProjection>> {
     match state.workspace.design_projection(
         &state.library_manager,
-        &state.workspace.active_view,
+        &state.workspace.content.active_view,
         &state.schematic,
     ) {
         Ok(projection) => Some(projection),
@@ -982,7 +982,7 @@ pub(super) fn open_occurrence(
 ) {
     let Ok(projection) = state.workspace.design_projection(
         &state.library_manager,
-        &state.workspace.active_view,
+        &state.workspace.content.active_view,
         &state.schematic,
     ) else {
         return;

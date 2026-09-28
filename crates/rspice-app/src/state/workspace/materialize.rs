@@ -9,8 +9,8 @@ pub(crate) fn project_veriloga_binding_for_view(
     reference: &CellViewRef,
 ) -> Result<ConfigurationVerilogABinding, String> {
     super::hierarchy_resolver::project_veriloga_binding_for_view(
-        workspace.project.id(),
-        &workspace.project_sources,
+        workspace.content.project.id(),
+        &workspace.content.project_sources,
         libraries.catalog(),
         reference,
     )
@@ -152,6 +152,7 @@ mod tests {
         schematic.document_mut_for_test().connections.clear();
 
         let main = workspace
+            .content
             .design_management
             .bootstrap_for_cell_view(
                 &key,
@@ -160,6 +161,7 @@ mod tests {
             )
             .expect("governed sheet catalog");
         let catalog = workspace
+            .content
             .design_management
             .sheet_catalog_mut(&key)
             .expect("the catalog just bootstrapped");
@@ -235,10 +237,12 @@ mod tests {
         schematic.document_mut_for_test().connections.clear();
 
         let main = workspace
+            .content
             .design_management
             .bootstrap_for_cell_view(&key, "Main", [stationary, moved, stationary_wire])
             .expect("governed sheet catalog");
         let catalog = workspace
+            .content
             .design_management
             .sheet_catalog_mut(&key)
             .expect("the catalog just bootstrapped");

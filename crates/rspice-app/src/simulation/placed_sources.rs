@@ -441,8 +441,8 @@ pub fn whole_design_excitations(
     active_schematic: &SchematicState,
     plan: Option<&SimulationPlan>,
 ) -> (Vec<PlacedSource>, Vec<PlacedRfPort>) {
-    let stimulus_library = &workspace.stimulus_library;
-    match workspace.design_projection(libraries, &workspace.active_view, active_schematic) {
+    let stimulus_library = &workspace.content.stimulus_library;
+    match workspace.design_projection(libraries, &workspace.content.active_view, active_schematic) {
         Ok(projection) => (
             design_sources(libraries, stimulus_library, &projection, plan),
             design_rf_ports(libraries, stimulus_library, &projection, plan),
@@ -475,10 +475,12 @@ pub fn whole_design_source_count(
     workspace: &crate::state::ProjectWorkspace,
     active_schematic: &SchematicState,
 ) -> usize {
-    match workspace.design_projection(libraries, &workspace.active_view, active_schematic) {
-        Ok(projection) => design_excitations(libraries, &workspace.stimulus_library, &projection)
-            .sources
-            .len(),
+    match workspace.design_projection(libraries, &workspace.content.active_view, active_schematic) {
+        Ok(projection) => {
+            design_excitations(libraries, &workspace.content.stimulus_library, &projection)
+                .sources
+                .len()
+        }
         Err(_) => placed_source_count(active_schematic),
     }
 }
@@ -2173,7 +2175,7 @@ mod tests {
                     );
                 }
                 libraries.add_library(work);
-                let active = workspace.active_view.clone();
+                let active = workspace.content.active_view.clone();
                 let mut top = Library::new(&active.library);
                 let mut top_cell = Cell::new(&active.cell);
                 top_cell.add_view(View::new(&active.view, ViewType::Schematic));

@@ -58,7 +58,7 @@ fn projection_nets_extract_the_root_once_and_stay_with_the_projection() {
     top.document_mut_for_test()
         .wires
         .push(Wire::new(2, vec![Point::new(130, 0), Point::new(130, 10)]));
-    let active = workspace.active_view.clone();
+    let active = workspace.content.active_view.clone();
     workspace.insert_schematic_editor(active.key(), top.clone());
 
     let projection = workspace

@@ -100,7 +100,14 @@ impl RSpiceApp {
                     .or_else(|| principal.email.clone())
             })
             .unwrap_or_default();
-        let project_name = self.state.workspace.project.name().trim().to_owned();
+        let project_name = self
+            .state
+            .workspace
+            .content
+            .project
+            .name()
+            .trim()
+            .to_owned();
         let title = if project_name.is_empty() {
             "Untitled project".to_owned()
         } else {
@@ -118,7 +125,7 @@ impl RSpiceApp {
         };
         dialog.scope = Some(build_scope(&self.state, &publication_draft(&dialog)));
         self.state.dialogs.publish_web = dialog;
-        if let Some(binding) = self.state.workspace.project.cloud_publication() {
+        if let Some(binding) = self.state.workspace.content.project.cloud_publication() {
             self.cloud_account
                 .refresh_publications(binding.circuit_id().to_owned());
         }
@@ -142,6 +149,7 @@ impl RSpiceApp {
         let binding = self
             .state
             .workspace
+            .content
             .project
             .cloud_publication()
             .map(|binding| {
@@ -348,7 +356,7 @@ impl RSpiceApp {
             receipt.circuit_id.clone(),
         ) {
             Ok(binding) => {
-                if let Err(error) = self.state.workspace.bind_cloud_publication(binding) {
+                if let Err(error) = self.state.workspace.content.bind_cloud_publication(binding) {
                     self.state
                         .push_user_message(ConsoleMessage::warning(format!(
                             "Published, but the project could not record its page lineage: {error}"

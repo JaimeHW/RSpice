@@ -170,11 +170,11 @@ fn overview_new_cell_action_opens_the_real_creation_workflow() {
 fn overview_history_action_preserves_project_context() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Project;
-    let active = app.state.workspace.active_view.clone();
+    let active = app.state.workspace.content.active_view.clone();
     OverviewIntent::Command(Command::RevisionHistory).execute(&mut app);
 
     assert_eq!(app.state.workbench.workspace, Workspace::Project);
-    assert_eq!(app.state.workspace.active_view, active);
+    assert_eq!(app.state.workspace.content.active_view, active);
     assert!(app.state.dialogs.project_revision_history.open);
 }
 
@@ -311,9 +311,9 @@ fn overview_model_closure_always_opens_the_project_catalog_scope() {
 #[test]
 fn current_checks_without_a_retained_result_are_never_green() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workspace.active_view = CellViewRef::new(
-        &app.state.workspace.project.root_library,
-        &app.state.workspace.project.top_cell,
+    app.state.workspace.content.active_view = CellViewRef::new(
+        &app.state.workspace.content.project.root_library,
+        &app.state.workspace.content.project.top_cell,
         crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
     let problem = problem_snapshot(&app);
@@ -326,9 +326,9 @@ fn project_problem_selects_the_highest_severity_finding() {
     use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
     let mut app = RSpiceApp::test_instance();
-    app.state.workspace.active_view = CellViewRef::new(
-        &app.state.workspace.project.root_library,
-        &app.state.workspace.project.top_cell,
+    app.state.workspace.content.active_view = CellViewRef::new(
+        &app.state.workspace.content.project.root_library,
+        &app.state.workspace.content.project.top_cell,
         crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
     let mut result = DrcResult::new();

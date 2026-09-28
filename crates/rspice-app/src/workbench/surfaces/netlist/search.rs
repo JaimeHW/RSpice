@@ -162,12 +162,14 @@ fn netlist_search_documents(
         editable: true,
         label: state
             .workspace
+            .content
             .netlist_descriptor
             .as_ref()
             .map(|descriptor| descriptor.artifact_name.clone())
             .or_else(|| {
                 state
                     .workspace
+                    .content
                     .netlist_source_path
                     .as_deref()
                     .and_then(std::path::Path::file_name)
@@ -176,6 +178,7 @@ fn netlist_search_documents(
             .unwrap_or_else(|| "owned-source.sp".to_owned()),
         source: state
             .workspace
+            .content
             .netlist_source
             .as_deref()
             .unwrap_or_default(),
@@ -246,6 +249,7 @@ fn netlist_search_documents(
         NetlistFindScope::ActiveLanguageProject => {
             let mut documents = state
                 .workspace
+                .content
                 .netlist_source
                 .as_ref()
                 .map(|_| vec![owned()])
@@ -278,7 +282,7 @@ fn netlist_search_documents(
                     false,
                 ));
             }
-            if state.workspace.netlist_source.is_some() {
+            if state.workspace.content.netlist_source.is_some() {
                 documents.extend(dependency_search_documents(
                     state,
                     ActiveNetlistDocument::OwnedSource,
@@ -335,12 +339,14 @@ fn open_netlist_search_documents(state: &AppState) -> Vec<NetlistSearchDocument<
             editable: true,
             label: state
                 .workspace
+                .content
                 .netlist_descriptor
                 .as_ref()
                 .map(|descriptor| descriptor.artifact_name.clone())
                 .unwrap_or_else(|| "owned-source.sp".to_owned()),
             source: state
                 .workspace
+                .content
                 .netlist_source
                 .as_deref()
                 .unwrap_or_default(),
@@ -386,7 +392,7 @@ fn dependency_search_documents(
         ActiveNetlistDocument::OwnedSource => state.ui.netlist.owned_document.as_ref(),
         ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
     };
-    let owned = state.workspace.netlist_descriptor.as_ref();
+    let owned = state.workspace.content.netlist_descriptor.as_ref();
     document
         .into_iter()
         .flat_map(crate::state::NetlistDocument::dependencies)
@@ -412,7 +418,7 @@ fn dependency_search_documents(
 
 fn retained_deck_search_documents(state: &AppState) -> Vec<NetlistSearchDocument<'_>> {
     let mut documents = Vec::new();
-    for deck in &state.workspace.retained_netlist_decks {
+    for deck in &state.workspace.content.retained_netlist_decks {
         let artifact = deck.descriptor.artifact_name.as_str();
         documents.push(NetlistSearchDocument {
             active_document: ActiveNetlistDocument::OwnedSource,

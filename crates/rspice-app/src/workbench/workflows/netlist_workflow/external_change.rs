@@ -228,6 +228,7 @@ pub(super) fn stage_external_netlist_change(
     let (external_source, external_encoding) = decode_import_bytes(&bytes)?;
     let descriptor = state
         .workspace
+        .content
         .netlist_descriptor
         .as_ref()
         .ok_or_else(|| "Owned source metadata is unavailable.".to_owned())?;
@@ -298,9 +299,10 @@ pub(crate) fn apply_staged_external_netlist_change(state: &mut AppState) -> Resu
         .cloned()
         .ok_or_else(|| "No current owned source document is available.".to_owned())?;
     if current.source() != review.local_source
-        || state.workspace.netlist_source_path.as_deref() != Some(review.path.as_path())
+        || state.workspace.content.netlist_source_path.as_deref() != Some(review.path.as_path())
         || state
             .workspace
+            .content
             .netlist_descriptor
             .as_ref()
             .and_then(|descriptor| descriptor.external_file_sha256)
@@ -328,6 +330,7 @@ pub(crate) fn apply_staged_external_netlist_change(state: &mut AppState) -> Resu
     let mut candidate = state.clone();
     let mut descriptor = candidate
         .workspace
+        .content
         .netlist_descriptor
         .take()
         .ok_or_else(|| "Owned source metadata is unavailable.".to_owned())?;
@@ -337,7 +340,7 @@ pub(crate) fn apply_staged_external_netlist_change(state: &mut AppState) -> Resu
         descriptor.source_encoding = review.external_encoding;
         descriptor.source_line_ending = crate::state::NetlistLineEnding::detect(&selected_source);
     }
-    candidate.workspace.netlist_descriptor = Some(descriptor);
+    candidate.workspace.content.netlist_descriptor = Some(descriptor);
 
     if selected_source != review.local_source
         && !crate::workbench::documents::netlist_document::replace_owned_source(
@@ -358,6 +361,7 @@ pub(crate) fn apply_staged_external_netlist_change(state: &mut AppState) -> Resu
         .ok_or_else(|| "The conflict resolution lost the canonical owned document.".to_owned())?;
     candidate
         .workspace
+        .content
         .netlist_descriptor
         .as_mut()
         .ok_or_else(|| {
@@ -380,6 +384,7 @@ pub(crate) fn apply_staged_external_netlist_change(state: &mut AppState) -> Resu
     candidate.ui.netlist.external_change = None;
     candidate
         .workspace
+        .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
     *state = candidate;

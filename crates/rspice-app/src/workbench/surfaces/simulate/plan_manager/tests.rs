@@ -287,7 +287,7 @@ fn dialog_visible_text(
             let id = setup
                 .create_plan(format!("Spare plan {index}"))
                 .expect("a fresh root plan is created");
-            app.state.workspace.migrate_inactive_plan_data(id);
+            app.state.workspace.content.migrate_inactive_plan_data(id);
         }
         setup
             .activate_plan(active)
@@ -363,9 +363,18 @@ pub(super) fn app_with_every_lifecycle_state() -> (
     setup
         .archive_plan(retired)
         .expect("an inactive plan archives");
-    app.state.workspace.migrate_active_plan_data(available);
-    app.state.workspace.migrate_inactive_plan_data(retired);
-    app.state.workspace.migrate_inactive_plan_data(active);
+    app.state
+        .workspace
+        .content
+        .migrate_active_plan_data(available);
+    app.state
+        .workspace
+        .content
+        .migrate_inactive_plan_data(retired);
+    app.state
+        .workspace
+        .content
+        .migrate_inactive_plan_data(active);
     app.state.sim_setup = setup;
     (app, active, available, retired)
 }
@@ -1135,7 +1144,10 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
         .stable_analysis_plan()
         .expect("stable plan")
         .id();
-    app.state.workspace.migrate_active_plan_data(plan_id);
+    app.state
+        .workspace
+        .content
+        .migrate_active_plan_data(plan_id);
     let mut setup = app.state.sim_setup.clone();
     setup
         .set_reference_pvt(ProcessCorner::FF, -40.0)
@@ -1239,6 +1251,7 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
     let run = crate::product::RunId::new();
     app.state
         .workspace
+        .content
         .ensure_active_plan_data(plan_id)
         .regression_baseline_run = Some(run);
     assert_eq!(

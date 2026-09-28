@@ -260,6 +260,7 @@ fn add_cell_veriloga_source(state: &mut AppState, cell: &str) -> crate::state::P
     let id = bundle.id();
     state
         .workspace
+        .content
         .project_sources
         .insert_bundle(bundle)
         .expect("unique source owner");
@@ -353,7 +354,7 @@ fn legacy_primitives_content_migrates_to_user_library() {
     state
         .workspace
         .insert_schematic_editor("primitives/ISource AC/schematic".to_owned(), drawn);
-    state.workspace.active_view =
+    state.workspace.content.active_view =
         crate::state::CellViewRef::new("primitives", "ISource AC", "schematic");
 
     state.migrate_legacy_primitives();
@@ -362,9 +363,10 @@ fn legacy_primitives_content_migrates_to_user_library() {
         state.library_manager.get_library("primitives").is_none(),
         "legacy library must be gone"
     );
-    assert_eq!(state.workspace.active_view.library, "user");
+    assert_eq!(state.workspace.content.active_view.library, "user");
     let migrated = state
         .workspace
+        .content
         .schematic_buffers
         .get("user/ISource AC/schematic")
         .expect("buffer migrated to the user library");
@@ -407,8 +409,8 @@ fn leaving_symbol_view_does_not_save_stale_schematic_under_symbol_key() {
         .workspace
         .insert_schematic_editor(amp_schematic.key(), amp_buffer.clone());
     state.schematic = amp_buffer;
-    state.workspace.active_view = amp_schematic.clone();
-    state.workspace.open_views = vec![crate::state::OpenCellView::new(
+    state.workspace.content.active_view = amp_schematic.clone();
+    state.workspace.content.open_views = vec![crate::state::OpenCellView::new(
         amp_schematic.clone(),
         ViewType::Schematic,
     )];
@@ -421,6 +423,7 @@ fn leaving_symbol_view_does_not_save_stale_schematic_under_symbol_key() {
     assert!(
         !state
             .workspace
+            .content
             .schematic_buffers
             .contains_key(&amp_symbol.key()),
         "switching away from symbol must not persist the live schematic under the symbol key"
@@ -644,7 +647,10 @@ fn undo_generate_symbol_restores_generated_fallback_metadata_state() {
         !view.metadata.contains_key(SYMBOL_DOCUMENT_METADATA_KEY),
         "undo must restore the missing authored metadata state"
     );
-    let resolver = SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers);
+    let resolver = SymbolResolver::new(
+        &state.library_manager,
+        &state.workspace.content.schematic_buffers,
+    );
     let resolved = resolver
         .resolve_reference(&CellViewRef::new("work", "amp", "symbol"))
         .expect("symbol resolves after undo");
@@ -717,7 +723,10 @@ fn undo_first_manual_symbol_edit_restores_generated_fallback_source() {
         !view.metadata.contains_key(SYMBOL_DOCUMENT_METADATA_KEY),
         "undo must restore the missing authored metadata state"
     );
-    let resolver = SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers);
+    let resolver = SymbolResolver::new(
+        &state.library_manager,
+        &state.workspace.content.schematic_buffers,
+    );
     let resolved = resolver
         .resolve_reference(&CellViewRef::new("work", "amp", "symbol"))
         .expect("symbol resolves after undo");
@@ -788,6 +797,7 @@ fn storing_symbol_document_remaps_open_instance_wires_by_pin_name() {
 
     let parent = state
         .workspace
+        .content
         .schematic_buffers
         .get("work/top/schematic")
         .expect("parent schematic remains open");
@@ -836,6 +846,7 @@ fn storing_symbol_document_remaps_instance_wires_when_origin_moves() {
 
     let parent = state
         .workspace
+        .content
         .schematic_buffers
         .get("work/top/schematic")
         .expect("parent schematic remains open");
@@ -878,6 +889,7 @@ fn storing_symbol_document_remaps_rotated_and_mirrored_instance_wires() {
 
     let parent = state
         .workspace
+        .content
         .schematic_buffers
         .get("work/top/schematic")
         .expect("parent schematic remains open");
@@ -916,6 +928,7 @@ fn storing_symbol_document_applies_wire_remaps_once() {
 
     let parent = state
         .workspace
+        .content
         .schematic_buffers
         .get("work/top/schematic")
         .expect("parent schematic remains open");
@@ -980,6 +993,7 @@ fn storing_symbol_document_remaps_all_open_parent_buffers() {
 
     let top = state
         .workspace
+        .content
         .schematic_buffers
         .get("work/top/schematic")
         .expect("top schematic remains open");
@@ -988,6 +1002,7 @@ fn storing_symbol_document_remaps_all_open_parent_buffers() {
 
     let tb = state
         .workspace
+        .content
         .schematic_buffers
         .get("work/tb/schematic")
         .expect("testbench schematic remains open");
@@ -1052,7 +1067,7 @@ fn copy_cell_flushes_live_active_schematic_before_copying_buffers() {
     state
         .schematic
         .add_component(ComponentType::Resistor, Point::new(20, 20));
-    let project_revision_before = state.workspace.project.revision().get();
+    let project_revision_before = state.workspace.content.project.revision().get();
 
     let copied = state
         .copy_cell("work", "amp", "work", "amp_copy")
@@ -1060,6 +1075,7 @@ fn copy_cell_flushes_live_active_schematic_before_copying_buffers() {
 
     let copy = state
         .workspace
+        .content
         .schematic_buffers
         .get("work/amp_copy/schematic")
         .expect("copy buffer exists");
@@ -1067,10 +1083,10 @@ fn copy_cell_flushes_live_active_schematic_before_copying_buffers() {
     assert_eq!(copy.document().components.len(), 1);
     assert_eq!(copy.document().components[0].kind, ComponentType::Resistor);
     assert_eq!(
-        state.workspace.project.revision().get(),
+        state.workspace.content.project.revision().get(),
         project_revision_before + 1
     );
-    assert!(state.workspace.project_metadata_dirty);
+    assert!(state.workspace.content.project_metadata_dirty);
 }
 
 #[test]
@@ -1079,6 +1095,7 @@ fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
     let original_id = add_cell_veriloga_source(&mut state, "amp");
     let configuration_id = state
         .workspace
+        .content
         .configuration_sets
         .create(crate::state::ConfigurationSetDefinition {
             name: "Release".to_owned(),
@@ -1096,22 +1113,22 @@ fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
         .expect("configuration root");
     let inactive_configuration_id = state
         .workspace
+        .content
         .configuration_sets
         .clone_configuration(configuration_id, 1, "Characterization")
         .expect("inactive configuration root");
-    let project_revision_before_copy = state.workspace.project.revision().get();
+    let project_revision_before_copy = state.workspace.content.project.revision().get();
 
     state
         .copy_cell("work", "amp", "work", "amp_copy")
         .expect("copy succeeds");
+    let project = &state.workspace.content;
     assert_eq!(
-        state.workspace.project.revision().get(),
+        project.project.revision().get(),
         project_revision_before_copy + 1
     );
     assert!(matches!(
-        state
-            .workspace
-            .project
+        project.project
             .library_mutation_audit()
             .last()
             .map(|receipt| receipt.mutation()),
@@ -1128,16 +1145,14 @@ fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
     let copied_owner = crate::state::ProjectSourceOwner::cell_view(CellViewRef::new(
         "work", "amp_copy", "behavior",
     ));
-    let copied = state
-        .workspace
+    let copied = project
         .project_sources
         .bundle_for_owner(&copied_owner)
         .expect("copied source exists");
     assert_ne!(copied.id(), original_id);
     assert_eq!(
         copied.root().content(),
-        state
-            .workspace
+        project
             .project_sources
             .get_bundle(original_id)
             .expect("original source")
@@ -1145,25 +1160,23 @@ fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
             .content()
     );
 
-    let revision = state
-        .workspace
+    let revision = project
         .project_sources
         .get_bundle(original_id)
         .expect("original source")
         .revision();
-    let project_revision_before_rename = state.workspace.project.revision().get();
+    let project_revision_before_rename = project.project.revision().get();
     state
         .rename_cell("work", "amp", "amp_renamed")
         .expect("rename succeeds");
+    let project = &state.workspace.content;
     assert_eq!(
-        state.workspace.project.revision().get(),
+        project.project.revision().get(),
         project_revision_before_rename + 1
     );
-    assert_eq!(state.workspace.project.library_mutation_audit().len(), 2);
+    assert_eq!(project.project.library_mutation_audit().len(), 2);
     assert!(matches!(
-        state
-            .workspace
-            .project
+        project.project
             .library_mutation_audit()
             .last()
             .map(|receipt| receipt.mutation()),
@@ -1178,33 +1191,30 @@ fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
         "amp_renamed",
         "behavior",
     ));
-    let renamed = state
-        .workspace
+    let renamed = project
         .project_sources
         .bundle_for_owner(&renamed_owner)
         .expect("renamed source exists");
     assert_eq!(renamed.id(), original_id);
     assert!(renamed.revision() > revision);
     assert!(
-        state
-            .workspace
+        project
             .project_sources
             .bundle_for_owner(&crate::state::ProjectSourceOwner::cell_view(
                 CellViewRef::new("work", "amp", "behavior")
             ))
             .is_none()
     );
-    assert!(state.workspace.project_sources_dirty);
+    assert!(project.project_sources_dirty);
     for id in [configuration_id, inactive_configuration_id] {
-        let configuration = state
-            .workspace
+        let configuration = project
             .configuration_sets
             .find(id)
             .expect("configuration remains");
         assert_eq!(configuration.root().cell, "amp_renamed");
         assert_eq!(configuration.revision(), 2);
     }
-    assert!(state.workspace.project_metadata_dirty);
+    assert!(project.project_metadata_dirty);
 }
 
 #[test]
@@ -1215,16 +1225,17 @@ fn canonical_cell_collisions_reject_copy_and_rename_without_partial_mutation() {
     state
         .schematic
         .add_component(ComponentType::Resistor, Point::new(20, 20));
-    let before_sources = state.workspace.project_sources.clone();
+    let before_sources = state.workspace.content.project_sources.clone();
 
     let copy_error = state
         .copy_cell("work", "\u{c9}tage", "work", "\u{e9}TAGE")
         .expect_err("accented case aliases cannot create a second cell identity");
     assert!(copy_error.contains("canonical cell identity"));
-    assert_eq!(state.workspace.project_sources, before_sources);
+    assert_eq!(state.workspace.content.project_sources, before_sources);
     assert_eq!(
         state
             .workspace
+            .content
             .schematic_buffers
             .get(&persisted_key)
             .expect("source buffer remains")
@@ -1248,9 +1259,10 @@ fn canonical_cell_collisions_reject_copy_and_rename_without_partial_mutation() {
         .get_library_mut("work")
         .expect("work library")
         .add_cell(Cell::new("Cible"));
-    let before_sources = state.workspace.project_sources.clone();
+    let before_sources = state.workspace.content.project_sources.clone();
     let before_revision = state
         .workspace
+        .content
         .project_sources
         .get_bundle(original_id)
         .expect("owned source")
@@ -1259,10 +1271,11 @@ fn canonical_cell_collisions_reject_copy_and_rename_without_partial_mutation() {
         .rename_cell("work", "\u{c9}tage", "cIBLE")
         .expect_err("rename cannot alias an existing canonical identity");
     assert!(rename_error.contains("canonical cell identity"));
-    assert_eq!(state.workspace.project_sources, before_sources);
+    assert_eq!(state.workspace.content.project_sources, before_sources);
     assert_eq!(
         state
             .workspace
+            .content
             .project_sources
             .get_bundle(original_id)
             .expect("owned source remains")
@@ -1289,7 +1302,7 @@ fn symbol_log_anchor_opens_symbol_view_and_selects_pin() {
         point: Some(Point::new(-30, 0)),
     });
 
-    assert_eq!(state.workspace.active_view, reference);
+    assert_eq!(state.workspace.content.active_view, reference);
     assert_eq!(state.ui.symbol.selected_pin.as_deref(), Some("IN"));
     assert_eq!(state.workbench.workspace, Workspace::Design);
 }
@@ -1303,7 +1316,7 @@ fn symbol_violation_cycle_opens_symbol_view_and_selects_pin() {
     crate::schematic::view::violations::cycle_violation(&mut state, 1);
 
     assert_eq!(
-        state.workspace.active_view,
+        state.workspace.content.active_view,
         CellViewRef::new("work", "amp", "symbol")
     );
     assert_eq!(state.ui.symbol.selected_pin.as_deref(), Some("IN"));
@@ -1537,6 +1550,7 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
     let owner = CellViewRef::new("work", "amp", "schematic").key();
     let main_sheet = state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(
             &owner,
@@ -1546,6 +1560,7 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
         .expect("source sheet catalog");
     let source_catalog = state
         .workspace
+        .content
         .design_management
         .sheet_catalog_mut(&owner)
         .expect("source catalog");
@@ -1591,6 +1606,7 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
         .expect("reviewed cross-sheet move");
     let variant_id = state
         .workspace
+        .content
         .design_management
         .variants_mut()
         .create(crate::state::AssemblyVariantDraft {
@@ -1610,6 +1626,7 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
 
     let source_sheet_ids = state
         .workspace
+        .content
         .design_management
         .sheet_catalog(&owner)
         .expect("source catalog")
@@ -1619,6 +1636,7 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
         .collect::<std::collections::BTreeSet<_>>();
     let source_port_ids = state
         .workspace
+        .content
         .design_management
         .sheet_catalog(&owner)
         .expect("source catalog")
@@ -1634,6 +1652,7 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
     let copied_owner = CellViewRef::new("work", "amp_copy", "schematic").key();
     let copied_catalog = state
         .workspace
+        .content
         .design_management
         .sheet_catalog(&copied_owner)
         .expect("copied sheet catalog");
@@ -1654,6 +1673,7 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
 
     let resolved = state
         .workspace
+        .content
         .design_management
         .variants()
         .resolve(variant_id)
@@ -1682,6 +1702,7 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
     let old_owner = CellViewRef::new("work", "amp", "schematic").key();
     let sheet_id = state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&old_owner, "Main", [object_id])
         .expect("source sheet catalog");
@@ -1689,6 +1710,7 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
         crate::state::SchematicObjectKey::new(&old_owner, object_id).expect("source scoped object");
     let variant_id = state
         .workspace
+        .content
         .design_management
         .variants_mut()
         .create(crate::state::AssemblyVariantDraft {
@@ -1724,12 +1746,14 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
     };
     let preview = state
         .workspace
+        .content
         .design_management
         .annotation()
         .preview_renumbering(&renumber_request)
         .expect("renumber preview");
     state
         .workspace
+        .content
         .design_management
         .annotation_mut()
         .commit_renumbering(&preview, &renumber_request)
@@ -1743,6 +1767,7 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
     assert!(
         state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&old_owner)
             .is_none()
@@ -1750,6 +1775,7 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
     assert_eq!(
         state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&new_owner)
             .expect("renamed sheet catalog")
@@ -1759,6 +1785,7 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
     );
     let resolved = state
         .workspace
+        .content
         .design_management
         .variants()
         .resolve(variant_id)
@@ -1778,6 +1805,7 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
     assert!(
         state
             .workspace
+            .content
             .design_management
             .annotation()
             .effective_mapping_for(&old_owner, object_id)
@@ -1787,6 +1815,7 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
     assert!(
         state
             .workspace
+            .content
             .design_management
             .annotation()
             .effective_mapping_for(&new_owner, object_id)
@@ -1804,9 +1833,8 @@ fn rename_cell_publishes_scoped_design_management_remaps_without_a_sheet_catalog
     let old_owner = CellViewRef::new("work", "amp", "schematic").key();
     let old_object =
         crate::state::SchematicObjectKey::new(&old_owner, object_id).expect("source scoped object");
-    let variant_id = state
-        .workspace
-        .design_management
+    let designs = &mut state.workspace.content.design_management;
+    let variant_id = designs
         .variants_mut()
         .create(crate::state::AssemblyVariantDraft {
             name: "Industrial".to_owned(),
@@ -1839,15 +1867,11 @@ fn rename_cell_publishes_scoped_design_management_remaps_without_a_sheet_catalog
             imported: false,
         }],
     };
-    let preview = state
-        .workspace
-        .design_management
+    let preview = designs
         .annotation()
         .preview_renumbering(&renumber_request)
         .expect("renumber preview");
-    state
-        .workspace
-        .design_management
+    designs
         .annotation_mut()
         .commit_renumbering(&preview, &renumber_request)
         .expect("reviewed annotation");
@@ -1859,6 +1883,7 @@ fn rename_cell_publishes_scoped_design_management_remaps_without_a_sheet_catalog
     let new_owner = CellViewRef::new("work", "amp_rev_c", "schematic").key();
     let resolved = state
         .workspace
+        .content
         .design_management
         .variants()
         .resolve(variant_id)
@@ -1878,6 +1903,7 @@ fn rename_cell_publishes_scoped_design_management_remaps_without_a_sheet_catalog
     assert!(
         state
             .workspace
+            .content
             .design_management
             .annotation()
             .effective_mapping_for(&new_owner, object_id)
@@ -1890,14 +1916,14 @@ fn rename_cell_publishes_scoped_design_management_remaps_without_a_sheet_catalog
 fn rename_top_cell_then_serialize_succeeds() {
     let mut state = AppState::default();
     state.provision_test_project_technology_contract();
-    assert_eq!(state.workspace.project.root_library, "user");
-    assert_eq!(state.workspace.project.top_cell, "top");
+    assert_eq!(state.workspace.content.project.root_library, "user");
+    assert_eq!(state.workspace.content.project.top_cell, "top");
 
     state
         .rename_cell("user", "top", "system")
         .expect("the project root cell is writable");
 
-    assert_eq!(state.workspace.project.top_cell, "system");
+    assert_eq!(state.workspace.content.project.top_cell, "system");
     crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
         .expect("a renamed project root cell must still serialize and validate");
 }
@@ -1914,7 +1940,7 @@ fn create_library_rejects_a_canonical_identity_collision() {
     assert!(matches!(
         state
             .workspace
-            .project
+            .content.project
             .library_mutation_audit()
             .last()
             .map(|receipt| receipt.mutation()),
@@ -1952,7 +1978,7 @@ fn state_with_populated_user_library() -> AppState {
     state
         .workspace
         .insert_schematic_editor(amp.key(), SchematicState::default());
-    state.workspace.open_views = vec![crate::state::OpenCellView::new(
+    state.workspace.content.open_views = vec![crate::state::OpenCellView::new(
         top.clone(),
         ViewType::Schematic,
     )];
@@ -1970,16 +1996,19 @@ fn state_with_populated_user_library() -> AppState {
     .expect("valid source bundle");
     state
         .workspace
+        .content
         .project_sources
         .insert_bundle(bundle)
         .expect("unique source owner");
     state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&amp.key(), "Main", [])
         .expect("owned sheet catalog");
     state
         .workspace
+        .content
         .configuration_sets
         .create(crate::state::ConfigurationSetDefinition {
             name: "Release".to_owned(),
@@ -2031,6 +2060,7 @@ fn rename_library_propagation_matrix() {
     let mut state = state_with_populated_user_library();
     let source_id = state
         .workspace
+        .content
         .project_sources
         .iter_bundles()
         .find(|bundle| {
@@ -2046,28 +2076,26 @@ fn rename_library_propagation_matrix() {
         .rename_library("user", "project_lib")
         .expect("a writable library renames");
 
+    let project = &state.workspace.content;
     assert_eq!(remapped, 1, "the bound instance follows the library");
     assert!(state.library_manager.get_library("user").is_none());
     assert!(state.library_manager.get_library("project_lib").is_some());
     assert!(
-        state
-            .workspace
+        project
             .schematic_buffers
             .keys()
             .all(|key| key.starts_with("project_lib/")),
         "every buffer is re-keyed under the renamed library"
     );
-    assert_eq!(state.workspace.active_view.library, "project_lib");
+    assert_eq!(project.active_view.library, "project_lib");
     assert!(
-        state
-            .workspace
+        project
             .open_views
             .iter()
             .all(|open| open.reference.library == "project_lib")
     );
     assert!(
-        state
-            .workspace
+        project
             .hierarchy_stack
             .iter()
             .all(|reference| reference.library == "project_lib")
@@ -2081,8 +2109,7 @@ fn rename_library_propagation_matrix() {
         "project_lib"
     );
     assert_eq!(
-        state
-            .workspace
+        project
             .project_sources
             .get_bundle(source_id)
             .expect("bundle identity is stable across a rename")
@@ -2094,32 +2121,28 @@ fn rename_library_propagation_matrix() {
         ))
     );
     assert!(
-        state
-            .workspace
+        project
             .design_management
             .sheet_catalog(&CellViewRef::new("project_lib", "amp", "schematic").key())
             .is_some(),
         "sheet-catalog ownership moves with the library"
     );
     assert!(
-        state
-            .workspace
+        project
             .design_management
             .sheet_catalog(&CellViewRef::new("user", "amp", "schematic").key())
             .is_none()
     );
     assert_eq!(
-        state.workspace.configuration_sets.configurations()[0]
+        project.configuration_sets.configurations()[0]
             .root()
             .library,
         "project_lib",
         "configuration roots follow the renamed library"
     );
-    assert_eq!(state.workspace.project.root_library, "project_lib");
+    assert_eq!(project.project.root_library, "project_lib");
     assert!(matches!(
-        state
-            .workspace
-            .project
+        project.project
             .library_mutation_audit()
             .last()
             .map(|receipt| receipt.mutation()),
@@ -2135,9 +2158,9 @@ fn rename_library_is_blocked_by_a_lease_on_either_name() {
     for locked in ["user", "project_lib"] {
         let mut state = state_with_populated_user_library();
         let snapshot = crate::state::library_browser::ProjectLibraryLockSnapshot::try_new(
-            state.workspace.project.id(),
+            state.workspace.content.project.id(),
             1,
-            state.workspace.project.revision(),
+            state.workspace.content.project.revision(),
             state.library_manager.revision(),
             "org-lock-service",
             vec![crate::state::library_browser::ProjectLibraryEditLock::new(
@@ -2178,7 +2201,7 @@ fn delete_library_is_blocked_by_root_config_root_and_referenced_master() {
         "{root_error}"
     );
 
-    state.workspace.project.root_library = "spare".to_owned();
+    state.workspace.content.project.root_library = "spare".to_owned();
     let mut spare = Library::new("spare");
     let mut consumer = Cell::new("consumer");
     consumer.add_view(View::new("schematic", ViewType::Schematic));
@@ -2202,7 +2225,7 @@ fn delete_library_is_blocked_by_root_config_root_and_referenced_master() {
         "{configuration_error}"
     );
 
-    state.workspace.configuration_sets = Default::default();
+    state.workspace.content.configuration_sets = Default::default();
     let reference_error = state
         .delete_library("user")
         .expect_err("a loaded instance master cannot be deleted out from under it");
@@ -2216,8 +2239,8 @@ fn delete_library_is_blocked_by_root_config_root_and_referenced_master() {
 #[test]
 fn delete_library_removes_its_cells_and_restores_valid_focus() {
     let mut state = state_with_populated_user_library();
-    state.workspace.project.root_library = "spare".to_owned();
-    state.workspace.project.top_cell = "keep".to_owned();
+    state.workspace.content.project.root_library = "spare".to_owned();
+    state.workspace.content.project.top_cell = "keep".to_owned();
     let mut spare = Library::new("spare");
     let mut keep = Cell::new("keep");
     keep.add_view(View::new("schematic", ViewType::Schematic));
@@ -2229,13 +2252,14 @@ fn delete_library_removes_its_cells_and_restores_valid_focus() {
         .insert_schematic_editor(survivor.key(), SchematicState::default());
     state
         .workspace
+        .content
         .open_views
         .push(crate::state::OpenCellView::new(
             survivor.clone(),
             ViewType::Schematic,
         ));
-    state.workspace.project_sources = Default::default();
-    state.workspace.configuration_sets = Default::default();
+    state.workspace.content.project_sources = Default::default();
+    state.workspace.content.configuration_sets = Default::default();
     if let Some(library) = state.library_manager.get_library_mut("user") {
         library
             .get_cell_mut("amp")
@@ -2247,28 +2271,25 @@ fn delete_library_removes_its_cells_and_restores_valid_focus() {
         .delete_library("user")
         .expect("an unreferenced library is deletable");
 
+    let project = &state.workspace.content;
     assert_eq!(cells, 2);
     assert!(state.library_manager.get_library("user").is_none());
     assert!(
-        state
-            .workspace
+        project
             .schematic_buffers
             .keys()
             .all(|key| !key.starts_with("user/"))
     );
     assert!(
-        state
-            .workspace
+        project
             .open_views
             .iter()
             .all(|open| open.reference.library != "user")
     );
-    assert_eq!(state.workspace.active_view, survivor);
+    assert_eq!(project.active_view, survivor);
     assert!(state.workspace.active_context_schematic().is_some());
     assert!(matches!(
-        state
-            .workspace
-            .project
+        project.project
             .library_mutation_audit()
             .last()
             .map(|receipt| receipt.mutation()),
@@ -2285,7 +2306,7 @@ fn rename_view_moves_the_buffer_source_and_view_exact_bindings() {
         .expect("the configuration root view renames");
     assert_eq!(remapped, 0, "no instance binds the renamed root view");
     assert_eq!(
-        state.workspace.configuration_sets.configurations()[0]
+        state.workspace.content.configuration_sets.configurations()[0]
             .root()
             .view,
         "netlist_view",
@@ -2296,6 +2317,7 @@ fn rename_view_moves_the_buffer_source_and_view_exact_bindings() {
         .rename_view("user", "amp", "schematic", "netlist_view")
         .expect("a writable view renames");
 
+    let project = &state.workspace.content;
     assert_eq!(
         remapped, 1,
         "only the instances bound to that exact view move"
@@ -2309,14 +2331,12 @@ fn rename_view_moves_the_buffer_source_and_view_exact_bindings() {
             .is_some()
     );
     assert!(
-        state
-            .workspace
+        project
             .schematic_buffers
             .contains_key(&CellViewRef::new("user", "amp", "netlist_view").key())
     );
     assert!(
-        !state
-            .workspace
+        !project
             .schematic_buffers
             .contains_key(&CellViewRef::new("user", "amp", "schematic").key())
     );
@@ -2329,16 +2349,13 @@ fn rename_view_moves_the_buffer_source_and_view_exact_bindings() {
         "netlist_view"
     );
     assert!(
-        state
-            .workspace
+        project
             .design_management
             .sheet_catalog(&CellViewRef::new("user", "amp", "netlist_view").key())
             .is_some()
     );
     assert!(matches!(
-        state
-            .workspace
-            .project
+        project.project
             .library_mutation_audit()
             .last()
             .map(|receipt| receipt.mutation()),
@@ -2375,7 +2392,7 @@ fn state_with_probed_conductors() -> AppState {
     wires.push(Wire::new(91, vec![out_a, out_b]));
     wires.push(Wire::new(92, vec![mid_a, mid_b]));
     state.simulation.cross_probe.update(
-        state.workspace.active_view.clone(),
+        state.workspace.content.active_view.clone(),
         HashMap::from([
             (out_a, "OUT".to_owned()),
             (out_b, "OUT".to_owned()),

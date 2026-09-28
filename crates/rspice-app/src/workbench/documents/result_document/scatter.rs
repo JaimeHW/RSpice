@@ -1006,7 +1006,7 @@ mod tests {
         assert!(simulation.select_analysis(0));
         let mut workspace = crate::state::ProjectWorkspace::default();
         if let Some(min) = limit {
-            workspace.specs.push(SpecEntry {
+            workspace.content.specs.push(SpecEntry {
                 measurement: "gain_dc".to_owned(),
                 expression: String::new(),
                 min: Some(min),
@@ -1096,7 +1096,7 @@ mod tests {
         let original =
             population::plan(&mut context(&simulation, &workspace, &mut results)).unwrap();
         assert_eq!(original.failing_count(), 38);
-        workspace.specs[0].measurement = "gain_ac".to_owned();
+        workspace.content.specs[0].measurement = "gain_ac".to_owned();
 
         let plan = population::plan(&mut context(&simulation, &workspace, &mut results)).unwrap();
         let pair = active_pair(&plan, &results.scatter).unwrap();

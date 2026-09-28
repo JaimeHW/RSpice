@@ -31,7 +31,7 @@ fn app_with_open_candidate() -> RSpiceApp {
             },
         )
         .expect("create project model");
-    let revision = app.state.workspace.project.revision();
+    let revision = app.state.workspace.content.project.revision();
     app.state
         .workbench
         .model_editor

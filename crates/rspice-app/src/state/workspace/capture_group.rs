@@ -1,10 +1,12 @@
 //! App-facing capture group aliases and project transaction integration tests.
 
-pub(crate) use rspice_simulation_contract::capture_group::validate_plan_groups;
 pub use rspice_simulation_contract::capture_group::{
-    CaptureGroup, CaptureGroupError, CaptureGroupMembership, CaptureGroupRule, MembershipMove,
-    UNGROUPED_NAME, collation_key, group_namer, normalize_name,
+    CaptureGroup, CaptureGroupMembership, CaptureGroupRule, MembershipMove, UNGROUPED_NAME,
+    collation_key, group_namer, normalize_name,
 };
+
+#[cfg(test)]
+use rspice_simulation_contract::capture_group::CaptureGroupError;
 
 #[cfg(test)]
 mod tests {
@@ -35,15 +37,18 @@ mod tests {
         let plan_id = SimulationPlanId::new();
         let mut workspace = ProjectWorkspace::default();
         workspace
+            .content
             .simulation_plan_payloads
             .push(SimulationPlanPayloadRecord {
                 plan_id,
                 payload: SimulationPlanPayload::default(),
             });
         workspace
+            .content
             .add_saved_output(plan_id, capture_output("core", "V(x1.n)"))
             .expect("first output");
         workspace
+            .content
             .add_saved_output(plan_id, capture_output("edge", "V(x2.n)"))
             .expect("second output");
         let mut group = CaptureGroup::new("Core rails").expect("group name");
@@ -52,6 +57,7 @@ mod tests {
         ));
         group.points = Some(SavedOutputPolicy::EveryAcceptedPoint);
         workspace
+            .content
             .add_capture_group(plan_id, group.clone())
             .expect("group is added");
         (workspace, plan_id, group)
@@ -60,7 +66,11 @@ mod tests {
     #[test]
     fn capture_groups_survive_a_project_round_trip_unchanged() {
         let (workspace, plan_id, group) = workspace_with_capture_group();
-        let payload = workspace.plan_data(plan_id).expect("payload").clone();
+        let payload = workspace
+            .content
+            .plan_data(plan_id)
+            .expect("payload")
+            .clone();
 
         let wire = serde_json::to_string(&payload).expect("serialize");
         let restored: SimulationPlanPayload = serde_json::from_str(&wire).expect("deserialize");
@@ -90,7 +100,11 @@ mod tests {
     #[test]
     fn a_project_written_before_capture_groups_loads_with_everything_ungrouped() {
         let (workspace, plan_id, _) = workspace_with_capture_group();
-        let payload = workspace.plan_data(plan_id).expect("payload").clone();
+        let payload = workspace
+            .content
+            .plan_data(plan_id)
+            .expect("payload")
+            .clone();
         let mut wire = serde_json::to_value(&payload).expect("serialize");
         wire.as_object_mut()
             .expect("payload object")
@@ -124,6 +138,7 @@ mod tests {
 
         let collision = CaptureGroup::new("core RAILS").expect("name is well formed on its own");
         let refusal = workspace
+            .content
             .add_capture_group(plan_id, collision)
             .expect_err("a case-insensitive collision is refused");
 
@@ -138,8 +153,8 @@ mod tests {
             "{refusal}"
         );
         assert_eq!(
-            workspace.plan_data(plan_id),
-            before.plan_data(plan_id),
+            workspace.content.plan_data(plan_id),
+            before.content.plan_data(plan_id),
             "a refused add leaves the plan untouched"
         );
     }
@@ -157,14 +172,21 @@ mod tests {
     #[test]
     fn one_output_cannot_be_named_by_two_groups() {
         let (mut workspace, plan_id, first) = workspace_with_capture_group();
-        let output_id = workspace.plan_data(plan_id).expect("payload").saved_outputs[0].id;
+        let output_id = workspace
+            .content
+            .plan_data(plan_id)
+            .expect("payload")
+            .saved_outputs[0]
+            .id;
         workspace
+            .content
             .set_capture_group_member(plan_id, first.id, output_id, true)
             .expect("the first group names it");
         let mut second = CaptureGroup::new("Watchlist").expect("group");
         second.members.push(output_id);
 
         let refusal = workspace
+            .content
             .add_capture_group(plan_id, second)
             .expect_err("a second explicit claim on one output is refused");
 
@@ -183,21 +205,29 @@ mod tests {
     #[test]
     fn naming_an_output_moves_it_off_whichever_group_held_it() {
         let (mut workspace, plan_id, core) = workspace_with_capture_group();
-        let edge_id = workspace.plan_data(plan_id).expect("payload").saved_outputs[1].id;
+        let edge_id = workspace
+            .content
+            .plan_data(plan_id)
+            .expect("payload")
+            .saved_outputs[1]
+            .id;
         let watchlist = CaptureGroup::new("Watchlist").expect("group");
         let watchlist_id = watchlist.id;
         workspace
+            .content
             .add_capture_group(plan_id, watchlist)
             .expect("second group");
         workspace
+            .content
             .set_capture_group_member(plan_id, core.id, edge_id, true)
             .expect("core names the sibling-scope output");
 
         workspace
+            .content
             .set_capture_group_member(plan_id, watchlist_id, edge_id, true)
             .expect("the watchlist takes it over");
 
-        let payload = workspace.plan_data(plan_id).expect("payload");
+        let payload = workspace.content.plan_data(plan_id).expect("payload");
         assert!(
             payload.capture_groups[0].members.is_empty(),
             "the previous holder released it rather than both holding it"
@@ -213,14 +243,19 @@ mod tests {
             SavedOutputKind::RawVoltageOrCurrent,
         ));
         let wide_id = wide.id;
-        workspace.add_capture_group(plan_id, wide).expect("added");
+        workspace
+            .content
+            .add_capture_group(plan_id, wide)
+            .expect("added");
         let outputs = workspace
+            .content
             .plan_data(plan_id)
             .expect("payload")
             .saved_outputs
             .clone();
         let before = CaptureGroupMembership::resolve(
             &workspace
+                .content
                 .plan_data(plan_id)
                 .expect("payload")
                 .capture_groups,
@@ -229,11 +264,13 @@ mod tests {
         assert_eq!(before.owner(0), core.id, "the earlier group takes it first");
 
         workspace
+            .content
             .reorder_capture_group(plan_id, wide_id, true)
             .expect("the wide group is raised");
 
         let after = CaptureGroupMembership::resolve(
             &workspace
+                .content
                 .plan_data(plan_id)
                 .expect("payload")
                 .capture_groups,
@@ -249,17 +286,27 @@ mod tests {
     #[test]
     fn cloning_a_plan_rebinds_named_members_onto_the_cloned_outputs() {
         let (mut workspace, plan_id, core) = workspace_with_capture_group();
-        let source_output = workspace.plan_data(plan_id).expect("payload").saved_outputs[0].id;
+        let source_output = workspace
+            .content
+            .plan_data(plan_id)
+            .expect("payload")
+            .saved_outputs[0]
+            .id;
         workspace
+            .content
             .set_capture_group_member(plan_id, core.id, source_output, true)
             .expect("named member");
         let cloned_plan = SimulationPlanId::new();
 
         workspace
+            .content
             .clone_plan_data(plan_id, cloned_plan, true, false, &[])
             .expect("clone");
 
-        let cloned = workspace.plan_data(cloned_plan).expect("cloned payload");
+        let cloned = workspace
+            .content
+            .plan_data(cloned_plan)
+            .expect("cloned payload");
         assert_eq!(cloned.capture_groups.len(), 1);
         assert_ne!(
             cloned.capture_groups[0].id, core.id,

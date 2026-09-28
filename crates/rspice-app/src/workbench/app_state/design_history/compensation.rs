@@ -38,6 +38,7 @@ impl DocumentCompensation {
     pub(super) fn with_recorded_sheets(state: &AppState, reference: CellViewRef) -> Self {
         let before_sheet_assignments = state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&reference.key())
             .map(|catalog| catalog.object_assignments().clone())
@@ -75,6 +76,7 @@ impl DocumentCompensation {
         let key = self.reference.key();
         if state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&key)
             .is_none()
@@ -86,7 +88,7 @@ impl DocumentCompensation {
         else {
             return Ok(());
         };
-        let mut candidate = state.workspace.design_management.clone();
+        let mut candidate = state.workspace.content.design_management.clone();
         let catalog = candidate
             .sheet_catalog_mut(&key)
             .expect("the cloned catalog retains the key just found on the live one");
@@ -112,6 +114,7 @@ impl DocumentCompensation {
         }
         state
             .workspace
+            .content
             .replace_design_management(candidate)
             .map_err(|error| error.to_string())?;
         Ok(())

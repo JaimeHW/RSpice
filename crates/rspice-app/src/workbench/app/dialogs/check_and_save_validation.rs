@@ -81,8 +81,8 @@ impl CheckAndSaveValidationReport {
     pub(crate) fn collect(state: &AppState) -> Result<Self, String> {
         let effective_scope = effective_save_scope(state, SaveScope::ActiveDocument);
         let active_view = state.workspace.active_schematic_reference();
-        let project_id = state.workspace.project.id().to_string();
-        let project_revision = state.workspace.project.revision().get();
+        let project_id = state.workspace.content.project.id().to_string();
+        let project_revision = state.workspace.content.project.revision().get();
         let accepted_generation = accepted_generation(state);
         let mut findings = BTreeMap::<String, CheckAndSaveFinding>::new();
         let mut dependencies = BTreeMap::<String, ContentDigest>::new();
@@ -124,7 +124,7 @@ impl CheckAndSaveValidationReport {
             );
         }
 
-        if let Err(error) = state.workspace.project.validate() {
+        if let Err(error) = state.workspace.content.project.validate() {
             insert_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Blocker,
@@ -137,9 +137,21 @@ impl CheckAndSaveValidationReport {
         // exactly, and if the plan needs one it must have one. The three states
         // carry different remedies, so each owns a distinct finding identity.
         if let Err(error) = state.technology_gate_block_reason() {
-            let discriminator = if state.workspace.project.technology_binding().is_none() {
+            let discriminator = if state
+                .workspace
+                .content
+                .project
+                .technology_binding()
+                .is_none()
+            {
                 "technology-required-by-plan"
-            } else if state.workspace.project.technology_change_audit().is_empty() {
+            } else if state
+                .workspace
+                .content
+                .project
+                .technology_change_audit()
+                .is_empty()
+            {
                 "technology-binding-unaudited"
             } else {
                 "technology-binding-invalid"
@@ -178,6 +190,7 @@ impl CheckAndSaveValidationReport {
         // contracts are statements about these; nothing hierarchy-derived is.
         let mut buffers = state
             .workspace
+            .content
             .schematic_buffers
             .iter()
             .map(|(key, schematic)| (key.clone(), schematic))
@@ -246,6 +259,7 @@ impl CheckAndSaveValidationReport {
         let active_key = active_view.key();
         let root_is_active = state
             .workspace
+            .content
             .simulation_root_reference()
             .key()
             .eq_ignore_ascii_case(&active_key);
@@ -363,11 +377,14 @@ impl CheckAndSaveValidationReport {
                 }
                 let generated_source = state
                     .workspace
+                    .content
                     .bind_generated_netlist_provenance(generated.netlist);
                 match crate::simulation::controller::prepared_run::expand_generated_dependencies(
                     &generated_source,
                     root.current_file(),
-                    &crate::state::IncludeSearchChain::for_project(&state.workspace.project),
+                    &crate::state::IncludeSearchChain::for_project(
+                        &state.workspace.content.project,
+                    ),
                     &state.model_library_manager,
                 ) {
                     Ok((sealed_source, sealed_dependencies)) => {
@@ -414,7 +431,7 @@ impl CheckAndSaveValidationReport {
                 .collect::<Vec<_>>(),
         };
         documents.sort_by(|left, right| left.0.cmp(&right.0));
-        let root_schematic_key = state.workspace.simulation_root_reference().key();
+        let root_schematic_key = state.workspace.content.simulation_root_reference().key();
         let symbol_resolver = SymbolResolver::new(&state.library_manager, &buffers);
         for (key, schematic) in &documents {
             if let Err(error) = schematic.document().validated_revisions.validate() {
@@ -519,7 +536,7 @@ impl CheckAndSaveValidationReport {
         }
         dependencies.insert(
             "project:descriptor".to_owned(),
-            digest_serializable(&state.workspace.project)?,
+            digest_serializable(&state.workspace.content.project)?,
         );
         dependencies.insert(
             "project:libraries".to_owned(),
@@ -606,8 +623,8 @@ impl CheckAndSaveValidationReport {
     }
 
     pub(crate) fn source_is_current(&self, state: &AppState) -> bool {
-        self.project_id == state.workspace.project.id().to_string()
-            && self.project_revision == state.workspace.project.revision().get()
+        self.project_id == state.workspace.content.project.id().to_string()
+            && self.project_revision == state.workspace.content.project.revision().get()
             && self.accepted_generation == accepted_generation(state)
             && self.design_execution_epoch == state.design_execution_epoch
             && self.active_schematic_epoch == state.active_schematic_epoch
@@ -1135,9 +1152,10 @@ mod tests {
             .name = "X1".to_owned();
         state.sync_active_schematic_to_workspace();
 
-        let root = state.workspace.active_view.clone();
+        let root = state.workspace.content.active_view.clone();
         state
             .workspace
+            .content
             .configuration_sets
             .create(crate::state::ConfigurationSetDefinition {
                 name: "Stop at a schematic".to_owned(),
@@ -1178,9 +1196,10 @@ mod tests {
             .schematic
             .add_component(ComponentType::Resistor, Point::new(10, 10));
         state.sync_active_schematic_to_workspace();
-        let root = state.workspace.active_view.clone();
+        let root = state.workspace.content.active_view.clone();
         state
             .workspace
+            .content
             .configuration_sets
             .create(crate::state::ConfigurationSetDefinition {
                 name: "Unresolvable DUT".to_owned(),

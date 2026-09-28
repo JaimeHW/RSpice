@@ -32,7 +32,8 @@ impl ProjectWorkspace {
             .map_err(|error| error.to_string())?;
         let configuration = configuration
             .map(|id| {
-                self.configuration_sets
+                self.content
+                    .configuration_sets
                     .find(id)
                     .ok_or_else(|| "The hierarchy configuration no longer exists.".to_owned())
             })
@@ -71,8 +72,8 @@ impl<'a> HierarchyResolver<'a> {
             workspace,
             libraries,
             active_overlay,
-            workspace.simulation_root_reference(),
-            workspace.configuration_sets.active(),
+            workspace.content.simulation_root_reference(),
+            workspace.content.configuration_sets.active(),
         )
     }
 
@@ -98,15 +99,15 @@ impl<'a> HierarchyResolver<'a> {
 
     pub(super) fn resolve_all(self) -> (HierarchyResolution, ConfigurationExecutionPlan) {
         let documents = WorkspaceHierarchyDocuments {
-            buffers: &self.workspace.schematic_buffers,
+            buffers: &self.workspace.content.schematic_buffers,
             sessions: &self.workspace.schematic_sessions,
             active_overlay: self.active_overlay,
         };
         let context = HierarchyContext {
             documents: &documents,
             libraries: self.libraries.catalog(),
-            project_id: self.workspace.project.id(),
-            project_sources: &self.workspace.project_sources,
+            project_id: self.workspace.content.project.id(),
+            project_sources: &self.workspace.content.project_sources,
             source_files: &WorkspaceSourceFiles,
         };
         hierarchy_core::resolve_hierarchy(context, self.root, self.configuration)
@@ -169,6 +170,7 @@ pub(super) fn find_schematic<'a>(
     reference: &CellViewRef,
 ) -> Option<SchematicEditorRef<'a>> {
     workspace
+        .content
         .schematic_buffers
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case(&reference.key()))

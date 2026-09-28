@@ -103,6 +103,7 @@ fn place_instance(schematic: &mut SchematicState, id: u64, x: i32) {
 fn terminal_names(state: &AppState) -> Vec<String> {
     let mut names: Vec<String> = state
         .workspace
+        .content
         .schematic_buffers
         .get(PARENT)
         .expect("the parent buffer exists")

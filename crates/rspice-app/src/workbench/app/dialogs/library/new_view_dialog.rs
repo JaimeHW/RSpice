@@ -346,6 +346,7 @@ impl RSpiceApp {
         let candidate_layouts = match self
             .state
             .workspace
+            .content
             .prepare_insert_physical_layout_document(document)
         {
             Ok(candidate) => candidate,
@@ -404,6 +405,7 @@ impl RSpiceApp {
         self.state.library_manager = candidate_libraries;
         self.state
             .workspace
+            .content
             .commit_prepared_physical_layout_catalog(candidate_layouts);
         self.state
             .publish_project_library_mutation(project_mutation);
@@ -459,7 +461,7 @@ impl RSpiceApp {
         };
         let receipt =
             match crate::workbench::documents::code_workspace::compile_project_bundle_receipt(
-                self.state.workspace.project.id(),
+                self.state.workspace.content.project.id(),
                 &bundle,
                 Some(&module_name),
             ) {
@@ -484,7 +486,7 @@ impl RSpiceApp {
 
         // Prepare both durable stores on clones. No live project mutation is
         // visible until the complete view/source transaction has succeeded.
-        let mut candidate_sources = self.state.workspace.project_sources.clone();
+        let mut candidate_sources = self.state.workspace.content.project_sources.clone();
         if let Err(error) = candidate_sources.insert_bundle(bundle) {
             self.state.dialogs.new_view_error = Some(format!(
                 "The Verilog-A source bundle could not be retained: {error}"
@@ -551,8 +553,8 @@ impl RSpiceApp {
                 return outcome;
             }
         };
-        self.state.workspace.project_sources = candidate_sources;
-        self.state.workspace.project_sources_dirty = true;
+        self.state.workspace.content.project_sources = candidate_sources;
+        self.state.workspace.content.project_sources_dirty = true;
         self.state.library_manager = candidate_libraries;
         self.state
             .publish_project_library_mutation(project_mutation);
@@ -620,11 +622,12 @@ fn cell_schematic_ports(
     cell: &str,
 ) -> Vec<crate::state::PortSpec> {
     let reference = crate::state::CellViewRef::new(library, cell, "schematic");
-    if state.workspace.active_view == reference {
+    if state.workspace.content.active_view == reference {
         return state.schematic.document().interface_ports();
     }
     state
         .workspace
+        .content
         .schematic_buffers
         .get(&reference.key())
         .map(|schematic| schematic.document().interface_ports())
@@ -658,10 +661,14 @@ fn derive_cell_interface(
             continue;
         }
         let reference = crate::state::CellViewRef::new(library_name, cell_name, &view.name);
-        let schematic = if app.state.workspace.active_view == reference {
+        let schematic = if app.state.workspace.content.active_view == reference {
             Some(app.state.schematic.editor_ref().design)
         } else {
-            app.state.workspace.schematic_buffers.get(&reference.key())
+            app.state
+                .workspace
+                .content
+                .schematic_buffers
+                .get(&reference.key())
         };
         if let Some(schematic) = schematic {
             let ports = schematic.document().interface_ports();
@@ -893,19 +900,19 @@ mod tests {
         app.state.dialogs.new_view_name = "schematic".to_owned();
         app.state.dialogs.new_view_type = crate::state::ViewType::Schematic;
         app.state.dialogs.new_view_library_revision = app.state.library_manager.revision();
-        let project_revision_before = app.state.workspace.project.revision().get();
+        let project_revision_before = app.state.workspace.content.project.revision().get();
 
         let outcome = app.handle_new_view_create_action();
 
         assert!(outcome.close);
         assert_eq!(
-            app.state.workspace.project.revision().get(),
+            app.state.workspace.content.project.revision().get(),
             project_revision_before + 1
         );
         assert!(matches!(
             app.state
                 .workspace
-                .project
+                .content.project
                 .library_mutation_audit()
                 .last()
                 .map(|receipt| receipt.mutation()),
@@ -919,6 +926,7 @@ mod tests {
         let document = app
             .state
             .workspace
+            .content
             .schematic_buffers
             .get(&key)
             .expect("new schematic view owns an explicit document buffer");
@@ -1080,13 +1088,13 @@ mod tests {
         app.state.dialogs.new_view_name = "layout".to_owned();
         app.state.dialogs.new_view_type = ViewType::Layout;
         app.state.dialogs.new_view_library_revision = app.state.library_manager.revision();
-        let project_revision_before = app.state.workspace.project.revision().get();
+        let project_revision_before = app.state.workspace.content.project.revision().get();
 
         let outcome = app.handle_new_view_create_action();
 
         assert!(outcome.close, "{:?}", app.state.dialogs.new_view_error);
         assert_eq!(
-            app.state.workspace.project.revision().get(),
+            app.state.workspace.content.project.revision().get(),
             project_revision_before + 1
         );
         let reference = CellViewRef::new("layout_designs", "precision_amp", "layout");
@@ -1101,12 +1109,13 @@ mod tests {
         let document = app
             .state
             .workspace
+            .content
             .physical_layout_document(&reference)
             .expect("authoritative physical-layout document commits atomically");
         assert_eq!(document.owner(), &reference);
         assert_eq!(document.technology().package_id(), "demo180");
         assert_eq!(document.technology().stack_id(), "1P2M");
-        assert_eq!(app.state.workspace.active_view, reference);
+        assert_eq!(app.state.workspace.content.active_view, reference);
         assert_eq!(
             app.state.workbench.workspace,
             crate::workbench::state::Workspace::Design
@@ -1126,13 +1135,13 @@ mod tests {
         app.state.dialogs.new_view_name = "layout".to_owned();
         app.state.dialogs.new_view_type = ViewType::Layout;
         app.state.dialogs.new_view_library_revision = app.state.library_manager.revision();
-        let project_revision_before = app.state.workspace.project.revision();
+        let project_revision_before = app.state.workspace.content.project.revision();
 
         let outcome = app.handle_new_view_create_action();
 
         assert!(!outcome.close);
         assert_eq!(
-            app.state.workspace.project.revision(),
+            app.state.workspace.content.project.revision(),
             project_revision_before
         );
         let reference = CellViewRef::new("layout_designs", "precision_amp", "layout");
@@ -1146,6 +1155,7 @@ mod tests {
         assert!(
             app.state
                 .workspace
+                .content
                 .physical_layout_document(&reference)
                 .is_none()
         );
@@ -1171,7 +1181,7 @@ mod tests {
         app.state.dialogs.new_view_name = "MOD\u{c8}LE".to_owned();
         app.state.dialogs.new_view_type = ViewType::Schematic;
         app.state.dialogs.new_view_library_revision = app.state.library_manager.revision();
-        let buffers_before = app.state.workspace.schematic_buffers.len();
+        let buffers_before = app.state.workspace.content.schematic_buffers.len();
 
         let outcome = app.handle_new_view_create_action();
 
@@ -1184,7 +1194,10 @@ mod tests {
             .expect("identity cell remains");
         assert_eq!(cell.view_count(), 1);
         assert!(cell.get_view("Mod\u{e8}le").is_some());
-        assert_eq!(app.state.workspace.schematic_buffers.len(), buffers_before);
+        assert_eq!(
+            app.state.workspace.content.schematic_buffers.len(),
+            buffers_before
+        );
         assert!(
             app.state
                 .dialogs
@@ -1218,13 +1231,13 @@ mod tests {
         app.state.dialogs.new_view_name = "veriloga".to_owned();
         app.state.dialogs.new_view_type = ViewType::VerilogA;
         app.state.dialogs.new_view_library_revision = app.state.library_manager.revision();
-        let project_revision_before = app.state.workspace.project.revision().get();
+        let project_revision_before = app.state.workspace.content.project.revision().get();
 
         let outcome = app.handle_new_view_create_action();
 
         assert!(outcome.close, "{:?}", app.state.dialogs.new_view_error);
         assert_eq!(
-            app.state.workspace.project.revision().get(),
+            app.state.workspace.content.project.revision().get(),
             project_revision_before + 1
         );
         let reference =
@@ -1233,6 +1246,7 @@ mod tests {
         let bundle = app
             .state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&owner)
             .expect("created view owns a sealed source bundle");
@@ -1261,7 +1275,7 @@ mod tests {
             view.metadata.get("veriloga.ports").map(String::as_str),
             Some(r#"["inp","inn","out","vss"]"#)
         );
-        assert_eq!(app.state.workspace.active_view, reference);
+        assert_eq!(app.state.workspace.content.active_view, reference);
         assert_eq!(
             app.state.workbench.workspace,
             crate::workbench::state::Workspace::Netlist
@@ -1288,6 +1302,7 @@ mod tests {
             crate::state::CellViewRef::new("behavioral_models", "gain_stage", "veriloga");
         app.state
             .workspace
+            .content
             .project_sources
             .insert_bundle(
                 ProjectSourceBundle::try_new(
@@ -1301,7 +1316,13 @@ mod tests {
                 .unwrap(),
             )
             .unwrap();
-        let sources_before = app.state.workspace.project_sources.iter_bundles().count();
+        let sources_before = app
+            .state
+            .workspace
+            .content
+            .project_sources
+            .iter_bundles()
+            .count();
         app.state.dialogs.new_view_library = "behavioral_models".to_owned();
         app.state.dialogs.new_view_cell = "gain_stage".to_owned();
         app.state.dialogs.new_view_name = "veriloga".to_owned();
@@ -1312,7 +1333,12 @@ mod tests {
 
         assert!(!outcome.close);
         assert_eq!(
-            app.state.workspace.project_sources.iter_bundles().count(),
+            app.state
+                .workspace
+                .content
+                .project_sources
+                .iter_bundles()
+                .count(),
             sources_before
         );
         assert!(
@@ -1339,7 +1365,7 @@ mod tests {
         app.state
             .library_manager
             .add_library(Library::new("intervening_change"));
-        let project_revision_before = app.state.workspace.project.revision();
+        let project_revision_before = app.state.workspace.content.project.revision();
 
         let outcome = app.handle_new_view_create_action();
 
@@ -1352,7 +1378,7 @@ mod tests {
                 .is_some_and(|cell| cell.get_view("schematic").is_none())
         );
         assert_eq!(
-            app.state.workspace.project.revision(),
+            app.state.workspace.content.project.revision(),
             project_revision_before
         );
         assert_eq!(

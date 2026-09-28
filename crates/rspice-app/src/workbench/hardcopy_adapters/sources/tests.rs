@@ -59,7 +59,7 @@ fn quick_view_state(analysis: AnalysisResult, viewer: ResultViewer) -> AppState 
 fn resolve_quick_view(state: &AppState) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
     resolve_results_quick_view_source(ResultsQuickViewHardcopySource {
         source_key: "results-quick-view".to_owned(),
-        project_id: state.workspace.project.id(),
+        project_id: state.workspace.content.project.id(),
         state,
         scope: HardcopyScope::ActivePlotDocument,
     })
@@ -783,7 +783,7 @@ fn linked_report_table_requires_exact_source_and_dataset_inventory() {
     // Application resolution derives an exact inventory from retained source
     // owners. It never substitutes a most-recent or background run.
     let report_id = report.id();
-    app.workspace.report_documents.push(report.clone());
+    app.workspace.content.report_documents.push(report.clone());
     app.workbench.report_authoring.selected_document = Some(report_id);
     let app_resolved = report_inventory::resolve(&app, &report, HardcopyScope::CompleteReport)
         .expect("the retained dataset must authenticate the linked report table");
@@ -1005,14 +1005,12 @@ fn retained_linked_report_figure_resolves_identically_in_process_and_worker_snap
 
     let mut state = AppState::default();
     let report_id = report.id();
-    state.workspace.visualization_documents.push(visualization);
-    state.workspace.report_documents.push(report);
+    let project = &mut state.workspace.content;
+    project.visualization_documents.push(visualization);
+    project.report_documents.push(report);
     state.workbench.report_authoring.selected_document = Some(report_id);
-    let source_key = format!(
-        "project:{}:report:{}",
-        state.workspace.project.id().as_uuid(),
-        report_id
-    );
+    let project_id = project.project.id().as_uuid();
+    let source_key = format!("project:{project_id}:report:{report_id}");
 
     let synchronous =
         resolve_retained_hardcopy_source(&state, &source_key, HardcopyScope::CompleteReport)
@@ -1555,7 +1553,7 @@ fn production_figure_preparation_uses_the_open_dataset_not_the_global_run_select
 
     let source_key = format!(
         "project:{}:result-dataset:{}",
-        state.workspace.project.id().as_uuid(),
+        state.workspace.content.project.id().as_uuid(),
         displayed_dataset
     );
     let descriptors = enumerate_retained_hardcopy_sources(&state);
@@ -1621,7 +1619,7 @@ fn production_manifest_hardcopy_retains_the_complete_displayed_dataset_through_w
 
     let source_key = format!(
         "project:{}:result-dataset:{}",
-        state.workspace.project.id().as_uuid(),
+        state.workspace.content.project.id().as_uuid(),
         displayed_dataset
     );
     let prepared = prepare_retained_hardcopy_resolution(
@@ -1674,7 +1672,7 @@ fn production_stacked_results_hardcopy_retains_every_displayed_analysis() {
         .activate(WorkspaceDocumentId::ResultDataset(dataset_id));
     let source_key = format!(
         "project:{}:result-dataset:{}",
-        state.workspace.project.id().as_uuid(),
+        state.workspace.content.project.id().as_uuid(),
         dataset_id
     );
 
@@ -1728,7 +1726,7 @@ fn production_specs_hardcopy_judges_the_complete_dataset() {
     state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
-    state.workspace.specs = vec![
+    state.workspace.content.specs = vec![
         crate::state::SpecEntry {
             measurement: "gain".to_owned(),
             expression: "max gain".to_owned(),
@@ -1754,7 +1752,7 @@ fn production_specs_hardcopy_judges_the_complete_dataset() {
         .activate(WorkspaceDocumentId::ResultDataset(dataset_id));
     let source_key = format!(
         "project:{}:result-dataset:{}",
-        state.workspace.project.id().as_uuid(),
+        state.workspace.content.project.id().as_uuid(),
         dataset_id
     );
 
@@ -1858,7 +1856,7 @@ fn signed_off_specification_workspace() -> (AppState, String) {
         .activate(WorkspaceDocumentId::ResultDataset(dataset_id));
     let source_key = format!(
         "project:{}:result-dataset:{}",
-        state.workspace.project.id().as_uuid(),
+        state.workspace.content.project.id().as_uuid(),
         dataset_id
     );
     (state, source_key)
@@ -1897,7 +1895,7 @@ fn printed_specification_bounds(
 #[test]
 fn printed_specifications_are_the_ones_the_run_froze_not_the_ones_now_authored() {
     let (mut state, source_key) = signed_off_specification_workspace();
-    state.workspace.specs = vec![crate::state::SpecEntry {
+    state.workspace.content.specs = vec![crate::state::SpecEntry {
         measurement: "gain".to_owned(),
         expression: "max gain".to_owned(),
         min: Some(10.0),
@@ -1909,7 +1907,7 @@ fn printed_specifications_are_the_ones_the_run_froze_not_the_ones_now_authored()
 
     // The reader raises the limit after the run. The retained dataset was
     // never judged against 20 dB.
-    state.workspace.specs[0].min = Some(20.0);
+    state.workspace.content.specs[0].min = Some(20.0);
     let (after, identity_after) = printed_specification_bounds(&state, &source_key);
 
     assert_eq!(
@@ -1947,7 +1945,7 @@ fn quick_view_reads_exact_active_retained_waveform_without_report_reference() {
 
     let resolved = resolve_results_quick_view_source(ResultsQuickViewHardcopySource {
         source_key: "results-quick-view".to_owned(),
-        project_id: state.workspace.project.id(),
+        project_id: state.workspace.content.project.id(),
         state: &state,
         scope: HardcopyScope::ActivePlotDocument,
     })
@@ -2363,7 +2361,8 @@ fn project_visualization_hardcopy_uses_the_selected_pane_not_the_first_pane() {
         .unwrap();
     let document_id = document.id();
     let mut state = AppState::default();
-    state.workspace.visualization_documents.push(document);
+    let project = &mut state.workspace.content;
+    project.visualization_documents.push(document);
     state.workbench.visualization_studio.active_pane = Some(second_pane.get());
 
     let (_, _, selected) = active_visualization_document_pane(&state, document_id).unwrap();

@@ -968,7 +968,7 @@ fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
 
     // Frozen requirements, no live workspace contract: the page is offered.
     let state = specs_state(receipt_run(1));
-    assert!(state.workspace.specs.is_empty());
+    assert!(state.workspace.content.specs.is_empty());
     let run = state.simulation.active_run().unwrap();
     assert_eq!(
         quick_result_availability(&state, run),
@@ -979,7 +979,7 @@ fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
     // a page, because the capture resolves the frozen set and would write an
     // empty table.
     let mut state = specs_state(receipt_run(0));
-    state.workspace.specs.push(workspace_only.clone());
+    state.workspace.content.specs.push(workspace_only.clone());
     let run = state.simulation.active_run().unwrap();
     assert!(!quick_result_availability(&state, run).is_available());
 
@@ -990,7 +990,7 @@ fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
         .analyses
         .push(AnalysisResult::new(1, AnalysisType::Ac, "AC"));
     let mut state = specs_state(legacy);
-    state.workspace.specs.push(workspace_only);
+    state.workspace.content.specs.push(workspace_only);
     let run = state.simulation.active_run().unwrap();
     assert_eq!(
         quick_result_availability(&state, run),

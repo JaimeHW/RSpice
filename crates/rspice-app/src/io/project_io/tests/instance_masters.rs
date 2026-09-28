@@ -13,7 +13,7 @@ use crate::state::{LibraryCellInstance, Point, SchematicState};
 fn load_repairs_missing_instance_master() {
     let mut libraries = LibraryManager::with_primitives();
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let top = workspace.active_view.clone();
+    let top = workspace.content.active_view.clone();
     let mut binding = LibraryCellInstance::new("user", "ghost", "schematic");
     binding.module_name = Some("ghost".to_owned());
     binding.source_path = Some(std::path::PathBuf::from("cells/ghost.sp"));
@@ -30,6 +30,7 @@ fn load_repairs_missing_instance_master() {
 
     let restored = loaded
         .workspace
+        .content
         .schematic_buffers
         .get(&top.key())
         .expect("the parent drawing loads");
@@ -60,7 +61,7 @@ fn load_repairs_missing_instance_master() {
 fn load_breaks_an_instantiation_cycle_and_names_both_ends() {
     let mut libraries = LibraryManager::with_primitives();
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let top = workspace.active_view.clone();
+    let top = workspace.content.active_view.clone();
     let amp = CellViewRef::new("user", "amp", "schematic");
     {
         let library = libraries
@@ -89,11 +90,11 @@ fn load_breaks_an_instantiation_cycle_and_names_both_ends() {
 
     let loaded = load_project_text(&json, None).expect("a recursive hierarchy still opens");
 
-    let placements = loaded.workspace.schematic_buffers[&top.key()]
+    let placements = loaded.workspace.content.schematic_buffers[&top.key()]
         .document()
         .components
         .len()
-        + loaded.workspace.schematic_buffers[&amp.key()]
+        + loaded.workspace.content.schematic_buffers[&amp.key()]
             .document()
             .components
             .len();
@@ -147,7 +148,7 @@ fn unresolved_generated_veriloga_bindings_survive_project_save_and_reload() {
 
         let mut libraries = LibraryManager::with_primitives();
         let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-        let top = workspace.active_view.key();
+        let top = workspace.content.active_view.key();
         let mut stored_schematic = workspace.schematic_editor_mut(&top).unwrap();
         let schematic = &mut stored_schematic.editor;
         schematic.add_library_cell_component(Point::new(10, 20), binding);
@@ -157,7 +158,7 @@ fn unresolved_generated_veriloga_bindings_survive_project_save_and_reload() {
 
         let loaded =
             load_project_text(&json, None).expect("an unresolved model must not cost the project");
-        let restored = &loaded.workspace.schematic_buffers[&top]
+        let restored = &loaded.workspace.content.schematic_buffers[&top]
             .document()
             .components[0];
         assert_eq!(serde_json::to_value(restored).unwrap(), before);
@@ -177,7 +178,7 @@ fn unresolved_generated_veriloga_bindings_survive_project_save_and_reload() {
             load_project_text(&saved, None).expect("unresolved evidence remains loadable");
         assert_eq!(
             serde_json::to_value(
-                &reloaded.workspace.schematic_buffers[&top]
+                &reloaded.workspace.content.schematic_buffers[&top]
                     .document()
                     .components[0]
             )

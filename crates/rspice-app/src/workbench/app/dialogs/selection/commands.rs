@@ -431,14 +431,14 @@ fn design_nets(state: &AppState) -> Result<std::sync::Arc<Vec<DesignNet>>, Strin
         .workspace
         .design_projection(
             &state.library_manager,
-            &state.workspace.active_view,
+            &state.workspace.content.active_view,
             &state.schematic,
         )
         .map_err(|error| error.to_string())?;
     Ok(projection_nets(
         &state.library_manager,
         &projection,
-        &state.workspace.active_view.key(),
+        &state.workspace.content.active_view.key(),
     ))
 }
 
@@ -547,7 +547,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
     }
 
     let mut affected_output_names = BTreeSet::new();
-    for record in &state.workspace.simulation_plan_payloads {
+    for record in &state.workspace.content.simulation_plan_payloads {
         for output in &record.payload.saved_outputs {
             if references_any_symbol(&output.source_expression, &affected_symbols) {
                 affected_output_names.insert(output.name.clone());
@@ -555,7 +555,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
         }
     }
     let mut affected_specifications = BTreeSet::new();
-    for spec in &state.workspace.specs {
+    for spec in &state.workspace.content.specs {
         if affected_output_names
             .iter()
             .any(|name| name.eq_ignore_ascii_case(&spec.measurement))
@@ -563,7 +563,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
             affected_specifications.insert(spec.measurement.clone());
         }
     }
-    for record in &state.workspace.simulation_plan_payloads {
+    for record in &state.workspace.content.simulation_plan_payloads {
         for spec in &record.payload.specs {
             if affected_output_names
                 .iter()
@@ -655,14 +655,14 @@ fn cut_open_net_count(state: &AppState, selection: &Selection) -> Result<usize, 
         .workspace
         .design_projection(
             &state.library_manager,
-            &state.workspace.active_view,
+            &state.workspace.content.active_view,
             &state.schematic,
         )
         .map_err(|error| error.to_string())?;
     let before = projection_nets(
         &state.library_manager,
         &projection,
-        &state.workspace.active_view.key(),
+        &state.workspace.content.active_view.key(),
     );
     let mut after_schematic = state.schematic.clone();
     after_schematic.session.selection = selection.clone();

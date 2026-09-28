@@ -184,6 +184,7 @@ pub(crate) fn refresh_catalog_if_requested(app: &mut RSpiceApp) {
     let mut live_paths = app
         .state
         .workspace
+        .content
         .schematic_buffers
         .keys()
         .filter_map(|key| app.state.workspace.schematic_sessions.get(key))
@@ -564,7 +565,7 @@ fn project_owned_differences(state: &AppState) -> Result<ProjectOwnedDifferences
         .map_err(|error| format!("current simulation results are invalid: {error}"))?;
 
     let (saved_execution, saved_results) = if let Some(project_path) =
-        state.workspace.project.path.as_deref()
+        state.workspace.content.project.path.as_deref()
     {
         let project = crate::io::load_project_file(project_path).map_err(|error| {
             format!(
@@ -631,7 +632,7 @@ pub(crate) fn recovery_replacement_block_reason(state: &AppState) -> Option<Stri
     if differences.results {
         changed.push("simulation result history or selection");
     }
-    let baseline = if state.workspace.project.path.is_some() {
+    let baseline = if state.workspace.content.project.path.is_some() {
         "the last saved project snapshot"
     } else {
         "pristine unsaved-project defaults"
@@ -745,19 +746,20 @@ fn build_comparison_workspace(
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     let project_name = format!("{source_name} recovery");
     workspace
+        .content
         .project
         .rename(project_name)
-        .or_else(|_| workspace.project.rename("Recovered work"))
+        .or_else(|_| workspace.content.project.rename("Recovered work"))
         .map_err(|error| format!("Recovery project identity is invalid: {error}"))?;
-    workspace.project.path = None;
-    workspace.project.description =
+    workspace.content.project.path = None;
+    workspace.content.project.description =
         "Unsaved recovery comparison. Original source and checkpoint are retained.".to_owned();
 
     recovered.session.current_file = None;
     recovered.session.is_dirty = true;
     recovered.session.read_only = false;
     recovered.session.needs_history_reset = true;
-    let candidate_reference = workspace.active_view.clone();
+    let candidate_reference = workspace.content.active_view.clone();
     workspace.insert_schematic_editor(candidate_reference.key(), recovered.clone());
     workspace.set_active_dirty(true);
 
@@ -787,6 +789,7 @@ fn build_comparison_workspace(
         let baseline_reference = CellViewRef::new(BASELINE_LIBRARY, BASELINE_CELL, BASELINE_VIEW);
         workspace.insert_schematic_editor(baseline_reference.key(), baseline);
         workspace
+            .content
             .open_views
             .push(OpenCellView::new(baseline_reference, ViewType::Schematic));
     }
@@ -1049,10 +1052,10 @@ mod tests {
         let comparison = build_comparison_workspace("amplifier", Some(baseline), recovered)
             .expect("comparison builds");
 
-        assert!(comparison.workspace.project.path.is_none());
+        assert!(comparison.workspace.content.project.path.is_none());
         assert!(comparison.active.session.is_dirty);
         assert!(comparison.active.session.current_file.is_none());
-        assert_eq!(comparison.workspace.open_views.len(), 2);
+        assert_eq!(comparison.workspace.content.open_views.len(), 2);
         let baseline_library = comparison
             .libraries
             .get_library("recovery_baseline")
@@ -1066,9 +1069,9 @@ mod tests {
         let comparison = build_comparison_workspace("orphan", None, SchematicState::default())
             .expect("checkpoint-only comparison builds");
 
-        assert_eq!(comparison.workspace.open_views.len(), 1);
+        assert_eq!(comparison.workspace.content.open_views.len(), 1);
         assert!(comparison.active.session.is_dirty);
-        assert!(comparison.workspace.project.path.is_none());
+        assert!(comparison.workspace.content.project.path.is_none());
     }
 
     #[test]

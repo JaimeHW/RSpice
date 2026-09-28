@@ -597,11 +597,13 @@ mod tests {
         let key = state.workspace.active_schematic_reference().key();
         let first = state
             .workspace
+            .content
             .design_management
             .bootstrap_for_cell_view(&key, "Sheet 1", [1, 2])
             .expect("first sheet");
         let catalog = state
             .workspace
+            .content
             .design_management
             .sheet_catalog_mut(&key)
             .expect("sheet catalog");

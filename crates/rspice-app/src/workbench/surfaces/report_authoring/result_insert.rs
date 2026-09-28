@@ -17,7 +17,13 @@ pub(super) struct ReportFigureOption {
 
 pub(super) fn report_figure_options(state: &AppState) -> Vec<ReportFigureOption> {
     let mut options = Vec::new();
-    for (document_index, document) in state.workspace.visualization_documents.iter().enumerate() {
+    for (document_index, document) in state
+        .workspace
+        .content
+        .visualization_documents
+        .iter()
+        .enumerate()
+    {
         for page in document.pages() {
             let mut panes = document
                 .panes()
@@ -42,7 +48,7 @@ pub(super) fn open_insert_result_document(app: &mut RSpiceApp) {
         return;
     }
     let first = &options[0];
-    let source = &app.state.workspace.visualization_documents[first.document_index];
+    let source = &app.state.workspace.content.visualization_documents[first.document_index];
     let editor = &mut app.state.workbench.report_authoring;
     editor.insert_result_document_index = 0;
     editor.insert_result_caption = first.label.clone();
@@ -140,7 +146,7 @@ pub(super) fn insert_result_document_dialog(ctx: &egui::Context, app: &mut RSpic
                     .report_authoring
                     .insert_result_document_index = index;
                 if let Some(option) = figure_options.get(index) {
-                    let revision = app.state.workspace.visualization_documents
+                    let revision = app.state.workspace.content.visualization_documents
                         [option.document_index]
                         .revision()
                         .get();
@@ -271,6 +277,7 @@ pub(super) fn commit_insert_result_document(app: &mut RSpiceApp) {
     let Some(source) = app
         .state
         .workspace
+        .content
         .visualization_documents
         .get(option.document_index)
         .cloned()
@@ -395,7 +402,7 @@ pub(super) fn commit_insert_result_document(app: &mut RSpiceApp) {
                 .insert_result_document_open = false;
             app.state.workbench.report_authoring.preview_block_page = 0;
             app.state.workbench.report_authoring.transaction_error = None;
-            app.state.workspace.report_documents_dirty = true;
+            app.state.workspace.content.report_documents_dirty = true;
         }
         Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
     }

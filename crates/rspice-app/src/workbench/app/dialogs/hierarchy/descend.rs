@@ -446,7 +446,7 @@ mod tests {
 
     fn hierarchy_state() -> (AppState, CellViewRef, CellViewRef) {
         let mut state = AppState::default();
-        let parent = state.workspace.active_view.clone();
+        let parent = state.workspace.content.active_view.clone();
         let child = CellViewRef::new("hierarchy_test", "afe_core", "schematic");
         let mut cell = Cell::new("afe_core");
         cell.add_view(View::new("schematic", ViewType::Schematic));
@@ -513,12 +513,12 @@ mod tests {
         let (mut state, parent, _) = hierarchy_state();
         assert!(open_descend_hierarchy_dialog(&mut state));
         assert!(state.dialogs.descend_hierarchy.open);
-        assert_eq!(state.workspace.active_view, parent);
+        assert_eq!(state.workspace.content.active_view, parent);
 
         state.schematic.session.selection.clear();
         let error = commit_descend_context(&mut state).expect_err("selection drift must block");
         assert!(error.contains("selected-object set changed"));
-        assert_eq!(state.workspace.active_view, parent);
+        assert_eq!(state.workspace.content.active_view, parent);
         assert!(state.dialogs.descend_hierarchy.open);
     }
 
@@ -528,7 +528,7 @@ mod tests {
         state.ui.schematic_visibility.hierarchy =
             SchematicHierarchyVisibility::FullVisibleHierarchy;
         state.open_selected_instance_master();
-        assert_eq!(state.workspace.active_view, child);
+        assert_eq!(state.workspace.content.active_view, child);
         assert_eq!(state.workspace.occurrence_labels().last().unwrap(), "XAFE");
         assert_eq!(
             state.ui.schematic_visibility.hierarchy,
@@ -547,8 +547,8 @@ mod tests {
 
         state.open_selected_instance_master();
 
-        assert_eq!(state.workspace.active_view, child);
-        assert_eq!(state.workspace.hierarchy_stack, vec![child]);
+        assert_eq!(state.workspace.content.active_view, child);
+        assert_eq!(state.workspace.content.hierarchy_stack, vec![child]);
         assert_eq!(state.workspace.occurrence_labels(), ["afe_core"]);
         assert!(!state.dialogs.descend_hierarchy.open);
     }
@@ -570,7 +570,7 @@ mod tests {
         state.dialogs.descend_hierarchy.parent_context = HierarchyParentContext::ShowFullHierarchy;
         commit_descend_context(&mut state).expect("explicit edit-in-place choice remains valid");
 
-        assert_eq!(state.workspace.active_view, child);
+        assert_eq!(state.workspace.content.active_view, child);
         assert_eq!(state.workspace.occurrence_labels().last().unwrap(), "XAFE");
         assert_eq!(
             state.ui.schematic_visibility.hierarchy,
@@ -585,7 +585,7 @@ mod tests {
         state.dialogs.descend_hierarchy.edit_mode = HierarchyDescendEditMode::ReadOnlyReference;
         commit_descend_context(&mut state).expect("valid reference context");
 
-        assert_eq!(state.workspace.active_view, child);
+        assert_eq!(state.workspace.content.active_view, child);
         assert!(state.workspace.active_read_only_reference());
         assert!(state.active_view_read_only());
         assert!(!state.schematic.session.read_only);

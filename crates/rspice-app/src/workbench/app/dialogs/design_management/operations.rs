@@ -419,7 +419,7 @@ impl RSpiceApp {
             DesignManagementPage::HierarchyAudit => {
                 let resolution = self.state.workspace.resolve_hierarchy_with_active(
                     &self.state.library_manager,
-                    &self.state.workspace.active_view,
+                    &self.state.workspace.content.active_view,
                     &self.state.schematic,
                 );
                 let configuration = match inputs.audit_configuration {
@@ -427,6 +427,7 @@ impl RSpiceApp {
                         let configuration = self
                             .state
                             .workspace
+                            .content
                             .configuration_sets
                             .find(id)
                             .ok_or_else(|| {
@@ -517,6 +518,7 @@ pub(super) fn renumber_request(
     inputs: &SubflowInputs,
 ) -> Result<RenumberRequest, String> {
     let mut documents = workspace
+        .content
         .schematic_buffers
         .iter()
         .map(|(key, schematic)| (key.clone(), schematic))
@@ -600,6 +602,7 @@ pub(super) fn variant_connectivity_signature(
 ) -> Result<BTreeSet<Vec<String>>, String> {
     let mut workspace = state.workspace.clone();
     workspace
+        .content
         .design_management
         .variants_mut()
         .set_active(variant_id)
@@ -607,7 +610,7 @@ pub(super) fn variant_connectivity_signature(
     let projection = workspace
         .configuration_execution_projection(
             &state.library_manager,
-            &state.workspace.active_view,
+            &state.workspace.content.active_view,
             &state.schematic,
         )
         .map_err(|error| error.to_string())?;

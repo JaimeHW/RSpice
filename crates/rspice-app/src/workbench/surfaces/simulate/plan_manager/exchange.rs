@@ -811,6 +811,7 @@ pub(in crate::workbench::surfaces::simulate) fn export_simulation_plan_package(
     let payload = app
         .state
         .workspace
+        .content
         .plan_data(id)
         .cloned()
         .ok_or_else(|| format!("Simulation plan {id} has no plan-owned payload to export."))?;
@@ -844,11 +845,12 @@ pub(in crate::workbench::surfaces::simulate) fn commit_import_simulation_plan(
     let mut setup = app.state.sim_setup.clone();
     let mut workspace = app.state.workspace.clone();
     let current_id = setup.stable_analysis_plan()?.id();
-    workspace.migrate_active_plan_data(current_id);
+    workspace.content.migrate_active_plan_data(current_id);
     let outcome = setup
         .import_plan(package.plan)
         .map_err(|error| error.to_string())?;
     workspace
+        .content
         .import_plan_data(
             outcome.cloned_plan_id,
             &package.payload,
@@ -856,6 +858,7 @@ pub(in crate::workbench::surfaces::simulate) fn commit_import_simulation_plan(
         )
         .map_err(|error| error.to_string())?;
     workspace
+        .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
     crate::io::capture_execution_context(&setup, &app.state.model_library_manager)?;
@@ -1035,6 +1038,7 @@ mod tests {
         let owned = app
             .state
             .workspace
+            .content
             .plan_data(imported_id)
             .expect("the imported plan owns a payload")
             .specification_definitions

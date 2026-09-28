@@ -92,7 +92,7 @@ pub(crate) fn open_selected_object_rename(state: &mut AppState) -> bool {
         state.design_execution_epoch,
         state.active_schematic_epoch,
         state.schematic.topology_version(),
-        state.workspace.active_view.display_path(),
+        state.workspace.content.active_view.display_path(),
     );
     true
 }
@@ -443,7 +443,7 @@ fn rename_session_error(state: &AppState) -> Option<String> {
                 .to_owned(),
         );
     }
-    (dialog.view_path != state.workspace.active_view.display_path()).then(|| {
+    (dialog.view_path != state.workspace.content.active_view.display_path()).then(|| {
         "The active cell/view changed while Rename was open. Cancel and reopen the current object."
             .to_owned()
     })
@@ -956,10 +956,11 @@ mod tests {
         let configuration = app
             .state
             .workspace
+            .content
             .configuration_sets
             .create(crate::state::ConfigurationSetDefinition {
                 name: "Release".to_owned(),
-                root: app.state.workspace.active_view.clone(),
+                root: app.state.workspace.content.active_view.clone(),
                 dut_path: "/R1".to_owned(),
                 executable_view_policy: vec!["schematic".to_owned()],
                 stop_views: Vec::new(),
@@ -972,7 +973,7 @@ mod tests {
             })
             .expect("valid configuration root");
         let plan_id = crate::product::SimulationPlanId::new();
-        app.state.workspace.simulation_plan_payloads.push(
+        app.state.workspace.content.simulation_plan_payloads.push(
             crate::state::SimulationPlanPayloadRecord {
                 plan_id,
                 payload: crate::state::SimulationPlanPayload {
@@ -1003,6 +1004,7 @@ mod tests {
         let expressions = app
             .state
             .workspace
+            .content
             .simulation_plan_payloads
             .iter()
             .find(|record| record.plan_id == plan_id)
@@ -1020,6 +1022,7 @@ mod tests {
         assert_eq!(
             app.state
                 .workspace
+                .content
                 .configuration_sets
                 .find(configuration)
                 .expect("the configuration this test owns")
@@ -1027,12 +1030,13 @@ mod tests {
             "/RLOAD",
             "the configuration DUT path follows the renamed instance"
         );
-        assert!(app.state.workspace.project_metadata_dirty);
+        assert!(app.state.workspace.content.project_metadata_dirty);
         app.action_edit_undo();
         assert_eq!(app.state.schematic.document().components[0].name, "R1");
         assert_eq!(
             app.state
                 .workspace
+                .content
                 .configuration_sets
                 .find(configuration)
                 .unwrap()
@@ -1043,6 +1047,7 @@ mod tests {
         assert_eq!(
             app.state
                 .workspace
+                .content
                 .plan_data(plan_id)
                 .unwrap()
                 .saved_outputs[0]
@@ -1055,6 +1060,7 @@ mod tests {
         assert_eq!(
             app.state
                 .workspace
+                .content
                 .configuration_sets
                 .find(configuration)
                 .unwrap()
@@ -1064,6 +1070,7 @@ mod tests {
         assert_eq!(
             app.state
                 .workspace
+                .content
                 .plan_data(plan_id)
                 .unwrap()
                 .saved_outputs[0]

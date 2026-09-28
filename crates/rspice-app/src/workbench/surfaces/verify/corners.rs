@@ -19,7 +19,7 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
     // `AnalysisResult::measurements` has no corner-point identity. It must not
     // be presented as a pointwise specification matrix until that provenance
     // is retained by the result schema.
-    let configured_specifications = app.state.workspace.specs.len();
+    let configured_specifications = app.state.workspace.content.specs.len();
     let (elapsed, run_detail) = verification_run(app).map_or_else(
         || {
             (

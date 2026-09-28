@@ -29,6 +29,7 @@ fn seed_capture_group(app: &mut RSpiceApp) -> crate::product::CaptureGroupId {
         .expect("valid saved output");
         app.state
             .workspace
+            .content
             .add_saved_output(id, output)
             .expect("the plan accepts the output");
     }
@@ -39,6 +40,7 @@ fn seed_capture_group(app: &mut RSpiceApp) -> crate::product::CaptureGroupId {
     group.points = Some(SavedOutputPolicy::EveryAcceptedPoint);
     app.state
         .workspace
+        .content
         .add_capture_group(id, group)
         .expect("the plan accepts the group")
 }
@@ -47,6 +49,7 @@ fn seed_capture_group(app: &mut RSpiceApp) -> crate::product::CaptureGroupId {
 fn stored_group(app: &RSpiceApp, id: crate::product::CaptureGroupId) -> crate::state::CaptureGroup {
     app.state
         .workspace
+        .content
         .plan_data(plan_id(app))
         .expect("payload")
         .capture_groups
@@ -74,6 +77,7 @@ fn the_group_editor_edits_every_rule_of_a_disjunction() {
     let member = app
         .state
         .workspace
+        .content
         .plan_data(plan_id(&app))
         .expect("payload")
         .saved_outputs[1]
@@ -88,6 +92,7 @@ fn the_group_editor_edits_every_rule_of_a_disjunction() {
         group.members.push(member);
         app.state
             .workspace
+            .content
             .replace_capture_group(plan_id(&app), id, group)
             .expect("the plan accepts a second rule");
     }
@@ -158,6 +163,7 @@ fn page_capture_ledger(app: &RSpiceApp) -> crate::simulation::capture_ledger::Ca
     let payload = app
         .state
         .workspace
+        .content
         .plan_data(plan_id(app))
         .cloned()
         .expect("payload");
@@ -193,6 +199,7 @@ fn the_capture_ledger_total_is_the_sum_of_its_rows_and_counts_each_output_once()
     let payload = app
         .state
         .workspace
+        .content
         .plan_data(plan_id(&app))
         .cloned()
         .expect("payload");
@@ -240,6 +247,7 @@ fn a_capture_group_override_reaches_the_effective_output_the_run_will_use() {
     let payload = app
         .state
         .workspace
+        .content
         .plan_data(plan_id(&app))
         .cloned()
         .expect("payload");
@@ -305,6 +313,7 @@ fn adding_an_output_inside_a_rule_receipts_the_group_it_joined() {
             "Added saved output core_m.",
             move |workspace, plan_id| {
                 workspace
+                    .content
                     .add_saved_output(plan_id, arriving)
                     .map_err(|error| error.to_string())
             },
@@ -347,6 +356,7 @@ fn an_edit_that_moves_nothing_receipts_only_what_it_changed() {
             "Moved capture group Core rails later in resolution order.",
             move |workspace, plan_id| {
                 workspace
+                    .content
                     .reorder_capture_group(plan_id, group, false)
                     .map_err(|error| error.to_string())
             },
@@ -431,11 +441,13 @@ fn naming_an_output_into_a_group_outranks_the_rule_that_had_it() {
     let watchlist_id = watchlist.id;
     app.state
         .workspace
+        .content
         .add_capture_group(id, watchlist)
         .expect("second group");
     let output_id = app
         .state
         .workspace
+        .content
         .plan_data(id)
         .expect("payload")
         .saved_outputs[0]
@@ -448,6 +460,7 @@ fn naming_an_output_into_a_group_outranks_the_rule_that_had_it() {
             "Named saved output core_n into capture group Watchlist.",
             move |workspace, plan_id| {
                 workspace
+                    .content
                     .set_capture_group_member(plan_id, watchlist_id, output_id, true)
                     .map_err(|error| error.to_string())
             },
@@ -455,7 +468,7 @@ fn naming_an_output_into_a_group_outranks_the_rule_that_had_it() {
         "the naming commits"
     );
 
-    let payload = app.state.workspace.plan_data(id).expect("payload");
+    let payload = app.state.workspace.content.plan_data(id).expect("payload");
     let membership = crate::state::CaptureGroupMembership::resolve(
         &payload.capture_groups,
         &payload.saved_outputs,
@@ -500,17 +513,20 @@ fn editing_a_group_keeps_the_rules_and_members_the_form_never_showed() {
     let group_id = app
         .state
         .workspace
+        .content
         .add_capture_group(id, group.clone())
         .expect("the plan accepts a two-rule group");
     let output_id = app
         .state
         .workspace
+        .content
         .plan_data(id)
         .expect("payload")
         .saved_outputs[1]
         .id;
     app.state
         .workspace
+        .content
         .set_capture_group_member(id, group_id, output_id, true)
         .expect("named member");
 
@@ -521,6 +537,7 @@ fn editing_a_group_keeps_the_rules_and_members_the_form_never_showed() {
     let stored = app
         .state
         .workspace
+        .content
         .plan_data(id)
         .expect("payload")
         .capture_groups
@@ -593,6 +610,7 @@ fn the_registry_size_and_the_ledger_row_price_one_output_once() {
     let payload = app
         .state
         .workspace
+        .content
         .plan_data(plan_id(&app))
         .cloned()
         .expect("payload");

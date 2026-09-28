@@ -22,6 +22,7 @@ rspice-results = { workspace = true, features = ["engine-evidence"] }
 ron = { version = "0.12.2", features = ["integer128"] }
 rspice-app-types.workspace = true
 rspice-design.workspace = true
+rspice-hardcopy-contract.workspace = true
 rspice-design-model.workspace = true
 rspice-model-library.workspace = true
 rspice-simulation-contract.workspace = true

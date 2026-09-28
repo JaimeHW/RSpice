@@ -618,7 +618,7 @@ fn utc_stamp(created_unix_ms: u64) -> String {
 pub(super) fn ensure_project_recovery_catalog(ctx: &Context, state: &mut AppState) {
     #[cfg(not(target_arch = "wasm32"))]
     let _ = ctx;
-    let project_id = state.workspace.project.id().to_string();
+    let project_id = state.workspace.content.project.id().to_string();
     if state
         .dialogs
         .project_checkpoint_recovery
@@ -754,7 +754,7 @@ fn create_manual_checkpoint(ctx: &Context, state: &mut AppState) {
 
     #[cfg(target_arch = "wasm32")]
     {
-        let project_id = state.workspace.project.id().to_string();
+        let project_id = state.workspace.content.project.id().to_string();
         let repaint = ctx.clone();
         BROWSER_MANUAL_CHECKPOINT_PENDING.with(|pending| pending.set(true));
         if let Err(error) = crate::workbench::lifecycle::project_checkpoint::start_create(
@@ -780,7 +780,7 @@ fn create_manual_checkpoint(ctx: &Context, state: &mut AppState) {
 
 #[cfg(target_arch = "wasm32")]
 fn poll_browser_manual_checkpoint(ctx: &Context, state: &mut AppState) {
-    let current_project_id = state.workspace.project.id().to_string();
+    let current_project_id = state.workspace.content.project.id().to_string();
     let completions = BROWSER_MANUAL_CHECKPOINT_COMPLETIONS
         .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
     if completions.is_empty() {
@@ -870,7 +870,7 @@ pub(super) fn export_project_checkpoint_copy(
 
     #[cfg(target_arch = "wasm32")]
     {
-        let project_id = state.workspace.project.id().to_string();
+        let project_id = state.workspace.content.project.id().to_string();
         let queued_filename = filename.clone();
         let repaint = ctx.clone();
         crate::workbench::lifecycle::project_checkpoint::start_recovery_copy_bytes(

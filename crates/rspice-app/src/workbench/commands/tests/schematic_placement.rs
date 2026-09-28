@@ -208,7 +208,7 @@ fn every_raw_port_command_route_is_projected_through_the_same_dialog() {
 fn port_undo_and_redo_resynchronize_the_generated_symbol_contract() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    let reference = app.state.workspace.active_view.clone();
+    let reference = app.state.workspace.content.active_view.clone();
     let pending = crate::state::PendingPortPlacement::new(
         "BIAS_EN",
         crate::state::PortDirectionType::InputLogic,

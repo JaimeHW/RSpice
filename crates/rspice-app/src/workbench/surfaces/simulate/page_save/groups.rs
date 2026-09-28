@@ -507,7 +507,7 @@ fn plan_capture_groups(state: &AppState) -> Vec<CaptureGroup> {
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())
-        .and_then(|plan_id| state.workspace.plan_data(plan_id))
+        .and_then(|plan_id| state.workspace.content.plan_data(plan_id))
         .map(|payload| payload.capture_groups.clone())
         .unwrap_or_default()
 }
@@ -563,6 +563,7 @@ pub(super) fn apply_group_command(
                 &detail,
                 move |workspace, plan_id| {
                     workspace
+                        .content
                         .remove_capture_group(plan_id, id)
                         .map(|_| ())
                         .map_err(|error| error.to_string())
@@ -592,6 +593,7 @@ pub(super) fn apply_group_command(
                 &detail,
                 move |workspace, plan_id| {
                     workspace
+                        .content
                         .reorder_capture_group(plan_id, id, toward_front)
                         .map_err(|error| error.to_string())
                 },

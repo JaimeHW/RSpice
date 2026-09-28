@@ -134,6 +134,7 @@ pub(super) fn open_technology_attachment_dialog(app: &mut RSpiceApp) {
     let current_library = app
         .state
         .workspace
+        .content
         .project
         .technology_binding()
         .map(|binding| binding.model_library().to_owned());
@@ -156,6 +157,7 @@ pub(super) fn open_technology_attachment_dialog(app: &mut RSpiceApp) {
     let current_pin = app
         .state
         .workspace
+        .content
         .project
         .technology_binding()
         .and_then(ProjectTechnologyBinding::signed_package);
@@ -383,8 +385,8 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         technology_authority_fields_ready(&app.state.dialogs.technology_attachment);
     let selected_is_attached = selected_binding.as_ref().is_some_and(|binding| {
         let label = binding.display_label();
-        app.state.workspace.project.technology_binding() == Some(binding)
-            && app.state.workspace.project.technology.as_deref() == Some(label.as_str())
+        app.state.workspace.content.project.technology_binding() == Some(binding)
+            && app.state.workspace.content.project.technology.as_deref() == Some(label.as_str())
     });
     let primary = technology_primary_state(
         selected_binding.is_some() && authority_ready && migration_ready,
@@ -736,13 +738,13 @@ pub(super) fn attach_technology_binding(
     verify_pinned_technology_contract(&binding, app)?;
     validate_migration_evidence_for_binding(app, &binding, migration_evidence.as_ref())?;
     let label = binding.display_label();
-    if app.state.workspace.project.technology_binding() == Some(&binding)
-        && app.state.workspace.project.technology.as_deref() == Some(label.as_str())
+    if app.state.workspace.content.project.technology_binding() == Some(&binding)
+        && app.state.workspace.content.project.technology.as_deref() == Some(label.as_str())
     {
         return Ok(format!(
             "{} already matches project revision {}; no checkpoint or mutation was required.",
             label,
-            app.state.workspace.project.revision().get()
+            app.state.workspace.content.project.revision().get()
         ));
     }
 
@@ -771,9 +773,9 @@ pub(super) fn commit_technology_after_checkpoint(
 ) -> Result<String, String> {
     verify_pinned_technology_contract(&binding, app)?;
     validate_migration_evidence_for_binding(app, &binding, migration_evidence.as_ref())?;
-    let previous_revision = app.state.workspace.project.revision();
+    let previous_revision = app.state.workspace.content.project.revision();
     if checkpoint.project_revision() != previous_revision.get()
-        || checkpoint.project_name() != app.state.workspace.project.name()
+        || checkpoint.project_name() != app.state.workspace.content.project.name()
         || !crate::workbench::lifecycle::project_checkpoint::matches_current_state(
             checkpoint, &app.state,
         )?
@@ -802,6 +804,7 @@ pub(super) fn commit_technology_after_checkpoint(
     let (revision, audit_receipt) = app
         .state
         .workspace
+        .content
         .attach_technology_audited(binding.clone(), change_context)
         .map_err(|error| format!("Technology attachment was not committed: {error}"))?;
     if revision == previous_revision {
@@ -843,8 +846,8 @@ pub(super) fn start_browser_technology_checkpoint(
     if app.state.dialogs.technology_attachment.checkpoint_pending {
         return Err("A project recovery checkpoint is already being written".to_owned());
     }
-    let project_id = app.state.workspace.project.id().to_string();
-    let expected_revision = app.state.workspace.project.revision().get();
+    let project_id = app.state.workspace.content.project.id().to_string();
+    let expected_revision = app.state.workspace.content.project.revision().get();
     let queued_project_id = project_id.clone();
     let queued_binding = binding.clone();
     let repaint = ctx.clone();
@@ -877,8 +880,8 @@ pub(super) fn poll_browser_technology_checkpoint(ctx: &Context, app: &mut RSpice
     let completions = BROWSER_TECHNOLOGY_CHECKPOINT_COMPLETIONS
         .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
     for completion in completions {
-        if app.state.workspace.project.id().to_string() != completion.project_id
-            || app.state.workspace.project.revision().get() != completion.expected_revision
+        if app.state.workspace.content.project.id().to_string() != completion.project_id
+            || app.state.workspace.content.project.revision().get() != completion.expected_revision
         {
             app.state.dialogs.technology_attachment.checkpoint_pending = false;
             app.state.dialogs.technology_attachment.validation_error = Some(
@@ -917,7 +920,7 @@ pub(super) fn poll_browser_technology_checkpoint(ctx: &Context, app: &mut RSpice
 
 #[cfg(target_arch = "wasm32")]
 pub(super) fn poll_browser_recovery_completions(ctx: &Context, app: &mut RSpiceApp) {
-    let project_id = app.state.workspace.project.id().to_string();
+    let project_id = app.state.workspace.content.project.id().to_string();
     let catalog = BROWSER_RECOVERY_CATALOG_COMPLETIONS
         .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
     for completion in catalog {

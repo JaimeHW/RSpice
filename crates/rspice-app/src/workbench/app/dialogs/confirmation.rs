@@ -74,7 +74,7 @@ impl RSpiceApp {
     fn render_save_confirmation_dialog(&mut self, ctx: &Context) {
         let (title, consequence) = match self.state.dialogs.confirmation_dialog.pending_action {
             Some(action) => (
-                action.prompt_title(self.state.workspace.project.name().trim()),
+                action.prompt_title(self.state.workspace.content.project.name().trim()),
                 action.prompt_consequence(),
             ),
             None => (
@@ -200,7 +200,7 @@ impl RSpiceApp {
         never_saved: bool,
         unsaved: &[(WorkbenchIcon, String)],
     ) {
-        let project = self.state.workspace.project.name().trim();
+        let project = self.state.workspace.content.project.name().trim();
         let title = if project.is_empty() {
             "Save changes before closing?".to_owned()
         } else {
@@ -438,6 +438,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state
             .workspace
+            .content
             .project
             .rename("lna-frontend")
             .expect("valid project name");
@@ -510,6 +511,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state
             .workspace
+            .content
             .project
             .rename("lna-frontend")
             .expect("valid project name");

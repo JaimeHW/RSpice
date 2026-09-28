@@ -216,17 +216,25 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
     state.sim_setup.options.reltol = -1.0;
     assert!(refresh_registry(&mut state).is_err());
     assert!(state.schematic.session.is_dirty);
-    assert!(state.workspace.open_views.iter().all(|view| view.dirty));
     assert!(
-        state.workspace.schematic_buffers.keys().all(|key| state
+        state
             .workspace
-            .schematic_editor(key)
-            .unwrap()
-            .is_dirty())
+            .content
+            .open_views
+            .iter()
+            .all(|view| view.dirty)
     );
-    assert!(state.workspace.project_metadata_dirty);
-    assert!(state.workspace.netlist_source_dirty);
-    assert!(state.workspace.project_sources_dirty);
+    assert!(
+        state
+            .workspace
+            .content
+            .schematic_buffers
+            .keys()
+            .all(|key| state.workspace.schematic_editor(key).unwrap().is_dirty())
+    );
+    assert!(state.workspace.content.project_metadata_dirty);
+    assert!(state.workspace.content.netlist_source_dirty);
+    assert!(state.workspace.content.project_sources_dirty);
     assert!(
         state
             .project_lifecycle
@@ -262,10 +270,17 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
     refresh_registry(&mut state).unwrap();
     assert!(!has_unsaved_changes(&state));
     assert!(!state.schematic.session.is_dirty);
-    assert!(state.workspace.open_views.iter().all(|view| !view.dirty));
-    assert!(!state.workspace.project_metadata_dirty);
-    assert!(!state.workspace.netlist_source_dirty);
-    assert!(!state.workspace.project_sources_dirty);
+    assert!(
+        state
+            .workspace
+            .content
+            .open_views
+            .iter()
+            .all(|view| !view.dirty)
+    );
+    assert!(!state.workspace.content.project_metadata_dirty);
+    assert!(!state.workspace.content.netlist_source_dirty);
+    assert!(!state.workspace.content.project_sources_dirty);
     assert!(
         state
             .project_lifecycle

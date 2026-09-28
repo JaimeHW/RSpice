@@ -24,7 +24,10 @@ fn seal_legacy_unattributed(run: &mut crate::state::SimulationRun) {
 fn project_named(path: &str) -> ProjectFile {
     let mut libraries = crate::state::LibraryManager::with_primitives();
     let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
-    workspace.project.set_path(std::path::PathBuf::from(path));
+    workspace
+        .content
+        .project
+        .set_path(std::path::PathBuf::from(path));
     ProjectFile::new(workspace, libraries)
 }
 
@@ -173,6 +176,7 @@ fn close_to_live_mirror_raises_the_one_shot_engine_entry_request() {
 fn live_project_snapshot_applies_wholesale_and_never_keeps_the_host_path() {
     let mut host = AppState::default();
     host.workspace
+        .content
         .project
         .set_path(std::path::PathBuf::from("C:/host-only/design.rspiceproj"));
     let snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(&host)
@@ -186,9 +190,12 @@ fn live_project_snapshot_applies_wholesale_and_never_keeps_the_host_path() {
         LiveProjectApply::Applied
     ));
     assert!(guest.project_lifecycle.project_open);
-    assert_eq!(guest.workspace.project.id(), host.workspace.project.id());
+    assert_eq!(
+        guest.workspace.content.project.id(),
+        host.workspace.content.project.id()
+    );
     // The host's on-disk location must never become a guest save target.
-    assert!(guest.workspace.project.path.is_none());
+    assert!(guest.workspace.content.project.path.is_none());
     assert!(
         crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&guest).is_none()
     );
@@ -247,7 +254,10 @@ fn save_copy_permission_never_turns_a_live_mirror_into_a_canonical_project() {
 fn project_named_with_results(path: &str) -> ProjectFile {
     let mut libraries = crate::state::LibraryManager::with_primitives();
     let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
-    workspace.project.set_path(std::path::PathBuf::from(path));
+    workspace
+        .content
+        .project
+        .set_path(std::path::PathBuf::from(path));
 
     let waveform = crate::state::WaveformData::new(
         "V(out)",
@@ -386,7 +396,7 @@ fn browser_import_applies_project_clears_runs_and_skips_recents() {
     assert!(state.simulation.has_results());
 
     let mut project = project_named("browser-import.rspiceproj");
-    project.workspace.project.path = None;
+    project.workspace.content.project.path = None;
 
     let imported = apply_loaded_project(
         &mut state,
@@ -395,8 +405,11 @@ fn browser_import_applies_project_clears_runs_and_skips_recents() {
     );
 
     assert!(imported);
-    assert_eq!(state.workspace.project.display_name(), "browser-import");
-    assert!(state.workspace.project.path.is_none());
+    assert_eq!(
+        state.workspace.content.project.display_name(),
+        "browser-import"
+    );
+    assert!(state.workspace.content.project.path.is_none());
     assert!(!state.simulation.has_results());
     assert!(state.recent_files.is_empty());
     assert!(state.log_buffer.entries().any(|entry| {
@@ -418,7 +431,7 @@ fn browser_import_keeps_project_filename_as_save_suggestion_without_native_path(
     );
 
     assert!(imported);
-    assert!(state.workspace.project.path.is_none());
+    assert!(state.workspace.content.project.path.is_none());
     assert_eq!(
         state.browser_project_save_name.as_deref(),
         Some("browser-import.rspiceproj")
@@ -627,6 +640,7 @@ fn create_new_project_captures_the_personal_drawing_sheet_default() {
 
     let project_default = state
         .workspace
+        .content
         .design_management
         .drawing_sheet_settings()
         .default_format
@@ -704,7 +718,11 @@ fn new_project_custom_default_is_exact_and_has_no_personal_preset_dependency() {
 
     create_new_project(&mut state);
 
-    let project_settings = state.workspace.design_management.drawing_sheet_settings();
+    let project_settings = state
+        .workspace
+        .content
+        .design_management
+        .drawing_sheet_settings();
     assert_eq!(
         project_settings.default_format.portrait_dimensions_um(),
         (250_001, 400_003)
@@ -768,6 +786,7 @@ fn project_import_restores_plan_order_solver_options_and_model_catalog() {
     let mut design_libraries = crate::state::LibraryManager::with_primitives();
     let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut design_libraries);
     workspace
+        .content
         .project
         .set_path(std::path::PathBuf::from("context.rspiceproj"));
     let project = ProjectFile::new_with_execution_context(
@@ -860,8 +879,8 @@ fn invalid_execution_context_does_not_partially_replace_open_project() {
     project.execution_context = Some(context);
 
     let mut state = AppState::default();
-    let original_project_name = state.workspace.project.display_name().to_owned();
-    let original_active_view = state.workspace.active_view.clone();
+    let original_project_name = state.workspace.content.project.display_name().to_owned();
+    let original_active_view = state.workspace.content.active_view.clone();
 
     let imported = apply_loaded_project(
         &mut state,
@@ -871,10 +890,10 @@ fn invalid_execution_context_does_not_partially_replace_open_project() {
 
     assert!(!imported);
     assert_eq!(
-        state.workspace.project.display_name(),
+        state.workspace.content.project.display_name(),
         original_project_name
     );
-    assert_eq!(state.workspace.active_view, original_active_view);
+    assert_eq!(state.workspace.content.active_view, original_active_view);
     assert!(state.log_buffer.entries().any(|entry| {
         entry
             .message
@@ -898,7 +917,10 @@ fn browser_import_restores_project_simulation_results_and_skips_recents() {
     );
 
     assert!(imported);
-    assert_eq!(state.workspace.project.display_name(), "browser-import");
+    assert_eq!(
+        state.workspace.content.project.display_name(),
+        "browser-import"
+    );
     assert_eq!(state.simulation.run_count(), 1);
     assert_eq!(
         state
@@ -1227,7 +1249,7 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
             .add_expression_trace(&state.simulation, expression_owner, "V(out) * 2".to_owned(),)
             .expect("retained expression owner")
     );
-    state.workspace.visualization_documents_dirty = true;
+    state.workspace.content.visualization_documents_dirty = true;
 
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1383,6 +1405,7 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
         .expect("authored entities commit");
     let document_id = state
         .workspace
+        .content
         .insert_visualization_document(document)
         .expect("workspace owns result document");
 
@@ -1401,6 +1424,7 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
     assert!(saved);
     let restored = loaded
         .workspace
+        .content
         .visualization_document(document_id)
         .expect("result document round trips");
     assert_eq!(restored.presentation().significant_digits, 13);
@@ -1475,27 +1499,32 @@ fn a_named_new_project_seeds_every_owner_of_its_identity() {
     .expect("a validated identity creates a project");
 
     let workspace = &state.workspace;
-    assert_eq!(workspace.project.name(), "Precision Sensor AFE");
-    assert_eq!(workspace.project.root_library, "afe");
-    assert_eq!(workspace.project.top_cell, "core");
+    assert_eq!(workspace.content.project.name(), "Precision Sensor AFE");
+    assert_eq!(workspace.content.project.root_library, "afe");
+    assert_eq!(workspace.content.project.top_cell, "core");
 
     let expected = crate::state::CellViewRef::new(
         "afe",
         "core",
         crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
-    assert_eq!(workspace.active_view, expected);
+    assert_eq!(workspace.content.active_view, expected);
     assert_eq!(
         workspace
+            .content
             .open_views
             .iter()
             .map(|open| open.reference.clone())
             .collect::<Vec<_>>(),
         vec![expected.clone()]
     );
-    assert_eq!(workspace.hierarchy_stack, vec![expected.clone()]);
+    assert_eq!(workspace.content.hierarchy_stack, vec![expected.clone()]);
     assert_eq!(
-        workspace.schematic_buffers.keys().collect::<Vec<_>>(),
+        workspace
+            .content
+            .schematic_buffers
+            .keys()
+            .collect::<Vec<_>>(),
         vec![&expected.key()]
     );
 
@@ -1524,7 +1553,7 @@ fn a_named_new_project_seeds_every_owner_of_its_identity() {
 #[test]
 fn an_invalid_identity_creates_nothing_and_names_the_field() {
     let mut state = AppState::default();
-    let before = state.workspace.project.id();
+    let before = state.workspace.content.project.id();
 
     let error = create_new_project_with(
         &mut state,
@@ -1537,7 +1566,7 @@ fn an_invalid_identity_creates_nothing_and_names_the_field() {
     .expect_err("a library segment with a space is refused");
 
     assert!(error.starts_with("Library"), "{error}");
-    assert_eq!(state.workspace.project.id(), before);
+    assert_eq!(state.workspace.content.project.id(), before);
     assert!(
         state
             .log_buffer
@@ -1554,11 +1583,14 @@ fn netlist_import_keeps_creating_the_default_project_without_a_dialog() {
 
     assert!(!state.dialogs.new_project.open);
     let defaults = NewProjectParams::default();
-    assert_eq!(state.workspace.project.name(), defaults.name);
-    assert_eq!(state.workspace.project.root_library, defaults.root_library);
-    assert_eq!(state.workspace.project.top_cell, defaults.top_cell);
+    assert_eq!(state.workspace.content.project.name(), defaults.name);
     assert_eq!(
-        state.workspace.active_view,
+        state.workspace.content.project.root_library,
+        defaults.root_library
+    );
+    assert_eq!(state.workspace.content.project.top_cell, defaults.top_cell);
+    assert_eq!(
+        state.workspace.content.active_view,
         crate::state::CellViewRef::default_top()
     );
     assert!(
@@ -1611,6 +1643,7 @@ fn a_disagreeing_legacy_corner_run_space_is_reported_on_load() {
     let mut design_libraries = crate::state::LibraryManager::with_primitives();
     let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut design_libraries);
     workspace
+        .content
         .project
         .set_path(std::path::PathBuf::from("legacy-corner.rspiceproj"));
     let project = ProjectFile::new_with_execution_context(

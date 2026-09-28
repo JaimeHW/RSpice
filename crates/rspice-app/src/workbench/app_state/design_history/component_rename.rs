@@ -34,7 +34,7 @@ pub(super) struct PreparedComponentRename {
 impl AppState {
     pub(crate) fn inline_edit_authority(&self) -> InlineEditAuthority {
         InlineEditAuthority {
-            project: self.workspace.project.id(),
+            project: self.workspace.content.project.id(),
             document: self.workspace.active_schematic_reference(),
             occurrence: self.workspace.active_occurrence().cloned(),
             design_epoch: self.design_execution_epoch,
@@ -131,7 +131,7 @@ impl AppState {
             BTreeMap::from([(document.key(), self.schematic.clone())]),
             BTreeMap::from([(document.key(), after_schematic)]),
         )?;
-        let annotation_before = self.workspace.design_management.annotation();
+        let annotation_before = self.workspace.content.design_management.annotation();
         let mut annotation_after = annotation_before.clone();
         let annotation = annotation_after
             .commit_manual_reference_edit(
@@ -145,9 +145,10 @@ impl AppState {
                 Ok(AnnotationChange {
                     before: annotation_before.clone(),
                     after: annotation_after,
-                    before_revision: self.workspace.project.revision(),
+                    before_revision: self.workspace.content.project.revision(),
                     after_revision: self
                         .workspace
+                        .content
                         .project
                         .revision()
                         .next()
@@ -179,6 +180,7 @@ impl AppState {
                 self.schematic.clear_schematic_redo();
             } else {
                 self.workspace
+                    .content
                     .schematic_buffers
                     .get_mut(key)
                     .expect("guarded reference document")
@@ -207,13 +209,13 @@ impl ComponentRenameRecord {
         schematic_map_matches(state, expected)
             && self.references.matches(&state.workspace, forward)
             && self.annotation.as_ref().is_none_or(|change| {
-                state.workspace.design_management.annotation()
+                state.workspace.content.design_management.annotation()
                     == if forward {
                         &change.before
                     } else {
                         &change.after
                     }
-                    && state.workspace.project.revision()
+                    && state.workspace.content.project.revision()
                         == if forward {
                             change.before_revision
                         } else {
@@ -293,7 +295,7 @@ impl ComponentRenameRecord {
         self.annotation
             .as_ref()
             .map(|change| {
-                let current = &state.workspace.design_management;
+                let current = &state.workspace.content.design_management;
                 let mut candidate = current.clone();
                 *candidate.annotation_mut() = if forward {
                     &change.after
@@ -309,6 +311,7 @@ impl ComponentRenameRecord {
                     .map_err(|error| error.to_string())?;
                 state
                     .workspace
+                    .content
                     .project
                     .revision()
                     .next()
@@ -342,6 +345,7 @@ impl PreparedComponentRename {
         if let Some(candidate) = self.annotation {
             state
                 .workspace
+                .content
                 .replace_design_management(candidate)
                 .map_err(|error| error.to_string())?;
         }
@@ -364,7 +368,7 @@ impl PreparedComponentRename {
             } else {
                 &mut change.before_revision
             };
-            let revision = state.workspace.project.revision();
+            let revision = state.workspace.content.project.revision();
             state.reanchor_annotation_history_revision(*restored, revision);
             *restored = revision;
         }

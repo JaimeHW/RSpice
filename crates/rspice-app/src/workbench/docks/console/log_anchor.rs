@@ -199,7 +199,7 @@ mod tests {
             .wires
             .push(Wire::new(91, vec![a, b]));
         state.simulation.cross_probe.update(
-            state.workspace.active_view.clone(),
+            state.workspace.content.active_view.clone(),
             HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),
             HashMap::from([("OUT".to_owned(), vec![a, b])]),
             HashMap::new(),

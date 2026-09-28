@@ -50,6 +50,7 @@ pub(super) fn handle_runtime_host_call(
     let exact_bundle_is_current = app
         .state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&ProjectSourceOwner::code_workspace(
             ProjectSourceLanguage::RSpiceAutomation,

@@ -207,12 +207,17 @@ fn seed_new_project_drawing_sheet_default(
         })
         .expect("validated personal drawing-sheet defaults can seed a project")
         .as_drawing_sheet_default();
-    let mut settings = workspace.design_management.drawing_sheet_settings().clone();
+    let mut settings = workspace
+        .content
+        .design_management
+        .drawing_sheet_settings()
+        .clone();
     settings.default_format = project_default;
-    if settings != *workspace.design_management.drawing_sheet_settings() {
+    if settings != *workspace.content.design_management.drawing_sheet_settings() {
         workspace
+            .content
             .design_management
-            .update_drawing_sheet_settings(workspace.design_management.revision(), settings)
+            .update_drawing_sheet_settings(workspace.content.design_management.revision(), settings)
             .expect("a new project accepts its validated personal drawing-sheet default");
     }
 }
@@ -237,6 +242,7 @@ fn file_name_string(path: &Path) -> Option<String> {
 fn project_save_dialog_default_name(state: &AppState) -> String {
     state
         .workspace
+        .content
         .project
         .path
         .as_deref()
@@ -1083,7 +1089,7 @@ fn apply_loaded_project_authorized(
         return false;
     }
     let accepted_execution_context = project.execution_context.clone();
-    let project_id = project.workspace.project.id();
+    let project_id = project.workspace.content.project.id();
     let (simulation_plan, model_library_manager, execution_warnings) = match project
         .execution_context
         .take()
@@ -1158,12 +1164,12 @@ fn apply_loaded_project_authorized(
         ProjectLoadOrigin::LiveSession(_) => {
             // The host's on-disk location is meaningless on this machine and
             // must never become a save target here.
-            project.workspace.project.path = None;
+            project.workspace.content.project.path = None;
             state.browser_project_save_name = None;
         }
         #[cfg(any(test, target_arch = "wasm32"))]
         ProjectLoadOrigin::BrowserImport(name) | ProjectLoadOrigin::BrowserCanonical(name) => {
-            project.workspace.project.path = None;
+            project.workspace.content.project.path = None;
             state.browser_project_save_name = Some(name.to_string());
         }
     }
@@ -1613,7 +1619,7 @@ fn finish_browser_canonical_open(
         binding_id: uuid::Uuid::new_v4(),
         backend:
             crate::workbench::lifecycle::project_lifecycle::BrowserBindingBackend::ExternalFile,
-        project_id: project.workspace.project.id().to_string(),
+        project_id: project.workspace.content.project.id().to_string(),
         accepted_generation: 1,
         display_name: display_name.clone(),
         accepted_digest: digest,

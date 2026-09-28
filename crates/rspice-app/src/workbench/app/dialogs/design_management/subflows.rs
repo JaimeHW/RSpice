@@ -130,7 +130,7 @@ pub(super) fn subflow_fields(
                 &mut dialog.inputs.sheet_port_policy,
                 write_allowed,
             );
-            let settings = workspace.design_management.drawing_sheet_settings();
+            let settings = workspace.content.design_management.drawing_sheet_settings();
             let current = dialog
                 .draft
                 .as_ref()
@@ -506,6 +506,7 @@ pub(super) fn subflow_fields(
         }
         DesignManagementPage::HierarchyAudit => {
             let configurations = workspace
+                .content
                 .configuration_sets
                 .configurations()
                 .iter()

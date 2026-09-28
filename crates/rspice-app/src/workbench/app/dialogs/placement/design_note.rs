@@ -126,7 +126,7 @@ fn validate_draft(state: &AppState) -> DraftValidation {
             "The schematic topology changed. Close and reopen Place text or note.".to_owned(),
         );
     }
-    if draft.view_path != state.workspace.active_view.display_path() {
+    if draft.view_path != state.workspace.content.active_view.display_path() {
         return DraftValidation::Invalid(
             "The active cell/view changed. Close and reopen Place text or note.".to_owned(),
         );
@@ -156,7 +156,7 @@ fn design_note_preview_text(state: &AppState) -> String {
     let Ok(note) = DesignNote::new(0, Point::origin(), draft.kind, source) else {
         return source.to_owned();
     };
-    let view_path = state.workspace.active_view.display_path();
+    let view_path = state.workspace.content.active_view.display_path();
     note.rendered_text(&DesignNoteRenderContext {
         view_path: &view_path,
         component_count: state.schematic.document().components.len(),
@@ -550,7 +550,7 @@ mod tests {
             app.state.design_execution_epoch,
             app.state.active_schematic_epoch,
             app.state.schematic.topology_version(),
-            app.state.workspace.active_view.display_path(),
+            app.state.workspace.content.active_view.display_path(),
         );
         let _ = ctx.run_ui(
             egui::RawInput {
@@ -607,7 +607,7 @@ mod tests {
             state.design_execution_epoch,
             state.active_schematic_epoch,
             state.schematic.topology_version(),
-            state.workspace.active_view.display_path(),
+            state.workspace.content.active_view.display_path(),
         );
         let DraftValidation::Valid(pending) = validate_draft(&state) else {
             panic!("valid draft");
@@ -624,7 +624,7 @@ mod tests {
             state.design_execution_epoch,
             state.active_schematic_epoch,
             state.schematic.topology_version(),
-            state.workspace.active_view.display_path(),
+            state.workspace.content.active_view.display_path(),
         );
         state.schematic.session.read_only = true;
         assert!(matches!(

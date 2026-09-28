@@ -45,7 +45,7 @@ mod tests {
     /// setup the publish dialog's own tests use.
     fn app_with_an_exportable_document() -> RSpiceApp {
         let mut app = RSpiceApp::test_instance();
-        let reference = app.state.workspace.active_view.clone();
+        let reference = app.state.workspace.content.active_view.clone();
         app.state.workbench.documents.activate(
             crate::workbench::state::WorkspaceDocumentId::CellView(reference),
         );

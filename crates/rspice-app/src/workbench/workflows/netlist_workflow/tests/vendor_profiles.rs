@@ -92,7 +92,13 @@ fn vendor_admitted_decks_have_explicit_preparation_outcomes() {
             Some(path),
             relative
         ));
-        let descriptor = app.state.workspace.netlist_descriptor.as_mut().unwrap();
+        let descriptor = app
+            .state
+            .workspace
+            .content
+            .netlist_descriptor
+            .as_mut()
+            .unwrap();
         descriptor.imported_dialect = Some(profile.source_dialect());
         descriptor.execution_profile = Some(profile);
         descriptor.compatibility_reviewed = true;
@@ -112,7 +118,7 @@ fn vendor_admitted_decks_have_explicit_preparation_outcomes() {
             ));
         }
         assert_eq!(
-            app.state.workspace.netlist_source.as_deref(),
+            app.state.workspace.content.netlist_source.as_deref(),
             Some(source.as_str())
         );
     }

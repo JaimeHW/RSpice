@@ -68,7 +68,7 @@ pub(crate) fn open_create_pins(state: &mut AppState) {
     let authority = PlacementAuthority::new(
         state.design_execution_epoch,
         state.active_schematic_epoch,
-        state.workspace.active_view.display_path(),
+        state.workspace.content.active_view.display_path(),
     );
     let armed = state
         .schematic
@@ -142,7 +142,7 @@ fn draft(state: &AppState) -> Draft {
         authority.matches(
             state.design_execution_epoch,
             state.active_schematic_epoch,
-            &state.workspace.active_view.display_path(),
+            &state.workspace.content.active_view.display_path(),
         )
     });
     if !current {
@@ -274,7 +274,7 @@ impl RSpiceApp {
         // The cell whose interface this batch will change. It is the one thing
         // about the form that is not in the form, and the reason the
         // document-changed refusal exists at all.
-        let view_path = self.state.workspace.active_view.display_path();
+        let view_path = self.state.workspace.content.active_view.display_path();
 
         let form = &mut self.state.dialogs.pin_port;
         let choice = CommandForm::new(TITLE, PRIMARY)

@@ -99,7 +99,7 @@ impl serde::Serialize for AppState {
         if ProjectFile::validate_result_plan_references_for(
             &simulation_results,
             Some(&execution_context.simulation_plan),
-            self.workspace.project.revision(),
+            self.workspace.content.project.revision(),
         )
         .is_err()
         {
@@ -126,6 +126,7 @@ impl serde::Serialize for AppState {
         let mut committed_workspace;
         let workspace = if self
             .workspace
+            .content
             .schematic_buffers
             .values()
             .any(|schematic| schematic.pending_operation_id().is_some())
@@ -213,10 +214,12 @@ impl<'de> serde::Deserialize<'de> for AppState {
         // JSON tree first can exhaust the browser WASM stack before any domain
         // validation or recovery policy gets a chance to run.
         let de = AppStateDe::deserialize(deserializer)?;
-        let needs_session_identity = de
-            .project_workspace
-            .as_ref()
-            .is_none_or(|workspace| workspace.project.has_descriptor_local_legacy_identity());
+        let needs_session_identity = de.project_workspace.as_ref().is_none_or(|workspace| {
+            workspace
+                .content
+                .project
+                .has_descriptor_local_legacy_identity()
+        });
         let legacy_execution_context_identity = de
             .execution_context
             .as_deref()
@@ -256,16 +259,18 @@ impl<'de> serde::Deserialize<'de> for AppState {
             });
         if let Some(identity) = migrated_session_identity {
             project_workspace
+                .content
                 .project
                 .bind_legacy_session_identity(identity);
         }
-        let project_id = project_workspace.project.id();
+        let project_id = project_workspace.content.project.id();
         project_workspace.ensure_library_model(&mut library_manager);
         // Documents skip their runtime dirty flag. The session's open tabs
         // retain it, including inactive schematics that will be reopened later.
-        for open in &project_workspace.open_views {
+        for open in &project_workspace.content.open_views {
             if open.dirty
                 && project_workspace
+                    .content
                     .schematic_buffers
                     .contains_key(&open.reference.key())
             {
@@ -377,7 +382,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
                 ProjectFile::validate_result_plan_references_for(
                     &simulation_results,
                     Some(&state.sim_setup),
-                    state.workspace.project.revision(),
+                    state.workspace.content.project.revision(),
                 )
             })
             .and_then(|()| crate::io::restore_simulation_results(simulation_results, &mut state.simulation))
@@ -405,7 +410,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
         if let Some(recovery) = state.workbench.model_editor_recovery.clone() {
             match recovery.restore(
                 &state.model_library_manager,
-                state.workspace.project.revision(),
+                state.workspace.content.project.revision(),
             ) {
                 Ok(draft) => state.workbench.model_editor.draft = Some(draft),
                 Err(error) => {
@@ -589,7 +594,7 @@ mod tests {
             let mut state = AppState::default();
             let receipt = BrowserBindingReceipt {
                 binding_id: uuid::Uuid::from_u128(0xc23c_8916_2865_430a_a612_ecbb_111b_3ce1),
-                project_id: state.workspace.project.id().to_string(),
+                project_id: state.workspace.content.project.id().to_string(),
                 accepted_generation: 23,
                 accepted_digest: "ab".repeat(32).parse().expect("valid digest fixture"),
                 backend,
@@ -607,8 +612,8 @@ mod tests {
                     "{backend:?} authority must survive {format} session recovery"
                 );
                 assert_eq!(
-                    restored.workspace.project.id(),
-                    state.workspace.project.id()
+                    restored.workspace.content.project.id(),
+                    state.workspace.content.project.id()
                 );
             }
         }
@@ -619,7 +624,7 @@ mod tests {
         let mut state = AppState::default();
         let receipt = crate::workbench::lifecycle::project_lifecycle::NativeBindingReceipt {
             canonical_path: std::path::PathBuf::from(r"C:\projects\precision-afe.rspiceproj"),
-            project_id: state.workspace.project.id().to_string(),
+            project_id: state.workspace.content.project.id().to_string(),
             accepted_digest: crate::product::ContentDigest::from_bytes([0x5a; 32]),
         };
         state.native_project_binding_receipt = Some(receipt.clone());
@@ -654,6 +659,7 @@ mod tests {
             let mut state = AppState::default();
             state
                 .workspace
+                .content
                 .project
                 .rename("Legacy saved circuit")
                 .unwrap();
@@ -664,7 +670,7 @@ mod tests {
             state.workspace.save_active_schematic(&state.schematic);
             let receipt = BrowserBindingReceipt {
                 binding_id: uuid::Uuid::from_u128(0xc23c_8916_2865_430a_a612_ecbb_111b_3ce1),
-                project_id: state.workspace.project.id().to_string(),
+                project_id: state.workspace.content.project.id().to_string(),
                 accepted_generation: 23,
                 accepted_digest: "ab".repeat(32).parse().unwrap(),
                 backend,
@@ -682,10 +688,13 @@ mod tests {
                 Some(&receipt)
             );
             assert_eq!(
-                restored.workspace.project.id(),
-                state.workspace.project.id()
+                restored.workspace.content.project.id(),
+                state.workspace.content.project.id()
             );
-            assert_eq!(restored.workspace.project.name(), "Legacy saved circuit");
+            assert_eq!(
+                restored.workspace.content.project.name(),
+                "Legacy saved circuit"
+            );
             assert_eq!(
                 restored.schematic.document().components,
                 state.schematic.document().components
@@ -705,8 +714,8 @@ mod tests {
                     let recovered = AppState::from_session_ron(&corrupted).unwrap();
                     assert!(recovered.browser_project_binding_receipt.is_none());
                     assert_eq!(
-                        recovered.workspace.project.id(),
-                        state.workspace.project.id()
+                        recovered.workspace.content.project.id(),
+                        state.workspace.content.project.id()
                     );
                     assert_eq!(
                         recovered.schematic.document().components,
@@ -728,6 +737,7 @@ mod tests {
         let mut state = AppState::default();
         state
             .workspace
+            .content
             .project
             .rename("Recovered receipt-corruption fixture")
             .expect("valid fixture name");
@@ -752,7 +762,7 @@ mod tests {
             "browser_project_binding_receipt".to_owned(),
             serde_json::json!({
                 "binding_id": uuid::Uuid::new_v4(),
-                "project_id": state.workspace.project.id().to_string(),
+                "project_id": state.workspace.content.project.id().to_string(),
                 "accepted_generation": 7,
                 "accepted_digest": "11".repeat(32),
                 "backend": "future-cloud-authority"
@@ -762,12 +772,13 @@ mod tests {
         let restored: AppState = serde_json::from_value(session)
             .expect("receipt corruption is independently recoverable");
         assert_eq!(
-            restored.workspace.project.name(),
+            restored.workspace.content.project.name(),
             "Recovered receipt-corruption fixture"
         );
         assert_eq!(
             restored
                 .workspace
+                .content
                 .schematic_buffers
                 .get(&active_key)
                 .expect("working schematic buffer survives")
@@ -813,7 +824,7 @@ mod tests {
     #[test]
     fn legacy_session_without_project_id_restores_a_reproducible_identity() {
         let state = AppState::default();
-        let original_id = state.workspace.project.id();
+        let original_id = state.workspace.content.project.id();
         let mut session = serde_json::to_value(&state).expect("session serializes");
         session["project_workspace"]["project"]
             .as_object_mut()
@@ -837,9 +848,12 @@ mod tests {
         let second: AppState =
             serde_json::from_str(&legacy_json).expect("identical legacy session restores");
 
-        assert_eq!(first.workspace.project.id(), second.workspace.project.id());
-        assert_ne!(first.workspace.project.id(), original_id);
-        assert!(!first.workspace.project.id().as_uuid().is_nil());
+        assert_eq!(
+            first.workspace.content.project.id(),
+            second.workspace.content.project.id()
+        );
+        assert_ne!(first.workspace.content.project.id(), original_id);
+        assert!(!first.workspace.content.project.id().as_uuid().is_nil());
     }
 
     #[test]
@@ -877,12 +891,12 @@ mod tests {
             serde_json::from_value(second_value).expect("second legacy session restores");
 
         assert_eq!(
-            first_restored.workspace.project.id(),
-            first_replay.workspace.project.id()
+            first_restored.workspace.content.project.id(),
+            first_replay.workspace.content.project.id()
         );
         assert_ne!(
-            first_restored.workspace.project.id(),
-            second_restored.workspace.project.id()
+            first_restored.workspace.content.project.id(),
+            second_restored.workspace.content.project.id()
         );
     }
 
@@ -1034,6 +1048,7 @@ mod tests {
         let mut state = AppState::default();
         state
             .workspace
+            .content
             .project
             .rename("Session with future preferences")
             .expect("valid project name");
@@ -1050,7 +1065,7 @@ mod tests {
         let restored: AppState =
             serde_json::from_value(wire).expect("future preferences remain isolated");
         assert_eq!(
-            restored.workspace.project.name(),
+            restored.workspace.content.project.name(),
             "Session with future preferences"
         );
         let rewritten = serde_json::to_value(&restored).expect("session rewrites");
@@ -1092,12 +1107,18 @@ mod tests {
         let mut state = AppState::default();
         state
             .workspace
+            .content
             .project
             .rename("Session before safe mode")
             .expect("valid project name");
         let before = serde_json::to_string(&state).expect("baseline session serializes");
 
-        state.workspace.project.rename("Isolated session").unwrap();
+        state
+            .workspace
+            .content
+            .project
+            .rename("Isolated session")
+            .unwrap();
         state.workbench.safe_mode.activate(
             crate::workbench::state::LocalSafeModeOptions::default(),
             before.clone(),
@@ -1106,7 +1127,7 @@ mod tests {
         let restored: AppState = serde_json::from_str(&persisted).expect("snapshot restores");
 
         assert_eq!(
-            restored.workspace.project.name(),
+            restored.workspace.content.project.name(),
             "Session before safe mode"
         );
         assert_eq!(
@@ -1323,7 +1344,7 @@ mod tests {
         let plan_id = plan.id();
         let source_instance_id = transient.id();
         let source_revision = plan.revision();
-        let project_revision = state.workspace.project.revision();
+        let project_revision = state.workspace.content.project.revision();
         let prepared_snapshot_digest = crate::product::ContentDigest::from_bytes([0x73; 32]);
         let mut run = crate::state::SimulationRun::new(4);
         run.add_analysis(

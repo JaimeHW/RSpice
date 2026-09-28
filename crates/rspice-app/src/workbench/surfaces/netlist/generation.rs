@@ -20,14 +20,15 @@ use crate::workbench::{AppState, RSpiceApp};
 /// partial bytes.
 pub(super) fn reconcile_documents(app: &mut RSpiceApp) {
     if app.state.ui.netlist.owned_document.is_none() {
-        app.state.ui.netlist.owned_document = app.state.workspace.netlist_document.clone();
+        app.state.ui.netlist.owned_document = app.state.workspace.content.netlist_document.clone();
     }
     if !app.state.ui.netlist.active_document_initialized {
-        app.state.ui.netlist.active_document = if app.state.workspace.netlist_source.is_some() {
-            ActiveNetlistDocument::OwnedSource
-        } else {
-            ActiveNetlistDocument::Generated
-        };
+        app.state.ui.netlist.active_document =
+            if app.state.workspace.content.netlist_source.is_some() {
+                ActiveNetlistDocument::OwnedSource
+            } else {
+                ActiveNetlistDocument::Generated
+            };
         app.state.ui.netlist.active_document_initialized = true;
     }
 
@@ -47,7 +48,9 @@ pub(super) fn reconcile_documents(app: &mut RSpiceApp) {
         .map(str::to_owned)
         .or_else(|| match app.state.ui.netlist.active_document {
             ActiveNetlistDocument::Generated => Some(app.state.ui.netlist.generated_source.clone()),
-            ActiveNetlistDocument::OwnedSource => app.state.workspace.netlist_source.clone(),
+            ActiveNetlistDocument::OwnedSource => {
+                app.state.workspace.content.netlist_source.clone()
+            }
             ActiveNetlistDocument::GeneratedDiff => {
                 Some(app.state.ui.netlist.generated_diff_source.clone())
             }
@@ -93,7 +96,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
         }
         if let Some(document) = app.state.ui.netlist.owned_document.as_mut() {
             let _ = document.invalidate_validation(document.content_digest());
-            app.state.workspace.netlist_document = Some(document.clone());
+            app.state.workspace.content.netlist_document = Some(document.clone());
         }
     }
     if app.state.ui.netlist.generated_input_digest == Some(input_digest)
@@ -158,7 +161,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
                 };
                 app.state.ui.netlist.generated_source = generated_artifact.source().to_owned();
                 app.state.ui.netlist.generated_document = Some(generated_document);
-                app.state.workspace.netlist_document = owned_document.clone();
+                app.state.workspace.content.netlist_document = owned_document.clone();
                 app.state.ui.netlist.owned_document = owned_document;
                 app.state.ui.netlist.generated_input_digest = Some(input_digest);
                 app.state.ui.netlist.generation_error = None;
@@ -189,7 +192,7 @@ pub(super) fn publish_generated_document(
 ) -> Result<(NetlistDocument, Option<NetlistDocument>), String> {
     let provenance = GeneratedProvenance::try_new(
         "rspice-netlist-generator/v1",
-        GenerationInput::new(state.workspace.project.revision(), input_digest),
+        GenerationInput::new(state.workspace.content.project.revision(), input_digest),
     )
     .map_err(|error| error.to_string())?;
     let source_map = generated_source_map(state, &source)?;
@@ -231,7 +234,7 @@ pub(super) fn generated_project_source_dependencies(
         .workspace
         .configuration_execution_projection(
             &state.library_manager,
-            &state.workspace.active_view,
+            &state.workspace.content.active_view,
             &state.schematic,
         )
         .map_err(|error| error.to_string())?;
@@ -245,6 +248,7 @@ pub(super) fn generated_project_source_dependencies(
         }
         let bundle = state
             .workspace
+            .content
             .project_sources
             .get_bundle(binding.source_bundle_id())
             .ok_or_else(|| {
@@ -402,7 +406,7 @@ fn generated_source_map(
     state: &AppState,
     source: &str,
 ) -> Result<Vec<GeneratedSourceMapEntry>, String> {
-    let top = state.workspace.active_view.clone();
+    let top = state.workspace.content.active_view.clone();
     let mut current = top.clone();
     let mut entries = Vec::with_capacity(source.lines().count());
 
@@ -416,6 +420,7 @@ fn generated_source_map(
         {
             current = state
                 .workspace
+                .content
                 .schematic_buffers
                 .keys()
                 .find_map(|key| {
@@ -465,7 +470,11 @@ fn source_line_component(
     if token.starts_with(['.', '*']) {
         return None;
     }
-    let schematic = state.workspace.schematic_buffers.get(&reference.key())?;
+    let schematic = state
+        .workspace
+        .content
+        .schematic_buffers
+        .get(&reference.key())?;
     schematic
         .document()
         .components

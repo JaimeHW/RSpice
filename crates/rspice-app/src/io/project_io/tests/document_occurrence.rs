@@ -54,7 +54,7 @@ fn a_saved_project_writes_occurrences_and_not_the_old_global_breadcrumb() {
     restored.validate().expect("the restored project validates");
     assert!(restored.workspace_migration_warning.is_none());
     assert_eq!(restored.workspace.occurrence_path().to_string(), "/XAMP");
-    assert_eq!(restored.workspace.active_view, schematic("amp"));
+    assert_eq!(restored.workspace.content.active_view, schematic("amp"));
 }
 
 #[test]
@@ -125,7 +125,7 @@ fn the_frozen_reference_project_gains_a_rooted_occurrence_per_document() {
     project.validate().expect("the frozen reference validates");
     assert!(project.workspace_migration_warning.is_none());
 
-    for open_view in &project.workspace.open_views {
+    for open_view in &project.workspace.content.open_views {
         assert!(!open_view.occurrence.is_unrooted());
         assert_eq!(open_view.occurrence.terminal_master(), &open_view.reference);
     }

@@ -141,6 +141,7 @@ pub(crate) fn active_bundle_path(
     explicit.or_else(|| {
         let owner = crate::state::ProjectSourceOwner::code_workspace(language);
         workspace
+            .content
             .project_sources
             .bundle_for_owner(&owner)
             .map(|bundle| bundle.root().logical_path().to_owned())
@@ -173,17 +174,19 @@ pub(crate) fn source_editor_id(
 /// marked as generated rather than borrowing a filename it does not have.
 fn netlist_document_label(workspace: &crate::state::ProjectWorkspace) -> String {
     workspace
+        .content
         .netlist_descriptor
         .as_ref()
         .map(|descriptor| descriptor.artifact_name.clone())
         .or_else(|| {
             workspace
+                .content
                 .netlist_source_path
                 .as_deref()
                 .and_then(std::path::Path::file_name)
                 .map(|name| name.to_string_lossy().into_owned())
         })
-        .unwrap_or_else(|| format!("{}.sp · generated", workspace.project.top_cell))
+        .unwrap_or_else(|| format!("{}.sp · generated", workspace.content.project.top_cell))
 }
 
 /// The selected file in a language bundle, or its root when nothing is
@@ -197,7 +200,7 @@ fn source_bundle_document_label(
     fallback: crate::workbench::MessageId,
 ) -> String {
     let owner = crate::state::ProjectSourceOwner::code_workspace(language);
-    let bundle = workspace.project_sources.bundle_for_owner(&owner);
+    let bundle = workspace.content.project_sources.bundle_for_owner(&owner);
     selected
         .map(str::to_owned)
         .or_else(|| bundle.map(|bundle| bundle.root().logical_path().to_owned()))
@@ -235,7 +238,7 @@ mod tests {
     #[test]
     fn the_active_document_label_follows_the_visible_page() {
         let (mut workspace, mut code) = fixture();
-        workspace.project.top_cell = "afe".to_owned();
+        workspace.content.project.top_cell = "afe".to_owned();
 
         code.page = CodeWorkspacePage::Netlist;
         assert_eq!(
@@ -243,7 +246,8 @@ mod tests {
             "afe.sp · generated"
         );
 
-        workspace.netlist_source_path = Some(std::path::PathBuf::from("/p/top_override.sp"));
+        workspace.content.netlist_source_path =
+            Some(std::path::PathBuf::from("/p/top_override.sp"));
         assert_eq!(
             active_document_label(&workspace, &code, messages()),
             "top_override.sp"

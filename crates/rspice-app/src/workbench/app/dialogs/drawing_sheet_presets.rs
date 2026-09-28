@@ -110,7 +110,7 @@ pub(crate) fn open_custom_sheet_size_library(state: &mut AppState) -> bool {
         library_open: true,
         search: String::new(),
         edit: Some(SchematicEditAuthority::capture(state)),
-        catalog_revision: state.workspace.design_management.revision(),
+        catalog_revision: state.workspace.content.design_management.revision(),
         baseline_personal: personal,
         editor: None,
         transfer: PresetTransferState::default(),
@@ -144,8 +144,9 @@ impl RSpiceApp {
             .ui
             .preferences
             .drawing_sheet_personal_preferences();
-        let presets = sorted_visible_presets(&self.state.workspace.design_management, &personal);
-        let usage = usage_counts(&self.state.workspace.design_management, &personal);
+        let presets =
+            sorted_visible_presets(&self.state.workspace.content.design_management, &personal);
+        let usage = usage_counts(&self.state.workspace.content.design_management, &personal);
         let authority_error =
             validate_project_authority(&self.state, &self.state.dialogs.drawing_sheet_presets)
                 .err();
@@ -254,7 +255,8 @@ impl RSpiceApp {
             .ui
             .preferences
             .drawing_sheet_personal_preferences();
-        let visible = all_visible_presets(&self.state.workspace.design_management, &personal);
+        let visible =
+            all_visible_presets(&self.state.workspace.content.design_management, &personal);
         let id = format!("custom-{}", uuid::Uuid::new_v4().simple());
         let name = unique_copy_name(&format!("{} copy", source.name), &visible);
         let format = source
@@ -299,7 +301,8 @@ impl RSpiceApp {
             .ui
             .preferences
             .drawing_sheet_personal_preferences();
-        let visible = all_visible_presets(&self.state.workspace.design_management, &personal);
+        let visible =
+            all_visible_presets(&self.state.workspace.content.design_management, &personal);
         let project_error =
             validate_project_authority(&self.state, &self.state.dialogs.drawing_sheet_presets)
                 .err();
@@ -397,7 +400,8 @@ impl RSpiceApp {
             .ui
             .preferences
             .drawing_sheet_personal_preferences();
-        let visible = all_visible_presets(&self.state.workspace.design_management, &personal);
+        let visible =
+            all_visible_presets(&self.state.workspace.content.design_management, &personal);
         let preset = if draft.mode == PresetEditorMode::Edit {
             let name = validate_editor_name(&draft, &visible)?;
             let baseline = draft
@@ -462,7 +466,7 @@ impl RSpiceApp {
             .preferences
             .drawing_sheet_personal_preferences();
         let used_by = usage_count(
-            &self.state.workspace.design_management,
+            &self.state.workspace.content.design_management,
             &personal,
             key.scope,
             &key.id,
@@ -515,7 +519,7 @@ impl RSpiceApp {
         match key.scope {
             DrawingSheetPresetScope::Project => {
                 validate_project_authority(&self.state, &self.state.dialogs.drawing_sheet_presets)?;
-                let before = self.state.workspace.design_management.clone();
+                let before = self.state.workspace.content.design_management.clone();
                 let mut candidate = before.clone();
                 candidate
                     .remove_drawing_sheet_preset(candidate.revision(), &key.id)
@@ -564,7 +568,8 @@ impl RSpiceApp {
             .ui
             .preferences
             .drawing_sheet_personal_preferences();
-        let visible = all_visible_presets(&self.state.workspace.design_management, &personal);
+        let visible =
+            all_visible_presets(&self.state.workspace.content.design_management, &personal);
         let export_ids = visible
             .iter()
             .filter(|preset| unsigned_exportable(preset))
@@ -598,7 +603,8 @@ impl RSpiceApp {
             .ui
             .preferences
             .drawing_sheet_personal_preferences();
-        let visible = sorted_visible_presets(&self.state.workspace.design_management, &personal);
+        let visible =
+            sorted_visible_presets(&self.state.workspace.content.design_management, &personal);
         let transfer = &self.state.dialogs.drawing_sheet_presets.transfer;
         let is_import = transfer.mode == TransferMode::Import;
         let title = if is_import {
@@ -742,8 +748,9 @@ impl RSpiceApp {
             .ui
             .preferences
             .drawing_sheet_personal_preferences();
-        let mut visible = all_visible_presets(&self.state.workspace.design_management, &personal);
-        let before = self.state.workspace.design_management.clone();
+        let mut visible =
+            all_visible_presets(&self.state.workspace.content.design_management, &personal);
+        let before = self.state.workspace.content.design_management.clone();
         let mut candidate = before.clone();
         let mut created = 0_usize;
         let mut mapped = 0_usize;
@@ -951,7 +958,7 @@ impl RSpiceApp {
                     .preferences
                     .drawing_sheet_personal_preferences();
                 let visible =
-                    all_visible_presets(&self.state.workspace.design_management, &personal);
+                    all_visible_presets(&self.state.workspace.content.design_management, &personal);
                 let source = package.text;
                 {
                     let transfer = &mut self.state.dialogs.drawing_sheet_presets.transfer;
@@ -1010,7 +1017,7 @@ impl RSpiceApp {
             .ui
             .preferences
             .drawing_sheet_personal_preferences();
-        all_visible_presets(&self.state.workspace.design_management, &personal)
+        all_visible_presets(&self.state.workspace.content.design_management, &personal)
             .into_iter()
             .find(|preset| preset.scope == key.scope && preset.id.eq_ignore_ascii_case(&key.id))
     }
@@ -1022,7 +1029,7 @@ impl RSpiceApp {
     ) -> Result<(), String> {
         validate_project_authority(&self.state, &self.state.dialogs.drawing_sheet_presets)?;
         preset.format = preset.format.as_reusable_drawing_sheet_preset();
-        let before = self.state.workspace.design_management.clone();
+        let before = self.state.workspace.content.design_management.clone();
         let mut candidate = before.clone();
         candidate
             .publish_drawing_sheet_preset(candidate.revision(), preset)
@@ -1039,7 +1046,7 @@ impl RSpiceApp {
 
     fn rename_project_preset(&mut self, preset_id: &str, name: String) -> Result<(), String> {
         validate_project_authority(&self.state, &self.state.dialogs.drawing_sheet_presets)?;
-        let before = self.state.workspace.design_management.clone();
+        let before = self.state.workspace.content.design_management.clone();
         let mut candidate = before.clone();
         candidate
             .rename_drawing_sheet_preset(candidate.revision(), preset_id, name)
@@ -1094,7 +1101,7 @@ impl RSpiceApp {
         let state = &self.state;
         let refreshed = DrawingSheetPresetDialogsState {
             edit: Some(SchematicEditAuthority::capture(state)),
-            catalog_revision: state.workspace.design_management.revision(),
+            catalog_revision: state.workspace.content.design_management.revision(),
             baseline_personal: state.ui.preferences.drawing_sheet_personal_preferences(),
             ..self.state.dialogs.drawing_sheet_presets.clone()
         };
@@ -1111,7 +1118,7 @@ fn validate_project_authority(
         .as_ref()
         .ok_or_else(|| "Custom sheet sizes has no project edit authority.".to_owned())?
         .validate(app, "Custom sheet sizes")?;
-    if app.workspace.design_management.revision() != state.catalog_revision {
+    if app.workspace.content.design_management.revision() != state.catalog_revision {
         return Err(
             "Project drawing-sheet presets changed. Close and reopen Custom sheet sizes."
                 .to_owned(),
@@ -1470,12 +1477,13 @@ mod tests {
             )
             .unwrap(),
         };
-        let mut seeded = app.state.workspace.design_management.clone();
+        let mut seeded = app.state.workspace.content.design_management.clone();
         seeded
             .publish_drawing_sheet_preset(seeded.revision(), existing.clone())
             .unwrap();
         app.state
             .workspace
+            .content
             .replace_design_management(seeded)
             .unwrap();
 
@@ -1527,7 +1535,8 @@ mod tests {
             .ui
             .preferences
             .drawing_sheet_personal_preferences();
-        let visible = all_visible_presets(&app.state.workspace.design_management, &personal);
+        let visible =
+            all_visible_presets(&app.state.workspace.content.design_management, &personal);
         app.review_import_source(&source, &visible).unwrap();
         {
             let candidates = &mut app
@@ -1555,6 +1564,7 @@ mod tests {
         let settings = app
             .state
             .workspace
+            .content
             .design_management
             .drawing_sheet_settings();
         assert!(settings.find_preset(&existing.id).is_some());

@@ -80,6 +80,7 @@ pub fn dry_run_automation_workflow(app: &mut RSpiceApp) {
 fn python_automation_requires_managed_worker(app: &RSpiceApp) -> bool {
     app.state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&ProjectSourceOwner::code_workspace(
             ProjectSourceLanguage::RSpiceAutomation,
@@ -117,6 +118,7 @@ fn start_managed_python_workflow(app: &mut RSpiceApp, mode: AutomationRuntimeLau
     let Some(bundle) = app
         .state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&owner)
         .cloned()
@@ -125,7 +127,7 @@ fn start_managed_python_workflow(app: &mut RSpiceApp, mode: AutomationRuntimeLau
         return;
     };
     let token = SourceOperationToken {
-        project_id: app.state.workspace.project.id(),
+        project_id: app.state.workspace.content.project.id(),
         revision: bundle.revision().get(),
         content_digest: bundle.closure_digest(),
     };
@@ -241,6 +243,7 @@ pub fn validate_automation_workspace(app: &mut RSpiceApp) {
     let Some(bundle) = app
         .state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&owner)
         .cloned()
@@ -249,7 +252,7 @@ pub fn validate_automation_workspace(app: &mut RSpiceApp) {
         return;
     };
     let token = SourceOperationToken {
-        project_id: app.state.workspace.project.id(),
+        project_id: app.state.workspace.content.project.id(),
         revision: bundle.revision().get(),
         content_digest: bundle.closure_digest(),
     };
@@ -268,7 +271,7 @@ pub fn validate_automation_workspace(app: &mut RSpiceApp) {
                         }
                     };
                     match crate::automation_workflow::build_automation_runtime_snapshot(
-                        app.state.workspace.project.id(),
+                        app.state.workspace.content.project.id(),
                         &bundle,
                         manifest,
                         capabilities,
@@ -653,6 +656,7 @@ fn complete_automation_validation(
     if let Err(error) = app
         .state
         .workspace
+        .content
         .mark_project_source_bundle_validated(bundle_id)
     {
         fail(
@@ -1110,6 +1114,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
     let Some(bundle) = app
         .state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&ProjectSourceOwner::code_workspace(
             ProjectSourceLanguage::RSpiceAutomation,
@@ -1120,7 +1125,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         return;
     };
     let token = SourceOperationToken {
-        project_id: app.state.workspace.project.id(),
+        project_id: app.state.workspace.content.project.id(),
         revision: bundle.revision().get(),
         content_digest: bundle.closure_digest(),
     };
@@ -1158,7 +1163,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
                     }
                 };
                 match crate::automation_workflow::build_automation_runtime_snapshot(
-                    app.state.workspace.project.id(),
+                    app.state.workspace.content.project.id(),
                     &bundle,
                     manifest,
                     capabilities,
@@ -1190,7 +1195,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
             return;
         }
     };
-    let Some(plan_payload) = app.state.workspace.plan_data(plan_id).cloned() else {
+    let Some(plan_payload) = app.state.workspace.content.plan_data(plan_id).cloned() else {
         fail(
             app,
             "The active simulation plan has no governed configuration payload.",
@@ -1244,6 +1249,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
     if let Err(error) = app
         .state
         .workspace
+        .content
         .mark_project_source_bundle_validated(bundle.id())
     {
         fail(
@@ -1315,15 +1321,15 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         }
     };
     let snapshot = AutomationDispatchSnapshot {
-        project_id: app.state.workspace.project.id(),
-        project_revision: app.state.workspace.project.revision(),
+        project_id: app.state.workspace.content.project.id(),
+        project_revision: app.state.workspace.content.project.revision(),
         plan_id,
         plan_revision,
         prepared_snapshot_digest: prepared.snapshot_digest,
         source_content_digest: prepared.source_digest,
         plan_name: active_name,
         plan_payload,
-        project_sources: app.state.workspace.project_sources.clone(),
+        project_sources: app.state.workspace.content.project_sources.clone(),
         baseline_run: Arc::new(baseline_run),
         baseline_digest,
     };
@@ -1391,7 +1397,7 @@ fn automation_capabilities(
     use rspice_automation_protocol::{CapabilityGrant, CapabilityKind};
     use uuid::Uuid;
 
-    let project_scope = app.state.workspace.project.id().to_string();
+    let project_scope = app.state.workspace.content.project.id().to_string();
     let mut grants = Vec::new();
     if manifest.project_files.eq_ignore_ascii_case("read") {
         grants.push(CapabilityGrant {
@@ -2011,6 +2017,7 @@ fn baseline_run(app: &RSpiceApp, plan_id: SimulationPlanId) -> Result<Simulation
     let run_id = app
         .state
         .workspace
+        .content
         .plan_data(plan_id)
         .and_then(|payload| payload.regression_baseline_run)
         .ok_or_else(|| {
@@ -2092,8 +2099,8 @@ fn dispatch_snapshot_is_current(
     app: &RSpiceApp,
     snapshot: &AutomationDispatchSnapshot,
 ) -> Result<(), String> {
-    if app.state.workspace.project.id() != snapshot.project_id
-        || app.state.workspace.project.revision() != snapshot.project_revision
+    if app.state.workspace.content.project.id() != snapshot.project_id
+        || app.state.workspace.content.project.revision() != snapshot.project_revision
     {
         return Err(
             "The project identity or revision changed while Automation execution was in flight; evidence publication was refused."
@@ -2118,13 +2125,13 @@ fn dispatch_snapshot_is_current(
                 .to_owned(),
         );
     }
-    if app.state.workspace.plan_data(snapshot.plan_id) != Some(&snapshot.plan_payload) {
+    if app.state.workspace.content.plan_data(snapshot.plan_id) != Some(&snapshot.plan_payload) {
         return Err(
             "The governed plan payload, specifications, baseline selection, or tolerance policy changed after Automation dispatch; evidence publication was refused."
                 .to_owned(),
         );
     }
-    if app.state.workspace.project_sources != snapshot.project_sources {
+    if app.state.workspace.content.project_sources != snapshot.project_sources {
         return Err(
             "A project-owned source document or validation identity changed after Automation dispatch; evidence publication was refused."
                 .to_owned(),
@@ -2192,12 +2199,13 @@ fn validate_regression_policy(
 fn source_token_is_current(app: &RSpiceApp, token: SourceOperationToken) -> bool {
     app.state
         .workspace
+        .content
         .project_sources
         .bundle_for_owner(&ProjectSourceOwner::code_workspace(
             ProjectSourceLanguage::RSpiceAutomation,
         ))
         .is_some_and(|bundle| {
-            app.state.workspace.project.id() == token.project_id
+            app.state.workspace.content.project.id() == token.project_id
                 && bundle.revision().get() == token.revision
                 && bundle.closure_digest() == token.content_digest
         })

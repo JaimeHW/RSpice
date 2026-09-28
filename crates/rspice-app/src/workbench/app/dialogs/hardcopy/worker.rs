@@ -1209,14 +1209,14 @@ mod tests {
                 Point::new(-20, 5),
                 Point::new(endpoint_x, 5),
             ));
-        let active_view = state.workspace.active_view.clone();
+        let active_view = state.workspace.content.active_view.clone();
         state
             .workbench
             .documents
             .activate(WorkspaceDocumentId::CellView(active_view));
         let source_key = format!(
             "project:{}:cell-view:{}",
-            state.workspace.project.id().as_uuid(),
+            state.workspace.content.project.id().as_uuid(),
             state.workspace.active_key()
         );
         let scope = HardcopyScope::ActiveDocument;

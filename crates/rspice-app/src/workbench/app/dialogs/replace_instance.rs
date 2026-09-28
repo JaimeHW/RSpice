@@ -242,8 +242,21 @@ impl RSpiceApp {
         self.state.dialogs.replace_instance.mapping = validation
             .mapping()
             .unwrap_or_else(|| "Unavailable".to_owned());
-        let project = self.state.workspace.project.display_name().to_owned();
-        let revision = self.state.workspace.project.revision().get().to_string();
+        let project = self
+            .state
+            .workspace
+            .content
+            .project
+            .display_name()
+            .to_owned();
+        let revision = self
+            .state
+            .workspace
+            .content
+            .project
+            .revision()
+            .get()
+            .to_string();
         let discard_confirm = self.state.dialogs.replace_instance.discard_confirm;
         let validation_error = validation.error().map(str::to_owned);
         let has_transaction = discard_confirm || validation_error.is_some();
@@ -670,7 +683,7 @@ fn validation_for_repaint(ctx: &Context, state: &AppState) -> ReplacementValidat
         preview_error: draft.preview_error.clone(),
         schematic_edit_read_only: state.schematic_edit_read_only(),
         library_revision: state.library_manager.revision(),
-        project_revision: state.workspace.project.revision().get(),
+        project_revision: state.workspace.content.project.revision().get(),
         design_execution_epoch: state.design_execution_epoch,
         active_schematic_epoch: state.active_schematic_epoch,
         topology_version: state.schematic.topology_version(),
@@ -766,8 +779,11 @@ fn authored_source_spec(
     template.mirror_h = false;
     template.mirror_v = false;
     let resolved = template.library_cell.as_ref().and_then(|binding| {
-        SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers)
-            .resolve_binding(binding)
+        SymbolResolver::new(
+            &state.library_manager,
+            &state.workspace.content.schematic_buffers,
+        )
+        .resolve_binding(binding)
     });
     let positions = template.terminal_positions_resolved(resolved.as_ref());
     let terminals = positions
@@ -877,12 +893,12 @@ fn validate_downstream(
 
     let baseline_hierarchy = state.workspace.resolve_hierarchy_with_active(
         &state.library_manager,
-        &state.workspace.active_view,
+        &state.workspace.content.active_view,
         &state.schematic,
     );
     let candidate_hierarchy = state.workspace.resolve_hierarchy_with_active(
         &state.library_manager,
-        &state.workspace.active_view,
+        &state.workspace.content.active_view,
         &candidate,
     );
     let baseline_failures = hierarchy_failures(&baseline_hierarchy);
@@ -953,7 +969,7 @@ fn generate_candidate_netlist(
         .workspace
         .design_projection(
             &state.library_manager,
-            &state.workspace.active_view,
+            &state.workspace.content.active_view,
             &state.schematic,
         )
         .map_err(|error| error.to_string())?;

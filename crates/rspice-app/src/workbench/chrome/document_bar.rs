@@ -262,6 +262,7 @@ fn available_documents_for_workspace(
         }],
         Workspace::Design => state
             .workspace
+            .content
             .open_views
             .iter()
             .map(|document| WorkspaceDocument {
@@ -352,6 +353,7 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
     if let Some(owned) = state.ui.netlist.owned_document.as_ref() {
         let owned_label = state
             .workspace
+            .content
             .netlist_descriptor
             .as_ref()
             .map(|descriptor| descriptor.artifact_name.clone())
@@ -361,7 +363,7 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
             id: WorkspaceDocumentId::NetlistOwned(owned.id()),
             label: owned_label,
             icon: WorkbenchIcon::Netlist,
-            dirty: state.workspace.netlist_source_dirty,
+            dirty: state.workspace.content.netlist_source_dirty,
         });
         documents.extend(owned.dependencies().iter().filter_map(|dependency| {
             dependency.source()?;
@@ -375,6 +377,7 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
             }
             let project_owned = state
                 .workspace
+                .content
                 .netlist_descriptor
                 .as_ref()
                 .and_then(|descriptor| descriptor.owned_include(identity))
@@ -387,7 +390,7 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
                     format!("{} · external", dependency.locator().display_name())
                 },
                 icon: WorkbenchIcon::Code,
-                dirty: project_owned && state.workspace.netlist_source_dirty,
+                dirty: project_owned && state.workspace.content.netlist_source_dirty,
             })
         }));
     }
@@ -469,7 +472,7 @@ fn code_workspace_document(state: &AppState) -> WorkspaceDocument {
             CodeWorkspacePage::VerilogA => WorkbenchIcon::Code,
             CodeWorkspacePage::Automation => WorkbenchIcon::Terminal,
         },
-        dirty: page == CodeWorkspacePage::Netlist && state.workspace.netlist_source_dirty,
+        dirty: page == CodeWorkspacePage::Netlist && state.workspace.content.netlist_source_dirty,
     }
 }
 
@@ -497,7 +500,7 @@ fn authoritative_active_document(
     }
     let candidate = match state.workbench.workspace {
         Workspace::Design => Some(WorkspaceDocumentId::CellView(
-            state.workspace.active_view.clone(),
+            state.workspace.content.active_view.clone(),
         )),
         Workspace::Results => state
             .simulation
@@ -699,12 +702,13 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
         WorkspaceDocumentId::CellView(reference) => {
             if state
                 .workspace
+                .content
                 .open_views
                 .iter()
                 .any(|open| open.reference == *reference)
             {
                 state.open_workspace_view(reference.clone());
-                state.workspace.active_view == *reference
+                state.workspace.content.active_view == *reference
             } else {
                 false
             }
@@ -1232,8 +1236,8 @@ mod tests {
         state.ui.netlist.generated_source = ROOT.to_owned();
         state.ui.netlist.generated_document = Some(generated);
         state.ui.netlist.owned_document = Some(owned.clone());
-        state.workspace.netlist_source = Some(ROOT.to_owned());
-        state.workspace.netlist_document = Some(owned);
+        state.workspace.content.netlist_source = Some(ROOT.to_owned());
+        state.workspace.content.netlist_document = Some(owned);
         state.simulation.netlist_content = ROOT.to_owned();
         state
     }

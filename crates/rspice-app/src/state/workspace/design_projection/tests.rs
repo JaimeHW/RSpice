@@ -103,7 +103,7 @@ fn workspace_with_two_cell_views() -> (
     let load = top.add_component(ComponentType::Resistor, Point::new(240, 0));
     set_name(&mut top, load, LOAD_NAME);
 
-    let active_reference = workspace.active_view.clone();
+    let active_reference = workspace.content.active_view.clone();
     workspace.insert_schematic_editor(active_reference.key(), top.clone());
 
     let mut catalog = ConfigurationSetCatalog::default();
@@ -121,7 +121,7 @@ fn workspace_with_two_cell_views() -> (
             owner: "projection fixture".to_owned(),
         })
         .expect("the fixture configuration is well formed");
-    workspace.configuration_sets = catalog;
+    workspace.content.configuration_sets = catalog;
 
     (workspace, libraries, active_reference, top)
 }
@@ -150,7 +150,7 @@ fn projection_is_not_rebuilt_without_a_key_change() {
         "two calls with nothing changed must share one projection"
     );
 
-    workspace.netlist_source_dirty = true;
+    workspace.content.netlist_source_dirty = true;
     assert!(
         Arc::ptr_eq(
             &first,
@@ -326,7 +326,7 @@ fn a_memo_hit_carries_what_a_full_rebuild_would_have_produced() {
                 "7k",
             ),
             2 => {
-                workspace.connectivity.policy.global_promotion =
+                workspace.content.connectivity.policy.global_promotion =
                     GlobalNetPromotionPolicy::TechnologyDefinedOnly;
             }
             _ => {
@@ -421,8 +421,8 @@ fn two_hundred_projections_over_thirty_cell_views() {
 
     let (mut workspace, libraries, reference, active) = workspace_with_two_cell_views();
     let filler = amp_master();
-    while workspace.schematic_buffers.len() < CELL_VIEWS {
-        let ordinal = workspace.schematic_buffers.len();
+    while workspace.content.schematic_buffers.len() < CELL_VIEWS {
+        let ordinal = workspace.content.schematic_buffers.len();
         workspace
             .insert_schematic_editor(format!("user/pad{ordinal:02}/schematic"), filler.clone());
     }

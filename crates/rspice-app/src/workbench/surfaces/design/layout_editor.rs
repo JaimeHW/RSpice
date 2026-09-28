@@ -75,7 +75,7 @@ struct ResolvedDisplayContract {
 }
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let owner = app.state.workspace.active_view.clone();
+    let owner = app.state.workspace.content.active_view.clone();
     let session_id = ui.id().with(("physical-layout-editor", owner.key()));
     let mut session = ui.ctx().data_mut(|data| {
         data.get_temp::<LayoutEditorSession>(session_id)
@@ -85,6 +85,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let Some(document) = app
         .state
         .workspace
+        .content
         .physical_layout_document(&owner)
         .cloned()
     else {

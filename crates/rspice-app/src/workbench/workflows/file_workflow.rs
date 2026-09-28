@@ -123,6 +123,7 @@ fn replace_active_schematic_document(state: &mut AppState, mut schematic: Schema
                 .insert_schematic_editor(reference.key(), state.schematic.clone());
             if let Some(open_view) = state
                 .workspace
+                .content
                 .open_views
                 .iter_mut()
                 .find(|open_view| open_view.reference == reference)
@@ -587,7 +588,7 @@ mod tests {
     }
 
     fn seed_stale_design_execution_context(state: &mut AppState) {
-        state.workspace.netlist_source = Some("old manual deck\n.end\n".to_owned());
+        state.workspace.content.netlist_source = Some("old manual deck\n.end\n".to_owned());
         state.simulation.netlist_content = "old generated deck\n.end\n".to_owned();
         state
             .simulation
@@ -603,7 +604,7 @@ mod tests {
     }
 
     fn assert_design_execution_context_cleared(state: &AppState) {
-        assert!(state.workspace.netlist_source.is_none());
+        assert!(state.workspace.content.netlist_source.is_none());
         assert!(state.simulation.netlist_content.is_empty());
         assert!(!state.simulation.has_results());
         assert!(state.ui.netlist.last_run_buffer.is_none());
@@ -674,7 +675,11 @@ mod tests {
         assert!(buffer.current_file.is_none());
         assert!(!buffer.is_dirty);
         assert!(
-            !state.workspace.schematic_buffers.contains_key(&symbol_key),
+            !state
+                .workspace
+                .content
+                .schematic_buffers
+                .contains_key(&symbol_key),
             "symbol view must not gain a schematic buffer"
         );
     }
@@ -730,7 +735,11 @@ mod tests {
             Some(Path::new("fresh-symbol-context.rsch"))
         );
         assert!(
-            !state.workspace.schematic_buffers.contains_key(&symbol_key),
+            !state
+                .workspace
+                .content
+                .schematic_buffers
+                .contains_key(&symbol_key),
             "symbol view must not gain a schematic buffer"
         );
     }

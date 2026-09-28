@@ -171,6 +171,7 @@ fn resolve_visualization_pane(
 ) -> Result<ResolvedResultView, String> {
     let document = state
         .workspace
+        .content
         .visualization_document(document_id)
         .ok_or_else(|| "The active visualization document no longer exists.".to_owned())?;
     let page_id = state

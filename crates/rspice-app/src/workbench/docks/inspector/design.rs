@@ -380,7 +380,7 @@ struct SheetConnectivity {
 fn sheet_connectivity(state: &AppState) -> SheetConnectivity {
     let projection = match state.workspace.design_projection(
         &state.library_manager,
-        &state.workspace.active_view,
+        &state.workspace.content.active_view,
         &state.schematic,
     ) {
         Ok(projection) => projection,
@@ -396,7 +396,7 @@ fn sheet_connectivity(state: &AppState) -> SheetConnectivity {
     let nets = crate::simulation::netlist_gen::projection_nets(
         &state.library_manager,
         &projection,
-        &state.workspace.active_view.key(),
+        &state.workspace.content.active_view.key(),
     );
 
     let mut bound: HashMap<(u64, &str), &str> = HashMap::new();
@@ -655,6 +655,7 @@ fn sheet_row(ui: &mut Ui, state: &AppState, object_id: u64) {
     let key = state.workspace.active_schematic_reference().key();
     let Some(id) = state
         .workspace
+        .content
         .design_management
         .sheet_for_object_or_active(&key, object_id)
     else {
@@ -703,9 +704,10 @@ fn checks_status(state: &AppState) -> String {
 fn active_view_dirty(state: &AppState) -> bool {
     state
         .workspace
+        .content
         .open_views
         .iter()
-        .find(|open| open.reference == state.workspace.active_view)
+        .find(|open| open.reference == state.workspace.content.active_view)
         .is_some_and(|open| open.dirty)
 }
 
@@ -718,11 +720,17 @@ use inline_instance::*;
 // =============================================================================
 
 fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
-    let reference = app.state.workspace.active_view.clone();
+    let reference = app.state.workspace.content.active_view.clone();
     let read_only = app.state.schematic_edit_read_only();
     let current = checks_current(&app.state);
     let dirty = active_view_dirty(&app.state);
-    let depth = app.state.workspace.hierarchy_stack.len().saturating_sub(1);
+    let depth = app
+        .state
+        .workspace
+        .content
+        .hierarchy_stack
+        .len()
+        .saturating_sub(1);
     let child_view_count = app
         .state
         .schematic
@@ -834,7 +842,13 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
     property_row(
         ui,
         "Working revision",
-        &app.state.workspace.project.revision().get().to_string(),
+        &app.state
+            .workspace
+            .content
+            .project
+            .revision()
+            .get()
+            .to_string(),
     );
 
     drawing_sheet_inspector(ui, app);
@@ -1302,7 +1316,12 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
             preview: HeroPreview::Icon(WorkbenchIcon::Select),
             eyebrow: format!(
                 "MULTI-SELECTION · SHEET {}",
-                app.state.workspace.active_view.cell.to_ascii_uppercase()
+                app.state
+                    .workspace
+                    .content
+                    .active_view
+                    .cell
+                    .to_ascii_uppercase()
             ),
             title: format!("{total} objects"),
             subtitle: match (selected.len(), others) {
@@ -1613,12 +1632,12 @@ impl AppState {
     pub(crate) fn master_occurrence_paths(&self) -> Vec<String> {
         let Ok(projection) = self.workspace.design_projection(
             &self.library_manager,
-            &self.workspace.active_view,
+            &self.workspace.content.active_view,
             &self.schematic,
         ) else {
             return Vec::new();
         };
-        let master = self.workspace.active_view.key();
+        let master = self.workspace.content.active_view.key();
         projection
             .plan()
             .bindings()

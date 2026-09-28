@@ -36,6 +36,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
 
     let mut wrapper = state
         .workspace
+        .content
         .physical_layout_document(&wrapper_layout)
         .expect("wrapper layout document")
         .clone();
@@ -60,6 +61,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
         .expect("hierarchical instance transaction");
     state
         .workspace
+        .content
         .commit_physical_layout_document(wrapper)
         .expect("hierarchical wrapper layout commits");
 
@@ -69,6 +71,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
     let copied_layout = CellViewRef::new("work", "amp_copy", "layout");
     let copied = state
         .workspace
+        .content
         .physical_layout_document(&copied_layout)
         .expect("copied authoritative layout document");
     assert_eq!(copied.owner(), &copied_layout);
@@ -76,6 +79,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
         copied.technology(),
         state
             .workspace
+            .content
             .physical_layout_document(&amp_layout)
             .expect("source layout remains")
             .technology()
@@ -83,6 +87,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
     assert_eq!(
         state
             .workspace
+            .content
             .physical_layout_document(&wrapper_layout)
             .expect("wrapper remains")
             .instances()
@@ -101,12 +106,14 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
     assert!(
         state
             .workspace
+            .content
             .physical_layout_document(&CellViewRef::new("work", "amp", "layout"))
             .is_none()
     );
     assert_eq!(
         state
             .workspace
+            .content
             .physical_layout_document(&renamed_layout)
             .expect("renamed authoritative layout document")
             .owner(),
@@ -115,6 +122,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
     assert_eq!(
         state
             .workspace
+            .content
             .physical_layout_document(&wrapper_layout)
             .expect("wrapper remains after rename")
             .instances()
@@ -128,6 +136,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
     assert!(
         state
             .workspace
+            .content
             .physical_layout_document(&copied_layout)
             .is_some(),
         "independent copied layout remains authoritative"
@@ -158,6 +167,7 @@ fn rename_library_carries_the_physical_layouts_that_name_it() {
     assert!(
         state
             .workspace
+            .content
             .physical_layout_document(&CellViewRef::new("user", "amp", "layout"))
             .is_none()
     );
@@ -165,6 +175,7 @@ fn rename_library_carries_the_physical_layouts_that_name_it() {
     assert_eq!(
         state
             .workspace
+            .content
             .physical_layout_document(&moved)
             .expect("the layout is addressable under the new library identity")
             .owner(),
@@ -193,6 +204,7 @@ fn rename_view_carries_the_physical_layouts_that_name_it() {
     assert!(
         state
             .workspace
+            .content
             .physical_layout_document(&CellViewRef::new("user", "amp", "layout"))
             .is_none()
     );
@@ -200,6 +212,7 @@ fn rename_view_carries_the_physical_layouts_that_name_it() {
     assert_eq!(
         state
             .workspace
+            .content
             .physical_layout_document(&moved)
             .expect("the layout is addressable under the new view identity")
             .owner(),

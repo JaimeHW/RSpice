@@ -39,10 +39,10 @@ fn located_instance_state() -> (AppState, u64, u64, u64) {
         }
     }
 
-    let view = state.workspace.active_view.key();
+    let view = state.workspace.content.active_view.key();
     let cell = format!(
         "{}/{}",
-        state.workspace.active_view.library, state.workspace.active_view.cell
+        state.workspace.content.active_view.library, state.workspace.content.active_view.cell
     );
     let entry = |line: usize, instance: &str, id: u64| {
         GeneratedSourceMapEntry::try_new(

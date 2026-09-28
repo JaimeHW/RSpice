@@ -59,10 +59,7 @@ pub(crate) use persistence::{
     BrowserPdkConfigReceipt, BrowserPdkConfigRestore, BrowserPdkStorageDurability,
     BrowserPdkStorageStatus, start_browser_pdk_config_load, start_browser_pdk_config_save,
 };
-pub use technology_callback::{
-    MAX_PROJECT_PDK_CALLBACK_RECEIPTS, PdkCallbackError, PdkCallbackExecutionInput,
-    PdkCallbackExecutionReceipt, ProjectPdkCallbackReceipt,
-};
+pub use technology_callback::{PdkCallbackExecutionInput, ProjectPdkCallbackReceipt};
 #[cfg(test)]
 pub(crate) use technology_diff::tests::fixture_revision_archives as signed_technology_diff_test_fixture;
 pub use technology_diff::{

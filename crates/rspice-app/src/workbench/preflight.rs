@@ -161,7 +161,7 @@ pub(crate) fn run(app: &mut RSpiceApp) {
     let (topology_root, topology_revision, topology_closure) =
         app.state.configured_topology_revision();
     let blocked = !report.is_runnable_for(
-        app.state.workspace.project.revision().get(),
+        app.state.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
@@ -234,7 +234,7 @@ pub(crate) fn run_and_queue(app: &mut RSpiceApp) {
 /// still current. This is also the dialog's primary action, avoiding a second
 /// preflight pass between review and dispatch.
 fn queue_retained_run(app: &mut RSpiceApp) -> bool {
-    let project_revision = app.state.workspace.project.revision().get();
+    let project_revision = app.state.workspace.content.project.revision().get();
     let (topology_root, topology_revision, topology_closure) =
         app.state.configured_topology_revision();
     let current_plan = app.state.active_plan_revision();
@@ -266,10 +266,10 @@ fn queue_retained_run(app: &mut RSpiceApp) -> bool {
 fn collect_report(state: &AppState) -> PreflightReport {
     let mut blockers = Vec::new();
     let mut advisories = Vec::new();
-    let root_reference = state.workspace.simulation_root_reference();
+    let root_reference = state.workspace.content.simulation_root_reference();
     let inspection = state.workspace.inspect_design_projection(
         &state.library_manager,
-        &state.workspace.active_view,
+        &state.workspace.content.active_view,
         &state.schematic,
     );
     let execution_projection = inspection
@@ -447,7 +447,7 @@ fn collect_report(state: &AppState) -> PreflightReport {
     // and if the plan needs one it must have one. Each demanding entity is
     // reported as its own row so the operator sees what to change.
     let demand = state.technology_demand();
-    match state.workspace.project.technology_binding() {
+    match state.workspace.content.project.technology_binding() {
         None if demand.is_empty() => {
             advisories.push(PreflightAdvisory::from(
                 TECHNOLOGY_NOT_REQUIRED_ADVISORY.to_owned(),
@@ -460,7 +460,13 @@ fn collect_report(state: &AppState) -> PreflightReport {
             remediation: PreflightRemediation::ProjectTechnology,
         })),
         Some(binding) => {
-            if state.workspace.project.technology_change_audit().is_empty() {
+            if state
+                .workspace
+                .content
+                .project
+                .technology_change_audit()
+                .is_empty()
+            {
                 blockers.push(PreflightIssue {
                     check: "Project technology contract".to_owned(),
                     observed:
@@ -548,7 +554,7 @@ fn collect_report(state: &AppState) -> PreflightReport {
     let simulation_plan = state.active_plan_revision();
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
     PreflightReport {
-        project_revision: state.workspace.project.revision().get(),
+        project_revision: state.workspace.content.project.revision().get(),
         topology_root,
         topology_revision,
         topology_closure,
@@ -686,7 +692,7 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
     // A report is valid only for the exact project, topology, and active-plan
     // revision it inspected. Drop the controller permit with the report so no
     // hidden stale authorization survives an out-of-band plan mutation.
-    let project_revision = app.state.workspace.project.revision().get();
+    let project_revision = app.state.workspace.content.project.revision().get();
     let (topology_root, topology_revision, topology_closure) =
         app.state.configured_topology_revision();
     let current_plan = app.state.active_plan_revision();

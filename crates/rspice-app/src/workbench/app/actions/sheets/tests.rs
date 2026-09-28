@@ -16,11 +16,13 @@ fn two_sheet_state() -> (AppState, SheetId, SheetId) {
     let key = state.workspace.active_schematic_reference().key();
     let first = state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&key, "Sheet 1", [10, 20])
         .expect("first sheet");
     let catalog = state
         .workspace
+        .content
         .design_management
         .sheet_catalog_mut(&key)
         .expect("sheet catalog");
@@ -46,6 +48,7 @@ fn delete_behavior(state: &mut AppState, behavior: SheetDeleteBehavior) {
     let key = state.workspace.active_schematic_reference().key();
     let catalog = state
         .workspace
+        .content
         .design_management
         .sheet_catalog_mut(&key)
         .expect("sheet catalog");
@@ -92,12 +95,15 @@ fn activating_a_sheet_retires_the_selection_and_frames_the_new_drawing() {
 #[test]
 fn re_activating_the_current_sheet_publishes_nothing() {
     let (mut state, first, _) = two_sheet_state();
-    let revision = state.workspace.design_management.revision();
+    let revision = state.workspace.content.design_management.revision();
     state.schematic.session.selection.select_component(10);
 
     activate_sheet(&mut state, first).expect("an inert activation still succeeds");
 
-    assert_eq!(state.workspace.design_management.revision(), revision);
+    assert_eq!(
+        state.workspace.content.design_management.revision(),
+        revision
+    );
     assert!(
         state.schematic.session.selection.has_component(10),
         "a chip redrawn every frame must not clear the selection"
@@ -124,6 +130,7 @@ fn a_single_sheet_catalog_offers_no_navigation() {
     let key = state.workspace.active_schematic_reference().key();
     state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&key, "Sheet 1", [10])
         .expect("first sheet");
@@ -218,6 +225,7 @@ fn the_last_sheet_of_a_catalog_is_retained() {
     let key = state.workspace.active_schematic_reference().key();
     let only = state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&key, "Sheet 1", [10])
         .expect("first sheet");

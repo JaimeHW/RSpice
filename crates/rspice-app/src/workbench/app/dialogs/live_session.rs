@@ -94,6 +94,7 @@ impl RSpiceApp {
         let circuit_id = self
             .state
             .workspace
+            .content
             .project
             .cloud_publication()
             .map(|binding| binding.circuit_id().to_owned());

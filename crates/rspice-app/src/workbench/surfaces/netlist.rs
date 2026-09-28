@@ -104,7 +104,7 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
         ui.set_min_size(ui.available_size());
         if generated_primary_unavailable(&app.state) {
             let messages = app.state.ui.messages();
-            if app.state.workspace.netlist_source.is_none()
+            if app.state.workspace.content.netlist_source.is_none()
                 && app.state.ui.netlist.generated_document.is_none()
             {
                 let mut action = None;
@@ -676,6 +676,7 @@ fn execution_profile_review_banner(ui: &mut Ui, app: &mut RSpiceApp) {
     let Some(descriptor) = app
         .state
         .workspace
+        .content
         .netlist_descriptor
         .as_ref()
         .filter(|descriptor| descriptor.execution_profile_review_required())
@@ -856,7 +857,7 @@ fn format_owned_netlist(ctx: &egui::Context, app: &mut RSpiceApp) {
         .as_ref()
         .is_some_and(|receipt| {
             receipt.visible_content_digest == digest
-                && receipt.project_revision == app.state.workspace.project.revision().get()
+                && receipt.project_revision == app.state.workspace.content.project.revision().get()
         });
     if !validation_current {
         crate::workbench::workflows::netlist_workflow::validate_visible_netlist_source(app);
@@ -869,7 +870,7 @@ fn format_owned_netlist(ctx: &egui::Context, app: &mut RSpiceApp) {
         .as_ref()
         .is_some_and(|receipt| {
             receipt.visible_content_digest == digest
-                && receipt.project_revision == app.state.workspace.project.revision().get()
+                && receipt.project_revision == app.state.workspace.content.project.revision().get()
         });
     if !validation_current {
         let message = app
@@ -962,7 +963,7 @@ fn active_document_available(state: &AppState) -> bool {
     }
     match state.ui.netlist.active_document {
         ActiveNetlistDocument::Generated => generated_primary_ready(state),
-        ActiveNetlistDocument::OwnedSource => state.workspace.netlist_source.is_some(),
+        ActiveNetlistDocument::OwnedSource => state.workspace.content.netlist_source.is_some(),
         ActiveNetlistDocument::GeneratedDiff => !state.ui.netlist.generated_diff_source.is_empty(),
         ActiveNetlistDocument::RunSnapshot => {
             crate::workbench::documents::netlist_document::run_deck_snapshot_run_id(state).is_some()
@@ -1115,6 +1116,7 @@ mod tests {
         .expect("valid source closure");
         state
             .workspace
+            .content
             .project_sources
             .insert_bundle(bundle)
             .expect("attach cell-view source");
@@ -1126,6 +1128,7 @@ mod tests {
             .add_library_cell_component(crate::state::Point::new(20, 20), placed);
         state
             .workspace
+            .content
             .configuration_sets
             .create(crate::state::ConfigurationSetDefinition {
                 name: "Mixed-signal".to_owned(),
@@ -1145,7 +1148,7 @@ mod tests {
             .workspace
             .configuration_execution_projection(
                 &state.library_manager,
-                &state.workspace.active_view,
+                &state.workspace.content.active_view,
                 &state.schematic,
             )
             .expect("resolve configured behavioral view");
@@ -1186,7 +1189,7 @@ mod tests {
         )
         .expect("create owned source");
         assert_eq!(
-            state.workspace.netlist_source.as_deref(),
+            state.workspace.content.netlist_source.as_deref(),
             Some(retained_generated.as_str())
         );
         assert!(
@@ -1199,7 +1202,7 @@ mod tests {
         assert!(crate::workbench::documents::netlist_document::open_generated_primary(&mut state));
         assert_eq!(state.simulation.netlist_content, retained_generated);
         assert_eq!(
-            state.workspace.netlist_source.as_deref(),
+            state.workspace.content.netlist_source.as_deref(),
             Some("owned edit\n.end\n")
         );
         assert!(!crate::workbench::documents::netlist_document::open_generated_primary(&mut state));
@@ -1209,12 +1212,12 @@ mod tests {
     fn opening_existing_owned_source_never_overwrites_its_bytes() {
         let mut state = AppState::default();
         retain_generated(&mut state, "new generated\n.end\n");
-        state.workspace.netlist_source = Some("retained owned\n.end\n".to_owned());
+        state.workspace.content.netlist_source = Some("retained owned\n.end\n".to_owned());
 
         assert!(ownership::open_owned_source(&mut state));
         assert_eq!(state.simulation.netlist_content, "retained owned\n.end\n");
         assert_eq!(
-            state.workspace.netlist_source.as_deref(),
+            state.workspace.content.netlist_source.as_deref(),
             Some("retained owned\n.end\n")
         );
     }
@@ -1362,7 +1365,7 @@ mod tests {
 
     fn ran_owned_deck(deck: &str) -> AppState {
         let mut state = AppState::default();
-        state.workspace.netlist_source = Some(deck.to_owned());
+        state.workspace.content.netlist_source = Some(deck.to_owned());
         state.simulation.netlist_content = deck.to_owned();
         state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         state.ui.netlist.active_document_initialized = true;
@@ -1393,7 +1396,7 @@ mod tests {
     #[test]
     fn run_strip_warns_once_the_working_deck_moves_past_the_run() {
         let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
-        state.workspace.netlist_source = Some("deck\nR1 out 0 2k\n.op\n.end\n".to_owned());
+        state.workspace.content.netlist_source = Some("deck\nR1 out 0 2k\n.op\n.end\n".to_owned());
         state.simulation.netlist_content = "deck\nR1 out 0 2k\n.op\n.end\n".to_owned();
 
         assert_eq!(
@@ -1405,7 +1408,7 @@ mod tests {
     #[test]
     fn run_strip_states_the_run_in_flight_and_never_the_stale_baseline() {
         let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
-        state.workspace.netlist_source = Some("deck\nR1 out 0 2k\n.op\n.end\n".to_owned());
+        state.workspace.content.netlist_source = Some("deck\nR1 out 0 2k\n.op\n.end\n".to_owned());
         seal_manual_run(&mut state, 8, 0xCD, 5);
         state.ui.netlist.pending_manual_run_id = Some(8);
 
@@ -1538,7 +1541,7 @@ mod tests {
 
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-        app.state.workspace.netlist_source = Some(DECK.to_owned());
+        app.state.workspace.content.netlist_source = Some(DECK.to_owned());
         app.state.simulation.netlist_content = DECK.to_owned();
         app.state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         app.state.ui.netlist.active_document_initialized = true;
@@ -1555,7 +1558,7 @@ mod tests {
                 );
             }
             RunStripPhase::Edited => {
-                app.state.workspace.netlist_source = Some(EDITED.to_owned());
+                app.state.workspace.content.netlist_source = Some(EDITED.to_owned());
                 app.state.simulation.netlist_content = EDITED.to_owned();
             }
             RunStripPhase::Running => {

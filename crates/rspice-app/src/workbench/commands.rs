@@ -385,7 +385,7 @@ impl Command {
                     && !state.dialogs.drawing_sheet_support.manager.open
                     && state
                         .workspace
-                        .design_management
+                        .content.design_management
                         .sheet_catalog(&state.workspace.active_key())
                         .is_some_and(|catalog| catalog.active().is_some())
             }
@@ -545,7 +545,7 @@ impl Command {
                     && !state.schematic_edit_read_only()
                     && state
                         .schematic
-                        .selected_instance_interface_is_stale(&state.workspace.schematic_buffers)
+                        .selected_instance_interface_is_stale(&state.workspace.content.schematic_buffers)
             }
             Self::CreateHierarchy => {
                 active_schematic_editor(app)
@@ -711,7 +711,7 @@ impl Command {
             }
             Self::SymbolSave => active_symbol_editor(app) && !state.active_view_read_only(),
             Self::AscendHierarchy => {
-                active_schematic_editor(app) && state.workspace.hierarchy_stack.len() > 1
+                active_schematic_editor(app) && state.workspace.content.hierarchy_stack.len() > 1
             }
             Self::DescendHierarchy | Self::DescendHierarchyDirect => {
                 active_schematic_editor(app) && state.selected_hierarchy_master().is_some()
@@ -1494,7 +1494,7 @@ impl Command {
                 let design_execution_epoch = app.state.design_execution_epoch;
                 let active_schematic_epoch = app.state.active_schematic_epoch;
                 let topology_version = app.state.schematic.topology_version();
-                let view_path = app.state.workspace.active_view.display_path();
+                let view_path = app.state.workspace.content.active_view.display_path();
                 app.state.dialogs.design_note.open(
                     design_execution_epoch,
                     active_schematic_epoch,
@@ -1507,7 +1507,7 @@ impl Command {
                 let design_execution_epoch = app.state.design_execution_epoch;
                 let active_schematic_epoch = app.state.active_schematic_epoch;
                 let topology_version = app.state.schematic.topology_version();
-                let view_path = app.state.workspace.active_view.display_path();
+                let view_path = app.state.workspace.content.active_view.display_path();
                 let expected_shapes = app.state.schematic.document().documentation_shapes.clone();
                 app.state.dialogs.documentation_shape.open(
                     design_execution_epoch,
@@ -1535,7 +1535,7 @@ impl Command {
             Self::UpdateInstanceInterface => {
                 let outcome = app.state.schematic.update_selected_instance_interface(
                     &app.state.library_manager,
-                    &app.state.workspace.schematic_buffers,
+                    &app.state.workspace.content.schematic_buffers,
                 );
                 app.state.push_user_message(match outcome {
                     Ok(summary) => crate::diagnostics::ConsoleMessage::info(summary),

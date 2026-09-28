@@ -174,6 +174,7 @@ impl Registry {
         self.app
             .state
             .workspace
+            .content
             .plan_data(self.plan())
             .map(|payload| {
                 payload
@@ -189,6 +190,7 @@ impl Registry {
         self.app
             .state
             .workspace
+            .content
             .plan_data(self.plan())
             .map(|payload| {
                 payload
@@ -204,6 +206,7 @@ impl Registry {
         self.app
             .state
             .workspace
+            .content
             .plan_data(self.plan())
             .map(|payload| {
                 payload
@@ -245,6 +248,7 @@ fn seed_variable(state: &mut AppState, name: &str) {
     .expect("valid design variable");
     state
         .workspace
+        .content
         .add_design_variable(id, variable)
         .expect("the plan accepts it");
     state.workbench.selected_design_variable = Some(name.to_owned());
@@ -265,6 +269,7 @@ fn seed_output(state: &mut AppState, name: &str, expression: &str) {
     .expect("valid saved output");
     state
         .workspace
+        .content
         .add_saved_output(id, output)
         .expect("the plan accepts it");
     state.workbench.selected_saved_output = Some(name.to_owned());
@@ -383,6 +388,7 @@ fn removing_an_output_a_specification_reads_opens_the_review() {
         let id = plan_of(state);
         let payload = state
             .workspace
+            .content
             .plan_data_mut(id)
             .expect("the plan has a payload");
         payload.specs.push(SpecEntry {
@@ -422,6 +428,7 @@ fn a_confirmed_output_removal_commits_with_its_receipt() {
         ));
         state
             .workspace
+            .content
             .add_capture_group(id, group)
             .expect("the plan accepts the group");
     });
@@ -481,6 +488,7 @@ fn seed_capture_group(state: &mut AppState, name: &str, holding: bool) {
     group.points = Some(SavedOutputPolicy::EveryAcceptedPoint);
     let group_id = state
         .workspace
+        .content
         .add_capture_group(id, group)
         .expect("the plan accepts the group");
     state.workbench.selected_capture_group = Some(group_id);

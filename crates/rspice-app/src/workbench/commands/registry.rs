@@ -1076,6 +1076,7 @@ impl Command {
                 if app
                     .state
                     .workspace
+                    .content
                     .design_management
                     .sheet_catalog(&app.state.workspace.active_key())
                     .and_then(|catalog| catalog.active())
@@ -1679,10 +1680,11 @@ mod tests {
             }
         }
 
-        let view = app.state.workspace.active_view.key();
+        let view = app.state.workspace.content.active_view.key();
         let cell = format!(
             "{}/{}",
-            app.state.workspace.active_view.library, app.state.workspace.active_view.cell
+            app.state.workspace.content.active_view.library,
+            app.state.workspace.content.active_view.cell
         );
         let digest = crate::state::content_digest("instance-locator-input");
         let artifact = GeneratedArtifact::try_from_utf8(

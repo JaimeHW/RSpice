@@ -767,7 +767,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
         + selection.probes.len()
         + selection.design_notes.len()
         + selection.documentation_shapes.len();
-    let path = format!("/{}", state.workspace.active_view.display_path());
+    let path = format!("/{}", state.workspace.content.active_view.display_path());
     if count > 1 {
         return format!("{count} selected objects · {path}");
     }
@@ -885,7 +885,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
                 .and_then(|wire| {
                     wire.points.iter().find_map(|point| {
                         state.simulation.cross_probe.net_at_in(
-                            &state.workspace.active_view,
+                            &state.workspace.content.active_view,
                             state.schematic.topology_version(),
                             *point,
                         )
@@ -1297,9 +1297,9 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         ),
         ContextAction::UpdateInstanceInterface => (
             writable
-                && state
-                    .schematic
-                    .selected_instance_interface_is_stale(&state.workspace.schematic_buffers),
+                && state.schematic.selected_instance_interface_is_stale(
+                    &state.workspace.content.schematic_buffers,
+                ),
             "Select one instance whose master interface changed after it was placed",
         ),
         // The command owns whether a replacement can be made at all — one
@@ -1396,7 +1396,7 @@ fn execute_context_action(
         ContextAction::UpdateInstanceInterface => {
             let outcome = state.schematic.update_selected_instance_interface(
                 &state.library_manager,
-                &state.workspace.schematic_buffers,
+                &state.workspace.content.schematic_buffers,
             );
             state.push_user_message(match outcome {
                 Ok(summary) => ConsoleMessage::info(summary),

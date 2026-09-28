@@ -83,7 +83,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn hero(ui: &mut Ui, app: &mut RSpiceApp, document: &SymbolDocument, ports: &[PortSpec]) {
     let t = Tokens::get(ui.ctx());
-    let reference = &app.state.workspace.active_view;
+    let reference = &app.state.workspace.content.active_view;
     let summary = document.pin_summary(ports);
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 82.0), egui::Sense::hover());

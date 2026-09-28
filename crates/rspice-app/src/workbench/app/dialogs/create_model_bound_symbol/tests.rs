@@ -139,7 +139,7 @@ fn opening_uses_real_writable_library_and_selected_model() {
 #[test]
 fn commit_publishes_one_typed_revision_and_opens_the_symbol_editor() {
     let mut state = state_with_bound_mos_model();
-    let initial_project_revision = state.workspace.project.revision();
+    let initial_project_revision = state.workspace.content.project.revision();
     open_create_model_bound_symbol_dialog(&mut state);
     state
         .dialogs
@@ -149,10 +149,10 @@ fn commit_publishes_one_typed_revision_and_opens_the_symbol_editor() {
     commit_create_model_bound_symbol(&mut state).expect("model-bound symbol commit");
 
     assert!(!state.dialogs.create_model_bound_symbol.open);
-    assert_eq!(state.workspace.active_view.view, "symbol");
-    assert_eq!(state.workspace.active_view.library, "analog_blocks");
-    assert_eq!(state.workspace.active_view.cell, "nmos_core");
-    assert!(state.workspace.project.revision() > initial_project_revision);
+    assert_eq!(state.workspace.content.active_view.view, "symbol");
+    assert_eq!(state.workspace.content.active_view.library, "analog_blocks");
+    assert_eq!(state.workspace.content.active_view.cell, "nmos_core");
+    assert!(state.workspace.content.project.revision() > initial_project_revision);
     let cell = state
         .library_manager
         .get_library("analog_blocks")
@@ -267,8 +267,8 @@ fn generated_fixture_is_real_editable_topology_in_the_atomic_publication() {
 fn existing_schematic_source_is_identity_locked_and_preserves_the_master() {
     let mut state = AppState::default();
     state.project_lifecycle.project_open = true;
-    let library = state.workspace.active_view.library.clone();
-    let cell = state.workspace.active_view.cell.clone();
+    let library = state.workspace.content.active_view.library.clone();
+    let cell = state.workspace.content.active_view.cell.clone();
     let port_id = state
         .schematic
         .add_component(ComponentType::Port, Point::origin());
@@ -331,7 +331,7 @@ fn blank_contract_publishes_truthful_review_views_but_never_a_fixture() {
     assert!(!definition.generated_views.simulation_test_fixture);
 
     commit_create_model_bound_symbol(&mut state).expect("publish unbound review symbol");
-    assert_eq!(state.workspace.active_view.view, "parameter_form");
+    assert_eq!(state.workspace.content.active_view.view, "parameter_form");
     let cell = state
         .library_manager
         .get_library("analog_blocks")

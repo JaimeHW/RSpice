@@ -72,15 +72,15 @@ impl ProjectWorkspace {
         &self,
     ) -> ProjectionContext<'_, WorkspaceProjectionSources<'_>, WorkspaceSourceFiles> {
         ProjectionContext {
-            schematic_buffers: &self.schematic_buffers,
+            schematic_buffers: &self.content.schematic_buffers,
             sources: WorkspaceProjectionSources(&self.schematic_sessions),
-            configuration_sets: &self.configuration_sets,
-            design_management: &self.design_management,
-            connectivity: &self.connectivity,
-            project_id: self.project.id(),
-            project_revision: self.project.revision(),
-            project_sources: &self.project_sources,
-            root: self.simulation_root_reference(),
+            configuration_sets: &self.content.configuration_sets,
+            design_management: &self.content.design_management,
+            connectivity: &self.content.connectivity,
+            project_id: self.content.project.id(),
+            project_revision: self.content.project.revision(),
+            project_sources: &self.content.project_sources,
+            root: self.content.simulation_root_reference(),
             source_files: &WorkspaceSourceFiles,
             cache: &self.design_projection_cache,
         }

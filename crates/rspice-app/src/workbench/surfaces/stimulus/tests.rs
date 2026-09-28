@@ -59,7 +59,7 @@ fn stage_size(width: f32, height: f32) -> egui::Vec2 {
 /// An application whose project holds the fixture library.
 fn seeded(selection: &str) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.workspace.stimulus_library = fixtures::library();
+    app.state.workspace.content.stimulus_library = fixtures::library();
     app.state.workbench.workspace = crate::workbench::state::Workspace::Stimulus;
     app.state.workbench.selected_stimulus_definition = Some(selection.to_owned());
     app
@@ -69,6 +69,7 @@ fn seeded(selection: &str) -> RSpiceApp {
 fn adopter(state: &mut AppState, name: &str, instance: &str) -> u64 {
     let definition = state
         .workspace
+        .content
         .stimulus_library
         .get(name)
         .cloned()
@@ -166,7 +167,7 @@ fn an_empty_library_offers_the_one_verb_that_resolves_it() {
 #[test]
 fn a_library_with_no_selection_opens_on_its_first_definition() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workspace.stimulus_library = fixtures::library();
+    app.state.workspace.content.stimulus_library = fixtures::library();
     let published = published(&mut app.state, vec2(900.0, 470.0));
     assert_eq!(
         app.state.workbench.selected_stimulus_definition.as_deref(),
@@ -303,6 +304,7 @@ fn a_family_switch_resets_the_shape_parameters_and_undo_restores_them() {
     let before = app
         .state
         .workspace
+        .content
         .stimulus_library
         .get("bridge_cal_step")
         .expect("fixture")
@@ -365,6 +367,7 @@ fn applying_a_rename_repoints_every_adopter() {
     assert_eq!(
         app.state
             .workspace
+            .content
             .stimulus_library
             .definitions()
             .iter()
@@ -376,6 +379,7 @@ fn applying_a_rename_repoints_every_adopter() {
     assert_eq!(
         app.state
             .workspace
+            .content
             .stimulus_library
             .get("bridge_cal_step")
             .map(|definition| definition.name()),
@@ -385,6 +389,7 @@ fn applying_a_rename_repoints_every_adopter() {
     let definition = app
         .state
         .workspace
+        .content
         .stimulus_library
         .get("bridge_cal_pulse")
         .expect("the renamed definition");
@@ -408,6 +413,7 @@ fn applying_a_rename_repoints_every_adopter() {
     assert_eq!(
         app.state
             .workspace
+            .content
             .stimulus_library
             .provenance_state(component)
             .label(),

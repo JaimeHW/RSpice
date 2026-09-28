@@ -519,7 +519,7 @@ fn parent_context_sheets(
         .iter()
         .filter_map(|master| {
             let key = parent_context_buffer_key(state, master)?;
-            let schematic = state.workspace.schematic_buffers.get(&key)?;
+            let schematic = state.workspace.content.schematic_buffers.get(&key)?;
             Some((key, schematic))
         })
         .collect()
@@ -531,6 +531,7 @@ fn parent_context_buffer_key(state: &AppState, reference: &CellViewRef) -> Optio
     let key = reference.key();
     state
         .workspace
+        .content
         .schematic_buffers
         .keys()
         .find(|candidate| candidate.eq_ignore_ascii_case(&key))
@@ -544,7 +545,7 @@ fn parent_context_buffer_key(state: &AppState, reference: &CellViewRef) -> Optio
 /// document; a parent is a different document, so it is asked about its own
 /// sheet rather than about the child's.
 fn object_is_on_sheet(state: &AppState, key: &str, object_id: u64) -> bool {
-    let Some(catalog) = state.workspace.design_management.sheet_catalog(key) else {
+    let Some(catalog) = state.workspace.content.design_management.sheet_catalog(key) else {
         return true;
     };
     let Some(active_sheet_id) = catalog.active_sheet_id() else {
@@ -552,6 +553,7 @@ fn object_is_on_sheet(state: &AppState, key: &str, object_id: u64) -> bool {
     };
     state
         .workspace
+        .content
         .design_management
         .sheet_for_object_or_active(key, object_id)
         == Some(active_sheet_id)
@@ -977,7 +979,7 @@ fn net_class_colors(state: &AppState) -> std::collections::HashMap<u64, egui::Co
     let mut colors = std::collections::HashMap::new();
     let Ok(projection) = state.workspace.design_projection(
         &state.library_manager,
-        &state.workspace.active_view,
+        &state.workspace.content.active_view,
         &state.schematic,
     ) else {
         return colors;
@@ -985,7 +987,7 @@ fn net_class_colors(state: &AppState) -> std::collections::HashMap<u64, egui::Co
     let nets = projection_nets(
         &state.library_manager,
         &projection,
-        &state.workspace.active_view.key(),
+        &state.workspace.content.active_view.key(),
     );
     for net in nets.iter().filter(|net| net.authored_name) {
         let color = named_net_class_color(&net.name);
@@ -1142,7 +1144,7 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
     if state.ui.schematic_visibility.annotations != SchematicAnnotationVisibility::OperatingPoint
         || !state.simulation.cross_probe.is_populated()
         || !state.simulation.cross_probe.is_current_for(
-            &state.workspace.active_view,
+            &state.workspace.content.active_view,
             state.schematic.topology_version(),
         )
     {
@@ -1521,7 +1523,7 @@ mod tests {
     /// A session descended one level, with the design root carrying a wire.
     fn descended_one_level() -> AppState {
         let mut state = AppState::default();
-        let root = state.workspace.active_view.clone();
+        let root = state.workspace.content.active_view.clone();
         state
             .workspace
             .insert_schematic_editor(root.key(), sheet_with_one_wire());
@@ -1800,7 +1802,7 @@ mod tests {
             .junctions
             .push(Junction::new(2, point));
         state.simulation.cross_probe.update(
-            state.workspace.active_view.clone(),
+            state.workspace.content.active_view.clone(),
             HashMap::from([(point, "OUT".to_owned())]),
             HashMap::from([("OUT".to_owned(), vec![Point::new(30, 10), point])]),
             HashMap::new(),
@@ -1851,7 +1853,7 @@ mod tests {
         let scalar = Point::new(20, 10);
         let bit = Point::new(20, 30);
         state.simulation.cross_probe.update(
-            state.workspace.active_view.clone(),
+            state.workspace.content.active_view.clone(),
             HashMap::from([(scalar, "OUT".to_owned()), (bit, "DATA#3".to_owned())]),
             HashMap::from([
                 ("OUT".to_owned(), vec![scalar]),

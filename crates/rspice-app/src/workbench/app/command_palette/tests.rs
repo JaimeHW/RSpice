@@ -200,7 +200,7 @@ fn palette_names_are_canonical_labels_without_ellipsis() {
 #[cfg(not(target_arch = "wasm32"))]
 fn test_app() -> RSpiceApp {
     let state = crate::workbench::app_state::AppState::default();
-    let automation_runtime_project_id = state.workspace.project.id();
+    let automation_runtime_project_id = state.workspace.content.project.id();
     RSpiceApp {
         state,
         first_frame: false,
@@ -488,7 +488,7 @@ fn real_cellview_records_are_searchable_and_open_the_workspace_document() {
     entry.execute(&mut app).expect("open real cellview");
 
     assert_eq!(
-        app.state.workspace.active_view,
+        app.state.workspace.content.active_view,
         crate::state::CellViewRef::new("precision_analog", "gain_stage", "schematic")
     );
     assert_eq!(

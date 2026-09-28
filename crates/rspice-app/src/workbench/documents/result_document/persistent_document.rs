@@ -334,7 +334,7 @@ fn degraded_tracking_reason(cause: &str) -> String {
 fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -> LatestBinding {
     use crate::results::visualization_document::{DocumentEdit, ResultDocumentTrackingMode};
 
-    let Some(document) = state.workspace.visualization_document(document_id) else {
+    let Some(document) = state.workspace.content.visualization_document(document_id) else {
         return LatestBinding::Missing(
             "The selected project result document no longer exists.".to_owned(),
         );
@@ -366,7 +366,7 @@ fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -
             "This document retains no pane binding for Latest tracking to advance.",
         ));
     };
-    let project_revision = state.workspace.project.revision();
+    let project_revision = state.workspace.content.project.revision();
     let source_digest = current_result_source_digest(state);
 
     let Some(candidate) = state
@@ -449,6 +449,7 @@ fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -
     };
     let Some(revision) = state
         .workspace
+        .content
         .visualization_document(document_id)
         .map(|document| document.revision())
     else {
@@ -456,7 +457,7 @@ fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -
             "The selected project result document is no longer retained.".to_owned(),
         );
     };
-    if let Err(error) = state.workspace.transact_visualization_document(
+    if let Err(error) = state.workspace.content.transact_visualization_document(
         document_id,
         revision,
         vec![DocumentEdit::RetargetTrackedDataset {
@@ -475,7 +476,7 @@ fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -
 }
 
 pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> bool {
-    let Some(document) = state.workspace.visualization_document(document_id) else {
+    let Some(document) = state.workspace.content.visualization_document(document_id) else {
         return false;
     };
     let selected_page_id = state
@@ -523,7 +524,10 @@ pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> b
 }
 
 fn projection(state: &AppState, document_id: ResultDocumentId) -> Option<DocumentProjection> {
-    let document = state.workspace.visualization_document(document_id)?;
+    let document = state
+        .workspace
+        .content
+        .visualization_document(document_id)?;
     let pages = document
         .pages()
         .iter()
@@ -1066,7 +1070,11 @@ fn project_pane_presentation(
 fn capture_pane_presentation(state: &mut AppState, pane: &PaneProjection, viewer: ResultViewer) {
     let view = state.ui.results.persistent_plot_view(viewer);
     let cursors = state.ui.results.cursors;
-    let Some(document) = state.workspace.visualization_document(pane.document_id) else {
+    let Some(document) = state
+        .workspace
+        .content
+        .visualization_document(pane.document_id)
+    else {
         return;
     };
     let revision = document.revision();
@@ -1126,6 +1134,7 @@ fn capture_pane_presentation(state: &mut AppState, pane: &PaneProjection, viewer
     if let Err(error) =
         state
             .workspace
+            .content
             .transact_visualization_document(pane.document_id, revision, edits)
     {
         state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(

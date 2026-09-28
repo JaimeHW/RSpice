@@ -127,7 +127,7 @@ fn validate_draft(state: &AppState) -> DraftValidation {
             "The schematic topology changed. Close and reopen Draw documentation shape.".to_owned(),
         );
     }
-    if draft.view_path != state.workspace.active_view.display_path() {
+    if draft.view_path != state.workspace.content.active_view.display_path() {
         return DraftValidation::Invalid(
             "The active cell/view changed. Close and reopen Draw documentation shape.".to_owned(),
         );

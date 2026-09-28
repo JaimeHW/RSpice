@@ -102,8 +102,8 @@ fn library_dialog_commits_reject_an_intervening_catalog_change() {
 #[test]
 fn the_deletion_review_reports_the_same_blocker_the_transaction_enforces() {
     let mut state = state_with_writable_work_library();
-    state.workspace.project.root_library = "work".to_owned();
-    state.workspace.project.top_cell = "amplifier".to_owned();
+    state.workspace.content.project.root_library = "work".to_owned();
+    state.workspace.content.project.top_cell = "amplifier".to_owned();
     state
         .open_delete_library_review("work")
         .expect("deletion review opens");
@@ -122,7 +122,7 @@ fn the_deletion_review_reports_the_same_blocker_the_transaction_enforces() {
 #[test]
 fn the_deletion_review_counts_what_the_library_owns() {
     let mut state = state_with_writable_work_library();
-    state.workspace.open_views = vec![crate::state::OpenCellView::new(
+    state.workspace.content.open_views = vec![crate::state::OpenCellView::new(
         crate::state::CellViewRef::new("work", "amplifier", "schematic"),
         ViewType::Schematic,
     )];

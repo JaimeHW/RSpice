@@ -1680,7 +1680,7 @@ fn build_include_manifest(app: &ManagerRenderContext<'_>) -> String {
         .collect::<Vec<_>>();
     serde_json::to_string_pretty(&serde_json::json!({
         "schema": 1,
-        "project_revision": app.state.workspace.project.revision(),
+        "project_revision": app.state.workspace.content.project.revision(),
         "libraries": libraries,
     }))
     .unwrap_or_else(|error| format!("{{\"error\":\"{error}\"}}"))

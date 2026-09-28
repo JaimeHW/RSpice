@@ -228,7 +228,7 @@ fn invalid_symbol_document_state(ui: &mut Ui, error: &str) {
 
 /// Floating cell path, matching the schematic stage's overlay.
 fn canvas_breadcrumb(ctx: &egui::Context, state: &AppState, stage: Rect) {
-    let reference = &state.workspace.active_view;
+    let reference = &state.workspace.content.active_view;
     let t = Tokens::get(ctx);
     let text = format!(
         "{} / {} / {}",
@@ -487,7 +487,7 @@ fn read_only_banner(ui: &mut Ui, state: &mut AppState) {
                 Stroke::new(1.0, c.border),
             );
             ui.add_space(12.0);
-            let library = state.workspace.active_view.library.clone();
+            let library = state.workspace.content.active_view.library.clone();
             ui.label(
                 egui::RichText::new(state.symbol_editor_lock_message())
                     .font(theme::sans(tokens::FS_1, FontWeight::Regular))
@@ -503,7 +503,7 @@ fn read_only_banner(ui: &mut Ui, state: &mut AppState) {
                     .show(ui)
                     .clicked()
                 {
-                    let cell = state.workspace.active_view.cell.clone();
+                    let cell = state.workspace.content.active_view.cell.clone();
                     if let Err(error) = state.open_copy_cell_dialog(&library, &cell) {
                         state.push_user_message(crate::diagnostics::ConsoleMessage::error(error));
                     }
@@ -1535,15 +1535,15 @@ fn draw_preview_tile(
     );
     let viewport = preview_viewport_for_tile(body, document);
     let mut binding = LibraryCellInstance::new(
-        &state.workspace.active_view.library,
-        &state.workspace.active_view.cell,
+        &state.workspace.content.active_view.library,
+        &state.workspace.content.active_view.cell,
         "schematic",
     );
     binding.bind_interface(ports);
     let mut component =
         Component::new(0, ComponentType::CellInstance, Point::origin()).with_library_cell(binding);
     component.name = "X1".to_owned();
-    component.value = state.workspace.active_view.cell.clone();
+    component.value = state.workspace.content.active_view.cell.clone();
     let resolved = ResolvedCellSymbol::from_authored_document(document.clone(), ports);
     let symbol_painter = painter.with_clip_rect(body.shrink(2.0));
     draw_resolved_symbol(

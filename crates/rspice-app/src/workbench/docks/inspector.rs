@@ -562,7 +562,8 @@ fn project(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
-    let active_configuration = app.state.workspace.configuration_sets.active();
+    let project = &app.state.workspace.content;
+    let active_configuration = project.configuration_sets.active();
     let testbench = active_configuration.map_or_else(
         || "not configured".to_owned(),
         |configuration| configuration.root().display_path(),
@@ -588,7 +589,7 @@ fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
         "Top",
         &format!(
             "{}/{}",
-            app.state.workspace.project.root_library, app.state.workspace.project.top_cell
+            project.project.root_library, project.project.top_cell
         ),
     );
     property_row(ui, "Testbench", &testbench);
@@ -612,7 +613,7 @@ fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
     property_row(
         ui,
         "Revision",
-        &app.state.workspace.project.revision().get().to_string(),
+        &project.project.revision().get().to_string(),
     );
     property_row(ui, "Modified documents", &modified.to_string());
     property_row_status(
@@ -633,7 +634,7 @@ fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
     property_row(
         ui,
         "Location",
-        &app.state.workspace.project.path.as_ref().map_or_else(
+        &project.project.path.as_ref().map_or_else(
             || "no accepted native path".to_owned(),
             |path| path.display().to_string(),
         ),
@@ -737,10 +738,18 @@ fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
     let usage = open_target
         .as_ref()
         .map_or_else(Vec::new, |(reference, _)| library_usage(app, reference));
-    let project_revision = app.state.workspace.project.revision().get().to_string();
+    let project_revision = app
+        .state
+        .workspace
+        .content
+        .project
+        .revision()
+        .get()
+        .to_string();
     let active_configuration = app
         .state
         .workspace
+        .content
         .configuration_sets
         .active()
         .map_or("not configured", |item| item.name());
@@ -835,7 +844,7 @@ fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn project_configuration(ui: &mut Ui, app: &mut RSpiceApp) {
-    let active = app.state.workspace.configuration_sets.active();
+    let active = app.state.workspace.content.configuration_sets.active();
     let name = active.map_or_else(
         || "No active configuration".to_owned(),
         |item| item.name().to_owned(),
@@ -934,7 +943,14 @@ fn project_dependency(ui: &mut Ui, app: &mut RSpiceApp) {
     property_row(
         ui,
         "Technology",
-        if app.state.workspace.project.technology_binding().is_some() {
+        if app
+            .state
+            .workspace
+            .content
+            .project
+            .technology_binding()
+            .is_some()
+        {
             "attached"
         } else {
             "not attached"
@@ -1053,14 +1069,14 @@ fn library_usage(app: &RSpiceApp, reference: &CellViewRef) -> Vec<String> {
     }
 
     let mut consumers = Vec::new();
-    let active_key = app.state.workspace.active_view.key();
+    let active_key = app.state.workspace.content.active_view.key();
     collect(
         &app.state.schematic,
-        &app.state.workspace.active_view.display_path(),
+        &app.state.workspace.content.active_view.display_path(),
         reference,
         &mut consumers,
     );
-    for (key, schematic) in &app.state.workspace.schematic_buffers {
+    for (key, schematic) in &app.state.workspace.content.schematic_buffers {
         if key != &active_key {
             collect(schematic, key, reference, &mut consumers);
         }
@@ -2031,7 +2047,7 @@ fn schematic_cross_probe_unavailability(
     };
     let map = &state.simulation.cross_probe;
     let topology = state.schematic.topology_version();
-    if !map.is_current_for(&state.workspace.active_view, topology) {
+    if !map.is_current_for(&state.workspace.content.active_view, topology) {
         return Some(
             "The schematic changed since this result was produced; run again to cross-probe it."
                 .to_owned(),
@@ -2051,7 +2067,7 @@ fn schematic_cross_probe_unavailability(
                 .to_owned(),
         );
     };
-    if receipt.project_revision() != state.workspace.project.revision() {
+    if receipt.project_revision() != state.workspace.content.project.revision() {
         return Some(
             "The selected result was produced from a different project revision; run again before cross-probing it."
                 .to_owned(),
@@ -2946,13 +2962,14 @@ fn generated_provenance(ui: &mut Ui, state: &AppState) {
 }
 
 fn owned_source_provenance(ui: &mut Ui, state: &AppState) {
+    let project = &state.workspace.content;
     design_section_header(ui, "Owned source provenance", None);
     let source = &state.simulation.netlist_content;
     let source_digest = crate::state::content_digest(source);
     property_row(
         ui,
         "Source origin",
-        &state.workspace.netlist_source_path.as_ref().map_or_else(
+        &project.netlist_source_path.as_ref().map_or_else(
             || "Project-owned source".to_owned(),
             |path| path.display().to_string(),
         ),
@@ -2960,7 +2977,7 @@ fn owned_source_provenance(ui: &mut Ui, state: &AppState) {
     property_row(
         ui,
         "Project revision",
-        &state.workspace.project.revision().get().to_string(),
+        &project.project.revision().get().to_string(),
     );
     if let Some(document) = state.ui.netlist.owned_document.as_ref() {
         property_row(
@@ -3052,6 +3069,7 @@ fn dependency_provenance(ui: &mut Ui, state: &AppState) {
     }
     let owned = state
         .workspace
+        .content
         .netlist_descriptor
         .as_ref()
         .and_then(|descriptor| descriptor.owned_include(dependency.locator().logical_identity()));
@@ -3113,7 +3131,7 @@ fn generated_state(state: &AppState) -> &'static str {
         let digest = crate::state::content_digest(&netlist.generated_source);
         if netlist.validation.as_ref().is_some_and(|receipt| {
             receipt.visible_content_digest == digest
-                && receipt.project_revision == state.workspace.project.revision().get()
+                && receipt.project_revision == state.workspace.content.project.revision().get()
         }) {
             "generated · validated"
         } else {

@@ -112,7 +112,7 @@ fn start_prepared_run_for_active_plan(state: &mut AppState, analysis: Option<Ana
         .first()
         .expect("the default plan holds one instance")
         .id();
-    let project_revision = state.workspace.project.revision();
+    let project_revision = state.workspace.content.project.revision();
     let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
         source_domain: AnalysisResultSourceDomain::SimulationPlan,
         simulation_plan_id: Some(plan_id),
@@ -203,7 +203,7 @@ fn the_selected_limit_offers_its_evidence_and_its_producer() {
             .stable_analysis_plan()
             .expect("stable plan")
             .id();
-        state.workspace.replace_active_specs(
+        state.workspace.content.replace_active_specs(
             plan_id,
             vec![SpecEntry {
                 measurement: "gain_dc".to_owned(),
@@ -240,6 +240,7 @@ fn a_saved_output_offers_the_trace_it_stored() {
         let name = output.name.clone();
         state
             .workspace
+            .content
             .add_saved_output(plan_id, output)
             .expect("the plan accepts one saved output");
         state.workbench.selected_saved_output = Some(name);

@@ -836,7 +836,8 @@ fn manual_deck_trigger_runs_deck_analysis_without_enabled_run_set() {
     let transient_id = plan.instances()[0].id();
     plan.set_enabled(transient_id, false)
         .expect("the sole run-set analysis disables");
-    state.workspace.netlist_source = Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
+    state.workspace.content.netlist_source =
+        Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
     state.simulation.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
@@ -874,8 +875,9 @@ fn controller_manual_run_receipt_remains_authoritative_if_result_provenance_is_s
     let transient_id = plan.instances()[0].id();
     plan.set_enabled(transient_id, false)
         .expect("run-set analysis disables");
-    state.workspace.netlist_source = Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
-    let project_revision = state.workspace.project.revision();
+    state.workspace.content.netlist_source =
+        Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
+    let project_revision = state.workspace.content.project.revision();
     state.simulation.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
@@ -943,7 +945,8 @@ fn controller_manual_run_receipt_remains_authoritative_if_result_provenance_is_s
 #[test]
 fn controller_manual_run_receipt_survives_production_project_round_trip() {
     let mut state = AppState::default();
-    state.workspace.netlist_source = Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
+    state.workspace.content.netlist_source =
+        Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     state.simulation.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
@@ -1012,7 +1015,8 @@ fn manual_deck_run_preserves_editor_source_without_ui_option_injection() {
     plan.set_enabled(transient_id, false)
         .expect("the sole run-set analysis disables");
     state.sim_setup.options.reltol = 1.0e-4;
-    state.workspace.netlist_source = Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
+    state.workspace.content.netlist_source =
+        Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
     state.simulation.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
@@ -1033,9 +1037,9 @@ fn manual_deck_runs_use_imported_netlist_origin_for_relative_includes() {
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
     state.schematic.session.current_file = Some(PathBuf::from("schematics").join("amp.rsch"));
-    state.workspace.netlist_source =
+    state.workspace.content.netlist_source =
         Some("deck\n.include models.lib\nV1 out 0 1\n.op\n.end\n".to_string());
-    state.workspace.netlist_source_path = Some(PathBuf::from("decks").join("bias.cir"));
+    state.workspace.content.netlist_source_path = Some(PathBuf::from("decks").join("bias.cir"));
 
     assert_eq!(
         SimulationController::analysis_source_path(&state).as_deref(),
@@ -1048,7 +1052,7 @@ fn manual_deck_runs_do_not_fall_back_to_schematic_path() {
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
     state.schematic.session.current_file = Some(PathBuf::from("schematics").join("amp.rsch"));
-    state.workspace.netlist_source = Some("deck\nV1 out 0 1\n.op\n.end\n".to_string());
+    state.workspace.content.netlist_source = Some("deck\nV1 out 0 1\n.op\n.end\n".to_string());
 
     assert!(
         SimulationController::analysis_source_path(&state).is_none(),
@@ -1071,7 +1075,8 @@ fn simulate_run_set_does_not_run_manual_deck_source() {
         .insert_at(AnalysisKind::OperatingPoint, 0)
         .expect("OP inserts as the sole enabled analysis");
     assert_eq!(plan.instances()[0].id(), op_id);
-    state.workspace.netlist_source = Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
+    state.workspace.content.netlist_source =
+        Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
     state.simulation.request_simulate_run_set();
     let mut controller = SimulationController::new();
 
@@ -1631,7 +1636,7 @@ fn a_wholesale_catalogue_replacement_cannot_reuse_an_inspection_key_it_did_not_e
 
     let mut state = AppState::default();
     let epoch = state.design_execution_epoch;
-    let project_revision = state.workspace.project.revision();
+    let project_revision = state.workspace.content.project.revision();
 
     let mut first = ModelLibraryManager::new();
     first
@@ -1662,7 +1667,7 @@ fn a_wholesale_catalogue_replacement_cannot_reuse_an_inspection_key_it_did_not_e
         state.design_execution_epoch, epoch,
         "the collision is only real while every counter the digest folds in is unmoved"
     );
-    assert_eq!(state.workspace.project.revision(), project_revision);
+    assert_eq!(state.workspace.content.project.revision(), project_revision);
     assert_ne!(
         prepared_run::design_inspection_input_digest(&state),
         before,

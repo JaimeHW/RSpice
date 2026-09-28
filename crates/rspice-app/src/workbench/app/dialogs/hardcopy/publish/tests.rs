@@ -9,7 +9,7 @@ use super::*;
 #[test]
 fn governed_design_print_selects_the_active_sheet_identity() {
     let mut app = RSpiceApp::test_instance();
-    let reference = app.state.workspace.active_view.clone();
+    let reference = app.state.workspace.content.active_view.clone();
     app.state
         .workbench
         .documents
@@ -20,6 +20,7 @@ fn governed_design_print_selects_the_active_sheet_identity() {
     let sheet_id = app
         .state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&key, "Main", [])
         .unwrap();
@@ -69,7 +70,11 @@ fn results_export_selects_the_active_project_document_pane_authority() {
         .unwrap();
     let document_id = document.id();
     let mut app = RSpiceApp::test_instance();
-    app.state.workspace.visualization_documents.push(document);
+    app.state
+        .workspace
+        .content
+        .visualization_documents
+        .push(document);
     app.state.workbench.activate(Workspace::Results);
     app.state
         .workbench
@@ -169,7 +174,7 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
-    let reference = app.state.workspace.active_view.clone();
+    let reference = app.state.workspace.content.active_view.clone();
     app.state
         .workbench
         .documents
@@ -178,12 +183,14 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
     let sheet_id = app
         .state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&key, "Input", [71])
         .unwrap();
     let catalog = app
         .state
         .workspace
+        .content
         .design_management
         .sheet_catalog(&key)
         .unwrap();
@@ -222,6 +229,7 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
     assert_eq!(
         app.state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&key)
             .unwrap()
@@ -237,6 +245,7 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
     assert_eq!(
         app.state
             .workspace
+            .content
             .hardcopy_setups
             .setup_for(resolved.authority())
             .unwrap()
@@ -244,7 +253,7 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
             .setup(),
         &setup
     );
-    assert!(app.state.workspace.hardcopy_setups_dirty);
+    assert!(app.state.workspace.content.hardcopy_setups_dirty);
 }
 
 #[test]
@@ -259,7 +268,7 @@ fn legacy_output_page_setup_does_not_rewrite_document_policy() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
-    let reference = app.state.workspace.active_view.clone();
+    let reference = app.state.workspace.content.active_view.clone();
     app.state
         .workbench
         .documents
@@ -311,7 +320,7 @@ fn page_setup_rejects_late_read_only_authority_without_partial_commit() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
-    let reference = app.state.workspace.active_view.clone();
+    let reference = app.state.workspace.content.active_view.clone();
     app.state
         .workbench
         .documents
@@ -351,6 +360,7 @@ fn page_setup_rejects_late_read_only_authority_without_partial_commit() {
     assert!(
         app.state
             .workspace
+            .content
             .hardcopy_setups
             .setup_for(resolved.authority())
             .unwrap()
@@ -371,12 +381,14 @@ fn governed_page_authority_rejects_catalog_or_active_sheet_drift() {
     let sheet_id = app
         .state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&key, "Input", [])
         .unwrap();
     let catalog = app
         .state
         .workspace
+        .content
         .design_management
         .sheet_catalog(&key)
         .unwrap();
@@ -392,6 +404,7 @@ fn governed_page_authority_rejects_catalog_or_active_sheet_drift() {
     let catalog = app
         .state
         .workspace
+        .content
         .design_management
         .sheet_catalog_mut(&key)
         .unwrap();
@@ -430,7 +443,7 @@ fn publication_reuses_only_the_exact_sealed_preview_plan() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
-    let reference = app.state.workspace.active_view.clone();
+    let reference = app.state.workspace.content.active_view.clone();
     app.state
         .workbench
         .documents
@@ -478,7 +491,7 @@ fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
-    let reference = app.state.workspace.active_view.clone();
+    let reference = app.state.workspace.content.active_view.clone();
     app.state
         .workbench
         .documents
@@ -573,7 +586,7 @@ fn project_print_mapping_stage_is_transactional_until_publication_commit() {
     use crate::hardcopy::{PrintMappingSaveScope, PrintMappingTable};
 
     let mut app = RSpiceApp::test_instance();
-    let before = app.state.workspace.project_print_mappings.clone();
+    let before = app.state.workspace.content.project_print_mappings.clone();
     let mapping = PrintMappingTable::try_new(
         PrintMappingSaveScope::ProjectPrintSet("release-proof".to_owned()),
         Vec::new(),
@@ -581,23 +594,24 @@ fn project_print_mapping_stage_is_transactional_until_publication_commit() {
     .unwrap();
 
     let staged = stage_print_mapping_persistence(&app, &mapping).unwrap();
-    assert_eq!(app.state.workspace.project_print_mappings, before);
-    assert!(!app.state.workspace.project_print_mappings_dirty);
+    assert_eq!(app.state.workspace.content.project_print_mappings, before);
+    assert!(!app.state.workspace.content.project_print_mappings_dirty);
     drop(staged);
-    assert_eq!(app.state.workspace.project_print_mappings, before);
-    assert!(!app.state.workspace.project_print_mappings_dirty);
+    assert_eq!(app.state.workspace.content.project_print_mappings, before);
+    assert!(!app.state.workspace.content.project_print_mappings_dirty);
 
     let staged = stage_print_mapping_persistence(&app, &mapping).unwrap();
     commit_print_mapping_persistence(&mut app, staged).unwrap();
     assert_eq!(
         app.state
             .workspace
+            .content
             .project_print_mappings
             .get("release-proof")
             .unwrap(),
         &mapping
     );
-    assert!(app.state.workspace.project_print_mappings_dirty);
+    assert!(app.state.workspace.content.project_print_mappings_dirty);
 }
 
 #[test]

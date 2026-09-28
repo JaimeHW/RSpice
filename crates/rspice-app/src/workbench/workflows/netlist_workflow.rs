@@ -167,6 +167,7 @@ fn acknowledge_canonical_dependencies(
         == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
         && state
             .workspace
+            .content
             .netlist_descriptor
             .as_ref()
             .is_some_and(|descriptor| {
@@ -195,7 +196,7 @@ fn acknowledge_canonical_dependencies(
             state.schematic.session.current_file.as_deref()
         }
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
-            state.workspace.netlist_source_path.as_deref()
+            state.workspace.content.netlist_source_path.as_deref()
         }
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
         | crate::workbench::documents::netlist_document::ActiveNetlistDocument::RunSnapshot => None,
@@ -323,7 +324,7 @@ fn acknowledge_canonical_dependencies(
     if state.ui.netlist.active_document
         == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
     {
-        state.workspace.netlist_document = state.ui.netlist.owned_document.clone();
+        state.workspace.content.netlist_document = state.ui.netlist.owned_document.clone();
     }
     Ok(())
 }
@@ -430,6 +431,7 @@ fn dependency_authority_paths(
 ) {
     let technology = state
         .workspace
+        .content
         .project
         .technology_binding()
         .into_iter()
@@ -478,6 +480,7 @@ fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> 
     let narrow_owned = owned
         && state
             .workspace
+            .content
             .netlist_descriptor
             .as_ref()
             .is_some_and(|descriptor| {
@@ -534,7 +537,7 @@ fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> 
         .acknowledge_validation(document.content_digest(), diagnostics)
         .map_err(|error| error.to_string())?;
     if owned {
-        state.workspace.netlist_document = state.ui.netlist.owned_document.clone();
+        state.workspace.content.netlist_document = state.ui.netlist.owned_document.clone();
     }
     Ok(())
 }
@@ -556,7 +559,7 @@ fn invalidate_canonical_validation(state: &mut AppState) {
     if state.ui.netlist.active_document
         == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
     {
-        state.workspace.netlist_document = state.ui.netlist.owned_document.clone();
+        state.workspace.content.netlist_document = state.ui.netlist.owned_document.clone();
     }
 }
 

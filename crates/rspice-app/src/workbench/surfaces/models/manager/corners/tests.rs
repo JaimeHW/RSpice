@@ -262,7 +262,7 @@ fn corner_lifecycle_publishes_drafts_bindings_defaults_and_deletion() {
             None,
         )
         .expect("sectioned source imports");
-    let initial_revision = state.workspace.project.revision();
+    let initial_revision = state.workspace.content.project.revision();
     let mut pending = Vec::new();
     let mut app = ManagerRenderContext {
         state: &mut state,
@@ -315,8 +315,8 @@ fn corner_lifecycle_publishes_drafts_bindings_defaults_and_deletion() {
         .expect("library remains attached");
     assert!(!retained.corners.contains_key("hot"));
     assert!(retained.corners.values().any(|corner| corner.is_default));
-    assert!(app.state.workspace.project.revision() > initial_revision);
-    assert!(app.state.workspace.project_metadata_dirty);
+    assert!(app.state.workspace.content.project.revision() > initial_revision);
+    assert!(app.state.workspace.content.project_metadata_dirty);
 }
 
 #[test]
@@ -353,7 +353,7 @@ fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
         .expect("imported library remains present")
         .corners
         .insert(inspection_target.name.clone(), inspection_target);
-    let initial_revision = state.workspace.project.revision();
+    let initial_revision = state.workspace.content.project.revision();
     let initial_epoch = state.design_execution_epoch;
     let initial_active = state
         .model_library_manager
@@ -390,7 +390,10 @@ fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
         initial_active.as_deref(),
         "inspection must not change the executable section"
     );
-    assert_eq!(app.state.workspace.project.revision(), initial_revision);
+    assert_eq!(
+        app.state.workspace.content.project.revision(),
+        initial_revision
+    );
     assert_eq!(app.state.design_execution_epoch, initial_epoch);
 
     activate_corner(&mut app, &library, &inspected.corner.name);
@@ -402,7 +405,7 @@ fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
             .and_then(|library| library.selected_corner.as_deref()),
         Some(inspected.corner.name.as_str())
     );
-    assert!(app.state.workspace.project.revision() > initial_revision);
+    assert!(app.state.workspace.content.project.revision() > initial_revision);
     assert_eq!(
         app.state.design_execution_epoch,
         initial_epoch.wrapping_add(1)

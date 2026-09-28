@@ -47,8 +47,8 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             let revision = revision_status_summary(
                 app.state.project_lifecycle.project_open,
                 app.state.schematic.session.is_dirty || app.state.workspace.any_dirty(),
-                app.state.workspace.project.revision().get(),
-                app.state.workspace.project.display_name(),
+                app.state.workspace.content.project.revision().get(),
+                app.state.workspace.content.project.display_name(),
             );
             let zoom_command = if app.state.workbench.workspace == Workspace::Results {
                 Command::ZoomFit
@@ -572,7 +572,10 @@ fn engineering_context_summary(
                             app.state.schematic.document().grid_size.max(1)
                         )
                     }
-                    _ => format!("revision {}", app.state.workspace.project.revision().get()),
+                    _ => format!(
+                        "revision {}",
+                        app.state.workspace.content.project.revision().get()
+                    ),
                 },
                 |(x, y)| match view_type {
                     crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
@@ -596,7 +599,10 @@ fn engineering_context_summary(
                         "x {x:.0} · y {y:.0} · grid {}",
                         app.state.schematic.document().grid_size.max(1)
                     ),
-                    _ => format!("revision {}", app.state.workspace.project.revision().get()),
+                    _ => format!(
+                        "revision {}",
+                        app.state.workspace.content.project.revision().get()
+                    ),
                 },
             )
         }
@@ -607,7 +613,10 @@ fn engineering_context_summary(
         | Workspace::Verify
         | Workspace::Models
         | Workspace::Netlist => {
-            format!("revision {}", app.state.workspace.project.revision().get())
+            format!(
+                "revision {}",
+                app.state.workspace.content.project.revision().get()
+            )
         }
     }
 }
@@ -1272,6 +1281,7 @@ mod tests {
         let first = app
             .state
             .workspace
+            .content
             .design_management
             .bootstrap_for_cell_view(&key, "Input stage", [10])
             .expect("the fixture cell view takes a sheet catalog");
@@ -1280,6 +1290,7 @@ mod tests {
         let catalog = app
             .state
             .workspace
+            .content
             .design_management
             .sheet_catalog_mut(&key)
             .expect("the catalog was just bootstrapped");

@@ -18,7 +18,7 @@ mod tests {
         );
 
         let decoded: ProjectWorkspace = ron::from_str(&encoded).expect("deserialize");
-        assert!(decoded.stimulus_library.is_empty());
+        assert!(decoded.content.stimulus_library.is_empty());
     }
 
     #[test]
@@ -34,15 +34,20 @@ mod tests {
         definition.params = "va=3m freq=1k".to_owned();
         definition.purpose = "differential sensor drive".to_owned();
         workspace
+            .content
             .stimulus_library
             .insert(definition)
             .expect("insert");
 
         let encoded = ron::ser::to_string(&workspace).expect("serialize");
         let decoded: ProjectWorkspace = ron::from_str(&encoded).expect("deserialize");
-        assert_eq!(decoded.stimulus_library, workspace.stimulus_library);
+        assert_eq!(
+            decoded.content.stimulus_library,
+            workspace.content.stimulus_library
+        );
         assert_eq!(
             decoded
+                .content
                 .stimulus_library
                 .get("sensor_diff_1k")
                 .map(StimulusDefinition::revision),

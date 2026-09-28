@@ -53,8 +53,8 @@ fn bind_project_data<'a>(
     hierarchy: crate::simulation::netlist_gen::HierarchySource<'a>,
     state: &'a AppState,
 ) -> crate::simulation::netlist_gen::HierarchySource<'a> {
-    let hierarchy = hierarchy.with_stimulus_library(&state.workspace.stimulus_library);
-    match state.workspace.project.data_root() {
+    let hierarchy = hierarchy.with_stimulus_library(&state.workspace.content.stimulus_library);
+    match state.workspace.content.project.data_root() {
         Some(root) => hierarchy.with_data_root(root),
         None => hierarchy,
     }
@@ -83,15 +83,19 @@ fn activate_campaign_plan(
         stored.name().to_string()
     };
     if current_id != plan_id {
-        state.workspace.migrate_active_plan_data(current_id);
-        state.workspace.migrate_inactive_plan_data(plan_id);
+        state.workspace.content.migrate_active_plan_data(current_id);
+        state.workspace.content.migrate_inactive_plan_data(plan_id);
         state
             .sim_setup
             .activate_plan(plan_id)
             .map_err(|error| error.to_string())?;
-        state.workspace.sync_legacy_specs_projection(plan_id);
         state
             .workspace
+            .content
+            .sync_legacy_specs_projection(plan_id);
+        state
+            .workspace
+            .content
             .validate_simulation_configuration()
             .map_err(|error| error.to_string())?;
     }
@@ -235,7 +239,7 @@ impl SimulationController {
             .workspace
             .configuration_execution_projection(
                 &state.library_manager,
-                &state.workspace.active_view,
+                &state.workspace.content.active_view,
                 &state.schematic,
             )
             .map_err(|error| {
@@ -287,7 +291,7 @@ impl SimulationController {
             .workspace
             .configuration_execution_projection(
                 &state.library_manager,
-                &state.workspace.active_view,
+                &state.workspace.content.active_view,
                 &state.schematic,
             )
             .map_err(|error| {
@@ -312,7 +316,7 @@ impl SimulationController {
             .sim_setup
             .stable_analysis_plan()
             .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
-        let payload = state.workspace.plan_data(plan.id()).ok_or_else(|| {
+        let payload = state.workspace.content.plan_data(plan.id()).ok_or_else(|| {
             PreparationError::new(
                 PreparationStage::AnalysisPlan,
                 format!(
@@ -364,6 +368,7 @@ impl SimulationController {
         };
         let generated_source = state
             .workspace
+            .content
             .bind_generated_netlist_provenance(generated.netlist);
         let mut source =
             Self::apply_reference_model_bindings_to_netlist(&generated_source, &model_cards);
@@ -381,7 +386,7 @@ impl SimulationController {
         let (source, _) = expand_generated_dependencies_with_sealed_sources(
             &source,
             root_schematic.current_file(),
-            &crate::state::IncludeSearchChain::for_project(&state.workspace.project),
+            &crate::state::IncludeSearchChain::for_project(&state.workspace.content.project),
             Some(&sealed_models),
         )?;
         Ok(source)
@@ -398,12 +403,16 @@ impl SimulationController {
             .sim_setup
             .stable_analysis_plan()
             .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
-        let payload = state.workspace.plan_data(plan.id()).ok_or_else(|| {
-            PreparationError::new(
-                PreparationStage::AnalysisPlan,
-                "Missing active plan payload",
-            )
-        })?;
+        let payload = state
+            .workspace
+            .content
+            .plan_data(plan.id())
+            .ok_or_else(|| {
+                PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    "Missing active plan payload",
+                )
+            })?;
         measurements::append_to_generated_source(
             source,
             &payload.specification_definitions,
@@ -788,7 +797,7 @@ impl SimulationController {
             .workspace
             .configuration_execution_projection(
                 &state.library_manager,
-                &state.workspace.active_view,
+                &state.workspace.content.active_view,
                 &state.schematic,
             )
             .map_err(|error| {
@@ -845,7 +854,7 @@ impl SimulationController {
         let plan = self.build_analysis_plan(state).map_err(|errors| {
             PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; "))
         })?;
-        let plan_payload = state.workspace.plan_data(plan.plan_id()).ok_or_else(|| {
+        let plan_payload = state.workspace.content.plan_data(plan.plan_id()).ok_or_else(|| {
             PreparationError::new(
                 PreparationStage::AnalysisPlan,
                 format!(
@@ -1014,6 +1023,7 @@ impl SimulationController {
         let model_cards = model_execution_plan.model_cards();
         let generated_source = state
             .workspace
+            .content
             .bind_generated_netlist_provenance(generated.netlist);
         let mut netlist =
             Self::apply_reference_model_bindings_to_netlist(&generated_source, &model_cards);
@@ -1029,7 +1039,7 @@ impl SimulationController {
             expand_generated_dependencies_with_sealed_sources(
                 &netlist,
                 root_schematic.current_file(),
-                &crate::state::IncludeSearchChain::for_project(&state.workspace.project),
+                &crate::state::IncludeSearchChain::for_project(&state.workspace.content.project),
                 Some(&sealed_models),
             )?;
         netlist = measurements::materialize(
@@ -1109,7 +1119,7 @@ impl SimulationController {
             measurement_references,
             intent: SimulationRunIntent::SimulateRunSet,
             simulation_plan_id: Some(plan.plan_id()),
-            project_revision: state.workspace.project.revision().get(),
+            project_revision: state.workspace.content.project.revision().get(),
             topology_revision: root_schematic.topology_version(),
             source_digest,
             reference_process: state.sim_setup.reference_pvt.process,
@@ -1163,10 +1173,11 @@ impl SimulationController {
             == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
             || (!state.ui.netlist.active_document_initialized
                 && state.simulation.netlist_content.is_empty()
-                && state.workspace.netlist_source.is_some());
+                && state.workspace.content.netlist_source.is_some());
         let source = if owned_active {
             state
                 .workspace
+                .content
                 .netlist_source
                 .as_deref()
                 .unwrap_or(state.simulation.netlist_content.as_str())
@@ -1189,7 +1200,7 @@ impl SimulationController {
             source.to_owned()
         };
         let descriptor = owned_active
-            .then_some(state.workspace.netlist_descriptor.as_ref())
+            .then_some(state.workspace.content.netlist_descriptor.as_ref())
             .flatten();
         let owned_materialized =
             manual_deck::adapt_owned_execution_profile(descriptor, &owned_materialized)
@@ -1231,7 +1242,7 @@ impl SimulationController {
             );
         }
         let origin = if owned_active {
-            state.workspace.netlist_source_path.as_deref()
+            state.workspace.content.netlist_source_path.as_deref()
         } else {
             state.schematic.session.current_file.as_deref()
         };
@@ -1244,7 +1255,7 @@ impl SimulationController {
         let (expanded, canonical_origin, sealed_source_dependencies) = expand_manual_dependencies(
             &composed,
             origin,
-            &crate::state::IncludeSearchChain::for_project(&state.workspace.project),
+            &crate::state::IncludeSearchChain::for_project(&state.workspace.content.project),
             &sealed_models,
         )?;
         let expanded = manual_deck::bind_execution_profile(
@@ -1261,7 +1272,7 @@ impl SimulationController {
             .sim_setup
             .analysis_plan
             .as_ref()
-            .and_then(|plan| state.workspace.plan_data(plan.id()))
+            .and_then(|plan| state.workspace.content.plan_data(plan.id()))
             .map_or(&[][..], |payload| {
                 payload.specification_definitions.as_slice()
             });
@@ -1283,7 +1294,7 @@ impl SimulationController {
         let source_digest = manual_executable_source_digest(&expanded);
         let tasks = self.prepare_manual_tasks(
             source_digest,
-            state.workspace.project.revision(),
+            state.workspace.content.project.revision(),
             queued_tasks,
         )?;
         reject_deferred_corner_model_sources(
@@ -1333,7 +1344,7 @@ impl SimulationController {
             measurement_references,
             intent: SimulationRunIntent::ManualDeck,
             simulation_plan_id: None,
-            project_revision: state.workspace.project.revision().get(),
+            project_revision: state.workspace.content.project.revision().get(),
             topology_revision: state.schematic.topology_version(),
             source_digest,
             reference_process: state.sim_setup.reference_pvt.process,
@@ -1609,9 +1620,9 @@ pub(crate) fn design_inspection_input_digest(state: &AppState) -> crate::product
     let material = format!(
         "{}\0{}\0{}\0{}\0{}\0{:?}\0{}\0{}\0{}",
         state.design_execution_epoch,
-        state.workspace.project.revision().get(),
-        state.workspace.simulation_root_reference().key(),
-        state.workspace.active_view.key(),
+        state.workspace.content.project.revision().get(),
+        state.workspace.content.simulation_root_reference().key(),
+        state.workspace.content.active_view.key(),
         plan_identity,
         state.sim_setup.reference_pvt.process,
         state.sim_setup.reference_pvt.temperature_celsius,
@@ -1689,6 +1700,7 @@ fn prepared_configuration_veriloga_runtimes(
         };
         let bundle = state
             .workspace
+            .content
             .project_sources
             .get_bundle(binding.source_bundle_id())
             .ok_or_else(|| {
@@ -1711,7 +1723,7 @@ fn prepared_configuration_veriloga_runtimes(
             ));
         }
         let runtime = crate::simulation::veriloga::compile_project_source_bundle_runtime(
-            state.workspace.project.id(),
+            state.workspace.content.project.id(),
             bundle,
             binding.selected_module(),
         )
@@ -1780,7 +1792,7 @@ fn prepared_configuration_veriloga_runtimes(
 fn prepared_project_veriloga_runtimes(
     state: &AppState,
 ) -> Result<crate::simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
-    let Some(bundle) = state.workspace.project_sources.bundle_for_owner(
+    let Some(bundle) = state.workspace.content.project_sources.bundle_for_owner(
         &crate::state::ProjectSourceOwner::code_workspace(
             crate::state::ProjectSourceLanguage::VerilogA,
         ),
@@ -1790,13 +1802,13 @@ fn prepared_project_veriloga_runtimes(
     let document = bundle.root();
     let retained = state.ui.code_workspace.veriloga.receipt.as_ref();
     if let Some(receipt) = retained
-        && receipt.token.project_id == state.workspace.project.id()
+        && receipt.token.project_id == state.workspace.content.project.id()
         && receipt.token.bundle_id == bundle.id()
         && receipt.token.revision == bundle.revision().get()
         && receipt.token.closure_digest == bundle.closure_digest()
     {
         let runtime = crate::simulation::veriloga::prepare_project_runtime(
-            state.workspace.project.id(),
+            state.workspace.content.project.id(),
             bundle,
             &receipt.token,
             &receipt.module_name,
@@ -1820,7 +1832,7 @@ fn prepared_project_veriloga_runtimes(
     // transient executable artifacts rather than trusting serialized code or
     // requiring a redundant manual compile after project/session restore.
     let receipt = crate::workbench::documents::code_workspace::compile_project_bundle_receipt(
-        state.workspace.project.id(),
+        state.workspace.content.project.id(),
         bundle,
         None,
     )
@@ -1838,7 +1850,7 @@ fn prepared_project_veriloga_runtimes(
         )
     })?;
     let runtime = receipt
-        .prepare_runtime(state.workspace.project.id(), bundle)
+        .prepare_runtime(state.workspace.content.project.id(), bundle)
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
     crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
@@ -1885,7 +1897,7 @@ fn project_veriloga_runtimes_referenced_by(
     state: &AppState,
     source: &str,
 ) -> Result<crate::simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
-    let Some(bundle) = state.workspace.project_sources.bundle_for_owner(
+    let Some(bundle) = state.workspace.content.project_sources.bundle_for_owner(
         &crate::state::ProjectSourceOwner::code_workspace(
             crate::state::ProjectSourceLanguage::VerilogA,
         ),
@@ -1894,7 +1906,7 @@ fn project_veriloga_runtimes_referenced_by(
     };
     let key_prefix = format!(
         "__rspice_project__/{}/{}/{}/",
-        state.workspace.project.id(),
+        state.workspace.content.project.id(),
         bundle.id(),
         bundle.closure_digest()
     );

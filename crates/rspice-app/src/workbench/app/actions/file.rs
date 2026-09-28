@@ -488,7 +488,7 @@ mod tests {
         state: crate::workbench::app_state::AppState,
         file_io: TestFileWorkflowIo,
     ) -> RSpiceApp {
-        let automation_runtime_project_id = state.workspace.project.id();
+        let automation_runtime_project_id = state.workspace.content.project.id();
         RSpiceApp {
             state,
             first_frame: false,
@@ -621,6 +621,7 @@ mod tests {
         assert!(
             state
                 .workspace
+                .content
                 .schematic_buffers
                 .get(&active_key)
                 .is_none_or(|schematic| schematic.document().components.is_empty()),
@@ -660,6 +661,7 @@ mod tests {
         let mut target_state = crate::workbench::app_state::AppState::default();
         target_state
             .workspace
+            .content
             .project
             .rename("Recent target project")
             .expect("valid target name");
@@ -720,6 +722,7 @@ mod tests {
         assert_eq!(
             saved_source
                 .workspace
+                .content
                 .schematic_buffers
                 .get(&active_key)
                 .expect("saved active design")
@@ -742,7 +745,7 @@ mod tests {
             "opening a recent project must Save All before replacement"
         );
         assert_eq!(
-            project_app.state.workspace.project.name(),
+            project_app.state.workspace.content.project.name(),
             "Recent target project"
         );
 
@@ -796,6 +799,7 @@ mod tests {
         assert_eq!(
             active_only
                 .workspace
+                .content
                 .schematic_buffers
                 .get(&schematic_app.state.workspace.active_key())
                 .expect("saved active schematic")
@@ -863,11 +867,11 @@ mod tests {
             Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
         ));
 
-        let project_id = state.workspace.project.id();
+        let project_id = state.workspace.content.project.id();
         state.simulation.is_running = true;
         assert!(!crate::workbench::workflows::project_workflow::close_project_discard(&mut state));
         assert!(state.project_lifecycle.project_open);
-        assert_eq!(state.workspace.project.id(), project_id);
+        assert_eq!(state.workspace.content.project.id(), project_id);
         assert!(matches!(
             state.dialogs.project_review_dialog.request.as_ref(),
             Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
@@ -960,6 +964,7 @@ mod tests {
         assert_eq!(
             persisted
                 .workspace
+                .content
                 .schematic_buffers
                 .get(&active_key)
                 .expect("saved active schematic")

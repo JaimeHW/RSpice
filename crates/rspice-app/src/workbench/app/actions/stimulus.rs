@@ -33,7 +33,7 @@ const NEW_DEFINITION_FAMILY: crate::state::ComponentType =
 
 /// Create a definition, select it, and leave the reader in its name field.
 pub(crate) fn new_definition(state: &mut AppState) {
-    match state.workspace.stimulus_library.new_definition(
+    match state.workspace.content.stimulus_library.new_definition(
         NEW_DEFINITION_FAMILY,
         crate::state::stimulus_library::now_unix_ms,
     ) {
@@ -56,6 +56,7 @@ pub(crate) fn duplicate_definition(state: &mut AppState) {
     };
     match state
         .workspace
+        .content
         .stimulus_library
         .duplicate(&name, crate::state::stimulus_library::now_unix_ms)
     {
@@ -76,12 +77,19 @@ pub(crate) fn delete_definition(state: &mut AppState) {
         return;
     };
     let adopters = design_adopters(state, &name).len();
-    if state.workspace.stimulus_library.delete(&name).is_none() {
+    if state
+        .workspace
+        .content
+        .stimulus_library
+        .delete(&name)
+        .is_none()
+    {
         return;
     }
     state.workbench.stimulus_editor.close(&name);
     state.workbench.selected_stimulus_definition = state
         .workspace
+        .content
         .stimulus_library
         .definitions()
         .first()
@@ -147,7 +155,7 @@ pub(crate) fn apply_draft(state: &mut AppState) {
     let Some(name) = selected(state) else {
         return;
     };
-    let Some(saved) = state.workspace.stimulus_library.get(&name).cloned() else {
+    let Some(saved) = state.workspace.content.stimulus_library.get(&name).cloned() else {
         return;
     };
     let draft = state.workbench.stimulus_editor.draft_for(&saved);
@@ -157,13 +165,18 @@ pub(crate) fn apply_draft(state: &mut AppState) {
     let renamed = draft.working().name().to_owned();
     let mut published = draft.clone();
     if !renamed.eq_ignore_ascii_case(&name)
-        && let Err(error) = state.workspace.stimulus_library.rename(&name, &renamed)
+        && let Err(error) = state
+            .workspace
+            .content
+            .stimulus_library
+            .rename(&name, &renamed)
     {
         state.push_user_message(ConsoleMessage::warning(error.to_string()));
         return;
     }
     let revision = state
         .workspace
+        .content
         .stimulus_library
         .apply(&mut published, crate::state::stimulus_library::now_unix_ms);
     if !renamed.eq_ignore_ascii_case(&name) {
@@ -173,7 +186,13 @@ pub(crate) fn apply_draft(state: &mut AppState) {
     // still the pre-publish record. Replacing it keeps the reader's editing
     // session open on the revision they just published rather than silently
     // reopening it on the next frame.
-    if let Some(record) = state.workspace.stimulus_library.get(&renamed).cloned() {
+    if let Some(record) = state
+        .workspace
+        .content
+        .stimulus_library
+        .get(&renamed)
+        .cloned()
+    {
         *state.workbench.stimulus_editor.draft_for(&record) = published;
     }
     state.workbench.selected_stimulus_definition = Some(renamed.clone());
@@ -244,6 +263,7 @@ pub(crate) fn edit_field(state: &mut AppState, field: &str, value: &str) {
 pub(crate) fn import_data_file(state: &mut AppState) {
     let data_root = state
         .workspace
+        .content
         .project
         .data_root()
         .map(std::path::Path::to_path_buf);
@@ -363,6 +383,7 @@ pub(crate) fn place_selected_definition(state: &mut AppState) {
     };
     let saved = state
         .workspace
+        .content
         .stimulus_library
         .get(&name)
         .map_or(0, StimulusDefinition::revision);
@@ -379,7 +400,12 @@ pub(crate) fn place_selected_definition(state: &mut AppState) {
 
 /// Audit every definition in the library and report the totals.
 pub(crate) fn validate_library(state: &mut AppState) {
-    let definitions = state.workspace.stimulus_library.definitions().to_vec();
+    let definitions = state
+        .workspace
+        .content
+        .stimulus_library
+        .definitions()
+        .to_vec();
     let mut errors = 0_usize;
     let mut advisories = 0_usize;
     for definition in &definitions {
@@ -443,7 +469,7 @@ pub(crate) fn contract_findings(
 /// comparison would report every one of them as an adopter of nothing.
 #[must_use]
 pub(crate) fn design_adopters(state: &AppState, name: &str) -> Vec<StimulusAdopter> {
-    let library = &state.workspace.stimulus_library;
+    let library = &state.workspace.content.stimulus_library;
     let Some(held) = library.get(name).map(StimulusDefinition::name) else {
         return Vec::new();
     };
@@ -515,7 +541,7 @@ pub(crate) struct StimulusAdopter {
 /// fourteen times for two numbers per row.
 #[must_use]
 pub(crate) fn design_adopter_tally(state: &AppState) -> HashMap<String, AdopterTally> {
-    let library = &state.workspace.stimulus_library;
+    let library = &state.workspace.content.stimulus_library;
     let (sources, _) = crate::simulation::placed_sources::whole_design_excitations(
         &state.library_manager,
         &state.workspace,
@@ -597,7 +623,7 @@ fn with_draft(state: &mut AppState, edit: impl FnOnce(&mut DefinitionDraft)) {
     let Some(name) = selected(state) else {
         return;
     };
-    let Some(saved) = state.workspace.stimulus_library.get(&name).cloned() else {
+    let Some(saved) = state.workspace.content.stimulus_library.get(&name).cloned() else {
         return;
     };
     edit(state.workbench.stimulus_editor.draft_for(&saved));
@@ -608,6 +634,7 @@ fn selected(state: &AppState) -> Option<String> {
     let name = state.workbench.selected_stimulus_definition.as_deref()?;
     state
         .workspace
+        .content
         .stimulus_library
         .get(name)
         .map(|definition| definition.name().to_owned())

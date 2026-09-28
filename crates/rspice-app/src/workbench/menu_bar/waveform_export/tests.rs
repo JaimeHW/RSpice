@@ -257,14 +257,18 @@ fn report_and_table_sheets_export_the_evidence_they_render() {
         AnalysisResult::new(1, AnalysisType::Transient, "Transient")
             .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.5)]),
     );
-    specs_state.workspace.specs.push(crate::state::SpecEntry {
-        measurement: "gain".to_owned(),
-        expression: "max V(out)".to_owned(),
-        min: Some(1.0),
-        max: Some(2.0),
-        unit: "V/V".to_owned(),
-        scope: crate::state::SpecPointScope::AllPoints,
-    });
+    specs_state
+        .workspace
+        .content
+        .specs
+        .push(crate::state::SpecEntry {
+            measurement: "gain".to_owned(),
+            expression: "max V(out)".to_owned(),
+            min: Some(1.0),
+            max: Some(2.0),
+            unit: "V/V".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
+        });
     activate_result_document(&mut specs_state, crate::workbench::ResultViewer::Specs);
     let specs_io = MockExportWorkflowIo::default();
     action_export_csv_with_io(&mut specs_state, &specs_io);

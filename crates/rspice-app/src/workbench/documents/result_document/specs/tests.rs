@@ -31,7 +31,7 @@ fn the_table_marks_the_limit_a_hop_carried_into_it() {
     );
     state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
-    state.workspace.specs = vec![
+    state.workspace.content.specs = vec![
         SpecEntry {
             measurement: "gain_dc".to_owned(),
             expression: "db20(V(out))".to_owned(),
@@ -364,6 +364,7 @@ fn authored_plan_measurements_editor_commits_the_active_plan_definition() {
 
     let owned = state
         .workspace
+        .content
         .plan_data(plan_id)
         .expect("active plan payload");
     assert_eq!(owned.specs.len(), 1);
@@ -382,7 +383,7 @@ fn authored_plan_measurements_editor_commits_the_active_plan_definition() {
             maximum: 40.0,
         }
     );
-    assert_eq!(state.workspace.specs, owned.specs);
+    assert_eq!(state.workspace.content.specs, owned.specs);
     assert!(
         state
             .sim_setup
@@ -436,6 +437,7 @@ fn governed_editor_preserves_identity_source_waiver_producer_and_equality_kind()
     let original = definition.clone();
     state
         .workspace
+        .content
         .replace_active_specification_definitions(plan_id, vec![definition]);
 
     super::open_editor(&mut state);
@@ -445,6 +447,7 @@ fn governed_editor_preserves_identity_source_waiver_producer_and_equality_kind()
 
     let retained = &state
         .workspace
+        .content
         .plan_data(plan_id)
         .unwrap()
         .specification_definitions[0];
@@ -551,7 +554,7 @@ fn two_unmeasured_limits_on_an_immutable_run() -> AppState {
     run.add_analysis(AnalysisResult::new(1, AnalysisType::Ac, "ac"));
     state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
-    state.workspace.specs = vec![
+    state.workspace.content.specs = vec![
         SpecEntry {
             measurement: "gain_dc".to_owned(),
             expression: "max V(out)".to_owned(),
@@ -1038,7 +1041,7 @@ fn two_runs_over_a_long_contract() -> AppState {
         state.simulation.runs.push(run);
     }
     state.simulation.active_run_idx = Some(0);
-    state.workspace.specs = names
+    state.workspace.content.specs = names
         .iter()
         .map(|name| SpecEntry {
             measurement: name.clone(),

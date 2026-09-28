@@ -172,14 +172,18 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
             // The distribution sheets need a bounded measurement to normalize
             // against, and the box's default grouping draws nothing without
             // one.
-            app.state.workspace.specs.push(crate::state::SpecEntry {
-                measurement: "gain_dc".to_owned(),
-                expression: String::new(),
-                min: Some(39.5),
-                max: None,
-                unit: "dB".to_owned(),
-                scope: crate::state::SpecPointScope::AllPoints,
-            });
+            app.state
+                .workspace
+                .content
+                .specs
+                .push(crate::state::SpecEntry {
+                    measurement: "gain_dc".to_owned(),
+                    expression: String::new(),
+                    min: Some(39.5),
+                    max: None,
+                    unit: "dB".to_owned(),
+                    scope: crate::state::SpecPointScope::AllPoints,
+                });
             monte_carlo_population_analysis()
         }
         ResultViewer::HarmonicBalance => {
@@ -245,14 +249,18 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
             }),
         ResultViewer::TransferFunction => transfer_function_analysis(),
         ResultViewer::Specs => {
-            app.state.workspace.specs.push(crate::state::SpecEntry {
-                measurement: "V(out)".to_owned(),
-                expression: String::new(),
-                min: Some(-2.0),
-                max: Some(5.0),
-                unit: "V".to_owned(),
-                scope: crate::state::SpecPointScope::AllPoints,
-            });
+            app.state
+                .workspace
+                .content
+                .specs
+                .push(crate::state::SpecEntry {
+                    measurement: "V(out)".to_owned(),
+                    expression: String::new(),
+                    min: Some(-2.0),
+                    max: Some(5.0),
+                    unit: "V".to_owned(),
+                    scope: crate::state::SpecPointScope::AllPoints,
+                });
             transient_analysis()
         }
         ResultViewer::PoleZero => AnalysisResult::new(1, AnalysisType::PoleZero, "PZ")

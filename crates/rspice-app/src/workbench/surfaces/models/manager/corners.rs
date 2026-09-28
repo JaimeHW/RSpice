@@ -1001,7 +1001,7 @@ fn validate_current_model_execution_plan(
         .state
         .model_library_manager
         .issue_model_validation_receipt(
-            app.state.workspace.project.revision(),
+            app.state.workspace.content.project.revision(),
             plan.digest(),
             pdk_archive_digest,
             crate::io::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
@@ -1010,12 +1010,12 @@ fn validate_current_model_execution_plan(
     app.state
         .model_library_manager
         .validate_model_validation_receipt(
-            app.state.workspace.project.revision(),
+            app.state.workspace.content.project.revision(),
             plan.digest(),
             pdk_archive_digest,
             crate::io::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
         )?;
-    app.state.workspace.project_metadata_dirty = true;
+    app.state.workspace.content.project_metadata_dirty = true;
     Ok(format!(
         "Published durable model-validation receipt {} for exact plan {} with {} authenticated bindings, {} source-qualified provider decisions, and {veriloga_count} Verilog-A runtimes.",
         receipt.receipt_digest,
@@ -1395,7 +1395,7 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &CornerRo
                 "run expansion",
             );
             if let Some(receipt) = app.state.model_library_manager.model_validation_receipt() {
-                let current_revision = app.state.workspace.project.revision();
+                let current_revision = app.state.workspace.content.project.revision();
                 let receipt_state = if receipt.project_revision == current_revision {
                     "current revision"
                 } else {

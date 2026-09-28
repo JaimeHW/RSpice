@@ -262,8 +262,8 @@ fn correlation_projection_cache_id() -> egui::Id {
 impl CorrelationProjection {
     fn from_app(ctx: &egui::Context, app: &RSpiceApp) -> Arc<Self> {
         let key = CorrelationProjectionCacheKey {
-            project_id: app.state.workspace.project.id(),
-            project_revision: app.state.workspace.project.revision(),
+            project_id: app.state.workspace.content.project.id(),
+            project_revision: app.state.workspace.content.project.revision(),
             library: app.state.model_library_manager.selected_library.clone(),
             model: app.state.workbench.selected_model.clone(),
             selected_suite_id: app

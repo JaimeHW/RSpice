@@ -81,6 +81,7 @@ fn pending_annotation() -> PendingAnnotation {
     drop(stored_top);
     project
         .workspace
+        .content
         .configuration_sets
         .create(ConfigurationSetDefinition {
             name: "Pending annotation".to_owned(),
@@ -112,7 +113,11 @@ fn pending_annotation() -> PendingAnnotation {
             )
             .unwrap();
             let id = output.id;
-            project.workspace.add_saved_output(plan, output).unwrap();
+            project
+                .workspace
+                .content
+                .add_saved_output(plan, output)
+                .unwrap();
             (plan, id)
         });
     for (reference, id) in [(&root, 1000), (&child, 1001)] {
@@ -160,7 +165,7 @@ fn pending_annotation() -> PendingAnnotation {
         })
         .collect(),
     };
-    let annotation = project.workspace.design_management.annotation_mut();
+    let annotation = project.workspace.content.design_management.annotation_mut();
     let preview = annotation.preview_renumbering(&request).unwrap();
     annotation.commit_renumbering(&preview, &request).unwrap();
     PendingAnnotation {
@@ -200,7 +205,12 @@ fn reopening_pending_annotation_aligns_hierarchy_outputs_and_bound_probes_once()
             .is_none()
     );
     assert_eq!(
-        workspace.configuration_sets.active().unwrap().dut_path(),
+        workspace
+            .content
+            .configuration_sets
+            .active()
+            .unwrap()
+            .dut_path(),
         "/X1"
     );
     assert_eq!(workspace.occurrence_path().to_string(), "/X1");
@@ -208,7 +218,7 @@ fn reopening_pending_annotation_aligns_hierarchy_outputs_and_bound_probes_once()
         (&fixture.root, fixture.parent, "X1"),
         (&fixture.child, fixture.voltage, "V1"),
     ] {
-        let schematic = &workspace.schematic_buffers[&reference.key()];
+        let schematic = &workspace.content.schematic_buffers[&reference.key()];
         assert_eq!(
             schematic
                 .document()
@@ -229,7 +239,7 @@ fn reopening_pending_annotation_aligns_hierarchy_outputs_and_bound_probes_once()
             Some(fixture.outputs[0].1)
         );
     }
-    let dependent = workspace.schematic_buffers[&fixture.child.key()]
+    let dependent = workspace.content.schematic_buffers[&fixture.child.key()]
         .document()
         .components
         .iter()
@@ -241,6 +251,7 @@ fn reopening_pending_annotation_aligns_hierarchy_outputs_and_bound_probes_once()
     );
     for ((plan, id), expression) in fixture.outputs.into_iter().zip(["I(/X1/V1)", "I(/X7/V1)"]) {
         let output = workspace
+            .content
             .plan_data(plan)
             .unwrap()
             .saved_outputs
@@ -250,17 +261,17 @@ fn reopening_pending_annotation_aligns_hierarchy_outputs_and_bound_probes_once()
         assert_eq!(output.source_expression, expression);
     }
     assert_eq!(
-        workspace.design_management,
-        fixture.project.workspace.design_management
+        workspace.content.design_management,
+        fixture.project.workspace.content.design_management
     );
     let again = load_project_text(&serialize_project_file(&loaded).unwrap(), None).unwrap();
     assert_eq!(
-        again.workspace.configuration_sets,
-        workspace.configuration_sets
+        again.workspace.content.configuration_sets,
+        workspace.content.configuration_sets
     );
     assert_eq!(
-        again.workspace.simulation_plan_payloads,
-        workspace.simulation_plan_payloads
+        again.workspace.content.simulation_plan_payloads,
+        workspace.content.simulation_plan_payloads
     );
     assert!(again.workspace_migration_warning.is_none());
 }
@@ -306,6 +317,7 @@ fn damage_pending_annotation(fixture: &mut PendingAnnotation, failure: &str) {
             fixture
                 .project
                 .workspace
+                .content
                 .plan_data_mut(fixture.outputs[0].0)
                 .unwrap()
                 .saved_outputs[0]
@@ -326,10 +338,11 @@ fn annotation_restoration_refuses_before_publishing_any_project_owner() {
         let mut fixture = pending_annotation();
         damage_pending_annotation(&mut fixture, failure);
         let before = serde_json::to_value(&fixture.project.workspace).unwrap();
-        let dirty = fixture.project.workspace.project_metadata_dirty;
+        let dirty = fixture.project.workspace.content.project_metadata_dirty;
         let snapshots: BTreeMap<_, _> = fixture
             .project
             .workspace
+            .content
             .schematic_buffers
             .iter()
             .map(|(key, source)| {
@@ -350,13 +363,14 @@ fn annotation_restoration_refuses_before_publishing_any_project_owner() {
             before,
             "{failure}"
         );
-        assert_eq!(fixture.project.workspace.project_metadata_dirty, dirty);
+        assert_eq!(
+            fixture.project.workspace.content.project_metadata_dirty,
+            dirty
+        );
         for (key, snapshot) in snapshots {
-            assert!(
-                snapshot.is_equal_document(
-                    &fixture.project.workspace.schematic_buffers[&key].document()
-                )
-            );
+            assert!(snapshot.is_equal_document(
+                &fixture.project.workspace.content.schematic_buffers[&key].document()
+            ));
         }
         let bytes = serialize_project_file(&fixture.project).unwrap();
         assert!(
@@ -371,6 +385,7 @@ fn restoration_follows_the_complete_recorded_name_lineage() {
     fixture
         .project
         .workspace
+        .content
         .design_management
         .annotation_mut()
         .commit_manual_reference_edit(
@@ -380,10 +395,10 @@ fn restoration_follows_the_complete_recorded_name_lineage() {
         )
         .unwrap()
         .unwrap();
-    let catalog = fixture.project.workspace.design_management.clone();
+    let catalog = fixture.project.workspace.content.design_management.clone();
     let loaded =
         load_project_text(&serialize_project_file(&fixture.project).unwrap(), None).unwrap();
-    let child = &loaded.workspace.schematic_buffers[&fixture.child.key()];
+    let child = &loaded.workspace.content.schematic_buffers[&fixture.child.key()];
     assert_eq!(
         child
             .document()
@@ -407,6 +422,7 @@ fn restoration_follows_the_complete_recorded_name_lineage() {
     for ((plan, id), expression) in fixture.outputs.into_iter().zip(["I(/X1/V9)", "I(/X7/V9)"]) {
         let output = loaded
             .workspace
+            .content
             .plan_data(plan)
             .unwrap()
             .saved_outputs
@@ -415,7 +431,7 @@ fn restoration_follows_the_complete_recorded_name_lineage() {
             .unwrap();
         assert_eq!(output.source_expression, expression);
     }
-    assert_eq!(loaded.workspace.design_management, catalog);
+    assert_eq!(loaded.workspace.content.design_management, catalog);
     assert!(
         loaded
             .workspace_migration_warning
@@ -427,7 +443,7 @@ fn restoration_follows_the_complete_recorded_name_lineage() {
 fn annotation_session(project: &ProjectFile) -> AppState {
     let (sim_setup, model_library_manager, _) = crate::io::restore_execution_context(
         project.execution_context.clone().unwrap(),
-        project.workspace.project.id(),
+        project.workspace.content.project.id(),
     )
     .unwrap();
     AppState {
@@ -456,8 +472,8 @@ fn assert_restored_annotation(state: &AppState, fixture: &PendingAnnotation) {
     let expected =
         load_project_text(&serialize_project_file(&fixture.project).unwrap(), None).unwrap();
     for reference in [&fixture.root, &fixture.child] {
-        let restored = &state.workspace.schematic_buffers[&reference.key()];
-        let canonical = &expected.workspace.schematic_buffers[&reference.key()];
+        let restored = &state.workspace.content.schematic_buffers[&reference.key()];
+        let canonical = &expected.workspace.content.schematic_buffers[&reference.key()];
         assert_eq!(
             restored.document().components,
             canonical.document().components
@@ -465,17 +481,20 @@ fn assert_restored_annotation(state: &AppState, fixture: &PendingAnnotation) {
         assert_eq!(restored.document().probes, canonical.document().probes);
     }
     assert_eq!(
-        state.workspace.configuration_sets,
-        expected.workspace.configuration_sets
+        state.workspace.content.configuration_sets,
+        expected.workspace.content.configuration_sets
     );
     assert_eq!(
-        state.workspace.simulation_plan_payloads,
-        expected.workspace.simulation_plan_payloads
+        state.workspace.content.simulation_plan_payloads,
+        expected.workspace.content.simulation_plan_payloads
     );
-    assert_eq!(state.workspace.active_view, expected.workspace.active_view);
     assert_eq!(
-        serde_json::to_value(&state.workspace.open_views).unwrap(),
-        serde_json::to_value(&expected.workspace.open_views).unwrap()
+        state.workspace.content.active_view,
+        expected.workspace.content.active_view
+    );
+    assert_eq!(
+        serde_json::to_value(&state.workspace.content.open_views).unwrap(),
+        serde_json::to_value(&expected.workspace.content.open_views).unwrap()
     );
     if let Some(active) = state.workspace.active_context_schematic() {
         assert_eq!(
@@ -484,8 +503,8 @@ fn assert_restored_annotation(state: &AppState, fixture: &PendingAnnotation) {
         );
     }
     assert_eq!(
-        state.workspace.design_management,
-        fixture.project.workspace.design_management
+        state.workspace.content.design_management,
+        fixture.project.workspace.content.design_management
     );
     assert!(
         state
@@ -565,6 +584,7 @@ fn session_retains_unsaved_schematic_flags_across_document_switches() {
             assert!(
                 restored
                     .workspace
+                    .content
                     .open_views
                     .iter()
                     .any(|open| open.reference == *reference && open.dirty)
@@ -582,7 +602,14 @@ fn session_retains_unsaved_schematic_flags_across_document_switches() {
         restored.sync_active_schematic_to_workspace();
         let repeated = restore_annotation_session(&restored, ron);
         assert!(repeated.schematic.session.is_dirty);
-        assert!(repeated.workspace.open_views.iter().all(|open| open.dirty));
+        assert!(
+            repeated
+                .workspace
+                .content
+                .open_views
+                .iter()
+                .all(|open| open.dirty)
+        );
     }
 }
 
@@ -598,7 +625,7 @@ fn failed_session_annotation_preserves_documents_blocks_execution_and_retries_af
             ] {
                 let mut fixture = pending_annotation();
                 if !configured {
-                    fixture.project.workspace.configuration_sets = Default::default();
+                    fixture.project.workspace.content.configuration_sets = Default::default();
                 }
                 let mut broken = fixture.clone();
                 damage_pending_annotation(&mut broken, failure);
@@ -606,29 +633,29 @@ fn failed_session_annotation_preserves_documents_blocks_execution_and_retries_af
                 let mut restored = restore_annotation_session(&source, ron);
                 for reference in [&fixture.root, &fixture.child] {
                     assert_eq!(
-                        restored.workspace.schematic_buffers[&reference.key()]
+                        restored.workspace.content.schematic_buffers[&reference.key()]
                             .document()
                             .components,
-                        source.workspace.schematic_buffers[&reference.key()]
+                        source.workspace.content.schematic_buffers[&reference.key()]
                             .document()
                             .components
                     );
                     assert_eq!(
-                        restored.workspace.schematic_buffers[&reference.key()]
+                        restored.workspace.content.schematic_buffers[&reference.key()]
                             .document()
                             .probes,
-                        source.workspace.schematic_buffers[&reference.key()]
+                        source.workspace.content.schematic_buffers[&reference.key()]
                             .document()
                             .probes
                     );
                 }
                 assert_eq!(
-                    restored.workspace.configuration_sets,
-                    source.workspace.configuration_sets
+                    restored.workspace.content.configuration_sets,
+                    source.workspace.content.configuration_sets
                 );
                 assert_eq!(
-                    restored.workspace.simulation_plan_payloads,
-                    source.workspace.simulation_plan_payloads
+                    restored.workspace.content.simulation_plan_payloads,
+                    source.workspace.content.simulation_plan_payloads
                 );
                 assert!(
                     serde_json::to_value(&restored.workspace)
@@ -674,18 +701,20 @@ fn failed_session_annotation_preserves_documents_blocks_execution_and_retries_af
                     .document_mut_for_test()
                     .components
                     .clone_from(
-                        &fixture.project.workspace.schematic_buffers[&fixture.child.key()]
+                        &fixture.project.workspace.content.schematic_buffers[&fixture.child.key()]
                             .document()
                             .components,
                     );
                 restored
                     .workspace
+                    .content
                     .plan_data_mut(fixture.outputs[0].0)
                     .unwrap()
                     .saved_outputs[0]
                     .revision = fixture
                     .project
                     .workspace
+                    .content
                     .plan_data(fixture.outputs[0].0)
                     .unwrap()
                     .saved_outputs[0]

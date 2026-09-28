@@ -18,7 +18,11 @@ fn add_output(
     )
     .unwrap();
     let id = output.id;
-    state.workspace.add_saved_output(plan, output).unwrap();
+    state
+        .workspace
+        .content
+        .add_saved_output(plan, output)
+        .unwrap();
     id
 }
 
@@ -63,6 +67,7 @@ fn bulk_annotation_revision_exhaustion_preserves_source_and_history() {
     let configuration = fixture
         .state
         .workspace
+        .content
         .configuration_sets
         .find(fixture.configuration)
         .unwrap();
@@ -71,23 +76,25 @@ fn bulk_annotation_revision_exhaustion_preserves_source_and_history() {
     fixture
         .state
         .workspace
+        .content
         .configuration_sets
         .update(fixture.configuration, configuration.revision(), definition)
         .unwrap();
-    let mut project = serde_json::to_value(&fixture.state.workspace.project).unwrap();
+    let mut project = serde_json::to_value(&fixture.state.workspace.content.project).unwrap();
     project["revision"] = serde_json::json!(u64::MAX - 1);
-    fixture.state.workspace.project = serde_json::from_value(project).unwrap();
+    fixture.state.workspace.content.project = serde_json::from_value(project).unwrap();
     publish(&mut fixture);
     assert_eq!(
-        fixture.state.workspace.project.revision(),
+        fixture.state.workspace.content.project.revision(),
         ObjectRevision::new(u64::MAX).unwrap()
     );
     let snapshot = SchematicSnapshot::capture(&fixture.state.schematic.document());
-    let catalog = fixture.state.workspace.design_management.clone();
-    let configurations = fixture.state.workspace.configuration_sets.clone();
+    let catalog = fixture.state.workspace.content.design_management.clone();
+    let configurations = fixture.state.workspace.content.configuration_sets.clone();
     let outputs = fixture
         .state
         .workspace
+        .content
         .plan_data(fixture.plan)
         .unwrap()
         .saved_outputs
@@ -100,12 +107,16 @@ fn bulk_annotation_revision_exhaustion_preserves_source_and_history() {
     assert_eq!(fixture.state.project_redo_sequence(), None);
     assert_eq!(fixture.state.workspace.active_schematic_reference(), active);
     assert!(snapshot.is_equal_document(&fixture.state.schematic.document()));
-    assert_eq!(fixture.state.workspace.design_management, catalog);
-    assert_eq!(fixture.state.workspace.configuration_sets, configurations);
+    assert_eq!(fixture.state.workspace.content.design_management, catalog);
+    assert_eq!(
+        fixture.state.workspace.content.configuration_sets,
+        configurations
+    );
     assert_eq!(
         fixture
             .state
             .workspace
+            .content
             .plan_data(fixture.plan)
             .unwrap()
             .saved_outputs,
@@ -156,6 +167,7 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
                 fixture
                     .state
                     .workspace
+                    .content
                     .open_views
                     .iter_mut()
                     .find(|open| open.reference == other)
@@ -175,11 +187,12 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
             });
             let outputs = state
                 .workspace
+                .content
                 .plan_data(fixture.plan)
                 .unwrap()
                 .saved_outputs
                 .clone();
-            let configurations = state.workspace.configuration_sets.clone();
+            let configurations = state.workspace.content.configuration_sets.clone();
             let before_sequence = sequence(state, forward);
             assert!(cross_history(state, forward).is_err());
             assert_eq!(state.workspace.active_schematic_reference(), root);
@@ -196,15 +209,17 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
             assert_eq!(
                 state
                     .workspace
+                    .content
                     .plan_data(fixture.plan)
                     .unwrap()
                     .saved_outputs,
                 outputs
             );
-            assert_eq!(state.workspace.configuration_sets, configurations);
+            assert_eq!(state.workspace.content.configuration_sets, configurations);
             if read_only {
                 state
                     .workspace
+                    .content
                     .open_views
                     .iter_mut()
                     .find(|open| open.reference == other)
@@ -233,7 +248,7 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
                     .iter()
                     .any(|document| document.reference() == &other)
             );
-            let probe = &state.workspace.schematic_buffers[&other.key()]
+            let probe = &state.workspace.content.schematic_buffers[&other.key()]
                 .document()
                 .probes[0];
             assert_eq!(probe.id, 4000);
@@ -245,7 +260,7 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
             assert_eq!(probe.reference, format!("I(/X5/{to})"));
             assert!(cross_history(state, !forward).unwrap().is_some());
             assert_eq!(
-                state.workspace.schematic_buffers[&other.key()]
+                state.workspace.content.schematic_buffers[&other.key()]
                     .document()
                     .probes[0]
                     .source_expression
@@ -270,6 +285,7 @@ fn new_output_revision_exhaustion_keeps_history_and_navigation_intact() {
         let id = add_output(state, fixture.plan, &format!("I(/X1/{from})"));
         let output = state
             .workspace
+            .content
             .plan_data_mut(fixture.plan)
             .unwrap()
             .saved_outputs
@@ -281,6 +297,7 @@ fn new_output_revision_exhaustion_keeps_history_and_navigation_intact() {
         state.activate_history_document(&root, "Inspect root before history");
         let outputs = state
             .workspace
+            .content
             .plan_data(fixture.plan)
             .unwrap()
             .saved_outputs
@@ -294,6 +311,7 @@ fn new_output_revision_exhaustion_keeps_history_and_navigation_intact() {
         assert_eq!(
             state
                 .workspace
+                .content
                 .plan_data(fixture.plan)
                 .unwrap()
                 .saved_outputs,
@@ -301,6 +319,7 @@ fn new_output_revision_exhaustion_keeps_history_and_navigation_intact() {
         );
         state
             .workspace
+            .content
             .plan_data_mut(fixture.plan)
             .unwrap()
             .saved_outputs
@@ -311,6 +330,7 @@ fn new_output_revision_exhaustion_keeps_history_and_navigation_intact() {
         assert!(cross_history(state, forward).unwrap().is_some());
         let output = state
             .workspace
+            .content
             .plan_data(fixture.plan)
             .unwrap()
             .saved_outputs
@@ -325,7 +345,7 @@ fn new_output_revision_exhaustion_keeps_history_and_navigation_intact() {
 #[test]
 fn bulk_annotation_history_includes_new_plan_outputs_in_both_directions() {
     let mut fixture = fixture(&["V42"]);
-    let catalog = &mut fixture.state.workspace.configuration_sets;
+    let catalog = &mut fixture.state.workspace.content.configuration_sets;
     let configuration = catalog.find(fixture.configuration).unwrap();
     let mut definition = configuration.definition().clone();
     definition.dut_path = "/".to_owned();
@@ -338,6 +358,7 @@ fn bulk_annotation_history_includes_new_plan_outputs_in_both_directions() {
     let output = fixture
         .state
         .workspace
+        .content
         .plan_data(fixture.plan)
         .unwrap()
         .saved_outputs
@@ -353,6 +374,7 @@ fn bulk_annotation_history_includes_new_plan_outputs_in_both_directions() {
         let output = fixture
             .state
             .workspace
+            .content
             .plan_data(plan)
             .unwrap()
             .saved_outputs
@@ -407,6 +429,7 @@ fn history_resolves_current_configuration_roots_before_rewriting_shared_output_t
             .insert_schematic_editor(other.key(), other_source);
         let mut definition = state
             .workspace
+            .content
             .configuration_sets
             .find(fixture.configuration)
             .unwrap()
@@ -417,11 +440,13 @@ fn history_resolves_current_configuration_roots_before_rewriting_shared_output_t
         definition.dut_path = "/".to_owned();
         let other_configuration = state
             .workspace
+            .content
             .configuration_sets
             .create(definition)
             .unwrap();
         state
             .workspace
+            .content
             .configuration_sets
             .activate(fixture.configuration)
             .unwrap();
@@ -448,12 +473,14 @@ fn history_resolves_current_configuration_roots_before_rewriting_shared_output_t
         let state = &mut fixture.state;
         state
             .workspace
+            .content
             .configuration_sets
             .activate(other_configuration)
             .unwrap();
         state.activate_history_document(&other, "Inspect independent testbench");
         let expected_output = state
             .workspace
+            .content
             .plan_data(fixture.plan)
             .unwrap()
             .saved_outputs[0]
@@ -465,19 +492,24 @@ fn history_resolves_current_configuration_roots_before_rewriting_shared_output_t
         for (forward, child_name) in [(false, "V42"), (true, target_name)] {
             assert!(cross_history(state, forward).unwrap().is_some());
             assert_eq!(
-                state.workspace.configuration_sets.active_configuration_id(),
+                state
+                    .workspace
+                    .content
+                    .configuration_sets
+                    .active_configuration_id(),
                 Some(other_configuration)
             );
             assert_eq!(
                 state
                     .workspace
+                    .content
                     .plan_data(fixture.plan)
                     .unwrap()
                     .saved_outputs[0],
                 expected_output
             );
             assert_eq!(
-                state.workspace.schematic_buffers[&independent.key()]
+                state.workspace.content.schematic_buffers[&independent.key()]
                     .document()
                     .components[0]
                     .name,
@@ -527,12 +559,14 @@ fn new_saved_outputs_follow_both_directions_of_a_past_component_rename() {
     let output_id = output.id;
     state
         .workspace
+        .content
         .add_saved_output(fixture.plan, output)
         .unwrap();
     assert!(state.undo_project_design().unwrap().is_some());
     assert_eq!(
         state
             .workspace
+            .content
             .plan_data(fixture.plan)
             .unwrap()
             .saved_outputs
@@ -555,11 +589,13 @@ fn new_saved_outputs_follow_both_directions_of_a_past_component_rename() {
     let second_id = second.id;
     state
         .workspace
+        .content
         .add_saved_output(fixture.plan, second)
         .unwrap();
     assert!(state.redo_project_design().unwrap().is_some());
     let outputs = &state
         .workspace
+        .content
         .plan_data(fixture.plan)
         .unwrap()
         .saved_outputs;

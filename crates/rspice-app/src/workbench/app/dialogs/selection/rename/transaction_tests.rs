@@ -29,6 +29,7 @@ fn fixture() -> (RSpiceApp, Component, ConfigurationSetId, SimulationPlanId) {
     let plan = app.state.sim_setup.stable_analysis_plan().unwrap().id();
     app.state
         .workspace
+        .content
         .add_saved_output(plan, source.clone())
         .unwrap();
     let mut probe =
@@ -42,6 +43,7 @@ fn fixture() -> (RSpiceApp, Component, ConfigurationSetId, SimulationPlanId) {
     let id = app
         .state
         .workspace
+        .content
         .configuration_sets
         .create(ConfigurationSetDefinition {
             name: "Rename test".to_owned(),
@@ -57,7 +59,7 @@ fn fixture() -> (RSpiceApp, Component, ConfigurationSetId, SimulationPlanId) {
         })
         .unwrap();
     app.state.schematic.session.is_dirty = false;
-    app.state.workspace.project_metadata_dirty = false;
+    app.state.workspace.content.project_metadata_dirty = false;
     (app, expected, id, plan)
 }
 
@@ -71,6 +73,7 @@ fn assert_reference(
     assert_eq!(
         app.state
             .workspace
+            .content
             .configuration_sets
             .find(configuration)
             .unwrap()
@@ -78,7 +81,13 @@ fn assert_reference(
         format!("/{name}")
     );
     assert_eq!(
-        app.state.workspace.plan_data(plan).unwrap().saved_outputs[0].source_expression,
+        app.state
+            .workspace
+            .content
+            .plan_data(plan)
+            .unwrap()
+            .saved_outputs[0]
+            .source_expression,
         format!("I({name})")
     );
     assert_eq!(
@@ -97,7 +106,14 @@ fn rename_undo_redo_carries_live_bindings_and_advances_revisions() {
         .session
         .selection
         .select_only_component(expected.id);
-    let output_id = app.state.workspace.plan_data(plan).unwrap().saved_outputs[0].id;
+    let output_id = app
+        .state
+        .workspace
+        .content
+        .plan_data(plan)
+        .unwrap()
+        .saved_outputs[0]
+        .id;
     assert!(
         app.state
             .rename_component_transaction(&expected, "V9".to_owned())
@@ -121,13 +137,20 @@ fn rename_undo_redo_carries_live_bindings_and_advances_revisions() {
     assert_eq!(
         app.state
             .workspace
+            .content
             .configuration_sets
             .find(configuration)
             .unwrap()
             .revision(),
         4
     );
-    let output = &app.state.workspace.plan_data(plan).unwrap().saved_outputs[0];
+    let output = &app
+        .state
+        .workspace
+        .content
+        .plan_data(plan)
+        .unwrap()
+        .saved_outputs[0];
     assert_eq!(output.id, output_id);
     assert_eq!(output.revision, ObjectRevision::new(4).unwrap());
     assert_eq!(
@@ -149,13 +172,15 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
         match refusal {
             "configuration revision" => {
                 let mut json =
-                    serde_json::to_value(&app.state.workspace.configuration_sets).unwrap();
+                    serde_json::to_value(&app.state.workspace.content.configuration_sets).unwrap();
                 json["configurations"][0]["revision"] = serde_json::json!(u64::MAX);
-                app.state.workspace.configuration_sets = serde_json::from_value(json).unwrap();
+                app.state.workspace.content.configuration_sets =
+                    serde_json::from_value(json).unwrap();
             }
             "output revision" => {
                 app.state
                     .workspace
+                    .content
                     .plan_data_mut(plan)
                     .unwrap()
                     .saved_outputs[0]
@@ -182,8 +207,8 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
             _ => unreachable!(),
         }
         let before = SchematicSnapshot::capture(&app.state.schematic.document());
-        let catalog = app.state.workspace.configuration_sets.clone();
-        let payloads = app.state.workspace.simulation_plan_payloads.clone();
+        let catalog = app.state.workspace.content.configuration_sets.clone();
+        let payloads = app.state.workspace.content.simulation_plan_payloads.clone();
         let dirty = app.state.schematic.session.is_dirty;
         let epoch = app.state.design_execution_epoch;
         let mut candidate = expected.clone();
@@ -200,15 +225,19 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
             before.is_equal_document(&app.state.schematic.document()),
             "{refusal}"
         );
-        assert_eq!(catalog, app.state.workspace.configuration_sets);
-        assert_eq!(payloads, app.state.workspace.simulation_plan_payloads);
+        assert_eq!(catalog, app.state.workspace.content.configuration_sets);
+        assert_eq!(
+            payloads,
+            app.state.workspace.content.simulation_plan_payloads
+        );
         assert_eq!(dirty, app.state.schematic.session.is_dirty);
-        assert!(!app.state.workspace.project_metadata_dirty);
+        assert!(!app.state.workspace.content.project_metadata_dirty);
         assert_eq!(epoch, app.state.design_execution_epoch);
         assert!(app.state.project_undo_sequence().is_none());
         assert_eq!(
             app.state
                 .workspace
+                .content
                 .configuration_sets
                 .find(configuration)
                 .unwrap()
@@ -224,7 +253,7 @@ fn undo_preserves_unrelated_outputs_and_current_output_metadata() {
     app.state
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
-    let payload = app.state.workspace.plan_data_mut(plan).unwrap();
+    let payload = app.state.workspace.content.plan_data_mut(plan).unwrap();
     payload.saved_outputs[0].name = "reviewed current".to_owned();
     payload.saved_outputs[0].revision = payload.saved_outputs[0].revision.next().unwrap();
     let mut unrelated = payload.saved_outputs[0].clone();
@@ -234,7 +263,7 @@ fn undo_preserves_unrelated_outputs_and_current_output_metadata() {
     payload.saved_outputs.push(unrelated.clone());
     app.action_edit_undo();
     assert_reference(&app, configuration, plan, "V1");
-    let payload = app.state.workspace.plan_data(plan).unwrap();
+    let payload = app.state.workspace.content.plan_data(plan).unwrap();
     assert_eq!(payload.saved_outputs[0].name, "reviewed current");
     assert_eq!(
         payload.saved_outputs[0].revision,
@@ -250,9 +279,17 @@ fn history_refusal_keeps_the_transaction_available_for_retry() {
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
     let sequence = app.state.project_undo_sequence();
-    let revision = app.state.workspace.plan_data(plan).unwrap().saved_outputs[0].revision;
+    let revision = app
+        .state
+        .workspace
+        .content
+        .plan_data(plan)
+        .unwrap()
+        .saved_outputs[0]
+        .revision;
     app.state
         .workspace
+        .content
         .plan_data_mut(plan)
         .unwrap()
         .saved_outputs[0]
@@ -262,6 +299,7 @@ fn history_refusal_keeps_the_transaction_available_for_retry() {
     assert_eq!(sequence, app.state.project_undo_sequence());
     app.state
         .workspace
+        .content
         .plan_data_mut(plan)
         .unwrap()
         .saved_outputs[0]
@@ -283,6 +321,7 @@ fn undo_does_not_cross_a_blocked_rename_into_older_local_history() {
         .unwrap();
     app.state
         .workspace
+        .content
         .plan_data_mut(plan)
         .unwrap()
         .saved_outputs[0]
@@ -361,16 +400,14 @@ fn switching_documents_does_not_redirect_rename_history() {
     app.action_edit_undo();
     assert_eq!(app.state.workspace.active_schematic_reference(), owner);
     assert_reference(&app, configuration, plan, "V1");
-    assert!(
-        other_snapshot
-            .is_equal_document(&app.state.workspace.schematic_buffers[&other.key()].document())
-    );
+    assert!(other_snapshot.is_equal_document(
+        &app.state.workspace.content.schematic_buffers[&other.key()].document()
+    ));
     app.action_edit_redo();
     assert_reference(&app, configuration, plan, "V9");
-    assert!(
-        other_snapshot
-            .is_equal_document(&app.state.workspace.schematic_buffers[&other.key()].document())
-    );
+    assert!(other_snapshot.is_equal_document(
+        &app.state.workspace.content.schematic_buffers[&other.key()].document()
+    ));
 }
 
 #[test]
@@ -382,6 +419,7 @@ fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
     let mut definition = app
         .state
         .workspace
+        .content
         .configuration_sets
         .find(configuration)
         .unwrap()
@@ -390,12 +428,14 @@ fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
     definition.dut_path = "/".to_owned();
     app.state
         .workspace
+        .content
         .configuration_sets
         .update(configuration, 1, definition)
         .unwrap();
     let mut source = app
         .state
         .workspace
+        .content
         .plan_data(first_plan)
         .unwrap()
         .saved_outputs[0]
@@ -404,6 +444,7 @@ fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
     let second_plan = app.state.sim_setup.create_plan("Second plan").unwrap();
     app.state
         .workspace
+        .content
         .add_saved_output(second_plan, source)
         .unwrap();
     app.state
@@ -427,7 +468,7 @@ fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
         )
         .unwrap();
         let loaded = crate::io::load_project_file(&path).unwrap();
-        let schematic = &loaded.workspace.schematic_buffers
+        let schematic = &loaded.workspace.content.schematic_buffers
             [&loaded.workspace.active_schematic_reference().key()];
         assert_eq!(schematic.document().components[0].name, name);
         assert_eq!(
@@ -436,7 +477,13 @@ fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
         );
         for plan in [first_plan, second_plan] {
             assert_eq!(
-                loaded.workspace.plan_data(plan).unwrap().saved_outputs[0].source_expression,
+                loaded
+                    .workspace
+                    .content
+                    .plan_data(plan)
+                    .unwrap()
+                    .saved_outputs[0]
+                    .source_expression,
                 format!("I({name})")
             );
         }
@@ -459,6 +506,7 @@ fn a_same_spelled_instance_in_another_configuration_root_is_unchanged() {
     let mut unrelated = app
         .state
         .workspace
+        .content
         .configuration_sets
         .find(configuration)
         .unwrap()
@@ -469,12 +517,14 @@ fn a_same_spelled_instance_in_another_configuration_root_is_unchanged() {
     let id = app
         .state
         .workspace
+        .content
         .configuration_sets
         .create(unrelated)
         .unwrap();
     let original = app
         .state
         .workspace
+        .content
         .configuration_sets
         .find(id)
         .unwrap()
@@ -484,12 +534,12 @@ fn a_same_spelled_instance_in_another_configuration_root_is_unchanged() {
         .unwrap();
     assert_reference(&app, configuration, plan, "V9");
     assert_eq!(
-        app.state.workspace.configuration_sets.find(id),
+        app.state.workspace.content.configuration_sets.find(id),
         Some(&original)
     );
     app.action_edit_undo();
     assert_eq!(
-        app.state.workspace.configuration_sets.find(id),
+        app.state.workspace.content.configuration_sets.find(id),
         Some(&original)
     );
 }
@@ -501,6 +551,7 @@ fn imported_primitive_current_probes_follow_the_emitted_card_identity() {
     app.state.schematic.document_mut_for_test().components[0] = expected.clone();
     app.state
         .workspace
+        .content
         .plan_data_mut(plan)
         .unwrap()
         .saved_outputs[0]
@@ -512,13 +563,25 @@ fn imported_primitive_current_probes_follow_the_emitted_card_identity() {
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
     assert_eq!(
-        app.state.workspace.plan_data(plan).unwrap().saved_outputs[0].source_expression,
+        app.state
+            .workspace
+            .content
+            .plan_data(plan)
+            .unwrap()
+            .saved_outputs[0]
+            .source_expression,
         "I(V9)"
     );
     assert_eq!(app.state.schematic.document().probes[0].reference, "I(V9)");
     app.action_edit_undo();
     assert_eq!(
-        app.state.workspace.plan_data(plan).unwrap().saved_outputs[0].source_expression,
+        app.state
+            .workspace
+            .content
+            .plan_data(plan)
+            .unwrap()
+            .saved_outputs[0]
+            .source_expression,
         "I(Vbias)"
     );
     assert_eq!(app.state.schematic.document().components[0].name, "bias");
@@ -549,5 +612,5 @@ fn an_unchanged_name_preserves_authored_reference_spelling_and_history() {
     assert!(before.is_equal_document(&app.state.schematic.document()));
     assert_eq!(app.state.design_execution_epoch, epoch);
     assert!(app.state.project_undo_sequence().is_none());
-    assert!(!app.state.workspace.project_metadata_dirty);
+    assert!(!app.state.workspace.content.project_metadata_dirty);
 }

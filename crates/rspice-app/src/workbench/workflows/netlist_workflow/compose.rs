@@ -13,7 +13,7 @@ pub(crate) fn compose_owned_netlist_execution_source(
     state: &AppState,
     authored_source: &str,
 ) -> Result<String, String> {
-    let Some(descriptor) = state.workspace.netlist_descriptor.as_ref() else {
+    let Some(descriptor) = state.workspace.content.netlist_descriptor.as_ref() else {
         return Ok(authored_source.to_owned());
     };
     if descriptor.strategy == crate::state::OwnedNetlistEditStrategy::OwnedSource {
@@ -21,6 +21,7 @@ pub(crate) fn compose_owned_netlist_execution_source(
     }
     let base = state
         .workspace
+        .content
         .netlist_document
         .as_ref()
         .and_then(|document| document.generated_artifact())

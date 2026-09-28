@@ -112,6 +112,7 @@ pub fn create_editable_project_copy_and_open(
     let expected_project_revision = app
         .state
         .workspace
+        .content
         .project
         .next_revision()
         .map_err(|error| error.to_string())?;
@@ -212,7 +213,7 @@ pub fn open_project_model(
         &app.state.model_library_manager,
         library_name,
         model_name,
-        app.state.workspace.project.revision(),
+        app.state.workspace.content.project.revision(),
     )?;
     app.state
         .workbench
@@ -232,7 +233,7 @@ pub fn open_project_model(
 pub fn validate_open_candidate(app: &mut RSpiceApp) -> bool {
     let valid = app.state.workbench.model_editor.validate_candidate(
         &app.state.model_library_manager,
-        app.state.workspace.project.revision(),
+        app.state.workspace.content.project.revision(),
     );
     let message = if valid {
         ConsoleMessage::info("Model candidate is valid and bound to the current source revision.")

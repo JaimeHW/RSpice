@@ -410,9 +410,8 @@ fn trace_manager_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
             .clone();
         if let Some(document_id) = active_project_visualization_document_id(&app.state) {
             let active_pane = app.state.workbench.visualization_studio.active_pane;
-            let edits = app
-                .state
-                .workspace
+            let project = &app.state.workspace.content;
+            let edits = project
                 .visualization_document(document_id)
                 .map(|document| {
                     document
@@ -526,6 +525,7 @@ fn cursor_manager_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
                 let has_markers = app
                     .state
                     .workspace
+                    .content
                     .visualization_document(document_id)
                     .is_some_and(|document| !document.markers().is_empty());
                 if has_markers {
@@ -561,6 +561,7 @@ fn properties_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
     let document_policy = active_document.and_then(|document_id| {
         app.state
             .workspace
+            .content
             .visualization_document(document_id)
             .map(|document| document.presentation())
     });
@@ -704,9 +705,8 @@ fn reorder_panes_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
             .draft_pane_order
             .clone();
         if let Some(document_id) = active_project_visualization_document_id(&app.state) {
-            let edits = app
-                .state
-                .workspace
+            let project = &app.state.workspace.content;
+            let edits = project
                 .visualization_document(document_id)
                 .map(|document| {
                     document
@@ -844,6 +844,7 @@ fn link_groups_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
                 let document = app
                     .state
                     .workspace
+                    .content
                     .visualization_document(document_id)
                     .ok_or_else(|| {
                         "The active result document is no longer retained.".to_owned()
@@ -1036,6 +1037,7 @@ fn page_editor_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
             let canonical_pane = app
                 .state
                 .workspace
+                .content
                 .visualization_document(document_id)
                 .and_then(|document| {
                     document
@@ -1238,6 +1240,7 @@ fn canonical_measurement_trace_ids(
     ),
     String,
 > {
+    let project = &state.workspace.content;
     let (pane_id, fallback_trace) = active_project_pane_and_trace(state, None)?;
     let parsed = calculator::parser::try_parse(expression)
         .map_err(|error| format!("Parse error: {error}"))?;
@@ -1248,8 +1251,7 @@ fn canonical_measurement_trace_ids(
     }
     let document_id = active_project_visualization_document_id(state)
         .ok_or_else(|| "Open a project-owned result document before measuring it.".to_owned())?;
-    let document = state
-        .workspace
+    let document = project
         .visualization_document(document_id)
         .ok_or_else(|| "The active result document is no longer retained.".to_owned())?;
     let trace_ids = signal_names
@@ -1723,16 +1725,16 @@ fn comparison_source_projection_edits(
     app: &RSpiceApp,
     receipt: &ComparisonReceipt,
 ) -> Result<Vec<DocumentEdit>, String> {
-    let document_id = active_project_visualization_document_id(&app.state).ok_or_else(|| {
+    let state = &app.state;
+    let document_id = active_project_visualization_document_id(&state).ok_or_else(|| {
         "Open a project-owned result document before recording a comparison.".to_owned()
     })?;
-    let document = app
-        .state
+    let document = state
         .workspace
+        .content
         .visualization_document(document_id)
         .ok_or_else(|| "The active result document is no longer retained.".to_owned())?;
-    let candidate_analysis = app
-        .state
+    let candidate_analysis = state
         .simulation
         .active_analysis()
         .ok_or_else(|| "No candidate analysis is selected.".to_owned())?;
@@ -1742,8 +1744,7 @@ fn comparison_source_projection_edits(
         if !seen.insert(binding.dataset_id) {
             continue;
         }
-        let run = app
-            .state
+        let run = state
             .simulation
             .runs
             .iter()
@@ -3294,6 +3295,7 @@ fn apply_family_policy_draft(app: &mut RSpiceApp) {
             let canonical_pane = app
                 .state
                 .workspace
+                .content
                 .visualization_document(
                     active_project_visualization_document_id(&app.state)
                         .expect("canonical branch has an active document"),

@@ -177,7 +177,7 @@ impl super::AppState {
         self.cancel_schematic_drag();
         self.schematic.begin_operation(description);
         let owner = SchematicDragOwner {
-            project: self.workspace.project.id(),
+            project: self.workspace.content.project.id(),
             document: self.workspace.active_schematic_reference(),
             window: self.workbench.window_session.current(),
             viewport: ctx.viewport_id(),
@@ -197,7 +197,7 @@ impl super::AppState {
             .owner
             .as_ref()
             .is_some_and(|owner| {
-                owner.project == self.workspace.project.id()
+                owner.project == self.workspace.content.project.id()
                     && owner.document == self.workspace.active_schematic_reference()
                     && Some(owner.operation_id) == self.schematic.pending_operation_id()
             })
@@ -226,7 +226,7 @@ impl super::AppState {
         };
         if active {
             self.schematic.cancel_operation();
-        } else if owner.project == self.workspace.project.id()
+        } else if owner.project == self.workspace.content.project.id()
             && let Some(mut schematic) = self.workspace.schematic_editor_mut(&owner.document.key())
             && schematic.editor.pending_operation_id() == Some(owner.operation_id)
         {

@@ -61,6 +61,7 @@ pub(crate) fn multi_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
     let key = state.workspace.active_schematic_reference().key();
     state
         .workspace
+        .content
         .design_management
         .sheet_catalog(&key)
         .filter(|catalog| catalog.sheets().len() > 1)
@@ -93,13 +94,14 @@ fn object_is_on_active_sheet_in_workspace(
     object_id: u64,
 ) -> bool {
     let key = workspace.active_schematic_reference().key();
-    let Some(catalog) = workspace.design_management.sheet_catalog(&key) else {
+    let Some(catalog) = workspace.content.design_management.sheet_catalog(&key) else {
         return true;
     };
     let Some(active_sheet_id) = catalog.active_sheet_id() else {
         return true;
     };
     workspace
+        .content
         .design_management
         .sheet_for_object_or_active(&key, object_id)
         == Some(active_sheet_id)
@@ -445,11 +447,13 @@ mod tests {
             .collect::<Vec<_>>();
         let first = state
             .workspace
+            .content
             .design_management
             .bootstrap_for_cell_view(&key, "Sheet 1", all_ids)
             .expect("first sheet");
         let catalog = state
             .workspace
+            .content
             .design_management
             .sheet_catalog_mut(&key)
             .expect("sheet catalog");
@@ -497,6 +501,7 @@ mod tests {
         let key = single.workspace.active_schematic_reference().key();
         single
             .workspace
+            .content
             .design_management
             .bootstrap_for_cell_view(&key, "Sheet 1", [10])
             .expect("the fixture cell view takes a sheet catalog");

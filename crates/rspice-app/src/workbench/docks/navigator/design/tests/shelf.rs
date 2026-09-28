@@ -1653,6 +1653,7 @@ fn a_stimulus_definition_is_listed_as_a_part_and_arms_the_cursor() {
         .app
         .state
         .workspace
+        .content
         .stimulus_library
         .insert(definition)
         .expect("insert");
@@ -1699,7 +1700,15 @@ fn a_stimulus_definition_is_listed_as_a_part_and_arms_the_cursor() {
 #[test]
 fn an_empty_stimulus_library_paints_no_section() {
     let mut shelf = ShelfHarness::opened().settled();
-    assert!(shelf.app.state.workspace.stimulus_library.is_empty());
+    assert!(
+        shelf
+            .app
+            .state
+            .workspace
+            .content
+            .stimulus_library
+            .is_empty()
+    );
     let (text, _) = shelf.frame(Vec::new());
     assert!(
         !paints_line(&text, "Stimulus library"),

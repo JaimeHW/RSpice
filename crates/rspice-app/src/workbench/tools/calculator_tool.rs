@@ -166,7 +166,7 @@ fn plot_expression(ctx: &Context, app: &mut RSpiceApp) {
         }
     };
     if added {
-        app.state.workspace.visualization_documents_dirty = true;
+        app.state.workspace.content.visualization_documents_dirty = true;
     }
     app.state.ui.results.viewer = crate::workbench::documents::result_document::ResultViewer::Waves;
     app.state
@@ -219,7 +219,7 @@ mod tests {
         let traces = app.state.ui.results.exprs.get(&0).expect("trace recorded");
         assert_eq!(traces.len(), 1, "the same expression plotted twice");
         assert_eq!(traces[0].text, "V(out)/V(in)");
-        assert!(app.state.workspace.visualization_documents_dirty);
+        assert!(app.state.workspace.content.visualization_documents_dirty);
         assert!(
             app.state.dialogs.waveform_calculator_dialog,
             "plotting must not close a modeless tool"

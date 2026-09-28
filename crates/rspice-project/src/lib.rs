@@ -19,3 +19,11 @@ mod libraries;
 mod open_view;
 pub use libraries::ProjectLibraries;
 pub use open_view::OpenCellView;
+
+mod workspace;
+pub use workspace::{
+    HardcopySourceSetPersistenceError, MAX_PROJECT_HARDCOPY_SOURCE_SETS,
+    MAX_PROJECT_VISUALIZATION_DOCUMENTS, PreparedPhysicalLayoutCatalog,
+    ProjectConfigurationMutationError, ProjectWorkspace, SimulationConfigurationError,
+    VisualizationDocumentPersistenceError,
+};

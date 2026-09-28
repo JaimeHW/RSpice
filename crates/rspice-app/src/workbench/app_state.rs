@@ -295,13 +295,14 @@ impl AppState {
         }
         self.library_edit_locks
             .require_mutation_authority(
-                self.workspace.project.id(),
-                self.workspace.project.revision(),
+                self.workspace.content.project.id(),
+                self.workspace.content.project.revision(),
                 self.library_manager.revision(),
                 &mutation,
             )
             .map_err(|error| format!("Could not reserve {operation}: {error}"))?;
         self.workspace
+            .content
             .project
             .prepare_library_mutation(mutation, self.library_manager.revision())
             .map_err(|error| format!("Could not reserve {operation}: {error}"))
@@ -319,10 +320,11 @@ impl AppState {
             "library mutation did not advance the library revision"
         );
         self.workspace
+            .content
             .project
             .publish_library_mutation(prepared, observed_library_revision)
             .expect("the library mutation receipt was fully preflighted");
-        self.workspace.project_metadata_dirty = true;
+        self.workspace.content.project_metadata_dirty = true;
         self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
         self.ui.netlist.current_generation_input_digest = None;
         self.clear_project_design_history();
@@ -333,13 +335,25 @@ impl AppState {
     /// from a display label, an active registry package, or model paths alone.
     pub(crate) fn validate_project_technology_contract(&self) -> Result<(), String> {
         self.workspace
+            .content
             .project
             .validate()
             .map_err(|error| format!("Project technology metadata is invalid: {error}"))?;
-        let binding = self.workspace.project.technology_binding().ok_or_else(|| {
-            "Project has no exact authenticated model-source and signed PDK binding".to_owned()
-        })?;
-        if self.workspace.project.technology_change_audit().is_empty() {
+        let binding = self
+            .workspace
+            .content
+            .project
+            .technology_binding()
+            .ok_or_else(|| {
+                "Project has no exact authenticated model-source and signed PDK binding".to_owned()
+            })?;
+        if self
+            .workspace
+            .content
+            .project
+            .technology_change_audit()
+            .is_empty()
+        {
             return Err(
                 "Project technology binding predates checkpoint-backed authority receipts; reattach it before governed saving or simulation"
                     .to_owned(),
@@ -395,7 +409,7 @@ impl AppState {
                 })
             })
             .collect::<std::collections::BTreeSet<_>>();
-        for (key, document) in self.workspace.physical_layout_documents() {
+        for (key, document) in self.workspace.content.physical_layout_documents() {
             document
                 .validate()
                 .map_err(|error| format!("Physical layout '{key}' is invalid: {error}"))?;
@@ -441,7 +455,7 @@ impl AppState {
     pub(crate) fn project_signed_technology_package(
         &self,
     ) -> Result<Option<&crate::state::pdk_config::ValidatedPdkTechnologyPackage>, String> {
-        let Some(binding) = self.workspace.project.technology_binding() else {
+        let Some(binding) = self.workspace.content.project.technology_binding() else {
             return Ok(None);
         };
         let Some(pin) = binding.signed_package() else {
@@ -476,8 +490,17 @@ impl AppState {
     /// prefer project-sealed model sources over the plain model library key
     /// off this, not off the binding alone.
     pub(crate) fn project_technology_in_effect(&self) -> bool {
-        self.workspace.project.technology_binding().is_some()
-            && !self.workspace.project.technology_change_audit().is_empty()
+        self.workspace
+            .content
+            .project
+            .technology_binding()
+            .is_some()
+            && !self
+                .workspace
+                .content
+                .project
+                .technology_change_audit()
+                .is_empty()
     }
 
     /// What the authored plan needs a project technology for, computed before
@@ -493,7 +516,13 @@ impl AppState {
     /// yields the exact reattach message for a binding without receipts. An
     /// absent binding blocks only what the plan actually demands.
     pub(crate) fn technology_gate_block_reason(&self) -> Result<(), String> {
-        if self.workspace.project.technology_binding().is_some() {
+        if self
+            .workspace
+            .content
+            .project
+            .technology_binding()
+            .is_some()
+        {
             return self.validate_project_technology_contract();
         }
         self.technology_demand().block_reason().map_or(Ok(()), Err)
@@ -529,6 +558,7 @@ impl AppState {
         self.validate_project_technology_contract()?;
         let signed_pin = self
             .workspace
+            .content
             .project
             .technology_binding()
             .and_then(crate::state::ProjectTechnologyBinding::signed_package)
@@ -589,7 +619,12 @@ impl AppState {
                 view.view_type.display_name()
             ));
         }
-        if self.workspace.physical_layout_document(&owner).is_some() {
+        if self
+            .workspace
+            .content
+            .physical_layout_document(&owner)
+            .is_some()
+        {
             return Err(format!(
                 "Layout owner '{}' already has an authoritative physical document",
                 owner.display_path()
@@ -600,6 +635,7 @@ impl AppState {
             .map_err(|error| format!("Physical layout could not be initialized: {error}"))?;
         let revision = document.revision();
         self.workspace
+            .content
             .commit_physical_layout_document(document)
             .map_err(|error| format!("Physical layout was not committed: {error}"))?;
         if let Some(mut library) = self.library_manager.edit_library(&owner.library) {
@@ -607,6 +643,7 @@ impl AppState {
         }
         if let Some(open) = self
             .workspace
+            .content
             .open_views
             .iter_mut()
             .find(|open| open.reference == owner)
@@ -669,6 +706,7 @@ impl AppState {
             .collect::<std::collections::BTreeSet<_>>();
         let mut document = self
             .workspace
+            .content
             .physical_layout_document(owner)
             .ok_or_else(|| {
                 format!(
@@ -715,6 +753,7 @@ impl AppState {
             }
         }
         self.workspace
+            .content
             .commit_physical_layout_document(document)
             .map_err(|error| format!("Physical-layout transaction was not committed: {error}"))?;
         if let Some(mut library) = self.library_manager.edit_library(&owner.library) {
@@ -722,6 +761,7 @@ impl AppState {
         }
         if let Some(open) = self
             .workspace
+            .content
             .open_views
             .iter_mut()
             .find(|open| open.reference == *owner)
@@ -744,6 +784,7 @@ impl AppState {
         self.validate_project_technology_contract()?;
         let project_binding = self
             .workspace
+            .content
             .project
             .technology_binding()
             .expect("validated project technology has an exact binding");
@@ -799,6 +840,7 @@ impl AppState {
 
         let project_binding = self
             .workspace
+            .content
             .project
             .technology_binding()
             .expect("validated project technology has an exact binding");
@@ -816,7 +858,7 @@ impl AppState {
         let plan_id = plan.id();
         let plan_revision = plan.revision();
         let mut project_parameters = std::collections::BTreeMap::new();
-        if let Some(payload) = self.workspace.plan_data(plan_id) {
+        if let Some(payload) = self.workspace.content.plan_data(plan_id) {
             for (index, variable) in payload.design_variables.iter().enumerate() {
                 variable.validate().map_err(|error| {
                     format!("Active-plan design variable[{index}] is invalid: {error}")
@@ -851,6 +893,7 @@ impl AppState {
             .map_err(|error| format!("Signed PDK callback execution was rejected: {error}"))?;
         let receipt = self
             .workspace
+            .content
             .commit_pdk_callback_execution(
                 plan_id,
                 plan_revision,
@@ -861,7 +904,7 @@ impl AppState {
             )
             .map_err(|error| format!("Signed PDK callback evidence was not committed: {error}"))?;
 
-        self.workspace.project_metadata_dirty = true;
+        self.workspace.content.project_metadata_dirty = true;
         self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
         self.ui.netlist.current_generation_input_digest = None;
         self.clear_project_design_history();
@@ -941,13 +984,14 @@ impl AppState {
         let context = crate::state::ProjectTechnologyChangeContext::new(
             authority,
             uuid::Uuid::new_v4(),
-            self.workspace.project.revision(),
+            self.workspace.content.project.revision(),
             1,
             crate::product::ContentDigest::from_bytes([0x7a; 32]),
             1,
         )
         .expect("test checkpoint evidence is valid");
         self.workspace
+            .content
             .project
             .attach_technology_audited(binding, context)
             .expect("test technology attachment commits with an audit receipt");
@@ -1118,6 +1162,7 @@ impl AppState {
     pub(crate) fn is_netlist_first_without_schematic(&self) -> bool {
         let netlist_first_deck_owns_the_project = self
             .workspace
+            .content
             .netlist_document
             .as_ref()
             .is_some_and(|document| document.generated_artifact().is_none());
@@ -1125,9 +1170,10 @@ impl AppState {
             return false;
         }
 
-        self.workspace.schematic_buffers.len() <= 1
+        self.workspace.content.schematic_buffers.len() <= 1
             && self
                 .workspace
+                .content
                 .schematic_buffers
                 .values()
                 .all(|schematic| !schematic_has_authored_content(schematic))
@@ -1418,6 +1464,7 @@ mod tests {
             .id();
         state
             .workspace
+            .content
             .add_design_variable(
                 plan_id,
                 crate::state::DesignVariable::new(
@@ -1439,7 +1486,7 @@ mod tests {
             &mut state, baseline, None,
         );
         assert!(!crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state));
-        let from_revision = state.workspace.project.revision();
+        let from_revision = state.workspace.content.project.revision();
         let authority = crate::state::pdk_config::PdkAdministrativeAuthority {
             actor_id: "callback-operator@rspice.invalid".to_owned(),
             authority_id: "test:project-callback".to_owned(),
@@ -1457,7 +1504,7 @@ mod tests {
         assert_eq!(receipt.from_project_revision, from_revision);
         assert_eq!(
             receipt.to_project_revision,
-            state.workspace.project.revision()
+            state.workspace.content.project.revision()
         );
         assert_eq!(receipt.execution.callback_id, "derive-device");
         assert!(receipt.execution.derived_metadata.is_empty());
@@ -1480,20 +1527,25 @@ mod tests {
         assert_eq!(second.from_project_revision, receipt.to_project_revision);
         assert_eq!(second.previous_receipt_digest, Some(receipt.receipt_digest));
         assert_eq!(
-            state.workspace.pdk_callback_receipts(),
+            state.workspace.content.pdk_callback_receipts(),
             [receipt.clone(), second.clone()]
         );
         state
             .workspace
+            .content
             .validate_pdk_callback_receipts()
             .expect("project callback ledger validates");
-        assert!(state.workspace.project_metadata_dirty);
+        assert!(state.workspace.content.project_metadata_dirty);
 
         let encoded = serde_json::to_vec(&state.workspace).expect("serialize callback evidence");
         let restored: crate::state::ProjectWorkspace =
             serde_json::from_slice(&encoded).expect("restore callback evidence");
-        assert_eq!(restored.pdk_callback_receipts(), [receipt.clone(), second]);
+        assert_eq!(
+            restored.content.pdk_callback_receipts(),
+            [receipt.clone(), second]
+        );
         restored
+            .content
             .validate_pdk_callback_receipts()
             .expect("restored callback ledger validates");
 
@@ -1503,13 +1555,13 @@ mod tests {
             serde_json::Value::String("tampered callback reason".to_owned());
         let tampered: crate::state::ProjectWorkspace =
             serde_json::from_value(tampered).expect("structurally valid tampered workspace");
-        assert!(tampered.validate_pdk_callback_receipts().is_err());
+        assert!(tampered.content.validate_pdk_callback_receipts().is_err());
     }
 
     #[test]
     fn project_callback_failure_is_transactional_without_an_exact_project_pin() {
         let mut state = AppState::default();
-        let revision = state.workspace.project.revision();
+        let revision = state.workspace.content.project.revision();
         let authority = crate::state::pdk_config::PdkAdministrativeAuthority {
             actor_id: "callback-operator@rspice.invalid".to_owned(),
             authority_id: "test:project-callback".to_owned(),
@@ -1524,9 +1576,9 @@ mod tests {
             .expect_err("missing exact project pin must fail closed");
 
         assert!(error.contains("no exact authenticated"), "{error}");
-        assert_eq!(state.workspace.project.revision(), revision);
-        assert!(state.workspace.pdk_callback_receipts().is_empty());
-        assert!(!state.workspace.project_metadata_dirty);
+        assert_eq!(state.workspace.content.project.revision(), revision);
+        assert!(state.workspace.content.pdk_callback_receipts().is_empty());
+        assert!(!state.workspace.content.project_metadata_dirty);
     }
 
     #[test]
@@ -1549,6 +1601,7 @@ mod tests {
             .expect("initialize exact signed-PDK physical layout");
         let document = state
             .workspace
+            .content
             .physical_layout_document(&owner)
             .expect("authoritative layout document");
         assert_eq!(document.revision(), revision);
@@ -1604,6 +1657,7 @@ mod tests {
             .modified = false;
         state
             .workspace
+            .content
             .open_views
             .iter_mut()
             .find(|open| open.reference == owner)
@@ -1636,6 +1690,7 @@ mod tests {
         assert!(
             state
                 .workspace
+                .content
                 .physical_layout_document(&owner)
                 .unwrap()
                 .shapes()
@@ -1655,6 +1710,7 @@ mod tests {
         assert!(
             state
                 .workspace
+                .content
                 .open_views
                 .iter()
                 .find(|open| open.reference == owner)
@@ -1688,7 +1744,11 @@ mod tests {
             error.contains("outside the exact signed project PDK"),
             "{error}"
         );
-        let unchanged = state.workspace.physical_layout_document(&owner).unwrap();
+        let unchanged = state
+            .workspace
+            .content
+            .physical_layout_document(&owner)
+            .unwrap();
         assert_eq!(unchanged.revision(), committed);
         assert_eq!(unchanged.shapes().len(), 1);
         assert!(!unchanged.shapes().contains_key(&invalid_shape));
@@ -1716,6 +1776,7 @@ mod tests {
             .expect("layout-domain import accepts syntactically valid package-foreign layer");
         state
             .workspace
+            .content
             .commit_physical_layout_document(imported)
             .expect("simulate an imported physical-layout document");
         let imported_error = state

@@ -1011,7 +1011,7 @@ pub(crate) fn commit_rename(state: &mut AppState) -> Result<usize, String> {
         .netlist
         .owned_document
         .as_ref()
-        .or(state.workspace.netlist_document.as_ref())
+        .or(state.workspace.content.netlist_document.as_ref())
         .ok_or_else(|| "The project-owned source closure is unavailable.".to_owned())?;
     let mut replacements = Vec::new();
     let root_locations = locations
@@ -1070,6 +1070,7 @@ fn ensure_location_is_project_owned(
     if let Some(identity) = location.dependency_identity.as_deref()
         && state
             .workspace
+            .content
             .netlist_descriptor
             .as_ref()
             .and_then(|descriptor| descriptor.owned_include(identity))
@@ -1887,9 +1888,9 @@ M1 d g s b nch W={w} L={l*2}\n\
         let owned_include =
             crate::state::OwnedNetlistIncludeDescriptor::try_new(&owned.dependencies()[0]).unwrap();
         let mut state = AppState::default();
-        state.workspace.netlist_source = Some(root.to_owned());
-        state.workspace.netlist_document = Some(owned.clone());
-        state.workspace.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
+        state.workspace.content.netlist_source = Some(root.to_owned());
+        state.workspace.content.netlist_document = Some(owned.clone());
+        state.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
             deck_id: uuid::Uuid::new_v4(),
             artifact_name: "root.sp".to_owned(),
             strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
@@ -1913,7 +1914,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         state.ui.netlist.rename_dialog.replacement = "amplifier".to_owned();
         assert_eq!(commit_rename(&mut state).unwrap(), 3);
 
-        let document = state.workspace.netlist_document.as_ref().unwrap();
+        let document = state.workspace.content.netlist_document.as_ref().unwrap();
         assert!(
             document
                 .source()
@@ -1933,10 +1934,14 @@ M1 d g s b nch W={w} L={l*2}\n\
         );
         assert!(super::super::can_undo_netlist_edit(&state));
         super::super::undo_netlist_edit(&mut state).unwrap();
-        assert_eq!(state.workspace.netlist_source.as_deref(), Some(root));
+        assert_eq!(
+            state.workspace.content.netlist_source.as_deref(),
+            Some(root)
+        );
         assert_eq!(
             state
                 .workspace
+                .content
                 .netlist_document
                 .as_ref()
                 .unwrap()
@@ -1949,7 +1954,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         begin_rename_at_cursor(&mut state).unwrap();
         state.ui.netlist.rename_dialog.replacement = "drive".to_owned();
         assert_eq!(commit_rename(&mut state).unwrap(), 4);
-        let renamed = state.workspace.netlist_source.as_deref().unwrap();
+        let renamed = state.workspace.content.netlist_source.as_deref().unwrap();
         assert!(renamed.contains(".param drive=2"));
         assert!(renamed.contains("{x*drive}"));
         assert!(renamed.contains("Rgain in 0 drive"));
@@ -1960,7 +1965,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         begin_rename_at_cursor(&mut state).unwrap();
         state.ui.netlist.rename_dialog.replacement = "curve".to_owned();
         assert_eq!(commit_rename(&mut state).unwrap(), 2);
-        let renamed = state.workspace.netlist_source.as_deref().unwrap();
+        let renamed = state.workspace.content.netlist_source.as_deref().unwrap();
         assert!(renamed.contains(".func curve(x)"));
         assert!(renamed.contains("{curve(gain)}"));
     }

@@ -819,6 +819,7 @@ fn next_document_name(state: &AppState, family: ResultDocumentFamily) -> String 
         let candidate = format!("{} · {sequence:02}", family.label());
         if !state
             .workspace
+            .content
             .visualization_documents
             .iter()
             .any(|document| document.title().eq_ignore_ascii_case(&candidate))
@@ -856,6 +857,7 @@ fn resolve_draft<'a>(
     }
     if state
         .workspace
+        .content
         .visualization_documents
         .iter()
         .any(|document| document.title().eq_ignore_ascii_case(name))
@@ -1495,11 +1497,12 @@ pub(crate) fn commit(app: &mut RSpiceApp) -> Result<ResultDocumentId, CreateResu
     let resolved = resolve_draft(&app.state, &app.state.workbench.create_result_document)?;
     let tracking = document_tracking(&app.state.simulation.runs, resolved.run, resolved.analysis);
     let document = build_document(resolved, tracking)?;
-    let previous_documents_dirty = app.state.workspace.visualization_documents_dirty;
+    let previous_documents_dirty = app.state.workspace.content.visualization_documents_dirty;
     let previous_workspace = app.state.workbench.workspace;
     let document_id = app
         .state
         .workspace
+        .content
         .insert_visualization_document(document)?;
 
     let workspace_document = WorkspaceDocumentId::VisualizationDocument(document_id);
@@ -1513,13 +1516,18 @@ pub(crate) fn commit(app: &mut RSpiceApp) -> Result<ResultDocumentId, CreateResu
         if let Some(index) = app
             .state
             .workspace
+            .content
             .visualization_documents
             .iter()
             .position(|document| document.id() == document_id)
         {
-            app.state.workspace.visualization_documents.remove(index);
+            app.state
+                .workspace
+                .content
+                .visualization_documents
+                .remove(index);
         }
-        app.state.workspace.visualization_documents_dirty = previous_documents_dirty;
+        app.state.workspace.content.visualization_documents_dirty = previous_documents_dirty;
         app.state.workbench.activate(previous_workspace);
         return Err(CreateResultDocumentError::InvalidDraft(
             "The created result document could not resolve its retained dataset binding."
@@ -1695,10 +1703,11 @@ mod tests {
 
         let document_id = commit(&mut app).expect("document commits");
 
-        assert!(app.state.workspace.visualization_documents_dirty);
+        assert!(app.state.workspace.content.visualization_documents_dirty);
         let document = app
             .state
             .workspace
+            .content
             .visualization_document(document_id)
             .expect("project owns created document");
         assert_eq!(document.title(), "Transient review");
@@ -1759,6 +1768,7 @@ mod tests {
         let document = app
             .state
             .workspace
+            .content
             .visualization_document(document_id)
             .expect("workspace owns typed table");
         assert_eq!(document.panes()[0].viewer_id, "viewer-table");
@@ -1895,6 +1905,7 @@ mod tests {
             let document = app
                 .state
                 .workspace
+                .content
                 .visualization_document(document_id)
                 .expect("workspace owns typed document");
             assert_eq!(document.panes()[0].viewer_id, viewer_id);
@@ -1923,10 +1934,13 @@ mod tests {
         app.state.workbench.create_result_document = draft.clone();
         commit(&mut app).expect("first document commits");
         app.state.workbench.create_result_document = draft;
-        let before = app.state.workspace.visualization_documents.len();
+        let before = app.state.workspace.content.visualization_documents.len();
 
         assert!(commit(&mut app).is_err());
-        assert_eq!(app.state.workspace.visualization_documents.len(), before);
+        assert_eq!(
+            app.state.workspace.content.visualization_documents.len(),
+            before
+        );
     }
 
     #[test]

@@ -153,7 +153,7 @@ fn attach_run(
     let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
         source_domain: AnalysisResultSourceDomain::SimulationPlan,
         simulation_plan_id: Some(plan_id),
-        project_revision: project.workspace.project.revision(),
+        project_revision: project.workspace.content.project.revision(),
         prepared_snapshot_digest: snapshot,
         source_content_digest: ContentDigest::from_bytes([0x5b; 32]),
         source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes(

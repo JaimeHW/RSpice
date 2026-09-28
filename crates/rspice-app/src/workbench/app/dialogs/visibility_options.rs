@@ -97,7 +97,7 @@ impl RSpiceApp {
 
 fn capture_visibility_recovery(state: &AppState) -> crate::workbench::SchematicVisibilityRecovery {
     crate::workbench::SchematicVisibilityRecovery {
-        view_path: state.workspace.active_view.display_path(),
+        view_path: state.workspace.content.active_view.display_path(),
         policy: state.ui.schematic_visibility,
         routing_mode: state.ui.schematic_routing_mode,
         net_highlight: state.schematic.session.net_highlight.clone(),
@@ -110,7 +110,9 @@ fn visibility_recovery_available(state: &AppState) -> bool {
         .ui
         .schematic_visibility_recovery
         .as_ref()
-        .is_some_and(|recovery| recovery.view_path == state.workspace.active_view.display_path())
+        .is_some_and(|recovery| {
+            recovery.view_path == state.workspace.content.active_view.display_path()
+        })
 }
 
 fn restore_visibility_recovery(state: &mut AppState) -> Result<(), String> {
@@ -119,7 +121,7 @@ fn restore_visibility_recovery(state: &mut AppState) -> Result<(), String> {
         .schematic_visibility_recovery
         .clone()
         .ok_or_else(|| "No prior schematic visibility state is available.".to_owned())?;
-    if recovery.view_path != state.workspace.active_view.display_path() {
+    if recovery.view_path != state.workspace.content.active_view.display_path() {
         return Err(
             "The active cell/view changed; its prior visibility state was not applied.".to_owned(),
         );

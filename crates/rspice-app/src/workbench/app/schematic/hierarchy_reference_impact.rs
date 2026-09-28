@@ -53,7 +53,7 @@ pub(in crate::workbench) fn validate_hierarchy_reference_impact(
             &mut findings,
         );
     }
-    for record in &state.workspace.simulation_plan_payloads {
+    for record in &state.workspace.content.simulation_plan_payloads {
         let label = plan_label(state, record.plan_id);
         for (index, output) in record.payload.saved_outputs.iter().enumerate() {
             if let Some(symbol) = affected_reference(&output.source_expression, &affected) {

@@ -36,10 +36,10 @@ impl AppState {
     /// Stable identity and revision of the configured execution root, with the
     /// per-reference topology versions of everything it instantiates.
     pub(crate) fn configured_topology_revision(&self) -> (String, u64, Vec<(String, u64)>) {
-        let root = self.workspace.simulation_root_reference();
+        let root = self.workspace.content.simulation_root_reference();
         let projection = self.workspace.configuration_execution_projection(
             &self.library_manager,
-            &self.workspace.active_view,
+            &self.workspace.content.active_view,
             &self.schematic,
         );
         let mut closure = std::collections::BTreeMap::new();
@@ -105,6 +105,7 @@ impl AppState {
         } else {
             closure.extend(
                 self.workspace
+                    .content
                     .schematic_buffers
                     .iter()
                     .map(|(key, schematic)| {
@@ -112,7 +113,11 @@ impl AppState {
                     }),
             );
             closure.insert(
-                self.workspace.active_view.key().to_ascii_lowercase(),
+                self.workspace
+                    .content
+                    .active_view
+                    .key()
+                    .to_ascii_lowercase(),
                 self.schematic.topology_version(),
             );
         }
@@ -122,7 +127,7 @@ impl AppState {
             .copied()
             .or_else(|| {
                 self.workspace
-                    .simulation_root_schematic(&self.workspace.active_view, &self.schematic)
+                    .simulation_root_schematic(&self.workspace.content.active_view, &self.schematic)
                     .map(|source| source.design.topology_version())
             })
             .unwrap_or(0);

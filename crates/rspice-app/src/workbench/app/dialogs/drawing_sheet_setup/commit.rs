@@ -88,6 +88,7 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
     let resolved_active = crate::schematic::view::drawing_sheet::ActiveDrawingSheet::resolve(state);
     let governed = state
         .workspace
+        .content
         .design_management
         .sheet_catalog(&cell_view_key)
         .and_then(|catalog| catalog.active().map(|sheet| (catalog, sheet)));
@@ -112,7 +113,7 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
             (
                 None,
                 resolved_active.format,
-                state.workspace.active_view.cell.clone(),
+                state.workspace.content.active_view.cell.clone(),
                 1,
                 1,
             )
@@ -127,6 +128,7 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
     }
     let mut available_presets = state
         .workspace
+        .content
         .design_management
         .drawing_sheet_settings()
         .presets
@@ -141,6 +143,7 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
     let document = state.workspace.active_display_path().to_uppercase();
     let managed_sheet_names = state
         .workspace
+        .content
         .design_management
         .sheet_catalog(&cell_view_key)
         .map(|catalog| {
@@ -167,6 +170,7 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
         available_presets,
         project_default: state
             .workspace
+            .content
             .design_management
             .drawing_sheet_settings()
             .default_format
@@ -175,7 +179,7 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
         authority: Some(DrawingSheetAuthority {
             edit: crate::workbench::app::SchematicEditAuthority::capture(state),
             cell_view_key,
-            design_management_revision: state.workspace.design_management.revision(),
+            design_management_revision: state.workspace.content.design_management.revision(),
             personal_preferences_digest: Some(
                 state
                     .ui
@@ -201,7 +205,8 @@ pub(crate) fn validate_drawing_sheet_authority(
         return Err("The active cell/view changed. Close and reopen Page Setup.".to_owned());
     }
     authority.edit.validate(state, "Page Setup")?;
-    if state.workspace.design_management.revision() != authority.design_management_revision {
+    if state.workspace.content.design_management.revision() != authority.design_management_revision
+    {
         return Err(
             "Drawing-sheet project policy changed. Close and reopen this workflow.".to_owned(),
         );
@@ -225,6 +230,7 @@ pub(crate) fn validate_drawing_sheet_authority(
     let Some(governed) = &authority.governed else {
         let active_governed_sheet = state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&state.workspace.active_key())
             .and_then(|catalog| catalog.active_sheet_id());
@@ -242,6 +248,7 @@ pub(crate) fn validate_drawing_sheet_authority(
     }
     let catalog = state
         .workspace
+        .content
         .design_management
         .sheet_catalog(&governed.cell_view_key)
         .ok_or_else(|| {
@@ -278,6 +285,7 @@ pub(crate) fn resume_drawing_sheet_setup_after_support(state: &mut AppState) -> 
     let governed = if let Some(previous_governed) = previous.governed {
         let catalog = state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&previous_governed.cell_view_key)
             .ok_or_else(|| {
@@ -304,6 +312,7 @@ pub(crate) fn resume_drawing_sheet_setup_after_support(state: &mut AppState) -> 
     let personal = state.ui.preferences.drawing_sheet_personal_preferences();
     let mut available_presets = state
         .workspace
+        .content
         .design_management
         .drawing_sheet_settings()
         .presets
@@ -312,7 +321,7 @@ pub(crate) fn resume_drawing_sheet_setup_after_support(state: &mut AppState) -> 
     let authority = DrawingSheetAuthority {
         edit: crate::workbench::app::SchematicEditAuthority::capture(state),
         cell_view_key: previous.cell_view_key,
-        design_management_revision: state.workspace.design_management.revision(),
+        design_management_revision: state.workspace.content.design_management.revision(),
         personal_preferences_digest: Some(personal.semantic_digest()),
         governed,
     };
@@ -321,6 +330,7 @@ pub(crate) fn resume_drawing_sheet_setup_after_support(state: &mut AppState) -> 
     setup.available_presets = available_presets;
     setup.project_default = state
         .workspace
+        .content
         .design_management
         .drawing_sheet_settings()
         .default_format
@@ -368,7 +378,7 @@ fn apply_governed_sheet_setup(
 ) -> Result<String, String> {
     let transaction = app.state.dialogs.drawing_sheet_setup.clone();
     let scope = transaction.draft.scope;
-    let before = app.state.workspace.design_management.clone();
+    let before = app.state.workspace.content.design_management.clone();
     let source_catalog = before
         .sheet_catalog(&authority.cell_view_key)
         .ok_or_else(|| "The governed sheet catalog is unavailable.".to_owned())?;
@@ -644,11 +654,12 @@ fn commit_governed_page_setup_candidate(
     let committed_revision = app
         .state
         .workspace
+        .content
         .replace_design_management(candidate)
         .map_err(|error| error.to_string())?;
     app.state
         .apply_design_management_schematic_transaction(&schematic_tx);
-    let after = app.state.workspace.design_management.clone();
+    let after = app.state.workspace.content.design_management.clone();
     app.state
         .record_design_management_transaction(DesignManagementHistoryEntry {
             description: "Sheet format".to_owned(),
@@ -938,7 +949,7 @@ fn apply_legacy_sheet_setup(
     validated: ValidatedDrawingSheetDraft,
 ) -> Result<String, String> {
     let transaction = app.state.dialogs.drawing_sheet_setup.clone();
-    let before = app.state.workspace.design_management.clone();
+    let before = app.state.workspace.content.design_management.clone();
     let mut candidate = before.clone();
     let personal_before = app
         .state
@@ -1042,11 +1053,12 @@ fn apply_legacy_sheet_setup(
     let committed_revision = app
         .state
         .workspace
+        .content
         .replace_design_management(candidate)
         .map_err(|error| error.to_string())?;
     app.state
         .apply_design_management_schematic_transaction(&schematic_tx);
-    let after = app.state.workspace.design_management.clone();
+    let after = app.state.workspace.content.design_management.clone();
     app.state
         .record_design_management_transaction(DesignManagementHistoryEntry {
             description: "Sheet format".to_owned(),
@@ -1190,6 +1202,7 @@ mod tests {
         let first = app
             .state
             .workspace
+            .content
             .design_management
             .bootstrap_for_cell_view(&key, "Sheet 1", [])
             .unwrap();
@@ -1198,6 +1211,7 @@ mod tests {
             let catalog = app
                 .state
                 .workspace
+                .content
                 .design_management
                 .sheet_catalog_mut(&key)
                 .unwrap();
@@ -1254,7 +1268,7 @@ mod tests {
         let authority = DrawingSheetAuthority {
             edit: crate::workbench::app::SchematicEditAuthority::capture(&state),
             cell_view_key: state.workspace.active_key(),
-            design_management_revision: state.workspace.design_management.revision(),
+            design_management_revision: state.workspace.content.design_management.revision(),
             personal_preferences_digest: Some(
                 state
                     .ui
@@ -1282,13 +1296,15 @@ mod tests {
         let mut settings = app
             .state
             .workspace
+            .content
             .design_management
             .drawing_sheet_settings()
             .clone();
         settings.new_sheet_policy = crate::state::DrawingSheetNewSheetPolicy::Ask;
-        let revision = app.state.workspace.design_management.revision();
+        let revision = app.state.workspace.content.design_management.revision();
         app.state
             .workspace
+            .content
             .design_management
             .update_drawing_sheet_settings(revision, settings)
             .unwrap();
@@ -1321,6 +1337,7 @@ mod tests {
         assert_eq!(
             app.state
                 .workspace
+                .content
                 .design_management
                 .sheet_catalog(&key)
                 .unwrap()
@@ -1330,13 +1347,14 @@ mod tests {
             &expected
         );
         assert!(app.state.can_undo_project_design());
-        assert!(app.state.workspace.project_metadata_dirty);
+        assert!(app.state.workspace.content.project_metadata_dirty);
         assert_eq!(app.state.schematic.topology_version(), topology);
         assert_eq!(app.state.dialogs.drc_checked_version, drc_version);
         assert_eq!(app.state.simulation.runs.len(), retained_runs);
         let receipt = app
             .state
             .workspace
+            .content
             .design_management
             .drawing_sheet_settings()
             .transaction_receipts
@@ -1354,6 +1372,7 @@ mod tests {
         let catalog = app
             .state
             .workspace
+            .content
             .design_management
             .sheet_catalog_mut(&key)
             .unwrap();
@@ -1396,6 +1415,7 @@ mod tests {
         let inherited = app
             .state
             .workspace
+            .content
             .design_management
             .drawing_sheet_settings()
             .default_format
@@ -1413,6 +1433,7 @@ mod tests {
         let catalog = app
             .state
             .workspace
+            .content
             .design_management
             .sheet_catalog_mut(&key)
             .unwrap();
@@ -1436,6 +1457,7 @@ mod tests {
         let saved = app
             .state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&key)
             .unwrap()
@@ -1471,6 +1493,7 @@ mod tests {
         let catalog = app
             .state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&key)
             .unwrap();
@@ -1512,6 +1535,7 @@ mod tests {
             let catalog = app
                 .state
                 .workspace
+                .content
                 .design_management
                 .sheet_catalog_mut(&key)
                 .unwrap();
@@ -1535,6 +1559,7 @@ mod tests {
         let catalog = app
             .state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&key)
             .unwrap();
@@ -1577,6 +1602,7 @@ mod tests {
             let catalog = app
                 .state
                 .workspace
+                .content
                 .design_management
                 .sheet_catalog_mut(&key)
                 .unwrap();
@@ -1608,6 +1634,7 @@ mod tests {
         let saved = app
             .state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&key)
             .unwrap()
@@ -1648,6 +1675,7 @@ mod tests {
             let catalog = app
                 .state
                 .workspace
+                .content
                 .design_management
                 .sheet_catalog_mut(&key)
                 .unwrap();
@@ -1690,7 +1718,7 @@ mod tests {
 
         apply_drawing_sheet_setup(&mut app).unwrap();
 
-        let management = &app.state.workspace.design_management;
+        let management = &app.state.workspace.content.design_management;
         let format = management
             .sheet_catalog(&key)
             .unwrap()
@@ -1749,6 +1777,7 @@ mod tests {
         let project_preset = app
             .state
             .workspace
+            .content
             .design_management
             .drawing_sheet_settings()
             .presets
@@ -1765,6 +1794,7 @@ mod tests {
         let sheet = app
             .state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&key)
             .unwrap()
@@ -1841,7 +1871,7 @@ mod tests {
         open_drawing_sheet_setup(&mut app);
         app.state.dialogs.drawing_sheet_setup.open = false;
         app.state.dialogs.drawing_sheet_setup.support_suspended = true;
-        app.state.workspace.active_view.cell = "different_cell".to_owned();
+        app.state.workspace.content.active_view.cell = "different_cell".to_owned();
 
         let error = resume_drawing_sheet_setup_after_support(&mut app.state).unwrap_err();
 
@@ -1876,6 +1906,7 @@ mod tests {
         let mut settings = app
             .state
             .workspace
+            .content
             .design_management
             .drawing_sheet_settings()
             .clone();
@@ -1883,9 +1914,10 @@ mod tests {
             crate::state::DrawingSheetTitleFieldId::Organization,
             "Previous organization".to_owned(),
         );
-        let revision = app.state.workspace.design_management.revision();
+        let revision = app.state.workspace.content.design_management.revision();
         app.state
             .workspace
+            .content
             .design_management
             .update_drawing_sheet_settings(revision, settings)
             .unwrap();
@@ -1905,6 +1937,7 @@ mod tests {
         let catalog = app
             .state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&key)
             .unwrap();
@@ -1924,6 +1957,7 @@ mod tests {
         assert_eq!(
             app.state
                 .workspace
+                .content
                 .design_management
                 .drawing_sheet_settings()
                 .title_block_field_values[&crate::state::DrawingSheetTitleFieldId::Organization],
@@ -1943,6 +1977,7 @@ mod tests {
         let catalog = app
             .state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&key)
             .expect("bootstrap publishes the first governed sheet");
@@ -1966,6 +2001,7 @@ mod tests {
         let sheet = app
             .state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&key)
             .and_then(|catalog| catalog.active())

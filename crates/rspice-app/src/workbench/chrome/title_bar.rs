@@ -1816,7 +1816,7 @@ fn paint_title_context(
         if app.state.project_lifecycle.project_open {
             node.set_label(format!(
                 "Active project: {}; {}; {}",
-                app.state.workspace.project.display_name(),
+                app.state.workspace.content.project.display_name(),
                 cell,
                 if dirty {
                     "unsaved changes"
@@ -1852,7 +1852,12 @@ fn title_context_text(app: &RSpiceApp, compact: bool) -> String {
         // document tab and the local canvas breadcrumb. Keep the centered
         // title scoped to project identity so the shell does not repeat the
         // same context three times.
-        app.state.workspace.project.display_name().to_owned()
+        app.state
+            .workspace
+            .content
+            .project
+            .display_name()
+            .to_owned()
     }
 }
 
@@ -1906,7 +1911,8 @@ fn active_title_cell(app: &RSpiceApp) -> String {
         Workspace::Project => "Project overview".to_owned(),
         Workspace::Design => format!(
             "{} · {}",
-            app.state.workspace.active_view.cell, app.state.workspace.active_view.view
+            app.state.workspace.content.active_view.cell,
+            app.state.workspace.content.active_view.view
         ),
         Workspace::Simulate => "Simulation plan".to_owned(),
         Workspace::Stimulus => "Stimulus Library".to_owned(),

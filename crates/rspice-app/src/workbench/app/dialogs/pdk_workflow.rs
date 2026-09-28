@@ -253,7 +253,7 @@ fn prepare_pdk_configuration(
     prepare_pdk_configuration_candidate(
         state.model_library_manager.clone(),
         &state.pdk_config,
-        state.workspace.project.technology_binding(),
+        state.workspace.content.project.technology_binding(),
         config,
     )
 }
@@ -648,7 +648,13 @@ impl RSpiceApp {
                 NativePdkConfigurationOperation {
                     previous: self.state.pdk_config.clone(),
                     config,
-                    technology_binding: self.state.workspace.project.technology_binding().cloned(),
+                    technology_binding: self
+                        .state
+                        .workspace
+                        .content
+                        .project
+                        .technology_binding()
+                        .cloned(),
                 },
             )),
         );
@@ -887,8 +893,8 @@ fn capture_native_model_import_authority(state: &AppState) -> NativeModelImportA
         project_id: state
             .project_lifecycle
             .project_open
-            .then(|| state.workspace.project.id().to_string()),
-        project_revision: state.workspace.project.revision().get(),
+            .then(|| state.workspace.content.project.id().to_string()),
+        project_revision: state.workspace.content.project.revision().get(),
         catalog_digest: state.model_library_manager.execution_catalog_digest(),
     }
 }
@@ -902,8 +908,8 @@ fn native_model_import_authority_is_current(
         == state
             .project_lifecycle
             .project_open
-            .then(|| state.workspace.project.id().to_string())
-        && authority.project_revision == state.workspace.project.revision().get()
+            .then(|| state.workspace.content.project.id().to_string())
+        && authority.project_revision == state.workspace.content.project.revision().get()
         && authority.catalog_digest == state.model_library_manager.execution_catalog_digest()
 }
 
@@ -1443,8 +1449,8 @@ fn start_browser_model_import(
         project_id: state
             .project_lifecycle
             .project_open
-            .then(|| state.workspace.project.id().to_string()),
-        project_revision: state.workspace.project.revision().get(),
+            .then(|| state.workspace.content.project.id().to_string()),
+        project_revision: state.workspace.content.project.revision().get(),
         catalog_digest: state.model_library_manager.execution_catalog_digest(),
         replace_library: replace_library.clone(),
     };
@@ -1598,8 +1604,8 @@ impl RSpiceApp {
                 .state
                 .project_lifecycle
                 .project_open
-                .then(|| self.state.workspace.project.id().to_string()),
-            project_revision: self.state.workspace.project.revision().get(),
+                .then(|| self.state.workspace.content.project.id().to_string()),
+            project_revision: self.state.workspace.content.project.revision().get(),
             catalog_digest: self.state.model_library_manager.execution_catalog_digest(),
             replace_library: None,
         };
@@ -1651,10 +1657,10 @@ fn poll_browser_model_hub_operations(
                 let current = state
                     .project_lifecycle
                     .project_open
-                    .then(|| state.workspace.project.id().to_string());
+                    .then(|| state.workspace.content.project.id().to_string());
                 let authority_current = completion.authority.project_id == current
                     && completion.authority.project_revision
-                        == state.workspace.project.revision().get()
+                        == state.workspace.content.project.revision().get()
                     && completion.authority.catalog_digest
                         == state.model_library_manager.execution_catalog_digest();
                 if output.part.is_some() && !authority_current {
@@ -1698,9 +1704,10 @@ fn poll_browser_model_imports(ctx: &Context, state: &mut AppState) {
         let current_project_id = state
             .project_lifecycle
             .project_open
-            .then(|| state.workspace.project.id().to_string());
+            .then(|| state.workspace.content.project.id().to_string());
         let authority_current = completion.authority.project_id == current_project_id
-            && completion.authority.project_revision == state.workspace.project.revision().get()
+            && completion.authority.project_revision
+                == state.workspace.content.project.revision().get()
             && completion.authority.catalog_digest
                 == state.model_library_manager.execution_catalog_digest();
         let replace_library = completion.authority.replace_library.clone();
@@ -2253,7 +2260,7 @@ mod tests {
         state.project_lifecycle.project_open = true;
         state.model_library_manager.clear();
         state.pdk_config = PdkConfig::new();
-        let initial_revision = state.workspace.project.revision();
+        let initial_revision = state.workspace.content.project.revision();
         let initial_epoch = state.design_execution_epoch;
         let mut config = PdkConfig::new();
         config.add_library_path(alpha_root.to_string_lossy().into_owned());
@@ -2264,10 +2271,10 @@ mod tests {
                 .expect("configured sources publish"),
             2
         );
-        let first_revision = state.workspace.project.revision();
+        let first_revision = state.workspace.content.project.revision();
         assert!(first_revision > initial_revision);
         assert_eq!(state.design_execution_epoch, initial_epoch.wrapping_add(1));
-        assert!(state.workspace.project_metadata_dirty);
+        assert!(state.workspace.content.project_metadata_dirty);
         assert!(state.model_library_manager.get_library("alpha").is_some());
         assert!(state.model_library_manager.get_library("beta").is_some());
         assert_eq!(state.pdk_config.managed_model_sources.len(), 2);
@@ -2280,7 +2287,7 @@ mod tests {
                 .expect("disabled source publishes"),
             1
         );
-        assert!(state.workspace.project.revision() > first_revision);
+        assert!(state.workspace.content.project.revision() > first_revision);
         assert_eq!(state.design_execution_epoch, initial_epoch.wrapping_add(2));
         assert!(state.model_library_manager.get_library("alpha").is_none());
         assert!(state.model_library_manager.get_library("beta").is_some());
@@ -2306,7 +2313,7 @@ mod tests {
         state.project_lifecycle.project_open = true;
         state.model_library_manager.clear();
         state.pdk_config = PdkConfig::new();
-        let revision = state.workspace.project.revision();
+        let revision = state.workspace.content.project.revision();
         let epoch = state.design_execution_epoch;
         let mut config = PdkConfig::new();
         config.add_library_path(root.to_string_lossy().into_owned());
@@ -2328,7 +2335,7 @@ mod tests {
                 .is_none()
         );
         assert!(state.pdk_config.library_paths().is_empty());
-        assert_eq!(state.workspace.project.revision(), revision);
+        assert_eq!(state.workspace.content.project.revision(), revision);
         assert_eq!(state.design_execution_epoch, epoch);
         assert!(!state.can_undo_project_design());
 
@@ -2340,7 +2347,7 @@ mod tests {
         let root = configured_root("startup", "startup.lib", "startup_n");
         let mut state = AppState::default();
         state.model_library_manager.clear();
-        let revision = state.workspace.project.revision();
+        let revision = state.workspace.content.project.revision();
         let epoch = state.design_execution_epoch;
         let mut config = PdkConfig::new();
         config.add_library_path(root.to_string_lossy().into_owned());
@@ -2353,9 +2360,9 @@ mod tests {
         state.model_library_manager = manager;
         assert_eq!(loaded, 1);
         assert!(state.model_library_manager.get_library("startup").is_some());
-        assert_eq!(state.workspace.project.revision(), revision);
+        assert_eq!(state.workspace.content.project.revision(), revision);
         assert_eq!(state.design_execution_epoch, epoch);
-        assert!(!state.workspace.project_metadata_dirty);
+        assert!(!state.workspace.content.project_metadata_dirty);
         assert!(!state.can_undo_project_design());
 
         std::fs::remove_dir_all(root).expect("remove startup source root");

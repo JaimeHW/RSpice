@@ -246,10 +246,10 @@ pub(super) fn plan(context: &mut SheetContext<'_>) -> Option<Arc<PopulationPlan>
         && plan.source == source
         && plan.analysis == key
         && plan.requirements.as_ref().is_none_or(|requirements| {
-            requirements.len() == context.workspace.specs.len()
+            requirements.len() == context.workspace.content.specs.len()
                 && requirements
                     .iter()
-                    .zip(&context.workspace.specs)
+                    .zip(&context.workspace.content.specs)
                     .all(|(retained, spec)| retained.matches(spec))
         })
     {
@@ -367,7 +367,7 @@ fn build(
         return None;
     }
 
-    let requirements = applicable_requirements(analysis, &workspace.specs, prepared);
+    let requirements = applicable_requirements(analysis, &workspace.content.specs, prepared);
     let requirements_valid = requirements.is_ok();
     let requirement_note = match &requirements {
         Err(error) => {
@@ -551,6 +551,7 @@ fn build(
         analysis: key,
         requirements: prepared.is_none().then(|| {
             workspace
+                .content
                 .specs
                 .iter()
                 .map(PopulationRequirement::capture)

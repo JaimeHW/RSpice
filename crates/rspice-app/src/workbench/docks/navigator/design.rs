@@ -497,12 +497,12 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
 fn navigator_path(workspace: &crate::state::ProjectWorkspace) -> (String, String, bool) {
     let master = format!(
         "{}/{}",
-        workspace.active_view.library, workspace.active_view.cell
+        workspace.content.active_view.library, workspace.content.active_view.cell
     );
     (
         workspace.occurrence_path().to_string(),
         master,
-        workspace.hierarchy_stack.len() > 1,
+        workspace.content.hierarchy_stack.len() > 1,
     )
 }
 
@@ -581,7 +581,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
     // from the editor buffer would offer conductors the run has no name for.
     let projection = match app.state.workspace.design_projection(
         &app.state.library_manager,
-        &app.state.workspace.active_view,
+        &app.state.workspace.content.active_view,
         &app.state.schematic,
     ) {
         Ok(projection) => projection,
@@ -595,7 +595,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
     let nets = crate::simulation::netlist_gen::projection_nets(
         &app.state.library_manager,
         &projection,
-        &app.state.workspace.active_view.key(),
+        &app.state.workspace.content.active_view.key(),
     )
     .iter()
     .filter(|net| net_is_in_scope(&app.state, scope, net))
@@ -913,7 +913,7 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
 /// other is a row that has to stay.
 fn whole_design_sources(app: &RSpiceApp) -> Vec<crate::simulation::placed_sources::PlacedSource> {
     let plan = app.state.sim_setup.analysis_plan.as_ref();
-    let stimulus_library = &app.state.workspace.stimulus_library;
+    let stimulus_library = &app.state.workspace.content.stimulus_library;
     let mut rows = crate::simulation::placed_sources::placed_sources(
         &app.state.schematic,
         stimulus_library,
@@ -947,7 +947,7 @@ fn whole_design_rf_ports(app: &RSpiceApp) -> Vec<crate::simulation::placed_sourc
     rows.extend(
         crate::simulation::placed_sources::design_rf_ports(
             &app.state.library_manager,
-            &app.state.workspace.stimulus_library,
+            &app.state.workspace.content.stimulus_library,
             &projection,
             plan,
         )
@@ -980,7 +980,7 @@ fn design_projection(
         .workspace
         .design_projection(
             &app.state.library_manager,
-            &app.state.workspace.active_view,
+            &app.state.workspace.content.active_view,
             &app.state.schematic,
         )
         .ok()
@@ -1494,7 +1494,7 @@ fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
         .sim_setup
         .analysis_plan
         .as_ref()
-        .and_then(|plan| app.state.workspace.plan_data(plan.id()))
+        .and_then(|plan| app.state.workspace.content.plan_data(plan.id()))
         .map(|payload| {
             payload
                 .saved_outputs
@@ -1580,7 +1580,7 @@ fn reveal_probe_expression(state: &mut AppState, expression: &str) {
         RawProbeTarget::Voltage { positive, negative } => {
             let resolved = state.workspace.design_projection(
                 &state.library_manager,
-                &state.workspace.active_view,
+                &state.workspace.content.active_view,
                 &state.schematic,
             );
             let projection = match resolved {
@@ -1596,7 +1596,7 @@ fn reveal_probe_expression(state: &mut AppState, expression: &str) {
             let nets = crate::simulation::netlist_gen::projection_nets(
                 &state.library_manager,
                 &projection,
-                &state.workspace.active_view.key(),
+                &state.workspace.content.active_view.key(),
             );
             let requested = std::iter::once(positive)
                 .chain(negative)

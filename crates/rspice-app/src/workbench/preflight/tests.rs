@@ -135,7 +135,7 @@ fn a_current_retained_report_queues_without_reauthoring_preflight() {
         app.state.configured_topology_revision();
     let current_plan = app.state.active_plan_revision();
     app.state.workbench.preflight.report = Some(PreflightReport {
-        project_revision: app.state.workspace.project.revision().get(),
+        project_revision: app.state.workspace.content.project.revision().get(),
         topology_root,
         topology_revision,
         topology_closure,
@@ -268,7 +268,7 @@ fn report_collects_all_independent_blocker_classes() {
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
 
     assert!(!report.is_runnable_for(
-        state.workspace.project.revision().get(),
+        state.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
@@ -457,12 +457,27 @@ fn an_unaudited_technology_binding_blocks_on_reattachment_without_faking_drift()
     state.provision_test_project_technology_contract();
     // A project copy retains the exact binding and starts a fresh audit
     // history, which is precisely the binding-without-receipts state.
-    state.workspace.project = state
+    state.workspace.content.project = state
         .workspace
+        .content
         .project
         .fork_copy_at(std::path::PathBuf::from("preflight_copy.rspiceproj"));
-    assert!(state.workspace.project.technology_binding().is_some());
-    assert!(state.workspace.project.technology_change_audit().is_empty());
+    assert!(
+        state
+            .workspace
+            .content
+            .project
+            .technology_binding()
+            .is_some()
+    );
+    assert!(
+        state
+            .workspace
+            .content
+            .project
+            .technology_change_audit()
+            .is_empty()
+    );
 
     let report = collect_report(&state);
 
@@ -527,7 +542,7 @@ fn report_is_bound_to_the_exact_project_topology_and_plan_revision() {
 
     assert_eq!(
         report.project_revision,
-        state.workspace.project.revision().get()
+        state.workspace.content.project.revision().get()
     );
     let (plan_id, plan_revision) = state.active_plan_revision().expect("active plan");
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
@@ -537,7 +552,7 @@ fn report_is_bound_to_the_exact_project_topology_and_plan_revision() {
     assert_eq!(report.simulation_plan_id, Some(plan_id));
     assert_eq!(report.simulation_plan_revision, Some(plan_revision));
     assert!(report.is_current_for(
-        state.workspace.project.revision().get(),
+        state.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
@@ -557,7 +572,7 @@ fn report_is_bound_to_the_exact_project_topology_and_plan_revision() {
         .edit(transient_id, |_| ())
         .expect("analysis edit advances the plan revision");
     assert!(!report.is_current_for(
-        state.workspace.project.revision().get(),
+        state.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
@@ -568,7 +583,7 @@ fn report_is_bound_to_the_exact_project_topology_and_plan_revision() {
 #[test]
 fn report_currentness_tracks_the_configured_root_not_an_unrelated_active_editor() {
     let mut state = AppState::default();
-    let configured_root = state.workspace.simulation_root_reference();
+    let configured_root = state.workspace.content.simulation_root_reference();
     let configured_root_key = configured_root.key();
     let mut stored_configured_schematic = state
         .workspace
@@ -582,7 +597,7 @@ fn report_currentness_tracks_the_configured_root_not_an_unrelated_active_editor(
     let configured_revision = configured_schematic.topology_version();
     drop(stored_configured_schematic);
 
-    state.workspace.active_view =
+    state.workspace.content.active_view =
         crate::state::CellViewRef::new("user", "unrelated_editor", "schematic");
     state.schematic = crate::state::SchematicState::default();
     state.schematic.add_component(
@@ -600,7 +615,7 @@ fn report_currentness_tracks_the_configured_root_not_an_unrelated_active_editor(
     );
     let (live_root, live_revision, live_closure) = state.configured_topology_revision();
     assert!(report.is_current_for(
-        state.workspace.project.revision().get(),
+        state.workspace.content.project.revision().get(),
         &live_root,
         live_revision,
         &live_closure,
@@ -642,7 +657,7 @@ fn report_currentness_expires_when_a_referenced_child_topology_changes() {
         crate::state::CellViewRef::default_top().key(),
         state.schematic.clone(),
     );
-    state.workspace.active_view = child;
+    state.workspace.content.active_view = child;
     state.schematic = child_schematic;
     state.schematic.add_component(
         crate::state::ComponentType::Resistor,
@@ -651,7 +666,7 @@ fn report_currentness_expires_when_a_referenced_child_topology_changes() {
     let (live_root, live_revision, live_closure) = state.configured_topology_revision();
     assert_eq!(live_revision, root_revision);
     assert!(!report.is_current_for(
-        state.workspace.project.revision().get(),
+        state.workspace.content.project.revision().get(),
         &live_root,
         live_revision,
         &live_closure,
@@ -669,6 +684,7 @@ fn unresolved_hierarchy_is_an_ordered_preflight_blocker() {
     assert!(
         state
             .workspace
+            .content
             .schematic_buffers
             .get(&crate::state::CellViewRef::default_top().key())
             .expect("persisted root schematic")
@@ -877,9 +893,10 @@ fn state_with_a_stop_view_warning() -> AppState {
         .name = "X1".to_owned();
     state.sync_active_schematic_to_workspace();
 
-    let root = state.workspace.active_view.clone();
+    let root = state.workspace.content.active_view.clone();
     state
         .workspace
+        .content
         .configuration_sets
         .create(crate::state::ConfigurationSetDefinition {
             name: "Stop at a schematic".to_owned(),

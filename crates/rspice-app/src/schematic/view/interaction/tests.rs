@@ -64,6 +64,7 @@ fn saved_outputs(state: &AppState) -> &[SavedOutput] {
         .id();
     state
         .workspace
+        .content
         .plan_data(plan_id)
         .map_or(&[], |payload| payload.saved_outputs.as_slice())
 }
@@ -144,6 +145,7 @@ fn schematic_and_exact_veriloga_instance_double_click_destinations_are_distinct(
 
     state
         .workspace
+        .content
         .project_sources
         .insert_bundle(
             crate::state::ProjectSourceBundle::try_new(
@@ -162,7 +164,7 @@ fn schematic_and_exact_veriloga_instance_double_click_destinations_are_distinct(
         SelectDoubleClickAction::OpenVerilogA(42)
     );
     assert!(state.open_veriloga_source_for_component(42));
-    assert_eq!(state.workspace.active_view, veriloga_reference);
+    assert_eq!(state.workspace.content.active_view, veriloga_reference);
     assert_eq!(
         state.workbench.workspace,
         crate::workbench::state::Workspace::Netlist
@@ -243,7 +245,7 @@ fn wire_probe_resolves_from_live_connectivity_without_retained_run_data() {
             .simulation
             .cross_probe
             .net_at_in(
-                &state.workspace.active_view,
+                &state.workspace.content.active_view,
                 state.schematic.topology_version(),
                 Point::new(40, 20),
             )
@@ -401,13 +403,16 @@ fn unmaterialized_probe_creates_one_plan_owned_output_idempotently() {
 #[test]
 fn probe_without_stable_plan_fails_closed() {
     let mut state = AppState::default();
-    let payloads_before = state.workspace.simulation_plan_payloads.clone();
+    let payloads_before = state.workspace.content.simulation_plan_payloads.clone();
     state.sim_setup.analysis_plan = None;
 
     let outcome = request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)"));
 
     assert!(matches!(outcome, ProbeSignalOutcome::Rejected { .. }));
-    assert_eq!(state.workspace.simulation_plan_payloads, payloads_before);
+    assert_eq!(
+        state.workspace.content.simulation_plan_payloads,
+        payloads_before
+    );
     assert!(state.sim_setup.analysis_plan.is_none());
 }
 
@@ -480,7 +485,7 @@ fn probe_marker_rejects_read_only_and_replaced_view_identity_without_mutation() 
     assert!(!read_only_reference.schematic.can_undo());
 
     let mut replaced = AppState::default();
-    replaced.workspace.active_view.view = "symbol".to_owned();
+    replaced.workspace.content.active_view.view = "symbol".to_owned();
     assert!(retain_probe_flag(&mut replaced, Point::origin(), None, None).is_err());
     assert!(replaced.schematic.document().probes.is_empty());
     assert!(!replaced.schematic.can_undo());
@@ -667,6 +672,7 @@ fn preexisting_equivalent_output_prevents_duplicate_probe_output() {
         .id();
     state
         .workspace
+        .content
         .add_saved_output(
             plan_id,
             SavedOutput::new(
@@ -700,6 +706,7 @@ fn unrelated_output_name_collision_gets_a_deterministic_probe_name() {
         .id();
     state
         .workspace
+        .content
         .add_saved_output(
             plan_id,
             SavedOutput::new(
@@ -875,7 +882,7 @@ fn arm_pins(state: &mut AppState, names: &[&str], direction: PortDirection) {
     let authority = PlacementAuthority::new(
         state.design_execution_epoch,
         state.active_schematic_epoch,
-        state.workspace.active_view.display_path(),
+        state.workspace.content.active_view.display_path(),
     );
     state.schematic.session.pending_port_sequence = Some(
         PendingPortSequence::new(
@@ -1037,7 +1044,7 @@ fn validated_design_note_contract_places_once_without_changing_topology() {
     .with_document_authority(
         state.design_execution_epoch,
         state.active_schematic_epoch,
-        state.workspace.active_view.display_path(),
+        state.workspace.content.active_view.display_path(),
     );
     let topology = state.schematic.topology_version();
     state.schematic.session.pending_design_note = Some(pending);
@@ -1099,7 +1106,7 @@ fn every_documentation_shape_gesture_commits_once_and_remains_non_electrical() {
             .with_document_authority(
                 state.design_execution_epoch,
                 state.active_schematic_epoch,
-                state.workspace.active_view.display_path(),
+                state.workspace.content.active_view.display_path(),
             ),
         );
         state.schematic.session.tool = Tool::DocumentationShape;
@@ -1162,7 +1169,7 @@ fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
         .with_document_authority(
             state.design_execution_epoch,
             state.active_schematic_epoch,
-            state.workspace.active_view.display_path(),
+            state.workspace.content.active_view.display_path(),
         ),
     );
     state.schematic.session.tool = Tool::DocumentationShape;
@@ -1203,7 +1210,7 @@ fn focused_keyboard_cursor_places_exact_grid_resolved_shape_points() {
         .with_document_authority(
             state.design_execution_epoch,
             state.active_schematic_epoch,
-            state.workspace.active_view.display_path(),
+            state.workspace.content.active_view.display_path(),
         ),
     );
     state.schematic.session.tool = Tool::DocumentationShape;
@@ -1285,7 +1292,7 @@ fn stale_design_note_authority_is_consumed_without_document_mutation() {
     .with_document_authority(
         state.design_execution_epoch,
         state.active_schematic_epoch,
-        state.workspace.active_view.display_path(),
+        state.workspace.content.active_view.display_path(),
     );
     state.schematic.session.pending_design_note = Some(pending);
     state.schematic.session.tool = Tool::DesignNote;
@@ -1487,11 +1494,13 @@ fn hidden_overlapping_component_cannot_block_active_component_hit() {
     let key = state.workspace.active_schematic_reference().key();
     let first = state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&key, "Sheet 1", [10, 20])
         .unwrap();
     let catalog = state
         .workspace
+        .content
         .design_management
         .sheet_catalog_mut(&key)
         .unwrap();
@@ -1539,11 +1548,13 @@ fn inactive_sheet_probe_cannot_block_active_probe_hit() {
     let key = state.workspace.active_schematic_reference().key();
     let first = state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&key, "Sheet 1", [30, 31])
         .unwrap();
     let catalog = state
         .workspace
+        .content
         .design_management
         .sheet_catalog_mut(&key)
         .unwrap();

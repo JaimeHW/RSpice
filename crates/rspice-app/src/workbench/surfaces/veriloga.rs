@@ -965,7 +965,9 @@ fn current_diagnostics(
         .unwrap_or_else(|| {
             state
                 .last_failure_token
-                .filter(|token| selected.matches_token(app.state.workspace.project.id(), *token))
+                .filter(|token| {
+                    selected.matches_token(app.state.workspace.content.project.id(), *token)
+                })
                 .map_or_else(
                     || std::sync::Arc::new(CodeDiagnosticCollection::default()),
                     |_| std::sync::Arc::clone(&state.last_failure),
@@ -983,7 +985,9 @@ fn current_receipt<'a>(
         .veriloga
         .receipt
         .as_ref()
-        .filter(|receipt| selected.matches_token(app.state.workspace.project.id(), receipt.token))
+        .filter(|receipt| {
+            selected.matches_token(app.state.workspace.content.project.id(), receipt.token)
+        })
 }
 
 fn inspector(

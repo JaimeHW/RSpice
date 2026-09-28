@@ -49,6 +49,7 @@ fn governed_crossing(state: &mut AppState) -> GovernedCrossing {
 
     let main = state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(
             &key,
@@ -58,6 +59,7 @@ fn governed_crossing(state: &mut AppState) -> GovernedCrossing {
         .expect("governed sheet catalog");
     let catalog = state
         .workspace
+        .content
         .design_management
         .sheet_catalog_mut(&key)
         .expect("the catalog just bootstrapped");
@@ -121,6 +123,7 @@ fn cross_sheet_port_definitions(
 ) -> Vec<CrossSheetPortDefinition> {
     state
         .workspace
+        .content
         .design_management
         .sheet_catalog(&owner.key())
         .expect("the cell view is governed")
@@ -133,6 +136,7 @@ fn cross_sheet_port_definitions(
 fn cross_sheet_port_count(state: &AppState, owner: &CellViewRef) -> usize {
     state
         .workspace
+        .content
         .design_management
         .sheet_catalog(&owner.key())
         .expect("the cell view is governed")
@@ -143,6 +147,7 @@ fn cross_sheet_port_count(state: &AppState, owner: &CellViewRef) -> usize {
 fn sheet_of(state: &AppState, owner: &CellViewRef, object_id: u64) -> Option<SheetId> {
     state
         .workspace
+        .content
         .design_management
         .sheet_catalog(&owner.key())
         .expect("the cell view is governed")

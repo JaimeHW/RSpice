@@ -664,8 +664,11 @@ pub(super) fn hierarchy_manager_body(
         return DesignManagementBodyAction::None;
     };
     let mut action = DesignManagementBodyAction::None;
-    let resolution =
-        workspace.resolve_hierarchy_with_active(libraries, &workspace.active_view, schematic);
+    let resolution = workspace.resolve_hierarchy_with_active(
+        libraries,
+        &workspace.content.active_view,
+        schematic,
+    );
     split_surface(ui, MAIN_SPLIT_LEFT_FRACTION, |left, right| {
         section_header(
             left,
@@ -699,7 +702,7 @@ pub(super) fn hierarchy_manager_body(
                 let configuration = resolution.configuration_id.map_or_else(
                     || "active project".to_owned(),
                     |id| {
-                        workspace.configuration_sets.find(id).map_or_else(
+                        workspace.content.configuration_sets.find(id).map_or_else(
                             || id.to_string(),
                             |configuration| configuration.name().to_owned(),
                         )

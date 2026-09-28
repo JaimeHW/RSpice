@@ -112,6 +112,7 @@ fn custom_stop_view_name_stops_the_hierarchy() {
         &source_path,
     );
     workspace
+        .content
         .configuration_sets
         .create(view_policy_configuration(
             "Typical corner",
@@ -120,7 +121,7 @@ fn custom_stop_view_name_stops_the_hierarchy() {
         ))
         .expect("a configuration may name its own views");
 
-    let active = workspace.active_view.clone();
+    let active = workspace.content.active_view.clone();
     let root = workspace
         .clone_schematic_editor(&CellViewRef::default_top().key())
         .expect("top buffer");
@@ -180,6 +181,7 @@ fn custom_executable_view_name_is_accepted() {
         .add_view(View::new("schematic_fast", ViewType::Schematic));
     workspace.insert_schematic_editor(fast.key(), SchematicState::default());
     workspace
+        .content
         .configuration_sets
         .create(view_policy_configuration(
             "Fast schematic",
@@ -225,6 +227,7 @@ fn stop_view_matching_a_schematic_warns_and_descends() {
         SchematicState::default(),
     );
     workspace
+        .content
         .configuration_sets
         .create(view_policy_configuration(
             "Schematic stop",
@@ -278,6 +281,7 @@ fn a_configuration_written_before_the_implicit_root_names_the_same_instances() {
         SchematicState::default(),
     );
     workspace
+        .content
         .configuration_sets
         .create(crate::state::ConfigurationSetDefinition {
             name: "Saved before the migration".to_owned(),
@@ -331,6 +335,7 @@ fn an_override_pattern_is_measured_against_the_instances_the_walk_reached() {
     let mut libraries = LibraryManager::default();
     workspace.ensure_library_model(&mut libraries);
     workspace
+        .content
         .configuration_sets
         .create(crate::state::ConfigurationSetDefinition {
             name: "Empty testbench".to_owned(),
@@ -446,10 +451,10 @@ fn no_configuration_still_builds_a_plan() {
         SchematicState::default(),
     );
     assert!(
-        workspace.configuration_sets.active().is_none(),
+        workspace.content.configuration_sets.active().is_none(),
         "this fixture deliberately has no configuration"
     );
-    let active = workspace.active_view.clone();
+    let active = workspace.content.active_view.clone();
     let root = workspace
         .clone_schematic_editor(&active.key())
         .expect("top buffer");

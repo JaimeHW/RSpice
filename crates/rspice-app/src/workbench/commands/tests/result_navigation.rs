@@ -49,7 +49,7 @@ fn app_with_prepared_run(origin: RunOrigin) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.project_open = true;
     let (active_plan, analysis_id) = plan_binding(&app);
-    let project_revision = app.state.workspace.project.revision();
+    let project_revision = app.state.workspace.content.project.revision();
     let (domain, plan_id, source_check) = match origin {
         RunOrigin::ActivePlan => (
             AnalysisResultSourceDomain::SimulationPlan,

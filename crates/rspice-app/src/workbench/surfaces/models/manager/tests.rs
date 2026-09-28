@@ -78,7 +78,7 @@ fn detaching_a_pack_removes_every_attached_library_in_one_revision() {
         library.add_model(DeviceModel::new(model_name, ModelType::Nmos));
         state.model_library_manager.add_library(library);
     }
-    let initial_revision = state.workspace.project.revision();
+    let initial_revision = state.workspace.content.project.revision();
     let initial_epoch = state.design_execution_epoch;
     let mut pending_actions = Vec::new();
     let mut render = ManagerRenderContext {
@@ -103,7 +103,7 @@ fn detaching_a_pack_removes_every_attached_library_in_one_revision() {
             .is_none()
     );
     assert_eq!(
-        render.state.workspace.project.revision().get(),
+        render.state.workspace.content.project.revision().get(),
         initial_revision.get() + 1
     );
     assert_eq!(
@@ -119,7 +119,7 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
     state
         .library_manager
         .add_library(crate::state::Library::new("signed_variant_test"));
-    let initial_revision = state.workspace.project.revision();
+    let initial_revision = state.workspace.content.project.revision();
     let package_digest = state
         .project_signed_technology_package()
         .expect("exact package resolves")
@@ -142,7 +142,7 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
 
     assert!(receipt.contains("signed technology symbol 'demo180/nmos_demo'"));
     assert_eq!(
-        render.state.workspace.project.revision().get(),
+        render.state.workspace.content.project.revision().get(),
         initial_revision.get() + 1
     );
     let view = render
@@ -174,7 +174,7 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
         .validate()
         .expect("project variant stays executable");
 
-    let committed_revision = render.state.workspace.project.revision();
+    let committed_revision = render.state.workspace.content.project.revision();
     assert!(
         author_technology_symbol_variant(
             &mut render,
@@ -186,7 +186,7 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
         .is_err()
     );
     assert_eq!(
-        render.state.workspace.project.revision(),
+        render.state.workspace.content.project.revision(),
         committed_revision,
         "a rejected overwrite must not publish a partial transaction"
     );

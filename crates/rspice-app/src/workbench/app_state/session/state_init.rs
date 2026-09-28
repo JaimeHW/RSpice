@@ -68,7 +68,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
     workspace.save_active_schematic(&schematic);
     let sim_setup = crate::workbench::app_state::SimSetupState::new();
     if let Ok(plan) = sim_setup.stable_analysis_plan() {
-        workspace.migrate_active_plan_data(plan.id());
+        workspace.content.migrate_active_plan_data(plan.id());
     }
     let mut ui = crate::workbench::UiSessionState::new();
     ui.schematic_snap.grid_size = schematic
@@ -76,21 +76,21 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         .document_policy
         .grid_pitch
         .canvas_grid_size();
-    if let Some(bundle) = workspace.project_sources.bundle_for_owner(
+    if let Some(bundle) = workspace.content.project_sources.bundle_for_owner(
         &crate::state::ProjectSourceOwner::code_workspace(
             crate::state::ProjectSourceLanguage::VerilogA,
         ),
     ) {
         ui.code_workspace.veriloga.receipt = Some(
             crate::workbench::documents::code_workspace::compile_project_bundle_receipt(
-                workspace.project.id(),
+                workspace.content.project.id(),
                 bundle,
                 None,
             )
             .expect("the canonical bootstrapped Verilog-A source must compile"),
         );
     }
-    if let Some(bundle) = workspace.project_sources.bundle_for_owner(
+    if let Some(bundle) = workspace.content.project_sources.bundle_for_owner(
         &crate::state::ProjectSourceOwner::code_workspace(
             crate::state::ProjectSourceLanguage::RSpiceAutomation,
         ),
@@ -135,7 +135,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         )
         .expect("the canonical bootstrapped Automation workspace must compile");
         let runtime_snapshot = crate::automation_workflow::build_automation_runtime_snapshot(
-            workspace.project.id(),
+            workspace.content.project.id(),
             bundle,
             &manifest,
             Vec::new(),
@@ -250,6 +250,7 @@ mod tests {
         let state = super::default_app_state();
         let automation = state
             .workspace
+            .content
             .project_sources
             .bundle_for_owner(&crate::state::ProjectSourceOwner::code_workspace(
                 ProjectSourceLanguage::RSpiceAutomation,
@@ -263,7 +264,10 @@ mod tests {
             .as_ref()
             .expect("bootstrapped Automation runtime snapshot");
 
-        assert_eq!(snapshot.project_id, state.workspace.project.id().as_uuid());
+        assert_eq!(
+            snapshot.project_id,
+            state.workspace.content.project.id().as_uuid()
+        );
         assert_eq!(snapshot.workspace_revision, automation.revision().get());
         assert_eq!(
             snapshot.closure_digest.0,

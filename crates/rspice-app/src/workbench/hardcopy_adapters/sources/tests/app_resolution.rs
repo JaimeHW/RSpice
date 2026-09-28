@@ -13,7 +13,7 @@ fn global_app_resolver_uses_exact_active_design_registry_identity() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
-    let reference = state.workspace.active_view.clone();
+    let reference = state.workspace.content.active_view.clone();
     state
         .workbench
         .documents
@@ -27,7 +27,7 @@ fn global_app_resolver_uses_exact_active_design_registry_identity() {
     );
     assert_eq!(
         first.authority().revision(),
-        state.workspace.project.revision()
+        state.workspace.content.project.revision()
     );
     assert!(first.source_key().contains(&reference.key()));
     let HardcopySemanticDocument::Schematic(schematic) = first.semantic_document() else {
@@ -38,6 +38,7 @@ fn global_app_resolver_uses_exact_active_design_registry_identity() {
         Some(
             &state
                 .workspace
+                .content
                 .design_management
                 .drawing_sheet_settings()
                 .default_format
@@ -48,13 +49,14 @@ fn global_app_resolver_uses_exact_active_design_registry_identity() {
 #[test]
 fn ungoverned_current_sheet_and_worker_use_the_canvas_project_default() {
     let mut state = AppState::default();
-    let reference = state.workspace.active_view.clone();
+    let reference = state.workspace.content.active_view.clone();
     state
         .workbench
         .documents
         .activate(WorkspaceDocumentId::CellView(reference));
     let mut settings = state
         .workspace
+        .content
         .design_management
         .drawing_sheet_settings()
         .clone();
@@ -73,25 +75,31 @@ fn ungoverned_current_sheet_and_worker_use_the_canvas_project_default() {
     );
     state
         .workspace
+        .content
         .design_management
-        .update_drawing_sheet_settings(state.workspace.design_management.revision(), settings)
+        .update_drawing_sheet_settings(
+            state.workspace.content.design_management.revision(),
+            settings,
+        )
         .unwrap();
     assert!(
         state
             .workspace
+            .content
             .design_management
             .sheet_catalog(&state.workspace.active_key())
             .is_none()
     );
     let expected_format = state
         .workspace
+        .content
         .design_management
         .drawing_sheet_settings()
         .default_format
         .clone();
     let source_key = format!(
         "project:{}:cell-view:{}",
-        state.workspace.project.id().as_uuid(),
+        state.workspace.content.project.id().as_uuid(),
         state.workspace.active_key()
     );
 
@@ -128,14 +136,14 @@ fn prepared_resolution_is_send_owned_and_snapshot_isolated() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
-    let reference = state.workspace.active_view.clone();
+    let reference = state.workspace.content.active_view.clone();
     state
         .workbench
         .documents
         .activate(WorkspaceDocumentId::CellView(reference));
     let source_key = format!(
         "project:{}:cell-view:{}",
-        state.workspace.project.id().as_uuid(),
+        state.workspace.content.project.id().as_uuid(),
         state.workspace.active_key()
     );
     let synchronous =
@@ -157,14 +165,14 @@ fn prepared_design_worker_fixture() -> (PreparedRetainedHardcopyResolution, Reso
         .document_mut_for_test()
         .wires
         .push(Wire::segment(771, Point::new(-4, 3), Point::new(29, 3)));
-    let active_view = state.workspace.active_view.clone();
+    let active_view = state.workspace.content.active_view.clone();
     state
         .workbench
         .documents
         .activate(WorkspaceDocumentId::CellView(active_view));
     let source_key = format!(
         "project:{}:cell-view:{}",
-        state.workspace.project.id().as_uuid(),
+        state.workspace.content.project.id().as_uuid(),
         state.workspace.active_key()
     );
     let expected =
@@ -269,7 +277,7 @@ fn enumeration_exposes_all_sheets_exact_members_and_available_named_sets() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(91, Point::new(0, 0), Point::new(20, 0)));
-    let reference = state.workspace.active_view.clone();
+    let reference = state.workspace.content.active_view.clone();
     state
         .workbench
         .documents
@@ -277,11 +285,13 @@ fn enumeration_exposes_all_sheets_exact_members_and_available_named_sets() {
     let active_key = state.workspace.active_key();
     let first_id = state
         .workspace
+        .content
         .design_management
         .bootstrap_for_cell_view(&active_key, "First", [91])
         .unwrap();
     let second_id = state
         .workspace
+        .content
         .design_management
         .sheet_catalog_mut(&active_key)
         .unwrap()
@@ -289,7 +299,7 @@ fn enumeration_exposes_all_sheets_exact_members_and_available_named_sets() {
         .unwrap();
     let base_key = format!(
         "project:{}:cell-view:{}",
-        state.workspace.project.id().as_uuid(),
+        state.workspace.content.project.id().as_uuid(),
         active_key
     );
     let first_key = format!("{base_key}:sheet:{first_id}");
@@ -307,6 +317,7 @@ fn enumeration_exposes_all_sheets_exact_members_and_available_named_sets() {
     let set_key = source_set.source_key();
     state
         .workspace
+        .content
         .save_hardcopy_source_set(source_set)
         .unwrap();
 

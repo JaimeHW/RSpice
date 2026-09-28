@@ -1000,7 +1000,7 @@ fn place_pending_design_note(state: &mut AppState, grid_pos: Point) {
         .is_some_and(|authority| {
             authority.design_execution_epoch == state.design_execution_epoch
                 && authority.active_schematic_epoch == state.active_schematic_epoch
-                && authority.view_path == state.workspace.active_view.display_path()
+                && authority.view_path == state.workspace.content.active_view.display_path()
         });
     if state.schematic_edit_read_only() || !authority_matches {
         state.push_user_message(ConsoleMessage::warning(
@@ -1058,7 +1058,7 @@ fn handle_documentation_shape_click(
         .is_some_and(|authority| {
             authority.design_execution_epoch == state.design_execution_epoch
                 && authority.active_schematic_epoch == state.active_schematic_epoch
-                && authority.view_path == state.workspace.active_view.display_path()
+                && authority.view_path == state.workspace.content.active_view.display_path()
         });
     if state.schematic_edit_read_only() || !authority_matches {
         state.push_user_message(ConsoleMessage::warning(
@@ -1713,6 +1713,7 @@ fn ensure_plan_probe_output(
     let expression_key = raw_output_expression_key(expression);
     if state
         .workspace
+        .content
         .plan_data(plan_id)
         .and_then(|payload| {
             payload.saved_outputs.iter().find_map(|output| {
@@ -1732,6 +1733,7 @@ fn ensure_plan_probe_output(
     let output_name = unique_probe_output_name(
         state
             .workspace
+            .content
             .plan_data(plan_id)
             .map_or(&[], |payload| payload.saved_outputs.as_slice()),
         spelling.display().trim(),
@@ -1762,9 +1764,11 @@ fn ensure_plan_probe_output(
 
     let mut workspace = state.workspace.clone();
     workspace
+        .content
         .add_saved_output(plan_id, output)
         .map_err(|error| error.to_string())?;
     workspace
+        .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
     let receipt = setup
@@ -2050,7 +2054,7 @@ fn probe_edit_identity_is_current(state: &AppState) -> Result<(), String> {
     ) {
         return Err("the active cell/view is not a schematic document".to_owned());
     }
-    if state.workspace.active_schematic_reference() != state.workspace.active_view {
+    if state.workspace.active_schematic_reference() != state.workspace.content.active_view {
         return Err("the active schematic identity changed before the probe was placed".to_owned());
     }
     if state.workspace.active_schematic().is_none() {
@@ -2073,6 +2077,7 @@ fn current_probe_output_binding(
     let expression_key = raw_output_expression_key(expression);
     let output_id = state
         .workspace
+        .content
         .plan_data(plan_id)?
         .saved_outputs
         .iter()
@@ -2158,13 +2163,13 @@ fn retain_probe_flag(
 fn live_design_nets(state: &AppState) -> std::sync::Arc<Vec<DesignNet>> {
     match state.workspace.design_projection(
         &state.library_manager,
-        &state.workspace.active_view,
+        &state.workspace.content.active_view,
         &state.schematic,
     ) {
         Ok(projection) => projection_nets(
             &state.library_manager,
             &projection,
-            &state.workspace.active_view.key(),
+            &state.workspace.content.active_view.key(),
         ),
         Err(error) => {
             log::warn!("Probe naming has no design projection: {error}");
@@ -2238,7 +2243,7 @@ fn retained_probe_net_name(state: &AppState, position: Point) -> Option<String> 
         .simulation
         .cross_probe
         .net_at_in(
-            &state.workspace.active_view,
+            &state.workspace.content.active_view,
             state.schematic.topology_version(),
             position,
         )

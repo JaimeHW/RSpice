@@ -473,7 +473,7 @@ pub(super) fn build_create_symbol_definition(
         || {
             let material = format!(
                 "rspice:model-bound-symbol:{}:{library_name}/{cell_name}",
-                state.workspace.project.id()
+                state.workspace.content.project.id()
             );
             uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, material.as_bytes()).to_string()
         },
@@ -977,7 +977,7 @@ pub(super) fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(
 
     let fixture = if definition.generated_views.simulation_test_fixture {
         let reference = CellViewRef::new(&library_name, &cell_name, "testbench");
-        let before = if state.workspace.active_view == reference {
+        let before = if state.workspace.content.active_view == reference {
             Some(state.schematic.clone())
         } else {
             state.workspace.clone_schematic_editor(&reference.key())

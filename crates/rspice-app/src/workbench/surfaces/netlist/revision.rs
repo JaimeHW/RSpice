@@ -16,6 +16,7 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
     let history_len = if owned {
         app.state
             .workspace
+            .content
             .netlist_descriptor
             .as_ref()
             .map_or(0, |descriptor| descriptor.revision_history.len())
@@ -35,16 +36,17 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
     let messages = app.state.ui.messages();
     dialog.selected_history_index = dialog.selected_history_index.min(history_len - 1);
     let selected_label = if owned {
-        let Some(selected) =
-            app.state
-                .workspace
-                .netlist_descriptor
-                .as_ref()
-                .and_then(|descriptor| {
-                    descriptor
-                        .revision_history
-                        .get(dialog.selected_history_index)
-                })
+        let Some(selected) = app
+            .state
+            .workspace
+            .content
+            .netlist_descriptor
+            .as_ref()
+            .and_then(|descriptor| {
+                descriptor
+                    .revision_history
+                    .get(dialog.selected_history_index)
+            })
         else {
             app.state.ui.netlist.comparison_dialog.open = false;
             return;
@@ -82,6 +84,7 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
         && app
             .state
             .workspace
+            .content
             .netlist_descriptor
             .as_ref()
             .and_then(|descriptor| {
@@ -129,7 +132,9 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
             .width(ui.available_width().max(1.0))
             .show_ui(ui, |ui| {
                 if owned {
-                    if let Some(descriptor) = app.state.workspace.netlist_descriptor.as_ref() {
+                    if let Some(descriptor) =
+                        app.state.workspace.content.netlist_descriptor.as_ref()
+                    {
                         for (index, snapshot) in
                             descriptor.revision_history.iter().enumerate().rev()
                         {
@@ -214,7 +219,7 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
 pub(super) fn owned_source_save_ready(app: &RSpiceApp) -> bool {
     if app.state.ui.netlist.active_document != ActiveNetlistDocument::OwnedSource
         || app.state.ui.netlist.active_dependency_identity.is_some()
-        || app.state.workspace.netlist_source.is_none()
+        || app.state.workspace.content.netlist_source.is_none()
     {
         return false;
     }
@@ -278,7 +283,7 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
     .hint(footer_hint)
     .show_with_initial_body_focus(ctx, |ui| {
         let t = Tokens::get(ctx);
-        let descriptor = app.state.workspace.netlist_descriptor.as_ref();
+        let descriptor = app.state.workspace.content.netlist_descriptor.as_ref();
         let artifact_name = descriptor.map_or_else(
             || messages.text(MessageId::NetlistOwnedSpiceSource),
             |value| value.artifact_name.clone(),

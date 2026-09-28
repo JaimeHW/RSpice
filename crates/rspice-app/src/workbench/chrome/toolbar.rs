@@ -898,6 +898,7 @@ fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layou
     let Some((tracking, revision)) = app
         .state
         .workspace
+        .content
         .visualization_document(document_id)
         .map(|document| (document.tracking(), document.revision()))
     else {
@@ -941,6 +942,7 @@ fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layou
         let result = app
             .state
             .workspace
+            .content
             .transact_visualization_document(
                 document_id,
                 revision,
@@ -990,7 +992,7 @@ fn run_has_current_success_authority(
 fn results_document_is_historical(app: &RSpiceApp) -> bool {
     use crate::workbench::state::WorkspaceDocumentId;
 
-    let project_revision = app.state.workspace.project.revision();
+    let project_revision = app.state.workspace.content.project.revision();
     let source_digest = current_result_source_digest(app);
     match app.state.workbench.documents.active(Workspace::Results) {
         Some(WorkspaceDocumentId::ResultDataset(dataset_id)) => app
@@ -1002,7 +1004,12 @@ fn results_document_is_historical(app: &RSpiceApp) -> bool {
             .max_by_key(|run| run.id)
             .is_none_or(|latest| latest.dataset_id != *dataset_id),
         Some(WorkspaceDocumentId::VisualizationDocument(document_id)) => {
-            let Some(document) = app.state.workspace.visualization_document(*document_id) else {
+            let Some(document) = app
+                .state
+                .workspace
+                .content
+                .visualization_document(*document_id)
+            else {
                 return true;
             };
             let Some(binding) = document
@@ -2071,7 +2078,7 @@ mod tests {
         app.state.simulation.netlist_content = source.to_owned();
         app.state.ui.netlist.generated_input_digest = Some(generation_input);
         app.state.ui.netlist.current_generation_input_digest = Some(generation_input);
-        let revision = app.state.workspace.project.revision();
+        let revision = app.state.workspace.content.project.revision();
         let run = completed_prepared_run(revision, source_digest);
         let dataset_id = run.dataset_id;
         app.state.simulation.runs = vec![run].into();
@@ -2088,7 +2095,7 @@ mod tests {
     fn missing_current_generated_source_never_authenticates_a_retained_dataset() {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = Workspace::Results;
-        let revision = app.state.workspace.project.revision();
+        let revision = app.state.workspace.content.project.revision();
         let run = completed_prepared_run(revision, digest(0x83));
         let dataset_id = run.dataset_id;
         app.state.simulation.runs = vec![run].into();
@@ -2311,7 +2318,7 @@ mod tests {
         let (topology_root, topology_revision, topology_closure) =
             app.state.configured_topology_revision();
         app.state.workbench.preflight.report = Some(crate::workbench::state::PreflightReport {
-            project_revision: app.state.workspace.project.revision().get(),
+            project_revision: app.state.workspace.content.project.revision().get(),
             topology_root,
             topology_revision,
             topology_closure,
