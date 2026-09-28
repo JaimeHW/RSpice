@@ -29,6 +29,7 @@ pub mod junction_edit;
 pub mod label_position;
 pub mod movement;
 pub mod net_label;
+pub mod owned;
 pub mod port;
 pub mod probe;
 pub mod replacement;

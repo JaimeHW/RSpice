@@ -15,6 +15,8 @@ workspace = true
 generated-veriloga-catalog = ["rspice-core/veriloga-builtins"]
 # Enabled by the app dev-dependency to retain parser/cache regression coverage.
 symbol-test-observation = []
+# Enabled only by dependent integration tests that construct external/invalid edits.
+schematic-test-fixtures = []
 
 [dependencies]
 log.workspace = true

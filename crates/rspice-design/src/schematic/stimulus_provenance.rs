@@ -19,6 +19,13 @@ pub struct StimulusProvenance {
 }
 
 impl StimulusProvenance {
+    /// Stamp the exact adopted card and its provenance onto a placed instance.
+    pub fn stamp_onto(&self, component: &mut Component) {
+        component.value = self.value.clone();
+        component.params = self.params.clone();
+        component.stimulus_provenance = Some(self.clone());
+    }
+
     /// Whether the component still carries exactly the card it copied.
     ///
     /// Both sides are normalized, so a parameter string someone re-ordered by

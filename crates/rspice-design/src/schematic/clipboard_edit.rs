@@ -170,6 +170,7 @@ pub struct ClipboardPaste<'document, 'clipboard> {
 /// Borrowed objects appended by one paste, for editor selection and notification.
 /// These are results, not inputs authorizing another mutation.
 pub struct PastedObjects<'a> {
+    document: &'a SchematicDocument,
     pub components: &'a [Component],
     pub wires: &'a [Wire],
     pub net_labels: &'a [NetLabel],
@@ -183,6 +184,10 @@ pub struct PastedObjects<'a> {
 }
 
 impl PastedObjects<'_> {
+    pub(super) fn document(&self) -> &SchematicDocument {
+        self.document
+    }
+
     pub fn has_content(&self) -> bool {
         !self.components.is_empty()
             || !self.wires.is_empty()
@@ -475,6 +480,7 @@ impl<'document, 'clipboard> ClipboardPaste<'document, 'clipboard> {
         let topology_changes =
             (document.junctions.len() - junctions_start) as u64 + u64::from(electrical_committed);
         PastedObjects {
+            document,
             components: &document.components[components_start..],
             wires: &document.wires[wires_start..],
             net_labels: &document.net_labels[net_labels_start..],
