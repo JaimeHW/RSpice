@@ -31,6 +31,7 @@ members = [
     "crates/rspice-hardcopy-contract",
     "crates/rspice-model-library",
     "crates/rspice-design",
+    "crates/rspice-project",
     "crates/rspice-formats",
     "crates/rspice-simulation-contract",
     "crates/rspice-simulation",
@@ -161,6 +162,7 @@ rspice-units = { path = "crates/rspice-units", version = "0.1.0" }
 rspice-hardcopy-contract = { path = "crates/rspice-hardcopy-contract", version = "0.1.0" }
 rspice-model-library = { path = "crates/rspice-model-library", version = "0.1.0" }
 rspice-design = { path = "crates/rspice-design", version = "0.1.0" }
+rspice-project = { path = "crates/rspice-project", version = "0.1.0" }
 rspice-formats = { path = "crates/rspice-formats", version = "0.1.0" }
 rspice-simulation-contract = { path = "crates/rspice-simulation-contract", version = "0.1.0" }
 rspice-simulation = { path = "crates/rspice-simulation", version = "0.1.0" }

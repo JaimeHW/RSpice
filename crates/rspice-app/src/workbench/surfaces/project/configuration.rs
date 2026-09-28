@@ -337,7 +337,7 @@ fn validate_candidate_configuration(
     crate::simulation::controller::prepared_run::expand_generated_dependencies(
         &generated,
         root.current_file(),
-        &app.state.workspace.project.include_search_chain(),
+        &crate::state::IncludeSearchChain::for_project(&app.state.workspace.project),
         &app.state.model_library_manager,
     )
     .map_err(|error| {

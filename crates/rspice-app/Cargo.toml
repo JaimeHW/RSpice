@@ -50,6 +50,7 @@ rspice-automation-protocol = { path = "../rspice-automation-protocol", version =
 rspice-design-model = { workspace = true }
 rspice-app-types.workspace = true
 rspice-design.workspace = true
+rspice-project.workspace = true
 rspice-results = { workspace = true, features = ["engine-evidence"] }
 rspice-hardcopy-contract.workspace = true
 rspice-model-library.workspace = true

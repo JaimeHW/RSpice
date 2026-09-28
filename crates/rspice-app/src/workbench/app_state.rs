@@ -347,8 +347,9 @@ impl AppState {
         }
         self.model_library_manager
             .validate_attached_technology(Some(binding))?;
-        binding
-            .validate_signed_package(&self.pdk_config.technology_registry)
+        self.pdk_config
+            .technology_registry
+            .validate_project_binding(binding)
             .map_err(|error| format!("Signed PDK project binding is unavailable: {error}"))?;
         let signed_pin = binding
             .signed_package()
@@ -446,8 +447,9 @@ impl AppState {
         let Some(pin) = binding.signed_package() else {
             return Err("Project technology binding has no signed package pin.".to_owned());
         };
-        binding
-            .validate_signed_package(&self.pdk_config.technology_registry)
+        self.pdk_config
+            .technology_registry
+            .validate_project_binding(binding)
             .map_err(|error| format!("Signed PDK project binding is unavailable: {error}"))?;
         self.pdk_config
             .technology_registry
@@ -928,7 +930,7 @@ impl AppState {
             .get_library(&library_name)
             .expect("imported test model remains in the catalog");
         let binding = crate::state::ProjectTechnologyBinding::from_model_library(library)
-            .and_then(|binding| binding.with_signed_package(&package))
+            .and_then(|binding| binding.with_signed_package_metadata(package.metadata()))
             .expect("model and signed package form one exact test binding");
         let authority = crate::state::ProjectTechnologyChangeAuthority::new(
             "simulation-test@rspice.invalid",

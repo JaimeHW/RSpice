@@ -39,6 +39,7 @@ mod errors;
 mod library_path;
 mod paths;
 mod persistence;
+mod project_binding;
 mod recent;
 mod technology_callback;
 mod technology_diff;
@@ -81,10 +82,9 @@ pub(crate) use technology_package::tests::fixture_archive_with_veriloga as signe
 #[cfg(test)]
 pub(crate) use technology_package::tests::fixture_archive_with_veriloga_source as signed_veriloga_source_test_fixture;
 pub use technology_package::{
-    MAX_PDK_ARCHIVE_BYTES,
-    PdkAdministrativeAuthority, PdkConnectivityEdge, PdkExecutionTarget, PdkExtractionContract,
-    PdkExtractionQualificationVector, PdkExtractionQuantity, PdkLayerAlias, PdkLayerKind,
-    PdkLayerPurposeRef, PdkPublisherTrustStore, PdkRecognitionContract,
+    MAX_PDK_ARCHIVE_BYTES, PdkAdministrativeAuthority, PdkConnectivityEdge, PdkExecutionTarget,
+    PdkExtractionContract, PdkExtractionQualificationVector, PdkExtractionQuantity, PdkLayerAlias,
+    PdkLayerKind, PdkLayerPurposeRef, PdkPublisherTrustStore, PdkRecognitionContract,
     PdkRecognitionQualificationVector, PdkRecognitionTerminal, PdkStreamMapEntry,
     PdkTechnologyArtifactKind, PdkTechnologyAuditAction, PdkTechnologyAuditReceipt,
     PdkTechnologyBinding, PdkTechnologyLayer, PdkTechnologyManifest, PdkTechnologyRegistry,

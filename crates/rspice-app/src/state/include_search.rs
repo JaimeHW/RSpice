@@ -51,6 +51,12 @@ pub struct IncludeSearchChain {
 }
 
 impl IncludeSearchChain {
+    /// Resolve the project's persisted search order for this host.
+    #[must_use]
+    pub fn for_project(project: &crate::state::ProjectDescriptor) -> Self {
+        Self::resolve(project.include_search_paths(), project.data_root())
+    }
+
     /// Resolve the persisted entries against a project data root.
     #[must_use]
     pub fn resolve(authored: &[PathBuf], data_root: Option<&Path>) -> Self {
@@ -78,12 +84,6 @@ impl IncludeSearchChain {
     #[must_use]
     pub fn entries(&self) -> &[IncludeSearchEntry] {
         &self.entries
-    }
-
-    /// Whether the project states no search chain at all.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
     }
 
     /// Whether this host can say anything about a search directory's presence.
@@ -156,51 +156,6 @@ fn directory_exists(path: &Path) -> bool {
 mod tests {
     use super::*;
     use crate::state::ProjectDescriptor;
-    use crate::state::workspace::ProjectDescriptorError;
-
-    #[test]
-    fn include_search_paths_round_trip_and_default_to_empty() {
-        let mut project = ProjectDescriptor::default();
-        assert!(project.include_search_paths().is_empty());
-
-        // Absent from a stored descriptor is the empty chain, not a failure.
-        let stored = serde_json::to_value(&project).expect("descriptor serializes");
-        assert!(
-            stored.get("include_search_paths").is_none(),
-            "an empty chain must not be written into the project file"
-        );
-        let restored: ProjectDescriptor =
-            serde_json::from_value(stored).expect("descriptor without a chain restores");
-        assert!(restored.include_search_paths().is_empty());
-
-        project
-            .set_include_search_paths(vec![PathBuf::from("models"), PathBuf::from("/opt/pdk/lib")])
-            .expect("an ordered chain of distinct directories is accepted");
-        let wire = serde_json::to_value(&project).expect("descriptor serializes");
-        let restored: ProjectDescriptor =
-            serde_json::from_value(wire).expect("descriptor with a chain restores");
-        assert_eq!(
-            restored.include_search_paths(),
-            [PathBuf::from("models"), PathBuf::from("/opt/pdk/lib")],
-            "order is the setting and must survive the round trip"
-        );
-        restored.validate().expect("a persisted chain validates");
-    }
-
-    #[test]
-    fn a_chain_rejects_an_empty_or_repeated_entry() {
-        let mut project = ProjectDescriptor::default();
-        assert!(matches!(
-            project.set_include_search_paths(vec![PathBuf::from("  ")]),
-            Err(ProjectDescriptorError::EmptyIncludeSearchPath)
-        ));
-        assert!(matches!(
-            project
-                .set_include_search_paths(vec![PathBuf::from("models"), PathBuf::from("models")]),
-            Err(ProjectDescriptorError::DuplicateIncludeSearchPath(_))
-        ));
-        assert!(project.include_search_paths().is_empty());
-    }
 
     #[test]
     fn a_project_places_its_relative_entries_against_its_own_folder() {
@@ -210,7 +165,7 @@ mod tests {
             .set_include_search_paths(vec![PathBuf::from("models"), PathBuf::from("/opt/pdk/lib")])
             .expect("chain is accepted");
 
-        let directories = project.include_search_chain().directories();
+        let directories = crate::state::IncludeSearchChain::for_project(&project).directories();
         assert_eq!(directories.len(), 2);
         assert_eq!(directories[0], Path::new("/projects/mixer").join("models"));
         assert_eq!(directories[1], PathBuf::from("/opt/pdk/lib"));
@@ -252,7 +207,7 @@ mod tests {
     #[test]
     fn an_empty_chain_parses_through_the_ordinary_path_entry_point() {
         let chain = IncludeSearchChain::default();
-        assert!(chain.is_empty());
+        assert!(chain.entries().is_empty());
         assert!(chain.directories().is_empty());
     }
 

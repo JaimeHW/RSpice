@@ -101,9 +101,8 @@ impl ProjectWorkspace {
         if candidate == self.configuration_sets {
             return Err(ProjectConfigurationMutationError::NoChanges);
         }
-        let next_revision = self.project.revision.next()?;
+        let next_revision = self.project.advance_revision()?;
         self.configuration_sets = candidate;
-        self.project.revision = next_revision;
         self.project_metadata_dirty = true;
         Ok(next_revision)
     }
@@ -129,9 +128,8 @@ impl ProjectWorkspace {
                     message: source.to_string(),
                 }
             })?;
-        let next_revision = self.project.revision.next()?;
+        let next_revision = self.project.advance_revision()?;
         self.design_management = published;
-        self.project.revision = next_revision;
         self.project_metadata_dirty = true;
         Ok(next_revision)
     }
@@ -371,12 +369,7 @@ impl ProjectWorkspace {
         root_library: &str,
         top_cell: &str,
     ) -> Self {
-        let project = ProjectDescriptor {
-            name: name.to_owned(),
-            root_library: root_library.to_owned(),
-            top_cell: top_cell.to_owned(),
-            ..ProjectDescriptor::default()
-        };
+        let project = ProjectDescriptor::new(name, root_library, top_cell);
         let active_view = CellViewRef::new(root_library, top_cell, DEFAULT_SCHEMATIC_VIEW);
         let mut schematic_buffers = HashMap::new();
         schematic_buffers.insert(active_view.key(), SchematicState::default());

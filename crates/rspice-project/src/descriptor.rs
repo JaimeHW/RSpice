@@ -4,8 +4,85 @@
 //! the exact trusted package revision and content digests. Remote entitlement
 //! receipts remain a provider concern and are never inferred from local state.
 
-use super::*;
+use crate::library_publication::ProjectLibraryPublicationReceipt;
+use rspice_app_types::product::{ContentDigest, ObjectRevision, ProjectId, RevisionError};
+use rspice_design::library::ProjectLibraryMutation;
+use rspice_design_model::cell_view::{DEFAULT_PROJECT_LIBRARY, DEFAULT_TOP_CELL};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
+use sha2::Digest as _;
+use std::path::{Path, PathBuf};
 use unicode_segmentation::UnicodeSegmentation;
+use uuid::Uuid;
+
+/// Persisted schema for project identity metadata.
+pub const PROJECT_DESCRIPTOR_SCHEMA_VERSION: u16 = 1;
+/// Persisted schema for an exact project-owned technology binding.
+pub const PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION: u16 = 1;
+
+/// Versioned identity domain for legacy session descriptors that predate a
+/// persisted [`ProjectId`]. Project-file migration derives its ID from the
+/// complete source bytes before deserialization; this namespace is reserved
+/// for standalone/session descriptor migration.
+const LEGACY_PROJECT_DESCRIPTOR_ID_NAMESPACE: Uuid =
+    Uuid::from_u128(0xd59a_680f_c781_5f1a_a69f_9a67_64bb_32ac);
+
+fn default_project_name() -> String {
+    "Untitled Project".to_owned()
+}
+
+/// Presence-aware project identity used only while decoding persisted data.
+///
+/// `Option<T>` intentionally maps both a missing field (through `default`) and
+/// an explicit JSON `null` to `None`. Those states have different security
+/// semantics for project identity: only a genuinely missing field from an
+/// unversioned legacy descriptor may be migrated.
+#[derive(Debug, Default)]
+enum DeserializedProjectId {
+    #[default]
+    Missing,
+    Null,
+    Value(ProjectId),
+}
+
+#[derive(Debug, Default)]
+enum DeserializedProjectSchemaVersion {
+    #[default]
+    Missing,
+    Null,
+    Value(u16),
+}
+
+impl<'de> Deserialize<'de> for DeserializedProjectSchemaVersion {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.is_null() {
+            Ok(Self::Null)
+        } else {
+            serde_json::from_value(value)
+                .map(Self::Value)
+                .map_err(D::Error::custom)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for DeserializedProjectId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.is_null() {
+            Ok(Self::Null)
+        } else {
+            serde_json::from_value(value)
+                .map(Self::Value)
+                .map_err(D::Error::custom)
+        }
+    }
+}
 
 pub const PROJECT_SIGNED_TECHNOLOGY_PIN_SCHEMA_VERSION: u16 = 1;
 pub const PROJECT_TECHNOLOGY_CHANGE_RECEIPT_SCHEMA_VERSION: u16 = 1;
@@ -21,19 +98,19 @@ pub struct ProjectSignedTechnologyPin {
     schema_version: u16,
     package_id: String,
     revision: String,
-    manifest_digest: crate::product::ContentDigest,
-    archive_digest: crate::product::ContentDigest,
+    manifest_digest: rspice_app_types::product::ContentDigest,
+    archive_digest: rspice_app_types::product::ContentDigest,
     technology_name: String,
     publisher_id: String,
     signing_key_id: String,
     process_node_nm: u32,
     stack_name: String,
-    execution_targets: Vec<crate::state::pdk_config::PdkExecutionTarget>,
+    execution_targets: Vec<rspice_model_library::pdk::contracts::PdkExecutionTarget>,
 }
 
 impl ProjectSignedTechnologyPin {
-    pub(crate) fn from_validated_package(
-        package: &crate::state::pdk_config::ValidatedPdkTechnologyPackage,
+    pub fn from_package_metadata(
+        package: &rspice_model_library::pdk::package::PdkTechnologyPackageMetadata,
     ) -> Result<Self, TechnologyBindingError> {
         let manifest = package.manifest();
         let mut execution_targets = manifest.compatibility.targets.clone();
@@ -98,39 +175,6 @@ impl ProjectSignedTechnologyPin {
         Ok(())
     }
 
-    pub(crate) fn validate_registry(
-        &self,
-        registry: &crate::state::pdk_config::PdkTechnologyRegistry,
-    ) -> Result<(), TechnologyBindingError> {
-        self.validate()?;
-        let package = registry
-            .validated_packages()
-            .iter()
-            .find(|package| {
-                package
-                    .manifest()
-                    .package_id
-                    .eq_ignore_ascii_case(&self.package_id)
-                    && package.manifest().revision == self.revision
-                    && package.manifest_digest() == self.manifest_digest
-                    && package.archive_digest() == self.archive_digest
-            })
-            .ok_or_else(|| TechnologyBindingError::SignedPackageUnavailable {
-                package_id: self.package_id.clone(),
-                revision: self.revision.clone(),
-            })?;
-        let observed = Self::from_validated_package(package)?;
-        if &observed != self {
-            return Err(TechnologyBindingError::SignedPackageMetadataDrift {
-                package_id: self.package_id.clone(),
-                revision: self.revision.clone(),
-            });
-        }
-        package
-            .runtime_compatibility()
-            .map_err(TechnologyBindingError::SignedPackageRuntime)
-    }
-
     #[must_use]
     pub fn package_id(&self) -> &str {
         &self.package_id
@@ -142,12 +186,12 @@ impl ProjectSignedTechnologyPin {
     }
 
     #[must_use]
-    pub const fn manifest_digest(&self) -> crate::product::ContentDigest {
+    pub const fn manifest_digest(&self) -> rspice_app_types::product::ContentDigest {
         self.manifest_digest
     }
 
     #[must_use]
-    pub const fn archive_digest(&self) -> crate::product::ContentDigest {
+    pub const fn archive_digest(&self) -> rspice_app_types::product::ContentDigest {
         self.archive_digest
     }
 
@@ -196,9 +240,9 @@ pub struct ProjectTechnologyBinding {
     pub(super) technology_node: Option<String>,
     pub(super) model_library: String,
     pub(super) root_source: PathBuf,
-    pub(super) source_closure: Vec<crate::state::model_library::ModelSourcePin>,
+    pub(super) source_closure: Vec<rspice_model_library::ModelSourcePin>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) source_edges: Vec<crate::state::model_library::ModelSourceEdge>,
+    pub(super) source_edges: Vec<rspice_model_library::ModelSourceEdge>,
     pub(super) model_count: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) process_sections: Vec<String>,
@@ -208,7 +252,7 @@ pub struct ProjectTechnologyBinding {
 
 impl ProjectTechnologyBinding {
     pub fn from_model_library(
-        library: &crate::state::model_library::ModelLibrary,
+        library: &rspice_model_library::ModelLibrary,
     ) -> Result<Self, TechnologyBindingError> {
         validate_retained_model_sources(library)?;
         let root_source = library
@@ -259,7 +303,7 @@ impl ProjectTechnologyBinding {
         if self.root_source.as_os_str().is_empty() {
             return Err(TechnologyBindingError::MissingRootSource);
         }
-        if !crate::state::model_library::is_portable_absolute_path(&self.root_source) {
+        if !rspice_model_library::is_portable_absolute_path(&self.root_source) {
             return Err(TechnologyBindingError::NonAbsoluteSource(
                 self.root_source.clone(),
             ));
@@ -269,7 +313,7 @@ impl ProjectTechnologyBinding {
         }
         let mut paths = std::collections::HashSet::with_capacity(self.source_closure.len());
         for (index, source) in self.source_closure.iter().enumerate() {
-            if !crate::state::model_library::is_portable_absolute_path(&source.path) {
+            if !rspice_model_library::is_portable_absolute_path(&source.path) {
                 return Err(TechnologyBindingError::NonAbsoluteSource(
                     source.path.clone(),
                 ));
@@ -299,7 +343,7 @@ impl ProjectTechnologyBinding {
             rspice_core::netlist::normalize_source_path_literal(&edge.requested_path)
                 .map_err(|_| TechnologyBindingError::InvalidSourceEdge)?;
         }
-        if let Some(unreachable) = crate::state::model_library::first_unreachable_source(
+        if let Some(unreachable) = rspice_model_library::first_unreachable_source(
             &self.root_source,
             &self.source_closure,
             &self.source_edges,
@@ -367,12 +411,12 @@ impl ProjectTechnologyBinding {
     }
 
     #[must_use]
-    pub fn source_closure(&self) -> &[crate::state::model_library::ModelSourcePin] {
+    pub fn source_closure(&self) -> &[rspice_model_library::ModelSourcePin] {
         &self.source_closure
     }
 
     #[must_use]
-    pub fn source_edges(&self) -> &[crate::state::model_library::ModelSourceEdge] {
+    pub fn source_edges(&self) -> &[rspice_model_library::ModelSourceEdge] {
         &self.source_edges
     }
 
@@ -380,9 +424,9 @@ impl ProjectTechnologyBinding {
     /// technology contract accepted by the project. Re-parsing, refreshing,
     /// or replacing a library must therefore invalidate the attachment until
     /// the user explicitly accepts the new contract.
-    pub(crate) fn validate_model_library(
+    pub fn validate_model_library(
         &self,
-        library: &crate::state::model_library::ModelLibrary,
+        library: &rspice_model_library::ModelLibrary,
     ) -> Result<(), TechnologyBindingError> {
         let mut observed = Self::from_model_library(library)?;
         // The live model catalog can prove only its own authenticated source
@@ -414,23 +458,13 @@ impl ProjectTechnologyBinding {
         self.signed_package.as_ref()
     }
 
-    pub(crate) fn with_signed_package(
+    pub fn with_signed_package_metadata(
         mut self,
-        package: &crate::state::pdk_config::ValidatedPdkTechnologyPackage,
+        package: &rspice_model_library::pdk::package::PdkTechnologyPackageMetadata,
     ) -> Result<Self, TechnologyBindingError> {
-        self.signed_package = Some(ProjectSignedTechnologyPin::from_validated_package(package)?);
+        self.signed_package = Some(ProjectSignedTechnologyPin::from_package_metadata(package)?);
         self.validate()?;
         Ok(self)
-    }
-
-    pub(crate) fn validate_signed_package(
-        &self,
-        registry: &crate::state::pdk_config::PdkTechnologyRegistry,
-    ) -> Result<(), TechnologyBindingError> {
-        self.signed_package
-            .as_ref()
-            .ok_or(TechnologyBindingError::MissingSignedPackage)?
-            .validate_registry(registry)
     }
 }
 
@@ -485,7 +519,7 @@ pub struct ProjectTechnologyChangeContext {
     checkpoint_created_unix_ms: u64,
     checkpoint_snapshot_digest: ContentDigest,
     checkpoint_snapshot_byte_len: u64,
-    migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
+    migration_evidence: Option<rspice_model_library::pdk::diff::PdkTechnologyMigrationEvidence>,
 }
 
 impl ProjectTechnologyChangeContext {
@@ -512,7 +546,7 @@ impl ProjectTechnologyChangeContext {
 
     pub fn with_migration_evidence(
         mut self,
-        evidence: crate::state::pdk_config::PdkTechnologyMigrationEvidence,
+        evidence: rspice_model_library::pdk::diff::PdkTechnologyMigrationEvidence,
     ) -> Result<Self, ProjectDescriptorError> {
         evidence.validate().map_err(|error| {
             ProjectDescriptorError::InvalidTechnologyMigrationEvidence(error.to_string())
@@ -570,7 +604,7 @@ pub struct ProjectTechnologyChangeReceipt {
     checkpoint_snapshot_digest: ContentDigest,
     checkpoint_snapshot_byte_len: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
+    migration_evidence: Option<rspice_model_library::pdk::diff::PdkTechnologyMigrationEvidence>,
     previous_receipt_digest: Option<ContentDigest>,
     receipt_digest: ContentDigest,
 }
@@ -596,7 +630,7 @@ struct ProjectTechnologyChangeReceiptPayload<'a> {
     checkpoint_snapshot_digest: ContentDigest,
     checkpoint_snapshot_byte_len: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    migration_evidence: &'a Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
+    migration_evidence: &'a Option<rspice_model_library::pdk::diff::PdkTechnologyMigrationEvidence>,
     previous_receipt_digest: Option<ContentDigest>,
 }
 
@@ -684,7 +718,7 @@ impl ProjectTechnologyChangeReceipt {
     #[must_use]
     pub const fn migration_evidence(
         &self,
-    ) -> Option<&crate::state::pdk_config::PdkTechnologyMigrationEvidence> {
+    ) -> Option<&rspice_model_library::pdk::diff::PdkTechnologyMigrationEvidence> {
         self.migration_evidence.as_ref()
     }
 
@@ -785,13 +819,13 @@ impl ProjectLibraryMutationReceipt {
 
 /// Fully preflighted descriptor-side portion of a library transaction.
 #[derive(Debug)]
-pub(crate) struct PreparedProjectLibraryMutation {
+pub struct PreparedProjectLibraryMutation {
     receipt: ProjectLibraryMutationReceipt,
 }
 
 impl PreparedProjectLibraryMutation {
     #[must_use]
-    pub(crate) const fn minimum_library_revision(&self) -> u64 {
+    pub const fn minimum_library_revision(&self) -> u64 {
         self.receipt.to_library_revision
     }
 }
@@ -809,7 +843,7 @@ fn technology_binding_digest(
 }
 
 fn migration_endpoint_matches_project_pin(
-    endpoint: &crate::state::pdk_config::PdkTechnologyBinding,
+    endpoint: &rspice_model_library::pdk::contracts::PdkTechnologyBinding,
     archive_digest: ContentDigest,
     pin: &ProjectSignedTechnologyPin,
 ) -> bool {
@@ -846,7 +880,7 @@ fn validate_project_audit_text(
 }
 
 pub(super) fn validate_retained_model_sources(
-    library: &crate::state::model_library::ModelLibrary,
+    library: &rspice_model_library::ModelLibrary,
 ) -> Result<(), TechnologyBindingError> {
     if library.source_contents.len() != library.source_closure.len() {
         return Err(TechnologyBindingError::MissingRetainedSourceBytes);
@@ -855,8 +889,9 @@ pub(super) fn validate_retained_model_sources(
         if pin.path != content.path {
             return Err(TechnologyBindingError::RetainedSourceIdentityMismatch);
         }
-        let digest =
-            crate::product::ContentDigest::from_bytes(sha2::Sha256::digest(&content.bytes).into());
+        let digest = rspice_app_types::product::ContentDigest::from_bytes(
+            sha2::Sha256::digest(&content.bytes).into(),
+        );
         if digest != pin.digest {
             return Err(TechnologyBindingError::RetainedSourceDigestMismatch(
                 pin.path.clone(),
@@ -1197,19 +1232,31 @@ impl Default for ProjectDescriptor {
 }
 
 impl ProjectDescriptor {
+    /// Start a fresh descriptor with the requested project and design names.
+    /// The caller validates those names before accepting the new project.
+    #[must_use]
+    pub fn new(name: &str, root_library: &str, top_cell: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            root_library: root_library.to_owned(),
+            top_cell: top_cell.to_owned(),
+            ..Self::default()
+        }
+    }
+
     #[must_use]
     pub const fn id(&self) -> ProjectId {
         self.id
     }
 
     #[must_use]
-    pub(crate) const fn has_descriptor_local_legacy_identity(&self) -> bool {
+    pub const fn has_descriptor_local_legacy_identity(&self) -> bool {
         self.migrated_legacy_identity
     }
 
     /// Replace a temporary descriptor-local migration identity with the
     /// identity derived by its owning legacy session artifact.
-    pub(crate) fn bind_legacy_session_identity(&mut self, id: ProjectId) {
+    pub fn bind_legacy_session_identity(&mut self, id: ProjectId) {
         self.id = id;
         self.schema_version = PROJECT_DESCRIPTOR_SCHEMA_VERSION;
         self.migrated_legacy_identity = false;
@@ -1245,8 +1292,8 @@ impl ProjectDescriptor {
 
     /// Advance only the logical project revision after every other part of a
     /// preflighted project transaction is ready to publish.
-    pub fn advance_revision(&mut self) -> Result<ObjectRevision, ProjectDescriptorError> {
-        let revision = self.next_revision()?;
+    pub fn advance_revision(&mut self) -> Result<ObjectRevision, RevisionError> {
+        let revision = self.revision.next()?;
         self.revision = revision;
         Ok(revision)
     }
@@ -1309,15 +1356,6 @@ impl ProjectDescriptor {
         &self.include_search_paths
     }
 
-    /// The persisted chain, placed against this project's data root.
-    ///
-    /// Every host include resolution goes through the value this returns, so
-    /// the deck the editor lints and the deck a run seals walk one chain.
-    #[must_use]
-    pub fn include_search_chain(&self) -> crate::state::IncludeSearchChain {
-        crate::state::IncludeSearchChain::resolve(&self.include_search_paths, self.data_root())
-    }
-
     /// Replace the ordered include search chain.
     ///
     /// Order is the setting: the chain is walked front to back, so moving an
@@ -1364,7 +1402,7 @@ impl ProjectDescriptor {
     /// project metadata revision. Re-recording the identical binding is a
     /// no-op; a different circuit replaces the lineage (the service keeps the
     /// old page's history — this binding only selects future publish targets).
-    pub(crate) fn bind_cloud_publication(
+    pub fn bind_cloud_publication(
         &mut self,
         binding: ProjectCloudPublicationBinding,
     ) -> Result<ObjectRevision, ProjectDescriptorError> {
@@ -1390,7 +1428,7 @@ impl ProjectDescriptor {
 
     /// Preflight an exact library membership mutation, including the complete
     /// receipt and both next revisions, before any live catalog state changes.
-    pub(crate) fn prepare_library_mutation(
+    pub fn prepare_library_mutation(
         &self,
         mutation: ProjectLibraryMutation,
         library_revision: u64,
@@ -1439,7 +1477,7 @@ impl ProjectDescriptor {
 
     /// Publish a receipt that was fully constructed and validated before the
     /// catalog mutation. The caller owns the matching catalog revision check.
-    pub(crate) fn publish_library_mutation(
+    pub fn publish_library_mutation(
         &mut self,
         prepared: PreparedProjectLibraryMutation,
         observed_library_revision: u64,
@@ -1557,7 +1595,7 @@ impl ProjectDescriptor {
 
     /// Attach an exact, validated technology contract as one atomic project
     /// metadata revision. Reattaching the identical binding is a no-op.
-    pub(crate) fn attach_technology(
+    pub fn attach_technology(
         &mut self,
         binding: ProjectTechnologyBinding,
     ) -> Result<ObjectRevision, ProjectDescriptorError> {
@@ -2024,3 +2062,6 @@ pub enum ProjectDescriptorError {
     #[error(transparent)]
     Revision(#[from] RevisionError),
 }
+
+#[cfg(test)]
+mod tests;

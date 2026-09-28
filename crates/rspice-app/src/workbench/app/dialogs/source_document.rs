@@ -1176,7 +1176,7 @@ fn include_search_paths(
     messages: MessageCatalog,
 ) -> Option<NetlistLifecycleAction> {
     let t = Tokens::get(ui.ctx());
-    let chain = state.workspace.project.include_search_chain();
+    let chain = crate::state::IncludeSearchChain::for_project(&state.workspace.project);
     let authored = state.workspace.project.include_search_paths().to_vec();
     let unsaved = state.workspace.project.data_root().is_none();
     let mut action = None;

@@ -5255,6 +5255,7 @@ dependencies = [
  "rspice-hardcopy-contract",
  "rspice-model-library",
  "rspice-pack",
+ "rspice-project",
  "rspice-publication-contract",
  "rspice-results",
  "rspice-simulation",
@@ -5616,6 +5617,23 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "rspice-project"
+version = "0.1.0"
+dependencies = [
+ "rspice-app-types",
+ "rspice-core",
+ "rspice-design",
+ "rspice-design-model",
+ "rspice-model-library",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.20",
+ "unicode-segmentation",
+ "uuid",
 ]
 
 [[package]]

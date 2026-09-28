@@ -1605,7 +1605,6 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     // budget every save already hangs sidecars off — and this file was standing
     // exactly on its ceiling, so the ceiling moves to the new measurement
     // rather than the field being refused a home.
-    ("state/workspace/tests.rs", 2_974),
     ("workbench/app/dialogs/drawing_sheet_setup/render.rs", 2_845),
     ("workbench/app/dialogs/hardcopy/render.rs", 3_112),
     ("workbench/docks/inspector.rs", 3_221),

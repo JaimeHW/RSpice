@@ -1678,10 +1678,12 @@ endmodule
             .validated_packages()
             .first()
             .expect("installed package validates");
-        let pin =
-            crate::state::workspace::ProjectSignedTechnologyPin::from_validated_package(package)
-                .expect("project pin");
-        pin.validate_registry(&registry)
+        let pin = crate::state::workspace::ProjectSignedTechnologyPin::from_package_metadata(
+            package.metadata(),
+        )
+        .expect("project pin");
+        registry
+            .validate_project_pin(&pin)
             .expect("exact trusted archive resolves");
 
         let json = serde_json::to_string(&pin).expect("pin serializes");
@@ -1695,7 +1697,7 @@ endmodule
             .revalidate_installed(&revoked)
             .expect_err("revocation invalidates runtime packages");
         assert!(matches!(
-            pin.validate_registry(&registry),
+            registry.validate_project_pin(&pin),
             Err(crate::state::workspace::TechnologyBindingError::SignedPackageUnavailable { .. })
         ));
     }

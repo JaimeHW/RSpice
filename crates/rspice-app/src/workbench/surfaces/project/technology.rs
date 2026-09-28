@@ -292,9 +292,12 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
             candidate
                 .binding
                 .clone()
-                .with_signed_package(package)
+                .with_signed_package_metadata(package.metadata())
                 .and_then(|binding| {
-                    binding.validate_signed_package(&app.state.pdk_config.technology_registry)?;
+                    app.state
+                        .pdk_config
+                        .technology_registry
+                        .validate_project_binding(&binding)?;
                     Ok(binding)
                 })
         })
@@ -998,8 +1001,10 @@ pub(super) fn verify_pinned_technology_contract(
     app: &RSpiceApp,
 ) -> Result<(), String> {
     verify_pinned_model_sources(binding, &app.state.model_library_manager)?;
-    binding
-        .validate_signed_package(&app.state.pdk_config.technology_registry)
+    app.state
+        .pdk_config
+        .technology_registry
+        .validate_project_binding(binding)
         .map_err(|error| format!("Signed PDK contract is unavailable: {error}"))
 }
 

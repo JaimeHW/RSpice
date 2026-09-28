@@ -580,7 +580,7 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
     } else {
         None
     };
-    let include_search = state.workspace.project.include_search_chain();
+    let include_search = crate::state::IncludeSearchChain::for_project(&state.workspace.project);
     let (mut diagnostics, symbols) = if buffer.trim().is_empty() {
         (Vec::new(), Some(Vec::new()))
     } else {

@@ -381,7 +381,7 @@ impl SimulationController {
         let (source, _) = expand_generated_dependencies_with_sealed_sources(
             &source,
             root_schematic.current_file(),
-            &state.workspace.project.include_search_chain(),
+            &crate::state::IncludeSearchChain::for_project(&state.workspace.project),
             Some(&sealed_models),
         )?;
         Ok(source)
@@ -1029,7 +1029,7 @@ impl SimulationController {
             expand_generated_dependencies_with_sealed_sources(
                 &netlist,
                 root_schematic.current_file(),
-                &state.workspace.project.include_search_chain(),
+                &crate::state::IncludeSearchChain::for_project(&state.workspace.project),
                 Some(&sealed_models),
             )?;
         netlist = measurements::materialize(
@@ -1244,7 +1244,7 @@ impl SimulationController {
         let (expanded, canonical_origin, sealed_source_dependencies) = expand_manual_dependencies(
             &composed,
             origin,
-            &state.workspace.project.include_search_chain(),
+            &crate::state::IncludeSearchChain::for_project(&state.workspace.project),
             &sealed_models,
         )?;
         let expanded = manual_deck::bind_execution_profile(

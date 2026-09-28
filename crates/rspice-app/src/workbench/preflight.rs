@@ -484,8 +484,10 @@ fn collect_report(state: &AppState) -> PreflightReport {
                     remediation: PreflightRemediation::ProjectTechnology,
                 });
             }
-            if let Err(error) =
-                binding.validate_signed_package(&state.pdk_config.technology_registry)
+            if let Err(error) = state
+                .pdk_config
+                .technology_registry
+                .validate_project_binding(binding)
             {
                 blockers.push(PreflightIssue {
                     check: "Project signed PDK".to_owned(),

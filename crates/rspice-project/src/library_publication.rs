@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
-use crate::product::{ContentDigest, ObjectRevision, ProjectId};
+use rspice_app_types::product::{ContentDigest, ObjectRevision, ProjectId};
 
 use super::{ProjectDescriptor, ProjectDescriptorError};
 use rspice_design::library::validate_library_audit_text;
@@ -23,20 +23,20 @@ const MAX_PROJECT_LIBRARY_PUBLICATION_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 
 /// Validated caller input for one exact publication transaction.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ProjectLibraryPublicationDraft {
-    pub(crate) publication_id: Uuid,
-    pub(crate) label: String,
-    pub(crate) actor_id: String,
-    pub(crate) authority_id: String,
-    pub(crate) reason: String,
-    pub(crate) created_unix_ms: u64,
-    pub(crate) library_revision: u64,
-    pub(crate) snapshot_digest: ContentDigest,
-    pub(crate) snapshot_byte_len: u64,
+pub struct ProjectLibraryPublicationDraft {
+    pub publication_id: Uuid,
+    pub label: String,
+    pub actor_id: String,
+    pub authority_id: String,
+    pub reason: String,
+    pub created_unix_ms: u64,
+    pub library_revision: u64,
+    pub snapshot_digest: ContentDigest,
+    pub snapshot_byte_len: u64,
 }
 
 impl ProjectLibraryPublicationDraft {
-    pub(crate) fn validate(&self) -> Result<(), ProjectDescriptorError> {
+    pub fn validate(&self) -> Result<(), ProjectDescriptorError> {
         if self.publication_id.is_nil() {
             return Err(ProjectDescriptorError::LibraryPublicationCorrupted(
                 "publication identity must not be nil".to_owned(),
@@ -215,7 +215,7 @@ impl ProjectDescriptor {
         &self.library_publications
     }
 
-    pub(crate) fn publish_library_snapshot(
+    pub fn publish_library_snapshot(
         &mut self,
         draft: ProjectLibraryPublicationDraft,
     ) -> Result<ProjectLibraryPublicationReceipt, ProjectDescriptorError> {

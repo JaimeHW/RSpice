@@ -21,8 +21,6 @@ mod netlist_profile_tests;
 mod open_documents;
 mod owned_netlist_validation;
 mod plan_data;
-mod project_descriptor;
-mod project_library_publication;
 mod reference_changes;
 mod reference_preparation;
 
@@ -40,12 +38,11 @@ pub use hierarchy::*;
 pub use netlist_profile::NetlistExecutionProfile;
 pub use owned_netlist_validation::validate_owned_netlist_artifact_path;
 use owned_netlist_validation::validate_owned_netlist_projection;
-pub use project_descriptor::*;
-pub use project_library_publication::*;
 pub(crate) use reference_changes::{PreparedReferences, ReferenceChanges};
 pub(crate) use reference_preparation::{SchematicReferenceTransaction, reference_from_key};
 pub use rspice_design::library::ProjectLibraryMutation;
 pub use rspice_design::occurrence::{DocumentOccurrence, OccurrencePrune};
+pub use rspice_project::*;
 pub(crate) use rspice_simulation_contract::saved_output::{
     device_current_probe, saved_output_references,
 };
@@ -60,12 +57,11 @@ pub use rspice_simulation_contract::saved_output::{
     SavedOutputDisplayIntent, SavedOutputKind, SavedOutputOrigin, SavedOutputPolicy,
     SavedOutputPrecision, SavedOutputStreaming,
 };
-use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
-use sha2::Digest as _;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::product::{
-    AnalysisInstanceId, CaptureGroupId, ContentDigest, DesignVariableId, ObjectRevision, ProjectId,
+    AnalysisInstanceId, CaptureGroupId, ContentDigest, DesignVariableId, ObjectRevision,
     ResultDocumentId, RevisionError, SavedOutputId, SimulationPlanId, SpecificationId,
 };
 #[cfg(test)]
@@ -81,79 +77,9 @@ pub use rspice_design_model::cell_view::{
     validate_cell_view_name_segment,
 };
 
-/// Persisted schema for project identity metadata.
-pub const PROJECT_DESCRIPTOR_SCHEMA_VERSION: u16 = 1;
-/// Persisted schema for an exact project-owned technology binding.
-pub const PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION: u16 = 1;
-
 /// Defensive bound on project-owned result documents. Documents themselves
 /// carry independent limits for panes, traces, retained samples, and history.
 pub const MAX_PROJECT_VISUALIZATION_DOCUMENTS: usize = 1_024;
-
-/// Versioned identity domain for legacy session descriptors that predate a
-/// persisted [`ProjectId`]. Project-file migration derives its ID from the
-/// complete source bytes before deserialization; this namespace is reserved
-/// for standalone/session descriptor migration.
-const LEGACY_PROJECT_DESCRIPTOR_ID_NAMESPACE: Uuid =
-    Uuid::from_u128(0xd59a_680f_c781_5f1a_a69f_9a67_64bb_32ac);
-
-fn default_project_name() -> String {
-    "Untitled Project".to_owned()
-}
-
-/// Presence-aware project identity used only while decoding persisted data.
-///
-/// `Option<T>` intentionally maps both a missing field (through `default`) and
-/// an explicit JSON `null` to `None`. Those states have different security
-/// semantics for project identity: only a genuinely missing field from an
-/// unversioned legacy descriptor may be migrated.
-#[derive(Debug, Default)]
-enum DeserializedProjectId {
-    #[default]
-    Missing,
-    Null,
-    Value(ProjectId),
-}
-
-#[derive(Debug, Default)]
-enum DeserializedProjectSchemaVersion {
-    #[default]
-    Missing,
-    Null,
-    Value(u16),
-}
-
-impl<'de> Deserialize<'de> for DeserializedProjectSchemaVersion {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        if value.is_null() {
-            Ok(Self::Null)
-        } else {
-            serde_json::from_value(value)
-                .map(Self::Value)
-                .map_err(D::Error::custom)
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for DeserializedProjectId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        if value.is_null() {
-            Ok(Self::Null)
-        } else {
-            serde_json::from_value(value)
-                .map(Self::Value)
-                .map_err(D::Error::custom)
-        }
-    }
-}
 
 /// One open view tab in the workspace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
