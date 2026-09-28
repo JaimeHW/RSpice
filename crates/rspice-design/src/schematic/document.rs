@@ -127,3 +127,9 @@ impl SchematicDocument {
             .any(|component| component.port_spec().is_some())
     }
 }
+
+impl AsRef<SchematicDocument> for SchematicDocument {
+    fn as_ref(&self) -> &SchematicDocument {
+        self
+    }
+}

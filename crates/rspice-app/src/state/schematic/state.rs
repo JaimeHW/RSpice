@@ -376,3 +376,9 @@ impl SchematicState {
         }
     }
 }
+
+impl AsRef<SchematicDocument> for SchematicState {
+    fn as_ref(&self) -> &SchematicDocument {
+        self.document()
+    }
+}
