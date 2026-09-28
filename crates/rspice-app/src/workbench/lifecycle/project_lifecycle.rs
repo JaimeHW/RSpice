@@ -1118,11 +1118,12 @@ pub(crate) fn complete_browser_save(
         // Keep the last generation that is known to exist in IndexedDB when
         // this publication is session-only. The new file bytes are canonical
         // for this live tab, but the next retry must CAS from durable storage.
-        persisted_generation: persistence::persisted_generation_after_browser_write(
-            durable,
-            generation,
-            prepared.target.persisted_generation,
-        ),
+        persisted_generation:
+            rspice_project::persistence::browser::persisted_generation_after_browser_write(
+                durable,
+                generation,
+                prepared.target.persisted_generation,
+            ),
     };
     finish_successful_save(state, prepared.candidate, binding, prepared.scope);
     state.project_lifecycle.authority.cancel_transaction();

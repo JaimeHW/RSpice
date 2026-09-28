@@ -501,7 +501,7 @@ pub(super) async fn restore_browser_binding(
         // delete another project's binding authority.
         Err(error) => return BrowserRestoreResult::Evicted(error),
     };
-    if let Err(error) = prove_browser_record_ownership(&metadata, receipt) {
+    if let Err(error) = validate_browser_binding_identity(&metadata, receipt) {
         // Identity mismatch explicitly means ownership was not established.
         // Ignore the record; never evict it using facts supplied by this
         // untrusted receipt.
@@ -754,23 +754,6 @@ pub(super) fn metadata_from_record(
         backend: browser_backend_from_name(&js_string_field(record, "backend")?)?,
         display_name: js_string_field(record, "displayName")?,
     })
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) fn browser_backend_name(backend: BrowserBindingBackend) -> &'static str {
-    match backend {
-        BrowserBindingBackend::ExternalFile => "external-file",
-        BrowserBindingBackend::Opfs => "opfs",
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) fn browser_backend_from_name(value: &str) -> Result<BrowserBindingBackend, String> {
-    match value {
-        "external-file" => Ok(BrowserBindingBackend::ExternalFile),
-        "opfs" => Ok(BrowserBindingBackend::Opfs),
-        _ => Err(format!("unknown browser binding backend {value}")),
-    }
 }
 
 #[cfg(target_arch = "wasm32")]

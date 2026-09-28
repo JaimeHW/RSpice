@@ -1,5 +1,7 @@
 //! Canonical project byte identities and persisted binding receipts.
 
+pub mod browser;
+
 use crate::{ProjectFile, ProjectIoError};
 use rspice_app_types::product::ContentDigest;
 use sha2::{Digest as _, Sha256};
@@ -39,6 +41,42 @@ pub struct NativeBindingReceipt {
     pub accepted_digest: ContentDigest,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+impl NativeBindingReceipt {
+    pub fn validate_session_project(
+        &self,
+        session_project_id: &str,
+    ) -> Result<(), PersistenceError> {
+        if self.project_id != session_project_id {
+            return Err(PersistenceError::NativeReceiptMismatch(
+                "logical project identity differs from the restored session".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn validate_canonical_path(
+        &self,
+        canonical_path: &std::path::Path,
+    ) -> Result<(), PersistenceError> {
+        if canonical_path != self.canonical_path {
+            return Err(PersistenceError::NativeReceiptMismatch(
+                "canonical pathname differs from the accepted pathname".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn validate_loaded_project(&self, project: &ProjectFile) -> Result<(), PersistenceError> {
+        if project.workspace.project.id().to_string() != self.project_id {
+            return Err(PersistenceError::NativeReceiptMismatch(
+                "project file identity differs from the accepted logical project".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PersistenceError {
     #[cfg(not(target_arch = "wasm32"))]
@@ -67,4 +105,15 @@ pub fn serialized_project(
 
 pub fn digest_bytes(bytes: &[u8]) -> ContentDigest {
     ContentDigest::from_bytes(Sha256::digest(bytes).into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_digest_is_exact_over_published_bytes() {
+        let bytes = b"project bytes\n";
+        assert_ne!(digest_bytes(bytes), digest_bytes(b"project bytes"));
+    }
 }
