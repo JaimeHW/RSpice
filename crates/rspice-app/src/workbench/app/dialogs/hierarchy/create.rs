@@ -56,18 +56,25 @@ const TABLE_ROW_HEIGHT: f32 = 28.0;
 
 pub(crate) fn create_hierarchy_available(state: &AppState) -> bool {
     !state.schematic_edit_read_only()
-        && !state.schematic.selection.components.is_empty()
-        && state.schematic.selection.count() == state.schematic.selection.components.len()
-        && state.schematic.selection.components.iter().all(|id| {
-            state
-                .schematic
-                .document()
-                .components
-                .iter()
-                .any(|component| {
-                    component.id == *id && component.kind != crate::state::ComponentType::Port
-                })
-        })
+        && !state.schematic.session.selection.components.is_empty()
+        && state.schematic.session.selection.count()
+            == state.schematic.session.selection.components.len()
+        && state
+            .schematic
+            .session
+            .selection
+            .components
+            .iter()
+            .all(|id| {
+                state
+                    .schematic
+                    .document()
+                    .components
+                    .iter()
+                    .any(|component| {
+                        component.id == *id && component.kind != crate::state::ComponentType::Port
+                    })
+            })
 }
 
 pub(crate) fn open_create_hierarchy_dialog(state: &mut AppState) {
@@ -958,8 +965,8 @@ mod tests {
             .schematic
             .add_wire(vec![Point::origin(), Point::new(20, 0)])
             .expect("wire");
-        state.schematic.selection.select_component(id);
-        state.schematic.selection.select_wire(wire);
+        state.schematic.session.selection.select_component(id);
+        state.schematic.session.selection.select_wire(wire);
         assert!(!create_hierarchy_available(&state));
     }
 
@@ -995,8 +1002,8 @@ mod tests {
         state
             .schematic
             .add_wire(vec![Point::new(100, 0), Point::new(140, 0)]);
-        state.schematic.selection.select_component(r1);
-        state.schematic.selection.select_component(r2);
+        state.schematic.session.selection.select_component(r1);
+        state.schematic.session.selection.select_component(r2);
         let parent_ref = state.workspace.active_view.clone();
         let library_name = parent_ref.library.clone();
 
@@ -1038,7 +1045,7 @@ mod tests {
             .views
             .values_mut()
             .for_each(|view| view.modified = false);
-        state.schematic.is_dirty = false;
+        state.schematic.session.is_dirty = false;
         assert!(
             state.can_undo_project_design(),
             "saving must not disable undo"
@@ -1078,7 +1085,7 @@ mod tests {
             .expect("selected")
             .name
             .clone();
-        state.schematic.selection.select_component(selected);
+        state.schematic.session.selection.select_component(selected);
         let plan_id = state
             .sim_setup
             .analysis_plan

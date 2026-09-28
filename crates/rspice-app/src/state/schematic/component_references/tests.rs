@@ -20,7 +20,7 @@ fn coupled_selection() -> SchematicState {
     .enumerate()
     {
         let id = state.add_component(kind, Point::new(index as i32 * 100, 0));
-        state.selection.select_component(id);
+        state.session.selection.select_component(id);
     }
     state.design.document_mut_for_test().components[0].params =
         "coupled_to=l2 coupling_factor=0.9".to_owned();
@@ -35,7 +35,7 @@ fn coupled_selection() -> SchematicState {
         .components
         .rotate_right(4);
     state.clear_undo_history();
-    state.is_dirty = false;
+    state.session.is_dirty = false;
     state
 }
 
@@ -83,7 +83,7 @@ fn simultaneous_renames_preserve_swapped_windings_and_reject_collisions_atomical
         component(&state.design.document().components, "L2").id,
         second
     );
-    assert!(!state.is_dirty);
+    assert!(!state.session.is_dirty);
 }
 
 #[test]
@@ -311,9 +311,9 @@ fn rejected_copy_and_array_leave_the_document_history_and_allocators_unchanged()
             state.design.document().components,
             before.design.document().components
         );
-        assert_eq!(state.selection, before.selection);
+        assert_eq!(state.session.selection, before.session.selection);
         assert_eq!(state.topology_version(), before.topology_version());
-        assert_eq!(state.is_dirty, before.is_dirty);
+        assert_eq!(state.session.is_dirty, before.session.is_dirty);
         assert!(!state.can_undo());
         if malformed {
             let count = SchematicArrayCount::new(2, 1).unwrap();

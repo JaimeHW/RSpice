@@ -199,10 +199,10 @@ pub fn resolve_schematic_source(
         return Err(HardcopySourceError::UnsupportedScope(source.scope));
     }
     let selection_only = matches!(&source.scope, HardcopyScope::Selection);
-    if selection_only && source.schematic.selection.is_empty() {
+    if selection_only && source.schematic.session.selection.is_empty() {
         return Err(HardcopySourceError::EmptySelection);
     }
-    if selection_only && !source.schematic.selection.probes.is_empty() {
+    if selection_only && !source.schematic.session.selection.probes.is_empty() {
         return Err(HardcopySourceError::ProbeSelectionUnsupported);
     }
     let governed_sheet = match (source.sheet_catalog, source.sheet_id) {
@@ -288,6 +288,7 @@ pub fn resolve_schematic_source(
         if selection_only
             && !source
                 .schematic
+                .session
                 .selection
                 .components
                 .contains(&component.id)
@@ -305,6 +306,7 @@ pub fn resolve_schematic_source(
     let selected_wire_ids = || {
         source
             .schematic
+            .session
             .selection
             .wires
             .iter()
@@ -312,6 +314,7 @@ pub fn resolve_schematic_source(
             .chain(
                 source
                     .schematic
+                    .session
                     .selection
                     .wire_segments
                     .iter()
@@ -320,6 +323,7 @@ pub fn resolve_schematic_source(
             .chain(
                 source
                     .schematic
+                    .session
                     .selection
                     .wire_vertices
                     .iter()
@@ -350,7 +354,8 @@ pub fn resolve_schematic_source(
             .iter()
             .filter(|bus| {
                 object_is_in_scope(bus.id)
-                    && (!selection_only || source.schematic.selection.buses.contains(&bus.id))
+                    && (!selection_only
+                        || source.schematic.session.selection.buses.contains(&bus.id))
             })
             .cloned(),
     );
@@ -362,7 +367,13 @@ pub fn resolve_schematic_source(
             .iter()
             .filter(|tap| {
                 object_is_in_scope(tap.id)
-                    && (!selection_only || source.schematic.selection.bus_taps.contains(&tap.id))
+                    && (!selection_only
+                        || source
+                            .schematic
+                            .session
+                            .selection
+                            .bus_taps
+                            .contains(&tap.id))
             })
             .cloned(),
     );
@@ -377,6 +388,7 @@ pub fn resolve_schematic_source(
                     && (!selection_only
                         || source
                             .schematic
+                            .session
                             .selection
                             .junctions
                             .iter()
@@ -393,7 +405,12 @@ pub fn resolve_schematic_source(
             .filter(|label| {
                 object_is_in_scope(label.id)
                     && (!selection_only
-                        || source.schematic.selection.net_labels.contains(&label.id))
+                        || source
+                            .schematic
+                            .session
+                            .selection
+                            .net_labels
+                            .contains(&label.id))
             })
             .cloned(),
     );
@@ -406,7 +423,12 @@ pub fn resolve_schematic_source(
             .filter(|note| {
                 object_is_in_scope(note.id)
                     && (!selection_only
-                        || source.schematic.selection.design_notes.contains(&note.id))
+                        || source
+                            .schematic
+                            .session
+                            .selection
+                            .design_notes
+                            .contains(&note.id))
             })
             .cloned(),
     );
@@ -421,6 +443,7 @@ pub fn resolve_schematic_source(
                     && (!selection_only
                         || source
                             .schematic
+                            .session
                             .selection
                             .documentation_shapes
                             .contains(&shape.id))

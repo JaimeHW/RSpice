@@ -2068,7 +2068,7 @@ mod tests {
             .design_management
             .bootstrap_for_cell_view(&key, "Main", [])
             .unwrap();
-        app.state.schematic.read_only = true;
+        app.state.schematic.session.read_only = true;
 
         let error = open_sheet_format_manager(&mut app.state)
             .expect_err("read-only documents must not start an edit transaction");

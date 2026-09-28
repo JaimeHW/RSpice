@@ -15,7 +15,7 @@ impl SchematicState {
     pub fn add_junction(&mut self, pos: Point) -> u64 {
         let (id, inserted) = self.design.add_junction(pos);
         if inserted {
-            self.is_dirty = true;
+            self.session.is_dirty = true;
         }
         id
     }
@@ -24,7 +24,7 @@ impl SchematicState {
     pub fn remove_junction(&mut self, id: u64) -> bool {
         let removed = self.design.remove_junction(id);
         if removed {
-            self.is_dirty = true;
+            self.session.is_dirty = true;
         }
         removed
     }
@@ -51,7 +51,7 @@ impl SchematicState {
     /// Add a net label at the given position
     pub fn add_net_label(&mut self, pos: Point, name: String) -> u64 {
         let id = self.design.add_net_label(pos, name);
-        self.is_dirty = true;
+        self.session.is_dirty = true;
         id
     }
     pub(crate) fn add_net_label_with_kind(
@@ -61,7 +61,7 @@ impl SchematicState {
         kind: crate::state::NetLabelKind,
     ) -> u64 {
         let id = self.design.add_net_label_with_kind(pos, name, kind);
-        self.is_dirty = true;
+        self.session.is_dirty = true;
         id
     }
 }
@@ -77,7 +77,7 @@ mod tests {
 
         let id = schematic.add_net_label(Point::new(2, 3), "sense".to_owned());
 
-        assert!(schematic.is_dirty);
+        assert!(schematic.session.is_dirty);
         assert_eq!(
             schematic.design.document().net_labels,
             vec![NetLabel::new(id, Point::new(2, 3), "sense")]

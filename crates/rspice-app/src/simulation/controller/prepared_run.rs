@@ -1233,7 +1233,7 @@ impl SimulationController {
         let origin = if owned_active {
             state.workspace.netlist_source_path.as_deref()
         } else {
-            state.schematic.current_file.as_deref()
+            state.schematic.session.current_file.as_deref()
         };
         if origin.is_none() && contains_external_include_directive(&composed) {
             return Err(PreparationError::new(

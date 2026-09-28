@@ -53,7 +53,7 @@ pub(crate) fn open_stretch_selection_dialog(state: &mut AppState) {
         ));
         return;
     }
-    if !state.schematic.selection.probes.is_empty() {
+    if !state.schematic.session.selection.probes.is_empty() {
         state.push_user_message(ConsoleMessage::warning(
             "Probe markers cannot be stretched; move the retained probe marker instead.".to_owned(),
         ));
@@ -168,7 +168,7 @@ fn validate_draft(state: &AppState) -> DraftValidation {
 
 pub(crate) fn armed_stretch_selection_authority(state: &AppState) -> Result<(), String> {
     let draft = &state.dialogs.stretch_selection;
-    if !draft.armed || state.schematic.tool != Tool::StretchSelection {
+    if !draft.armed || state.schematic.session.tool != Tool::StretchSelection {
         return Err("Stretch selection is not armed.".to_owned());
     }
     match validate_draft(state) {
@@ -179,7 +179,7 @@ pub(crate) fn armed_stretch_selection_authority(state: &AppState) -> Result<(), 
 
 pub(crate) fn cancel_armed_stretch_selection(state: &mut AppState) {
     state.dialogs.stretch_selection.close();
-    if state.schematic.tool == Tool::StretchSelection {
+    if state.schematic.session.tool == Tool::StretchSelection {
         state.schematic.cancel_tool();
     }
 }
@@ -345,7 +345,7 @@ mod tests {
         let mut state = AppState::default();
         let wire = Wire::new(7, vec![Point::new(0, 0), Point::new(20, 0)]);
         state.schematic.document_mut_for_test().wires.push(wire);
-        state.schematic.selection.select_wire(7);
+        state.schematic.session.selection.select_wire(7);
 
         open_stretch_selection_dialog(&mut state);
 

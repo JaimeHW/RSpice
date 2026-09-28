@@ -13,7 +13,7 @@ impl SchematicState {
             .design
             .remap_symbol_instance_wires(reference, pin_remaps);
         if changed {
-            self.is_dirty = true;
+            self.session.is_dirty = true;
         }
         changed
     }
@@ -25,7 +25,7 @@ impl SchematicState {
     ) -> usize {
         let renamed = self.design.rename_instance_terminals(reference, renames);
         if renamed > 0 {
-            self.is_dirty = true;
+            self.session.is_dirty = true;
         }
         renamed
     }

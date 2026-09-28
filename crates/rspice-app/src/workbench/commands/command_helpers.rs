@@ -100,7 +100,7 @@ pub(super) fn active_schematic_editor(app: &RSpiceApp) -> bool {
 pub(super) fn schematic_selection_has_live_object(
     schematic: &crate::state::SchematicState,
 ) -> bool {
-    let selection = &schematic.selection;
+    let selection = &schematic.session.selection;
     schematic
         .document()
         .components
@@ -157,18 +157,29 @@ pub(super) fn schematic_selection_has_deletable_object(
 ) -> bool {
     schematic_selection_has_live_object(schematic)
         || schematic.document().wires.iter().any(|wire| {
-            schematic.selection.wire_segments.iter().any(|selected| {
-                selected.wire_id == wire.id && selected.segment_index < wire.segment_count()
-            }) || schematic.selection.wire_vertices.iter().any(|selected| {
-                selected.wire_id == wire.id && selected.vertex_index < wire.vertex_count()
-            })
+            schematic
+                .session
+                .selection
+                .wire_segments
+                .iter()
+                .any(|selected| {
+                    selected.wire_id == wire.id && selected.segment_index < wire.segment_count()
+                })
+                || schematic
+                    .session
+                    .selection
+                    .wire_vertices
+                    .iter()
+                    .any(|selected| {
+                        selected.wire_id == wire.id && selected.vertex_index < wire.vertex_count()
+                    })
         })
 }
 
 pub(super) fn schematic_selection_has_duplicable_object(
     schematic: &crate::state::SchematicState,
 ) -> bool {
-    let selection = &schematic.selection;
+    let selection = &schematic.session.selection;
     selection.wire_segments.is_empty()
         && selection.wire_vertices.is_empty()
         && (schematic
@@ -251,13 +262,13 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
                 app.state.ui.symbol.marquee_start = None;
                 app.state.ui.symbol.marquee_current = None;
             } else {
-                app.state.schematic.zoom = 1.0;
-                app.state.schematic.pan = (0.0, 0.0);
-                app.state.schematic.needs_fit = true;
-                app.state.schematic.center_request = None;
-                app.state.schematic.selection.clear();
-                app.state.schematic.selection_rect.cancel();
-                app.state.schematic.net_highlight.clear();
+                app.state.schematic.session.zoom = 1.0;
+                app.state.schematic.session.pan = (0.0, 0.0);
+                app.state.schematic.session.needs_fit = true;
+                app.state.schematic.session.center_request = None;
+                app.state.schematic.session.selection.clear();
+                app.state.schematic.session.selection_rect.cancel();
+                app.state.schematic.session.net_highlight.clear();
             }
         }
         Workspace::Simulate => {

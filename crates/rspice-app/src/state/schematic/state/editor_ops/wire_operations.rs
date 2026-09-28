@@ -23,7 +23,7 @@ impl SchematicState {
     pub fn split_wire(&mut self, wire_id: u64, at_point: Point) -> Option<(u64, u64)> {
         let split = self.design.split_wire(wire_id, at_point);
         if split.is_some() {
-            self.is_dirty = true;
+            self.session.is_dirty = true;
         }
         split
     }
@@ -31,7 +31,7 @@ impl SchematicState {
     /// Optimize all wires by removing collinear intermediate points
     pub fn optimize_all_wires(&mut self) {
         if self.design.optimize_all_wires() {
-            self.is_dirty = true;
+            self.session.is_dirty = true;
         }
     }
 
@@ -49,7 +49,7 @@ impl SchematicState {
     pub fn remove_degenerate_segments(&mut self) -> (usize, usize) {
         let (wires_modified, wires_removed) = self.design.remove_degenerate_segments();
         if wires_modified > 0 || wires_removed > 0 {
-            self.is_dirty = true;
+            self.session.is_dirty = true;
         }
         (wires_modified, wires_removed)
     }
@@ -112,7 +112,7 @@ impl SchematicState {
 
         let moved = self.design.move_vertices_at(old_pos, new_pos);
         if moved {
-            self.is_dirty = true;
+            self.session.is_dirty = true;
         }
         moved
     }

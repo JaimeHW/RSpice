@@ -32,11 +32,11 @@ pub(crate) fn apply_bulk_edit(
     if !edit.committed {
         return Err("The bulk-edit transaction did not produce a document change.".to_owned());
     }
-    schematic.selection.clear();
+    schematic.session.selection.clear();
     for id in edit.value {
-        schematic.selection.select_component(id);
+        schematic.session.selection.select_component(id);
     }
     Ok(SelectionBulkReceipt {
-        changed: schematic.selection.components.len(),
+        changed: schematic.session.selection.components.len(),
     })
 }

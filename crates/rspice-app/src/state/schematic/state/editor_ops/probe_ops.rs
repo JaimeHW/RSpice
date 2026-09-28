@@ -9,7 +9,7 @@ impl SchematicState {
         existing_id: u64,
         binding: Option<(SimulationPlanId, SavedOutputId)>,
     ) {
-        if self.read_only {
+        if self.session.read_only {
             return;
         }
         let edit = self.design.bind_probe_saved_output(existing_id, binding);
@@ -25,14 +25,14 @@ impl SchematicState {
         source_expression: Option<String>,
         binding: Option<(SimulationPlanId, SavedOutputId)>,
     ) -> Result<u64, String> {
-        if self.read_only {
+        if self.session.read_only {
             return Err("the probe marker did not change the active schematic".to_owned());
         }
         let edit = self
             .design
             .place_schematic_probe(position, label, source_expression, binding);
         if let Some(id) = edit.value {
-            self.selection.select_only_probe(id);
+            self.session.selection.select_only_probe(id);
         }
         if edit.value.is_some() || edit.committed {
             self.finish_document_edit(edit.committed);
@@ -49,7 +49,7 @@ impl SchematicState {
         enabled: bool,
         plot_on_materialization: bool,
     ) -> bool {
-        if self.read_only {
+        if self.session.read_only {
             return false;
         }
         let edit = self

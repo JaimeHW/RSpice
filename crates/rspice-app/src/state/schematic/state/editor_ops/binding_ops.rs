@@ -50,7 +50,7 @@ impl SchematicState {
         let repaired = self.design.remove_master_placements(library, cell, view);
         self.repair_clipboard_after_load();
         self.remove_stale_runtime_references(&repaired);
-        self.is_dirty = true;
+        self.session.is_dirty = true;
     }
 
     pub(crate) fn remove_cyclic_master_placements(&mut self, master_key: &str) {

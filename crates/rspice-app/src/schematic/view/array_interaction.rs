@@ -281,7 +281,7 @@ mod tests {
             .document_mut_for_test()
             .components
             .push(Component::new(1, ComponentType::Resistor, Point::origin()));
-        state.schematic.selection.select_only_component(1);
+        state.schematic.session.selection.select_only_component(1);
         state.schematic.recalculate_runtime_state();
         state.schematic.clear_undo_history();
         crate::workbench::app::open_array_selection_dialog(&mut state);
@@ -294,7 +294,7 @@ mod tests {
 
         assert_eq!(state.schematic.document().components.len(), 8);
         assert_eq!(state.schematic.undo_description(), Some("create array"));
-        assert_eq!(state.schematic.tool, Tool::Select);
+        assert_eq!(state.schematic.session.tool, Tool::Select);
         assert!(!state.dialogs.array_selection.armed);
         assert!(state.schematic.undo());
         assert_eq!(state.schematic.document().components.len(), 1);
@@ -309,7 +309,7 @@ mod tests {
             .document_mut_for_test()
             .components
             .push(Component::new(1, ComponentType::Resistor, Point::origin()));
-        state.schematic.selection.select_only_component(1);
+        state.schematic.session.selection.select_only_component(1);
         state.schematic.recalculate_runtime_state();
         state.schematic.clear_undo_history();
         crate::workbench::app::open_array_selection_dialog(&mut state);
@@ -322,7 +322,7 @@ mod tests {
 
         assert_eq!(state.schematic.document().components.len(), 1);
         assert!(state.dialogs.array_selection.armed);
-        assert_eq!(state.schematic.tool, Tool::ArraySelection);
+        assert_eq!(state.schematic.session.tool, Tool::ArraySelection);
         assert!(state.dialogs.array_selection.preview_error.is_some());
         assert!(!state.schematic.can_undo());
     }

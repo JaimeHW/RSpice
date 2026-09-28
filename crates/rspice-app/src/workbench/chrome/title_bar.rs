@@ -1780,7 +1780,7 @@ fn paint_title_context(
         return;
     }
     let t = Tokens::get(ui.ctx());
-    let dirty = app.state.schematic.is_dirty || app.state.workspace.any_dirty();
+    let dirty = app.state.schematic.session.is_dirty || app.state.workspace.any_dirty();
     let cell = active_title_cell(app);
     let full = title_context_text(app, compact);
     let font = theme::sans(tokens::FS_1, FontWeight::Regular);

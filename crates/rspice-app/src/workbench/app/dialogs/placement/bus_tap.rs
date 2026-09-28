@@ -135,7 +135,7 @@ impl RSpiceApp {
                     && let DraftValidation::Valid(pending) =
                         validate_draft(&self.state.dialogs.bus_tap)
                 {
-                    self.state.schematic.pending_bus_tap = Some(pending);
+                    self.state.schematic.session.pending_bus_tap = Some(pending);
                     self.state.schematic.arm_tool(Tool::BusTap);
                     self.state.dialogs.bus_tap.close();
                 }
@@ -819,7 +819,7 @@ mod tests {
 
         assert_eq!(app.state.dialogs.bus_tap.bus, "DATA[31:0]");
         assert!(app.state.dialogs.bus_tap.dirty);
-        assert!(app.state.schematic.pending_bus_tap.is_none());
+        assert!(app.state.schematic.session.pending_bus_tap.is_none());
     }
 
     #[test]
@@ -853,8 +853,8 @@ mod tests {
         }
 
         assert!(!app.state.dialogs.bus_tap.open);
-        assert!(app.state.schematic.pending_bus_tap.is_none());
-        assert_eq!(app.state.schematic.tool, Tool::Select);
+        assert!(app.state.schematic.session.pending_bus_tap.is_none());
+        assert_eq!(app.state.schematic.session.tool, Tool::Select);
         assert_eq!(ctx.memory(|memory| memory.focused()), Some(workspace_id));
         assert_eq!(workspace_text, "workspace");
     }
@@ -969,10 +969,11 @@ mod tests {
         });
 
         assert!(!app.state.dialogs.bus_tap.open);
-        assert_eq!(app.state.schematic.tool, Tool::BusTap);
+        assert_eq!(app.state.schematic.session.tool, Tool::BusTap);
         let pending = app
             .state
             .schematic
+            .session
             .pending_bus_tap
             .as_ref()
             .expect("validated pending bus tap");
@@ -985,7 +986,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        app.state.schematic.read_only = true;
+        app.state.schematic.session.read_only = true;
         app.state.dialogs.bus_tap.open();
 
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
@@ -996,8 +997,8 @@ mod tests {
         });
 
         assert!(app.state.dialogs.bus_tap.open);
-        assert_eq!(app.state.schematic.tool, Tool::Select);
-        assert!(app.state.schematic.pending_bus_tap.is_none());
+        assert_eq!(app.state.schematic.session.tool, Tool::Select);
+        assert!(app.state.schematic.session.pending_bus_tap.is_none());
     }
 
     #[test]

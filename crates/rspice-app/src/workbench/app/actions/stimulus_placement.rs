@@ -44,7 +44,7 @@ pub(crate) fn arm_placement_from_definition(
     state
         .schematic
         .arm_tool(Tool::Place(placement.component_type));
-    state.schematic.pending_stimulus = Some(placement);
+    state.schematic.session.pending_stimulus = Some(placement);
     state.workbench.activate(Workspace::Design);
     state.push_user_message(ConsoleMessage::info(format!(
         "{reference}\u{2026} from {armed} follows the pointer; click to place, Esc cancels."
@@ -84,12 +84,13 @@ mod tests {
         arm_placement_from_definition(&mut app.state, "sensor_drive").expect("armed");
 
         assert_eq!(
-            app.state.schematic.tool,
+            app.state.schematic.session.tool,
             Tool::Place(ComponentType::VoltageSourceSin)
         );
         let armed = app
             .state
             .schematic
+            .session
             .pending_stimulus
             .clone()
             .expect("a definition is armed");
@@ -123,17 +124,17 @@ mod tests {
         let refusal =
             arm_placement_from_definition(&mut app.state, "absent").expect_err("nothing to arm");
         assert!(refusal.contains("defines no 'absent'"), "{refusal}");
-        assert!(app.state.schematic.pending_stimulus.is_none());
-        assert_eq!(app.state.schematic.tool, Tool::Select);
+        assert!(app.state.schematic.session.pending_stimulus.is_none());
+        assert_eq!(app.state.schematic.session.tool, Tool::Select);
     }
 
     #[test]
     fn arming_refuses_a_read_only_view() {
         let mut app = app_with_definition();
-        app.state.schematic.read_only = true;
+        app.state.schematic.session.read_only = true;
         let refusal = arm_placement_from_definition(&mut app.state, "sensor_drive")
             .expect_err("a read-only sheet takes no placement");
         assert!(refusal.contains("read-only"), "{refusal}");
-        assert!(app.state.schematic.pending_stimulus.is_none());
+        assert!(app.state.schematic.session.pending_stimulus.is_none());
     }
 }

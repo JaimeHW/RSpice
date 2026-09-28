@@ -58,7 +58,7 @@ pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
         ));
         return;
     }
-    if state.schematic.read_only
+    if state.schematic.session.read_only
         || state.active_view_read_only()
         || state.workbench.safe_mode.project_read_only()
     {
@@ -286,6 +286,7 @@ impl RSpiceApp {
         };
         self.state
             .schematic
+            .session
             .selection
             .select_only_component(component_id);
         let outcome = self.state.schematic.update_selected_instance_interface(
@@ -352,7 +353,7 @@ impl RSpiceApp {
         }
 
         let original_journal = self.state.schematic.document().validated_revisions.clone();
-        let original_dirty = self.state.schematic.is_dirty;
+        let original_dirty = self.state.schematic.session.is_dirty;
         let target_view_key = fresh_report.active_view().key();
         if original_journal.is_empty()
             && let Some(accepted) =
@@ -1260,7 +1261,7 @@ mod tests {
         );
         rollback_exact_journal(&mut schematic, &original, &retained, guarded_design, false)
             .expect("journal rollback preserves a newer design edit");
-        assert!(schematic.is_dirty);
+        assert!(schematic.session.is_dirty);
         assert_eq!(schematic.document().validated_revisions, original);
     }
 }

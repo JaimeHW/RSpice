@@ -36,10 +36,11 @@ pub(in crate::workbench) fn placed_instance(
         .map(|component| component.pos);
     state
         .schematic
+        .session
         .selection
         .select_only_component(component_id);
-    state.schematic.net_highlight.clear();
-    state.schematic.center_request = position;
+    state.schematic.session.net_highlight.clear();
+    state.schematic.session.center_request = position;
 }
 
 /// Whether the buffer on screen is the one this occurrence names.

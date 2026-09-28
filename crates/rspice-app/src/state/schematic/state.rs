@@ -87,6 +87,12 @@ pub struct PendingPartModel {
 pub struct SchematicState {
     pub(in crate::state::schematic) design: rspice_design::schematic::owned::Schematic,
 
+    pub session: SchematicSession,
+}
+
+/// Per-document editor interaction and presentation, kept outside the design.
+#[derive(Debug, Clone)]
+pub struct SchematicSession {
     /// Current selection (runtime state, never part of the design document).
     pub selection: Selection,
 
@@ -210,87 +216,9 @@ pub struct SchematicState {
     pub(super) canvas_cache: super::canvas_cache::CanvasCache,
 }
 
-impl Default for SchematicState {
+impl Default for SchematicSession {
     fn default() -> Self {
-        Self::from_document(SchematicDocument::default())
-    }
-}
-
-impl SchematicState {
-    /// Read-only access to persisted schematic content.
-    pub(crate) fn document(&self) -> &SchematicDocument {
-        self.design.document()
-    }
-
-    pub(crate) fn document_and_selection(&mut self) -> (&SchematicDocument, &mut Selection) {
-        (self.design.document(), &mut self.selection)
-    }
-
-    pub(crate) fn into_document(self) -> SchematicDocument {
-        self.design.into_document()
-    }
-
-    /// Fixtures can model invalid or externally changed content without a
-    /// mutable document accessor in production.
-    #[cfg(test)]
-    pub(crate) fn document_mut_for_test(&mut self) -> &mut SchematicDocument {
-        self.design.document_mut_for_test()
-    }
-
-    /// Create fresh editor state around an owned document. Saved-file loading
-    /// retains its separate legacy runtime defaults in Deserialize.
-    pub(crate) fn from_document(document: SchematicDocument) -> Self {
-        let snap_engine = SnapEngine {
-            grid_size: document.grid_size,
-            ..SnapEngine::default()
-        };
         Self {
-            design: rspice_design::schematic::owned::Schematic::from_document(document),
-            selection: Selection::default(),
-            tool: Tool::default(),
-            wire_drawing: WireDrawing::default(),
-            bus_drawing: BusDrawing::default(),
-            zoom: 1.0,
-            pan: (0.0, 0.0),
-            current_file: None,
-            clipboard: ClipboardData::default(),
-            preview_rotation: Rotation::default(),
-            preview_mirror_h: false,
-            pending_library_cell: None,
-            pending_part_model: None,
-            pending_stimulus: None,
-            pending_bus_tap: None,
-            pending_port_sequence: None,
-            pending_design_note: None,
-            pending_documentation_shape: None,
-            documentation_shape_drawing: DocumentationShapeDrawing::default(),
-            is_dirty: false,
-            needs_fit: false,
-            needs_drawing_sheet_fit: false,
-            center_request: None,
-            read_only: false,
-            needs_history_reset: false,
-            snap_engine,
-            selection_rect: super::selection::SelectionRect::default(),
-            net_highlight: super::net_highlight::NetHighlightState::default(),
-            operation_cancel: None,
-            canvas_cache: super::canvas_cache::CanvasCache::default(),
-        }
-    }
-}
-
-// Delegate the design owner's wire layout without copying content. Runtime
-// fields retain their original serde(skip) defaults when loading saved data.
-impl Serialize for SchematicState {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.design.serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for SchematicState {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Self {
-            design: rspice_design::schematic::owned::Schematic::deserialize(deserializer)?,
             selection: Default::default(),
             tool: Default::default(),
             wire_drawing: Default::default(),
@@ -320,6 +248,67 @@ impl<'de> Deserialize<'de> for SchematicState {
             net_highlight: Default::default(),
             operation_cancel: None,
             canvas_cache: Default::default(),
+        }
+    }
+}
+
+impl Default for SchematicState {
+    fn default() -> Self {
+        Self::from_document(SchematicDocument::default())
+    }
+}
+
+impl SchematicState {
+    /// Read-only access to persisted schematic content.
+    pub(crate) fn document(&self) -> &SchematicDocument {
+        self.design.document()
+    }
+
+    pub(crate) fn document_and_selection(&mut self) -> (&SchematicDocument, &mut Selection) {
+        (self.design.document(), &mut self.session.selection)
+    }
+
+    pub(crate) fn into_document(self) -> SchematicDocument {
+        self.design.into_document()
+    }
+
+    /// Fixtures can model invalid or externally changed content without a
+    /// mutable document accessor in production.
+    #[cfg(test)]
+    pub(crate) fn document_mut_for_test(&mut self) -> &mut SchematicDocument {
+        self.design.document_mut_for_test()
+    }
+
+    /// Create fresh editor state around an owned document. Saved-file loading
+    /// retains its separate legacy runtime defaults in Deserialize.
+    pub(crate) fn from_document(document: SchematicDocument) -> Self {
+        let snap_engine = SnapEngine {
+            grid_size: document.grid_size,
+            ..SnapEngine::default()
+        };
+        Self {
+            design: rspice_design::schematic::owned::Schematic::from_document(document),
+            session: SchematicSession {
+                snap_engine,
+                ..Default::default()
+            },
+        }
+    }
+}
+
+// Delegate the design owner's wire layout without copying content. Runtime
+// fields retain their original serde(skip) defaults when loading saved data.
+impl Serialize for SchematicState {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.design.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SchematicState {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            design: rspice_design::schematic::owned::Schematic::deserialize(deserializer)?,
+            session: SchematicSession::default(),
         })
     }
 }
@@ -332,19 +321,19 @@ impl SchematicState {
     /// target preferences into a newly activated document.
     pub(crate) fn reconcile_grid_pitch_runtime(&mut self) {
         let grid_size = self.design.reconcile_grid_pitch();
-        self.snap_engine.grid_size = grid_size;
+        self.session.snap_engine.grid_size = grid_size;
     }
 }
 
 impl SchematicState {
     pub(crate) fn strip_runtime_for_project_save(&mut self) {
-        self.selection = Default::default();
-        self.wire_drawing = Default::default();
-        self.clipboard = Default::default();
-        self.preview_rotation = Default::default();
-        self.preview_mirror_h = false;
+        self.session.selection = Default::default();
+        self.session.wire_drawing = Default::default();
+        self.session.clipboard = Default::default();
+        self.session.preview_rotation = Default::default();
+        self.session.preview_mirror_h = false;
         self.design.strip_runtime_connections_for_save();
-        self.is_dirty = false;
+        self.session.is_dirty = false;
     }
 }
 
@@ -367,7 +356,7 @@ impl SchematicState {
         self.design.take_restored_sheet_assignments()
     }
     pub(crate) fn set_pending_was_dirty(&mut self, was_dirty: bool) {
-        if let Some(cancel) = &mut self.operation_cancel
+        if let Some(cancel) = &mut self.session.operation_cancel
             && Some(cancel.operation_id()) == self.design.pending_operation_id()
         {
             cancel.set_was_dirty(was_dirty);

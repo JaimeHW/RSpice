@@ -22,8 +22,11 @@ pub(super) fn viewport_from_state(
     let ppp = pixels_per_point.max(0.5);
     let snap = |v: f64| ((v as f32) * ppp).round() / ppp;
     Viewport {
-        offset: Pos2::new(snap(state.schematic.pan.0), snap(state.schematic.pan.1)),
-        zoom: state.schematic.zoom as f32,
+        offset: Pos2::new(
+            snap(state.schematic.session.pan.0),
+            snap(state.schematic.session.pan.1),
+        ),
+        zoom: state.schematic.session.zoom as f32,
         bounds,
     }
 }

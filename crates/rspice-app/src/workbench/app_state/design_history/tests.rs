@@ -330,15 +330,15 @@ fn project_undo_and_redo_preserve_parent_view_runtime() {
         .schematic_buffers
         .get_mut(&parent.key())
         .expect("parent");
-    parent_buffer.zoom = 2.75;
-    parent_buffer.pan = (140.0, -35.0);
+    parent_buffer.session.zoom = 2.75;
+    parent_buffer.session.pan = (140.0, -35.0);
 
     assert!(state.undo_project_design().expect("undo").is_some());
-    assert_eq!(state.schematic.zoom, 2.75);
-    assert_eq!(state.schematic.pan, (140.0, -35.0));
+    assert_eq!(state.schematic.session.zoom, 2.75);
+    assert_eq!(state.schematic.session.pan, (140.0, -35.0));
 
-    state.schematic.zoom = 1.5;
-    state.schematic.pan = (-20.0, 85.0);
+    state.schematic.session.zoom = 1.5;
+    state.schematic.session.pan = (-20.0, 85.0);
     state.sync_active_schematic_to_workspace();
     assert!(state.redo_project_design().expect("redo").is_some());
     let parent_buffer = state
@@ -346,20 +346,20 @@ fn project_undo_and_redo_preserve_parent_view_runtime() {
         .schematic_buffers
         .get(&parent.key())
         .expect("parent");
-    assert_eq!(parent_buffer.zoom, 1.5);
-    assert_eq!(parent_buffer.pan, (-20.0, 85.0));
+    assert_eq!(parent_buffer.session.zoom, 1.5);
+    assert_eq!(parent_buffer.session.pan, (-20.0, 85.0));
 }
 
 #[test]
 fn project_undo_and_redo_preserve_child_view_runtime() {
     let (mut state, _, _) = state_with_hierarchy_record();
-    state.schematic.zoom = 3.25;
-    state.schematic.pan = (75.0, -120.0);
+    state.schematic.session.zoom = 3.25;
+    state.schematic.session.pan = (75.0, -120.0);
 
     assert!(state.undo_project_design().expect("undo").is_some());
     assert!(state.redo_project_design().expect("redo").is_some());
-    assert_eq!(state.schematic.zoom, 3.25);
-    assert_eq!(state.schematic.pan, (75.0, -120.0));
+    assert_eq!(state.schematic.session.zoom, 3.25);
+    assert_eq!(state.schematic.session.pan, (75.0, -120.0));
 }
 
 #[test]

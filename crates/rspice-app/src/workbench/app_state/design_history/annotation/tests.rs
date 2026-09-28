@@ -107,7 +107,7 @@ fn fixture(names: &[&str]) -> Fixture {
         })
         .unwrap();
     state.schematic.clear_undo_history();
-    state.schematic.is_dirty = false;
+    state.schematic.session.is_dirty = false;
     state.sync_active_schematic_to_workspace();
     let candidate = annotation_candidate(&state, objects);
     Fixture {

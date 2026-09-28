@@ -77,6 +77,7 @@ impl SchematicState {
     /// when it applies is the same one [`Self::arm_tool`] retires it by.
     pub fn add_armed_component(&mut self, kind: ComponentType, pos: Point) -> u64 {
         match self
+            .session
             .pending_stimulus
             .clone()
             .filter(|armed| armed.component_type == kind)
@@ -155,7 +156,7 @@ mod tests {
         let (_, definition) = library_with_sin();
         let mut schematic = SchematicState::default();
         schematic.init_undo_history();
-        schematic.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
+        schematic.session.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
 
         schematic.with_undo("place a sine source", |schematic| {
             schematic.add_armed_component(ComponentType::VoltageSourceSin, Point::new(4, 4));
@@ -177,7 +178,7 @@ mod tests {
     fn an_armed_definition_applies_only_to_its_own_type() {
         let (_, definition) = library_with_sin();
         let mut schematic = SchematicState::default();
-        schematic.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
+        schematic.session.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
 
         let id = schematic.add_armed_component(ComponentType::VoltageSourcePulse, Point::new(4, 4));
         let placed = schematic
@@ -199,11 +200,11 @@ mod tests {
         let (_, definition) = library_with_sin();
         let mut schematic = SchematicState::default();
         schematic.arm_tool(Tool::Place(ComponentType::VoltageSourceSin));
-        schematic.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
-        assert!(schematic.pending_stimulus.is_some());
+        schematic.session.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
+        assert!(schematic.session.pending_stimulus.is_some());
 
         schematic.arm_tool(Tool::Place(ComponentType::Resistor));
-        assert!(schematic.pending_stimulus.is_none());
+        assert!(schematic.session.pending_stimulus.is_none());
     }
 
     #[test]
@@ -211,11 +212,11 @@ mod tests {
         let (_, definition) = library_with_sin();
         let mut schematic = SchematicState::default();
         schematic.arm_tool(Tool::Place(ComponentType::VoltageSourceSin));
-        schematic.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
+        schematic.session.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
 
         schematic.cancel_tool();
-        assert!(schematic.pending_stimulus.is_none());
-        assert_eq!(schematic.tool, Tool::Select);
+        assert!(schematic.session.pending_stimulus.is_none());
+        assert_eq!(schematic.session.tool, Tool::Select);
     }
 }
 
@@ -238,7 +239,7 @@ impl PreparedStimulusAdoption {
         schematic: &mut SchematicState,
         description: String,
     ) -> bool {
-        if schematic.read_only {
+        if schematic.session.read_only {
             return false;
         }
         let committed = schematic

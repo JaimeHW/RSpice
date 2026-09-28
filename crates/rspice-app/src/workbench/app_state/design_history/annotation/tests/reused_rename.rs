@@ -12,6 +12,7 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
     fixture
         .state
         .schematic
+        .session
         .selection
         .components
         .insert(fixture.sources[0]);
@@ -32,6 +33,7 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
         assert!(source.undo());
         assert!(source.can_redo());
         source
+            .session
             .selection
             .components
             .insert(source.document().components[0].id);
@@ -101,12 +103,14 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
         assert!(
             state
                 .schematic
+                .session
                 .selection
                 .components
                 .contains(&fixture.sources[0])
         );
         assert!(
             state.workspace.schematic_buffers[&root.key()]
+                .session
                 .selection
                 .components
                 .contains(&root_selection)

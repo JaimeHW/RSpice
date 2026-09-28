@@ -35,7 +35,7 @@ fn safe_mode_disables_schematic_mutation_commands_but_keeps_canvas_settings_avai
     assert!(Command::GridSnapRouting.is_enabled(&app));
 
     Command::PlaceWire.execute(&mut app);
-    assert_eq!(app.state.schematic.tool, Tool::Select);
+    assert_eq!(app.state.schematic.session.tool, Tool::Select);
 }
 
 #[test]
@@ -101,13 +101,13 @@ fn draw_bus_arms_directly_but_bus_tap_waits_for_its_validated_dialog() {
     app.state.workbench.workspace = Workspace::Design;
 
     Command::PlaceBus.execute(&mut app);
-    assert_eq!(app.state.schematic.tool, Tool::Bus);
+    assert_eq!(app.state.schematic.session.tool, Tool::Bus);
 
-    app.state.schematic.tool = Tool::Select;
+    app.state.schematic.session.tool = Tool::Select;
     Command::PlaceBusTap.execute(&mut app);
     assert!(app.state.dialogs.bus_tap.open);
-    assert_eq!(app.state.schematic.tool, Tool::Select);
-    assert!(app.state.schematic.pending_bus_tap.is_none());
+    assert_eq!(app.state.schematic.session.tool, Tool::Select);
+    assert!(app.state.schematic.session.pending_bus_tap.is_none());
 }
 
 #[test]
@@ -116,8 +116,8 @@ fn place_pin_opens_the_isolated_mockup_transaction_without_mutating_the_document
     app.state.workbench.workspace = Workspace::Design;
     let components = app.state.schematic.document().components.clone();
     let topology = app.state.schematic.topology_version();
-    let dirty = app.state.schematic.is_dirty;
-    let tool = app.state.schematic.tool;
+    let dirty = app.state.schematic.session.is_dirty;
+    let tool = app.state.schematic.session.tool;
 
     Command::PlacePin.execute(&mut app);
 
@@ -134,9 +134,9 @@ fn place_pin_opens_the_isolated_mockup_transaction_without_mutating_the_document
     );
     assert_eq!(app.state.schematic.document().components, components);
     assert_eq!(app.state.schematic.topology_version(), topology);
-    assert_eq!(app.state.schematic.is_dirty, dirty);
-    assert_eq!(app.state.schematic.tool, tool);
-    assert!(app.state.schematic.pending_port_sequence.is_none());
+    assert_eq!(app.state.schematic.session.is_dirty, dirty);
+    assert_eq!(app.state.schematic.session.tool, tool);
+    assert!(app.state.schematic.session.pending_port_sequence.is_none());
     assert!(!app.state.schematic.can_undo());
 }
 
@@ -146,8 +146,8 @@ fn place_text_opens_the_isolated_mockup_transaction_without_mutating_the_documen
     app.state.workbench.workspace = Workspace::Design;
     let notes = app.state.schematic.document().design_notes.clone();
     let topology = app.state.schematic.topology_version();
-    let dirty = app.state.schematic.is_dirty;
-    let tool = app.state.schematic.tool;
+    let dirty = app.state.schematic.session.is_dirty;
+    let tool = app.state.schematic.session.tool;
 
     Command::PlaceText.execute(&mut app);
 
@@ -155,9 +155,9 @@ fn place_text_opens_the_isolated_mockup_transaction_without_mutating_the_documen
     assert_eq!(app.state.dialogs.design_note.text, "Bias network");
     assert_eq!(app.state.schematic.document().design_notes, notes);
     assert_eq!(app.state.schematic.topology_version(), topology);
-    assert_eq!(app.state.schematic.is_dirty, dirty);
-    assert_eq!(app.state.schematic.tool, tool);
-    assert!(app.state.schematic.pending_design_note.is_none());
+    assert_eq!(app.state.schematic.session.is_dirty, dirty);
+    assert_eq!(app.state.schematic.session.tool, tool);
+    assert!(app.state.schematic.session.pending_design_note.is_none());
     assert!(!app.state.schematic.can_undo());
 }
 
@@ -167,8 +167,8 @@ fn place_shape_opens_the_isolated_mockup_transaction_without_mutating_the_docume
     app.state.workbench.workspace = Workspace::Design;
     let shapes = app.state.schematic.document().documentation_shapes.clone();
     let topology = app.state.schematic.topology_version();
-    let dirty = app.state.schematic.is_dirty;
-    let tool = app.state.schematic.tool;
+    let dirty = app.state.schematic.session.is_dirty;
+    let tool = app.state.schematic.session.tool;
 
     Command::PlaceShape.execute(&mut app);
 
@@ -179,9 +179,15 @@ fn place_shape_opens_the_isolated_mockup_transaction_without_mutating_the_docume
     );
     assert_eq!(app.state.schematic.document().documentation_shapes, shapes);
     assert_eq!(app.state.schematic.topology_version(), topology);
-    assert_eq!(app.state.schematic.is_dirty, dirty);
-    assert_eq!(app.state.schematic.tool, tool);
-    assert!(app.state.schematic.pending_documentation_shape.is_none());
+    assert_eq!(app.state.schematic.session.is_dirty, dirty);
+    assert_eq!(app.state.schematic.session.tool, tool);
+    assert!(
+        app.state
+            .schematic
+            .session
+            .pending_documentation_shape
+            .is_none()
+    );
     assert!(!app.state.schematic.can_undo());
 }
 
@@ -193,8 +199,8 @@ fn every_raw_port_command_route_is_projected_through_the_same_dialog() {
     Command::Place(ComponentType::Port).execute(&mut app);
 
     assert!(app.state.dialogs.pin_port.open);
-    assert_eq!(app.state.schematic.tool, Tool::Select);
-    assert!(app.state.schematic.pending_port_sequence.is_none());
+    assert_eq!(app.state.schematic.session.tool, Tool::Select);
+    assert!(app.state.schematic.session.pending_port_sequence.is_none());
     assert!(app.state.schematic.document().components.is_empty());
 }
 
@@ -244,13 +250,13 @@ fn bus_authoring_commands_are_unavailable_on_read_only_schematics() {
     assert!(Command::PlaceText.is_enabled(&app));
     assert!(Command::PlaceShape.is_enabled(&app));
 
-    app.state.schematic.read_only = true;
+    app.state.schematic.session.read_only = true;
     assert!(!Command::PlaceBus.is_enabled(&app));
     assert!(!Command::PlaceBusTap.is_enabled(&app));
     assert!(!Command::PlacePin.is_enabled(&app));
     assert!(!Command::PlaceText.is_enabled(&app));
     assert!(!Command::PlaceShape.is_enabled(&app));
-    app.state.schematic.read_only = false;
+    app.state.schematic.session.read_only = false;
     app.state.workbench.workspace = Workspace::Results;
     assert!(!Command::PlacePin.is_enabled(&app));
     assert!(!Command::PlaceText.is_enabled(&app));
@@ -264,14 +270,14 @@ fn switching_conductor_tools_cancels_incompatible_routes_and_tap_state() {
     let mut schematic = crate::state::SchematicState::default();
     schematic.arm_tool(Tool::Wire);
     schematic.start_wire(Point::origin());
-    assert!(schematic.wire_drawing.active);
+    assert!(schematic.session.wire_drawing.active);
 
     schematic.arm_tool(Tool::Bus);
-    assert!(!schematic.wire_drawing.active);
+    assert!(!schematic.session.wire_drawing.active);
     schematic.start_bus(Point::new(2, 3), None).unwrap();
-    assert!(schematic.bus_drawing.active);
+    assert!(schematic.session.bus_drawing.active);
 
-    schematic.pending_bus_tap = Some(
+    schematic.session.pending_bus_tap = Some(
         PendingBusTap::new(
             BusDeclaration::parse("DATA[15:0]").unwrap(),
             BusSlice::parse("DATA[7:0]").unwrap(),
@@ -280,11 +286,11 @@ fn switching_conductor_tools_cancels_incompatible_routes_and_tap_state() {
         .unwrap(),
     );
     schematic.arm_tool(Tool::BusTap);
-    assert!(!schematic.bus_drawing.active);
-    assert!(schematic.pending_bus_tap.is_some());
+    assert!(!schematic.session.bus_drawing.active);
+    assert!(schematic.session.pending_bus_tap.is_some());
 
     schematic.arm_tool(Tool::Wire);
-    assert!(schematic.pending_bus_tap.is_none());
+    assert!(schematic.session.pending_bus_tap.is_none());
 }
 
 #[test]
@@ -292,18 +298,18 @@ fn cancel_clears_even_hidden_conductor_routes() {
     use crate::state::Point;
 
     let mut schematic = crate::state::SchematicState::default();
-    schematic.tool = Tool::Select;
+    schematic.session.tool = Tool::Select;
     schematic.start_wire(Point::origin());
     schematic.start_bus(Point::new(4, 5), None).unwrap();
-    assert!(schematic.wire_drawing.active);
-    assert!(schematic.bus_drawing.active);
+    assert!(schematic.session.wire_drawing.active);
+    assert!(schematic.session.bus_drawing.active);
 
     schematic.cancel_tool();
 
-    assert_eq!(schematic.tool, Tool::Select);
-    assert!(!schematic.wire_drawing.active);
-    assert!(!schematic.bus_drawing.active);
-    assert!(schematic.pending_bus_tap.is_none());
+    assert_eq!(schematic.session.tool, Tool::Select);
+    assert!(!schematic.session.wire_drawing.active);
+    assert!(!schematic.session.bus_drawing.active);
+    assert!(schematic.session.pending_bus_tap.is_none());
 }
 
 #[test]
@@ -312,20 +318,20 @@ fn escape_walks_route_then_tool_then_selection_without_collapsing_stages() {
 
     let mut schematic = crate::state::SchematicState::default();
     let selected = schematic.add_component(ComponentType::Resistor, Point::origin());
-    schematic.selection.select_only_component(selected);
-    schematic.tool = Tool::Wire;
+    schematic.session.selection.select_only_component(selected);
+    schematic.session.tool = Tool::Wire;
     schematic.start_wire(Point::origin());
     schematic.extend_wire(Point::new(10, 0));
 
     schematic.cancel_interaction_step();
-    assert!(!schematic.wire_drawing.active);
-    assert_eq!(schematic.tool, Tool::Wire);
-    assert!(schematic.selection.has_component(selected));
+    assert!(!schematic.session.wire_drawing.active);
+    assert_eq!(schematic.session.tool, Tool::Wire);
+    assert!(schematic.session.selection.has_component(selected));
 
     schematic.cancel_interaction_step();
-    assert_eq!(schematic.tool, Tool::Select);
-    assert!(schematic.selection.has_component(selected));
+    assert_eq!(schematic.session.tool, Tool::Select);
+    assert!(schematic.session.selection.has_component(selected));
 
     schematic.cancel_interaction_step();
-    assert!(schematic.selection.is_empty());
+    assert!(schematic.session.selection.is_empty());
 }

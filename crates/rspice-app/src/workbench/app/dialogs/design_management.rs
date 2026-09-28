@@ -540,7 +540,7 @@ fn all_stable_object_ids(schematic: &crate::state::SchematicState) -> Vec<u64> {
 }
 
 fn selected_stable_object_ids(schematic: &crate::state::SchematicState) -> Vec<u64> {
-    let selection = &schematic.selection;
+    let selection = &schematic.session.selection;
     let mut ids = BTreeSet::new();
     ids.extend(selection.components.iter().copied());
     ids.extend(selection.all_selected_wire_ids());

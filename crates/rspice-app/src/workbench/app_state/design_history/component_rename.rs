@@ -121,12 +121,12 @@ impl AppState {
         }
         if candidate.name == expected.name || expected.kind.spice_prefix().is_empty() {
             prepared.commit_local(description);
-            self.schematic.is_dirty = true;
+            self.schematic.session.is_dirty = true;
             return Ok(true);
         }
         let after_design = prepared.into_reference_candidate();
         let mut after_schematic = self.schematic.clone_with_design(after_design);
-        after_schematic.is_dirty = true;
+        after_schematic.session.is_dirty = true;
         let transaction = self.prepare_schematic_reference_transaction(
             BTreeMap::from([(document.key(), self.schematic.clone())]),
             BTreeMap::from([(document.key(), after_schematic)]),

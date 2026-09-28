@@ -162,7 +162,7 @@ pub(crate) fn apply_selection_layout(
             TargetKind::Probe => state.schematic.translate_layout_probe(target.id, delta),
         }
     }
-    state.schematic.is_dirty = true;
+    state.schematic.session.is_dirty = true;
     let recorded = state.schematic.end_operation();
     if recorded {
         state.sync_active_schematic_to_workspace();
@@ -179,7 +179,7 @@ fn selection_layout_targets(
         return Err(SelectionLayoutError::ReadOnly);
     }
 
-    let selection = &state.schematic.selection;
+    let selection = &state.schematic.session.selection;
     if has_incompatible_selection(selection) {
         return Err(SelectionLayoutError::IncompatibleSelection);
     }
@@ -456,7 +456,7 @@ mod tests {
                     ComponentType::Resistor,
                     Point::new(x, y),
                 ));
-            state.schematic.selection.select_component(id);
+            state.schematic.session.selection.select_component(id);
         }
         state.schematic.init_undo_history();
         state
@@ -546,7 +546,7 @@ mod tests {
                 9,
                 vec![Point::origin(), Point::new(10, 0)],
             ));
-        state.schematic.selection.select_wire(9);
+        state.schematic.session.selection.select_wire(9);
         let context = SchematicSymbolContext::from_state(&state);
         assert_eq!(
             apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft),
@@ -554,8 +554,8 @@ mod tests {
         );
         assert!(!state.schematic.can_undo());
 
-        state.schematic.selection.wires.clear();
-        state.schematic.read_only = true;
+        state.schematic.session.selection.wires.clear();
+        state.schematic.session.read_only = true;
         assert_eq!(
             apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft),
             Err(SelectionLayoutError::ReadOnly)
@@ -570,8 +570,8 @@ mod tests {
             SchematicProbe::new(20, Point::new(10, 10), "V(out)", None).unwrap(),
             SchematicProbe::new(21, Point::new(40, 30), "V(out)", None).unwrap(),
         ];
-        state.schematic.selection.select_probe(20);
-        state.schematic.selection.select_probe(21);
+        state.schematic.session.selection.select_probe(20);
+        state.schematic.session.selection.select_probe(21);
         state.schematic.init_undo_history();
         let original = state.schematic.document().probes.clone();
         let topology = state.schematic.topology_version();

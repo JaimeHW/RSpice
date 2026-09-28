@@ -226,11 +226,15 @@ mod tests {
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
         let active = state.workspace.active_view.clone();
 
-        state.schematic.selection.select_component(component);
+        state
+            .schematic
+            .session
+            .selection
+            .select_component(component);
         state.schematic.copy_selection();
-        state.schematic.pan = (125.0, -40.0);
-        state.schematic.zoom = 2.25;
-        state.schematic.current_file = Some(std::path::PathBuf::from("presentation.rsch"));
+        state.schematic.session.pan = (125.0, -40.0);
+        state.schematic.session.zoom = 2.25;
+        state.schematic.session.current_file = Some(std::path::PathBuf::from("presentation.rsch"));
         state.workspace.open_views[0].dirty = true;
         state.library_manager.filter_text = "presentation filter".to_owned();
         state.library_manager.show_read_only = !state.library_manager.show_read_only;

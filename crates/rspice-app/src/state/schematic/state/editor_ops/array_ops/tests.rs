@@ -21,9 +21,9 @@ fn plan(
 fn selected_resistor() -> SchematicState {
     let mut state = SchematicState::default();
     let id = state.add_component(ComponentType::Resistor, Point::new(0, 0));
-    state.selection.select_only_component(id);
+    state.session.selection.select_only_component(id);
     state.clear_undo_history();
-    state.is_dirty = false;
+    state.session.is_dirty = false;
     state
 }
 
@@ -59,9 +59,12 @@ fn preview_is_exact_and_does_not_mutate_any_live_runtime_state() {
         state.design.document().components,
         before.design.document().components
     );
-    assert_eq!(state.selection, before.selection);
-    assert_eq!(state.clipboard.count(), before.clipboard.count());
-    assert_eq!(state.is_dirty, before.is_dirty);
+    assert_eq!(state.session.selection, before.session.selection);
+    assert_eq!(
+        state.session.clipboard.count(),
+        before.session.clipboard.count()
+    );
+    assert_eq!(state.session.is_dirty, before.session.is_dirty);
     assert_eq!(state.topology_version(), before.topology_version());
     assert!(!state.can_undo());
 }
@@ -69,11 +72,12 @@ fn preview_is_exact_and_does_not_mutate_any_live_runtime_state() {
 #[test]
 fn linear_commit_matches_preview_preserves_clipboard_and_undoes_once() {
     let mut state = selected_resistor();
-    state
-        .clipboard
-        .net_labels
-        .push(NetLabel::new(9_999, Point::new(5, 5), "clipboard_guard"));
-    let clipboard = state.clipboard.clone();
+    state.session.clipboard.net_labels.push(NetLabel::new(
+        9_999,
+        Point::new(5, 5),
+        "clipboard_guard",
+    ));
+    let clipboard = state.session.clipboard.clone();
     let topology = state.topology_version();
     let plan = plan(
         SchematicArrayKind::Linear,
@@ -90,8 +94,8 @@ fn linear_commit_matches_preview_preserves_clipboard_and_undoes_once() {
         &state.design.document().components[1..],
         preview.components()
     );
-    assert_eq!(state.clipboard.components, clipboard.components);
-    assert_eq!(state.clipboard.net_labels, clipboard.net_labels);
+    assert_eq!(state.session.clipboard.components, clipboard.components);
+    assert_eq!(state.session.clipboard.net_labels, clipboard.net_labels);
     assert_eq!(state.topology_version(), topology.wrapping_add(1));
     assert_eq!(state.undo_description(), Some("create array"));
     assert!(state.undo());
@@ -153,11 +157,11 @@ fn radial_documentation_rotates_exact_geometry_without_topology_change() {
         .document_mut_for_test()
         .documentation_shapes
         .push(shape);
-    state.selection.select_design_note(40);
-    state.selection.select_documentation_shape(41);
+    state.session.selection.select_design_note(40);
+    state.session.selection.select_documentation_shape(41);
     state.recalculate_runtime_state();
     state.clear_undo_history();
-    state.is_dirty = false;
+    state.session.is_dirty = false;
     let topology = state.topology_version();
     let naming = state
         .default_array_naming(SchematicArrayCount::parse("4 × 1").unwrap())
@@ -217,7 +221,7 @@ fn collision_and_radial_electrical_rejections_are_atomic_true_no_ops() {
         state.design.document().components,
         before.design.document().components
     );
-    assert_eq!(state.is_dirty, before.is_dirty);
+    assert_eq!(state.session.is_dirty, before.session.is_dirty);
     assert_eq!(state.topology_version(), before.topology_version());
     assert!(!state.can_undo());
 }
@@ -235,8 +239,8 @@ fn resolved_internal_wire_connections_are_remapped_per_replica() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(wire_id, Point::new(0, 0), Point::new(20, 0)));
-    state.selection.select_component(left);
-    state.selection.select_component(right);
+    state.session.selection.select_component(left);
+    state.session.selection.select_component(right);
     state.clear_undo_history();
     let plan = plan(
         SchematicArrayKind::Linear,
@@ -290,7 +294,7 @@ fn bus_and_tap_ownership_and_scalar_slice_are_remapped_together() {
     state.design.document_mut_for_test().bus_taps.push(tap);
     state.recalculate_runtime_state();
     state.clear_undo_history();
-    state.selection.select_only_bus_tap(71);
+    state.session.selection.select_only_bus_tap(71);
     let tap_naming = state
         .default_array_naming(SchematicArrayCount::parse("2 × 1").unwrap())
         .unwrap();
@@ -309,7 +313,7 @@ fn bus_and_tap_ownership_and_scalar_slice_are_remapped_together() {
         "DATA[1]"
     );
 
-    state.selection.select_only_bus(70);
+    state.session.selection.select_only_bus(70);
     assert_eq!(
         state
             .default_array_naming(SchematicArrayCount::parse("2 × 1").unwrap())
@@ -350,10 +354,10 @@ fn naming_collision_partial_stale_read_only_and_overflow_fail_closed() {
         Some("R2")
     );
 
-    state.selection.select_wire_segment(123, 0);
+    state.session.selection.select_wire_segment(123, 0);
     assert!(!state.has_live_array_selection());
-    state.selection.wire_segments.clear();
-    state.selection.select_component(999_999);
+    state.session.selection.wire_segments.clear();
+    state.session.selection.select_component(999_999);
     let stale_plan = plan(
         SchematicArrayKind::Linear,
         "2 × 1",
@@ -364,8 +368,8 @@ fn naming_collision_partial_stale_read_only_and_overflow_fail_closed() {
         state.preview_array_selection(&stale_plan),
         Err(SchematicArrayError::StaleSelection { .. })
     ));
-    state.selection.components.remove(&999_999);
-    state.read_only = true;
+    state.session.selection.components.remove(&999_999);
+    state.session.read_only = true;
     assert!(matches!(
         state.array_selection(&stale_plan),
         Err(SchematicArrayError::ReadOnly)
@@ -393,14 +397,14 @@ fn naming_collision_partial_stale_read_only_and_overflow_fail_closed() {
 fn strict_source_eligibility_rejects_mixed_stale_and_malformed_objects() {
     let mut stale = selected_resistor();
     assert_eq!(stale.validate_array_source_selection(), Ok(()));
-    stale.selection.select_component(999_999);
+    stale.session.selection.select_component(999_999);
     assert!(matches!(
         stale.validate_array_source_selection(),
         Err(SchematicArrayError::StaleSelection { object_id: 999_999 })
     ));
 
-    stale.selection.clear();
-    stale.selection.select_component(999_999);
+    stale.session.selection.clear();
+    stale.session.selection.select_component(999_999);
     assert!(matches!(
         stale.validate_array_source_selection(),
         Err(SchematicArrayError::StaleSelection { object_id: 999_999 })
@@ -417,7 +421,7 @@ fn strict_source_eligibility_rejects_mixed_stale_and_malformed_objects() {
             Point::new(20, 0),
             Point::new(20, 0),
         ));
-    malformed.selection.select_wire(malformed_wire_id);
+    malformed.session.selection.select_wire(malformed_wire_id);
     assert!(matches!(
         malformed.validate_array_source_selection(),
         Err(SchematicArrayError::InvalidGeometry { object_id })
@@ -461,8 +465,8 @@ fn strict_source_eligibility_rejects_mixed_stale_and_malformed_objects() {
         .document_mut_for_test()
         .connections
         .push(WireConnection::new(implicit_wire_id, 1, right, "B"));
-    implicit.selection.select_component(left);
-    implicit.selection.select_component(right);
+    implicit.session.selection.select_component(left);
+    implicit.session.selection.select_component(right);
     assert!(matches!(
         implicit.validate_array_source_selection(),
         Err(SchematicArrayError::InvalidGeometry { object_id })
@@ -475,8 +479,8 @@ fn default_group_naming_interleaves_same_prefix_without_collisions() {
     let mut state = SchematicState::default();
     let first = state.add_component(ComponentType::Resistor, Point::new(0, 0));
     let second = state.add_component(ComponentType::Resistor, Point::new(0, 30));
-    state.selection.select_component(first);
-    state.selection.select_component(second);
+    state.session.selection.select_component(first);
+    state.session.selection.select_component(second);
     let count = SchematicArrayCount::parse("8 × 1").unwrap();
     let naming = state.default_array_naming(count).unwrap();
     assert_eq!(naming.to_string(), "R1…R15 · R2…R16");
@@ -501,8 +505,8 @@ fn default_group_naming_interleaves_same_prefix_without_collisions() {
     let first = sparse.add_component(ComponentType::Resistor, Point::new(0, 0));
     let second = sparse.add_component(ComponentType::Resistor, Point::new(0, 30));
     sparse.design.document_mut_for_test().components[1].name = "R5".to_owned();
-    sparse.selection.select_component(first);
-    sparse.selection.select_component(second);
+    sparse.session.selection.select_component(first);
+    sparse.session.selection.select_component(second);
     let sparse_naming = sparse.default_array_naming(count).unwrap();
     let sparse_plan = SchematicArrayPlan::new(
         SchematicArrayKind::Linear,
@@ -547,8 +551,8 @@ fn default_bus_index_naming_interleaves_selected_scalar_labels() {
         .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(61, Point::new(0, 20), "DATA[1]"));
-    state.selection.select_net_label(60);
-    state.selection.select_net_label(61);
+    state.session.selection.select_net_label(60);
+    state.session.selection.select_net_label(61);
     state.recalculate_runtime_state();
     let count = SchematicArrayCount::parse("4 × 1").unwrap();
     let naming = state.default_array_naming(count).unwrap();
@@ -579,10 +583,10 @@ fn radial_zero_radius_and_quantized_overlap_are_atomic_rejections() {
         .document_mut_for_test()
         .design_notes
         .push(DesignNote::new(80, Point::origin(), DesignNoteKind::PlainText, "centered").unwrap());
-    zero_radius.selection.select_design_note(80);
+    zero_radius.session.selection.select_design_note(80);
     zero_radius.recalculate_runtime_state();
     zero_radius.clear_undo_history();
-    zero_radius.is_dirty = false;
+    zero_radius.session.is_dirty = false;
     let zero_before = zero_radius.clone();
     let zero_count = SchematicArrayCount::new(4, 1).unwrap();
     let zero_plan = SchematicArrayPlan::new(
@@ -601,7 +605,7 @@ fn radial_zero_radius_and_quantized_overlap_are_atomic_rejections() {
         zero_radius.design.document().design_notes,
         zero_before.design.document().design_notes
     );
-    assert_eq!(zero_radius.is_dirty, zero_before.is_dirty);
+    assert_eq!(zero_radius.session.is_dirty, zero_before.session.is_dirty);
     assert!(!zero_radius.can_undo());
 
     let mut quantized = SchematicState::default();
@@ -614,10 +618,10 @@ fn radial_zero_radius_and_quantized_overlap_are_atomic_rejections() {
         )
         .unwrap(),
     );
-    quantized.selection.select_design_note(81);
+    quantized.session.selection.select_design_note(81);
     quantized.recalculate_runtime_state();
     quantized.clear_undo_history();
-    quantized.is_dirty = false;
+    quantized.session.is_dirty = false;
     let quantized_before = quantized.clone();
     let quantized_count = SchematicArrayCount::new(360, 1).unwrap();
     let quantized_plan = SchematicArrayPlan::new(
@@ -636,7 +640,10 @@ fn radial_zero_radius_and_quantized_overlap_are_atomic_rejections() {
         quantized.design.document().design_notes,
         quantized_before.design.document().design_notes
     );
-    assert_eq!(quantized.is_dirty, quantized_before.is_dirty);
+    assert_eq!(
+        quantized.session.is_dirty,
+        quantized_before.session.is_dirty
+    );
     assert!(!quantized.can_undo());
 }
 
@@ -657,10 +664,10 @@ fn symmetric_radial_shape_overlap_is_rejected_even_when_points_reverse() {
             )
             .unwrap(),
         );
-    state.selection.select_documentation_shape(90);
+    state.session.selection.select_documentation_shape(90);
     state.recalculate_runtime_state();
     state.clear_undo_history();
-    state.is_dirty = false;
+    state.session.is_dirty = false;
     let before = state.clone();
     let count = SchematicArrayCount::new(2, 1).unwrap();
     let plan = SchematicArrayPlan::new(
@@ -679,7 +686,7 @@ fn symmetric_radial_shape_overlap_is_rejected_even_when_points_reverse() {
         state.design.document().documentation_shapes,
         before.design.document().documentation_shapes
     );
-    assert_eq!(state.is_dirty, before.is_dirty);
+    assert_eq!(state.session.is_dirty, before.session.is_dirty);
     assert!(!state.can_undo());
 }
 
@@ -704,8 +711,8 @@ fn snapped_durable_connections_capture_implicit_wire_and_close_selection_symmetr
         .document_mut_for_test()
         .connections
         .push(WireConnection::new(wire_id, 1, right, "B"));
-    state.selection.select_component(left);
-    state.selection.select_component(right);
+    state.session.selection.select_component(left);
+    state.session.selection.select_component(right);
     state.clear_undo_history();
     let count = SchematicArrayCount::new(2, 1).unwrap();
     let plan = SchematicArrayPlan::new(
@@ -738,8 +745,8 @@ fn snapped_durable_connections_capture_implicit_wire_and_close_selection_symmetr
         .array_selection_resolved(&plan, terminals, bounds)
         .unwrap();
     assert_eq!(state.design.document().connections.len(), 4);
-    assert!(state.selection.has_wire(wire_id));
-    assert!(state.selection.has_wire(preview.wires()[0].id));
+    assert!(state.session.selection.has_wire(wire_id));
+    assert!(state.session.selection.has_wire(preview.wires()[0].id));
 }
 
 #[test]
@@ -762,8 +769,8 @@ fn explicitly_selected_wire_preserves_durable_terminal_ownership_without_duplica
             component_id,
             "durable-terminal",
         ));
-    state.selection.select_component(component_id);
-    state.selection.select_wire(wire_id);
+    state.session.selection.select_component(component_id);
+    state.session.selection.select_wire(wire_id);
     state.clear_undo_history();
     let count = SchematicArrayCount::new(2, 1).unwrap();
     let plan = SchematicArrayPlan::new(
@@ -829,7 +836,7 @@ fn resolved_authored_bounds_enforce_symmetric_body_conductor_and_anchor_collisio
         .document_mut_for_test()
         .wires
         .push(Wire::segment(710, Point::new(-5, 0), Point::new(5, 0)));
-    conductor_case.selection.select_only_wire(710);
+    conductor_case.session.selection.select_only_wire(710);
     conductor_case
         .design
         .document_mut_for_test()
@@ -855,7 +862,7 @@ fn resolved_authored_bounds_enforce_symmetric_body_conductor_and_anchor_collisio
         .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(720, Point::origin(), "SIGNAL"));
-    anchor_case.selection.select_net_label(720);
+    anchor_case.session.selection.select_net_label(720);
     anchor_case.design.document_mut_for_test().components.push(
         Component::new(721, ComponentType::Capacitor, Point::new(100, 0))
             .with_name_value("C1", "1p"),
@@ -901,8 +908,8 @@ fn typed_reference_defaults_support_suffixes_and_zero_padding() {
         Component::new(502, ComponentType::CellInstance, Point::new(0, 30))
             .with_name_value("X03B", "cell"),
     );
-    state.selection.select_component(501);
-    state.selection.select_component(502);
+    state.session.selection.select_component(501);
+    state.session.selection.select_component(502);
     state.recalculate_runtime_state();
     let count = SchematicArrayCount::new(8, 1).unwrap();
     let naming = state.default_array_naming(count).unwrap();
@@ -924,8 +931,8 @@ fn duplicate_scalar_bus_sources_share_one_canonical_naming_range() {
         .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(602, Point::new(0, 20), "data[0]"));
-    state.selection.select_net_label(601);
-    state.selection.select_net_label(602);
+    state.session.selection.select_net_label(601);
+    state.session.selection.select_net_label(602);
     state.recalculate_runtime_state();
     let count = SchematicArrayCount::new(4, 1).unwrap();
     let naming = state.default_array_naming(count).unwrap();
@@ -968,7 +975,10 @@ fn generated_object_and_segment_budgets_reject_before_allocation() {
                 )
                 .unwrap(),
             );
-        object_heavy.selection.select_design_note(800 + index);
+        object_heavy
+            .session
+            .selection
+            .select_design_note(800 + index);
     }
     object_heavy.recalculate_runtime_state();
     let count = SchematicArrayCount::new(4_096, 1).unwrap();
@@ -993,7 +1003,7 @@ fn generated_object_and_segment_budgets_reject_before_allocation() {
             900,
             (0..35).map(|index| Point::new(index * 10, 0)).collect(),
         ));
-    segment_heavy.selection.select_only_wire(900);
+    segment_heavy.session.selection.select_only_wire(900);
     segment_heavy.recalculate_runtime_state();
     assert!(matches!(
         segment_heavy.preview_array_selection(&plan),

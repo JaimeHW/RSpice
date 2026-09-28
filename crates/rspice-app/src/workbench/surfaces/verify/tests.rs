@@ -780,7 +780,7 @@ fn soa_cross_probe_selects_the_exact_schematic_device() {
     cross_probe_soa_device(&mut app, "m1")
         .expect("device identity cross-probes case-insensitively");
 
-    assert!(app.state.schematic.selection.has_component(42));
+    assert!(app.state.schematic.session.selection.has_component(42));
     assert_eq!(
         app.state.workbench.workspace,
         super::super::super::state::Workspace::Design

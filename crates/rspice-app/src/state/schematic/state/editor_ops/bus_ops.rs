@@ -17,12 +17,12 @@ impl SchematicState {
         points: Vec<Point>,
         declaration: Option<BusDeclaration>,
     ) -> Result<u64, BusParseError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(BusParseError::ReadOnly);
         }
         let edit = self.design.add_bus(points, declaration)?;
-        self.selection.clear();
-        self.selection.select_bus(edit.value);
+        self.session.selection.clear();
+        self.session.selection.select_bus(edit.value);
         self.finish_document_edit(edit.committed);
         Ok(edit.value)
     }
@@ -33,41 +33,41 @@ impl SchematicState {
         position: Point,
         declaration: Option<BusDeclaration>,
     ) -> Result<(), BusParseError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(BusParseError::ReadOnly);
         }
         if let Some(declaration) = &declaration {
             declaration.validate()?;
         }
-        self.bus_drawing.start(position, declaration);
+        self.session.bus_drawing.start(position, declaration);
         Ok(())
     }
 
     pub fn update_bus_preview(&mut self, position: Point) {
-        self.bus_drawing.update_preview(position);
+        self.session.bus_drawing.update_preview(position);
     }
 
     pub fn extend_bus(&mut self, position: Point) {
-        if !self.read_only {
-            self.bus_drawing.add_point(position);
+        if !self.session.read_only {
+            self.session.bus_drawing.add_point(position);
         }
     }
 
     pub fn toggle_bus_routing(&mut self) {
-        self.bus_drawing.routing_mode = self.bus_drawing.routing_mode.toggle();
+        self.session.bus_drawing.routing_mode = self.session.bus_drawing.routing_mode.toggle();
     }
 
     /// Finish the active route and commit the complete polyline atomically.
     pub fn finish_bus(&mut self) -> Result<Option<u64>, BusParseError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(BusParseError::ReadOnly);
         }
-        if !self.bus_drawing.active {
+        if !self.session.bus_drawing.active {
             return Ok(None);
         }
-        let points = std::mem::take(&mut self.bus_drawing.points);
-        let declaration = self.bus_drawing.declaration.take();
-        self.bus_drawing.cancel();
+        let points = std::mem::take(&mut self.session.bus_drawing.points);
+        let declaration = self.session.bus_drawing.declaration.take();
+        self.session.bus_drawing.cancel();
         let points = bus_edit::simplify_polyline(points);
         if points.len() < 2 {
             return Ok(None);
@@ -76,14 +76,14 @@ impl SchematicState {
     }
 
     pub fn cancel_bus(&mut self) {
-        self.bus_drawing.cancel();
+        self.session.bus_drawing.cancel();
     }
 
     /// Cancel every unfinished conductor-routing gesture. Escape and tool
     /// switches use this to guarantee an invisible route can never commit.
     pub fn cancel_routing_gestures(&mut self) {
         self.cancel_wire();
-        self.bus_drawing.cancel();
+        self.session.bus_drawing.cancel();
     }
 
     /// Place a validated tap as one atomic, undoable topology mutation.
@@ -95,7 +95,7 @@ impl SchematicState {
         slice: BusSlice,
         orientation: BusTapOrientation,
     ) -> Result<u64, BusParseError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(BusParseError::ReadOnly);
         }
         let edit = self.design.place_bus_tap(
@@ -107,8 +107,8 @@ impl SchematicState {
             },
             slice,
         )?;
-        self.selection.clear();
-        self.selection.select_bus_tap(edit.value);
+        self.session.selection.clear();
+        self.session.selection.select_bus_tap(edit.value);
         self.finish_document_edit(edit.committed);
         Ok(edit.value)
     }
@@ -123,7 +123,7 @@ impl SchematicState {
         connection_point: Point,
         pending: &PendingBusTap,
     ) -> Result<u64, BusParseError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(BusParseError::ReadOnly);
         }
         let edit = self.design.place_configured_bus_tap(
@@ -136,8 +136,8 @@ impl SchematicState {
             &pending.bus_declaration,
             &pending.slice,
         )?;
-        self.selection.clear();
-        self.selection.select_bus_tap(edit.value);
+        self.session.selection.clear();
+        self.session.selection.select_bus_tap(edit.value);
         self.finish_document_edit(edit.committed);
         Ok(edit.value)
     }
@@ -152,7 +152,7 @@ impl SchematicState {
         expected: &Bus,
         declaration: Option<BusDeclaration>,
     ) -> Result<bool, BusParseError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(BusParseError::ReadOnly);
         }
         let Some(edit) = self.design.edit_bus_properties(expected, declaration)? else {
@@ -169,7 +169,7 @@ impl SchematicState {
         expected: &Bus,
         declaration: Option<&BusDeclaration>,
     ) -> Result<BusPropertyImpact, BusParseError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(BusParseError::ReadOnly);
         }
         bus_edit::validate_bus_properties(&self.design.document(), expected, declaration)
@@ -188,7 +188,7 @@ impl SchematicState {
         slice: BusSlice,
         orientation: BusTapOrientation,
     ) -> Result<bool, BusParseError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(BusParseError::ReadOnly);
         }
         let Some(edit) = self.design.edit_bus_tap_properties(
@@ -217,7 +217,7 @@ impl SchematicState {
         slice: BusSlice,
         orientation: BusTapOrientation,
     ) -> Result<bool, BusParseError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(BusParseError::ReadOnly);
         }
         bus_edit::validate_bus_tap_properties(
@@ -317,10 +317,8 @@ mod tests {
 
     #[test]
     fn read_only_bus_transactions_never_mutate_or_create_undo() {
-        let mut state = SchematicState {
-            read_only: true,
-            ..SchematicState::default()
-        };
+        let mut state = SchematicState::default();
+        state.session.read_only = true;
         assert_eq!(
             state.add_bus(vec![Point::new(0, 0), Point::new(5, 0)], None),
             Err(BusParseError::ReadOnly)
@@ -1049,7 +1047,7 @@ mod tests {
         let mut state = SchematicState::default();
         declared_bus(&mut state);
         state.clear_undo_history();
-        state.is_dirty = false;
+        state.session.is_dirty = false;
         let version = state.topology_version();
         let expected = state.design.document().buses[0].clone();
         let declaration = expected.declaration.clone().expect("declared bus");
@@ -1065,7 +1063,7 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(state.topology_version(), version);
-        assert!(!state.is_dirty);
+        assert!(!state.session.is_dirty);
         assert_eq!(state.history().undo_count(), 0);
     }
 }

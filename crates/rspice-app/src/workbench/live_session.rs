@@ -607,7 +607,7 @@ impl LiveSessionEngine {
         state.workbench.live_write_locks = LiveWriteLocks::default();
         // The read-only flag is this engine's to own; clearing it never
         // unlocks library or safe-mode gates, which are separate.
-        state.schematic.read_only = false;
+        state.schematic.session.read_only = false;
     }
 
     /// The session is over: keep the mirror open as an unsaved copy when
@@ -1643,7 +1643,7 @@ impl LiveSessionEngine {
             .schematic_views
             .contains_key(&state.workspace.active_key());
         state.workbench.live_write_locks = locks;
-        state.schematic.read_only = active_locked;
+        state.schematic.session.read_only = active_locked;
     }
 }
 
@@ -1657,13 +1657,13 @@ fn install_schematic_buffer(
     mut prepared: SchematicState,
     remote_is_unsaved: bool,
 ) {
-    prepared.needs_fit = false;
-    prepared.is_dirty = remote_is_unsaved;
-    prepared.needs_history_reset = true;
+    prepared.session.needs_fit = false;
+    prepared.session.is_dirty = remote_is_unsaved;
+    prepared.session.needs_history_reset = true;
     if state.workspace.active_key() == cell_key {
-        prepared.zoom = state.schematic.zoom;
-        prepared.pan = state.schematic.pan;
-        prepared.read_only = state.schematic.read_only;
+        prepared.session.zoom = state.schematic.session.zoom;
+        prepared.session.pan = state.schematic.session.pan;
+        prepared.session.read_only = state.schematic.session.read_only;
         state.schematic = prepared.clone();
     }
     state

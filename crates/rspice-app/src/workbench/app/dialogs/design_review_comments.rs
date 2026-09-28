@@ -187,7 +187,7 @@ impl RSpiceApp {
             current_revision.as_deref(),
         );
         let stale = review_authority_error(&self.state);
-        let write_allowed = !self.state.schematic.read_only
+        let write_allowed = !self.state.schematic.session.read_only
             && !self.state.active_view_read_only()
             && !self.state.workbench.safe_mode.project_read_only();
         let selected = selected_review_note(&self.state).cloned();
@@ -290,8 +290,12 @@ impl RSpiceApp {
             ReviewAction::GoToAnchor(id, point) => {
                 self.state.dialogs.design_review_comments.close();
                 self.state.workbench.workspace = crate::workbench::state::Workspace::Design;
-                self.state.schematic.selection.select_only_design_note(id);
-                self.state.schematic.center_request = Some(point);
+                self.state
+                    .schematic
+                    .session
+                    .selection
+                    .select_only_design_note(id);
+                self.state.schematic.session.center_request = Some(point);
             }
             ReviewAction::ApplyAssignment(assignee) => {
                 self.apply_review_mutation(DesignReviewMutation::Assign { assignee });
@@ -1088,7 +1092,7 @@ mod tests {
             open_design_review_comments(&mut app.state);
             app.state.dialogs.design_review_comments.reply = "Check the bias point".to_owned();
             let notes = app.state.schematic.document().design_notes.clone();
-            let dirty = app.state.schematic.is_dirty;
+            let dirty = app.state.schematic.session.is_dirty;
             for epoch in [
                 Err("clock unavailable"),
                 Ok(std::time::Duration::ZERO),
@@ -1098,7 +1102,7 @@ mod tests {
                     app.handle_design_review_action(action.clone())
                 });
                 assert_eq!(app.state.schematic.document().design_notes, notes);
-                assert_eq!(app.state.schematic.is_dirty, dirty);
+                assert_eq!(app.state.schematic.session.is_dirty, dirty);
                 assert_eq!(
                     app.state.dialogs.design_review_comments.reply,
                     "Check the bias point"

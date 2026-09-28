@@ -450,7 +450,7 @@ fn inspector_scroll_identity(app: &RSpiceApp) -> String {
         "{}|{}|{:?}",
         route,
         app.state.workspace.active_display_path(),
-        app.state.schematic.selection
+        app.state.schematic.session.selection
     )
 }
 

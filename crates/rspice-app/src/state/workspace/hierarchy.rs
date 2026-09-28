@@ -133,7 +133,7 @@ impl HierarchyDocuments for WorkspaceHierarchyDocuments<'_> {
         }?;
         Some(HierarchySchematic {
             document: &schematic.document(),
-            modified: schematic.is_dirty,
+            modified: schematic.session.is_dirty,
         })
     }
 }

@@ -89,7 +89,7 @@ pub(crate) fn open_net_label_placement(state: &mut AppState, anchor: Point) -> b
         return false;
     }
 
-    let kind = if state.schematic.tool == Tool::OffSheetConnector {
+    let kind = if state.schematic.session.tool == Tool::OffSheetConnector {
         NetLabelKind::OffSheet {
             direction: CrossSheetPortDirection::default(),
         }
@@ -480,12 +480,12 @@ mod tests {
     }
 
     fn open_at(app: &mut RSpiceApp, anchor: Point) {
-        app.state.schematic.tool = Tool::Label;
+        app.state.schematic.session.tool = Tool::Label;
         assert!(open_net_label_placement(&mut app.state, anchor));
     }
 
     fn open_connector_at(app: &mut RSpiceApp, anchor: Point) {
-        app.state.schematic.tool = Tool::OffSheetConnector;
+        app.state.schematic.session.tool = Tool::OffSheetConnector;
         assert!(open_net_label_placement(&mut app.state, anchor));
     }
 
@@ -531,7 +531,7 @@ mod tests {
             vec![NetLabel::new(id, Point::new(40, -20), "DATA[7]")]
         );
         assert!(app.state.schematic.can_undo());
-        assert_eq!(app.state.schematic.tool, Tool::Label);
+        assert_eq!(app.state.schematic.session.tool, Tool::Label);
         assert!(app.state.schematic.undo());
         assert!(app.state.schematic.document().net_labels.is_empty());
         assert!(!app.state.schematic.can_undo());
@@ -570,7 +570,7 @@ mod tests {
         assert!(!app.state.dialogs.net_label_placement.open);
         assert!(app.state.schematic.document().net_labels.is_empty());
         assert!(!app.state.schematic.can_undo());
-        assert_eq!(app.state.schematic.tool, Tool::Label);
+        assert_eq!(app.state.schematic.session.tool, Tool::Label);
     }
 
     #[test]
@@ -578,12 +578,12 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         open_at(&mut app, Point::origin());
         app.state.dialogs.net_label_placement.name = "sense".to_owned();
-        app.state.schematic.read_only = true;
+        app.state.schematic.session.read_only = true;
         assert!(matches!(
             validate_draft(&app.state),
             DraftValidation::Invalid(_)
         ));
-        app.state.schematic.read_only = false;
+        app.state.schematic.session.read_only = false;
         let DraftValidation::Valid(commit) = validate_draft(&app.state) else {
             panic!("authority should recover after read-only mode is cleared");
         };

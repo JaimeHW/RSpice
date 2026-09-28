@@ -194,7 +194,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
 fn standalone_schematic_save_remains_available_without_a_project() {
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.project_open = false;
-    app.state.schematic.current_file = Some("standalone.rsch".into());
+    app.state.schematic.session.current_file = Some("standalone.rsch".into());
 
     assert!(!Command::Save.requires_open_project());
     assert!(Command::Save.is_enabled(&app));
@@ -203,7 +203,7 @@ fn standalone_schematic_save_remains_available_without_a_project() {
         CommandAvailability::Available
     );
 
-    app.state.schematic.current_file = None;
+    app.state.schematic.session.current_file = None;
     app.state.browser_schematic_save_name = Some("browser-import.rsch".to_owned());
     assert!(Command::Save.is_enabled(&app));
     assert_eq!(

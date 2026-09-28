@@ -14,7 +14,7 @@ impl SchematicState {
             self.design
                 .select_instance_model(component_id, candidate_name, candidate_source);
         if changed {
-            self.is_dirty = true;
+            self.session.is_dirty = true;
         }
         changed
     }
@@ -28,7 +28,7 @@ impl SchematicState {
             .design
             .select_instance_model_section(component_id, selected);
         if changed {
-            self.is_dirty = true;
+            self.session.is_dirty = true;
         }
         changed
     }

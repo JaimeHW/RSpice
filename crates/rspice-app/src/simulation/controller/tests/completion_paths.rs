@@ -37,7 +37,7 @@ fn touchstone_auto_export_uses_export_workflow_io() {
     controller.current_analysis_idx = 1;
     // Live editor mutations after dispatch must not redirect or reformat
     // the prepared automatic export.
-    state.schematic.current_file = Some(PathBuf::from("changed").join("redirect.sch"));
+    state.schematic.session.current_file = Some(PathBuf::from("changed").join("redirect.sch"));
     let mut changed = crate::simulation::dialog::SpConfig::default();
     changed.touchstone_export = false;
     changed.touchstone_version = 1;
@@ -1032,7 +1032,7 @@ fn manual_deck_run_preserves_editor_source_without_ui_option_injection() {
 fn manual_deck_runs_use_imported_netlist_origin_for_relative_includes() {
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
-    state.schematic.current_file = Some(PathBuf::from("schematics").join("amp.rsch"));
+    state.schematic.session.current_file = Some(PathBuf::from("schematics").join("amp.rsch"));
     state.workspace.netlist_source =
         Some("deck\n.include models.lib\nV1 out 0 1\n.op\n.end\n".to_string());
     state.workspace.netlist_source_path = Some(PathBuf::from("decks").join("bias.cir"));
@@ -1047,7 +1047,7 @@ fn manual_deck_runs_use_imported_netlist_origin_for_relative_includes() {
 fn manual_deck_runs_do_not_fall_back_to_schematic_path() {
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
-    state.schematic.current_file = Some(PathBuf::from("schematics").join("amp.rsch"));
+    state.schematic.session.current_file = Some(PathBuf::from("schematics").join("amp.rsch"));
     state.workspace.netlist_source = Some("deck\nV1 out 0 1\n.op\n.end\n".to_string());
 
     assert!(

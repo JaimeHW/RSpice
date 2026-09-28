@@ -157,7 +157,7 @@ pub(crate) fn create_new_project_with(
     state.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
     state.workspace = workspace;
     state.schematic = schematic;
-    state.ui.schematic_snap = state.schematic.snap_engine.clone();
+    state.ui.schematic_snap = state.schematic.session.snap_engine.clone();
     state.bump_active_schematic_epoch();
     state.clear_project_execution_context();
     state.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
@@ -983,7 +983,7 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
     state.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
     state.workspace = workspace;
     state.schematic = schematic;
-    state.ui.schematic_snap = state.schematic.snap_engine.clone();
+    state.ui.schematic_snap = state.schematic.session.snap_engine.clone();
     state.bump_active_schematic_epoch();
     state.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
         &state.ui.preferences,

@@ -964,7 +964,7 @@ fn design_checks_on_save_are_off_by_default_and_never_refuse_the_save() {
         "the console states a finding rather than only a count"
     );
     assert!(
-        !state.schematic.is_dirty,
+        !state.schematic.session.is_dirty,
         "the published revision stands: the advisory changed nothing about it"
     );
 

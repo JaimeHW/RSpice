@@ -636,7 +636,11 @@ fn one_model_project() -> RSpiceApp {
         .document_mut_for_test()
         .components
         .push(component);
-    app.state.schematic.selection.select_only_component(1);
+    app.state
+        .schematic
+        .session
+        .selection
+        .select_only_component(1);
     app
 }
 
@@ -658,7 +662,7 @@ fn the_bind_primary_names_the_instance_it_would_bind() {
     // With nothing selected there is nothing to name, and the base spelling —
     // the one the control ratchet reads — is what comes back.
     let mut app = one_model_project();
-    app.state.schematic.selection.clear();
+    app.state.schematic.session.selection.clear();
     let unselected = ModelsStudio::open(app);
     assert!(
         unselected.announces(|label| label == "Bind to selection…"),

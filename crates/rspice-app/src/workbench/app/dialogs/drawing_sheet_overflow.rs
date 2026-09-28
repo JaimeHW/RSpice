@@ -87,8 +87,8 @@ impl RSpiceApp {
             }
             OverflowReviewAction::FitContent => {
                 self.state.dialogs.drawing_sheet_overflow_open = false;
-                self.state.schematic.needs_fit = true;
-                self.state.schematic.needs_drawing_sheet_fit = false;
+                self.state.schematic.session.needs_fit = true;
+                self.state.schematic.session.needs_drawing_sheet_fit = false;
             }
             OverflowReviewAction::PageSetup => {
                 self.state.dialogs.drawing_sheet_overflow_open = false;

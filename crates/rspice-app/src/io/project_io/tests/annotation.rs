@@ -554,7 +554,11 @@ fn session_retains_unsaved_schematic_flags_across_document_switches() {
         let state = annotation_session(&fixture.project);
         let mut restored = restore_annotation_session(&state, ron);
         for reference in [&fixture.root, &fixture.child] {
-            assert!(restored.workspace.schematic_buffers[&reference.key()].is_dirty);
+            assert!(
+                restored.workspace.schematic_buffers[&reference.key()]
+                    .session
+                    .is_dirty
+            );
             assert!(
                 restored
                     .workspace
@@ -563,7 +567,7 @@ fn session_retains_unsaved_schematic_flags_across_document_switches() {
                     .any(|open| open.reference == *reference && open.dirty)
             );
         }
-        assert!(restored.schematic.is_dirty);
+        assert!(restored.schematic.session.is_dirty);
         restored
             .workspace
             .activate_view(fixture.root.clone(), ViewType::Schematic);
@@ -574,7 +578,7 @@ fn session_retains_unsaved_schematic_flags_across_document_switches() {
             .clone();
         restored.sync_active_schematic_to_workspace();
         let repeated = restore_annotation_session(&restored, ron);
-        assert!(repeated.schematic.is_dirty);
+        assert!(repeated.schematic.session.is_dirty);
         assert!(repeated.workspace.open_views.iter().all(|open| open.dirty));
     }
 }

@@ -12,8 +12,8 @@ impl SchematicState {
     /// Restore document history while updating editor invalidation and selection.
     pub fn apply_snapshot(&mut self, snapshot: &super::super::undo_history::SchematicSnapshot) {
         self.design.apply_snapshot(snapshot);
-        self.is_dirty = true;
-        self.selection.clear();
+        self.session.is_dirty = true;
+        self.session.selection.clear();
     }
 
     // =========================================================================
@@ -26,7 +26,7 @@ impl SchematicState {
     /// Establishes the baseline for the undo system.
     pub fn init_undo_history(&mut self) {
         self.design.initialize_history();
-        self.operation_cancel = None;
+        self.session.operation_cancel = None;
     }
 
     /// Begin an undoable operation
@@ -47,11 +47,11 @@ impl SchematicState {
         let previous = self.design.pending_operation_id();
         let operation_id = self.design.begin_operation(description);
         if previous != Some(operation_id) {
-            self.operation_cancel =
+            self.session.operation_cancel =
                 Some(super::super::undo_history::OperationCancelState::capture(
                     operation_id,
-                    &self.selection,
-                    self.is_dirty,
+                    &self.session.selection,
+                    self.session.is_dirty,
                 ));
         }
     }
@@ -67,14 +67,14 @@ impl SchematicState {
         let operation_id = self.design.pending_operation_id();
         let committed = self.design.end_operation();
         if committed {
-            self.is_dirty = true;
+            self.session.is_dirty = true;
         }
         if self.design.pending_operation_id().is_none()
-            && let Some(cancel) = self.operation_cancel.take()
+            && let Some(cancel) = self.session.operation_cancel.take()
             && Some(cancel.operation_id()) == operation_id
             && !committed
         {
-            self.is_dirty = cancel.was_dirty();
+            self.session.is_dirty = cancel.was_dirty();
         }
         committed
     }
@@ -82,10 +82,10 @@ impl SchematicState {
     /// Reconcile a synchronous design edit with the editor's dirty state.
     pub(in crate::state::schematic) fn finish_document_edit(&mut self, committed: bool) {
         if committed || self.design.pending_operation_id().is_some() {
-            self.is_dirty = true;
+            self.session.is_dirty = true;
         }
         if self.design.pending_operation_id().is_none() {
-            self.operation_cancel = None;
+            self.session.operation_cancel = None;
         }
     }
 
@@ -105,13 +105,13 @@ impl SchematicState {
             return false;
         };
         if let Some(repaired) = cancelled.repaired {
-            self.is_dirty = true;
-            self.selection.clear();
-            self.snap_engine.grid_size = self.design.document().grid_size;
+            self.session.is_dirty = true;
+            self.session.selection.clear();
+            self.session.snap_engine.grid_size = self.design.document().grid_size;
             self.repair_clipboard_after_load();
             self.remove_stale_runtime_references(&repaired);
         }
-        if let Some(cancel) = self.operation_cancel.take()
+        if let Some(cancel) = self.session.operation_cancel.take()
             && cancel.operation_id() == cancelled.operation_id
         {
             cancel.restore(self);
@@ -135,7 +135,7 @@ impl SchematicState {
     {
         // Backstop for read-only views: the UI layers refuse with a console
         // line; anything that slips through is silently skipped here.
-        if self.read_only {
+        if self.session.read_only {
             return false;
         }
         self.begin_operation(description);
@@ -168,9 +168,9 @@ impl SchematicState {
         let Some(repaired) = self.design.undo() else {
             return false;
         };
-        self.is_dirty = true;
-        self.selection.clear();
-        self.snap_engine.grid_size = self.design.document().grid_size;
+        self.session.is_dirty = true;
+        self.session.selection.clear();
+        self.session.snap_engine.grid_size = self.design.document().grid_size;
         self.repair_clipboard_after_load();
         self.remove_stale_runtime_references(&repaired);
         true
@@ -183,9 +183,9 @@ impl SchematicState {
         let Some(repaired) = self.design.redo() else {
             return false;
         };
-        self.is_dirty = true;
-        self.selection.clear();
-        self.snap_engine.grid_size = self.design.document().grid_size;
+        self.session.is_dirty = true;
+        self.session.selection.clear();
+        self.session.snap_engine.grid_size = self.design.document().grid_size;
         self.repair_clipboard_after_load();
         self.remove_stale_runtime_references(&repaired);
         true
@@ -214,7 +214,7 @@ impl SchematicState {
     /// Clear undo history
     pub fn clear_undo_history(&mut self) {
         self.design.clear_history();
-        self.operation_cancel = None;
+        self.session.operation_cancel = None;
     }
 
     /// Reset undo history with current state as baseline
@@ -222,7 +222,7 @@ impl SchematicState {
     /// Clears all undo/redo. Use after loading a file.
     pub fn reset_undo_history(&mut self) {
         self.design.clear_history();
-        self.operation_cancel = None;
+        self.session.operation_cancel = None;
         self.init_undo_history();
     }
 
@@ -265,7 +265,7 @@ mod tests {
         let expected = pitch.canvas_grid_size();
         assert_eq!(state.design.document().document_policy.grid_pitch, pitch);
         assert_eq!(state.design.document().grid_size, expected);
-        assert_eq!(state.snap_engine.grid_size, expected);
+        assert_eq!(state.session.snap_engine.grid_size, expected);
     }
 
     #[test]
@@ -282,7 +282,7 @@ mod tests {
                 .grid_pitch = SchematicGridPitch::Mil25;
             schematic.design.document_mut_for_test().grid_size =
                 SchematicGridPitch::Mil25.canvas_grid_size();
-            schematic.snap_engine.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
+            schematic.session.snap_engine.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
         }));
         assert_eq!(state.content_version(), baseline + 1);
 
@@ -310,7 +310,7 @@ mod tests {
                 .grid_pitch = SchematicGridPitch::Mil25;
             schematic.design.document_mut_for_test().grid_size =
                 SchematicGridPitch::Mil25.canvas_grid_size();
-            schematic.snap_engine.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
+            schematic.session.snap_engine.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
         }));
         assert_grid_pitch_contract(&state, SchematicGridPitch::Mil25);
 

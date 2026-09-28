@@ -1009,9 +1009,10 @@ fn apply_schematic_cross_probe(ui: &Ui, state: &mut AppState, selection: &SoaRul
     };
     state
         .schematic
+        .session
         .selection
         .select_only_component(component_id);
-    state.schematic.center_request = Some(position);
+    state.schematic.session.center_request = Some(position);
     state.ui.schematic_visibility.annotations =
         crate::state::SchematicAnnotationVisibility::ViolationsOnly;
     state

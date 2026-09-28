@@ -107,28 +107,44 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
         Some("select one instance")
     );
 
-    state.schematic.selection.select_only_component(source_id);
+    state
+        .schematic
+        .session
+        .selection
+        .select_only_component(source_id);
     assert_eq!(state.selected_instance_netlist_block(), None);
 
     // The instance's own card is the first of its lines, never the
     // continuation the map also carries.
-    state.schematic.selection.select_only_component(load_id);
+    state
+        .schematic
+        .session
+        .selection
+        .select_only_component(load_id);
     state.show_selected_instance_in_netlist();
     assert_eq!(state.ui.netlist.requested_line, Some(3));
 
-    state.schematic.selection.select_only_component(unmapped_id);
+    state
+        .schematic
+        .session
+        .selection
+        .select_only_component(unmapped_id);
     assert_eq!(
         state.selected_instance_netlist_block(),
         Some("no netlist line for this instance")
     );
 
-    state.schematic.selection.select_component(load_id);
+    state.schematic.session.selection.select_component(load_id);
     assert_eq!(
         state.selected_instance_netlist_block(),
         Some("select one instance")
     );
 
-    state.schematic.selection.select_only_component(source_id);
+    state
+        .schematic
+        .session
+        .selection
+        .select_only_component(source_id);
     state.ui.netlist.generated_document = None;
     state.ui.netlist.generated_source.clear();
     assert_eq!(
@@ -143,7 +159,11 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
 #[test]
 fn showing_an_instance_opens_the_generated_primary_at_its_card() {
     let (mut state, _, load_id, _) = located_instance_state();
-    state.schematic.selection.select_only_component(load_id);
+    state
+        .schematic
+        .session
+        .selection
+        .select_only_component(load_id);
 
     state.show_selected_instance_in_netlist();
 
@@ -170,7 +190,11 @@ fn showing_an_instance_opens_the_generated_primary_at_its_card() {
 #[test]
 fn showing_an_instance_from_a_stale_deck_says_so_without_blocking_the_jump() {
     let (mut state, source_id, _, _) = located_instance_state();
-    state.schematic.selection.select_only_component(source_id);
+    state
+        .schematic
+        .session
+        .selection
+        .select_only_component(source_id);
     state.ui.netlist.current_generation_input_digest =
         Some(crate::state::content_digest("edited-schematic"));
 
@@ -190,10 +214,17 @@ fn showing_an_instance_from_a_stale_deck_says_so_without_blocking_the_jump() {
 #[test]
 fn the_round_trip_through_the_generated_deck_selects_the_same_instance() {
     let (mut state, _, load_id, _) = located_instance_state();
-    state.schematic.selection.select_only_component(load_id);
+    state
+        .schematic
+        .session
+        .selection
+        .select_only_component(load_id);
 
     state.show_selected_instance_in_netlist();
-    assert_eq!(state.schematic.selection.single_component(), Some(load_id));
+    assert_eq!(
+        state.schematic.session.selection.single_component(),
+        Some(load_id)
+    );
 
     // Reading the selection back the way the navigator's source-mapping panel
     // does: the active line, its map entry, and the component it names.
@@ -209,8 +240,11 @@ fn the_round_trip_through_the_generated_deck_selects_the_same_instance() {
         .expect("the active line names a component");
     assert_eq!(revealed, load_id);
 
-    state.schematic.selection.clear();
-    state.schematic.selection.select_component(revealed);
-    assert_eq!(state.schematic.selection.single_component(), Some(load_id));
+    state.schematic.session.selection.clear();
+    state.schematic.session.selection.select_component(revealed);
+    assert_eq!(
+        state.schematic.session.selection.single_component(),
+        Some(load_id)
+    );
     assert_eq!(state.selected_instance_netlist_block(), None);
 }

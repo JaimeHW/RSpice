@@ -117,7 +117,7 @@ impl RSpiceApp {
                         &mut self.state,
                     )
                 } else if self.action_file_save() {
-                    if self.state.schematic.is_dirty {
+                    if self.state.schematic.session.is_dirty {
                         crate::workbench::workflows::project_workflow::SaveRequestOutcome::CopyOnly
                     } else {
                         crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalComplete
@@ -579,8 +579,8 @@ mod tests {
             )
             .expect("seed canonical project");
             state.workbench.activate(workspace);
-            state.schematic.current_file = Some(schematic_path);
-            state.schematic.is_dirty = true;
+            state.schematic.session.current_file = Some(schematic_path);
+            state.schematic.session.is_dirty = true;
             state.workspace.set_active_dirty(true);
             let mut app = test_app_with_file_io(
                 state,
@@ -616,7 +616,7 @@ mod tests {
                 ComponentType::Resistor,
                 Point::new(10, 20),
             ));
-        state.schematic.is_dirty = true;
+        state.schematic.session.is_dirty = true;
         let active_key = state.workspace.active_key();
         assert!(
             state
@@ -645,7 +645,7 @@ mod tests {
 
         assert_eq!(app.state.schematic.document().components.len(), 1);
         assert_eq!(app.state.schematic.document().components[0].id, 42);
-        assert!(app.state.schematic.is_dirty);
+        assert!(app.state.schematic.session.is_dirty);
     }
 
     #[cfg(not(target_arch = "wasm32"))]

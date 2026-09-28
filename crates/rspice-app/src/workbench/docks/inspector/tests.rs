@@ -25,7 +25,7 @@ fn catalog_test_diode(params: &str) -> (RSpiceApp, u64) {
         .add_component(ComponentType::Diode, crate::state::Point::origin());
     app.state.schematic.document_mut_for_test().components[0].params = params.to_owned();
     app.state.schematic.clear_undo_history();
-    app.state.schematic.is_dirty = false;
+    app.state.schematic.session.is_dirty = false;
     (app, id)
 }
 
@@ -53,7 +53,7 @@ fn catalog_binding_preserves_raw_parameters_and_refuses_malformed_text_atomicall
             .contains("unterminated")
     );
     assert_eq!(app.state.schematic.document().components[0], before);
-    assert!(!app.state.schematic.is_dirty);
+    assert!(!app.state.schematic.session.is_dirty);
     assert!(!app.state.schematic.can_undo());
 }
 
@@ -460,12 +460,13 @@ fn schematic_subjects_do_not_share_inspector_scroll_state() {
         .add_component(ComponentType::Resistor, crate::state::Point::new(10, 10));
     app.state
         .schematic
+        .session
         .selection
         .select_only_component(component_id);
     let component = inspector_scroll_identity(&app);
 
     assert_ne!(sheet, component);
-    app.state.schematic.selection.clear();
+    app.state.schematic.session.selection.clear();
     assert_eq!(sheet, inspector_scroll_identity(&app));
 }
 
@@ -510,8 +511,14 @@ fn full_results_cross_probe_navigates_to_design_after_exact_resolution() {
 
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert!(!app.state.workbench.split_with_results);
-    assert!(app.state.schematic.selection.wires.contains(&91));
-    assert!(app.state.schematic.net_highlight.is_wire_highlighted(91));
+    assert!(app.state.schematic.session.selection.wires.contains(&91));
+    assert!(
+        app.state
+            .schematic
+            .session
+            .net_highlight
+            .is_wire_highlighted(91)
+    );
 }
 
 #[test]
@@ -543,7 +550,7 @@ fn stale_cross_probe_map_fails_without_leaving_results() {
 
     assert!(error.contains("changed since this result"));
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
-    assert!(app.state.schematic.selection.wires.is_empty());
+    assert!(app.state.schematic.session.selection.wires.is_empty());
 }
 
 #[test]
@@ -628,7 +635,7 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
 
     assert!(error.contains("different project revision"));
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
-    assert!(app.state.schematic.selection.wires.is_empty());
+    assert!(app.state.schematic.session.selection.wires.is_empty());
 }
 
 #[test]
@@ -642,7 +649,7 @@ fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
         .expect_err("a trace read inside X1 has no conductor on the root sheet");
     assert_eq!(error, "Descend to /x1 to cross-probe it.");
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
-    assert!(app.state.schematic.selection.wires.is_empty());
+    assert!(app.state.schematic.session.selection.wires.is_empty());
 
     // One level down, the root-scoped trace is the one out of scope — even
     // though the open sheet happens to carry a conductor of that name.
@@ -656,7 +663,7 @@ fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
         .expect_err("a root-scoped trace does not name a conductor inside X1");
     assert_eq!(error, "Ascend to / to cross-probe it.");
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
-    assert!(app.state.schematic.selection.wires.is_empty());
+    assert!(app.state.schematic.session.selection.wires.is_empty());
 }
 
 #[test]

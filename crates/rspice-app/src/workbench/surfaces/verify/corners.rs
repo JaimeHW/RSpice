@@ -662,6 +662,7 @@ pub(super) fn cross_probe_soa_device(app: &mut RSpiceApp, device_id: &str) -> Re
         })?;
     app.state
         .schematic
+        .session
         .selection
         .select_only_component(component_id);
     app.state

@@ -239,7 +239,7 @@ fn generated_fixture_is_real_editable_topology_in_the_atomic_publication() {
         "ground is generated only for the explicitly electrical-ground pin"
     );
     assert_eq!(fixture.document().wires.len(), 5);
-    assert!(fixture.is_dirty);
+    assert!(fixture.session.is_dirty);
     let dut = fixture
         .document()
         .components

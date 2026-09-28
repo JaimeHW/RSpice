@@ -695,16 +695,16 @@ pub(crate) fn show_drawing_sheet_overflow_target(
     };
     match target {
         DrawingSheetOverflowTarget::Component(id) => {
-            state.schematic.selection.select_only_component(id);
+            state.schematic.session.selection.select_only_component(id);
         }
         DrawingSheetOverflowTarget::Wire(id) => {
-            state.schematic.selection.select_only_wire(id);
+            state.schematic.session.selection.select_only_wire(id);
         }
         DrawingSheetOverflowTarget::Bus(id) => {
-            state.schematic.selection.select_only_bus(id);
+            state.schematic.session.selection.select_only_bus(id);
         }
         DrawingSheetOverflowTarget::BusTap(id) => {
-            state.schematic.selection.select_only_bus_tap(id);
+            state.schematic.session.selection.select_only_bus_tap(id);
         }
         DrawingSheetOverflowTarget::Junction(id) => {
             let Some(position) = state
@@ -717,22 +717,31 @@ pub(crate) fn show_drawing_sheet_overflow_target(
             else {
                 return false;
             };
-            state.schematic.selection.select_only_junction(position);
+            state
+                .schematic
+                .session
+                .selection
+                .select_only_junction(position);
         }
         DrawingSheetOverflowTarget::NetLabel(id) => {
-            state.schematic.selection.select_only_net_label(id);
+            state.schematic.session.selection.select_only_net_label(id);
         }
         DrawingSheetOverflowTarget::DesignNote(id) => {
-            state.schematic.selection.select_only_design_note(id);
+            state
+                .schematic
+                .session
+                .selection
+                .select_only_design_note(id);
         }
         DrawingSheetOverflowTarget::DocumentationShape(id) => {
             state
                 .schematic
+                .session
                 .selection
                 .select_only_documentation_shape(id);
         }
     }
-    state.schematic.center_request = Some(center);
+    state.schematic.session.center_request = Some(center);
     true
 }
 
@@ -2125,8 +2134,11 @@ mod tests {
         };
 
         assert!(show_first_drawing_sheet_overflow(&mut state));
-        assert_eq!(state.schematic.selection.single_wire(), Some(41));
-        assert_eq!(state.schematic.center_request, Some(expected_center));
+        assert_eq!(state.schematic.session.selection.single_wire(), Some(41));
+        assert_eq!(
+            state.schematic.session.center_request,
+            Some(expected_center)
+        );
         assert!(!show_drawing_sheet_overflow_target(
             &mut state,
             DrawingSheetOverflowTarget::Wire(404)

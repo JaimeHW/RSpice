@@ -32,7 +32,7 @@ fn assert_active_grid_pitch_contract(state: &AppState, pitch: crate::state::Sche
     let expected = pitch.canvas_grid_size();
     assert_eq!(state.schematic.document().document_policy.grid_pitch, pitch);
     assert_eq!(state.schematic.document().grid_size, expected);
-    assert_eq!(state.schematic.snap_engine.grid_size, expected);
+    assert_eq!(state.schematic.session.snap_engine.grid_size, expected);
     assert_eq!(state.ui.schematic_snap.grid_size, expected);
 }
 
@@ -53,8 +53,8 @@ fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
     create_new_project(&mut state);
 
     assert_active_grid_pitch_contract(&state, crate::state::SchematicGridPitch::Mil25);
-    assert_eq!(state.schematic.snap_engine.snap_radius, 8);
-    assert!(!state.schematic.snap_engine.snap_to_grid);
+    assert_eq!(state.schematic.session.snap_engine.snap_radius, 8);
+    assert!(!state.schematic.session.snap_engine.snap_to_grid);
 
     state
         .ui
@@ -68,8 +68,8 @@ fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
 
     assert!(close_project_discard(&mut state));
     assert_active_grid_pitch_contract(&state, crate::state::SchematicGridPitch::Metric);
-    assert_eq!(state.schematic.snap_engine.snap_radius, 8);
-    assert!(!state.schematic.snap_engine.snap_to_grid);
+    assert_eq!(state.schematic.session.snap_engine.snap_radius, 8);
+    assert!(!state.schematic.session.snap_engine.snap_to_grid);
 }
 
 #[test]

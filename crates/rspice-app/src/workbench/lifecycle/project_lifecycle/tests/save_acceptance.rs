@@ -70,7 +70,7 @@ fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() 
             let key = state.workspace.active_key();
             let mut inactive_copy = state.workspace.schematic_buffers[&key].clone();
             assert!(inactive_copy.cancel_operation());
-            assert_eq!(inactive_copy.is_dirty, later_change != 0);
+            assert_eq!(inactive_copy.session.is_dirty, later_change != 0);
             assert!(state.schematic.cancel_operation());
             assert_eq!(
                 state.schematic.document().components[0].value,
@@ -80,7 +80,7 @@ fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() 
                 state.schematic.document().components[0].pos,
                 Point::new(100, 100)
             );
-            assert_eq!(state.schematic.is_dirty, later_change != 0);
+            assert_eq!(state.schematic.session.is_dirty, later_change != 0);
             assert_eq!(has_unsaved_changes(&state), later_change != 0);
             remove_project_artifacts(&path);
         }
@@ -167,7 +167,7 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
         }));
         assert!(has_unsaved_changes(&state));
         assert!(active_document_is_dirty(&state));
-        assert!(state.schematic.is_dirty);
+        assert!(state.schematic.session.is_dirty);
         assert!(
             state
                 .project_lifecycle
@@ -196,7 +196,7 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
         assert!(state.schematic.undo());
         refresh_registry(&mut state).unwrap();
         assert!(!has_unsaved_changes(&state));
-        assert!(!state.schematic.is_dirty);
+        assert!(!state.schematic.session.is_dirty);
         assert!(saved_snapshot_authorizes_continuation(
             &state,
             scope,
@@ -215,14 +215,14 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
     let valid_reltol = state.sim_setup.options.reltol;
     state.sim_setup.options.reltol = -1.0;
     assert!(refresh_registry(&mut state).is_err());
-    assert!(state.schematic.is_dirty);
+    assert!(state.schematic.session.is_dirty);
     assert!(state.workspace.open_views.iter().all(|view| view.dirty));
     assert!(
         state
             .workspace
             .schematic_buffers
             .values()
-            .all(|schematic| schematic.is_dirty)
+            .all(|schematic| schematic.session.is_dirty)
     );
     assert!(state.workspace.project_metadata_dirty);
     assert!(state.workspace.netlist_source_dirty);
@@ -261,7 +261,7 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
     state.sim_setup.options.reltol = valid_reltol;
     refresh_registry(&mut state).unwrap();
     assert!(!has_unsaved_changes(&state));
-    assert!(!state.schematic.is_dirty);
+    assert!(!state.schematic.session.is_dirty);
     assert!(state.workspace.open_views.iter().all(|view| !view.dirty));
     assert!(!state.workspace.project_metadata_dirty);
     assert!(!state.workspace.netlist_source_dirty);

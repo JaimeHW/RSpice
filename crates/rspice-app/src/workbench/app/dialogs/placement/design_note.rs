@@ -90,7 +90,7 @@ impl RSpiceApp {
         match response.choice {
             DialogChoice::Primary => {
                 if let DraftValidation::Valid(pending) = validate_draft(&self.state) {
-                    self.state.schematic.pending_design_note = Some(pending);
+                    self.state.schematic.session.pending_design_note = Some(pending);
                     self.state.schematic.arm_tool(Tool::DesignNote);
                     self.state.dialogs.design_note.close();
                 }
@@ -626,12 +626,12 @@ mod tests {
             state.schematic.topology_version(),
             state.workspace.active_view.display_path(),
         );
-        state.schematic.read_only = true;
+        state.schematic.session.read_only = true;
         assert!(matches!(
             validate_draft(&state),
             DraftValidation::Invalid(_)
         ));
-        state.schematic.read_only = false;
+        state.schematic.session.read_only = false;
         state.design_execution_epoch += 1;
         assert!(matches!(
             validate_draft(&state),

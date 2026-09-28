@@ -441,12 +441,12 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
         // The working draft could not be compared with accepted content.
         // Preserve its authorship and show pending changes until a successful
         // refresh can establish which documents are actually clean.
-        state.schematic.is_dirty = true;
+        state.schematic.session.is_dirty = true;
         state.workspace.project_metadata_dirty = true;
         state.workspace.netlist_source_dirty = true;
         state.workspace.project_sources_dirty = true;
         for schematic in state.workspace.schematic_buffers.values_mut() {
-            schematic.is_dirty = true;
+            schematic.session.is_dirty = true;
         }
         for view in &mut state.workspace.open_views {
             view.dirty = true;
@@ -466,7 +466,7 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
         .collect::<Vec<_>>();
     for (reference, dirty) in &cell_dirty {
         if let Some(buffer) = state.workspace.schematic_buffers.get_mut(&reference.key()) {
-            buffer.is_dirty = *dirty;
+            buffer.session.is_dirty = *dirty;
         }
         if let Some(open) = state
             .workspace
@@ -487,7 +487,7 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
         .iter()
         .find(|(reference, _)| *reference == state.workspace.active_view)
     {
-        state.schematic.is_dirty = *dirty;
+        state.schematic.session.is_dirty = *dirty;
     }
     // Project setup is dirty when it differs from the accepted baseline and at
     // no other time. A flag that only ever turned on left the unsaved marker
@@ -1481,7 +1481,7 @@ fn adopt_successful_save(
     match scope {
         SaveScope::AllDocuments => {
             state.workspace.mark_all_clean();
-            state.schematic.is_dirty = false;
+            state.schematic.session.is_dirty = false;
             mark_all_library_views_clean(&mut state.library_manager);
         }
         SaveScope::ActiveDocument => mark_active_document_clean(state),
@@ -1646,10 +1646,10 @@ fn mark_active_document_clean(state: &mut AppState) {
     match active_document(state) {
         ProjectDocumentId::CellView(reference) => {
             if let Some(buffer) = state.workspace.schematic_buffers.get_mut(&reference.key()) {
-                buffer.is_dirty = false;
+                buffer.session.is_dirty = false;
             }
             if reference == state.workspace.active_view {
-                state.schematic.is_dirty = false;
+                state.schematic.session.is_dirty = false;
             }
             if let Some(open) = state
                 .workspace

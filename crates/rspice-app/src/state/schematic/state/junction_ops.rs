@@ -9,7 +9,7 @@ impl SchematicState {
     /// Call this after wire operations to maintain junction consistency.
     pub fn auto_place_junctions(&mut self) {
         if self.design.auto_place_junctions() {
-            self.is_dirty = true;
+            self.session.is_dirty = true;
         }
     }
 
@@ -17,7 +17,7 @@ impl SchematicState {
     pub fn remove_orphan_junctions(&mut self) -> usize {
         let removed = self.design.remove_orphan_junctions();
         if removed > 0 {
-            self.is_dirty = true;
+            self.session.is_dirty = true;
         }
         removed
     }

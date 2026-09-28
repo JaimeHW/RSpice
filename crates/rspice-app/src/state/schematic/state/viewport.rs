@@ -29,8 +29,8 @@ impl SchematicState {
     ) {
         let Some((min_x, min_y, max_x, max_y)) = bounds else {
             // No content - reset to default view
-            self.zoom = 1.0;
-            self.pan = (0.0, 0.0);
+            self.session.zoom = 1.0;
+            self.session.pan = (0.0, 0.0);
             return;
         };
 
@@ -59,7 +59,7 @@ impl SchematicState {
         // Use the same 25%–800% contract as direct canvas zoom. Keeping one
         // range avoids a fit operation silently producing a scale that the
         // wheel and toolbar cannot subsequently reach.
-        self.zoom = fit_zoom.clamp(0.25, 8.0);
+        self.session.zoom = fit_zoom.clamp(0.25, 8.0);
 
         // Calculate pan to center the content in the viewport
         // Screen position formula: screen = bounds.min + pan + schematic * zoom
@@ -69,9 +69,9 @@ impl SchematicState {
         let center_schematic_x = (min_px + max_px) / 2.0;
         let center_schematic_y = (min_py + max_py) / 2.0;
 
-        self.pan = (
-            viewport_width / 2.0 - center_schematic_x * self.zoom,
-            viewport_height / 2.0 - center_schematic_y * self.zoom,
+        self.session.pan = (
+            viewport_width / 2.0 - center_schematic_x * self.session.zoom,
+            viewport_height / 2.0 - center_schematic_y * self.session.zoom,
         );
 
         log::debug!(
@@ -82,9 +82,9 @@ impl SchematicState {
             max_py,
             viewport_width,
             viewport_height,
-            self.zoom,
-            self.pan.0,
-            self.pan.1
+            self.session.zoom,
+            self.session.pan.0,
+            self.session.pan.1
         );
     }
 
@@ -112,15 +112,15 @@ impl SchematicState {
             .min((viewport_height - 1.0).max(0.0) * 0.5);
         let usable_width = (viewport_width - inset_x * 2.0).max(1.0);
         let usable_height = (viewport_height - inset_y * 2.0).max(1.0);
-        self.zoom = (usable_width / width)
+        self.session.zoom = (usable_width / width)
             .min(usable_height / height)
             .clamp(0.25, 8.0);
 
         let center_x = (min_x + max_x) * 0.5;
         let center_y = (min_y + max_y) * 0.5;
-        self.pan = (
-            viewport_width * 0.5 - center_x * self.zoom,
-            viewport_height * 0.5 - center_y * self.zoom,
+        self.session.pan = (
+            viewport_width * 0.5 - center_x * self.session.zoom,
+            viewport_height * 0.5 - center_y * self.session.zoom,
         );
     }
 
@@ -128,9 +128,9 @@ impl SchematicState {
     /// center, keeping the current zoom. Same screen mapping as
     /// `zoom_to_fit`: screen = bounds.min + pan + schematic * zoom.
     pub fn center_view_on(&mut self, target: Point, viewport_width: f64, viewport_height: f64) {
-        self.pan = (
-            viewport_width / 2.0 - f64::from(target.x) * self.zoom,
-            viewport_height / 2.0 - f64::from(target.y) * self.zoom,
+        self.session.pan = (
+            viewport_width / 2.0 - f64::from(target.x) * self.session.zoom,
+            viewport_height / 2.0 - f64::from(target.y) * self.session.zoom,
         );
     }
 
@@ -224,10 +224,10 @@ mod tests {
         let mut state = SchematicState::default();
         state.zoom_to_fit_world_rect((-140.0, -40.0, 723.6, 1077.6), 1200.0, 800.0, 24.0);
 
-        let left = state.pan.0 + -140.0 * state.zoom;
-        let top = state.pan.1 + -40.0 * state.zoom;
-        let right = state.pan.0 + 723.6 * state.zoom;
-        let bottom = state.pan.1 + 1077.6 * state.zoom;
+        let left = state.session.pan.0 + -140.0 * state.session.zoom;
+        let top = state.session.pan.1 + -40.0 * state.session.zoom;
+        let right = state.session.pan.0 + 723.6 * state.session.zoom;
+        let bottom = state.session.pan.1 + 1077.6 * state.session.zoom;
 
         assert!(left >= 24.0 - 1.0e-9);
         assert!(top >= 24.0 - 1.0e-9);

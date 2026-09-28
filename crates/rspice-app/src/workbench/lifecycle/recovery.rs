@@ -186,9 +186,9 @@ pub(crate) fn refresh_catalog_if_requested(app: &mut RSpiceApp) {
         .workspace
         .schematic_buffers
         .values()
-        .filter_map(|schematic| schematic.current_file.clone())
+        .filter_map(|schematic| schematic.session.current_file.clone())
         .collect::<Vec<_>>();
-    if let Some(path) = app.state.schematic.current_file.clone() {
+    if let Some(path) = app.state.schematic.session.current_file.clone() {
         live_paths.push(path);
     }
 
@@ -598,7 +598,7 @@ fn project_owned_differences(state: &AppState) -> Result<ProjectOwnedDifferences
 /// destroy state that cannot be reconstructed from its saved project (or from
 /// the documented pristine state of an unsaved project).
 pub(crate) fn recovery_replacement_block_reason(state: &AppState) -> Option<String> {
-    if state.schematic.is_dirty || state.workspace.any_dirty() {
+    if state.schematic.session.is_dirty || state.workspace.any_dirty() {
         return Some(
             "Recovery comparison is blocked because the current design has unsaved changes. Save or close the current project before opening recovery work."
                 .to_owned(),
@@ -752,10 +752,10 @@ fn build_comparison_workspace(
     workspace.project.description =
         "Unsaved recovery comparison. Original source and checkpoint are retained.".to_owned();
 
-    recovered.current_file = None;
-    recovered.is_dirty = true;
-    recovered.read_only = false;
-    recovered.needs_history_reset = true;
+    recovered.session.current_file = None;
+    recovered.session.is_dirty = true;
+    recovered.session.read_only = false;
+    recovered.session.needs_history_reset = true;
     let candidate_reference = workspace.active_view.clone();
     workspace
         .schematic_buffers
@@ -782,9 +782,9 @@ fn build_comparison_workspace(
             .insert("display_name".to_owned(), "Recovery baseline".to_owned());
         libraries.add_library(library);
 
-        baseline.is_dirty = false;
-        baseline.read_only = true;
-        baseline.needs_history_reset = true;
+        baseline.session.is_dirty = false;
+        baseline.session.read_only = true;
+        baseline.session.needs_history_reset = true;
         let baseline_reference = CellViewRef::new(BASELINE_LIBRARY, BASELINE_CELL, BASELINE_VIEW);
         workspace
             .schematic_buffers
@@ -873,7 +873,7 @@ pub(crate) fn start_local_safe_mode(
         .safe_mode
         .activate(options, preserved_session);
     if options.open_project_read_only {
-        app.state.schematic.read_only = true;
+        app.state.schematic.session.read_only = true;
     }
     app.state.workbench.activate(Workspace::Project);
     let mut enforced = Vec::new();
@@ -1045,16 +1045,16 @@ mod tests {
     #[test]
     fn comparison_workspace_keeps_recovery_editable_and_baseline_read_only() {
         let mut baseline = SchematicState::default();
-        baseline.is_dirty = false;
+        baseline.session.is_dirty = false;
         let mut recovered = baseline.clone();
-        recovered.is_dirty = false;
+        recovered.session.is_dirty = false;
 
         let comparison = build_comparison_workspace("amplifier", Some(baseline), recovered)
             .expect("comparison builds");
 
         assert!(comparison.workspace.project.path.is_none());
-        assert!(comparison.active.is_dirty);
-        assert!(comparison.active.current_file.is_none());
+        assert!(comparison.active.session.is_dirty);
+        assert!(comparison.active.session.current_file.is_none());
         assert_eq!(comparison.workspace.open_views.len(), 2);
         let baseline_library = comparison
             .libraries
@@ -1070,7 +1070,7 @@ mod tests {
             .expect("checkpoint-only comparison builds");
 
         assert_eq!(comparison.workspace.open_views.len(), 1);
-        assert!(comparison.active.is_dirty);
+        assert!(comparison.active.session.is_dirty);
         assert!(comparison.workspace.project.path.is_none());
     }
 

@@ -86,7 +86,7 @@ pub(crate) fn synchronize_schematic_cross_probe(state: &mut AppState) {
     let selection = SelectionObservation {
         active_view_key: state.workspace.active_view.key(),
         topology_version: state.schematic.topology_version(),
-        selection: state.schematic.selection.clone(),
+        selection: state.schematic.session.selection.clone(),
     };
     let target = if state.ui.schematic_cross_probe.selection.as_ref() == Some(&selection) {
         state.ui.schematic_cross_probe.target.clone()
@@ -163,8 +163,14 @@ fn clear_synchronized_source_line(state: &mut AppState) {
 }
 
 fn selected_target(state: &AppState) -> Option<SchematicCrossProbeTarget> {
-    let selection = &state.schematic.selection;
-    if state.schematic.net_highlight.selected_net_name.is_some() {
+    let selection = &state.schematic.session.selection;
+    if state
+        .schematic
+        .session
+        .net_highlight
+        .selected_net_name
+        .is_some()
+    {
         let nets = active_design_nets(state);
         if let Some(name) = semantic_selected_net_name(state, &nets) {
             return Some(SchematicCrossProbeTarget::Net { name });
@@ -194,14 +200,21 @@ fn selected_target(state: &AppState) -> Option<SchematicCrossProbeTarget> {
 }
 
 fn semantic_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
-    let name = state.schematic.net_highlight.selected_net_name.as_deref()?;
+    let name = state
+        .schematic
+        .session
+        .net_highlight
+        .selected_net_name
+        .as_deref()?;
     let net = nets
         .iter()
         .find(|net| net.name.eq_ignore_ascii_case(name))?;
-    if state.schematic.net_highlight.highlighted_wires != net.wire_ids.iter().copied().collect() {
+    if state.schematic.session.net_highlight.highlighted_wires
+        != net.wire_ids.iter().copied().collect()
+    {
         return None;
     }
-    let selection = &state.schematic.selection;
+    let selection = &state.schematic.session.selection;
     let no_other_classes = selection.wire_segments.is_empty()
         && selection.wire_vertices.is_empty()
         && selection.junctions.is_empty()
@@ -288,7 +301,7 @@ fn active_design_nets(state: &AppState) -> std::sync::Arc<Vec<DesignNet>> {
 }
 
 fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
-    let selection = &state.schematic.selection;
+    let selection = &state.schematic.session.selection;
     if !conductor_selection(selection) {
         return None;
     }
@@ -651,9 +664,10 @@ mod tests {
     #[test]
     fn wireless_semantic_net_beats_its_incident_component_projection() {
         let mut state = AppState::default();
-        state.schematic.selection.select_only_component(17);
+        state.schematic.session.selection.select_only_component(17);
         state
             .schematic
+            .session
             .net_highlight
             .highlight_named_wires("PORT_OUT", HashSet::new());
         let nets = vec![DesignNet {
@@ -673,7 +687,7 @@ mod tests {
             semantic_selected_net_name(&state, &nets).as_deref(),
             Some("PORT_OUT")
         );
-        state.schematic.net_highlight.clear();
+        state.schematic.session.net_highlight.clear();
         assert!(semantic_selected_net_name(&state, &nets).is_none());
     }
 
@@ -689,7 +703,7 @@ mod tests {
                 crate::state::Point::new(0, 0),
                 "OUT",
             ));
-        state.schematic.selection.select_net_label(7);
+        state.schematic.session.selection.select_net_label(7);
         install_current_map(&mut state, "OUT");
         let revision = state.workspace.project.revision();
         state.simulation.runs.push(prepared_run(revision, "V(OUT)"));
@@ -731,7 +745,7 @@ mod tests {
                 crate::state::Point::new(0, 0),
                 "n1",
             ));
-        state.schematic.selection.select_net_label(7);
+        state.schematic.session.selection.select_net_label(7);
         install_current_map(&mut state, "n1");
         let revision = state.workspace.project.revision();
         state.simulation.runs.push(prepared_run_in(
@@ -775,7 +789,7 @@ mod tests {
                 crate::state::Point::new(0, 0),
                 "OUT",
             ));
-        state.schematic.selection.select_net_label(7);
+        state.schematic.session.selection.select_net_label(7);
         install_current_map(&mut state, "OUT");
         let revision = state.workspace.project.revision();
         state.simulation.runs.push(prepared_run(revision, "V(OUT)"));
@@ -804,6 +818,7 @@ mod tests {
             .expect("component exists");
         state
             .schematic
+            .session
             .selection
             .select_only_component(component_id);
         install_current_map(&mut state, "OUT");

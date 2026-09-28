@@ -522,7 +522,7 @@ impl ProjectWorkspace {
         }
         let key = self.active_key();
         self.schematic_buffers.insert(key, schematic.clone());
-        self.set_active_dirty(schematic.is_dirty);
+        self.set_active_dirty(schematic.session.is_dirty);
     }
 
     pub fn mark_all_clean(&mut self) {
@@ -530,7 +530,7 @@ impl ProjectWorkspace {
             view.dirty = false;
         }
         for schematic in self.schematic_buffers.values_mut() {
-            schematic.is_dirty = false;
+            schematic.session.is_dirty = false;
         }
         self.netlist_source_dirty = false;
         self.project_sources_dirty = false;
@@ -548,7 +548,7 @@ impl ProjectWorkspace {
             || self
                 .schematic_buffers
                 .values()
-                .any(|schematic| schematic.is_dirty)
+                .any(|schematic| schematic.session.is_dirty)
             || self.netlist_source_dirty
             || self.project_sources_dirty
             || self.project_metadata_dirty

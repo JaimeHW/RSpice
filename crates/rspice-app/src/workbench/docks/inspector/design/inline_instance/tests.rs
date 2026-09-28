@@ -21,7 +21,7 @@ impl Editor {
             .schematic
             .add_component(ComponentType::VoltageSource, crate::state::Point::origin());
         app.state.schematic.clear_undo_history();
-        app.state.schematic.is_dirty = false;
+        app.state.schematic.session.is_dirty = false;
         Self {
             ctx,
             app,
@@ -304,7 +304,7 @@ fn escape_discards_valid_and_invalid_fields_without_design_or_history_changes() 
             "{label}: {draft}"
         );
         assert!(before.is_equal_document(&editor.app.state.schematic.document()));
-        assert!(!editor.app.state.schematic.is_dirty);
+        assert!(!editor.app.state.schematic.session.is_dirty);
         assert_eq!(editor.app.state.schematic.topology_version(), topology);
         assert!(!editor.app.state.schematic.can_undo());
         assert!(editor.app.state.project_undo_sequence().is_none());

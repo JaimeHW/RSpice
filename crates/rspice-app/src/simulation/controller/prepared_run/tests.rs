@@ -873,7 +873,7 @@ fn automatic_touchstone_export_policy_captures_live_dialog_and_path_once() {
     state.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(
         &crate::simulation::dialog::SpConfig::default(),
     );
-    state.schematic.current_file = Some(PathBuf::from("designs").join("amp.rsch"));
+    state.schematic.session.current_file = Some(PathBuf::from("designs").join("amp.rsch"));
     let tasks = vec![QueuedAnalysis {
         numeric_override: None,
         spec: AnalysisSpec::SParameter {
@@ -894,17 +894,24 @@ fn automatic_touchstone_export_policy_captures_live_dialog_and_path_once() {
         analysis_line: ".sp dec 20 1Meg 1Gig".to_owned(),
     }];
 
-    let prepared =
-        touchstone_export_policy(&state, &tasks, state.schematic.current_file.as_deref())
-            .expect("capture enabled policy");
+    let prepared = touchstone_export_policy(
+        &state,
+        &tasks,
+        state.schematic.session.current_file.as_deref(),
+    )
+    .expect("capture enabled policy");
     let prepared_path = prepared.output_path(7, 1, 2).expect("enabled export path");
 
-    state.schematic.current_file = Some(PathBuf::from("redirect").join("changed.rsch"));
+    state.schematic.session.current_file = Some(PathBuf::from("redirect").join("changed.rsch"));
     let mut disabled = crate::simulation::dialog::SpConfig::default();
     disabled.touchstone_export = false;
     state.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(&disabled);
-    let current = touchstone_export_policy(&state, &tasks, state.schematic.current_file.as_deref())
-        .expect("capture disabled policy");
+    let current = touchstone_export_policy(
+        &state,
+        &tasks,
+        state.schematic.session.current_file.as_deref(),
+    )
+    .expect("capture disabled policy");
 
     assert!(current.output_path(7, 1, 2).is_none());
     assert!(prepared_path.ends_with("designs/amp_run0007_sp01.s2p"));
@@ -914,7 +921,7 @@ fn automatic_touchstone_export_policy_captures_live_dialog_and_path_once() {
 fn manual_touchstone_export_uses_imported_deck_origin_not_stale_schematic_path() {
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
-    state.schematic.current_file = Some(PathBuf::from("stale").join("schematic.rsch"));
+    state.schematic.session.current_file = Some(PathBuf::from("stale").join("schematic.rsch"));
     state.workspace.netlist_source_path = Some(PathBuf::from("imported").join("rf_fixture.cir"));
     state.workspace.netlist_source = Some(
             "deck\nV2 out 0 dc 0 ac 1 portnum 2 z0 75\nV1 in 0 dc 0 ac 1 portnum 1 z0 50\nR1 in out 100\n.sp lin 3 1Meg 3Meg\n.end\n"

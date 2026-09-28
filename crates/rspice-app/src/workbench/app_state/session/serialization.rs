@@ -269,7 +269,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
                     .schematic_buffers
                     .get_mut(&open.reference.key())
             {
-                schematic.is_dirty = true;
+                schematic.session.is_dirty = true;
             }
         }
         // Restore the entire reference closure before acquiring the active
@@ -319,11 +319,11 @@ impl<'de> serde::Deserialize<'de> for AppState {
         // editor presentation. Schematic documents deliberately skip them,
         // so restore the exact device-local settings after loading the active
         // document buffer and keep wire and bus gestures coherent.
-        state.schematic.snap_engine = state.ui.schematic_snap.clone();
+        state.schematic.session.snap_engine = state.ui.schematic_snap.clone();
         state.schematic.reconcile_grid_pitch_runtime();
         state.ui.schematic_snap.grid_size = state.schematic.document().grid_size;
-        state.schematic.wire_drawing.routing_mode = state.ui.schematic_routing_mode;
-        state.schematic.bus_drawing.routing_mode = state.ui.schematic_routing_mode;
+        state.schematic.session.wire_drawing.routing_mode = state.ui.schematic_routing_mode;
+        state.schematic.session.bus_drawing.routing_mode = state.ui.schematic_routing_mode;
         state.workbench.reconcile_restored_navigation();
         let navigation_warning = state.workbench.take_route_diagnostic();
         let execution_warnings = match (de.execution_context_json, de.execution_context) {
@@ -520,14 +520,14 @@ mod tests {
         let json = serde_json::to_string(&state).expect("session serializes");
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
 
-        assert!(!restored.schematic.snap_engine.enabled);
-        assert!(!restored.schematic.snap_engine.snap_to_wire_segments);
+        assert!(!restored.schematic.session.snap_engine.enabled);
+        assert!(!restored.schematic.session.snap_engine.snap_to_wire_segments);
         assert_eq!(
-            restored.schematic.wire_drawing.routing_mode,
+            restored.schematic.session.wire_drawing.routing_mode,
             crate::state::WireRoutingMode::FortyFiveDegree
         );
         assert_eq!(
-            restored.schematic.bus_drawing.routing_mode,
+            restored.schematic.session.bus_drawing.routing_mode,
             crate::state::WireRoutingMode::FortyFiveDegree
         );
     }

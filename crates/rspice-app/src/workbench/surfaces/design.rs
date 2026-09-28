@@ -77,10 +77,10 @@ fn paint_live_cursors(ui: &mut Ui, app: &RSpiceApp, canvas: Rect) {
     let t = Tokens::get(ui.ctx());
     let painter = ui.painter_at(canvas);
     let grid = app.state.schematic.document().grid_size.max(1) as f32;
-    let zoom = app.state.schematic.zoom as f32;
+    let zoom = app.state.schematic.session.zoom as f32;
     let pan = egui::vec2(
-        app.state.schematic.pan.0 as f32,
-        app.state.schematic.pan.1 as f32,
+        app.state.schematic.session.pan.0 as f32,
+        app.state.schematic.session.pan.1 as f32,
     );
     const COLORS: [egui::Color32; 8] = [
         egui::Color32::from_rgb(0x2F, 0xC7, 0xE5),

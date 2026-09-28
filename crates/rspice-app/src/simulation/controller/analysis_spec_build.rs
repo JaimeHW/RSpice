@@ -288,7 +288,13 @@ impl SimulationController {
             .document()
             .components
             .iter()
-            .filter(|component| state.schematic.selection.has_component(component.id))
+            .filter(|component| {
+                state
+                    .schematic
+                    .session
+                    .selection
+                    .has_component(component.id)
+            })
             .map(|component| component.name.clone())
             .collect();
         config.selected_devices.sort();

@@ -102,7 +102,7 @@ fn selected_rename_target(state: &AppState) -> Option<RenameSelectionTarget> {
     if let Some(target) = crate::workbench::app::selected_named_net_target(state) {
         return Some(RenameSelectionTarget::NamedNet(target));
     }
-    if let Some(id) = schematic.selection.single_component() {
+    if let Some(id) = schematic.session.selection.single_component() {
         return schematic
             .document()
             .components
@@ -112,7 +112,7 @@ fn selected_rename_target(state: &AppState) -> Option<RenameSelectionTarget> {
             .map(Box::new)
             .map(RenameSelectionTarget::Component);
     }
-    if let Some(id) = schematic.selection.single_net_label() {
+    if let Some(id) = schematic.session.selection.single_net_label() {
         return schematic
             .document()
             .net_labels
@@ -121,7 +121,7 @@ fn selected_rename_target(state: &AppState) -> Option<RenameSelectionTarget> {
             .cloned()
             .map(RenameSelectionTarget::NetLabel);
     }
-    if let Some(id) = schematic.selection.single_bus() {
+    if let Some(id) = schematic.session.selection.single_bus() {
         return schematic
             .document()
             .buses
@@ -454,7 +454,7 @@ fn validate_draft(
     target: &RenameSelectionTarget,
     draft: &str,
 ) -> RenameValidation {
-    if schematic.read_only {
+    if schematic.session.read_only {
         return RenameValidation::Invalid(
             "The active schematic is read-only; no name can be changed.".to_owned(),
         );
@@ -633,7 +633,11 @@ mod tests {
             .state
             .schematic
             .add_component(ComponentType::Resistor, Point::new(0, 0));
-        app.state.schematic.selection.select_only_component(id);
+        app.state
+            .schematic
+            .session
+            .selection
+            .select_only_component(id);
         (app, id)
     }
 
@@ -654,10 +658,18 @@ mod tests {
         let (mut app, id) = component_app();
         assert!(rename_selection_available(&app.state));
 
-        app.state.schematic.selection.select_component(id + 999);
+        app.state
+            .schematic
+            .session
+            .selection
+            .select_component(id + 999);
         assert!(!rename_selection_available(&app.state));
-        app.state.schematic.selection.select_only_component(id);
-        app.state.schematic.read_only = true;
+        app.state
+            .schematic
+            .session
+            .selection
+            .select_only_component(id);
+        app.state.schematic.session.read_only = true;
         assert!(!rename_selection_available(&app.state));
     }
 
@@ -674,7 +686,7 @@ mod tests {
             .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(82, Point::new(20, 0), "sense"));
-        app.state.schematic.selection.select_only_wire(81);
+        app.state.schematic.session.selection.select_only_wire(81);
         assert!(open_selected_object_rename(&mut app.state));
         assert!(matches!(
             app.state.dialogs.rename_selection.target,
@@ -690,7 +702,11 @@ mod tests {
             .document_mut_for_test()
             .components
             .push(port);
-        app.state.schematic.selection.select_only_component(83);
+        app.state
+            .schematic
+            .session
+            .selection
+            .select_only_component(83);
         assert!(open_selected_object_rename(&mut app.state));
         assert!(matches!(
             app.state.dialogs.rename_selection.target,
@@ -789,7 +805,11 @@ mod tests {
         assert_eq!(app.state.schematic.document().components[0], original);
         assert!(!app.state.schematic.can_undo());
 
-        app.state.schematic.selection.select_only_component(id);
+        app.state
+            .schematic
+            .session
+            .selection
+            .select_only_component(id);
         assert!(open_selected_object_rename(&mut app.state));
         let target = app.state.dialogs.rename_selection.target.clone().unwrap();
         let pending_commit = match validate_draft(&app.state.schematic, &target, "R_STALE") {
@@ -900,7 +920,11 @@ mod tests {
         assert_eq!(app.state.schematic.document().components[0].id, id);
         assert_eq!(app.state.schematic.document().components[0].name, "R_ENTER");
 
-        app.state.schematic.selection.select_only_component(id);
+        app.state
+            .schematic
+            .session
+            .selection
+            .select_only_component(id);
         assert!(open_selected_object_rename(&mut app.state));
         app.state.dialogs.rename_selection.draft = "R_ESCAPE".to_owned();
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
@@ -962,7 +986,11 @@ mod tests {
             },
         );
         app.state.schematic.document_mut_for_test().components[0].name = "R1".to_owned();
-        app.state.schematic.selection.select_only_component(id);
+        app.state
+            .schematic
+            .session
+            .selection
+            .select_only_component(id);
         assert!(open_selected_object_rename(&mut app.state));
         let target = app.state.dialogs.rename_selection.target.clone().unwrap();
         let commit = match validate_draft(&app.state.schematic, &target, "RLOAD") {

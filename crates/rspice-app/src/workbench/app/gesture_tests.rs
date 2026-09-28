@@ -20,8 +20,8 @@ impl Fixture {
         app.state.project_lifecycle.project_open = true;
         app.state.workbench.activate(Workspace::Design);
         app.state.schematic = SchematicState::default();
-        app.state.schematic.needs_fit = false;
-        app.state.schematic.needs_drawing_sheet_fit = false;
+        app.state.schematic.session.needs_fit = false;
+        app.state.schematic.session.needs_drawing_sheet_fit = false;
         if wires {
             app.state.schematic.document_mut_for_test().wires = vec![
                 Wire::new(1, vec![Point::new(100, 100), Point::new(200, 100)]),
@@ -34,7 +34,7 @@ impl Fixture {
                 .add_component(ComponentType::Resistor, Point::new(100, 100));
         }
         app.state.schematic.clear_undo_history();
-        app.state.schematic.is_dirty = false;
+        app.state.schematic.session.is_dirty = false;
         app.state.sync_active_schematic_to_workspace();
         let mut fixture = Self {
             ctx,
@@ -167,7 +167,7 @@ fn gesture_release_commits_selection_and_wire_vertex_moves_once() {
 fn gesture_escape_restores_geometry_and_release_cannot_recommit_it() {
     let mut fixture = Fixture::new(false);
     fixture.drag(DragType::MoveSelection);
-    let selection = fixture.app.state.schematic.selection.clone();
+    let selection = fixture.app.state.schematic.session.selection.clone();
     fixture.frame(
         vec![egui::Event::Key {
             key: egui::Key::Escape,
@@ -182,10 +182,10 @@ fn gesture_escape_restores_geometry_and_release_cannot_recommit_it() {
         fixture.app.state.schematic.document().components[0].pos,
         Point::new(100, 100)
     );
-    assert_eq!(fixture.app.state.schematic.selection, selection);
+    assert_eq!(fixture.app.state.schematic.session.selection, selection);
     fixture.frame(vec![fixture.button(170.0, false)], true);
     assert!(!fixture.app.state.schematic.can_undo());
-    assert!(!fixture.app.state.schematic.is_dirty);
+    assert!(!fixture.app.state.schematic.session.is_dirty);
     fixture.drag(DragType::MoveSelection);
     fixture.frame(vec![fixture.button(170.0, false)], true);
     assert!(fixture.app.state.schematic.can_undo());
@@ -195,7 +195,7 @@ fn gesture_escape_restores_geometry_and_release_cannot_recommit_it() {
 fn gesture_returning_to_start_preserves_the_original_dirty_state() {
     for was_dirty in [false, true] {
         let mut fixture = Fixture::new(false);
-        fixture.app.state.schematic.is_dirty = was_dirty;
+        fixture.app.state.schematic.session.is_dirty = was_dirty;
         fixture.drag(DragType::MoveSelection);
         fixture.frame(
             vec![egui::Event::PointerMoved(
@@ -208,7 +208,7 @@ fn gesture_returning_to_start_preserves_the_original_dirty_state() {
             fixture.app.state.schematic.document().components[0].pos,
             Point::new(100, 100)
         );
-        assert_eq!(fixture.app.state.schematic.is_dirty, was_dirty);
+        assert_eq!(fixture.app.state.schematic.session.is_dirty, was_dirty);
         assert!(!fixture.app.state.schematic.can_undo());
         assert!(!fixture.app.state.schematic.has_pending_operation());
     }
@@ -259,7 +259,7 @@ fn gesture_tool_and_workspace_changes_cancel_without_starting_a_new_edit() {
             Point::new(100, 100)
         );
         assert!(!fixture.app.state.schematic.has_pending_operation());
-        assert!(!fixture.app.state.schematic.wire_drawing.active);
+        assert!(!fixture.app.state.schematic.session.wire_drawing.active);
     }
 }
 
@@ -381,7 +381,7 @@ fn gesture_native_save_acceptance_rebases_cancel_and_release_dirty_state() {
             );
             assert_eq!(has_unsaved_changes(&fixture.app.state), completion == 2);
             assert_eq!(
-                fixture.app.state.schematic.is_dirty,
+                fixture.app.state.schematic.session.is_dirty,
                 completion == 2,
                 "dirty before drag={dirty_before_drag}, completion={completion}"
             );

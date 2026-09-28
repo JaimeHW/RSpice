@@ -241,12 +241,13 @@ fn enter_arms_the_whole_sequence_without_touching_the_document() {
 
     assert!(!app.state.dialogs.pin_port.open);
     assert_eq!(
-        app.state.schematic.tool,
+        app.state.schematic.session.tool,
         Tool::Place(crate::state::ComponentType::Port)
     );
     let sequence = app
         .state
         .schematic
+        .session
         .pending_port_sequence
         .as_ref()
         .expect("the batch is armed");
@@ -261,7 +262,7 @@ fn enter_arms_the_whole_sequence_without_touching_the_document() {
     assert!(sequence.authority.is_some());
 
     assert!(app.state.schematic.document().components.is_empty());
-    assert!(!app.state.schematic.is_dirty);
+    assert!(!app.state.schematic.session.is_dirty);
     assert!(!app.state.schematic.can_undo());
     // The canvas owns the keyboard, so R, M and Esc work before the pointer
     // has moved over it.
@@ -289,6 +290,7 @@ fn reopening_while_armed_offers_the_remaining_names() {
     });
     app.state
         .schematic
+        .session
         .pending_port_sequence
         .as_mut()
         .expect("armed")
@@ -333,10 +335,10 @@ fn the_prefill_is_empty_until_a_batch_has_been_armed() {
 fn a_read_only_or_changed_document_blocks_the_form_and_says_so() {
     let mut app = RSpiceApp::test_instance();
     open_with(&mut app.state, "EN");
-    app.state.schematic.read_only = true;
+    app.state.schematic.session.read_only = true;
     assert_eq!(draft(&app.state), Draft::Blocked(READ_ONLY));
 
-    app.state.schematic.read_only = false;
+    app.state.schematic.session.read_only = false;
     assert!(matches!(draft(&app.state), Draft::Ready(_)));
     app.state.active_schematic_epoch = app.state.active_schematic_epoch.wrapping_add(1);
     assert_eq!(draft(&app.state), Draft::Blocked(DOCUMENT_CHANGED));
@@ -350,7 +352,7 @@ fn a_blocked_form_never_arms_on_enter() {
         let mut app = RSpiceApp::test_instance();
         open_with(&mut app.state, "EN");
         if blocked == 0 {
-            app.state.schematic.read_only = true;
+            app.state.schematic.session.read_only = true;
         } else {
             app.state.active_schematic_epoch = app.state.active_schematic_epoch.wrapping_add(1);
         }
@@ -363,8 +365,8 @@ fn a_blocked_form_never_arms_on_enter() {
         });
 
         assert!(app.state.dialogs.pin_port.open);
-        assert_eq!(app.state.schematic.tool, Tool::Select);
-        assert!(app.state.schematic.pending_port_sequence.is_none());
+        assert_eq!(app.state.schematic.session.tool, Tool::Select);
+        assert!(app.state.schematic.session.pending_port_sequence.is_none());
         assert!(app.state.schematic.document().components.is_empty());
     }
 }
@@ -386,7 +388,7 @@ fn escape_closes_the_form_at_once() {
     });
 
     assert!(!app.state.dialogs.pin_port.open);
-    assert!(app.state.schematic.pending_port_sequence.is_none());
+    assert!(app.state.schematic.session.pending_port_sequence.is_none());
     assert!(app.state.schematic.document().components.is_empty());
 }
 
@@ -543,7 +545,7 @@ fn render_create_pins() {
         }),
         ("read-only", |state: &mut AppState| {
             state.dialogs.pin_port.names = "INP INN".to_owned();
-            state.schematic.read_only = true;
+            state.schematic.session.read_only = true;
         }),
     ] {
         for (size_stem, size) in [

@@ -35,7 +35,7 @@ pub(crate) fn open_descend_hierarchy_dialog(state: &mut AppState) -> bool {
         return false;
     };
     let authority = SchematicEditAuthority::capture(state);
-    let parent_dirty = state.schematic.is_dirty;
+    let parent_dirty = state.schematic.session.is_dirty;
     let preferred_edit_mode = if state.hierarchical_edit_in_place_enabled() {
         HierarchyDescendEditMode::EditInPlace
     } else {
@@ -466,7 +466,7 @@ mod tests {
             .document_mut_for_test()
             .components
             .push(instance);
-        state.schematic.selection.select_only_component(91);
+        state.schematic.session.selection.select_only_component(91);
         (state, parent, child)
     }
 
@@ -515,7 +515,7 @@ mod tests {
         assert!(state.dialogs.descend_hierarchy.open);
         assert_eq!(state.workspace.active_view, parent);
 
-        state.schematic.selection.clear();
+        state.schematic.session.selection.clear();
         let error = commit_descend_context(&mut state).expect_err("selection drift must block");
         assert!(error.contains("selected-object set changed"));
         assert_eq!(state.workspace.active_view, parent);
@@ -588,7 +588,7 @@ mod tests {
         assert_eq!(state.workspace.active_view, child);
         assert!(state.workspace.active_read_only_reference());
         assert!(state.active_view_read_only());
-        assert!(!state.schematic.read_only);
+        assert!(!state.schematic.session.read_only);
         assert!(
             !state
                 .library_manager

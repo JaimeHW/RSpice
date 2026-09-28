@@ -346,7 +346,8 @@ pub(super) fn validate_design_management_page(
                 .count();
             if selected_components != dialog.selection_object_ids.len()
                 || selected_components == 0
-                || state.schematic.selection.count() != state.schematic.selection.components.len()
+                || state.schematic.session.selection.count()
+                    != state.schematic.session.selection.components.len()
             {
                 return Err(
                     "Connectivity-preserving sheet and hierarchy moves require the same complete instance-only selection captured when Design Management opened."

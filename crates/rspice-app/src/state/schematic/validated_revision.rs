@@ -41,7 +41,7 @@ impl SchematicState {
         let id = self
             .design
             .append_validated_revision(request, checked_unix_time_ms)?;
-        self.is_dirty = true;
+        self.session.is_dirty = true;
         Ok(id)
     }
 
@@ -56,12 +56,12 @@ impl SchematicState {
         &mut self,
         id: ValidatedSchematicRevisionId,
     ) -> Result<(), ValidatedRevisionError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(ValidatedRevisionError::ReadOnly);
         }
         let changed = self.design.restore_validated_revision(id)?;
-        self.is_dirty = true;
-        self.selection.clear();
+        self.session.is_dirty = true;
+        self.session.selection.clear();
         self.finish_document_edit(changed);
         if changed {
             Ok(())
@@ -111,7 +111,7 @@ mod tests {
         state.add_component(ComponentType::Resistor, Point::new(10, 10));
         let design = state.validated_design_content_digest().unwrap();
         let journal = state.design.document().validated_revisions.clone();
-        let dirty = state.is_dirty;
+        let dirty = state.session.is_dirty;
         for epoch in [
             Err("clock unavailable"),
             Ok(std::time::Duration::ZERO),
@@ -133,7 +133,7 @@ mod tests {
                 ));
             });
             assert_eq!(state.design.document().validated_revisions, journal);
-            assert_eq!(state.is_dirty, dirty);
+            assert_eq!(state.session.is_dirty, dirty);
             assert_eq!(state.validated_design_content_digest().unwrap(), design);
         }
         state
@@ -160,7 +160,7 @@ mod tests {
 
         state.design.document_mut_for_test().components[0].value = "3k".to_owned();
         let changed = state.design.document().components.clone();
-        state.read_only = true;
+        state.session.read_only = true;
         assert_eq!(
             state.restore_validated_revision(saved),
             Err(ValidatedRevisionError::ReadOnly)
@@ -194,11 +194,11 @@ impl SchematicState {
             checked_unix_time_ms,
         ) {
             Ok(record) => {
-                self.is_dirty = true;
+                self.session.is_dirty = true;
                 Ok(record)
             }
             Err(error) => {
-                self.is_dirty = original_dirty;
+                self.session.is_dirty = original_dirty;
                 Err(error)
             }
         }
@@ -216,7 +216,7 @@ impl SchematicState {
             expected_journal,
             expected_design_digest,
         )?;
-        self.is_dirty = original_dirty || changed;
+        self.session.is_dirty = original_dirty || changed;
         Ok(())
     }
 }

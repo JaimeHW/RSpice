@@ -337,7 +337,7 @@ impl SimulationController {
                 match prepared_run::touchstone_export_policy_for_dialog(
                     &projected_state.sim_setup.sp,
                     &crate::simulation::placed_sources::placed_rf_ports(&state.schematic, None),
-                    state.schematic.current_file.as_deref(),
+                    state.schematic.session.current_file.as_deref(),
                 ) {
                     Ok(policy) => {
                         prepared = prepared.with_touchstone_export_policy(policy);

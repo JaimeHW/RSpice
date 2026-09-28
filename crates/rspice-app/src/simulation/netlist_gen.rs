@@ -2214,7 +2214,7 @@ mod tests {
         .enumerate()
         {
             let id = state.add_component(kind, Point::new(index as i32 * 100, 0));
-            state.selection.select_component(id);
+            state.session.selection.select_component(id);
         }
         state.document_mut_for_test().components[0].name = "coil".to_owned();
         state.document_mut_for_test().components[2].params = "inductors=\"Lcoil L2\"".to_owned();

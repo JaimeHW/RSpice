@@ -200,7 +200,7 @@ fn stretch_target_at(
 ) -> Option<StretchTarget> {
     let point = screen_to_schematic(viewport, position);
     let tolerance = f64::from((6.0 / viewport.zoom.max(0.1)).ceil() as i32);
-    let selection = &state.schematic.selection;
+    let selection = &state.schematic.session.selection;
     let mut candidates: Vec<(f64, u8, u64, usize, StretchTarget)> = Vec::new();
 
     for wire in state.schematic.document().wires.iter().filter(|wire| {
@@ -380,7 +380,11 @@ mod tests {
                     Point::new(20, 0),
                 ],
             ));
-        state.schematic.selection.select_only_wire_segment(7, 1);
+        state
+            .schematic
+            .session
+            .selection
+            .select_only_wire_segment(7, 1);
         state.schematic.init_undo_history();
         state
     }
@@ -407,7 +411,11 @@ mod tests {
             .document_mut_for_test()
             .wires
             .push(Wire::segment(2, Point::new(0, 10), Point::new(100, 10)));
-        state.schematic.selection.select_only_wire_segment(2, 0);
+        state
+            .schematic
+            .session
+            .selection
+            .select_only_wire_segment(2, 0);
         let viewport = Viewport {
             offset: egui::Pos2::ZERO,
             zoom: 1.0,
@@ -438,7 +446,11 @@ mod tests {
                 4,
                 vec![Point::new(0, 0), Point::new(0, 20), Point::new(30, 20)],
             ));
-        state.schematic.selection.select_only_wire_vertex(4, 1);
+        state
+            .schematic
+            .session
+            .selection
+            .select_only_wire_vertex(4, 1);
         let viewport = Viewport {
             offset: egui::Pos2::ZERO,
             zoom: 1.0,
@@ -487,8 +499,8 @@ mod tests {
             state.schematic.undo_description(),
             Some("stretch selection")
         );
-        assert!(state.schematic.selection.has_wire_segment(7, 1));
-        assert_eq!(state.schematic.tool, crate::state::Tool::Select);
+        assert!(state.schematic.session.selection.has_wire_segment(7, 1));
+        assert_eq!(state.schematic.session.tool, crate::state::Tool::Select);
         assert!(!state.dialogs.stretch_selection.armed);
         assert_eq!(
             state
@@ -521,8 +533,8 @@ mod tests {
         crate::workbench::app::cancel_armed_stretch_selection(&mut state);
 
         assert_eq!(state.schematic.document().wires[0], baseline);
-        assert!(state.schematic.selection.has_wire_segment(7, 1));
-        assert_eq!(state.schematic.tool, crate::state::Tool::Select);
+        assert!(state.schematic.session.selection.has_wire_segment(7, 1));
+        assert_eq!(state.schematic.session.tool, crate::state::Tool::Select);
         assert!(!state.schematic.can_undo());
     }
 
@@ -542,8 +554,11 @@ mod tests {
         commit_armed_stretch_selection(&mut state, &symbols);
 
         assert_eq!(state.schematic.document().wires[0], baseline);
-        assert!(state.schematic.selection.has_wire_segment(7, 1));
-        assert_eq!(state.schematic.tool, crate::state::Tool::StretchSelection);
+        assert!(state.schematic.session.selection.has_wire_segment(7, 1));
+        assert_eq!(
+            state.schematic.session.tool,
+            crate::state::Tool::StretchSelection
+        );
         assert!(state.dialogs.stretch_selection.armed);
         assert!(state.dialogs.stretch_selection.preview_error.is_some());
         assert!(!state.schematic.can_undo());

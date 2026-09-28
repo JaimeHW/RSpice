@@ -624,12 +624,13 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
             net.terminals.iter().any(|terminal| {
                 app.state
                     .schematic
+                    .session
                     .selection
                     .has_component(terminal.component_id)
             })
         } else {
             net.wire_ids.iter().copied().collect::<HashSet<_>>()
-                == app.state.schematic.net_highlight.highlighted_wires
+                == app.state.schematic.session.net_highlight.highlighted_wires
         };
         let connection_count = net.pin_count().to_string();
         let response = nav_row_indented_mono_response(
@@ -864,6 +865,7 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
                 selected: app
                     .state
                     .schematic
+                    .session
                     .selection
                     .has_component(port.component_id),
             },
@@ -873,10 +875,11 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
         if response.clicked() {
             app.state
                 .schematic
+                .session
                 .selection
                 .select_only_component(port.component_id);
-            app.state.schematic.net_highlight.clear();
-            app.state.schematic.center_request = Some(port.position);
+            app.state.schematic.session.net_highlight.clear();
+            app.state.schematic.session.center_request = Some(port.position);
         }
         navigator_object_context_menu(
             &response,
@@ -1047,10 +1050,11 @@ fn descend_to_placed(
     };
     state
         .schematic
+        .session
         .selection
         .select_only_component(component_id);
-    state.schematic.net_highlight.clear();
-    state.schematic.center_request = Some(position);
+    state.schematic.session.net_highlight.clear();
+    state.schematic.session.center_request = Some(position);
 }
 
 /// Every RF port the design places, in the order an S-parameter matrix indexes
@@ -1151,6 +1155,7 @@ fn rf_port_section(ui: &mut Ui, app: &mut RSpiceApp) {
                     && app
                         .state
                         .schematic
+                        .session
                         .selection
                         .has_component(port.component_id),
             },
@@ -1173,10 +1178,11 @@ fn rf_port_section(ui: &mut Ui, app: &mut RSpiceApp) {
                 if response.clicked() {
                     app.state
                         .schematic
+                        .session
                         .selection
                         .select_only_component(port.component_id);
-                    app.state.schematic.net_highlight.clear();
-                    app.state.schematic.center_request = None;
+                    app.state.schematic.session.net_highlight.clear();
+                    app.state.schematic.session.center_request = None;
                 }
             }
         }
@@ -1365,6 +1371,7 @@ fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
                     && app
                         .state
                         .schematic
+                        .session
                         .selection
                         .has_component(source.component_id),
             },
@@ -1387,10 +1394,11 @@ fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
                 if response.clicked() {
                     app.state
                         .schematic
+                        .session
                         .selection
                         .select_only_component(source.component_id);
-                    app.state.schematic.net_highlight.clear();
-                    app.state.schematic.center_request = None;
+                    app.state.schematic.session.net_highlight.clear();
+                    app.state.schematic.session.center_request = None;
                 }
             }
         }
@@ -1565,9 +1573,9 @@ fn reveal_probe_expression(state: &mut AppState, expression: &str) {
             };
             let id = component.id;
             let position = component.pos;
-            state.schematic.selection.select_only_component(id);
-            state.schematic.net_highlight.clear();
-            state.schematic.center_request = Some(position);
+            state.schematic.session.selection.select_only_component(id);
+            state.schematic.session.net_highlight.clear();
+            state.schematic.session.center_request = Some(position);
         }
         RawProbeTarget::Voltage { positive, negative } => {
             let resolved = state.workspace.design_projection(
@@ -1673,9 +1681,9 @@ impl NavigatorObject {
 fn select_navigator_object(state: &mut AppState, object: &NavigatorObject) {
     match object {
         NavigatorObject::Component { id, position, .. } => {
-            state.schematic.selection.select_only_component(*id);
-            state.schematic.net_highlight.clear();
-            state.schematic.center_request = Some(*position);
+            state.schematic.session.selection.select_only_component(*id);
+            state.schematic.session.net_highlight.clear();
+            state.schematic.session.center_request = Some(*position);
         }
         NavigatorObject::Net {
             name,
@@ -1686,6 +1694,7 @@ fn select_navigator_object(state: &mut AppState, object: &NavigatorObject) {
             select_navigator_net(state, wire_ids, component_ids, *position);
             state
                 .schematic
+                .session
                 .net_highlight
                 .highlight_named_wires(name, wire_ids.iter().copied().collect());
         }
@@ -1708,6 +1717,7 @@ fn select_navigator_design_net(
     select_navigator_net(state, &net.wire_ids, &component_ids, position);
     state
         .schematic
+        .session
         .net_highlight
         .highlight_named_wires(&net.name, net.wire_ids.iter().copied().collect());
 }
@@ -1718,20 +1728,25 @@ fn select_navigator_net(
     component_ids: &[u64],
     position: Option<crate::state::Point>,
 ) {
-    state.schematic.selection.clear();
+    state.schematic.session.selection.clear();
     for wire_id in wire_ids {
-        state.schematic.selection.select_wire(*wire_id);
+        state.schematic.session.selection.select_wire(*wire_id);
     }
     if wire_ids.is_empty() {
         for component_id in component_ids {
-            state.schematic.selection.select_component(*component_id);
+            state
+                .schematic
+                .session
+                .selection
+                .select_component(*component_id);
         }
     }
     state
         .schematic
+        .session
         .net_highlight
         .highlight_wires(wire_ids.iter().copied().collect());
-    state.schematic.center_request = position;
+    state.schematic.session.center_request = position;
 }
 
 fn sorted_unique(values: impl IntoIterator<Item = u64>) -> Vec<u64> {
@@ -1744,18 +1759,20 @@ fn sorted_unique(values: impl IntoIterator<Item = u64>) -> Vec<u64> {
 fn navigator_net_selection_matches(state: &AppState, net: &DesignNet) -> bool {
     if !state
         .schematic
+        .session
         .net_highlight
         .selected_net_name
         .as_deref()
         .is_some_and(|name| name.eq_ignore_ascii_case(&net.name))
-        || state.schematic.net_highlight.highlighted_wires != net.wire_ids.iter().copied().collect()
+        || state.schematic.session.net_highlight.highlighted_wires
+            != net.wire_ids.iter().copied().collect()
     {
         return false;
     }
 
     let wire_ids = sorted_unique(net.wire_ids.iter().copied());
     let component_ids = sorted_unique(net.terminals.iter().map(|terminal| terminal.component_id));
-    let concrete = &state.schematic.selection;
+    let concrete = &state.schematic.session.selection;
     let no_other_classes = concrete.wire_segments.is_empty()
         && concrete.wire_vertices.is_empty()
         && concrete.junctions.is_empty()

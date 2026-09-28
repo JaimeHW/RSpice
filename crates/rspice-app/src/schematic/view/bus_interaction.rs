@@ -86,6 +86,7 @@ fn resolve_bus_tap_candidate_filtered(
     object_is_visible: impl Fn(u64) -> bool,
 ) -> Result<BusTapCandidate, BusTapCandidateError> {
     let pending = schematic
+        .session
         .pending_bus_tap
         .as_ref()
         .ok_or(BusTapCandidateError::MissingConfiguration)?;
@@ -439,7 +440,7 @@ mod tests {
             )
             .unwrap(),
         );
-        state.pending_bus_tap = Some(
+        state.session.pending_bus_tap = Some(
             crate::state::PendingBusTap::new(
                 declaration,
                 BusSlice::parse(slice).unwrap(),
@@ -527,7 +528,7 @@ mod tests {
     #[test]
     fn explicit_orientation_is_never_auto_flipped() {
         let mut state = armed_state("DATA[3]");
-        state.pending_bus_tap.as_mut().unwrap().orientation = BusTapOrientation::Up;
+        state.session.pending_bus_tap.as_mut().unwrap().orientation = BusTapOrientation::Up;
         state.document_mut_for_test().wires.push(Wire::segment(
             2,
             Point::new(20, 10),
@@ -610,7 +611,7 @@ mod tests {
             BusTapOrientation::Automatic,
         )
         .unwrap();
-        state.pending_bus_tap = Some(pending.clone());
+        state.session.pending_bus_tap = Some(pending.clone());
 
         let candidate = resolve_bus_tap_candidate(&state, Point::new(5, 2), 6).unwrap();
         assert_eq!(candidate.bus_point, Point::new(10, 3));

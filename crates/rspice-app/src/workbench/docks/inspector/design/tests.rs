@@ -247,10 +247,14 @@ fn one_instance_beats_the_set_and_several_fall_through_to_multi() {
         .map(|component| component.id)
         .collect();
 
-    state.schematic.selection.select_only_component(ids[0]);
+    state
+        .schematic
+        .session
+        .selection
+        .select_only_component(ids[0]);
     assert_eq!(subject(&state, &[]), DesignSubject::Component(ids[0]));
 
-    state.schematic.selection.select_component(ids[1]);
+    state.schematic.session.selection.select_component(ids[1]);
     assert_eq!(subject(&state, &[]), DesignSubject::Multi);
 }
 
@@ -260,11 +264,11 @@ fn one_probe_has_its_own_inspector_and_mixed_selection_falls_back_to_multi() {
     state.schematic.document_mut_for_test().probes.push(
         SchematicProbe::new(73, Point::new(10, 20), "V(out)", Some("V(out)".to_owned())).unwrap(),
     );
-    state.schematic.selection.select_only_probe(73);
+    state.schematic.session.selection.select_only_probe(73);
 
     assert_eq!(subject(&state, &[]), DesignSubject::Probe(73));
 
-    state.schematic.selection.select_wire(9);
+    state.schematic.session.selection.select_wire(9);
     assert_eq!(subject(&state, &[]), DesignSubject::Multi);
 }
 
@@ -290,14 +294,14 @@ fn conductors_on_one_net_inspect_that_net_and_a_split_falls_back_to_multi() {
         },
     ];
 
-    state.schematic.selection.select_wire(7);
-    state.schematic.selection.select_wire(8);
+    state.schematic.session.selection.select_wire(7);
+    state.schematic.session.selection.select_wire(8);
     assert_eq!(
         subject(&state, &nets),
         DesignSubject::Net("vout".to_owned())
     );
 
-    state.schematic.selection.select_wire(9);
+    state.schematic.session.selection.select_wire(9);
     assert_eq!(subject(&state, &nets), DesignSubject::Multi);
 }
 
@@ -313,9 +317,10 @@ fn wireless_semantic_net_selection_routes_to_the_exact_net_inspector() {
             ComponentType::CellInstance,
             Point::origin(),
         ));
-    state.schematic.selection.select_only_component(71);
+    state.schematic.session.selection.select_only_component(71);
     state
         .schematic
+        .session
         .net_highlight
         .highlight_named_wires("PORT_OUT", HashSet::new());
     let nets = vec![DesignNet {
@@ -335,7 +340,7 @@ fn wireless_semantic_net_selection_routes_to_the_exact_net_inspector() {
         subject(&state, &nets),
         DesignSubject::Net("PORT_OUT".to_owned())
     );
-    state.schematic.net_highlight.clear();
+    state.schematic.session.net_highlight.clear();
     assert_eq!(subject(&state, &nets), DesignSubject::Component(71));
 }
 
@@ -353,6 +358,7 @@ fn explicit_junction_selection_resolves_its_live_net() {
         ));
     state
         .schematic
+        .session
         .selection
         .select_only_junction(Point::origin());
     let nets = vec![DesignNet {
@@ -380,7 +386,7 @@ fn a_selected_interface_port_routes_to_the_shared_net_inspector() {
         .document_mut_for_test()
         .components
         .push(port);
-    state.schematic.selection.select_only_component(77);
+    state.schematic.session.selection.select_only_component(77);
     let nets = vec![DesignNet {
         name: "VIN".to_owned(),
         authored_name: true,
@@ -396,7 +402,7 @@ fn a_selected_interface_port_routes_to_the_shared_net_inspector() {
 #[test]
 fn a_conductor_with_no_resolved_net_never_claims_one() {
     let mut state = AppState::default();
-    state.schematic.selection.select_wire(42);
+    state.schematic.session.selection.select_wire(42);
 
     // One unresolved wire is a single selected object, not a net.
     assert_eq!(subject(&state, &[]), DesignSubject::Multi);

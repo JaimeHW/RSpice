@@ -75,6 +75,6 @@ fn app_with_selected_authored_symbol() -> RSpiceApp {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(702, Point::new(60, 40), Point::new(60, 0)));
-    app.state.schematic.selection.select_component(701);
+    app.state.schematic.session.selection.select_component(701);
     app
 }

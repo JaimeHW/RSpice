@@ -105,7 +105,7 @@ impl CheckAndSaveValidationReport {
                 "Safe mode opened this project read-only.",
             );
         }
-        if state.schematic.read_only || state.active_view_read_only() {
+        if state.schematic.session.read_only || state.active_view_read_only() {
             insert_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Blocker,
@@ -1011,8 +1011,8 @@ mod tests {
 
         let anchor = finding_anchor(&state, located).expect("a located finding resolves an anchor");
         state.jump_to_log_anchor(anchor);
-        assert_eq!(state.schematic.center_request, Some(position));
-        assert!(state.schematic.selection.has_component(resistor));
+        assert_eq!(state.schematic.session.center_request, Some(position));
+        assert!(state.schematic.session.selection.has_component(resistor));
 
         // A finding about the project rather than the drawing offers no jump.
         let unlocated = CheckAndSaveFinding {

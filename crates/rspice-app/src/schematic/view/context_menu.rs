@@ -262,7 +262,7 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
 /// The one independent source the menu is about, when that is all that is
 /// selected.
 fn clicked_source(state: &AppState) -> Option<&crate::state::Component> {
-    let id = state.schematic.selection.single_component()?;
+    let id = state.schematic.session.selection.single_component()?;
     state
         .schematic
         .document()
@@ -491,66 +491,80 @@ fn select_pointer_target(
     ) else {
         return ContextTarget::Canvas;
     };
-    state.schematic.net_highlight.clear();
+    state.schematic.session.net_highlight.clear();
     match target {
         PointerTarget::Component(id) => {
-            if !state.schematic.selection.has_component(id) {
-                state.schematic.selection.select_only_component(id);
+            if !state.schematic.session.selection.has_component(id) {
+                state.schematic.session.selection.select_only_component(id);
             }
             ContextTarget::Component(id)
         }
         PointerTarget::DesignNote(id) => {
-            if !state.schematic.selection.has_design_note(id) {
-                state.schematic.selection.select_only_design_note(id);
+            if !state.schematic.session.selection.has_design_note(id) {
+                state
+                    .schematic
+                    .session
+                    .selection
+                    .select_only_design_note(id);
             }
             ContextTarget::Canvas
         }
         // A probe selects like any other annotation. `ContextTarget` has no
         // probe case, so the menu opens against the canvas.
         PointerTarget::Probe(id) => {
-            if !state.schematic.selection.has_probe(id) {
-                state.schematic.selection.select_only_probe(id);
+            if !state.schematic.session.selection.has_probe(id) {
+                state.schematic.session.selection.select_only_probe(id);
             }
             ContextTarget::Canvas
         }
         PointerTarget::DocumentationShape(id) => {
-            if !state.schematic.selection.has_documentation_shape(id) {
+            if !state
+                .schematic
+                .session
+                .selection
+                .has_documentation_shape(id)
+            {
                 state
                     .schematic
+                    .session
                     .selection
                     .select_only_documentation_shape(id);
             }
             ContextTarget::Canvas
         }
         PointerTarget::NetLabel(id) => {
-            if !state.schematic.selection.has_net_label(id) {
-                state.schematic.selection.select_only_net_label(id);
+            if !state.schematic.session.selection.has_net_label(id) {
+                state.schematic.session.selection.select_only_net_label(id);
             }
             // ContextTarget has no net-label variant; stable Selection identity
             // remains authoritative for properties and lifecycle actions.
             ContextTarget::Canvas
         }
         PointerTarget::BusTap(id) => {
-            if !state.schematic.selection.has_bus_tap(id) {
-                state.schematic.selection.select_only_bus_tap(id);
+            if !state.schematic.session.selection.has_bus_tap(id) {
+                state.schematic.session.selection.select_only_bus_tap(id);
             }
             ContextTarget::Canvas
         }
         PointerTarget::Junction(position) => {
-            if !state.schematic.selection.has_junction(position) {
-                state.schematic.selection.select_only_junction(position);
+            if !state.schematic.session.selection.has_junction(position) {
+                state
+                    .schematic
+                    .session
+                    .selection
+                    .select_only_junction(position);
             }
             ContextTarget::Canvas
         }
         PointerTarget::Bus(id) => {
-            if !state.schematic.selection.has_bus(id) {
-                state.schematic.selection.select_only_bus(id);
+            if !state.schematic.session.selection.has_bus(id) {
+                state.schematic.session.selection.select_only_bus(id);
             }
             ContextTarget::Canvas
         }
         PointerTarget::Wire(id) => {
-            if !state.schematic.selection.has_wire(id) {
-                state.schematic.selection.select_only_wire(id);
+            if !state.schematic.session.selection.has_wire(id) {
+                state.schematic.session.selection.select_only_wire(id);
             }
             ContextTarget::Wire(id)
         }
@@ -591,7 +605,7 @@ fn keyboard_target(
     viewport: &Viewport,
     fallback_screen_pos: egui::Pos2,
 ) -> (ContextTarget, Point) {
-    if let Some(id) = state.schematic.selection.single_bus_tap()
+    if let Some(id) = state.schematic.session.selection.single_bus_tap()
         && let Some(tap) = state
             .schematic
             .document()
@@ -601,7 +615,7 @@ fn keyboard_target(
     {
         return (ContextTarget::Canvas, tap.connection_point);
     }
-    if let Some(id) = state.schematic.selection.single_net_label()
+    if let Some(id) = state.schematic.session.selection.single_net_label()
         && let Some(label) = state
             .schematic
             .document()
@@ -611,7 +625,7 @@ fn keyboard_target(
     {
         return (ContextTarget::Canvas, label.pos);
     }
-    if let Some(id) = state.schematic.selection.single_bus()
+    if let Some(id) = state.schematic.session.selection.single_bus()
         && let Some(bus) = state
             .schematic
             .document()
@@ -622,7 +636,7 @@ fn keyboard_target(
     {
         return (ContextTarget::Canvas, point_midpoint(*first, *last));
     }
-    if let Some(id) = state.schematic.selection.single_component()
+    if let Some(id) = state.schematic.session.selection.single_component()
         && let Some(component) = state
             .schematic
             .document()
@@ -632,7 +646,7 @@ fn keyboard_target(
     {
         return (ContextTarget::Component(id), component.pos);
     }
-    if let Some(id) = state.schematic.selection.single_wire()
+    if let Some(id) = state.schematic.session.selection.single_wire()
         && let Some(wire) = state
             .schematic
             .document()
@@ -643,10 +657,17 @@ fn keyboard_target(
     {
         return (ContextTarget::Wire(id), point_midpoint(*first, *last));
     }
-    if let Some(point) = state.schematic.selection.single_junction() {
+    if let Some(point) = state.schematic.session.selection.single_junction() {
         return (ContextTarget::Canvas, point);
     }
-    if let Some(id) = state.schematic.selection.components.iter().copied().min()
+    if let Some(id) = state
+        .schematic
+        .session
+        .selection
+        .components
+        .iter()
+        .copied()
+        .min()
         && let Some(component) = state
             .schematic
             .document()
@@ -734,7 +755,7 @@ fn menu_row_keyboard_activated(ui: &Ui, response: &Response) -> bool {
 }
 
 fn selection_summary(state: &AppState, target: ContextTarget) -> String {
-    let selection = &state.schematic.selection;
+    let selection = &state.schematic.session.selection;
     let count = selection.components.len()
         + selection.wires.len()
         + selection.wire_segments.len()
@@ -1089,7 +1110,7 @@ enum FocusMove {
 }
 
 fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'static str) {
-    let selection = &state.schematic.selection;
+    let selection = &state.schematic.session.selection;
     // Components, complete wires, and explicit junctions are clipboard and
     // deletion objects. Wire segments and vertices remain edit handles.
     let has_live_component = state
@@ -1244,7 +1265,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         && all_junctions_are_live
         && !has_wire_sub_object;
     let has_component = has_live_component;
-    let writable = !state.schematic.read_only && !state.active_view_read_only();
+    let writable = !state.schematic.session.read_only && !state.active_view_read_only();
     match action {
         ContextAction::Properties => (
             crate::workbench::app::selected_object_properties_available(state),
@@ -1393,8 +1414,8 @@ fn execute_context_action(
             crate::workbench::app::open_drawing_sheet_setup_for_state(state);
         }
         ContextAction::FitContent => {
-            state.schematic.needs_fit = true;
-            state.schematic.needs_drawing_sheet_fit = false;
+            state.schematic.session.needs_fit = true;
+            state.schematic.session.needs_drawing_sheet_fit = false;
         }
         ContextAction::ShowInNetlist => state.show_selected_instance_in_netlist(),
         ContextAction::Probe => state.schematic.arm_tool(Tool::Probe),
@@ -1437,7 +1458,7 @@ fn open_operating_point(state: &mut AppState) {
 /// [`crate::workbench::documents::result_document::op_inspector`] uses to walk
 /// the other way, so the two directions agree on what "this device" means.
 fn clicked_instance_name(state: &AppState) -> Option<String> {
-    let id = state.schematic.selection.single_component()?;
+    let id = state.schematic.session.selection.single_component()?;
     Some(
         state
             .schematic

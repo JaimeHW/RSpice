@@ -93,8 +93,8 @@ pub(super) fn draw_scene(
         );
     }
 
-    let preview_bounds = if state.schematic.selection_rect.is_active() {
-        let (min_x, min_y, max_x, max_y) = state.schematic.selection_rect.bounds();
+    let preview_bounds = if state.schematic.session.selection_rect.is_active() {
+        let (min_x, min_y, max_x, max_y) = state.schematic.session.selection_rect.bounds();
         Some((min_x, min_y, max_x, max_y))
     } else {
         None
@@ -122,7 +122,7 @@ pub(super) fn draw_scene(
         if !polyline_intersects_view(&bus.points, wx0, wy0, wx1, wy1) {
             continue;
         }
-        let mut selected = state.schematic.selection.has_bus(bus.id);
+        let mut selected = state.schematic.session.selection.has_bus(bus.id);
         if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
             selected = bus.points.windows(2).any(|segment| {
                 super::segment_intersects_rect(segment[0], segment[1], min_x, min_y, max_x, max_y)
@@ -152,7 +152,7 @@ pub(super) fn draw_scene(
         {
             continue;
         }
-        let mut is_selected = state.schematic.selection.wires.contains(&wire.id);
+        let mut is_selected = state.schematic.session.selection.wires.contains(&wire.id);
 
         if !is_selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
             is_selected = wire
@@ -164,6 +164,7 @@ pub(super) fn draw_scene(
         let highlight_color = match state.ui.schematic_visibility.net_highlighting {
             SchematicNetHighlighting::SelectedAcrossHierarchy => state
                 .schematic
+                .session
                 .net_highlight
                 .is_wire_highlighted(wire.id)
                 .then_some(crate::ui::tokens::active_palette().warn),
@@ -204,7 +205,7 @@ pub(super) fn draw_scene(
         {
             continue;
         }
-        let mut selected = state.schematic.selection.has_bus_tap(tap.id);
+        let mut selected = state.schematic.session.selection.has_bus_tap(tap.id);
         if !selected && let Some((rx0, ry0, rx1, ry1)) = preview_bounds {
             selected = route.windows(2).any(|segment| {
                 super::segment_intersects_rect(segment[0], segment[1], rx0, ry0, rx1, ry1)
@@ -225,7 +226,12 @@ pub(super) fn draw_scene(
         {
             continue;
         }
-        let mut is_selected = state.schematic.selection.components.contains(&component.id);
+        let mut is_selected = state
+            .schematic
+            .session
+            .selection
+            .components
+            .contains(&component.id);
 
         if !is_selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
             is_selected = max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y;
@@ -257,7 +263,7 @@ pub(super) fn draw_scene(
 
     // Presentation geometry is a background documentation layer. It remains
     // selectable, but is intentionally painted below authored text and names.
-    let hovered_shape = if state.schematic.tool == crate::state::Tool::Select {
+    let hovered_shape = if state.schematic.session.tool == crate::state::Tool::Select {
         let shapes = objects_on_active_sheet(
             state,
             &state.schematic.document().documentation_shapes,
@@ -283,7 +289,11 @@ pub(super) fn draw_scene(
         {
             continue;
         }
-        let mut selected = state.schematic.selection.has_documentation_shape(shape.id);
+        let mut selected = state
+            .schematic
+            .session
+            .selection
+            .has_documentation_shape(shape.id);
         if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
             selected = super::documentation_shapes::shape_intersects_rect(
                 shape, min_x, min_y, max_x, max_y, false,
@@ -300,7 +310,7 @@ pub(super) fn draw_scene(
 
     // Net labels are authored text, not derived annotations. Paint them after
     // junction and OP overlays so the source net name always remains legible.
-    let hovered_label = if state.schematic.tool == crate::state::Tool::Select {
+    let hovered_label = if state.schematic.session.tool == crate::state::Tool::Select {
         let labels =
             objects_on_active_sheet(state, &state.schematic.document().net_labels, |item| {
                 item.id
@@ -325,7 +335,7 @@ pub(super) fn draw_scene(
         {
             continue;
         }
-        let mut selected = state.schematic.selection.has_net_label(label.id);
+        let mut selected = state.schematic.session.selection.has_net_label(label.id);
         if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
             selected = max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y;
         }
@@ -341,7 +351,7 @@ pub(super) fn draw_scene(
 
     // Documentation objects are painted above electrical names but below
     // validation markers. They never participate in conductor rendering.
-    let hovered_note = if state.schematic.tool == crate::state::Tool::Select {
+    let hovered_note = if state.schematic.session.tool == crate::state::Tool::Select {
         let notes = visible_design_notes(state);
         painter
             .ctx()
@@ -368,7 +378,7 @@ pub(super) fn draw_scene(
         {
             continue;
         }
-        let mut selected = state.schematic.selection.has_design_note(note.id);
+        let mut selected = state.schematic.session.selection.has_design_note(note.id);
         if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
             selected = max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y;
         }
@@ -385,7 +395,7 @@ pub(super) fn draw_scene(
     // Probe flags are durable output intent and remain visible above authored
     // conductor/text layers. Their reference is the exact bound expression
     // when resolved, otherwise the stable unbound P<n> marker identity.
-    let hovered_probe = if state.schematic.tool == crate::state::Tool::Select {
+    let hovered_probe = if state.schematic.session.tool == crate::state::Tool::Select {
         let probes =
             objects_on_active_sheet(state, &state.schematic.document().probes, |item| item.id);
         painter
@@ -409,7 +419,7 @@ pub(super) fn draw_scene(
         {
             continue;
         }
-        let mut selected = state.schematic.selection.has_probe(probe.id);
+        let mut selected = state.schematic.session.selection.has_probe(probe.id);
         if !selected {
             selected = state
                 .ui
@@ -784,7 +794,7 @@ pub(super) fn keyboard_focus_matches_selection(
     state: &AppState,
     focus: SchematicKeyboardFocus,
 ) -> bool {
-    let selection = &state.schematic.selection;
+    let selection = &state.schematic.session.selection;
     match focus {
         SchematicKeyboardFocus::Component(id) => selection.single_component() == Some(id),
         SchematicKeyboardFocus::Wire(id) => {
@@ -1218,7 +1228,11 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
             .components
             .iter()
             .filter(|component| {
-                state.schematic.selection.has_component(component.id)
+                state
+                    .schematic
+                    .session
+                    .selection
+                    .has_component(component.id)
                     && object_is_on_active_sheet(state, component.id)
             })
         {
@@ -1264,7 +1278,11 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
             .components
             .iter()
             .filter(|component| {
-                state.schematic.selection.has_component(component.id)
+                state
+                    .schematic
+                    .session
+                    .selection
+                    .has_component(component.id)
                     && object_is_on_active_sheet(state, component.id)
             })
         {
@@ -1301,7 +1319,11 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
             .components
             .iter()
             .filter(|component| {
-                state.schematic.selection.has_component(component.id)
+                state
+                    .schematic
+                    .session
+                    .selection
+                    .has_component(component.id)
                     && object_is_on_active_sheet(state, component.id)
                     && !annotated_devices.contains(&component.id)
             })
@@ -1767,7 +1789,7 @@ mod tests {
             .document_mut_for_test()
             .components
             .push(component);
-        state.schematic.selection.select_component(1);
+        state.schematic.session.selection.select_component(1);
 
         let point = Point::new(20, 10);
         state

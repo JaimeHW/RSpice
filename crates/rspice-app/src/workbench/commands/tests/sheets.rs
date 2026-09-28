@@ -150,7 +150,7 @@ fn sheet_commands_state_why_they_are_unavailable() {
     );
 
     app.state.workbench.activate(Workspace::Design);
-    app.state.schematic.read_only = true;
+    app.state.schematic.session.read_only = true;
     assert_eq!(
         Command::NewSheet.availability(&app),
         CommandAvailability::Disabled("the active schematic is read-only")
@@ -160,7 +160,7 @@ fn sheet_commands_state_why_they_are_unavailable() {
         CommandAvailability::Disabled("the active schematic is read-only")
     );
 
-    app.state.schematic.read_only = false;
+    app.state.schematic.session.read_only = false;
     for command in SHEET_COMMANDS {
         assert_eq!(
             command.availability(&app),

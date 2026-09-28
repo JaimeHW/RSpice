@@ -541,7 +541,9 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
             super::ActiveNetlistDocument::OwnedSource => {
                 state.workspace.netlist_source_path.as_deref()
             }
-            super::ActiveNetlistDocument::Generated => state.schematic.current_file.as_deref(),
+            super::ActiveNetlistDocument::Generated => {
+                state.schematic.session.current_file.as_deref()
+            }
             super::ActiveNetlistDocument::GeneratedDiff
             | super::ActiveNetlistDocument::RunSnapshot => None,
         }

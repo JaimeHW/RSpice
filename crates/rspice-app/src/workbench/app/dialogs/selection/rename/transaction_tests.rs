@@ -56,7 +56,7 @@ fn fixture() -> (RSpiceApp, Component, ConfigurationSetId, SimulationPlanId) {
             model_profile: ConfigurationModelProfile::ProjectRunSetSections,
         })
         .unwrap();
-    app.state.schematic.is_dirty = false;
+    app.state.schematic.session.is_dirty = false;
     app.state.workspace.project_metadata_dirty = false;
     (app, expected, id, plan)
 }
@@ -94,6 +94,7 @@ fn rename_undo_redo_carries_live_bindings_and_advances_revisions() {
     let (mut app, expected, configuration, plan) = fixture();
     app.state
         .schematic
+        .session
         .selection
         .select_only_component(expected.id);
     let output_id = app.state.workspace.plan_data(plan).unwrap().saved_outputs[0].id;
@@ -106,6 +107,7 @@ fn rename_undo_redo_carries_live_bindings_and_advances_revisions() {
     assert!(
         app.state
             .schematic
+            .session
             .selection
             .components
             .contains(&expected.id)
@@ -159,7 +161,7 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
                     .saved_outputs[0]
                     .revision = ObjectRevision::new(u64::MAX).unwrap()
             }
-            "read only" => app.state.schematic.read_only = true,
+            "read only" => app.state.schematic.session.read_only = true,
             "stale target" => {
                 app.state.schematic.document_mut_for_test().components[0].value = "8".to_owned()
             }
@@ -182,7 +184,7 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
         let before = SchematicSnapshot::capture(&app.state.schematic.document());
         let catalog = app.state.workspace.configuration_sets.clone();
         let payloads = app.state.workspace.simulation_plan_payloads.clone();
-        let dirty = app.state.schematic.is_dirty;
+        let dirty = app.state.schematic.session.is_dirty;
         let epoch = app.state.design_execution_epoch;
         let mut candidate = expected.clone();
         candidate.name = "V9".to_owned();
@@ -200,7 +202,7 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
         );
         assert_eq!(catalog, app.state.workspace.configuration_sets);
         assert_eq!(payloads, app.state.workspace.simulation_plan_payloads);
-        assert_eq!(dirty, app.state.schematic.is_dirty);
+        assert_eq!(dirty, app.state.schematic.session.is_dirty);
         assert!(!app.state.workspace.project_metadata_dirty);
         assert_eq!(epoch, app.state.design_execution_epoch);
         assert!(app.state.project_undo_sequence().is_none());

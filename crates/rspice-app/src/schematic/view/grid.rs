@@ -55,9 +55,9 @@ pub(super) fn draw_grid(
     }
 
     let grid_size = state.schematic.document().grid_size as f32;
-    let zoom = state.schematic.zoom as f32;
-    let pan_x = state.schematic.pan.0 as f32;
-    let pan_y = state.schematic.pan.1 as f32;
+    let zoom = state.schematic.session.zoom as f32;
+    let pan_x = state.schematic.session.pan.0 as f32;
+    let pan_y = state.schematic.session.pan.1 as f32;
 
     let pixels_per_point = painter.ctx().pixels_per_point().max(f32::EPSILON);
     let base_pitch = grid_size * zoom;

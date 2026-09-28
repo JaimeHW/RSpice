@@ -12,7 +12,7 @@ use rspice_design::schematic::movement::{self, MovementImpact, MovementSelection
 impl SchematicState {
     fn apply_movement_impact(&mut self, impact: MovementImpact) {
         if impact.changed {
-            self.is_dirty = true;
+            self.session.is_dirty = true;
         }
     }
 
@@ -21,7 +21,7 @@ impl SchematicState {
     pub fn has_live_movable_selection(&self) -> bool {
         movement::has_live_movable_selection(
             &self.design.document(),
-            movement_selection(&self.selection),
+            movement_selection(&self.session.selection),
         )
     }
 
@@ -29,7 +29,7 @@ impl SchematicState {
     pub fn live_movable_selection_count(&self) -> usize {
         movement::live_movable_selection_count(
             &self.design.document(),
-            movement_selection(&self.selection),
+            movement_selection(&self.session.selection),
         )
     }
 
@@ -40,7 +40,7 @@ impl SchematicState {
         delta: Point,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
     ) {
-        if self.read_only {
+        if self.session.read_only {
             return;
         }
         let impact = self.design.move_component_with_wires_resolved(
@@ -70,11 +70,11 @@ impl SchematicState {
         delta: Point,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
     ) {
-        if self.read_only {
+        if self.session.read_only {
             return;
         }
         let impact = self.design.move_selection_with_rubber_band_resolved(
-            movement_selection(&self.selection),
+            movement_selection(&self.session.selection),
             delta,
             terminal_points_for,
         );
@@ -102,11 +102,11 @@ impl SchematicState {
         mode: MoveSelectionMode,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
     ) -> Result<bool, MoveSelectionError> {
-        if self.read_only {
+        if self.session.read_only {
             return Ok(false);
         }
         let impact = self.design.move_selection_with_mode_resolved(
-            movement_selection(&self.selection),
+            movement_selection(&self.session.selection),
             delta,
             mode,
             terminal_points_for,
@@ -117,7 +117,7 @@ impl SchematicState {
 
     /// Move all points of a wire by a delta
     pub fn move_wire(&mut self, wire_id: u64, delta: Point) {
-        if self.read_only {
+        if self.session.read_only {
             return;
         }
         let impact = self.design.move_wire(wire_id, delta);
@@ -136,11 +136,11 @@ impl SchematicState {
         delta: Point,
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
     ) {
-        if self.read_only {
+        if self.session.read_only {
             return;
         }
         let impact = self.design.move_selection_resolved(
-            movement_selection(&self.selection),
+            movement_selection(&self.session.selection),
             delta,
             terminal_points_for,
         );
@@ -149,7 +149,7 @@ impl SchematicState {
 
     /// Move all wire points at a junction to a new position
     pub fn move_junction(&mut self, old_pos: Point, new_pos: Point) {
-        if self.read_only {
+        if self.session.read_only {
             return;
         }
         let impact = self.design.move_junction(old_pos, new_pos);

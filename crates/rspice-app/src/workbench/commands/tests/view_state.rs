@@ -12,25 +12,33 @@ fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
     app.state.ui.set_grid_style(crate::state::GridStyle::Dots);
-    app.state.schematic.snap_engine.enabled = true;
-    app.state.schematic.snap_engine.snap_to_wire_segments = false;
-    app.state.ui.schematic_snap = app.state.schematic.snap_engine.clone();
+    app.state.schematic.session.snap_engine.enabled = true;
+    app.state
+        .schematic
+        .session
+        .snap_engine
+        .snap_to_wire_segments = false;
+    app.state.ui.schematic_snap = app.state.schematic.session.snap_engine.clone();
 
     assert_eq!(Command::CycleGrid.stable_id(), "cycle-grid");
     assert_eq!(Command::CycleGrid.spec().label, "Cycle grid display");
 
     Command::CycleGrid.execute(&mut app);
     assert_eq!(app.state.ui.grid, crate::state::GridStyle::Lines);
-    assert!(app.state.schematic.snap_engine.enabled);
+    assert!(app.state.schematic.session.snap_engine.enabled);
     assert!(app.state.ui.schematic_snap.enabled);
     assert!(
-        !app.state.schematic.snap_engine.snap_to_wire_segments,
+        !app.state
+            .schematic
+            .session
+            .snap_engine
+            .snap_to_wire_segments,
         "display cycling must preserve detailed snap target choices"
     );
 
     Command::CycleGrid.execute(&mut app);
     assert_eq!(app.state.ui.grid, crate::state::GridStyle::Off);
-    assert!(app.state.schematic.snap_engine.enabled);
+    assert!(app.state.schematic.session.snap_engine.enabled);
 
     Command::CycleGrid.execute(&mut app);
     assert_eq!(app.state.ui.grid, crate::state::GridStyle::Dots);
@@ -63,35 +71,35 @@ fn schematic_zoom_commands_match_the_mockup_bounds_and_request_a_real_fit() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
 
-    app.state.schematic.zoom = 1.0;
+    app.state.schematic.session.zoom = 1.0;
     Command::ZoomIn.execute(&mut app);
-    assert!((app.state.schematic.zoom - 1.2).abs() < f64::EPSILON);
+    assert!((app.state.schematic.session.zoom - 1.2).abs() < f64::EPSILON);
 
-    app.state.schematic.zoom = 1.0;
+    app.state.schematic.session.zoom = 1.0;
     app.execute_shortcut_command(Command::ZoomOut);
-    assert!((app.state.schematic.zoom - (1.0 / 1.2)).abs() < f64::EPSILON);
+    assert!((app.state.schematic.session.zoom - (1.0 / 1.2)).abs() < f64::EPSILON);
 
-    app.state.schematic.zoom = 0.251;
+    app.state.schematic.session.zoom = 0.251;
     Command::ZoomOut.execute(&mut app);
-    assert_eq!(app.state.schematic.zoom, 0.25);
+    assert_eq!(app.state.schematic.session.zoom, 0.25);
 
-    app.state.schematic.zoom = 7.99;
+    app.state.schematic.session.zoom = 7.99;
     Command::ZoomIn.execute(&mut app);
-    assert_eq!(app.state.schematic.zoom, 8.0);
+    assert_eq!(app.state.schematic.session.zoom, 8.0);
 
-    app.state.schematic.zoom = 3.5;
-    app.state.schematic.pan = (127.0, -81.0);
-    app.state.schematic.needs_fit = false;
-    app.state.schematic.needs_drawing_sheet_fit = false;
+    app.state.schematic.session.zoom = 3.5;
+    app.state.schematic.session.pan = (127.0, -81.0);
+    app.state.schematic.session.needs_fit = false;
+    app.state.schematic.session.needs_drawing_sheet_fit = false;
     Command::ZoomFit.execute(&mut app);
-    assert_eq!(app.state.schematic.zoom, 3.5);
-    assert_eq!(app.state.schematic.pan, (127.0, -81.0));
-    assert!(!app.state.schematic.needs_fit);
-    assert!(app.state.schematic.needs_drawing_sheet_fit);
+    assert_eq!(app.state.schematic.session.zoom, 3.5);
+    assert_eq!(app.state.schematic.session.pan, (127.0, -81.0));
+    assert!(!app.state.schematic.session.needs_fit);
+    assert!(app.state.schematic.session.needs_drawing_sheet_fit);
 
     Command::FitSchematicContent.execute(&mut app);
-    assert!(app.state.schematic.needs_fit);
-    assert!(!app.state.schematic.needs_drawing_sheet_fit);
+    assert!(app.state.schematic.session.needs_fit);
+    assert!(!app.state.schematic.session.needs_drawing_sheet_fit);
 }
 
 #[test]

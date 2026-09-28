@@ -57,18 +57,18 @@ pub(super) fn handle_viewport_navigation(
         && primary_pan_modifier_down(ui);
     if middle_pan || modified_primary_pan {
         let delta = ui.input(|i| i.pointer.delta());
-        apply_pan_delta(&mut state.schematic.pan, delta);
+        apply_pan_delta(&mut state.schematic.session.pan, delta);
     }
 
     if let Some(touch) = ui.input(|i| i.multi_touch())
         && available.contains(touch.start_pos)
     {
-        apply_pan_delta(&mut state.schematic.pan, touch.translation_delta);
+        apply_pan_delta(&mut state.schematic.session.pan, touch.translation_delta);
         if (touch.zoom_delta - 1.0).abs() > f32::EPSILON {
             let focus = response.hover_pos().unwrap_or(touch.start_pos);
             apply_zoom_about(
-                &mut state.schematic.zoom,
-                &mut state.schematic.pan,
+                &mut state.schematic.session.zoom,
+                &mut state.schematic.session.pan,
                 available,
                 focus,
                 touch.zoom_delta as f64,
@@ -82,14 +82,14 @@ pub(super) fn handle_viewport_navigation(
         if shift {
             let horizontal = if scroll.y != 0.0 { scroll.y } else { scroll.x };
             if horizontal != 0.0 {
-                apply_horizontal_scroll_pan(&mut state.schematic.pan, horizontal);
+                apply_horizontal_scroll_pan(&mut state.schematic.session.pan, horizontal);
             }
         } else if scroll.y != 0.0
             && let Some(cursor_pos) = response.hover_pos()
         {
             apply_zoom_about(
-                &mut state.schematic.zoom,
-                &mut state.schematic.pan,
+                &mut state.schematic.session.zoom,
+                &mut state.schematic.session.pan,
                 available,
                 cursor_pos,
                 wheel_zoom_factor(scroll.y),

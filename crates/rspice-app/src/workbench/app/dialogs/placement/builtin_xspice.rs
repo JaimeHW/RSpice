@@ -59,7 +59,7 @@ impl RSpiceApp {
             DialogChoice::Primary => match materialize_draft(self) {
                 Ok(binding) => {
                     let label = format!("{}/{}", binding.library, binding.cell);
-                    self.state.schematic.pending_library_cell = Some(binding);
+                    self.state.schematic.session.pending_library_cell = Some(binding);
                     self.state
                         .schematic
                         .arm_tool(Tool::Place(crate::state::ComponentType::CellInstance));

@@ -1780,7 +1780,7 @@ fn frozen_plan_ids_revisions_and_exact_dependency_bindings_reach_prepared_tasks(
 #[test]
 fn same_kind_sparameter_instances_freeze_independent_export_policies() {
     let mut state = AppState::default();
-    state.schematic.current_file = Some(std::path::PathBuf::from("rf/duplexer.rsch"));
+    state.schematic.session.current_file = Some(std::path::PathBuf::from("rf/duplexer.rsch"));
     let plan = state
         .sim_setup
         .analysis_plan

@@ -1117,7 +1117,7 @@ pub(super) fn draw_junction(
         .hover_wire_vertex
         .map(|(x, y)| x == position.x && y == position.y)
         .unwrap_or(false);
-    let is_selected = state.schematic.selection.has_junction(position);
+    let is_selected = state.schematic.session.selection.has_junction(position);
 
     let palette = crate::ui::tokens::active_palette();
     if is_hovered || is_selected {

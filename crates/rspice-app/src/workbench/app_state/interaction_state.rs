@@ -271,7 +271,7 @@ impl super::AppState {
             return false;
         }
         let invalid_context = !self.schematic_drag_in_progress()
-            || self.schematic.tool != crate::state::Tool::Select
+            || self.schematic.session.tool != crate::state::Tool::Select
             || self.schematic_edit_read_only()
             || self.workbench.current_route().surface_id() != crate::workbench::SurfaceId::Design;
         let interrupted = ctx.input(|input| {

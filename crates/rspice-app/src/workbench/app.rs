@@ -630,7 +630,7 @@ impl RSpiceApp {
         ) {
             self.state
                 .workspace
-                .set_active_dirty(self.state.schematic.is_dirty);
+                .set_active_dirty(self.state.schematic.session.is_dirty);
         }
         self.sync_window_title(ctx);
         self.handle_image_export();
@@ -1650,7 +1650,7 @@ mod tests {
             fixture.frame(click(target(&output, "Resistor")));
             assert_eq!(fixture.app.state.workbench.drawer, None);
             assert_eq!(
-                fixture.app.state.schematic.tool,
+                fixture.app.state.schematic.session.tool,
                 Tool::Place(ComponentType::Resistor)
             );
             fixture.frame(Vec::new());

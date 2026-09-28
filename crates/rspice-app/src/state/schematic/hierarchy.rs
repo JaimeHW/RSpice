@@ -112,8 +112,8 @@ mod tests {
         let load = schematic.add_component(ComponentType::Resistor, Point::new(160, 0));
         schematic.add_wire(vec![Point::new(20, 0), Point::new(60, 0)]);
         schematic.add_wire(vec![Point::new(100, 0), Point::new(140, 0)]);
-        schematic.selection.select_component(r1);
-        schematic.selection.select_component(r2);
+        schematic.session.selection.select_component(r1);
+        schematic.session.selection.select_component(r2);
 
         let plan = schematic
             .plan_hierarchy_extraction(
@@ -158,8 +158,8 @@ mod tests {
         let p1 = schematic.add_component(ComponentType::Port, Point::new(40, 0));
         let before =
             super::super::undo_history::SchematicSnapshot::capture(&schematic.design.document());
-        schematic.selection.select_component(r1);
-        schematic.selection.select_component(p1);
+        schematic.session.selection.select_component(r1);
+        schematic.session.selection.select_component(p1);
         let error = schematic
             .plan_hierarchy_extraction(
                 &terminals(&schematic),
@@ -192,8 +192,11 @@ mod tests {
         schematic.add_wire(vec![Point::new(-40, 0), Point::new(-40, 40)]);
         schematic.add_junction(Point::new(-40, 0));
         schematic.add_net_label(Point::new(-40, 0), "sense".to_owned());
-        schematic.selection.select_component(selected_main);
-        schematic.selection.select_component(selected_branch);
+        schematic.session.selection.select_component(selected_main);
+        schematic
+            .session
+            .selection
+            .select_component(selected_branch);
 
         let plan = schematic
             .plan_hierarchy_extraction(
@@ -256,8 +259,8 @@ mod tests {
         let r1 = schematic.add_component(ComponentType::Resistor, Point::origin());
         let r2 = schematic.add_component(ComponentType::Resistor, Point::new(80, 0));
         schematic.add_wire(vec![Point::new(20, 0), Point::new(60, 0)]);
-        schematic.selection.select_component(r1);
-        schematic.selection.select_component(r2);
+        schematic.session.selection.select_component(r1);
+        schematic.session.selection.select_component(r2);
 
         let plan = schematic
             .plan_hierarchy_extraction(
@@ -297,7 +300,7 @@ mod tests {
         let mut schematic = SchematicState::default();
         let selected = schematic.add_component(ComponentType::Resistor, Point::origin());
         schematic.add_component(ComponentType::Ground, Point::new(-20, 10));
-        schematic.selection.select_component(selected);
+        schematic.session.selection.select_component(selected);
 
         let plan = schematic
             .plan_hierarchy_extraction(
@@ -332,7 +335,7 @@ mod tests {
         let adc = schematic.add_component(ComponentType::XspiceAdcBridge, Point::origin());
         schematic.add_component(ComponentType::Resistor, Point::new(80, 0));
         schematic.add_wire(vec![Point::new(20, 0), Point::new(60, 0)]);
-        schematic.selection.select_component(adc);
+        schematic.session.selection.select_component(adc);
 
         let plan = schematic
             .plan_hierarchy_extraction(
@@ -366,8 +369,8 @@ mod tests {
         schematic.add_wire(vec![Point::new(50, -20), Point::new(50, -40)]);
         schematic.add_junction(Point::new(50, -20));
         schematic.add_net_label(Point::new(50, -40), "sense".to_owned());
-        schematic.selection.select_component(r1);
-        schematic.selection.select_component(r2);
+        schematic.session.selection.select_component(r1);
+        schematic.session.selection.select_component(r2);
 
         let source_connectivity = connectivity(&schematic);
         let plan = schematic
@@ -430,8 +433,8 @@ mod tests {
         let r2 = schematic.add_component(ComponentType::Resistor, Point::new(100, 0));
         schematic.add_net_label(Point::new(20, 0), "sense".to_owned());
         schematic.add_net_label(Point::new(80, 0), "sense".to_owned());
-        schematic.selection.select_component(r1);
-        schematic.selection.select_component(r2);
+        schematic.session.selection.select_component(r1);
+        schematic.session.selection.select_component(r2);
 
         let plan = schematic
             .plan_hierarchy_extraction(
@@ -468,7 +471,7 @@ mod tests {
         let mut schematic = SchematicState::default();
         let selected = schematic.add_component(ComponentType::Resistor, Point::origin());
         schematic.add_component(ComponentType::Resistor, Point::new(40, 0));
-        schematic.selection.select_component(selected);
+        schematic.session.selection.select_component(selected);
 
         let plan = schematic
             .plan_hierarchy_extraction(
@@ -494,7 +497,7 @@ mod tests {
         let selected = schematic.add_component(ComponentType::Resistor, Point::origin());
         schematic.add_component(ComponentType::Resistor, Point::new(100, 0));
         schematic.add_wire(vec![Point::new(20, 0), Point::new(80, 0)]);
-        schematic.selection.select_component(selected);
+        schematic.session.selection.select_component(selected);
 
         let plan = schematic
             .plan_hierarchy_extraction(
@@ -578,7 +581,7 @@ mod tests {
                 stationary,
                 stationary_terminal.0,
             ));
-        schematic.selection.select_component(selected);
+        schematic.session.selection.select_component(selected);
 
         let plan = schematic
             .plan_hierarchy_extraction(
@@ -642,8 +645,8 @@ mod tests {
             .connections
             .push(WireConnection::new(wire, 1, right, right_terminal.0));
         let label = schematic.add_net_label(left_terminal.1, "sense".to_owned());
-        schematic.selection.select_component(left);
-        schematic.selection.select_component(right);
+        schematic.session.selection.select_component(left);
+        schematic.session.selection.select_component(right);
 
         let plan = schematic
             .plan_hierarchy_extraction(
@@ -673,7 +676,7 @@ mod tests {
         let selected = schematic.add_component(ComponentType::Resistor, Point::origin());
         schematic.add_component(ComponentType::Resistor, Point::new(80, 0));
         schematic.add_wire(vec![Point::new(20, 0), Point::new(60, 0)]);
-        schematic.selection.select_component(selected);
+        schematic.session.selection.select_component(selected);
         let mut resolved_bounds = bounds(&schematic);
         resolved_bounds.insert(selected, (-200, -100, 200, 100));
 
@@ -714,26 +717,26 @@ mod tests {
             state.add_component(ComponentType::Resistor, Point::origin());
         }));
         let id = schematic.design.document().components[0].id;
-        schematic.selection.select_only_component(id);
+        schematic.session.selection.select_only_component(id);
         schematic.design.document_mut_for_test().grid_size = 25;
-        schematic.snap_engine.grid_size = 77;
-        schematic.zoom = 2.5;
-        schematic.pan = (11.0, -7.0);
-        schematic.needs_fit = true;
-        schematic.current_file = Some("hierarchy-source.rsch".into());
-        schematic.preview_rotation = Rotation::R90;
-        schematic.preview_mirror_h = true;
-        schematic.pending_part_model = Some(PendingPartModel {
+        schematic.session.snap_engine.grid_size = 77;
+        schematic.session.zoom = 2.5;
+        schematic.session.pan = (11.0, -7.0);
+        schematic.session.needs_fit = true;
+        schematic.session.current_file = Some("hierarchy-source.rsch".into());
+        schematic.session.preview_rotation = Rotation::R90;
+        schematic.session.preview_mirror_h = true;
+        schematic.session.pending_part_model = Some(PendingPartModel {
             tool: Tool::Place(ComponentType::Resistor),
             model: "pending".to_owned(),
             variant: None,
         });
         let mut invalid_wire = Wire::segment(99, Point::origin(), Point::new(10, 0));
         invalid_wire.points.clear();
-        schematic.clipboard.wires.push(invalid_wire);
-        schematic.is_dirty = false;
+        schematic.session.clipboard.wires.push(invalid_wire);
+        schematic.session.is_dirty = false;
         let before = SchematicSnapshot::capture(&schematic.design.document());
-        let selection = schematic.selection.clone();
+        let selection = schematic.session.selection.clone();
         let cursor = schematic.identity_cursor();
         let topology = schematic.topology_version();
         let plan = schematic
@@ -747,37 +750,40 @@ mod tests {
             .materialize_hierarchy_extraction(&plan, "work", "child", "schematic")
             .unwrap();
         assert!(before.is_equal_document(&schematic.design.document()));
-        assert_eq!(schematic.selection, selection);
+        assert_eq!(schematic.session.selection, selection);
         assert_eq!(schematic.identity_cursor(), cursor);
-        assert_eq!(schematic.clipboard.wires.len(), 1);
-        assert!(!schematic.is_dirty);
+        assert_eq!(schematic.session.clipboard.wires.len(), 1);
+        assert!(!schematic.session.is_dirty);
         let parent = candidate.parent;
-        assert_eq!(parent.zoom, schematic.zoom);
-        assert_eq!(parent.pan, schematic.pan);
-        assert_eq!(parent.current_file, schematic.current_file);
-        assert!(parent.needs_fit);
-        assert_eq!(parent.pending_part_model, schematic.pending_part_model);
-        assert_eq!(parent.snap_engine.grid_size, 77);
+        assert_eq!(parent.session.zoom, schematic.session.zoom);
+        assert_eq!(parent.session.pan, schematic.session.pan);
+        assert_eq!(parent.session.current_file, schematic.session.current_file);
+        assert!(parent.session.needs_fit);
+        assert_eq!(
+            parent.session.pending_part_model,
+            schematic.session.pending_part_model
+        );
+        assert_eq!(parent.session.snap_engine.grid_size, 77);
         assert_eq!(parent.undo_description(), Some("seed"));
         assert_eq!(parent.content_version(), schematic.content_version());
         assert_eq!(parent.topology_version(), topology + 2);
-        assert!(parent.clipboard.wires.is_empty());
+        assert!(parent.session.clipboard.wires.is_empty());
         assert_eq!(
-            parent.selection.components,
+            parent.session.selection.components,
             std::collections::HashSet::from([candidate.instance_id])
         );
-        assert!(parent.is_dirty);
+        assert!(parent.session.is_dirty);
         let instance = &parent.design.document().components[0];
         assert_eq!(instance.rotation, Rotation::R0);
         assert!(instance.mirror_h);
-        assert!(candidate.child.selection.is_empty());
-        assert!(candidate.child.pending_part_model.is_none());
+        assert!(candidate.child.session.selection.is_empty());
+        assert!(candidate.child.session.pending_part_model.is_none());
         assert!(!candidate.child.can_undo());
         assert_eq!(candidate.child.design.document().grid_size, 25);
         assert_eq!(
-            candidate.child.snap_engine.grid_size,
-            SchematicState::default().snap_engine.grid_size
+            candidate.child.session.snap_engine.grid_size,
+            SchematicState::default().session.snap_engine.grid_size
         );
-        assert!(candidate.child.is_dirty);
+        assert!(candidate.child.session.is_dirty);
     }
 }

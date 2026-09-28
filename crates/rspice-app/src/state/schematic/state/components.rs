@@ -14,6 +14,7 @@ impl SchematicState {
     pub fn add_component(&mut self, kind: ComponentType, pos: Point) -> u64 {
         // A pending card applies only while its exact device tool is armed.
         let model_override = self
+            .session
             .pending_part_model
             .as_ref()
             .filter(|armed| armed.tool == Tool::Place(kind))
@@ -25,12 +26,12 @@ impl SchematicState {
             kind,
             ComponentPlacement {
                 position: pos,
-                rotation: self.preview_rotation,
-                mirror_h: self.preview_mirror_h,
+                rotation: self.session.preview_rotation,
+                mirror_h: self.session.preview_mirror_h,
             },
             model_override,
         );
-        self.is_dirty = true;
+        self.session.is_dirty = true;
         id
     }
 
@@ -43,12 +44,12 @@ impl SchematicState {
         let id = self.design.add_library_cell_component(
             ComponentPlacement {
                 position: pos,
-                rotation: self.preview_rotation,
-                mirror_h: self.preview_mirror_h,
+                rotation: self.session.preview_rotation,
+                mirror_h: self.session.preview_mirror_h,
             },
             library_cell,
         );
-        self.is_dirty = true;
+        self.session.is_dirty = true;
         id
     }
 
@@ -121,10 +122,10 @@ impl SchematicState {
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
         transform: ComponentTransform,
     ) {
-        if self.selection.components.is_empty() {
+        if self.session.selection.components.is_empty() {
             return;
         }
-        let mut ids: Vec<u64> = self.selection.components.iter().copied().collect();
+        let mut ids: Vec<u64> = self.session.selection.components.iter().copied().collect();
         ids.sort_unstable();
         ids.retain(|id| {
             self.design
@@ -139,7 +140,7 @@ impl SchematicState {
         self.with_undo(description, move |s| {
             s.design
                 .transform_components_resolved(&ids, terminal_points_for, transform);
-            s.is_dirty = true;
+            s.session.is_dirty = true;
         });
     }
 
@@ -213,10 +214,16 @@ mod tests {
                 if first == second {
                     continue;
                 }
-                schematic.selection.components.clear();
-                schematic.selection.select_component(first);
-                schematic.selection.select_component(second);
-                let order: Vec<u64> = schematic.selection.components.iter().copied().collect();
+                schematic.session.selection.components.clear();
+                schematic.session.selection.select_component(first);
+                schematic.session.selection.select_component(second);
+                let order: Vec<u64> = schematic
+                    .session
+                    .selection
+                    .components
+                    .iter()
+                    .copied()
+                    .collect();
                 if order == [first, second] {
                     return (first, second);
                 }
@@ -244,7 +251,7 @@ mod tests {
             .document_mut_for_test()
             .wires
             .push(Wire::segment(2, Point::new(60, 40), Point::new(60, 0)));
-        schematic.selection.select_component(1);
+        schematic.session.selection.select_component(1);
 
         schematic
             .rotate_selection_resolved(|component| resolved_terminal_points(component, &resolved));
@@ -302,12 +309,12 @@ mod tests {
     #[test]
     fn rotating_stale_component_selection_is_noop() {
         let mut schematic = SchematicState::default();
-        schematic.selection.select_component(404);
+        schematic.session.selection.select_component(404);
         let topology_version = schematic.topology_version();
 
         schematic.rotate_selection();
 
-        assert!(!schematic.is_dirty);
+        assert!(!schematic.session.is_dirty);
         assert_eq!(schematic.topology_version(), topology_version);
         assert!(schematic.design.document().components.is_empty());
     }

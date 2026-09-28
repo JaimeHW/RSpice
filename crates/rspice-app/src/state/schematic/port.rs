@@ -374,7 +374,7 @@ impl SchematicState {
         &self,
         pending: &PendingPortPlacement,
     ) -> Result<(), PortPlacementError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(PortPlacementError::ReadOnly);
         }
         self.validate_new_port_name(&pending.name)?;
@@ -917,7 +917,7 @@ mod tests {
                     .find(|component| component.id == stable_id)
                     .expect("stable identity survives persistence");
                 assert_eq!(restored_port.port_contract(), Some(expected));
-                assert!(restored.pending_port_sequence.is_none());
+                assert!(restored.session.pending_port_sequence.is_none());
             }
         }
     }

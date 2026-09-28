@@ -212,7 +212,7 @@ fn the_active_chip_carries_the_accent_edge_the_document_row_uses() {
 fn a_strip_action_routes_straight_to_the_sheet_actions() {
     let mut app = app_with_sheets(2);
     let entries = sheet_actions::sheet_entries(&app.state);
-    app.state.schematic.selection.select_component(10);
+    app.state.schematic.session.selection.select_component(10);
 
     apply(&mut app, StripAction::Activate(entries[1].id), &entries);
 
@@ -220,7 +220,7 @@ fn a_strip_action_routes_straight_to_the_sheet_actions() {
         sheet_actions::active_sheet_id(&app.state),
         Some(entries[1].id)
     );
-    assert!(app.state.schematic.selection.is_empty());
+    assert!(app.state.schematic.session.selection.is_empty());
 
     apply(
         &mut app,

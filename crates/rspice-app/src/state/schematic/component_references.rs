@@ -36,7 +36,7 @@ pub(crate) struct PreparedProbeReferences(
 impl PreparedProbeReferences {
     pub(crate) fn apply_to(self, candidate: &mut SchematicState) {
         self.0.apply_to(&mut candidate.design);
-        candidate.is_dirty = true;
+        candidate.session.is_dirty = true;
     }
 }
 impl SchematicState {
@@ -55,13 +55,13 @@ impl SchematicState {
     ) -> Result<Self, String> {
         let design = self.design.renamed_reference_candidate(names)?;
         let mut candidate = self.clone_with_design(design);
-        candidate.is_dirty = true;
+        candidate.session.is_dirty = true;
         Ok(candidate)
     }
     pub(crate) fn reference_history_candidate(&self, target: &super::SchematicSnapshot) -> Self {
         let mut candidate = self.clone_with_design(self.design.reference_history_candidate(target));
-        candidate.is_dirty = true;
-        candidate.selection.clear();
+        candidate.session.is_dirty = true;
+        candidate.session.selection.clear();
         candidate
     }
     pub(crate) fn prepare_probe_reference_update(

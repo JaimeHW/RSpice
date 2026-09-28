@@ -16,6 +16,7 @@ impl SchematicState {
         &self,
     ) -> Result<SchematicReplacementAuthority, SchematicReplacementError> {
         let component_id = self
+            .session
             .selection
             .single_component()
             .ok_or(SchematicReplacementError::SelectExactlyOneInstance)?;
@@ -33,7 +34,7 @@ impl SchematicState {
 
     fn replacement_context(&self) -> ReplacementContext {
         ReplacementContext {
-            selected_component: self.selection.single_component(),
+            selected_component: self.session.selection.single_component(),
             topology_version: self.topology_version(),
         }
     }
@@ -43,7 +44,7 @@ impl SchematicState {
         &self,
         source_spec: SchematicReplacementSourceSpec,
     ) -> Result<SchematicReplacementAuthority, SchematicReplacementError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(SchematicReplacementError::ReadOnly);
         }
         replacement_edit::replacement_authority_with_spec(
@@ -59,7 +60,7 @@ impl SchematicState {
         authority: &SchematicReplacementAuthority,
         target: &SchematicReplacementTargetSpec,
     ) -> Result<SchematicReplacementPreview, SchematicReplacementError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(SchematicReplacementError::ReadOnly);
         }
         replacement_edit::preview_instance_replacement(
@@ -76,13 +77,16 @@ impl SchematicState {
         authority: &SchematicReplacementAuthority,
         target: &SchematicReplacementTargetSpec,
     ) -> Result<SchematicReplacementImpact, SchematicReplacementError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(SchematicReplacementError::ReadOnly);
         }
-        let edit =
-            self.design
-                .replace_instance(self.selection.single_component(), authority, target)?;
-        self.selection
+        let edit = self.design.replace_instance(
+            self.session.selection.single_component(),
+            authority,
+            target,
+        )?;
+        self.session
+            .selection
             .select_only_component(edit.value.component_id);
         self.finish_document_edit(edit.committed);
         if !edit.committed {
@@ -131,7 +135,7 @@ mod tests {
         component.name = "U1".to_owned();
         component.value = "OPA189".to_owned();
         component.params = "gain=100 ibias=2n vos=1u slew=20Meg en=5n temp=27".to_owned();
-        state.selection.select_only_component(id);
+        state.session.selection.select_only_component(id);
         state.recalculate_runtime_state();
         state.clear_undo_history();
         state
@@ -183,10 +187,11 @@ mod tests {
         let mut state = selected_opamp();
         let authority = state.replacement_authority().unwrap();
         state
+            .session
             .clipboard
             .components
             .push(state.design.document().components[0].clone());
-        let clipboard = serde_json::to_value(&state.clipboard).unwrap();
+        let clipboard = serde_json::to_value(&state.session.clipboard).unwrap();
         let before = state.design.document().components[0].clone();
         let topology = state.topology_version();
 
@@ -198,7 +203,10 @@ mod tests {
         assert_eq!(after.id, before.id);
         assert_eq!(after.name, before.name);
         assert_eq!(after.pos, before.pos);
-        assert_eq!(serde_json::to_value(&state.clipboard).unwrap(), clipboard);
+        assert_eq!(
+            serde_json::to_value(&state.session.clipboard).unwrap(),
+            clipboard
+        );
         assert_eq!(impact.component_id, before.id);
         assert_eq!(state.topology_version(), topology.wrapping_add(1));
         assert_eq!(state.undo_description(), Some("replace instance"));
@@ -215,7 +223,7 @@ mod tests {
         let mut state = SchematicState::default();
         let resistor_id = state.add_component(ComponentType::Resistor, Point::origin());
         state.add_component(ComponentType::Capacitor, Point::new(100, 0));
-        state.selection.select_only_component(resistor_id);
+        state.session.selection.select_only_component(resistor_id);
         state.clear_undo_history();
         let authority = state.replacement_authority().unwrap();
 
@@ -255,7 +263,7 @@ mod tests {
     fn connected_terminal_alias_retargets_connection_and_wire_endpoint() {
         let mut state = SchematicState::default();
         let id = state.add_component(ComponentType::Resistor, Point::new(100, 100));
-        state.selection.select_only_component(id);
+        state.session.selection.select_only_component(id);
         let terminal = state.design.document().components[0]
             .terminal_positions()
             .into_iter()
@@ -312,7 +320,7 @@ mod tests {
     fn diagonal_pin_displacement_inserts_an_orthogonal_bend_and_remaps_connections() {
         let mut state = SchematicState::default();
         let id = state.add_component(ComponentType::Resistor, Point::new(100, 100));
-        state.selection.select_only_component(id);
+        state.session.selection.select_only_component(id);
         let terminal = state.design.document().components[0].terminal_positions()[0].1;
         let wire_id = state.next_id();
         state
@@ -364,7 +372,7 @@ mod tests {
     fn stale_authority_and_unmapped_connected_pin_are_non_mutating() {
         let mut state = SchematicState::default();
         let id = state.add_component(ComponentType::Resistor, Point::new(100, 100));
-        state.selection.select_only_component(id);
+        state.session.selection.select_only_component(id);
         let authority = state.replacement_authority().unwrap();
         let before = SchematicSnapshot::capture(&state.design.document());
         state.design.document_mut_for_test().components[0].value = "2k".to_owned();
@@ -415,7 +423,7 @@ mod tests {
     fn invalid_parameter_and_coordinate_contracts_fail_without_panicking() {
         let mut state = SchematicState::default();
         let id = state.add_component(ComponentType::Resistor, Point::new(i32::MAX, 0));
-        state.selection.select_only_component(id);
+        state.session.selection.select_only_component(id);
         assert_eq!(
             state.replacement_authority(),
             Err(SchematicReplacementError::CoordinateOverflow)

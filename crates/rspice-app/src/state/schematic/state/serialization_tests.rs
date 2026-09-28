@@ -6,13 +6,13 @@ use crate::state::SchematicDocumentPolicy;
 #[test]
 fn schematic_wire_layout_and_loaded_runtime_defaults_are_stable() {
     let mut state = SchematicState::default();
-    state.zoom = 3.0;
-    state.pan = (10.0, 20.0);
+    state.session.zoom = 3.0;
+    state.session.pan = (10.0, 20.0);
     state
         .design
         .set_identity_for_test(SchematicIdentity::with_cursor(99));
-    state.is_dirty = true;
-    state.read_only = true;
+    state.session.is_dirty = true;
+    state.session.read_only = true;
     let json = serde_json::to_string(&state).unwrap();
     let fields = [
         "components",
@@ -42,14 +42,14 @@ fn schematic_wire_layout_and_loaded_runtime_defaults_are_stable() {
         ron::from_str::<SchematicState>(&ron).unwrap(),
     ] {
         assert_eq!(serde_json::to_string(&restored).unwrap(), json);
-        assert_eq!(restored.zoom, 1.0);
-        assert_eq!(restored.pan, (0.0, 0.0));
+        assert_eq!(restored.session.zoom, 1.0);
+        assert_eq!(restored.session.pan, (0.0, 0.0));
         assert_eq!(restored.identity_cursor(), 0);
         assert_eq!(SchematicState::default().identity_cursor(), 1);
-        assert!(!restored.is_dirty);
-        assert!(!restored.read_only);
-        assert!(!restored.needs_fit);
-        assert!(!restored.needs_history_reset);
+        assert!(!restored.session.is_dirty);
+        assert!(!restored.session.read_only);
+        assert!(!restored.session.needs_fit);
+        assert!(!restored.session.needs_history_reset);
         assert!(!restored.has_pending_operation());
         assert!(!restored.can_undo());
     }
@@ -114,10 +114,10 @@ fn schematic_readers_preserve_legacy_fields_and_reject_missing_or_duplicate_data
                     && restored.design.document().net_labels.is_empty()
             );
             assert!(restored.design.document().validated_revisions.is_empty());
-            assert_eq!(restored.zoom, 1.0);
+            assert_eq!(restored.session.zoom, 1.0);
             assert_eq!(restored.identity_cursor(), 0);
             assert_eq!(
-                restored.snap_engine.grid_size,
+                restored.session.snap_engine.grid_size,
                 SnapEngine::default().grid_size
             );
         }

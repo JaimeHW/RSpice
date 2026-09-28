@@ -605,15 +605,16 @@ fn wireless_navigator_net_selection_is_exact_and_self_invalidating() {
         port: Some(crate::state::PortDirection::Out),
         wire_ids: Vec::new(),
     };
-    app.state.schematic.selection.select_only_component(9);
-    app.state
-        .schematic
+    let session = &mut app.state.schematic.session;
+    session.selection.select_only_component(9);
+    session
         .net_highlight
         .highlight_named_wires(&net.name, HashSet::new());
     assert!(navigator_net_selection_matches(&app.state, &net));
 
-    app.state.schematic.selection.select_only_component(10);
-    app.state.schematic.net_highlight.clear();
+    let session = &mut app.state.schematic.session;
+    session.selection.select_only_component(10);
+    session.net_highlight.clear();
     assert!(!navigator_net_selection_matches(&app.state, &net));
 }
 
@@ -2308,11 +2309,8 @@ fn the_rf_rail_marks_the_number_two_occurrences_of_one_master_both_claim() {
     );
 }
 
-/// A row of another occurrence answers a click by opening that occurrence.
-///
-/// The one thing it must not do is select here: a component id is unique inside
-/// one buffer and repeats across them, so applying the row's id to the sheet in
-/// front of the reader selects whatever that sheet happens to carry under it.
+/// Open the clicked occurrence before selecting its component; component IDs
+/// belong to their schematic and can repeat across documents.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn an_excitation_of_another_occurrence_opens_it_rather_than_selecting_here() {
@@ -2322,18 +2320,19 @@ fn an_excitation_of_another_occurrence_opens_it_rather_than_selecting_here() {
         .expect("the fixture instance is nameable");
 
     panel.click("/XB/V1");
+    let state = &panel.app.state;
 
     assert_eq!(
-        panel.app.state.workspace.occurrence_path(),
+        state.workspace.occurrence_path(),
         occurrence,
         "the click lands the session on the occurrence the row names"
     );
     assert_eq!(
-        panel.app.state.workspace.active_view,
+        state.workspace.active_view,
         CellViewRef::new("work", "afe", "schematic")
     );
     assert!(
-        panel.app.state.schematic.selection.has_component(711),
+        state.schematic.session.selection.has_component(711),
         "and selects the instance there, once the session is standing on it"
     );
 }

@@ -87,7 +87,7 @@ pub(super) enum DesignSubject {
 /// Wire IDs implied by the selection, including wires that merely own a
 /// selected segment or vertex.
 fn selected_wire_ids(state: &AppState) -> Vec<u64> {
-    let selection = &state.schematic.selection;
+    let selection = &state.schematic.session.selection;
     let mut ids: Vec<u64> = selection.wires.iter().copied().collect();
     ids.extend(
         selection
@@ -104,7 +104,7 @@ fn selected_wire_ids(state: &AppState) -> Vec<u64> {
 /// `true` when the selection holds conductors only — wires, their segments
 /// and vertices, and net labels — and at least one of them.
 fn conductors_only(state: &AppState) -> bool {
-    let selection = &state.schematic.selection;
+    let selection = &state.schematic.session.selection;
     let empty = selection.wires.is_empty()
         && selection.wire_segments.is_empty()
         && selection.wire_vertices.is_empty()
@@ -120,7 +120,7 @@ fn conductors_only(state: &AppState) -> bool {
 }
 
 pub(super) fn subject(state: &AppState, nets: &[DesignNet]) -> DesignSubject {
-    let selection = &state.schematic.selection;
+    let selection = &state.schematic.session.selection;
     if let Some(name) = navigator_selected_net_name(state, nets) {
         return DesignSubject::Net(name);
     }
@@ -168,7 +168,12 @@ pub(super) fn subject(state: &AppState, nets: &[DesignNet]) -> DesignSubject {
 /// label. Accept that runtime authority only while both the current net
 /// projection and the concrete schematic selection still match exactly.
 fn navigator_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
-    let authority = state.schematic.net_highlight.selected_net_name.as_deref()?;
+    let authority = state
+        .schematic
+        .session
+        .net_highlight
+        .selected_net_name
+        .as_deref()?;
     let net = nets
         .iter()
         .find(|net| net.name.eq_ignore_ascii_case(authority))?;
@@ -182,11 +187,12 @@ fn navigator_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<S
         .collect::<Vec<_>>();
     component_ids.sort_unstable();
     component_ids.dedup();
-    if state.schematic.net_highlight.highlighted_wires != wire_ids.iter().copied().collect() {
+    if state.schematic.session.net_highlight.highlighted_wires != wire_ids.iter().copied().collect()
+    {
         return None;
     }
 
-    let selection = &state.schematic.selection;
+    let selection = &state.schematic.session.selection;
     let no_other_classes = selection.wire_segments.is_empty()
         && selection.wire_vertices.is_empty()
         && selection.junctions.is_empty()
@@ -222,7 +228,14 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
     };
     // A selected label names its net outright.
     for label in &state.schematic.document().net_labels {
-        if state.schematic.selection.net_labels.contains(&label.id) && !accept(&label.name) {
+        if state
+            .schematic
+            .session
+            .selection
+            .net_labels
+            .contains(&label.id)
+            && !accept(&label.name)
+        {
             return None;
         }
     }
@@ -234,7 +247,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
             return None;
         }
     }
-    if !state.schematic.selection.junctions.is_empty() {
+    if !state.schematic.session.selection.junctions.is_empty() {
         // A junction marker names the conductors the one extraction puts on
         // its node, so the inspector resolves the same net the deck emits. A
         // marker standing mid-conductor is not itself a node of the traced
@@ -243,7 +256,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
         // re-derived here. An ambiguous crossing takes one stable seed rather
         // than joining two electrical nets.
         let connectivity = extract(&state.schematic, None);
-        for junction in &state.schematic.selection.junctions {
+        for junction in &state.schematic.session.selection.junctions {
             let Some(extracted) = connectivity.net_at(junction.pos).or_else(|| {
                 state
                     .schematic
@@ -321,7 +334,11 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             Ok(true) => sheet = sheet_connectivity(&app.state),
             Ok(false) => {}
             Err(_) => {
-                app.state.schematic.selection.select_only_component(editing);
+                app.state
+                    .schematic
+                    .session
+                    .selection
+                    .select_only_component(editing);
                 inspected = DesignSubject::Component(editing);
             }
         }
@@ -777,7 +794,7 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
         &format!(
             "{} · snap {}",
             schematic_grid_label(app.state.schematic.document().document_policy.grid_pitch),
-            if app.state.schematic.snap_engine.enabled {
+            if app.state.schematic.session.snap_engine.enabled {
                 "on"
             } else {
                 "off"
@@ -1252,7 +1269,13 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
         .document()
         .components
         .iter()
-        .filter(|component| app.state.schematic.selection.has_component(component.id))
+        .filter(|component| {
+            app.state
+                .schematic
+                .session
+                .selection
+                .has_component(component.id)
+        })
         .filter(|component| sheet_visibility::object_is_in_scope(&app.state, scope, component.id))
         .map(|component| {
             (
@@ -1263,10 +1286,10 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .collect();
     let total = match scope {
-        SheetScope::AllSheets => app.state.schematic.selection.count(),
+        SheetScope::AllSheets => app.state.schematic.session.selection.count(),
         SheetScope::ActiveSheet => sheet_visibility::selection_filtered_to_active_sheet(
             &app.state,
-            &app.state.schematic.selection,
+            &app.state.schematic.session.selection,
         )
         .count(),
     };
@@ -1563,7 +1586,7 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
             }
         }
         if Button::new("Center marker").ghost().show(ui).clicked() {
-            app.state.schematic.center_request = Some(probe.position);
+            app.state.schematic.session.center_request = Some(probe.position);
         }
         command_action(ui, app, Command::Delete, Icon::Trash, "Delete probe", true);
     });

@@ -1630,12 +1630,12 @@ mod tests {
 
         Command::PlaceOffSheetConnector.execute(&mut app);
         assert_eq!(
-            app.state.schematic.tool,
+            app.state.schematic.session.tool,
             crate::state::Tool::OffSheetConnector
         );
 
         Command::PlaceLabel.execute(&mut app);
-        assert_eq!(app.state.schematic.tool, crate::state::Tool::Label);
+        assert_eq!(app.state.schematic.session.tool, crate::state::Tool::Label);
     }
 
     const SHOW_IN_NETLIST_DECK: &str =
@@ -1753,7 +1753,11 @@ mod tests {
             CommandAvailability::Disabled("select one instance")
         );
 
-        app.state.schematic.selection.select_only_component(load_id);
+        app.state
+            .schematic
+            .session
+            .selection
+            .select_only_component(load_id);
         assert_eq!(
             Command::ShowInNetlist.availability(&app),
             CommandAvailability::Available
@@ -1761,6 +1765,7 @@ mod tests {
 
         app.state
             .schematic
+            .session
             .selection
             .select_only_component(unmapped_id);
         assert_eq!(
@@ -1768,7 +1773,11 @@ mod tests {
             CommandAvailability::Disabled("no netlist line for this instance")
         );
 
-        app.state.schematic.selection.select_only_component(load_id);
+        app.state
+            .schematic
+            .session
+            .selection
+            .select_only_component(load_id);
         app.state.ui.netlist.generated_document = None;
         app.state.ui.netlist.generated_source.clear();
         assert_eq!(
@@ -1781,7 +1790,11 @@ mod tests {
         // Outside a schematic there is no instance to locate at all, and
         // "select one instance" would send the engineer to the wrong place.
         let (mut app, load_id, _) = app_with_generated_deck();
-        app.state.schematic.selection.select_only_component(load_id);
+        app.state
+            .schematic
+            .session
+            .selection
+            .select_only_component(load_id);
         app.state.workbench.workspace = Workspace::Results;
         assert_eq!(
             Command::ShowInNetlist.availability(&app),
@@ -1795,7 +1808,11 @@ mod tests {
     #[test]
     fn show_in_netlist_opens_the_generated_deck_without_moving_the_selection() {
         let (mut app, load_id, _) = app_with_generated_deck();
-        app.state.schematic.selection.select_only_component(load_id);
+        app.state
+            .schematic
+            .session
+            .selection
+            .select_only_component(load_id);
 
         Command::ShowInNetlist.execute(&mut app);
 
@@ -1807,7 +1824,7 @@ mod tests {
         assert_eq!(app.state.ui.netlist.requested_line, Some(3));
         assert_eq!(app.state.ui.netlist.cursor_line, 2);
         assert_eq!(
-            app.state.schematic.selection.single_component(),
+            app.state.schematic.session.selection.single_component(),
             Some(load_id)
         );
     }

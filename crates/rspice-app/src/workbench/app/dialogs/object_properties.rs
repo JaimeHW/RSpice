@@ -550,7 +550,7 @@ fn apply_commit(schematic: &mut SchematicState, commit: PropertyCommit) -> Resul
 }
 
 fn validate_draft(schematic: &SchematicState, draft: &ObjectPropertiesDraft) -> DraftValidation {
-    if schematic.read_only {
+    if schematic.session.read_only {
         return DraftValidation::Invalid {
             field: None,
             message: "The active schematic is read-only.".to_owned(),
@@ -2099,7 +2099,7 @@ mod tests {
         let mut schematic = SchematicState::default();
         let bus = declared_bus(1, 0, "DATA[7:0]");
         schematic.document_mut_for_test().buses.push(bus.clone());
-        schematic.read_only = true;
+        schematic.session.read_only = true;
         let result = apply_commit(
             &mut schematic,
             PropertyCommit::Bus {

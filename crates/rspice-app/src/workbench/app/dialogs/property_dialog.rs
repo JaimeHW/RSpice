@@ -977,7 +977,7 @@ fn component_terminal_direction(component: &Component, index: usize, pin: &str) 
 
 fn component_property_session_error(state: &AppState) -> Option<String> {
     let dialog = &state.tabbed_property_dialog;
-    if state.schematic.read_only || state.active_view_read_only() {
+    if state.schematic.session.read_only || state.active_view_read_only() {
         return Some("The active schematic is read-only; no properties can be applied.".to_owned());
     }
     if dialog.design_execution_epoch != state.design_execution_epoch {
@@ -1171,9 +1171,9 @@ mod tests {
         open_property_editor(&mut state, 44);
         assert!(component_property_session_error(&state).is_none());
 
-        state.schematic.read_only = true;
+        state.schematic.session.read_only = true;
         assert!(component_property_session_error(&state).is_some());
-        state.schematic.read_only = false;
+        state.schematic.session.read_only = false;
 
         state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         assert!(component_property_session_error(&state).is_some());

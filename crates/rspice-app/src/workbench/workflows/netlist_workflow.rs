@@ -192,7 +192,7 @@ fn acknowledge_canonical_dependencies(
 
     let source_origin = match state.ui.netlist.active_document {
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
-            state.schematic.current_file.as_deref()
+            state.schematic.session.current_file.as_deref()
         }
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
             state.workspace.netlist_source_path.as_deref()

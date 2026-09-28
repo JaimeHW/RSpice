@@ -46,7 +46,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             let sheet_position = sheet_position_summary(&app.state);
             let revision = revision_status_summary(
                 app.state.project_lifecycle.project_open,
-                app.state.schematic.is_dirty || app.state.workspace.any_dirty(),
+                app.state.schematic.session.is_dirty || app.state.workspace.any_dirty(),
                 app.state.workspace.project.revision().get(),
                 app.state.workspace.project.display_name(),
             );
@@ -686,7 +686,7 @@ fn selection_summary(app: &RSpiceApp) -> String {
     if app.state.workbench.workspace != Workspace::Design {
         return app.state.workbench.workspace.label().to_owned();
     }
-    let selection = &app.state.schematic.selection;
+    let selection = &app.state.schematic.session.selection;
     if let Some(id) = selection.single_component() {
         app.state
             .schematic
@@ -711,7 +711,7 @@ fn zoom_factor(app: &RSpiceApp) -> f64 {
     {
         f64::from(app.state.ui.symbol.zoom)
     } else {
-        app.state.schematic.zoom
+        app.state.schematic.session.zoom
     }
 }
 

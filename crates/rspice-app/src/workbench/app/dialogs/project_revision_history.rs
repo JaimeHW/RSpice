@@ -246,7 +246,7 @@ impl RSpiceApp {
         let rows = project_audit_rows(&self.state);
         retain_existing_revision_selection(&mut self.state.dialogs.project_revision_history, &rows);
         let stale = history_authority_error(&self.state);
-        let write_allowed = !self.state.schematic.read_only
+        let write_allowed = !self.state.schematic.session.read_only
             && !self.state.active_view_read_only()
             && !self.state.workbench.safe_mode.project_read_only();
         let mut body_scroll_offset = self
@@ -402,7 +402,7 @@ impl RSpiceApp {
         let result = (|| {
             history_authority_error(&self.state).map_or(Ok(()), Err)?;
             if self.state.workbench.safe_mode.project_read_only()
-                || self.state.schematic.read_only
+                || self.state.schematic.session.read_only
                 || self.state.active_view_read_only()
             {
                 return Err("The active schematic or project is read-only.".to_owned());

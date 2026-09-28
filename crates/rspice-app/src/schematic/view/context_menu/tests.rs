@@ -96,7 +96,7 @@ fn state_with_selected_source(library_edits: usize, adopt: bool) -> AppState {
         .document_mut_for_test()
         .components
         .push(source);
-    state.schematic.selection.select_component(7);
+    state.schematic.session.selection.select_component(7);
     state
 }
 
@@ -255,7 +255,7 @@ fn header_summary_uses_the_selected_instance_identity_and_master() {
         .document_mut_for_test()
         .components
         .push(component);
-    state.schematic.selection.select_component(7);
+    state.schematic.session.selection.select_component(7);
 
     let summary = selection_summary(&state, ContextTarget::Canvas);
 
@@ -356,7 +356,7 @@ fn focused_keyboard_context_row_activates_with_enter_or_space() {
             .document_mut_for_test()
             .components
             .push(Component::new(7, ComponentType::Resistor, Point::origin()));
-        state.schematic.selection.select_only_component(7);
+        state.schematic.session.selection.select_only_component(7);
         state.dialogs.interaction.context_target = Some((ContextTarget::Component(7), (0, 0)));
         let symbol_context = SchematicSymbolContext::from_state(&state);
 
@@ -430,14 +430,14 @@ fn actions_are_truthfully_disabled_without_a_compatible_selection() {
     assert!(action_availability(ContextAction::Probe, &state).0);
     assert!(!action_availability(ContextAction::OperatingPoint, &state).0);
 
-    state.schematic.selection.select_wire_segment(17, 0);
+    state.schematic.session.selection.select_wire_segment(17, 0);
     assert!(!action_availability(ContextAction::Copy, &state).0);
     assert!(!action_availability(ContextAction::Duplicate, &state).0);
     assert!(!action_availability(ContextAction::Delete, &state).0);
 
-    state.schematic.selection.select_component(999);
+    state.schematic.session.selection.select_component(999);
     assert!(!action_availability(ContextAction::Copy, &state).0);
-    state.schematic.read_only = true;
+    state.schematic.session.read_only = true;
     assert!(!action_availability(ContextAction::Probe, &state).0);
 
     let mut junction_state = AppState::default();
@@ -449,6 +449,7 @@ fn actions_are_truthfully_disabled_without_a_compatible_selection() {
         .push(Junction::new(81, point));
     junction_state
         .schematic
+        .session
         .selection
         .select_only_junction(point);
     assert!(action_availability(ContextAction::Delete, &junction_state).0);
@@ -478,12 +479,12 @@ fn properties_context_action_is_available_for_one_live_bus_or_tap() {
     state.schematic.document_mut_for_test().buses.push(bus);
     state.schematic.document_mut_for_test().bus_taps.push(tap);
 
-    state.schematic.selection.select_only_bus(31);
+    state.schematic.session.selection.select_only_bus(31);
     assert!(action_availability(ContextAction::Properties, &state).0);
-    state.schematic.selection.select_only_bus_tap(32);
+    state.schematic.session.selection.select_only_bus_tap(32);
     assert!(action_availability(ContextAction::Properties, &state).0);
 
-    state.schematic.read_only = true;
+    state.schematic.session.read_only = true;
     assert!(!action_availability(ContextAction::Properties, &state).0);
 }
 
@@ -509,8 +510,11 @@ fn pointer_target_prefers_a_junction_over_its_underlying_wire() {
     );
 
     assert!(matches!(target, ContextTarget::Canvas));
-    assert_eq!(state.schematic.selection.single_junction(), Some(point));
-    assert!(state.schematic.selection.wires.is_empty());
+    assert_eq!(
+        state.schematic.session.selection.single_junction(),
+        Some(point)
+    );
+    assert!(state.schematic.session.selection.wires.is_empty());
 }
 
 #[test]
@@ -522,7 +526,11 @@ fn net_label_context_exposes_the_complete_object_lifecycle() {
         .document_mut_for_test()
         .net_labels
         .push(label.clone());
-    state.schematic.selection.select_only_net_label(label.id);
+    state
+        .schematic
+        .session
+        .selection
+        .select_only_net_label(label.id);
 
     assert!(action_availability(ContextAction::Properties, &state).0);
     assert!(action_availability(ContextAction::Copy, &state).0);
@@ -568,7 +576,11 @@ fn design_note_context_exposes_only_compatible_object_lifecycle_actions() {
         .document_mut_for_test()
         .design_notes
         .push(note.clone());
-    state.schematic.selection.select_only_design_note(note.id);
+    state
+        .schematic
+        .session
+        .selection
+        .select_only_design_note(note.id);
 
     assert!(action_availability(ContextAction::Properties, &state).0);
     assert!(action_availability(ContextAction::Copy, &state).0);
@@ -620,6 +632,7 @@ fn documentation_shape_context_exposes_the_complete_non_electrical_lifecycle() {
         .push(shape.clone());
     state
         .schematic
+        .session
         .selection
         .select_only_documentation_shape(shape.id);
 
@@ -666,7 +679,7 @@ fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
         .push(component);
     state.sync_active_schematic_to_workspace();
     state.schematic.init_undo_history();
-    state.schematic.selection.select_component(41);
+    state.schematic.session.selection.select_component(41);
 
     state.duplicate_schematic_selection_at(Point::new(22, 32));
     assert_eq!(state.schematic.document().components.len(), 2);
@@ -674,7 +687,7 @@ fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
     assert!(state.schematic.undo());
     assert_eq!(state.schematic.document().components.len(), 1);
 
-    state.schematic.selection.select_component(41);
+    state.schematic.session.selection.select_component(41);
     state.delete_schematic_selection();
     assert!(state.schematic.document().components.is_empty());
     assert!(state.schematic.undo());
@@ -687,7 +700,11 @@ fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
         .net_labels
         .push(label.clone());
     state.sync_active_schematic_to_workspace();
-    state.schematic.selection.select_only_net_label(label.id);
+    state
+        .schematic
+        .session
+        .selection
+        .select_only_net_label(label.id);
 
     state.duplicate_schematic_selection_at(Point::new(42, 42));
     assert_eq!(state.schematic.document().net_labels.len(), 2);
@@ -695,7 +712,11 @@ fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
     assert!(state.schematic.undo());
     assert_eq!(state.schematic.document().net_labels, vec![label.clone()]);
 
-    state.schematic.selection.select_only_net_label(label.id);
+    state
+        .schematic
+        .session
+        .selection
+        .select_only_net_label(label.id);
     state.delete_schematic_selection();
     assert!(state.schematic.document().net_labels.is_empty());
     assert!(state.schematic.undo());
@@ -728,7 +749,11 @@ fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
     let instance = state
         .schematic
         .add_library_cell_component(Point::new(100, 0), binding);
-    state.schematic.selection.select_only_component(instance);
+    state
+        .schematic
+        .session
+        .selection
+        .select_only_component(instance);
 
     assert!(
         !action_availability(ContextAction::UpdateInstanceInterface, &state).0,
@@ -792,7 +817,11 @@ fn the_replace_instance_row_is_offered_and_runs_only_for_one_replaceable_instanc
     let second = state
         .schematic
         .add_component(ComponentType::VoltageSource, Point::new(120, 0));
-    state.schematic.selection.select_only_component(first);
+    state
+        .schematic
+        .session
+        .selection
+        .select_only_component(first);
     assert!(action_availability(ContextAction::ReplaceInstance, &state).0);
     assert_eq!(
         action_availability(ContextAction::ReplaceInstance, &state).0,
@@ -800,13 +829,17 @@ fn the_replace_instance_row_is_offered_and_runs_only_for_one_replaceable_instanc
         "the row must answer with the command's own predicate"
     );
 
-    state.schematic.selection.select_component(second);
+    state.schematic.session.selection.select_component(second);
     assert!(
         !action_availability(ContextAction::ReplaceInstance, &state).0,
         "two selected instances are not one replaceable instance"
     );
 
-    state.schematic.selection.select_only_component(first);
+    state
+        .schematic
+        .session
+        .selection
+        .select_only_component(first);
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let symbol_context = SchematicSymbolContext::from_state(&state);
@@ -838,7 +871,7 @@ fn state_with_reported_device_op(device: &str) -> AppState {
         .document_mut_for_test()
         .components
         .push(component);
-    state.schematic.selection.select_only_component(1);
+    state.schematic.session.selection.select_only_component(1);
 
     let mut analysis = AnalysisResult::new(1, AnalysisType::DcOp, "OP");
     analysis.device_op = Some(rspice_core::circuit::DeviceOpReport {
@@ -884,7 +917,7 @@ fn operating_point_hop_leaves_the_report_unfiltered_when_the_device_is_unreporte
         .document_mut_for_test()
         .components
         .push(unreported);
-    state.schematic.selection.select_only_component(2);
+    state.schematic.session.selection.select_only_component(2);
 
     // A stale filter is the failure this guards: the previous device's name
     // was left in place, so the inspector opened on another instance's row

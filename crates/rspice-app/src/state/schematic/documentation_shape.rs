@@ -99,7 +99,7 @@ impl SchematicState {
         &self,
         pending: &PendingDocumentationShapePlacement,
     ) -> Result<(), DocumentationShapeError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(DocumentationShapeError::ReadOnly);
         }
         if pending.topology_version != self.topology_version()
@@ -123,8 +123,10 @@ impl SchematicState {
             return Err(DocumentationShapeError::DegenerateGeometry);
         }
         let edit = self.design.place_documentation_shape(geometry)?;
-        self.selection.clear();
-        self.selection.select_documentation_shape(edit.value);
+        self.session.selection.clear();
+        self.session
+            .selection
+            .select_documentation_shape(edit.value);
         self.finish_document_edit(edit.committed);
         if edit.committed {
             Ok(edit.value)

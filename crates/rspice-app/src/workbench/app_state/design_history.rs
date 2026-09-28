@@ -1798,7 +1798,7 @@ fn apply_symbol_fixture(
                 .iter_mut()
                 .find(|open| open.reference == *reference)
             {
-                open.dirty = schematic.is_dirty;
+                open.dirty = schematic.session.is_dirty;
             }
         }
         None => {
@@ -2082,10 +2082,10 @@ fn apply_schematic_map(
     let active_key = state.workspace.active_schematic_reference().key();
     for (key, snapshot) in snapshots {
         if key.eq_ignore_ascii_case(&active_key) {
-            let selection = preserve_selection.then(|| state.schematic.selection.clone());
+            let selection = preserve_selection.then(|| state.schematic.session.selection.clone());
             state.schematic.apply_snapshot(snapshot);
             if let Some(selection) = selection {
-                state.schematic.selection = selection;
+                state.schematic.session.selection = selection;
             }
             state
                 .workspace
@@ -2109,10 +2109,10 @@ fn apply_schematic_map(
             .schematic_buffers
             .get_mut(&existing_key)
             .expect("the retained schematic key remains present");
-        let selection = preserve_selection.then(|| schematic.selection.clone());
+        let selection = preserve_selection.then(|| schematic.session.selection.clone());
         schematic.apply_snapshot(snapshot);
         if let Some(selection) = selection {
-            schematic.selection = selection;
+            schematic.session.selection = selection;
         }
     }
     for open in &mut state.workspace.open_views {
@@ -2353,13 +2353,13 @@ fn apply_design_snapshot(
 
 fn schematic_read_only(state: &AppState, reference: &CellViewRef) -> bool {
     if state.workspace.active_schematic_reference() == *reference {
-        state.schematic.read_only
+        state.schematic.session.read_only
     } else {
         state
             .workspace
             .schematic_buffers
             .get(&reference.key())
-            .is_some_and(|schematic| schematic.read_only)
+            .is_some_and(|schematic| schematic.session.read_only)
     }
 }
 

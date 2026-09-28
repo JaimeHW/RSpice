@@ -12,7 +12,7 @@ impl SchematicState {
         name: String,
         position: Point,
     ) -> Result<bool, String> {
-        let read_only = self.read_only;
+        let read_only = self.session.read_only;
         let Some(change) = self
             .design
             .prepare_net_label_properties(expected, name, position)?
@@ -34,7 +34,7 @@ impl SchematicState {
         text: String,
         review_state: Option<DesignReviewState>,
     ) -> Result<bool, String> {
-        let read_only = self.read_only;
+        let read_only = self.session.read_only;
         let Some(change) =
             self.design
                 .prepare_design_note_properties(expected, kind, text, review_state)?
@@ -54,7 +54,7 @@ impl SchematicState {
         expected: DocumentationShape,
         geometry: DocumentationShapeGeometry,
     ) -> Result<bool, String> {
-        let read_only = self.read_only;
+        let read_only = self.session.read_only;
         let Some(change) = self
             .design
             .prepare_documentation_shape_properties(expected, geometry)?
@@ -74,7 +74,7 @@ impl SchematicState {
         expected: NetLabel,
         name: String,
     ) -> Result<bool, String> {
-        let read_only = self.read_only;
+        let read_only = self.session.read_only;
         let Some(change) = self.design.prepare_net_label_rename(expected, name)? else {
             return Ok(false);
         };
@@ -87,7 +87,7 @@ impl SchematicState {
     }
 
     pub(crate) fn change_grid_pitch(&mut self, pitch: SchematicGridPitch) -> bool {
-        if self.read_only {
+        if self.session.read_only {
             return false;
         }
         let committed = self.design.change_grid_pitch(pitch);
@@ -103,7 +103,7 @@ impl SchematicState {
         binding_expression: String,
         description: String,
     ) -> bool {
-        if self.read_only {
+        if self.session.read_only {
             return false;
         }
         let committed =

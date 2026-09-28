@@ -164,7 +164,7 @@ struct PreparedSchematicOwner {
 
 impl PreparedSchematicOwner {
     fn capture(mut schematic: SchematicState) -> Self {
-        let selection = std::mem::take(&mut schematic.selection);
+        let selection = std::mem::take(&mut schematic.session.selection);
         let document = schematic.into_document();
         Self {
             components: document.components,
@@ -192,7 +192,7 @@ impl PreparedSchematicOwner {
                 documentation_shapes: self.documentation_shapes,
                 ..Default::default()
             });
-        schematic.selection = self.selection;
+        schematic.session.selection = self.selection;
         schematic
     }
 }

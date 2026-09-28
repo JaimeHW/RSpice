@@ -30,6 +30,7 @@ pub(super) fn action_export_svg_with_io(
 
     let default_name = state
         .schematic
+        .session
         .current_file
         .as_ref()
         .and_then(|p| p.file_stem())
@@ -121,6 +122,7 @@ pub(crate) fn action_export_netlist_with_io(
 
     let default_name = state
         .schematic
+        .session
         .current_file
         .as_ref()
         .and_then(|p| p.file_stem())
@@ -500,6 +502,7 @@ pub(super) fn action_export_publication_snapshot_with_io(
 ) {
     let stem = state
         .schematic
+        .session
         .current_file
         .as_ref()
         .and_then(|p| p.file_stem())
@@ -685,7 +688,7 @@ mod tests {
     #[test]
     fn svg_export_uses_dialog_defaults_and_writes_svg_file() {
         let mut state = AppState::default();
-        state.schematic.current_file = Some(PathBuf::from("designs").join("rc_filter.sch"));
+        state.schematic.session.current_file = Some(PathBuf::from("designs").join("rc_filter.sch"));
         let io = MockExportWorkflowIo::returning_path(PathBuf::from("exports").join("rc_filter"));
 
         action_export_svg_with_io(&mut state, &io);

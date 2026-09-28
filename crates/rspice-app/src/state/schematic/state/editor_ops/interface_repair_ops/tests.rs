@@ -64,7 +64,7 @@ fn placed_instance(ports: &[&str]) -> Fixture {
         .find(|component| component.id == id)
         .expect("the placed instance is retained")
         .name = "X1".to_owned();
-    top.selection.select_only_component(id);
+    top.session.selection.select_only_component(id);
     top.recalculate_runtime_state();
     top.clear_undo_history();
     Fixture {

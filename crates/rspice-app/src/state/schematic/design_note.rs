@@ -69,7 +69,7 @@ impl SchematicState {
         &self,
         pending: &PendingDesignNotePlacement,
     ) -> Result<(), DesignNoteError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(DesignNoteError::ReadOnly);
         }
         if pending.topology_version != self.topology_version() {
@@ -99,8 +99,8 @@ impl SchematicState {
         let edit = self
             .design
             .place_design_note(pos, pending.kind, pending.text)?;
-        self.selection.clear();
-        self.selection.select_design_note(edit.value);
+        self.session.selection.clear();
+        self.session.selection.select_design_note(edit.value);
         self.finish_document_edit(edit.committed);
         if edit.committed {
             Ok(edit.value)
@@ -118,7 +118,7 @@ impl SchematicState {
         expected_design_notes: &[DesignNote],
         mutation: DesignReviewMutation,
     ) -> Result<(), DesignNoteError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(DesignNoteError::ReadOnly);
         }
         let committed =

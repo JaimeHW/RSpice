@@ -77,29 +77,29 @@ fn the_strip_projects_every_sheet_in_catalog_order() {
 #[test]
 fn activating_a_sheet_retires_the_selection_and_frames_the_new_drawing() {
     let (mut state, _, second) = two_sheet_state();
-    state.schematic.selection.select_component(10);
-    state.schematic.needs_drawing_sheet_fit = false;
+    state.schematic.session.selection.select_component(10);
+    state.schematic.session.needs_drawing_sheet_fit = false;
 
     activate_sheet(&mut state, second).expect("activation publishes");
 
     assert_eq!(active_sheet_id(&state), Some(second));
-    assert!(state.schematic.selection.is_empty());
-    assert!(!state.schematic.net_highlight.active);
-    assert!(state.schematic.needs_drawing_sheet_fit);
-    assert!(!state.schematic.needs_fit);
+    assert!(state.schematic.session.selection.is_empty());
+    assert!(!state.schematic.session.net_highlight.active);
+    assert!(state.schematic.session.needs_drawing_sheet_fit);
+    assert!(!state.schematic.session.needs_fit);
 }
 
 #[test]
 fn re_activating_the_current_sheet_publishes_nothing() {
     let (mut state, first, _) = two_sheet_state();
     let revision = state.workspace.design_management.revision();
-    state.schematic.selection.select_component(10);
+    state.schematic.session.selection.select_component(10);
 
     activate_sheet(&mut state, first).expect("an inert activation still succeeds");
 
     assert_eq!(state.workspace.design_management.revision(), revision);
     assert!(
-        state.schematic.selection.has_component(10),
+        state.schematic.session.selection.has_component(10),
         "a chip redrawn every frame must not clear the selection"
     );
 }

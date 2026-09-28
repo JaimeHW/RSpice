@@ -273,7 +273,7 @@ fn validate_draft(state: &AppState) -> DraftValidation {
         errors.messages.push(message);
     }
     if draft.kind == SchematicArrayKind::RadialDocumentation {
-        let selection = &state.schematic.selection;
+        let selection = &state.schematic.session.selection;
         let documentation_count = selection
             .documentation_shapes
             .len()
@@ -339,7 +339,8 @@ fn validate_draft(state: &AppState) -> DraftValidation {
 }
 
 pub(crate) fn armed_array_selection_authority(state: &AppState) -> Result<(), String> {
-    if !state.dialogs.array_selection.armed || state.schematic.tool != Tool::ArraySelection {
+    if !state.dialogs.array_selection.armed || state.schematic.session.tool != Tool::ArraySelection
+    {
         return Err("Create array is not armed.".to_owned());
     }
     match validate_draft(state) {
@@ -360,7 +361,7 @@ pub(crate) fn armed_array_selection_plan(
 
 pub(crate) fn cancel_armed_array_selection(state: &mut AppState) {
     state.dialogs.array_selection.close();
-    if state.schematic.tool == Tool::ArraySelection {
+    if state.schematic.session.tool == Tool::ArraySelection {
         state.schematic.cancel_tool();
     }
 }
@@ -482,7 +483,7 @@ fn array_dialog_body(
 }
 
 fn radial_documentation_center(state: &AppState) -> Option<Point> {
-    let selection = &state.schematic.selection;
+    let selection = &state.schematic.session.selection;
     let mut min_x = i32::MAX;
     let mut min_y = i32::MAX;
     let mut max_x = i32::MIN;
@@ -542,7 +543,7 @@ mod tests {
         state.schematic.document_mut_for_test().components.push(
             Component::new(4, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k"),
         );
-        state.schematic.selection.select_only_component(4);
+        state.schematic.session.selection.select_only_component(4);
 
         open_array_selection_dialog(&mut state);
 
@@ -597,7 +598,7 @@ mod tests {
             )
             .unwrap(),
         );
-        state.schematic.selection.select_design_note(11);
+        state.schematic.session.selection.select_design_note(11);
 
         open_array_selection_dialog(&mut state);
         state.dialogs.array_selection.kind = SchematicArrayKind::RadialDocumentation;
@@ -615,7 +616,7 @@ mod tests {
         state.schematic.document_mut_for_test().components.push(
             Component::new(4, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k"),
         );
-        state.schematic.selection.select_only_component(4);
+        state.schematic.session.selection.select_only_component(4);
         open_array_selection_dialog(&mut state);
         state.dialogs.array_selection.kind = SchematicArrayKind::Rectangular;
 
@@ -633,7 +634,7 @@ mod tests {
         state.schematic.document_mut_for_test().components.push(
             Component::new(4, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k"),
         );
-        state.schematic.selection.select_only_component(4);
+        state.schematic.session.selection.select_only_component(4);
         open_array_selection_dialog(&mut state);
         state.dialogs.array_selection.naming = "R1 to R8".to_owned();
 
@@ -663,7 +664,7 @@ mod tests {
         state.schematic.document_mut_for_test().components.push(
             Component::new(4, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k"),
         );
-        state.schematic.selection.select_only_component(4);
+        state.schematic.session.selection.select_only_component(4);
         open_array_selection_dialog(&mut state);
         state.dialogs.array_selection.authority = None;
 

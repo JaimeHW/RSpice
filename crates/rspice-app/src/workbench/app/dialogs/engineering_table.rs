@@ -712,7 +712,7 @@ impl RSpiceApp {
                         .map(|object| CrossProbeTarget::Junction(object.pos))
                 })
             });
-        let selection = &mut self.state.schematic.selection;
+        let selection = &mut self.state.schematic.session.selection;
         selection.clear();
         let selected = target.is_some();
         match target {

@@ -56,7 +56,7 @@ impl SchematicState {
         ArraySource {
             document: &self.design.document(),
             identity_cursor: self.identity_cursor(),
-            selection: array_selection_input(&self.selection),
+            selection: array_selection_input(&self.session.selection),
         }
     }
 
@@ -111,7 +111,7 @@ impl SchematicState {
         terminal_points_for: impl FnMut(&Component) -> Vec<(String, Point)>,
         component_bounds_for: impl FnMut(&Component) -> (i32, i32, i32, i32),
     ) -> Result<SchematicArrayPreview, SchematicArrayError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(SchematicArrayError::ReadOnly);
         }
         self.array_source().preview_array_selection_resolved(
@@ -127,17 +127,17 @@ impl SchematicState {
         terminal_points_for: impl FnMut(&Component) -> Vec<(String, Point)>,
         component_bounds_for: impl FnMut(&Component) -> (i32, i32, i32, i32),
     ) -> Result<SchematicArrayImpact, SchematicArrayError> {
-        if self.read_only {
+        if self.session.read_only {
             return Err(SchematicArrayError::ReadOnly);
         }
         let edit = self.design.array_selection_resolved(
-            array_selection_input(&self.selection),
+            array_selection_input(&self.session.selection),
             plan,
             terminal_points_for,
             component_bounds_for,
         )?;
         let (impact, objects) = edit.value;
-        self.selection = array_result_selection(objects);
+        self.session.selection = array_result_selection(objects);
         self.finish_document_edit(edit.committed);
         if !edit.committed {
             return Err(SchematicArrayError::CommitFailed);

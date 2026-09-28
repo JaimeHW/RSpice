@@ -955,6 +955,7 @@ fn instance_binding_card(
     if let Some(component_id) = bind {
         app.state
             .schematic
+            .session
             .selection
             .select_only_component(component_id);
         app.queue_command(Command::ModelsPage(ModelsPage::Models));
@@ -962,6 +963,7 @@ fn instance_binding_card(
     if let Some(component_id) = locate {
         app.state
             .schematic
+            .session
             .selection
             .select_only_component(component_id);
         navigate_specialist(app, crate::workbench::SurfaceId::Design);

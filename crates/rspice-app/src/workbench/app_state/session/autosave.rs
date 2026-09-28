@@ -23,11 +23,14 @@ impl RSpiceApp {
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::workbench) fn autosave_tick(&mut self, ctx: &Context) {
         let minutes = self.state.ui.autosave_minutes;
-        if minutes == 0 || !self.state.schematic.is_dirty || self.state.schematic.read_only {
+        if minutes == 0
+            || !self.state.schematic.session.is_dirty
+            || self.state.schematic.session.read_only
+        {
             self.autosave_last = None;
             return;
         }
-        let Some(path) = self.state.schematic.current_file.clone() else {
+        let Some(path) = self.state.schematic.session.current_file.clone() else {
             // Nothing to anchor a checkpoint to — save once and autosave
             // takes over.
             return;
@@ -129,8 +132,8 @@ impl RSpiceApp {
                     });
                 match restored {
                     Ok(mut schematic) => {
-                        schematic.current_file = Some(path.clone());
-                        schematic.is_dirty = true;
+                        schematic.session.current_file = Some(path.clone());
+                        schematic.session.is_dirty = true;
                         file_workflow::apply_loaded_schematic(
                             &mut self.state,
                             schematic,

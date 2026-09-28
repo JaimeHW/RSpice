@@ -161,7 +161,7 @@ fn validate_draft(state: &AppState) -> DraftValidation {
 /// move tool is armed.
 pub(crate) fn armed_move_selection_authority(state: &AppState) -> Result<(), String> {
     let draft = &state.dialogs.move_selection;
-    if !draft.armed || state.schematic.tool != Tool::MoveSelection {
+    if !draft.armed || state.schematic.session.tool != Tool::MoveSelection {
         return Err("Move selection is not armed.".to_owned());
     }
     match validate_draft(state) {
@@ -172,7 +172,7 @@ pub(crate) fn armed_move_selection_authority(state: &AppState) -> Result<(), Str
 
 pub(crate) fn cancel_armed_move_selection(state: &mut AppState) {
     state.dialogs.move_selection.close();
-    if state.schematic.tool == Tool::MoveSelection {
+    if state.schematic.session.tool == Tool::MoveSelection {
         state.schematic.cancel_tool();
     }
 }
@@ -244,7 +244,7 @@ fn workflow_body(
 }
 
 fn selection_summary(state: &AppState) -> String {
-    let selection = &state.schematic.selection;
+    let selection = &state.schematic.session.selection;
     let count = state.schematic.live_movable_selection_count();
     let symbol_context = SchematicSymbolContext::from_state(state);
     let terminals: std::collections::HashSet<Point> = state
@@ -290,12 +290,12 @@ mod tests {
         let id = state
             .schematic
             .add_component(ComponentType::Resistor, Point::origin());
-        state.schematic.selection.select_component(id);
+        state.schematic.session.selection.select_component(id);
         open_move_selection_dialog(&mut state);
         let draft = &state.dialogs.move_selection;
         assert!(draft.open);
         let authority = draft.authority.as_ref().expect("captured authority");
-        assert_eq!(authority.selection, state.schematic.selection);
+        assert_eq!(authority.selection, state.schematic.session.selection);
         assert!(
             authority
                 .snapshot
@@ -309,7 +309,7 @@ mod tests {
         let id = state
             .schematic
             .add_component(ComponentType::Resistor, Point::origin());
-        state.schematic.selection.select_component(id);
+        state.schematic.session.selection.select_component(id);
         open_move_selection_dialog(&mut state);
         state.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
         assert!(matches!(
@@ -324,13 +324,13 @@ mod tests {
         let id = state
             .schematic
             .add_component(ComponentType::Resistor, Point::origin());
-        state.schematic.selection.select_component(id);
+        state.schematic.session.selection.select_component(id);
         open_move_selection_dialog(&mut state);
         let baseline = SchematicSnapshot::capture(&state.schematic.document());
         state.dialogs.move_selection.arm();
         state.schematic.arm_tool(Tool::MoveSelection);
         assert!(baseline.is_equal(&SchematicSnapshot::capture(&state.schematic.document())));
-        assert!(state.schematic.selection.has_component(id));
+        assert!(state.schematic.session.selection.has_component(id));
         assert!(armed_move_selection_authority(&state).is_ok());
     }
 

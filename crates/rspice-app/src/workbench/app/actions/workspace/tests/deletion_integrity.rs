@@ -105,7 +105,11 @@ fn undo_revalidates_instance_bindings() {
     let mut state = state_with_populated_user_library();
     amp_placement_with_netlist_identity(&mut state);
     let placement = state.schematic.document().components[0].id;
-    state.schematic.selection.select_component(placement);
+    state
+        .schematic
+        .session
+        .selection
+        .select_component(placement);
     assert!(
         state.schematic.delete_selection(),
         "the reader takes the placement out of the drawing"

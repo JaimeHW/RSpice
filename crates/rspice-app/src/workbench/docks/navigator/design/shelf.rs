@@ -876,12 +876,13 @@ struct ShelfPlacementWatch {
 
 /// The identity the schematic currently has armed, as a shelf row names it.
 fn armed_shelf_entry(state: &AppState) -> Option<ShelfEntry> {
-    let Tool::Place(kind) = state.schematic.tool else {
+    let Tool::Place(kind) = state.schematic.session.tool else {
         return None;
     };
     if kind == ComponentType::CellInstance {
         return state
             .schematic
+            .session
             .pending_library_cell
             .as_ref()
             .map(ShelfEntry::from_binding);
@@ -889,7 +890,7 @@ fn armed_shelf_entry(state: &AppState) -> Option<ShelfEntry> {
     // A native device armed from the model library carries that part's card,
     // and the card name is the part's own id in the unified index — so the
     // history names the part the reader picked, not its device family.
-    if let Some(armed) = state.schematic.pending_part_model.as_ref()
+    if let Some(armed) = state.schematic.session.pending_part_model.as_ref()
         && armed.tool == Tool::Place(kind)
     {
         return Some(ShelfEntry::LibraryPart(armed.model.clone()));
@@ -899,7 +900,7 @@ fn armed_shelf_entry(state: &AppState) -> Option<ShelfEntry> {
     // recent band with a source the reader never picked, and a key of its own
     // would name a definition that is project state rather than something this
     // build can offer. The Stimulus library section lists it either way.
-    if state.schematic.pending_stimulus.is_some() {
+    if state.schematic.session.pending_stimulus.is_some() {
         return None;
     }
     Some(ShelfEntry::Primitive(kind))
@@ -1009,15 +1010,15 @@ fn resolve_shelf_entry(
     cells: &[CellCandidate],
     entry: &ShelfEntry,
 ) -> Option<ShelfEntryRow> {
-    let placing_cell = state.schematic.tool == Tool::Place(ComponentType::CellInstance);
-    let pending = state.schematic.pending_library_cell.as_ref();
+    let placing_cell = state.schematic.session.tool == Tool::Place(ComponentType::CellInstance);
+    let pending = state.schematic.session.pending_library_cell.as_ref();
     match entry {
         ShelfEntry::Primitive(kind) => Some(ShelfEntryRow {
             entry: entry.clone(),
             glyph: primitive_shelf_glyph(*kind),
             label: kind.display_name().to_owned(),
             meta: primitive_shelf_meta(*kind),
-            selected: state.schematic.tool == Tool::Place(*kind),
+            selected: state.schematic.session.tool == Tool::Place(*kind),
             arm: ShelfArm::Primitive(*kind),
         }),
         ShelfEntry::LibraryPart(part) => {
@@ -1405,7 +1406,7 @@ fn primitive_rows(
             ui,
             primitive_shelf_glyph(entry.kind),
             entry.label,
-            state.schematic.tool == Tool::Place(entry.kind),
+            state.schematic.session.tool == Tool::Place(entry.kind),
             primitive_shelf_meta(entry.kind).as_deref(),
             level,
         );
@@ -1462,6 +1463,7 @@ fn stimulus_library_section(ui: &mut Ui, state: &mut AppState) -> Option<String>
             &row.name,
             state
                 .schematic
+                .session
                 .pending_stimulus
                 .as_ref()
                 .is_some_and(|held| held.definition().eq_ignore_ascii_case(&row.name)),
@@ -1578,11 +1580,12 @@ fn builtin_xspice_catalog(ui: &mut Ui, state: &mut AppState) -> Option<LibraryCe
     for descriptor in descriptors {
         let selected = state
             .schematic
+            .session
             .pending_library_cell
             .as_ref()
             .and_then(|binding| binding.builtin_xspice.as_ref())
             .is_some_and(|binding| binding.stable_id == descriptor.stable_id)
-            && state.schematic.tool == Tool::Place(ComponentType::CellInstance);
+            && state.schematic.session.tool == Tool::Place(ComponentType::CellInstance);
         let response = shelf_part_row(
             ui,
             ShelfGlyph::Event,
@@ -1696,11 +1699,12 @@ fn generated_veriloga_catalog(ui: &mut Ui, state: &mut AppState) -> Option<Libra
     for descriptor in descriptors {
         let selected = state
             .schematic
+            .session
             .pending_library_cell
             .as_ref()
             .and_then(|binding| binding.generated_veriloga.as_ref())
             .is_some_and(|binding| binding.model_name == descriptor.model_name)
-            && state.schematic.tool == Tool::Place(ComponentType::CellInstance);
+            && state.schematic.session.tool == Tool::Place(ComponentType::CellInstance);
         let response = shelf_part_row(
             ui,
             ShelfGlyph::Text("VA"),
@@ -1945,7 +1949,7 @@ pub(super) fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui
         return;
     }
     let state = &mut app.state;
-    state.schematic.pending_library_cell = None;
+    state.schematic.session.pending_library_cell = None;
     state.schematic.arm_tool(Tool::Place(kind));
     finish_shelf_placement(state, ctx, kind.display_name());
 }
@@ -1960,7 +1964,7 @@ fn arm_cell(
     ctx: &egui::Context,
 ) {
     let label = format!("{}/{}", binding.library, binding.cell);
-    state.schematic.pending_library_cell = Some(binding);
+    state.schematic.session.pending_library_cell = Some(binding);
     state
         .schematic
         .arm_tool(Tool::Place(ComponentType::CellInstance));

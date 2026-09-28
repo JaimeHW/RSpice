@@ -101,7 +101,7 @@ fn sheet_format_manager_requires_live_schematic_edit_authority() {
         .design_management
         .bootstrap_for_cell_view(&key, "Main", [])
         .unwrap();
-    app.state.schematic.read_only = true;
+    app.state.schematic.session.read_only = true;
 
     assert_eq!(
         Command::SheetFormatManager.availability(&app),

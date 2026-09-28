@@ -173,21 +173,21 @@ impl SchematicState {
     /// built. Call once per frame before painting or hover hit-tests.
     pub fn ensure_canvas_cache(&mut self) {
         let version = self.topology_version();
-        if self.canvas_cache.version != Some(version) {
+        if self.session.canvas_cache.version != Some(version) {
             // Split the borrow: take the cache out, rebuild, put it back.
-            let mut cache = std::mem::take(&mut self.canvas_cache);
+            let mut cache = std::mem::take(&mut self.session.canvas_cache);
             cache.rebuild(
                 &self.design.document().wires,
                 &self.design.document().junctions,
                 version,
             );
-            self.canvas_cache = cache;
+            self.session.canvas_cache = cache;
         }
     }
 
     /// The canvas cache if it is current for this topology version.
     pub fn canvas_cache(&self) -> Option<&CanvasCache> {
-        self.canvas_cache.fresh(self.topology_version())
+        self.session.canvas_cache.fresh(self.topology_version())
     }
 
     /// Return the nearest valid explicit-junction target within `radius`.

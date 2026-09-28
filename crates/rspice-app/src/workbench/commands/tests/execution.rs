@@ -145,6 +145,6 @@ fn repeated_violation_navigation_keeps_advancing_after_jump_to_design() {
         Command::NextViolation.execute(&mut app);
         assert_eq!(app.state.workbench.workspace, Workspace::Design);
         assert_eq!(app.state.dialogs.drc_cycle, Some(expected_cycle));
-        assert!(app.state.schematic.center_request.is_some());
+        assert!(app.state.schematic.session.center_request.is_some());
     }
 }

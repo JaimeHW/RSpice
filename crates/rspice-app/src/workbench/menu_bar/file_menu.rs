@@ -176,7 +176,7 @@ mod tests {
     #[test]
     fn netlist_import_only_prompts_for_source_bytes_it_will_replace() {
         let mut state = AppState::default();
-        state.schematic.is_dirty = true;
+        state.schematic.session.is_dirty = true;
 
         assert!(!require_netlist_source_save_confirmation_if_dirty(
             &mut state,
@@ -251,7 +251,7 @@ mod tests {
             crate::state::Point::origin(),
         );
         state.schematic.clear_undo_history();
-        state.schematic.is_dirty = false;
+        state.schematic.session.is_dirty = false;
         let expected = state.schematic.document().components[0].clone();
         let mut candidate = expected.clone();
         candidate.name = "V9".to_owned();

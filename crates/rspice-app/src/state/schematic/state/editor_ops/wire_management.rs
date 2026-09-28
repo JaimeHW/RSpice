@@ -16,7 +16,7 @@ impl SchematicState {
     pub fn add_wire(&mut self, points: Vec<Point>) -> Option<u64> {
         let id = self.design.add_wire(points);
         if id.is_some() {
-            self.is_dirty = true;
+            self.session.is_dirty = true;
         }
         id
     }
@@ -73,48 +73,48 @@ impl SchematicState {
 
     /// Start drawing a wire at position
     pub fn start_wire(&mut self, pos: Point) {
-        if self.read_only {
+        if self.session.read_only {
             return;
         }
 
         log::info!("[Wire] start_wire at {:?}", pos);
-        self.wire_drawing.clear();
-        self.wire_drawing.points.push(pos);
-        self.wire_drawing.active = true;
+        self.session.wire_drawing.clear();
+        self.session.wire_drawing.points.push(pos);
+        self.session.wire_drawing.active = true;
     }
 
     /// Update the wire preview position (called on mouse move)
     pub fn update_wire_preview(&mut self, pos: Point) {
-        if self.wire_drawing.active {
-            self.wire_drawing.preview_pos = Some(pos);
+        if self.session.wire_drawing.active {
+            self.session.wire_drawing.preview_pos = Some(pos);
         }
     }
 
     /// Toggle wire routing mode (horizontal-first vs vertical-first)
     pub fn toggle_wire_routing(&mut self) {
-        self.wire_drawing.routing_mode = self.wire_drawing.routing_mode.toggle();
+        self.session.wire_drawing.routing_mode = self.session.wire_drawing.routing_mode.toggle();
     }
 
     /// Add a point to the current wire using orthogonal routing
     pub fn extend_wire(&mut self, pos: Point) {
-        if self.read_only || !self.wire_drawing.active {
+        if self.session.read_only || !self.session.wire_drawing.active {
             return;
         }
 
-        if let Some(last) = self.wire_drawing.points.last().copied() {
+        if let Some(last) = self.session.wire_drawing.points.last().copied() {
             if last == pos {
                 return; // Same point, skip
             }
 
             // Add corner point for orthogonal routing if needed
-            if let Some(corner) = self.wire_drawing.get_route_corner(pos)
+            if let Some(corner) = self.session.wire_drawing.get_route_corner(pos)
                 && corner != last
                 && corner != pos
             {
-                self.wire_drawing.points.push(corner);
+                self.session.wire_drawing.points.push(corner);
             }
 
-            self.wire_drawing.points.push(pos);
+            self.session.wire_drawing.points.push(pos);
         }
     }
 
@@ -126,14 +126,14 @@ impl SchematicState {
     /// - This ensures correct rubber-banding: all wires at a T-junction share
     ///   a common endpoint vertex, so moving any wire keeps the junction intact
     pub fn finish_wire(&mut self) -> Option<u64> {
-        if !self.wire_drawing.active {
+        if !self.session.wire_drawing.active {
             return None;
         }
 
-        let points = std::mem::take(&mut self.wire_drawing.points);
-        self.wire_drawing.clear();
+        let points = std::mem::take(&mut self.session.wire_drawing.points);
+        self.session.wire_drawing.clear();
 
-        if self.read_only {
+        if self.session.read_only {
             return None;
         }
 
@@ -192,7 +192,7 @@ impl SchematicState {
 
     /// Cancel wire drawing
     pub fn cancel_wire(&mut self) {
-        self.wire_drawing.clear();
+        self.session.wire_drawing.clear();
     }
 }
 
@@ -207,7 +207,7 @@ mod tests {
             .add_wire(vec![Point::new(-20, -20), Point::new(-10, -20)])
             .expect("baseline wire");
         schematic.reset_undo_history();
-        schematic.is_dirty = false;
+        schematic.session.is_dirty = false;
 
         schematic.start_wire(Point::new(0, 0));
         schematic.extend_wire(Point::new(20, 0));
@@ -218,8 +218,8 @@ mod tests {
         assert_eq!(schematic.history().undo_count(), 1);
         assert_eq!(schematic.undo_description(), Some("draw wire"));
         assert_eq!(schematic.design.document().wires.len(), 3);
-        assert!(!schematic.wire_drawing.active);
-        assert!(schematic.is_dirty);
+        assert!(!schematic.session.wire_drawing.active);
+        assert!(schematic.session.is_dirty);
 
         assert!(schematic.undo());
         assert_eq!(schematic.design.document().wires.len(), 1);
@@ -236,23 +236,23 @@ mod tests {
     fn cancelled_and_non_committing_routes_do_not_create_history() {
         let mut schematic = SchematicState::default();
         schematic.init_undo_history();
-        schematic.is_dirty = true;
+        schematic.session.is_dirty = true;
 
         schematic.start_wire(Point::new(0, 0));
         schematic.extend_wire(Point::new(10, 0));
         schematic.cancel_wire();
 
-        assert!(!schematic.wire_drawing.active);
+        assert!(!schematic.session.wire_drawing.active);
         assert!(!schematic.has_pending_operation());
         assert!(!schematic.can_undo());
-        assert!(schematic.is_dirty);
+        assert!(schematic.session.is_dirty);
         assert!(schematic.design.document().wires.is_empty());
 
         schematic.start_wire(Point::new(5, 5));
         assert_eq!(schematic.finish_wire(), None);
         assert!(!schematic.has_pending_operation());
         assert!(!schematic.can_undo());
-        assert!(schematic.is_dirty);
+        assert!(schematic.session.is_dirty);
         assert!(schematic.design.document().wires.is_empty());
     }
 
@@ -260,15 +260,15 @@ mod tests {
     fn read_only_wire_gestures_cannot_start_or_commit() {
         let mut schematic = SchematicState::default();
         schematic.init_undo_history();
-        schematic.read_only = true;
+        schematic.session.read_only = true;
 
         schematic.start_wire(Point::new(0, 0));
         schematic.extend_wire(Point::new(10, 0));
 
-        assert!(!schematic.wire_drawing.active);
+        assert!(!schematic.session.wire_drawing.active);
         assert_eq!(schematic.finish_wire(), None);
         assert!(!schematic.can_undo());
         assert!(schematic.design.document().wires.is_empty());
-        assert!(!schematic.is_dirty);
+        assert!(!schematic.session.is_dirty);
     }
 }

@@ -508,7 +508,12 @@ fn elsewhere<'a>(
 /// naming an instance of a child master would otherwise paint itself selected
 /// whenever the sheet on screen happened to hold that id.
 fn reveals(state: &AppState, occurrence: Option<&InstancePath>, component_id: u64) -> bool {
-    elsewhere(state, occurrence).is_none() && state.schematic.selection.has_component(component_id)
+    elsewhere(state, occurrence).is_none()
+        && state
+            .schematic
+            .session
+            .selection
+            .has_component(component_id)
 }
 
 /// The `Read by` cell: who reads this row, and whether that is a finding.

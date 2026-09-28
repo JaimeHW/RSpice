@@ -11,7 +11,7 @@ use crate::state::PendingPortSequence;
 /// again somewhere the model accepts. A *document* change ends it, because the
 /// pins were named for a cell that is no longer the one on screen.
 pub(super) fn place_pending_port(state: &mut AppState, grid_pos: Point) {
-    let Some(sequence) = state.schematic.pending_port_sequence.clone() else {
+    let Some(sequence) = state.schematic.session.pending_port_sequence.clone() else {
         state.push_user_message(ConsoleMessage::warning(
             "Pin placement ended: no names are armed.".to_owned(),
         ));
@@ -34,6 +34,7 @@ pub(super) fn place_pending_port(state: &mut AppState, grid_pos: Point) {
         Ok(stable_id) => {
             let more = state
                 .schematic
+                .session
                 .pending_port_sequence
                 .as_mut()
                 .is_some_and(PendingPortSequence::advance);
