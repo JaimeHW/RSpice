@@ -1319,7 +1319,7 @@ mod tests {
     #[test]
     fn schematic_coordinates_use_the_permanent_sheet_origin_and_status_context() {
         let mut state = crate::workbench::app_state::AppState::default();
-        state.schematic.document.grid_size = 10;
+        state.schematic.document_mut_for_test().grid_size = 10;
         assert_eq!(
             schematic_cursor_summary(&state, -14.0, -4.0),
             "x 0 · y 0 mm"

@@ -222,3 +222,55 @@ mod tests {
         assert_eq!(schematic.tool, Tool::Select);
     }
 }
+
+/// A definition-realized candidate; callers may preview it or consume it once.
+pub(crate) struct PreparedStimulusAdoption {
+    candidate: Component,
+}
+
+impl PreparedStimulusAdoption {
+    pub(crate) fn component(&self) -> &Component {
+        &self.candidate
+    }
+
+    pub(crate) fn into_component(self) -> Component {
+        self.candidate
+    }
+
+    pub(crate) fn replace_family(
+        self,
+        schematic: &mut SchematicState,
+        description: String,
+    ) -> bool {
+        let component_id = self.candidate.id;
+        schematic.with_undo(description, |schematic| {
+            if let Some(held) = schematic
+                .document
+                .components
+                .iter_mut()
+                .find(|component| component.id == component_id)
+            {
+                *held = self.candidate;
+            }
+            schematic.is_dirty = true;
+            schematic.bump_topology_version();
+        })
+    }
+}
+
+impl SchematicState {
+    pub(crate) fn prepare_stimulus_adoption(
+        component: &Component,
+        definition: &StimulusDefinition,
+    ) -> Option<PreparedStimulusAdoption> {
+        use crate::state::stimulus_library::provenance::AdoptionFit;
+
+        if definition.adoption_fit(component) == AdoptionFit::Kind {
+            return None;
+        }
+        let mut candidate = component.clone();
+        candidate.kind = definition.component_type();
+        definition.adopt_onto(&mut candidate).ok()?;
+        Some(PreparedStimulusAdoption { candidate })
+    }
+}

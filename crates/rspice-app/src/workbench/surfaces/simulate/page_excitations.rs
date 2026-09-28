@@ -626,7 +626,7 @@ mod tests {
 
     fn schematic_with(components: Vec<Component>) -> SchematicState {
         let mut schematic = SchematicState::default();
-        schematic.document.components = components;
+        schematic.document_mut_for_test().components = components;
         schematic
     }
 

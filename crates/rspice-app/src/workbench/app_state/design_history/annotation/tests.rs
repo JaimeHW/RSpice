@@ -38,7 +38,7 @@ fn fixture(names: &[&str]) -> Fixture {
             .add_component(ComponentType::VoltageSource, Point::new(x, 0));
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .components
             .iter_mut()
             .find(|c| c.id == id)
@@ -50,7 +50,7 @@ fn fixture(names: &[&str]) -> Fixture {
             .add_component(ComponentType::Cccs, Point::new(x, 100));
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .components
             .iter_mut()
             .find(|c| c.id == dependent)
@@ -75,7 +75,7 @@ fn fixture(names: &[&str]) -> Fixture {
         )
         .unwrap();
         probe.bind_saved_output(plan, output.id);
-        state.schematic.document.probes.push(probe);
+        state.schematic.document_mut_for_test().probes.push(probe);
         state.workspace.add_saved_output(plan, output).unwrap();
         objects.push(AnnotationObject {
             object: SchematicObjectKey::new(&owner.key(), id).unwrap(),
@@ -172,7 +172,7 @@ fn assert_component_references(fixture: &Fixture, names: &[&str]) {
         assert_eq!(
             state
                 .schematic
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|c| c.id == fixture.sources[index])
@@ -183,7 +183,7 @@ fn assert_component_references(fixture: &Fixture, names: &[&str]) {
         assert_eq!(
             state
                 .schematic
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|c| c.id == fixture.dependents[index])
@@ -192,7 +192,7 @@ fn assert_component_references(fixture: &Fixture, names: &[&str]) {
             format!("vref={name}")
         );
         assert_eq!(
-            state.schematic.document.probes[index]
+            state.schematic.document().probes[index]
                 .source_expression
                 .as_deref(),
             Some(format!("I({name})").as_str())
@@ -204,7 +204,7 @@ fn assert_component_references(fixture: &Fixture, names: &[&str]) {
             .saved_outputs[index];
         assert_eq!(output.source_expression, format!("I({name})"));
         assert_eq!(
-            state.schematic.document.probes[index].saved_output_id,
+            state.schematic.document().probes[index].saved_output_id,
             Some(output.id)
         );
     }
@@ -276,7 +276,7 @@ fn annotation_preparation_refuses_before_any_owner_or_history_changes() {
                 fixture
                     .state
                     .schematic
-                    .document
+                    .document_mut_for_test()
                     .components
                     .iter_mut()
                     .find(|c| c.id == fixture.dependents[0])
@@ -295,7 +295,7 @@ fn annotation_preparation_refuses_before_any_owner_or_history_changes() {
             "read only" => fixture.state.workspace.open_views[0].read_only_reference = true,
             _ => unreachable!(),
         }
-        let before = SchematicSnapshot::capture(&fixture.state.schematic.document);
+        let before = SchematicSnapshot::capture(&fixture.state.schematic.document());
         let configurations = fixture.state.workspace.configuration_sets.clone();
         let outputs = fixture
             .state
@@ -312,7 +312,7 @@ fn annotation_preparation_refuses_before_any_owner_or_history_changes() {
                 .is_err(),
             "{failure}"
         );
-        assert!(before.is_equal_document(&fixture.state.schematic.document));
+        assert!(before.is_equal_document(&fixture.state.schematic.document()));
         assert_eq!(fixture.state.workspace.configuration_sets, configurations);
         assert_eq!(
             fixture
@@ -389,7 +389,7 @@ fn reused_master_fixture(
     open.occurrence
         .descend(original_names[0].to_owned(), child_ref.clone());
     let mut child = std::mem::take(&mut state.schematic);
-    child.document.probes = vec![
+    child.document_mut_for_test().probes = vec![
         SchematicProbe::new(
             1000,
             Point::origin(),
@@ -409,13 +409,13 @@ fn reused_master_fixture(
         );
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .components
             .iter_mut()
             .find(|c| c.id == id)
             .unwrap()
             .name = (*name).to_owned();
-        state.schematic.document.probes.push(
+        state.schematic.document_mut_for_test().probes.push(
             SchematicProbe::new(
                 2000 + index as u64,
                 Point::origin(),
@@ -431,13 +431,13 @@ fn reused_master_fixture(
         LibraryCellInstance::new(&root.library, "child", "schematic"),
     );
     other
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|c| c.id == id)
         .unwrap()
         .name = "X5".to_owned();
-    other.document.probes.push(
+    other.document_mut_for_test().probes.push(
         SchematicProbe::new(
             3000,
             Point::origin(),
@@ -491,7 +491,7 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
     objects.extend(
         state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .map(|component| AnnotationObject {
@@ -523,7 +523,7 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
         let child = &state.workspace.schematic_buffers[&child_ref.key()];
         assert_eq!(
             child
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|c| c.id == fixture.sources[0])
@@ -533,7 +533,7 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
         );
         assert_eq!(
             child
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|c| c.id == fixture.dependents[0])
@@ -542,12 +542,12 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
             format!("vref={name}")
         );
         assert_eq!(
-            child.document.probes[0].source_expression.as_deref(),
+            child.document().probes[0].source_expression.as_deref(),
             Some(format!("I(/{}/{name})", parents[0]).as_str())
         );
         for (index, parent) in parents.iter().enumerate() {
             assert_eq!(
-                state.schematic.document.probes[index]
+                state.schematic.document().probes[index]
                     .source_expression
                     .as_deref(),
                 Some(format!("I(/{parent}/{name})").as_str())
@@ -555,7 +555,7 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
         }
         assert_eq!(
             state.workspace.schematic_buffers[&other_ref.key()]
-                .document
+                .document()
                 .probes[0]
                 .source_expression
                 .as_deref(),

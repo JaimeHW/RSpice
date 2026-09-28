@@ -461,7 +461,11 @@ mod tests {
                 "schematic",
             ));
         instance.name = "XAFE".to_owned();
-        state.schematic.document.components.push(instance);
+        state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(instance);
         state.schematic.selection.select_only_component(91);
         (state, parent, child)
     }

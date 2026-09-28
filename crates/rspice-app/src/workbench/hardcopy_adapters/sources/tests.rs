@@ -155,10 +155,11 @@ fn opaque_rgb8_png(width: u32, height: u32) -> Vec<u8> {
 #[test]
 fn schematic_digest_ignores_viewport_state_but_changes_with_authored_content() {
     let mut schematic = SchematicState::default();
-    schematic
-        .document
-        .wires
-        .push(Wire::segment(1, Point::new(-10, 0), Point::new(20, 0)));
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        1,
+        Point::new(-10, 0),
+        Point::new(20, 0),
+    ));
     let topology = schematic.topology_version();
     let first = resolve_schematic_source(SchematicHardcopySource {
         identity: identity("schematic"),
@@ -195,7 +196,7 @@ fn schematic_digest_ignores_viewport_state_but_changes_with_authored_content() {
         second.authority().content_digest()
     );
 
-    schematic.document.wires[0].points[1].x += 1;
+    schematic.document_mut_for_test().wires[0].points[1].x += 1;
     let third = resolve_schematic_source(SchematicHardcopySource {
         identity: HardcopySourceIdentity {
             document_id: first.authority().document_id(),
@@ -229,14 +230,16 @@ fn sheet_definition(name: &str) -> SheetDefinition {
 #[test]
 fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
     let mut schematic = SchematicState::default();
-    schematic
-        .document
-        .wires
-        .push(Wire::segment(11, Point::new(0, 0), Point::new(20, 0)));
-    schematic
-        .document
-        .wires
-        .push(Wire::segment(22, Point::new(100, 0), Point::new(120, 0)));
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        11,
+        Point::new(0, 0),
+        Point::new(20, 0),
+    ));
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        22,
+        Point::new(100, 0),
+        Point::new(120, 0),
+    ));
     let mut catalog = SheetCatalog::default();
     let first_id = catalog
         .create_sheet(sheet_definition("Input"), None)
@@ -530,14 +533,16 @@ fn source_sets_authenticate_definition_and_every_member_atomically() {
 #[test]
 fn schematic_selection_exports_only_selected_durable_objects() {
     let mut schematic = SchematicState::default();
-    schematic
-        .document
-        .wires
-        .push(Wire::segment(1, Point::new(0, 0), Point::new(10, 0)));
-    schematic
-        .document
-        .wires
-        .push(Wire::segment(2, Point::new(100, 0), Point::new(110, 0)));
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        1,
+        Point::new(0, 0),
+        Point::new(10, 0),
+    ));
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        2,
+        Point::new(100, 0),
+        Point::new(110, 0),
+    ));
     schematic.selection.select_wire(2);
     let resolved = resolve_schematic_source(SchematicHardcopySource {
         identity: identity("schematic"),
@@ -586,7 +591,7 @@ fn authored_cell_symbol_is_frozen_into_the_semantic_source() {
     let resolver = SymbolResolver::new(&libraries, &buffers);
 
     let mut schematic = SchematicState::default();
-    schematic.document.components.push(
+    schematic.document_mut_for_test().components.push(
         Component::new(7, ComponentType::CellInstance, Point::new(20, 30))
             .with_library_cell(LibraryCellInstance::new("work", "amp", "symbol")),
     );
@@ -636,7 +641,7 @@ fn stale_schematic_authority_is_rejected_before_digesting() {
 #[test]
 fn selected_probe_is_rejected_explicitly_without_mutating_the_schematic() {
     let mut schematic = SchematicState::default();
-    schematic.document.probes.push(
+    schematic.document_mut_for_test().probes.push(
         crate::state::SchematicProbe::new(
             91,
             Point::new(20, 30),
@@ -646,7 +651,7 @@ fn selected_probe_is_rejected_explicitly_without_mutating_the_schematic() {
         .unwrap(),
     );
     schematic.selection.select_only_probe(91);
-    let probes_before = schematic.document.probes.clone();
+    let probes_before = schematic.document().probes.clone();
     let selection_before = schematic.selection.clone();
     let topology_before = schematic.topology_version();
     let dirty_before = schematic.is_dirty;
@@ -670,7 +675,7 @@ fn selected_probe_is_rejected_explicitly_without_mutating_the_schematic() {
         error.to_string(),
         "probe markers are not publishable hardcopy objects; deselect every probe or publish the owning waveform instead"
     );
-    assert_eq!(schematic.document.probes, probes_before);
+    assert_eq!(schematic.document().probes, probes_before);
     assert_eq!(schematic.selection, selection_before);
     assert_eq!(schematic.topology_version(), topology_before);
     assert_eq!(schematic.is_dirty, dirty_before);

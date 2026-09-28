@@ -159,14 +159,7 @@ fn commit_grid_snap_routing(state: &mut AppState) -> Result<(), GridSnapRoutingC
     );
 
     if let Some(pitch) = requested_pitch.filter(|_| pitch_changed) {
-        let changed = state
-            .schematic
-            .with_undo("change schematic grid pitch", |document| {
-                document.document.document_policy.grid_pitch = pitch;
-                document.document.grid_size = pitch.canvas_grid_size();
-                document.is_dirty = true;
-                document.bump_topology_version();
-            });
+        let changed = state.schematic.change_grid_pitch(pitch);
         if !changed {
             return Err(GridSnapRoutingCommitError::new(
                 "The schematic grid pitch could not be changed.",
@@ -474,10 +467,10 @@ mod tests {
 
         assert_eq!(state.ui.grid, GridStyle::Lines);
         assert_eq!(
-            state.schematic.document.document_policy.grid_pitch,
+            state.schematic.document().document_policy.grid_pitch,
             SchematicGridPitch::Mil25
         );
-        assert_eq!(state.schematic.document.grid_size, 5);
+        assert_eq!(state.schematic.document().grid_size, 5);
         assert!(state.schematic.can_undo());
         assert!(state.schematic.snap_engine.enabled);
         assert_eq!(state.schematic.snap_engine.grid_size, 5);
@@ -507,7 +500,7 @@ mod tests {
     fn free_snap_and_session_only_choices_do_not_dirty_document_history() {
         let mut state = AppState::default();
         let topology = state.schematic.topology_version();
-        let pitch = state.schematic.document.document_policy.grid_pitch;
+        let pitch = state.schematic.document().document_policy.grid_pitch;
         assert!(open_grid_snap_routing_dialog(&mut state));
         state.dialogs.grid_snap_routing.draft.grid_style = GridStyle::Off;
         state.dialogs.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Free;
@@ -515,7 +508,7 @@ mod tests {
 
         assert!(commit_grid_snap_routing(&mut state).is_ok());
 
-        assert_eq!(state.schematic.document.document_policy.grid_pitch, pitch);
+        assert_eq!(state.schematic.document().document_policy.grid_pitch, pitch);
         assert_eq!(state.schematic.topology_version(), topology);
         assert!(!state.schematic.can_undo());
         assert!(!state.schematic.snap_engine.enabled);
@@ -556,7 +549,7 @@ mod tests {
         assert_eq!(state.ui.grid, GridStyle::Dots);
         assert_eq!(state.schematic.snap_engine, original_snap);
         assert_eq!(
-            state.schematic.document.document_policy.grid_pitch,
+            state.schematic.document().document_policy.grid_pitch,
             SchematicGridPitch::Mil50
         );
         assert!(state.dialogs.grid_snap_routing.open);
@@ -589,7 +582,7 @@ mod tests {
         assert_eq!(state.ui.grid, GridStyle::Dots);
         assert_eq!(state.schematic.snap_engine, original_snap);
         assert_eq!(
-            state.schematic.document.document_policy.grid_pitch,
+            state.schematic.document().document_policy.grid_pitch,
             SchematicGridPitch::Mil50
         );
         assert!(!state.schematic.can_undo());
@@ -634,7 +627,7 @@ mod tests {
         assert_eq!(state.ui.grid, GridStyle::Dots);
         assert_eq!(state.schematic.snap_engine, original_snap);
         assert_eq!(
-            state.schematic.document.document_policy.grid_pitch,
+            state.schematic.document().document_policy.grid_pitch,
             SchematicGridPitch::Mil50
         );
         assert!(state.dialogs.grid_snap_routing.open);

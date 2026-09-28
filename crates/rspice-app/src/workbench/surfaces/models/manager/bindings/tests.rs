@@ -24,7 +24,7 @@ fn design_with_unresolved(count: u64) -> AppState {
         let mut component = Component::new(index + 1, ComponentType::Nmos, Point::origin());
         component.name = format!("M{index}");
         component.params = format!("model=absent{index}");
-        schematic.document.components.push(component);
+        schematic.document_mut_for_test().components.push(component);
     }
     state.workspace.save_active_schematic(&schematic);
     state.schematic = schematic.clone();
@@ -100,7 +100,7 @@ fn an_instance_bound_to_the_wrong_provider_says_which_one_wins() {
     let mut component = Component::new(1, ComponentType::Nmos, Point::origin());
     component.name = "M1".to_owned();
     component.params = "model=nch model_library=beta".to_owned();
-    schematic.document.components.push(component);
+    schematic.document_mut_for_test().components.push(component);
     state.workspace.save_active_schematic(&schematic);
 
     let diagnostics = diagnostics(&mut state);

@@ -933,7 +933,7 @@ mod tests {
         width.constraints.minimum = Some("1m".to_owned());
         width.constraints.maximum = Some("1".to_owned());
         let second_binding = install_definition(&mut state, &second);
-        state.schematic.document.components = vec![
+        state.schematic.document_mut_for_test().components = vec![
             Component::new(1, ComponentType::CellInstance, Point::new(0, 0))
                 .with_library_cell(first_binding)
                 .with_name_value("M1", "nmos_core"),
@@ -941,10 +941,11 @@ mod tests {
                 .with_library_cell(second_binding)
                 .with_name_value("M2", "nmos_core"),
         ];
-        state.schematic.document.components[0].params = "w=2u l=180n".to_owned();
+        state.schematic.document_mut_for_test().components[0].params = "w=2u l=180n".to_owned();
 
         for (width, invalid) in [("2m", false), ("2u", true)] {
-            state.schematic.document.components[1].params = format!("w={width} l=180n");
+            state.schematic.document_mut_for_test().components[1].params =
+                format!("w={width} l=180n");
             for owner in [None, Some(1), Some(2)] {
                 state.tabbed_property_dialog.close();
                 state.property_registry.clear_cell_instance_sheet();
@@ -952,7 +953,7 @@ mod tests {
                     open_property_editor(&mut state, owner);
                     assert!(state.tabbed_property_dialog.open);
                 }
-                let original = state.schematic.document.components.clone();
+                let original = state.schematic.document().components.clone();
                 let draft = state.tabbed_property_dialog.values.clone();
                 let report = CheckAndSaveValidationReport::collect(&state).unwrap();
                 let errors = report
@@ -967,14 +968,14 @@ mod tests {
                 } else {
                     assert!(errors.is_empty(), "owner {owner:?}: {errors:?}");
                 }
-                assert_eq!(state.schematic.document.components, original);
+                assert_eq!(state.schematic.document().components, original);
                 assert_eq!(state.tabbed_property_dialog.values, draft);
             }
         }
 
         // Invalid published metadata must not fall back to the other master's
         // retained form or to an identity-only schema.
-        state.schematic.document.components[1].params = "w=2m l=180n".to_owned();
+        state.schematic.document_mut_for_test().components[1].params = "w=2m l=180n".to_owned();
         state
             .library_manager
             .get_library_mut(&first.identity.library)
@@ -1013,8 +1014,8 @@ mod tests {
             BusTapOrientation::Down,
         )
         .unwrap();
-        state.schematic.document.buses.push(bus);
-        state.schematic.document.bus_taps.push(tap);
+        state.schematic.document_mut_for_test().buses.push(bus);
+        state.schematic.document_mut_for_test().bus_taps.push(tap);
 
         state.schematic.selection.select_only_bus(41);
         assert!(open_selected_object_properties(&mut state));
@@ -1036,7 +1037,11 @@ mod tests {
     fn selected_net_label_opens_the_guarded_object_properties_transaction() {
         let mut state = AppState::default();
         let label = NetLabel::new(43, Point::new(-12, 34), "afe.out");
-        state.schematic.document.net_labels.push(label.clone());
+        state
+            .schematic
+            .document_mut_for_test()
+            .net_labels
+            .push(label.clone());
         state.schematic.selection.select_only_net_label(label.id);
 
         assert!(open_selected_object_properties(&mut state));
@@ -1055,12 +1060,12 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .wires
             .push(Wire::new(71, vec![Point::new(0, 0), Point::new(40, 0)]));
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(72, Point::new(20, 0), "sense"));
         state.schematic.selection.select_only_wire(71);
@@ -1076,7 +1081,7 @@ mod tests {
         ));
 
         state.dialogs.object_properties.close();
-        state.schematic.document.net_labels.clear();
+        state.schematic.document_mut_for_test().net_labels.clear();
         assert!(!selected_object_properties_available(&state));
         assert!(!open_selected_object_properties(&mut state));
     }
@@ -1084,7 +1089,7 @@ mod tests {
     #[test]
     fn interface_port_object_properties_preserve_the_full_typed_editor() {
         let mut state = AppState::default();
-        state.schematic.document.components.push(
+        state.schematic.document_mut_for_test().components.push(
             Component::new(73, ComponentType::Port, Point::origin()).with_name_value("P73", "VIN"),
         );
         state.schematic.selection.select_only_component(73);
@@ -1109,7 +1114,11 @@ mod tests {
             "Review bias path",
         )
         .unwrap();
-        state.schematic.document.design_notes.push(note.clone());
+        state
+            .schematic
+            .document_mut_for_test()
+            .design_notes
+            .push(note.clone());
         state.schematic.selection.select_only_design_note(note.id);
 
         assert!(open_selected_object_properties(&mut state));
@@ -1127,7 +1136,7 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .buses
             .push(Bus::segment(1, Point::new(0, 0), Point::new(10, 0), None).unwrap());
         state.schematic.selection.select_only_bus(1);
@@ -1140,7 +1149,7 @@ mod tests {
     #[test]
     fn selected_probe_routes_to_the_inspector_even_in_read_only_mode() {
         let mut state = AppState::default();
-        state.schematic.document.probes.push(
+        state.schematic.document_mut_for_test().probes.push(
             SchematicProbe::new(74, Point::new(10, 20), "V(out)", Some("V(out)".to_owned()))
                 .unwrap(),
         );
@@ -1188,7 +1197,7 @@ mod tests {
             Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
         )
         .unwrap();
-        state.schematic.document.buses.push(bus);
+        state.schematic.document_mut_for_test().buses.push(bus);
         state.schematic.selection.select_only_bus(1);
         assert!(open_selected_object_properties(&mut state));
 
@@ -1209,7 +1218,11 @@ mod tests {
             .with_library_cell(binding)
             .with_name_value("M44", "nmos_core");
         instance.params = "w=2u l=220n".to_owned();
-        state.schematic.document.components.push(instance);
+        state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(instance);
         state.schematic.selection.select_only_component(44);
 
         assert!(selected_object_properties_available(&state));
@@ -1261,7 +1274,7 @@ mod tests {
         let mut library = Library::new("work");
         library.add_cell(cell);
         state.library_manager.add_library(library);
-        state.schematic.document.components.push(
+        state.schematic.document_mut_for_test().components.push(
             Component::new(9, ComponentType::CellInstance, Point::origin())
                 .with_library_cell(LibraryCellInstance::new("work", "amp", "schematic"))
                 .with_name_value("X9", "amp"),
@@ -1297,7 +1310,7 @@ mod tests {
             .enumerate()
         {
             let mut state = AppState::default();
-            state.schematic.document.components.clear();
+            state.schematic.document_mut_for_test().components.clear();
             let name = if kind.spice_prefix().is_empty() {
                 if kind == ComponentType::Ground {
                     "GND".to_owned()
@@ -1309,7 +1322,11 @@ mod tests {
             };
             let component =
                 Component::new(index as u64 + 1, kind, Point::origin()).with_name_value(name, "");
-            state.schematic.document.components.push(component);
+            state
+                .schematic
+                .document_mut_for_test()
+                .components
+                .push(component);
 
             open_property_editor(&mut state, index as u64 + 1);
 
@@ -1327,7 +1344,7 @@ mod tests {
         let mut state = AppState::default();
         let definition = model_bound_definition();
         let binding = install_definition(&mut state, &definition);
-        state.schematic.document.components.push(
+        state.schematic.document_mut_for_test().components.push(
             Component::new(1, ComponentType::CellInstance, Point::origin())
                 .with_library_cell(binding)
                 .with_name_value("M1", "nmos_core"),
@@ -1346,7 +1363,7 @@ mod tests {
         let mut legacy_library = Library::new("legacy");
         legacy_library.add_cell(crate::state::Cell::new("opaque"));
         state.library_manager.add_library(legacy_library);
-        state.schematic.document.components.push(
+        state.schematic.document_mut_for_test().components.push(
             Component::new(2, ComponentType::CellInstance, Point::new(20, 0))
                 .with_library_cell(LibraryCellInstance::new("legacy", "opaque", "schematic"))
                 .with_name_value("X2", "opaque"),
@@ -1369,7 +1386,7 @@ mod tests {
         review.source = SymbolSourceContract::BlankExplicitContract;
         review.netlist = SymbolNetlistBinding::unbound();
         let review_binding = install_definition(&mut state, &review);
-        state.schematic.document.components.push(
+        state.schematic.document_mut_for_test().components.push(
             Component::new(3, ComponentType::CellInstance, Point::new(40, 0))
                 .with_library_cell(review_binding)
                 .with_name_value("X3", "review_only"),

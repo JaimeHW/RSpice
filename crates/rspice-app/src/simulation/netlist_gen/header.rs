@@ -264,7 +264,7 @@ mod tests {
         binding.model_section = Some("tt".to_owned());
         binding.terminal_order = vec!["d".to_owned(), "g".to_owned()];
         binding.interface_bound = true;
-        schematic.document.components.push(
+        schematic.document_mut_for_test().components.push(
             crate::state::Component::new(
                 1,
                 crate::state::ComponentType::CellInstance,

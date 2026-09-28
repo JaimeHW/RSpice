@@ -135,6 +135,8 @@ pub use property_types::{
 // re-exported here because it is still the application's state authority and
 // every caller names it through `crate::state`.
 pub use rspice_design_model::design_management::*;
+pub(crate) use schematic::bulk_edit;
+pub(crate) use schematic::named_net;
 pub use schematic::*;
 // Test-only aliases: the submodule is private, so this path is the only way
 // the tests can name an attribution's vocabulary directly.

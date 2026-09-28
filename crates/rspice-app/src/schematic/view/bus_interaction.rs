@@ -430,7 +430,7 @@ mod tests {
     fn armed_state(slice: &str) -> SchematicState {
         let declaration = BusDeclaration::parse("DATA[7:0]").unwrap();
         let mut state = SchematicState::default();
-        state.document.buses.push(
+        state.document_mut_for_test().buses.push(
             Bus::segment(
                 1,
                 Point::new(0, 0),
@@ -453,10 +453,11 @@ mod tests {
     #[test]
     fn scalar_tap_resolves_only_to_scalar_wire() {
         let mut state = armed_state("DATA[3]");
-        state
-            .document
-            .wires
-            .push(Wire::segment(2, Point::new(20, 10), Point::new(30, 10)));
+        state.document_mut_for_test().wires.push(Wire::segment(
+            2,
+            Point::new(20, 10),
+            Point::new(30, 10),
+        ));
 
         let candidate = resolve_bus_tap_candidate(&state, Point::new(20, 1), 2).unwrap();
 
@@ -468,14 +469,16 @@ mod tests {
     #[test]
     fn hidden_nearer_target_cannot_intercept_bus_tap_resolution() {
         let mut state = armed_state("DATA[3]");
-        state
-            .document
-            .wires
-            .push(Wire::segment(2, Point::new(10, 5), Point::new(30, 5)));
-        state
-            .document
-            .wires
-            .push(Wire::segment(3, Point::new(10, 10), Point::new(30, 10)));
+        state.document_mut_for_test().wires.push(Wire::segment(
+            2,
+            Point::new(10, 5),
+            Point::new(30, 5),
+        ));
+        state.document_mut_for_test().wires.push(Wire::segment(
+            3,
+            Point::new(10, 10),
+            Point::new(30, 10),
+        ));
 
         let candidate =
             resolve_bus_tap_candidate_filtered(&state, Point::new(20, 1), 2, |object_id| {
@@ -490,10 +493,11 @@ mod tests {
     #[test]
     fn multi_bit_tap_rejects_scalar_target_instead_of_collapsing() {
         let mut state = armed_state("DATA[3:0]");
-        state
-            .document
-            .wires
-            .push(Wire::segment(2, Point::new(20, 10), Point::new(30, 10)));
+        state.document_mut_for_test().wires.push(Wire::segment(
+            2,
+            Point::new(20, 10),
+            Point::new(30, 10),
+        ));
 
         assert_eq!(
             resolve_bus_tap_candidate(&state, Point::new(20, 1), 2),
@@ -504,7 +508,7 @@ mod tests {
     #[test]
     fn multi_bit_tap_requires_exact_destination_declaration() {
         let mut state = armed_state("DATA[3:0]");
-        state.document.buses.push(
+        state.document_mut_for_test().buses.push(
             Bus::segment(
                 2,
                 Point::new(0, 10),
@@ -524,10 +528,11 @@ mod tests {
     fn explicit_orientation_is_never_auto_flipped() {
         let mut state = armed_state("DATA[3]");
         state.pending_bus_tap.as_mut().unwrap().orientation = BusTapOrientation::Up;
-        state
-            .document
-            .wires
-            .push(Wire::segment(2, Point::new(20, 10), Point::new(30, 10)));
+        state.document_mut_for_test().wires.push(Wire::segment(
+            2,
+            Point::new(20, 10),
+            Point::new(30, 10),
+        ));
 
         assert_eq!(
             resolve_bus_tap_candidate(&state, Point::new(20, 1), 2),
@@ -538,7 +543,7 @@ mod tests {
     #[test]
     fn source_hit_radius_does_not_capture_a_nearby_bus() {
         let mut state = armed_state("DATA[3]");
-        state.document.buses.push(
+        state.document_mut_for_test().buses.push(
             Bus::segment(
                 3,
                 Point::new(0, 6),
@@ -547,10 +552,11 @@ mod tests {
             )
             .unwrap(),
         );
-        state
-            .document
-            .wires
-            .push(Wire::segment(2, Point::new(20, 10), Point::new(30, 10)));
+        state.document_mut_for_test().wires.push(Wire::segment(
+            2,
+            Point::new(20, 10),
+            Point::new(30, 10),
+        ));
 
         assert_eq!(
             resolve_bus_tap_candidate(&state, Point::new(20, 4), 1),
@@ -584,7 +590,7 @@ mod tests {
     fn non_lattice_source_projection_preview_always_commits_exactly() {
         let declaration = BusDeclaration::parse("DATA[7:0]").unwrap();
         let mut state = SchematicState::default();
-        state.document.buses.push(
+        state.document_mut_for_test().buses.push(
             Bus::segment(
                 1,
                 Point::new(0, 0),
@@ -593,10 +599,11 @@ mod tests {
             )
             .unwrap(),
         );
-        state
-            .document
-            .wires
-            .push(Wire::segment(2, Point::new(20, 3), Point::new(20, 12)));
+        state.document_mut_for_test().wires.push(Wire::segment(
+            2,
+            Point::new(20, 3),
+            Point::new(20, 12),
+        ));
         let pending = crate::state::PendingBusTap::new(
             declaration,
             BusSlice::parse("DATA[3]").unwrap(),
@@ -607,7 +614,7 @@ mod tests {
 
         let candidate = resolve_bus_tap_candidate(&state, Point::new(5, 2), 6).unwrap();
         assert_eq!(candidate.bus_point, Point::new(10, 3));
-        assert!(state.document.buses[0].contains_point(candidate.bus_point));
+        assert!(state.document().buses[0].contains_point(candidate.bus_point));
         assert!(
             state
                 .place_configured_bus_tap(
@@ -623,10 +630,11 @@ mod tests {
     #[test]
     fn scalar_tap_resolves_an_exact_lattice_crossing_on_a_diagonal_wire() {
         let mut state = armed_state("DATA[3]");
-        state
-            .document
-            .wires
-            .push(Wire::segment(2, Point::new(0, 10), Point::new(20, 20)));
+        state.document_mut_for_test().wires.push(Wire::segment(
+            2,
+            Point::new(0, 10),
+            Point::new(20, 20),
+        ));
 
         let candidate = resolve_bus_tap_candidate(&state, Point::new(10, 1), 2).unwrap();
 
@@ -638,10 +646,11 @@ mod tests {
     #[test]
     fn diagonal_target_without_an_integer_crossing_is_rejected() {
         let mut state = armed_state("DATA[3]");
-        state
-            .document
-            .wires
-            .push(Wire::segment(2, Point::new(0, 10), Point::new(3, 20)));
+        state.document_mut_for_test().wires.push(Wire::segment(
+            2,
+            Point::new(0, 10),
+            Point::new(3, 20),
+        ));
 
         assert_eq!(
             resolve_bus_tap_candidate(&state, Point::new(1, 1), 2),

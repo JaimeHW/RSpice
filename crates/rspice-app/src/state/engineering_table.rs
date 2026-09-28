@@ -1075,11 +1075,11 @@ mod tests {
 
     fn dataset() -> EngineeringDataset {
         let mut schematic = SchematicState::default();
-        schematic.document.components.push(
+        schematic.document_mut_for_test().components.push(
             Component::new(7, ComponentType::Resistor, Point::new(20, -10))
                 .with_name_value("R7", "10k"),
         );
-        schematic.document.components.push(
+        schematic.document_mut_for_test().components.push(
             Component::new(2, ComponentType::Capacitor, Point::new(0, 30))
                 .with_name_value("C2", "2p"),
         );

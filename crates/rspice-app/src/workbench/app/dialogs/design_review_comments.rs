@@ -1082,12 +1082,12 @@ mod tests {
             let mut app = RSpiceApp::test_instance();
             app.state
                 .schematic
-                .document
+                .document_mut_for_test()
                 .design_notes
                 .push(review_note(1));
             open_design_review_comments(&mut app.state);
             app.state.dialogs.design_review_comments.reply = "Check the bias point".to_owned();
-            let notes = app.state.schematic.document.design_notes.clone();
+            let notes = app.state.schematic.document().design_notes.clone();
             let dirty = app.state.schematic.is_dirty;
             for epoch in [
                 Err("clock unavailable"),
@@ -1097,7 +1097,7 @@ mod tests {
                 crate::time_compat::with_unix_epoch(epoch, || {
                     app.handle_design_review_action(action.clone())
                 });
-                assert_eq!(app.state.schematic.document.design_notes, notes);
+                assert_eq!(app.state.schematic.document().design_notes, notes);
                 assert_eq!(app.state.schematic.is_dirty, dirty);
                 assert_eq!(
                     app.state.dialogs.design_review_comments.reply,
@@ -1117,7 +1117,7 @@ mod tests {
             assert!(app.state.dialogs.design_review_comments.error.is_none());
             assert!(app.state.dialogs.design_review_comments.reply.is_empty());
             assert_eq!(
-                app.state.schematic.document.design_notes[0]
+                app.state.schematic.document().design_notes[0]
                     .review
                     .as_ref()
                     .unwrap()
@@ -1136,11 +1136,11 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state
             .schematic
-            .document
+            .document_mut_for_test()
             .design_notes
             .push(review_note(1));
         crate::workbench::commands::vocabulary::Command::ReviewComments.execute(&mut app);
-        let notes = app.state.schematic.document.design_notes.clone();
+        let notes = app.state.schematic.document().design_notes.clone();
         let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -1156,7 +1156,7 @@ mod tests {
             app.state.dialogs.design_review_comments.reply,
             "Check the bias point"
         );
-        assert_eq!(app.state.schematic.document.design_notes, notes);
+        assert_eq!(app.state.schematic.document().design_notes, notes);
     }
 
     #[test]
@@ -1169,7 +1169,7 @@ mod tests {
             if case != "empty" {
                 app.state
                     .schematic
-                    .document
+                    .document_mut_for_test()
                     .design_notes
                     .push(review_note(1));
             }
@@ -1186,11 +1186,11 @@ mod tests {
             if case == "stale" {
                 app.state
                     .schematic
-                    .document
+                    .document_mut_for_test()
                     .design_notes
                     .push(review_note(2));
             }
-            let notes = app.state.schematic.document.design_notes.clone();
+            let notes = app.state.schematic.document().design_notes.clone();
             let _ = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
@@ -1207,7 +1207,7 @@ mod tests {
                 "{case}"
             );
             assert!(!ctx.memory(|memory| memory.has_focus(reply_id())), "{case}");
-            assert_eq!(app.state.schematic.document.design_notes, notes);
+            assert_eq!(app.state.schematic.document().design_notes, notes);
         }
     }
 
@@ -1295,7 +1295,7 @@ mod tests {
             app.state.dialogs.design_note.text,
             "Browser recovery qualification"
         );
-        assert!(app.state.schematic.document.design_notes.is_empty());
+        assert!(app.state.schematic.document().design_notes.is_empty());
     }
 
     #[test]

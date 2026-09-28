@@ -39,12 +39,15 @@ impl Bench {
         self.next_id += 1;
         let mut component = Component::new(id, kind, Point::new(x, y)).with_name_value(name, value);
         component.params = params.to_owned();
-        self.state.document.components.push(component);
-        self.state.document.components.len() - 1
+        self.state
+            .document_mut_for_test()
+            .components
+            .push(component);
+        self.state.document().components.len() - 1
     }
 
     fn terminal(&self, index: usize, terminal: usize) -> Point {
-        self.state.document.components[index].terminal_positions()[terminal].1
+        self.state.document().components[index].terminal_positions()[terminal].1
     }
 
     fn connect(&mut self, from: (usize, usize), to: (usize, usize)) {
@@ -52,7 +55,10 @@ impl Bench {
         let b = self.terminal(to.0, to.1);
         let id = self.next_id;
         self.next_id += 1;
-        self.state.document.wires.push(Wire::segment(id, a, b));
+        self.state
+            .document_mut_for_test()
+            .wires
+            .push(Wire::segment(id, a, b));
     }
 
     fn ground(&mut self, at: (usize, usize)) {
@@ -60,11 +66,14 @@ impl Bench {
         let id = self.next_id;
         self.next_id += 1;
         // The ground terminal sits 10 units above its anchor position.
-        self.state.document.components.push(Component::new(
-            id,
-            ComponentType::Ground,
-            Point::new(point.x, point.y + 10),
-        ));
+        self.state
+            .document_mut_for_test()
+            .components
+            .push(Component::new(
+                id,
+                ComponentType::Ground,
+                Point::new(point.x, point.y + 10),
+            ));
     }
 
     fn netlist(&self) -> String {

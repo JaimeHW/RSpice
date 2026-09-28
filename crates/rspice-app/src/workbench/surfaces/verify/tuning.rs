@@ -299,17 +299,8 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
                 "bind {} to {}",
                 binding.component_name, binding.variable.name
             );
-            let changed = schematic.with_undo(description, move |schematic| {
-                let index = schematic
-                    .document()
-                    .components
-                    .iter()
-                    .position(|component| component.id == component_id)
-                    .expect("staged component identity was validated before the transaction");
-                schematic.document.components[index].value = binding_expression;
-                schematic.is_dirty = true;
-                schematic.bump_topology_version();
-            });
+            let changed =
+                schematic.bind_component_value(component_id, binding_expression, description);
             if !changed {
                 return Err(format!(
                     "{} could not be bound because the schematic became read-only",

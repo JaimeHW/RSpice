@@ -80,7 +80,7 @@ fn port_shelf_entry_uses_the_typed_place_pin_transaction() {
     assert!(app.state.dialogs.pin_port.open);
     assert_eq!(app.state.schematic.tool, Tool::Select);
     assert!(app.state.schematic.pending_port_sequence.is_none());
-    assert!(app.state.schematic.document.components.is_empty());
+    assert!(app.state.schematic.document().components.is_empty());
 }
 
 /// A library of pinned bytes the project retained: one macromodel, one card a

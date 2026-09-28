@@ -686,8 +686,8 @@ mod tests {
             );
             assert_eq!(restored.workspace.project.name(), "Legacy saved circuit");
             assert_eq!(
-                restored.schematic.document.components,
-                state.schematic.document.components
+                restored.schematic.document().components,
+                state.schematic.document().components
             );
             assert!(
                 !restored
@@ -708,8 +708,8 @@ mod tests {
                         state.workspace.project.id()
                     );
                     assert_eq!(
-                        recovered.schematic.document.components,
-                        state.schematic.document.components
+                        recovered.schematic.document().components,
+                        state.schematic.document().components
                     );
                     assert!(
                         recovered
@@ -770,7 +770,7 @@ mod tests {
                 .schematic_buffers
                 .get(&active_key)
                 .expect("working schematic buffer survives")
-                .document
+                .document()
                 .components
                 .len(),
             1

@@ -151,7 +151,7 @@ fn an_instance_naming_something_the_closure_defines_is_not_unresolved() {
         );
         component.name = name.to_owned();
         component.value = model.to_owned();
-        schematic.document.components.push(component);
+        schematic.document_mut_for_test().components.push(component);
     }
     state.workspace.save_active_schematic(&schematic);
 
@@ -249,7 +249,7 @@ fn render_a_populated_include_page() {
         );
         component.name = name.to_owned();
         component.value = model.to_owned();
-        schematic.document.components.push(component);
+        schematic.document_mut_for_test().components.push(component);
     }
     state.workspace.save_active_schematic(&schematic);
 

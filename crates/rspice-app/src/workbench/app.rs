@@ -1666,9 +1666,9 @@ mod tests {
                 .find(|(id, _)| *id == tree.focus)
                 .map(|(_, node)| (node.label(), node.role()))
         );
-            assert!(fixture.app.state.schematic.document.components.is_empty());
+            assert!(fixture.app.state.schematic.document().components.is_empty());
             fixture.frame(click(target(&output, "Schematic canvas")));
-            assert_eq!(fixture.app.state.schematic.document.components.len(), 1);
+            assert_eq!(fixture.app.state.schematic.document().components.len(), 1);
 
             // A new modal task supersedes a still-pending placement focus request.
             crate::schematic::view::request_schematic_canvas_focus(&fixture.ctx);
@@ -1677,7 +1677,7 @@ mod tests {
             fixture.frame(Vec::new());
             fixture.frame(vec![egui::Event::Text("help".to_owned())]);
             assert_eq!(fixture.app.state.dialogs.command_palette.query, "help");
-            assert_eq!(fixture.app.state.schematic.document.components.len(), 1);
+            assert_eq!(fixture.app.state.schematic.document().components.len(), 1);
         }
     }
 
@@ -2304,12 +2304,12 @@ mod tests {
             expected.workspace.project.id()
         );
         assert_eq!(
-            restored.schematic.document.components,
-            expected.schematic.document.components
+            restored.schematic.document().components,
+            expected.schematic.document().components
         );
         assert_eq!(
-            restored.schematic.document.wires,
-            expected.schematic.document.wires
+            restored.schematic.document().wires,
+            expected.schematic.document().wires
         );
     }
 }

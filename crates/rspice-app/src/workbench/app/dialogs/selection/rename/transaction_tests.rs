@@ -15,7 +15,7 @@ fn fixture() -> (RSpiceApp, Component, ConfigurationSetId, SimulationPlanId) {
     app.state
         .schematic
         .add_component(ComponentType::VoltageSource, Point::origin());
-    let expected = app.state.schematic.document.components[0].clone();
+    let expected = app.state.schematic.document().components[0].clone();
     let source = SavedOutput::new(
         SavedOutputKind::RawVoltageOrCurrent,
         "current",
@@ -34,7 +34,11 @@ fn fixture() -> (RSpiceApp, Component, ConfigurationSetId, SimulationPlanId) {
     let mut probe =
         SchematicProbe::new(100, Point::new(80, 20), "I(V1)", Some("I(V1)".to_owned())).unwrap();
     probe.bind_saved_output(plan, source.id);
-    app.state.schematic.document.probes.push(probe);
+    app.state
+        .schematic
+        .document_mut_for_test()
+        .probes
+        .push(probe);
     let id = app
         .state
         .workspace
@@ -63,7 +67,7 @@ fn assert_reference(
     plan: SimulationPlanId,
     name: &str,
 ) {
-    assert_eq!(app.state.schematic.document.components[0].name, name);
+    assert_eq!(app.state.schematic.document().components[0].name, name);
     assert_eq!(
         app.state
             .workspace
@@ -78,7 +82,7 @@ fn assert_reference(
         format!("I({name})")
     );
     assert_eq!(
-        app.state.schematic.document.probes[0]
+        app.state.schematic.document().probes[0]
             .source_expression
             .as_deref(),
         Some(format!("I({name})").as_str())
@@ -125,7 +129,7 @@ fn rename_undo_redo_carries_live_bindings_and_advances_revisions() {
     assert_eq!(output.id, output_id);
     assert_eq!(output.revision, ObjectRevision::new(4).unwrap());
     assert_eq!(
-        app.state.schematic.document.probes[0].saved_output_id,
+        app.state.schematic.document().probes[0].saved_output_id,
         Some(output_id)
     );
 }
@@ -156,7 +160,9 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
                     .revision = ObjectRevision::new(u64::MAX).unwrap()
             }
             "read only" => app.state.schematic.read_only = true,
-            "stale target" => app.state.schematic.document.components[0].value = "8".to_owned(),
+            "stale target" => {
+                app.state.schematic.document_mut_for_test().components[0].value = "8".to_owned()
+            }
             "duplicate" => {
                 let id = app
                     .state
@@ -164,7 +170,7 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
                     .add_component(ComponentType::VoltageSource, Point::new(100, 0));
                 app.state
                     .schematic
-                    .document
+                    .document_mut_for_test()
                     .components
                     .iter_mut()
                     .find(|component| component.id == id)
@@ -173,7 +179,7 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
             }
             _ => unreachable!(),
         }
-        let before = SchematicSnapshot::capture(&app.state.schematic.document);
+        let before = SchematicSnapshot::capture(&app.state.schematic.document());
         let catalog = app.state.workspace.configuration_sets.clone();
         let payloads = app.state.workspace.simulation_plan_payloads.clone();
         let dirty = app.state.schematic.is_dirty;
@@ -189,7 +195,7 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
             "{refusal}"
         );
         assert!(
-            before.is_equal_document(&app.state.schematic.document),
+            before.is_equal_document(&app.state.schematic.document()),
             "{refusal}"
         );
         assert_eq!(catalog, app.state.workspace.configuration_sets);
@@ -266,7 +272,7 @@ fn history_refusal_keeps_the_transaction_available_for_retry() {
 fn undo_does_not_cross_a_blocked_rename_into_older_local_history() {
     let (mut app, expected, _, plan) = fixture();
     app.state.schematic.with_undo("change value", |schematic| {
-        schematic.document.components[0].value = "2".to_owned();
+        schematic.document_mut_for_test().components[0].value = "2".to_owned();
     });
     let mut expected = expected;
     expected.value = "2".to_owned();
@@ -279,10 +285,10 @@ fn undo_does_not_cross_a_blocked_rename_into_older_local_history() {
         .unwrap()
         .saved_outputs[0]
         .source_expression = "I(V_other)".to_owned();
-    let snapshot = SchematicSnapshot::capture(&app.state.schematic.document);
+    let snapshot = SchematicSnapshot::capture(&app.state.schematic.document());
     let sequence = app.state.project_undo_sequence();
     app.action_edit_undo();
-    assert!(snapshot.is_equal_document(&app.state.schematic.document));
+    assert!(snapshot.is_equal_document(&app.state.schematic.document()));
     assert_eq!(sequence, app.state.project_undo_sequence());
     assert!(
         app.state.schematic.can_undo(),
@@ -297,12 +303,12 @@ fn local_edit_and_project_rename_follow_one_global_history_order() {
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
     app.state.schematic.with_undo("change value", |schematic| {
-        schematic.document.components[0].value = "2".to_owned();
+        schematic.document_mut_for_test().components[0].value = "2".to_owned();
     });
     app.action_edit_undo();
     assert_reference(&app, configuration, plan, "V9");
     assert_eq!(
-        app.state.schematic.document.components[0].value,
+        app.state.schematic.document().components[0].value,
         expected.value
     );
     app.action_edit_undo();
@@ -310,7 +316,7 @@ fn local_edit_and_project_rename_follow_one_global_history_order() {
     app.action_edit_redo();
     assert_reference(&app, configuration, plan, "V9");
     app.action_edit_redo();
-    assert_eq!(app.state.schematic.document.components[0].value, "2");
+    assert_eq!(app.state.schematic.document().components[0].value, "2");
     assert_reference(&app, configuration, plan, "V9");
 }
 
@@ -318,7 +324,7 @@ fn local_edit_and_project_rename_follow_one_global_history_order() {
 fn rename_starts_a_new_history_branch_without_stale_local_redo() {
     let (mut app, expected, configuration, plan) = fixture();
     app.state.schematic.with_undo("change value", |schematic| {
-        schematic.document.components[0].value = "2".to_owned();
+        schematic.document_mut_for_test().components[0].value = "2".to_owned();
     });
     app.action_edit_undo();
     assert!(app.state.schematic.can_redo());
@@ -329,7 +335,7 @@ fn rename_starts_a_new_history_branch_without_stale_local_redo() {
     app.action_edit_redo();
     assert_reference(&app, configuration, plan, "V9");
     assert_eq!(
-        app.state.schematic.document.components[0].value,
+        app.state.schematic.document().components[0].value,
         expected.value
     );
 }
@@ -349,19 +355,19 @@ fn switching_documents_does_not_redirect_rename_history() {
     app.state
         .schematic
         .add_component(ComponentType::Resistor, Point::new(50, 50));
-    let other_snapshot = SchematicSnapshot::capture(&app.state.schematic.document);
+    let other_snapshot = SchematicSnapshot::capture(&app.state.schematic.document());
     app.action_edit_undo();
     assert_eq!(app.state.workspace.active_schematic_reference(), owner);
     assert_reference(&app, configuration, plan, "V1");
     assert!(
         other_snapshot
-            .is_equal_document(&app.state.workspace.schematic_buffers[&other.key()].document)
+            .is_equal_document(&app.state.workspace.schematic_buffers[&other.key()].document())
     );
     app.action_edit_redo();
     assert_reference(&app, configuration, plan, "V9");
     assert!(
         other_snapshot
-            .is_equal_document(&app.state.workspace.schematic_buffers[&other.key()].document)
+            .is_equal_document(&app.state.workspace.schematic_buffers[&other.key()].document())
     );
 }
 
@@ -421,9 +427,9 @@ fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
         let loaded = crate::io::load_project_file(&path).unwrap();
         let schematic = &loaded.workspace.schematic_buffers
             [&loaded.workspace.active_schematic_reference().key()];
-        assert_eq!(schematic.document.components[0].name, name);
+        assert_eq!(schematic.document().components[0].name, name);
         assert_eq!(
-            schematic.document.probes[0].source_expression.as_deref(),
+            schematic.document().probes[0].source_expression.as_deref(),
             Some(format!("I({name})").as_str())
         );
         for plan in [first_plan, second_plan] {
@@ -490,15 +496,16 @@ fn a_same_spelled_instance_in_another_configuration_root_is_unchanged() {
 fn imported_primitive_current_probes_follow_the_emitted_card_identity() {
     let (mut app, mut expected, _, plan) = fixture();
     expected.name = "bias".to_owned();
-    app.state.schematic.document.components[0] = expected.clone();
+    app.state.schematic.document_mut_for_test().components[0] = expected.clone();
     app.state
         .workspace
         .plan_data_mut(plan)
         .unwrap()
         .saved_outputs[0]
         .source_expression = "I(Vbias)".to_owned();
-    app.state.schematic.document.probes[0].source_expression = Some("I(Vbias)".to_owned());
-    app.state.schematic.document.probes[0].reference = "I(Vbias)".to_owned();
+    app.state.schematic.document_mut_for_test().probes[0].source_expression =
+        Some("I(Vbias)".to_owned());
+    app.state.schematic.document_mut_for_test().probes[0].reference = "I(Vbias)".to_owned();
     app.state
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
@@ -506,13 +513,13 @@ fn imported_primitive_current_probes_follow_the_emitted_card_identity() {
         app.state.workspace.plan_data(plan).unwrap().saved_outputs[0].source_expression,
         "I(V9)"
     );
-    assert_eq!(app.state.schematic.document.probes[0].reference, "I(V9)");
+    assert_eq!(app.state.schematic.document().probes[0].reference, "I(V9)");
     app.action_edit_undo();
     assert_eq!(
         app.state.workspace.plan_data(plan).unwrap().saved_outputs[0].source_expression,
         "I(Vbias)"
     );
-    assert_eq!(app.state.schematic.document.components[0].name, "bias");
+    assert_eq!(app.state.schematic.document().components[0].name, "bias");
 }
 
 #[test]
@@ -524,20 +531,20 @@ fn an_unchanged_name_preserves_authored_reference_spelling_and_history() {
         .add_component(ComponentType::Cccs, Point::new(100, 0));
     app.state
         .schematic
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == id)
         .unwrap()
         .params = "vref=v1".to_owned();
-    let before = SchematicSnapshot::capture(&app.state.schematic.document);
+    let before = SchematicSnapshot::capture(&app.state.schematic.document());
     let epoch = app.state.design_execution_epoch;
     assert!(
         !app.state
             .rename_component_transaction(&expected, expected.name.clone())
             .unwrap()
     );
-    assert!(before.is_equal_document(&app.state.schematic.document));
+    assert!(before.is_equal_document(&app.state.schematic.document()));
     assert_eq!(app.state.design_execution_epoch, epoch);
     assert!(app.state.project_undo_sequence().is_none());
     assert!(!app.state.workspace.project_metadata_dirty);

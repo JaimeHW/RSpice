@@ -14,7 +14,7 @@ use std::borrow::Cow;
 
 use egui::{Context, Id};
 
-use crate::state::{BusTap, Junction, SchematicState, Selection, SheetCatalog, Wire};
+use crate::state::{SchematicState, Selection, SheetCatalog};
 use crate::workbench::app_state::AppState;
 
 use super::{SchematicSymbolContext, SelectionWindow};
@@ -85,15 +85,21 @@ fn sheet_scope_id() -> Id {
 }
 
 pub(crate) fn object_is_on_active_sheet(state: &AppState, object_id: u64) -> bool {
-    let key = state.workspace.active_schematic_reference().key();
-    let Some(catalog) = state.workspace.design_management.sheet_catalog(&key) else {
+    object_is_on_active_sheet_in_workspace(&state.workspace, object_id)
+}
+
+fn object_is_on_active_sheet_in_workspace(
+    workspace: &crate::state::ProjectWorkspace,
+    object_id: u64,
+) -> bool {
+    let key = workspace.active_schematic_reference().key();
+    let Some(catalog) = workspace.design_management.sheet_catalog(&key) else {
         return true;
     };
     let Some(active_sheet_id) = catalog.active_sheet_id() else {
         return true;
     };
-    state
-        .workspace
+    workspace
         .design_management
         .sheet_for_object_or_active(&key, object_id)
         == Some(active_sheet_id)
@@ -342,34 +348,10 @@ pub(crate) fn with_active_wire_topology<R>(
     state: &mut AppState,
     operation: impl FnOnce(&mut SchematicState) -> R,
 ) -> R {
-    let hidden_wire_ids = state
-        .schematic
-        .document()
-        .wires
-        .iter()
-        .filter(|wire| !object_is_on_active_sheet(state, wire.id))
-        .map(|wire| wire.id)
-        .collect::<std::collections::HashSet<_>>();
-    let hidden_junction_ids = state
-        .schematic
-        .document()
-        .junctions
-        .iter()
-        .filter(|junction| !object_is_on_active_sheet(state, junction.id))
-        .map(|junction| junction.id)
-        .collect::<std::collections::HashSet<_>>();
-
-    let hidden_wires = take_hidden(&mut state.schematic.document.wires, |wire: &Wire| {
-        hidden_wire_ids.contains(&wire.id)
-    });
-    let hidden_junctions = take_hidden(
-        &mut state.schematic.document.junctions,
-        |junction: &Junction| hidden_junction_ids.contains(&junction.id),
-    );
-    let result = operation(&mut state.schematic);
-    restore_hidden(&mut state.schematic.document.wires, hidden_wires);
-    restore_hidden(&mut state.schematic.document.junctions, hidden_junctions);
-    result
+    state.schematic.with_active_wire_topology(
+        |id| !object_is_on_active_sheet_in_workspace(&state.workspace, id),
+        operation,
+    )
 }
 
 /// Protect hidden conductors around an operation that owns its own undo
@@ -381,88 +363,10 @@ pub(crate) fn with_hidden_wire_topology_preserved<R>(
     state: &mut AppState,
     operation: impl FnOnce(&mut SchematicState) -> R,
 ) -> R {
-    let hidden_wires = state
-        .schematic
-        .document()
-        .wires
-        .iter()
-        .enumerate()
-        .filter(|(_, wire)| !object_is_on_active_sheet(state, wire.id))
-        .map(|(index, wire)| (index, wire.clone()))
-        .collect::<Vec<_>>();
-    let hidden_junctions = state
-        .schematic
-        .document()
-        .junctions
-        .iter()
-        .enumerate()
-        .filter(|(_, junction)| !object_is_on_active_sheet(state, junction.id))
-        .map(|(index, junction)| (index, *junction))
-        .collect::<Vec<_>>();
-    let hidden_bus_taps = state
-        .schematic
-        .document()
-        .bus_taps
-        .iter()
-        .enumerate()
-        .filter(|(_, tap)| !object_is_on_active_sheet(state, tap.id))
-        .map(|(index, tap)| (index, tap.clone()))
-        .collect::<Vec<_>>();
-
-    let result = operation(&mut state.schematic);
-    restore_authored_by_id(
-        &mut state.schematic.document.wires,
-        hidden_wires,
-        |wire: &Wire| wire.id,
-    );
-    restore_authored_by_id(
-        &mut state.schematic.document.junctions,
-        hidden_junctions,
-        |junction: &Junction| junction.id,
-    );
-    restore_authored_by_id(
-        &mut state.schematic.document.bus_taps,
-        hidden_bus_taps,
-        |tap: &BusTap| tap.id,
-    );
-    result
-}
-
-fn take_hidden<T>(items: &mut Vec<T>, hidden: impl Fn(&T) -> bool) -> Vec<(usize, T)> {
-    let mut retained = Vec::with_capacity(items.len());
-    let mut removed = Vec::new();
-    for (index, item) in std::mem::take(items).into_iter().enumerate() {
-        if hidden(&item) {
-            removed.push((index, item));
-        } else {
-            retained.push(item);
-        }
-    }
-    *items = retained;
-    removed
-}
-
-fn restore_hidden<T>(items: &mut Vec<T>, hidden: Vec<(usize, T)>) {
-    for (index, item) in hidden {
-        items.insert(index.min(items.len()), item);
-    }
-}
-
-fn restore_authored_by_id<T>(
-    items: &mut Vec<T>,
-    authored: Vec<(usize, T)>,
-    id: impl Fn(&T) -> u64,
-) {
-    for (original_index, object) in authored {
-        if let Some(current_index) = items
-            .iter()
-            .position(|candidate| id(candidate) == id(&object))
-        {
-            items[current_index] = object;
-        } else {
-            items.insert(original_index.min(items.len()), object);
-        }
-    }
+    state.schematic.with_hidden_wire_topology_preserved(
+        |id| !object_is_on_active_sheet_in_workspace(&state.workspace, id),
+        operation,
+    )
 }
 
 pub(super) fn active_sheet_has_objects(state: &AppState) -> bool {
@@ -528,6 +432,7 @@ mod tests {
     use crate::state::{
         Component, ComponentType, Point, SheetDefinition, SheetPortPolicy, SheetTemplate,
     };
+    use crate::state::{Junction, Wire};
 
     fn two_sheet_state(active_ids: &[u64], hidden_ids: &[u64]) -> AppState {
         let mut state = AppState::default();
@@ -602,7 +507,7 @@ mod tests {
     #[test]
     fn overlapping_hidden_object_is_removed_before_marquee_selection() {
         let mut state = two_sheet_state(&[10], &[20]);
-        state.schematic.document.components = vec![
+        state.schematic.document_mut_for_test().components = vec![
             Component::new(20, ComponentType::Capacitor, Point::new(10, 10)),
             Component::new(10, ComponentType::Resistor, Point::new(10, 10)),
         ];
@@ -621,7 +526,7 @@ mod tests {
     #[test]
     fn select_all_and_sheet_switch_selection_are_membership_aware() {
         let mut state = two_sheet_state(&[10], &[20]);
-        state.schematic.document.components = vec![
+        state.schematic.document_mut_for_test().components = vec![
             Component::new(10, ComponentType::Resistor, Point::origin()),
             Component::new(20, ComponentType::Capacitor, Point::origin()),
         ];
@@ -638,9 +543,9 @@ mod tests {
     #[test]
     fn select_all_honors_the_persisted_schematic_selection_filter() {
         let mut state = two_sheet_state(&[10, 11], &[]);
-        state.schematic.document.components =
+        state.schematic.document_mut_for_test().components =
             vec![Component::new(10, ComponentType::Resistor, Point::origin())];
-        state.schematic.document.wires =
+        state.schematic.document_mut_for_test().wires =
             vec![Wire::segment(11, Point::origin(), Point::new(20, 0))];
         state.ui.schematic_selection_filter.instances = false;
 
@@ -655,14 +560,14 @@ mod tests {
         let mut state = two_sheet_state(&[10, 11], &[20, 21]);
         let origin = Point::new(10, 10);
         let destination = Point::new(15, 15);
-        state.schematic.document.wires = vec![
+        state.schematic.document_mut_for_test().wires = vec![
             Wire::segment(20, origin, Point::new(30, 10)),
             Wire::segment(10, origin, Point::new(10, 30)),
         ];
-        state.schematic.document.junctions =
+        state.schematic.document_mut_for_test().junctions =
             vec![Junction::new(21, origin), Junction::new(11, origin)];
-        let hidden_wire = state.schematic.document.wires[0].clone();
-        let hidden_junction = state.schematic.document.junctions[0];
+        let hidden_wire = state.schematic.document().wires[0].clone();
+        let hidden_junction = state.schematic.document().junctions[0];
 
         assert!(with_active_wire_topology(&mut state, |schematic| {
             schematic.move_all_vertices_at(origin, destination)
@@ -671,7 +576,7 @@ mod tests {
         assert_eq!(
             state
                 .schematic
-                .document
+                .document()
                 .wires
                 .iter()
                 .find(|wire| wire.id == 20),
@@ -680,7 +585,7 @@ mod tests {
         assert_eq!(
             state
                 .schematic
-                .document
+                .document()
                 .junctions
                 .iter()
                 .find(|junction| junction.id == 21),
@@ -689,7 +594,7 @@ mod tests {
         assert!(
             state
                 .schematic
-                .document
+                .document()
                 .wires
                 .iter()
                 .find(|wire| wire.id == 10)
@@ -698,7 +603,7 @@ mod tests {
         assert!(
             state
                 .schematic
-                .document
+                .document()
                 .junctions
                 .iter()
                 .find(|junction| junction.id == 11)
@@ -709,9 +614,10 @@ mod tests {
     #[test]
     fn self_undoing_edit_preserves_hidden_objects_and_complete_undo_snapshot() {
         let mut state = two_sheet_state(&[10], &[21]);
-        state.schematic.document.wires =
+        state.schematic.document_mut_for_test().wires =
             vec![Wire::segment(10, Point::origin(), Point::new(20, 0))];
-        state.schematic.document.junctions = vec![Junction::new(21, Point::new(200, 200))];
+        state.schematic.document_mut_for_test().junctions =
+            vec![Junction::new(21, Point::new(200, 200))];
         state.schematic.selection.select_wire(10);
         state.schematic.init_undo_history();
 
@@ -719,9 +625,9 @@ mod tests {
             &mut state,
             |schematic| schematic.delete_selection()
         ));
-        assert!(state.schematic.document.wires.is_empty());
+        assert!(state.schematic.document().wires.is_empty());
         assert_eq!(
-            state.schematic.document.junctions,
+            state.schematic.document().junctions,
             vec![Junction::new(21, Point::new(200, 200))]
         );
 
@@ -729,13 +635,13 @@ mod tests {
         assert!(
             state
                 .schematic
-                .document
+                .document()
                 .wires
                 .iter()
                 .any(|wire| wire.id == 10)
         );
         assert_eq!(
-            state.schematic.document.junctions,
+            state.schematic.document().junctions,
             vec![Junction::new(21, Point::new(200, 200))]
         );
     }

@@ -533,37 +533,7 @@ fn apply_commit(schematic: &mut SchematicState, commit: PropertyCommit) -> Resul
             expected,
             name,
             position,
-        } => {
-            let Some(current) = schematic
-                .document()
-                .net_labels
-                .iter()
-                .find(|label| label.id == expected.id)
-            else {
-                return Err("The selected net label no longer exists.".to_owned());
-            };
-            if current != &expected {
-                return Err("The selected net label changed before commit.".to_owned());
-            }
-            if expected.name == name && expected.pos == position {
-                return Ok(false);
-            }
-            Ok(
-                schematic.with_undo("edit net label properties", move |schematic| {
-                    if let Some(label) = schematic
-                        .document
-                        .net_labels
-                        .iter_mut()
-                        .find(|label| label.id == expected.id)
-                    {
-                        label.name = name;
-                        label.pos = position;
-                        schematic.is_dirty = true;
-                        schematic.bump_topology_version();
-                    }
-                }),
-            )
-        }
+        } => schematic.edit_net_label_properties(expected, name, position),
         PropertyCommit::NamedNet { expected, name } => {
             crate::workbench::app::apply_named_net_rename(schematic, expected, name)
         }
@@ -572,74 +542,9 @@ fn apply_commit(schematic: &mut SchematicState, commit: PropertyCommit) -> Resul
             kind,
             text,
             review_state,
-        } => {
-            let Some(current) = schematic
-                .document()
-                .design_notes
-                .iter()
-                .find(|note| note.id == expected.id)
-            else {
-                return Err("The selected design note no longer exists.".to_owned());
-            };
-            if current != &expected {
-                return Err("The selected design note changed before commit.".to_owned());
-            }
-            let mut candidate = expected.clone();
-            candidate
-                .update(kind, text)
-                .map_err(|error| error.to_string())?;
-            if let Some(review_state) = review_state {
-                candidate
-                    .set_review_state(review_state)
-                    .map_err(|error| error.to_string())?;
-            }
-            if candidate == expected {
-                return Ok(false);
-            }
-            Ok(
-                schematic.with_undo("edit design note properties", move |schematic| {
-                    if let Some(note) = schematic
-                        .document
-                        .design_notes
-                        .iter_mut()
-                        .find(|note| note.id == expected.id)
-                    {
-                        *note = candidate;
-                        schematic.is_dirty = true;
-                    }
-                }),
-            )
-        }
+        } => schematic.edit_design_note_properties(expected, kind, text, review_state),
         PropertyCommit::DocumentationShape { expected, geometry } => {
-            let Some(current) = schematic
-                .document()
-                .documentation_shapes
-                .iter()
-                .find(|shape| shape.id == expected.id)
-            else {
-                return Err("The selected documentation shape no longer exists.".to_owned());
-            };
-            if current != &expected {
-                return Err("The selected documentation shape changed before commit.".to_owned());
-            }
-            let candidate = DocumentationShape::new(expected.id, geometry)
-                .map_err(|error| error.to_string())?;
-            if candidate == expected {
-                return Ok(false);
-            }
-            Ok(
-                schematic.with_undo("edit documentation shape properties", move |schematic| {
-                    if let Some(shape) = schematic
-                        .document
-                        .documentation_shapes
-                        .iter_mut()
-                        .find(|shape| shape.id == expected.id)
-                    {
-                        *shape = candidate;
-                        schematic.is_dirty = true;
-                    }
-                }),
-            )
+            schematic.edit_documentation_shape_properties(expected, geometry)
         }
     }
 }
@@ -1828,11 +1733,14 @@ mod tests {
     fn named_net_properties_publish_one_guarded_identity_preserving_undo() {
         let mut schematic = SchematicState::default();
         schematic
-            .document
+            .document_mut_for_test()
             .wires
             .push(Wire::new(91, vec![Point::new(0, 0), Point::new(40, 0)]));
         let label = NetLabel::new(92, Point::new(20, 0), "sense");
-        schematic.document.net_labels.push(label.clone());
+        schematic
+            .document_mut_for_test()
+            .net_labels
+            .push(label.clone());
         schematic.init_undo_history();
         let draft = NamedNetObjectPropertiesDraft {
             original: crate::workbench::app::NamedNetTarget {
@@ -1850,11 +1758,11 @@ mod tests {
             panic!("valid named-net properties were rejected")
         };
         assert!(apply_commit(&mut schematic, *commit).unwrap());
-        assert_eq!(schematic.document.net_labels[0].id, 92);
-        assert_eq!(schematic.document.net_labels[0].name, "sense_filtered");
+        assert_eq!(schematic.document().net_labels[0].id, 92);
+        assert_eq!(schematic.document().net_labels[0].name, "sense_filtered");
         assert_eq!(schematic.undo_description(), Some("rename named net"));
         assert!(schematic.undo());
-        assert_eq!(schematic.document.net_labels[0].name, "sense");
+        assert_eq!(schematic.document().net_labels[0].name, "sense");
         assert!(!schematic.undo(), "named-net edit must be one undo step");
     }
 
@@ -1862,7 +1770,11 @@ mod tests {
     fn repaint_resolution_cache_key_tracks_draft_topology_and_baseline_authority() {
         let mut state = crate::workbench::app_state::AppState::default();
         let bus = declared_bus(1, 0, "DATA[7:0]");
-        state.schematic.document.buses.push(bus.clone());
+        state
+            .schematic
+            .document_mut_for_test()
+            .buses
+            .push(bus.clone());
         let mut draft = ObjectPropertiesDraft::Bus(BusObjectPropertiesDraft {
             original: bus.clone(),
             declaration: "DATA[7:0]".to_owned(),
@@ -1881,7 +1793,7 @@ mod tests {
         let topology_changed = draft_resolution_key(&state, &draft);
         assert_ne!(topology_changed, initial);
 
-        state.schematic.document.buses[0].declaration =
+        state.schematic.document_mut_for_test().buses[0].declaration =
             Some(BusDeclaration::parse("OTHER[7:0]").unwrap());
         let baseline_changed = draft_resolution_key(&state, &draft);
         assert!(!baseline_changed.target_matches_baseline);
@@ -1892,12 +1804,12 @@ mod tests {
     fn bus_draft_validation_is_stale_safe_and_rebases_taps() {
         let mut schematic = SchematicState::default();
         let bus = declared_bus(1, 0, "DATA[7:0]");
-        schematic.document.buses.push(bus.clone());
+        schematic.document_mut_for_test().buses.push(bus.clone());
         schematic
-            .document
+            .document_mut_for_test()
             .buses
             .push(declared_bus(3, 5, "DATA[6:4]"));
-        schematic.document.bus_taps.push(
+        schematic.document_mut_for_test().bus_taps.push(
             BusTap::new(
                 2,
                 &bus,
@@ -1921,7 +1833,7 @@ mod tests {
         assert_eq!(impact.taps_changed, 1);
         assert!(apply_commit(&mut schematic, *commit).unwrap());
         assert_eq!(
-            schematic.document.bus_taps[0].slice,
+            schematic.document().bus_taps[0].slice,
             BusSlice::parse("ADDR<4:6>").unwrap()
         );
 
@@ -1945,13 +1857,16 @@ mod tests {
             BusTapOrientation::Down,
         )
         .unwrap();
-        schematic.document.buses.push(bus);
-        schematic.document.wires.push(crate::state::Wire::segment(
-            90,
-            Point::new(0, 5),
-            Point::new(20, 5),
-        ));
-        schematic.document.bus_taps.push(tap.clone());
+        schematic.document_mut_for_test().buses.push(bus);
+        schematic
+            .document_mut_for_test()
+            .wires
+            .push(crate::state::Wire::segment(
+                90,
+                Point::new(0, 5),
+                Point::new(20, 5),
+            ));
+        schematic.document_mut_for_test().bus_taps.push(tap.clone());
         let draft = BusTapObjectPropertiesDraft {
             original: tap.clone(),
             source_bus_id: 1,
@@ -1962,18 +1877,18 @@ mod tests {
             panic!("valid tap edit was rejected")
         };
         assert!(apply_commit(&mut schematic, *commit).unwrap());
-        assert_eq!(schematic.document.bus_taps[0].bus_point, tap.bus_point);
+        assert_eq!(schematic.document().bus_taps[0].bus_point, tap.bus_point);
         assert_eq!(
-            schematic.document.bus_taps[0].connection_point,
+            schematic.document().bus_taps[0].connection_point,
             tap.connection_point
         );
         assert_eq!(
-            schematic.document.bus_taps[0].target_kind(),
+            schematic.document().bus_taps[0].target_kind(),
             BusTargetKind::Wire
         );
 
         let mut invalid = draft;
-        invalid.original = schematic.document.bus_taps[0].clone();
+        invalid.original = schematic.document().bus_taps[0].clone();
         invalid.slice = "DATA[99]".to_owned();
         assert!(matches!(
             validate_tap_draft(&schematic, &invalid),
@@ -1988,7 +1903,10 @@ mod tests {
     fn net_label_properties_validate_and_commit_name_and_anchor_as_one_undo_step() {
         let original = NetLabel::new(17, Point::new(10, 20), "afe.out");
         let mut schematic = SchematicState::default();
-        schematic.document.net_labels.push(original.clone());
+        schematic
+            .document_mut_for_test()
+            .net_labels
+            .push(original.clone());
         schematic.init_undo_history();
         let draft = NetLabelObjectPropertiesDraft {
             original: original.clone(),
@@ -2003,7 +1921,7 @@ mod tests {
         };
         assert!(apply_commit(&mut schematic, *commit).unwrap());
         assert_eq!(
-            schematic.document.net_labels,
+            schematic.document().net_labels,
             vec![NetLabel::new(17, Point::new(-30, 45), "DATA[7]")]
         );
         assert_eq!(
@@ -2011,7 +1929,7 @@ mod tests {
             Some("edit net label properties")
         );
         assert!(schematic.undo());
-        assert_eq!(schematic.document.net_labels, vec![original.clone()]);
+        assert_eq!(schematic.document().net_labels, vec![original.clone()]);
         assert!(!schematic.can_undo());
 
         let mut invalid_name = draft.clone();
@@ -2045,7 +1963,10 @@ mod tests {
         .unwrap();
         let review_id = original.review.as_ref().unwrap().record_id.clone();
         let mut schematic = SchematicState::default();
-        schematic.document.design_notes.push(original.clone());
+        schematic
+            .document_mut_for_test()
+            .design_notes
+            .push(original.clone());
         schematic.init_undo_history();
         let topology = schematic.topology_version();
         let draft = DesignNoteObjectPropertiesDraft {
@@ -2061,11 +1982,11 @@ mod tests {
         };
         assert!(apply_commit(&mut schematic, *commit).unwrap());
         assert_eq!(
-            schematic.document.design_notes[0].text,
+            schematic.document().design_notes[0].text,
             "Review updated bias path"
         );
         assert_eq!(
-            schematic.document.design_notes[0]
+            schematic.document().design_notes[0]
                 .review
                 .as_ref()
                 .unwrap()
@@ -2073,7 +1994,7 @@ mod tests {
             DesignReviewState::Resolved
         );
         assert_eq!(
-            schematic.document.design_notes[0]
+            schematic.document().design_notes[0]
                 .review
                 .as_ref()
                 .unwrap()
@@ -2086,10 +2007,10 @@ mod tests {
             Some("edit design note properties")
         );
         assert!(schematic.undo());
-        assert_eq!(schematic.document.design_notes, vec![original]);
+        assert_eq!(schematic.document().design_notes, vec![original]);
 
         let invalid = DesignNoteObjectPropertiesDraft {
-            original: schematic.document.design_notes[0].clone(),
+            original: schematic.document().design_notes[0].clone(),
             kind: DesignNoteKind::RequirementLink,
             text: "REQ 19".to_owned(),
             review_state: None,
@@ -2116,7 +2037,7 @@ mod tests {
         .unwrap();
         let mut schematic = SchematicState::default();
         schematic
-            .document
+            .document_mut_for_test()
             .documentation_shapes
             .push(original.clone());
         schematic.init_undo_history();
@@ -2136,13 +2057,13 @@ mod tests {
             panic!("valid documentation-shape properties were rejected")
         };
         assert!(apply_commit(&mut schematic, *commit).unwrap());
-        assert_eq!(schematic.document.documentation_shapes[0].id, original.id);
+        assert_eq!(schematic.document().documentation_shapes[0].id, original.id);
         assert_eq!(
-            schematic.document.documentation_shapes[0].layer,
+            schematic.document().documentation_shapes[0].layer,
             original.layer
         );
         assert_eq!(
-            schematic.document.documentation_shapes[0].geometry,
+            schematic.document().documentation_shapes[0].geometry,
             DocumentationShapeGeometry::Arc {
                 start: Point::new(-5, 12),
                 through: Point::new(10, -3),
@@ -2155,12 +2076,12 @@ mod tests {
             Some("edit documentation shape properties")
         );
         assert!(schematic.undo());
-        assert_eq!(schematic.document.documentation_shapes, vec![original]);
+        assert_eq!(schematic.document().documentation_shapes, vec![original]);
         assert_eq!(schematic.topology_version(), topology);
         assert!(!schematic.can_undo());
 
         let invalid = DocumentationShapeObjectPropertiesDraft {
-            original: schematic.document.documentation_shapes[0].clone(),
+            original: schematic.document().documentation_shapes[0].clone(),
             points: vec![
                 ("0".to_owned(), "0".to_owned()),
                 ("10".to_owned(), "10".to_owned()),
@@ -2177,7 +2098,7 @@ mod tests {
     fn apply_commit_propagates_read_only_without_mutation() {
         let mut schematic = SchematicState::default();
         let bus = declared_bus(1, 0, "DATA[7:0]");
-        schematic.document.buses.push(bus.clone());
+        schematic.document_mut_for_test().buses.push(bus.clone());
         schematic.read_only = true;
         let result = apply_commit(
             &mut schematic,
@@ -2187,14 +2108,18 @@ mod tests {
             },
         );
         assert_eq!(result, Err(BusParseError::ReadOnly.to_string()));
-        assert_eq!(schematic.document.buses[0], bus);
+        assert_eq!(schematic.document().buses[0], bus);
     }
 
     #[test]
     fn dialog_session_guard_rejects_replaced_document_and_view() {
         let mut app = RSpiceApp::test_instance();
         let bus = declared_bus(1, 0, "DATA[7:0]");
-        app.state.schematic.document.buses.push(bus.clone());
+        app.state
+            .schematic
+            .document_mut_for_test()
+            .buses
+            .push(bus.clone());
         open_bus_dialog(&mut app, &bus);
         assert!(object_property_session_error(&app.state).is_none());
 
@@ -2213,7 +2138,11 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         let bus = declared_bus(1, 0, "DATA[7:0]");
-        app.state.schematic.document.buses.push(bus.clone());
+        app.state
+            .schematic
+            .document_mut_for_test()
+            .buses
+            .push(bus.clone());
         app.state.schematic.clear_undo_history();
         open_bus_dialog(&mut app, &bus);
         let Some(ObjectPropertiesDraft::Bus(draft)) =
@@ -2233,11 +2162,11 @@ mod tests {
 
         assert!(!app.state.dialogs.object_properties.open);
         assert_eq!(
-            app.state.schematic.document.buses[0].declaration,
+            app.state.schematic.document().buses[0].declaration,
             Some(BusDeclaration::parse("ADDR<0:15>").unwrap())
         );
         assert!(app.state.schematic.undo());
-        assert_eq!(app.state.schematic.document.buses[0], bus);
+        assert_eq!(app.state.schematic.document().buses[0], bus);
     }
 
     #[test]
@@ -2246,7 +2175,11 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         let bus = declared_bus(1, 0, "DATA[7:0]");
-        app.state.schematic.document.buses.push(bus.clone());
+        app.state
+            .schematic
+            .document_mut_for_test()
+            .buses
+            .push(bus.clone());
         open_bus_dialog(&mut app, &bus);
         let Some(ObjectPropertiesDraft::Bus(draft)) =
             app.state.dialogs.object_properties.draft.as_mut()
@@ -2278,7 +2211,11 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         let bus = declared_bus(1, 0, "DATA[7:0]");
-        app.state.schematic.document.buses.push(bus.clone());
+        app.state
+            .schematic
+            .document_mut_for_test()
+            .buses
+            .push(bus.clone());
         open_bus_dialog(&mut app, &bus);
 
         let output = ctx.run_ui(dialog_input(Vec::new()), |ctx| {

@@ -1264,7 +1264,7 @@ mod tests {
             ),
             governed: None,
         };
-        state.schematic.document.grid_size += 1;
+        state.schematic.document_mut_for_test().grid_size += 1;
         assert!(validate_drawing_sheet_authority(&state, &authority).is_err());
     }
 

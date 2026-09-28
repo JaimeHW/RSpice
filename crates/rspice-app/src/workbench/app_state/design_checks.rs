@@ -506,7 +506,7 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .wires
             .push(crate::state::Wire::segment(
                 FIRST_WIRE,
@@ -515,7 +515,7 @@ mod tests {
             ));
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .wires
             .push(crate::state::Wire::segment(
                 SECOND_WIRE,

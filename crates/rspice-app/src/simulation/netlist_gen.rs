@@ -820,7 +820,7 @@ mod tests {
         for (idx, name) in ["IN", "OUT"].iter().enumerate() {
             let id = master.add_component(ComponentType::Port, Point::new(idx as i32 * 40, 0));
             master
-                .document
+                .document_mut_for_test()
                 .components
                 .iter_mut()
                 .find(|component| component.id == id)
@@ -899,21 +899,26 @@ mod tests {
         let (libraries, buffers) = library_with_authored_amp_symbol();
         let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
         let mut schematic = SchematicState::default();
-        schematic.document.components.push(authored_amp_instance());
         schematic
-            .document
-            .wires
-            .push(Wire::segment(2, Point::new(60, 40), Point::new(40, 40)));
+            .document_mut_for_test()
+            .components
+            .push(authored_amp_instance());
+        schematic.document_mut_for_test().wires.push(Wire::segment(
+            2,
+            Point::new(60, 40),
+            Point::new(40, 40),
+        ));
+        schematic.document_mut_for_test().wires.push(Wire::segment(
+            3,
+            Point::new(170, 70),
+            Point::new(190, 70),
+        ));
         schematic
-            .document
-            .wires
-            .push(Wire::segment(3, Point::new(170, 70), Point::new(190, 70)));
-        schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(4, Point::new(40, 40), "vin"));
         schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(5, Point::new(190, 70), "vout"));
 
@@ -930,16 +935,18 @@ mod tests {
     #[test]
     fn any_angle_segment_interior_attachments_share_the_generated_net() {
         let mut state = SchematicState::default();
+        state.document_mut_for_test().wires.push(Wire::segment(
+            1,
+            Point::new(0, 0),
+            Point::new(40, 40),
+        ));
+        state.document_mut_for_test().wires.push(Wire::segment(
+            2,
+            Point::new(20, 20),
+            Point::new(20, 60),
+        ));
         state
-            .document
-            .wires
-            .push(Wire::segment(1, Point::new(0, 0), Point::new(40, 40)));
-        state
-            .document
-            .wires
-            .push(Wire::segment(2, Point::new(20, 20), Point::new(20, 60)));
-        state
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(3, Point::new(30, 30), "diag"));
 
@@ -969,14 +976,16 @@ mod tests {
     fn diagonal_crossings_require_an_explicit_junction() {
         let crossing = Point::new(20, 20);
         let mut state = SchematicState::default();
-        state
-            .document
-            .wires
-            .push(Wire::segment(1, Point::new(0, 0), Point::new(40, 40)));
-        state
-            .document
-            .wires
-            .push(Wire::segment(2, Point::new(0, 40), Point::new(40, 0)));
+        state.document_mut_for_test().wires.push(Wire::segment(
+            1,
+            Point::new(0, 0),
+            Point::new(40, 40),
+        ));
+        state.document_mut_for_test().wires.push(Wire::segment(
+            2,
+            Point::new(0, 40),
+            Point::new(40, 0),
+        ));
 
         let mut disconnected = NetlistGenerator::new(&state);
         disconnected.generate();
@@ -1151,19 +1160,19 @@ mod tests {
     fn same_name_labels_merge_nets() {
         let mut state = SchematicState::default();
         state
-            .document
+            .document_mut_for_test()
             .wires
             .push(Wire::new(1, vec![Point::new(0, 0), Point::new(40, 0)]));
         state
-            .document
+            .document_mut_for_test()
             .wires
             .push(Wire::new(2, vec![Point::new(0, 100), Point::new(40, 100)]));
         state
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(1, Point::new(20, 0), "bus"));
         state
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(2, Point::new(20, 100), "bus"));
 
@@ -1211,9 +1220,9 @@ mod tests {
             },
         )
         .unwrap();
-        state.document.buses.push(bus);
-        state.document.bus_taps.push(tap);
-        state.document.wires.push(Wire::segment(
+        state.document_mut_for_test().buses.push(bus);
+        state.document_mut_for_test().bus_taps.push(tap);
+        state.document_mut_for_test().wires.push(Wire::segment(
             wire_id,
             Point::new(0, wire_y),
             Point::new(40, wire_y),
@@ -1224,10 +1233,11 @@ mod tests {
     fn scalar_bus_tap_applies_exact_member_name_and_accepts_matching_label() {
         let mut state = SchematicState::default();
         add_scalar_bus_tap(&mut state, 10, 11, -20, 12, 0, "DATA[3]");
-        state
-            .document
-            .net_labels
-            .push(NetLabel::new(13, Point::new(30, 0), "DATA[3]"));
+        state.document_mut_for_test().net_labels.push(NetLabel::new(
+            13,
+            Point::new(30, 0),
+            "DATA[3]",
+        ));
 
         let mut generator = NetlistGenerator::new(&state);
         generator.generate();
@@ -1248,7 +1258,7 @@ mod tests {
         let mut state = SchematicState::default();
         add_scalar_bus_tap(&mut state, 20, 21, -20, 22, 0, "DATA[3]");
         state
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(23, Point::new(30, 0), "FOO"));
 
@@ -1317,8 +1327,8 @@ mod tests {
         )
         .unwrap();
         let mut state = SchematicState::default();
-        state.document.buses = vec![source, destination];
-        state.document.bus_taps.push(tap);
+        state.document_mut_for_test().buses = vec![source, destination];
+        state.document_mut_for_test().bus_taps.push(tap);
 
         let result = generate_netlist(&state);
 
@@ -1332,11 +1342,11 @@ mod tests {
     fn gnd_label_maps_to_node_zero() {
         let mut state = SchematicState::default();
         state
-            .document
+            .document_mut_for_test()
             .wires
             .push(Wire::new(1, vec![Point::new(0, 0), Point::new(40, 0)]));
         state
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(1, Point::new(20, 0), "GND"));
 
@@ -1350,7 +1360,7 @@ mod tests {
 
     fn netlist_for(components: Vec<Component>) -> String {
         let mut state = SchematicState::default();
-        state.document.components = components;
+        state.document_mut_for_test().components = components;
         generate_netlist(&state).netlist
     }
 
@@ -2083,7 +2093,7 @@ mod tests {
     #[test]
     fn a_pwl_file_source_without_a_file_blocks_the_run() {
         let mut state = SchematicState::default();
-        state.document.components = vec![pwl_file_source("td=1u")];
+        state.document_mut_for_test().components = vec![pwl_file_source("td=1u")];
         let result = generate_netlist(&state);
         assert!(
             result
@@ -2101,7 +2111,8 @@ mod tests {
     fn a_missing_pwl_data_file_blocks_the_run() {
         let absent = std::env::temp_dir().join("rspice-no-such-waveform-9c1f.csv");
         let mut state = SchematicState::default();
-        state.document.components = vec![pwl_file_source(&format!("file={}", absent.display()))];
+        state.document_mut_for_test().components =
+            vec![pwl_file_source(&format!("file={}", absent.display()))];
         let result = generate_netlist(&state);
         assert!(
             result
@@ -2199,11 +2210,11 @@ mod tests {
             let id = state.add_component(kind, Point::new(index as i32 * 100, 0));
             state.selection.select_component(id);
         }
-        state.document.components[0].name = "coil".to_owned();
-        state.document.components[2].params = "inductors=\"Lcoil L2\"".to_owned();
-        state.document.components[2].value = "0.9".to_owned();
-        state.document.components[3].name = "bias".to_owned();
-        state.document.components[4].params = "vref=Vbias".to_owned();
+        state.document_mut_for_test().components[0].name = "coil".to_owned();
+        state.document_mut_for_test().components[2].params = "inductors=\"Lcoil L2\"".to_owned();
+        state.document_mut_for_test().components[2].value = "0.9".to_owned();
+        state.document_mut_for_test().components[3].name = "bias".to_owned();
+        state.document_mut_for_test().components[4].params = "vref=Vbias".to_owned();
         state.copy_selection();
         assert!(state.paste_at_checked(Point::new(0, 1000)).unwrap());
         let netlist = generate_netlist(&state).netlist;
@@ -2226,13 +2237,14 @@ mod tests {
     fn floating_label_warns() {
         let mut state = SchematicState::default();
         state
-            .document
+            .document_mut_for_test()
             .wires
             .push(Wire::new(1, vec![Point::new(0, 0), Point::new(40, 0)]));
-        state
-            .document
-            .net_labels
-            .push(NetLabel::new(1, Point::new(500, 500), "lost"));
+        state.document_mut_for_test().net_labels.push(NetLabel::new(
+            1,
+            Point::new(500, 500),
+            "lost",
+        ));
 
         let mut generator = NetlistGenerator::new(&state);
         generator.generate();
@@ -2250,12 +2262,13 @@ mod tests {
     fn technology_global_catalog_changes_the_executable_node_authority() {
         let libraries = LibraryManager::new();
         let mut schematic = SchematicState::default();
+        schematic.document_mut_for_test().wires.push(Wire::segment(
+            1,
+            Point::new(0, 0),
+            Point::new(40, 0),
+        ));
         schematic
-            .document
-            .wires
-            .push(Wire::segment(1, Point::new(0, 0), Point::new(40, 0)));
-        schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(2, Point::new(0, 0), "VCC"));
         let mut buffers = HashMap::new();
@@ -2290,20 +2303,22 @@ mod tests {
     fn dialect_alias_catalog_merges_explicit_global_declarations() {
         let libraries = LibraryManager::new();
         let mut schematic = SchematicState::default();
+        schematic.document_mut_for_test().wires.push(Wire::segment(
+            1,
+            Point::new(0, 0),
+            Point::new(40, 0),
+        ));
+        schematic.document_mut_for_test().wires.push(Wire::segment(
+            2,
+            Point::new(0, 40),
+            Point::new(40, 40),
+        ));
         schematic
-            .document
-            .wires
-            .push(Wire::segment(1, Point::new(0, 0), Point::new(40, 0)));
-        schematic
-            .document
-            .wires
-            .push(Wire::segment(2, Point::new(0, 40), Point::new(40, 40)));
-        schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(3, Point::new(0, 0), "VCC!"));
         schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(4, Point::new(0, 40), "VDD!"));
         let mut buffers = HashMap::new();

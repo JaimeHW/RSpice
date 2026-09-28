@@ -20,7 +20,7 @@ fn rename(fixture: &mut Fixture, name: &str) -> Result<bool, String> {
     let expected = fixture
         .state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == fixture.sources[0])
@@ -45,7 +45,7 @@ fn assert_projection(fixture: &Fixture, name: &str) {
     let projected = projection.root_schematic().unwrap();
     assert_eq!(
         projected
-            .document
+            .document()
             .components
             .iter()
             .find(|c| c.id == fixture.sources[0])
@@ -55,7 +55,7 @@ fn assert_projection(fixture: &Fixture, name: &str) {
     );
     assert_eq!(
         projected
-            .document
+            .document()
             .components
             .iter()
             .find(|c| c.id == fixture.dependents[0])
@@ -176,7 +176,7 @@ fn manual_annotation_refusal_is_atomic_at_commit_and_history_boundaries() {
                 }
                 _ => unreachable!(),
             }
-            let before = SchematicSnapshot::capture(&state.schematic.document);
+            let before = SchematicSnapshot::capture(&state.schematic.document());
             let catalog = state.workspace.design_management.clone();
             let configurations = state.workspace.configuration_sets.clone();
             let outputs = state
@@ -198,7 +198,7 @@ fn manual_annotation_refusal_is_atomic_at_commit_and_history_boundaries() {
             }
             let state = &fixture.state;
             assert!(
-                before.is_equal_document(&state.schematic.document),
+                before.is_equal_document(&state.schematic.document()),
                 "{failure}"
             );
             assert_eq!(state.workspace.design_management, catalog);
@@ -248,7 +248,7 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
         for schematic in [source, projection.root_schematic().unwrap()] {
             assert_eq!(
                 schematic
-                    .document
+                    .document()
                     .components
                     .iter()
                     .find(|c| c.id == fixture.sources[0])
@@ -258,7 +258,7 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
             );
             assert_eq!(
                 schematic
-                    .document
+                    .document()
                     .components
                     .iter()
                     .find(|c| c.id == fixture.dependents[0])
@@ -267,7 +267,7 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
                 format!("vref={name}")
             );
             assert_eq!(
-                schematic.document.probes[0].source_expression.as_deref(),
+                schematic.document().probes[0].source_expression.as_deref(),
                 Some(format!("I({name})").as_str())
             );
         }
@@ -278,7 +278,7 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
             .saved_outputs;
         assert_eq!(outputs[0].source_expression, format!("I({name})"));
         assert_eq!(
-            source.document.probes[0].saved_output_id,
+            source.document().probes[0].saved_output_id,
             Some(outputs[0].id)
         );
         assert_eq!(

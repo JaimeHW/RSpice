@@ -95,9 +95,9 @@ mod tests {
         let authority = SchematicEditAuthority::capture(&state);
         assert!(authority.validate(&state, "Move selection").is_ok());
 
-        state.schematic.document.components[0].value = "2k".to_owned();
+        state.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
         assert!(authority.validate(&state, "Move selection").is_err());
-        state.schematic.document.components[0].value = "1k".to_owned();
+        state.schematic.document_mut_for_test().components[0].value = "1k".to_owned();
         state.schematic.selection.clear();
         assert!(authority.validate(&state, "Move selection").is_err());
     }

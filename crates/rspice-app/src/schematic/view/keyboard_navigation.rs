@@ -375,16 +375,20 @@ mod tests {
         };
 
         let mut state = AppState::default();
-        state.schematic.document.components.push(Component::new(
-            11,
-            ComponentType::Resistor,
-            Point::new(0, 0),
-        ));
-        state.schematic.document.wires.push(Wire::segment(
-            12,
-            Point::new(18, 0),
-            Point::new(22, 0),
-        ));
+        state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(Component::new(
+                11,
+                ComponentType::Resistor,
+                Point::new(0, 0),
+            ));
+        state
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(Wire::segment(12, Point::new(18, 0), Point::new(22, 0)));
         let bus = Bus::segment(
             13,
             Point::new(38, 0),
@@ -401,37 +405,41 @@ mod tests {
             BusTapOrientation::Down,
         )
         .unwrap();
-        state.schematic.document.buses.push(bus);
-        state.schematic.document.bus_taps.push(tap);
+        state.schematic.document_mut_for_test().buses.push(bus);
+        state.schematic.document_mut_for_test().bus_taps.push(tap);
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .junctions
             .push(Junction::new(15, Point::new(60, 0)));
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(16, Point::new(80, 0), "OUT"));
-        state.schematic.document.probes.push(
+        state.schematic.document_mut_for_test().probes.push(
             SchematicProbe::new(17, Point::new(100, 0), "V(OUT)", Some("V(OUT)".to_owned()))
                 .unwrap(),
         );
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .design_notes
             .push(DesignNote::new(18, Point::new(120, 0), DesignNoteKind::PlainText, "N").unwrap());
-        state.schematic.document.documentation_shapes.push(
-            DocumentationShape::new(
-                19,
-                DocumentationShapeGeometry::Rectangle {
-                    first: Point::new(138, -2),
-                    opposite: Point::new(142, 2),
-                },
-            )
-            .unwrap(),
-        );
+        state
+            .schematic
+            .document_mut_for_test()
+            .documentation_shapes
+            .push(
+                DocumentationShape::new(
+                    19,
+                    DocumentationShapeGeometry::Rectangle {
+                        first: Point::new(138, -2),
+                        opposite: Point::new(142, 2),
+                    },
+                )
+                .unwrap(),
+            );
         state
     }
 
@@ -579,12 +587,12 @@ mod tests {
     fn probe_focus_is_visible_state_and_traversal_continues_into_annotations() {
         let ctx = Context::default();
         let mut state = AppState::default();
-        state.schematic.document.components.push(Component::new(
-            1,
-            ComponentType::Resistor,
-            Point::new(0, 0),
-        ));
-        state.schematic.document.probes.push(
+        state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(Component::new(1, ComponentType::Resistor, Point::new(0, 0)));
+        state.schematic.document_mut_for_test().probes.push(
             crate::state::SchematicProbe::new(
                 2,
                 Point::new(30, 0),
@@ -593,7 +601,7 @@ mod tests {
             )
             .unwrap(),
         );
-        state.schematic.document.design_notes.push(
+        state.schematic.document_mut_for_test().design_notes.push(
             crate::state::DesignNote::new(
                 3,
                 Point::new(60, 0),
@@ -635,7 +643,7 @@ mod tests {
         ] {
             let ctx = Context::default();
             let mut state = AppState::default();
-            state.schematic.document.components = components();
+            state.schematic.document_mut_for_test().components = components();
             state.schematic.selection.select_only_component(22);
 
             let (handled, _) = run_navigation_frame(&ctx, key, Modifiers::NONE, &mut state, true);
@@ -695,7 +703,7 @@ mod tests {
     fn focused_canvas_consumes_arrow_and_changes_only_selection() {
         let ctx = Context::default();
         let mut state = AppState::default();
-        state.schematic.document.components = components();
+        state.schematic.document_mut_for_test().components = components();
         state.schematic.selection.select_only_component(11);
         state.schematic.net_highlight.active = true;
         state.schematic.net_highlight.highlighted_wires.insert(777);
@@ -720,7 +728,7 @@ mod tests {
     fn unfocused_canvas_and_modified_arrow_do_not_navigate_or_consume() {
         let ctx = Context::default();
         let mut state = AppState::default();
-        state.schematic.document.components = components();
+        state.schematic.document_mut_for_test().components = components();
         state.schematic.selection.select_only_component(11);
 
         let (handled, key_still_available) =
@@ -753,7 +761,7 @@ mod tests {
         assert!(!handled);
         assert!(key_still_available);
 
-        state.schematic.document.components = components();
+        state.schematic.document_mut_for_test().components = components();
         state.schematic.selection.select_only_component(11);
         state
             .ui
@@ -770,7 +778,7 @@ mod tests {
     fn modal_and_context_popup_owners_block_navigation() {
         let ctx = Context::default();
         let mut state = AppState::default();
-        state.schematic.document.components = components();
+        state.schematic.document_mut_for_test().components = components();
         state.schematic.selection.select_only_component(11);
         state.dialogs.about = true;
 
@@ -794,7 +802,7 @@ mod tests {
     fn focused_select_canvas_backspace_deletes_immediately_in_one_undo_entry() {
         let ctx = Context::default();
         let mut state = AppState::default();
-        state.schematic.document.components = components();
+        state.schematic.document_mut_for_test().components = components();
         state.sync_active_schematic_to_workspace();
         state.schematic.selection.select_only_component(22);
         state.schematic.init_undo_history();
@@ -804,11 +812,11 @@ mod tests {
 
         assert!(handled);
         assert!(!key_still_available);
-        assert_eq!(state.schematic.document.components.len(), 2);
+        assert_eq!(state.schematic.document().components.len(), 2);
         assert!(!state.dialogs.application_modal_open());
         assert_eq!(state.schematic.undo_description(), Some("delete selection"));
         assert!(state.schematic.undo());
-        assert_eq!(state.schematic.document.components.len(), 3);
+        assert_eq!(state.schematic.document().components.len(), 3);
         assert!(!state.schematic.can_undo());
     }
 
@@ -816,7 +824,7 @@ mod tests {
     fn focused_select_canvas_consumes_backspace_but_never_edits_read_only_content() {
         let ctx = Context::default();
         let mut state = AppState::default();
-        state.schematic.document.components = components();
+        state.schematic.document_mut_for_test().components = components();
         state.schematic.selection.select_only_component(22);
         state.schematic.read_only = true;
 
@@ -825,7 +833,7 @@ mod tests {
 
         assert!(handled);
         assert!(!key_still_available);
-        assert_eq!(state.schematic.document.components.len(), 3);
+        assert_eq!(state.schematic.document().components.len(), 3);
         assert!(!state.schematic.can_undo());
     }
 }

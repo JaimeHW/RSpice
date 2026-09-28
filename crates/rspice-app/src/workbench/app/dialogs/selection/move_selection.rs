@@ -299,7 +299,7 @@ mod tests {
         assert!(
             authority
                 .snapshot
-                .is_equal(&SchematicSnapshot::capture(&state.schematic.document))
+                .is_equal(&SchematicSnapshot::capture(&state.schematic.document()))
         );
     }
 
@@ -311,7 +311,7 @@ mod tests {
             .add_component(ComponentType::Resistor, Point::origin());
         state.schematic.selection.select_component(id);
         open_move_selection_dialog(&mut state);
-        state.schematic.document.components[0].value = "2k".to_owned();
+        state.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
         assert!(matches!(
             validate_draft(&state),
             DraftValidation::Invalid(_)
@@ -326,10 +326,10 @@ mod tests {
             .add_component(ComponentType::Resistor, Point::origin());
         state.schematic.selection.select_component(id);
         open_move_selection_dialog(&mut state);
-        let baseline = SchematicSnapshot::capture(&state.schematic.document);
+        let baseline = SchematicSnapshot::capture(&state.schematic.document());
         state.dialogs.move_selection.arm();
         state.schematic.arm_tool(Tool::MoveSelection);
-        assert!(baseline.is_equal(&SchematicSnapshot::capture(&state.schematic.document)));
+        assert!(baseline.is_equal(&SchematicSnapshot::capture(&state.schematic.document())));
         assert!(state.schematic.selection.has_component(id));
         assert!(armed_move_selection_authority(&state).is_ok());
     }

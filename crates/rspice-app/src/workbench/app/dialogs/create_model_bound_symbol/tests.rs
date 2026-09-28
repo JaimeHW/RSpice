@@ -212,7 +212,7 @@ fn generated_fixture_is_real_editable_topology_in_the_atomic_publication() {
         .expect("published editable fixture");
     assert_eq!(
         fixture
-            .document
+            .document()
             .components
             .iter()
             .filter(|component| component.kind == ComponentType::CellInstance)
@@ -221,7 +221,7 @@ fn generated_fixture_is_real_editable_topology_in_the_atomic_publication() {
     );
     assert_eq!(
         fixture
-            .document
+            .document()
             .components
             .iter()
             .filter(|component| component.kind == ComponentType::Port)
@@ -230,7 +230,7 @@ fn generated_fixture_is_real_editable_topology_in_the_atomic_publication() {
     );
     assert_eq!(
         fixture
-            .document
+            .document()
             .components
             .iter()
             .filter(|component| component.kind == ComponentType::Ground)
@@ -238,10 +238,10 @@ fn generated_fixture_is_real_editable_topology_in_the_atomic_publication() {
         1,
         "ground is generated only for the explicitly electrical-ground pin"
     );
-    assert_eq!(fixture.document.wires.len(), 5);
+    assert_eq!(fixture.document().wires.len(), 5);
     assert!(fixture.is_dirty);
     let dut = fixture
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.kind == ComponentType::CellInstance)
@@ -275,7 +275,7 @@ fn existing_schematic_source_is_identity_locked_and_preserves_the_master() {
         .add_component(ComponentType::Port, Point::origin());
     let port = state
         .schematic
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == port_id)

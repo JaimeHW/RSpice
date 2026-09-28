@@ -18,6 +18,7 @@
 
 use rspice_design::schematic::array;
 use rspice_design::schematic::array_edit;
+pub(crate) mod bulk_edit;
 mod bus;
 mod canvas_cache;
 use rspice_design::schematic::clipboard;
@@ -30,6 +31,7 @@ use rspice_design::schematic::component_references as reference_edit;
 use rspice_design::schematic::component_type;
 use rspice_design::schematic::deletion;
 mod design_note;
+mod design_projection;
 use rspice_design::schematic::device_catalog;
 use rspice_design::schematic::device_descriptor;
 use rspice_design::schematic::document;
@@ -39,6 +41,7 @@ use rspice_design::schematic::generated_veriloga_catalog;
 mod ground_names;
 mod hierarchy;
 use rspice_design::schematic::hierarchy as hierarchy_edit;
+pub(crate) mod named_net;
 mod net_highlight;
 use rspice_design::schematic::net_label;
 mod placement_authority;

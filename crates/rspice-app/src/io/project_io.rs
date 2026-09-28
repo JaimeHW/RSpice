@@ -28,14 +28,14 @@ use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
     AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType, CanonicalCellViewOwnerKey,
     CellViewRef, ConfigurationSet, DcOpResult, ExecutionTarget,
-    GENERATED_VERILOGA_BINDING_SCHEMA_REVISION, GeneratedVerilogABindingMigration, InstancePath,
-    InstancePathPattern, LibraryManager, NoiseContributorRow, NoiseSummary, OperatingPointValue,
-    PatternSegment, PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
+    GENERATED_VERILOGA_BINDING_SCHEMA_REVISION, InstancePath, InstancePathPattern, LibraryManager,
+    NoiseContributorRow, NoiseSummary, OperatingPointValue, PatternSegment,
+    PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
     PreparedSourceCheckReceipt, PreparedSpecification, PreparedSpecificationPolicy,
     ProjectWorkspace, RunRetention, SavedOutputMaterializationStatus, SavedOutputReceipt,
     SimulationRun, SimulationRunLifecycle, SimulationRunProvenance, SimulationState, SpecEntry,
     SpecificationDefinition, SpecificationPolicy, SpecificationVerdict, ViewType, WaveformData,
-    canonical_cell_view_owner_key, migrate_generated_veriloga_binding,
+    canonical_cell_view_owner_key,
 };
 use rspice_simulation_contract::analysis_kind::AnalysisKind;
 
@@ -549,14 +549,7 @@ impl ProjectFile {
                 .schematic_buffers
                 .get_mut(&owners[owner])
                 .expect("the buffer the cycle graph was built from remains present");
-            schematic.document.components.retain(|component| {
-                component.library_cell.as_ref().is_none_or(|binding| {
-                    CellViewRef::new(&binding.library, &binding.cell, &binding.view).key()
-                        != master_key
-                })
-            });
-            schematic.recalculate_runtime_state();
-            schematic.bump_topology_version();
+            schematic.remove_cyclic_master_placements(&master_key);
             repairs.push(format!(
                 "'{}' instantiated '{master_key}', which reaches back to it. That placement was removed so the hierarchy can be walked.",
                 owners[owner]
@@ -1971,23 +1964,9 @@ pub(crate) fn load_project_text(
     let mut migrated_generated_bindings = 0usize;
     let mut unresolved_generated_bindings = 0usize;
     for schematic in project.workspace.schematic_buffers.values_mut() {
-        for component in &mut schematic.document.components {
-            let Some(binding) = component.library_cell.as_mut() else {
-                continue;
-            };
-            if binding.generated_veriloga.is_none() {
-                continue;
-            }
-            match migrate_generated_veriloga_binding(binding) {
-                GeneratedVerilogABindingMigration::Current => {}
-                GeneratedVerilogABindingMigration::Migrated => {
-                    migrated_generated_bindings += 1;
-                }
-                GeneratedVerilogABindingMigration::Unresolved(_reason) => {
-                    unresolved_generated_bindings += 1;
-                }
-            }
-        }
+        let (migrated, unresolved) = schematic.migrate_generated_bindings();
+        migrated_generated_bindings += migrated;
+        unresolved_generated_bindings += unresolved;
     }
     if migrated_generated_bindings > 0 {
         load_repairs.push(format!(

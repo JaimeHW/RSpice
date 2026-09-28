@@ -344,7 +344,7 @@ mod tests {
     fn open_freezes_authority_and_exact_default_policy() {
         let mut state = AppState::default();
         let wire = Wire::new(7, vec![Point::new(0, 0), Point::new(20, 0)]);
-        state.schematic.document.wires.push(wire);
+        state.schematic.document_mut_for_test().wires.push(wire);
         state.schematic.selection.select_wire(7);
 
         open_stretch_selection_dialog(&mut state);
@@ -367,7 +367,7 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .wires
             .push(Wire::new(7, vec![Point::new(0, 0), Point::new(20, 0)]));
         let target = StretchTarget::WireSegment {

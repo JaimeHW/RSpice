@@ -1103,28 +1103,29 @@ mod tests {
     #[test]
     fn structural_delta_detects_equal_count_object_edits() {
         let mut baseline = SchematicState::default();
-        baseline.document.components.push(
+        baseline.document_mut_for_test().components.push(
             Component::new(1, ComponentType::Resistor, Point::new(10, 10))
                 .with_name_value("R1", "1k"),
         );
+        baseline.document_mut_for_test().wires.push(Wire::segment(
+            2,
+            Point::new(0, 0),
+            Point::new(10, 0),
+        ));
         baseline
-            .document
-            .wires
-            .push(Wire::segment(2, Point::new(0, 0), Point::new(10, 0)));
-        baseline
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(3, Point::new(10, 0), "OUT"));
         baseline
-            .document
+            .document_mut_for_test()
             .junctions
             .push(Junction::new(4, Point::new(10, 0)));
 
         let mut recovered = baseline.clone();
-        recovered.document.components[0].value = "2k".to_owned();
-        recovered.document.wires[0].points[1] = Point::new(20, 0);
-        recovered.document.net_labels[0].name = "SENSE".to_owned();
-        recovered.document.junctions[0].pos = Point::new(20, 0);
+        recovered.document_mut_for_test().components[0].value = "2k".to_owned();
+        recovered.document_mut_for_test().wires[0].points[1] = Point::new(20, 0);
+        recovered.document_mut_for_test().net_labels[0].name = "SENSE".to_owned();
+        recovered.document_mut_for_test().junctions[0].pos = Point::new(20, 0);
 
         assert_eq!(structural_delta(&baseline, &recovered), 4);
     }
@@ -1133,7 +1134,7 @@ mod tests {
     #[test]
     fn structural_delta_counts_documentation_shape_add_remove_and_edit() {
         let mut baseline = SchematicState::default();
-        baseline.document.documentation_shapes = vec![
+        baseline.document_mut_for_test().documentation_shapes = vec![
             DocumentationShape::new(
                 81,
                 DocumentationShapeGeometry::Rectangle {
@@ -1153,9 +1154,12 @@ mod tests {
         ];
 
         let mut recovered = baseline.clone();
-        recovered.document.documentation_shapes[0].translate(Point::new(2, 1));
-        recovered.document.documentation_shapes.remove(1);
-        recovered.document.documentation_shapes.push(
+        recovered.document_mut_for_test().documentation_shapes[0].translate(Point::new(2, 1));
+        recovered
+            .document_mut_for_test()
+            .documentation_shapes
+            .remove(1);
+        recovered.document_mut_for_test().documentation_shapes.push(
             DocumentationShape::new(
                 83,
                 DocumentationShapeGeometry::Polygon {

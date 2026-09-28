@@ -1702,21 +1702,7 @@ fn library_cell_keys(state: &AppState) -> BTreeSet<(String, String)> {
 /// Put one recorded identity back on the placement it was taken from, while
 /// that placement is still the same object naming the same master.
 fn restore_placement_binding(schematic: &mut SchematicState, placement: &StrandedPlacement) {
-    let Some(binding) = schematic
-        .document
-        .components
-        .iter_mut()
-        .find(|component| component.id == placement.object)
-        .and_then(|component| component.library_cell.as_mut())
-    else {
-        return;
-    };
-    if binding.library == placement.binding.library
-        && binding.cell == placement.binding.cell
-        && binding.view == placement.binding.view
-    {
-        *binding = placement.binding.clone();
-    }
+    schematic.restore_placement_binding(placement.object, &placement.binding);
 }
 
 /// Every placement of one of `masters` in the workspace, with the identity it

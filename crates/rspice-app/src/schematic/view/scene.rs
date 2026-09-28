@@ -1485,10 +1485,11 @@ mod tests {
     /// One conductor on a sheet, so an ancestor has something to contribute.
     fn sheet_with_one_wire() -> SchematicState {
         let mut sheet = SchematicState::default();
-        sheet
-            .document
-            .wires
-            .push(Wire::segment(1, Point::new(20, 40), Point::new(180, 40)));
+        sheet.document_mut_for_test().wires.push(Wire::segment(
+            1,
+            Point::new(20, 40),
+            Point::new(180, 40),
+        ));
         sheet
     }
 
@@ -1515,22 +1516,22 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .wires
             .push(Wire::segment(11, Point::new(0, 0), Point::new(40, 0)));
-        state.schematic.document.wires.push(Wire::segment(
-            12,
-            Point::new(0, 100),
-            Point::new(40, 100),
-        ));
         state
             .schematic
-            .document
+            .document_mut_for_test()
+            .wires
+            .push(Wire::segment(12, Point::new(0, 100), Point::new(40, 100)));
+        state
+            .schematic
+            .document_mut_for_test()
             .net_labels
             .push(crate::state::NetLabel::new(21, Point::new(20, 0), "VDD"));
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(crate::state::NetLabel::new(22, Point::new(20, 100), "VDD"));
         state.sync_active_schematic_to_workspace();
@@ -1581,7 +1582,7 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .wires
             .push(Wire::segment(31, Point::new(0, 0), Point::new(40, 0)));
         state.sync_active_schematic_to_workspace();
@@ -1622,7 +1623,7 @@ mod tests {
         state.ui.schematic_visibility.hierarchy = SchematicHierarchyVisibility::ActiveAndParent;
         let one_level = parent_context_sheets(&state);
         assert_eq!(one_level.len(), 1);
-        assert_eq!(one_level[0].1.document.wires.len(), 1);
+        assert_eq!(one_level[0].1.document().wires.len(), 1);
 
         state.workspace.schematic_buffers.insert(
             CellViewRef::new("user", "amp", "schematic").key(),
@@ -1761,13 +1762,17 @@ mod tests {
         let mut state = AppState::default();
         let mut component = Component::new(1, ComponentType::VoltageSource, Point::new(40, 30));
         component.name = "VBIAS".to_owned();
-        state.schematic.document.components.push(component);
+        state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(component);
         state.schematic.selection.select_component(1);
 
         let point = Point::new(20, 10);
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .junctions
             .push(Junction::new(2, point));
         state.simulation.cross_probe.update(

@@ -349,11 +349,15 @@ fn studio_state(app: &RSpiceApp) -> String {
 /// like any other.
 fn place_a_source(state: &mut AppState) {
     use crate::state::{Component, ComponentType, Point};
-    state.schematic.document.components.push(Component::new(
-        1,
-        ComponentType::VoltageSource,
-        Point::new(120, 120),
-    ));
+    state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(Component::new(
+            1,
+            ComponentType::VoltageSource,
+            Point::new(120, 120),
+        ));
 }
 
 /// One surface, rebuilt.

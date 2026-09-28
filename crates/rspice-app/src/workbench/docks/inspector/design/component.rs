@@ -453,32 +453,11 @@ pub(crate) fn apply_bound_model_choice(
         .file_path
         .clone()
         .or_else(|| library.root_path.clone());
-    let before = crate::state::SchematicSnapshot::capture(&app.state.schematic.document());
-    let component = app
-        .state
-        .schematic
-        .document
-        .components
-        .iter_mut()
-        .find(|component| component.id == component_id)
-        .expect("the validated component remains present until mutation");
-    let binding = component
-        .library_cell
-        .as_mut()
-        .expect("the validated library binding remains present until mutation");
-    let mut changed = binding.module_name.as_deref() != Some(candidate_name.as_str());
-    binding.module_name = Some(candidate_name);
-    if candidate_source.is_some() && binding.source_path != candidate_source {
-        binding.source_path = candidate_source;
-        binding.model_section = None;
-        changed = true;
-    }
-    if changed {
-        app.state.schematic.is_dirty = true;
-        app.state.schematic.bump_topology_version();
+    let changed =
         app.state
             .schematic
-            .commit_undo_from(before, "select instance model");
+            .select_instance_model(component_id, candidate_name, candidate_source);
+    if changed {
         app.invalidate_simulation_preflight();
     }
     Ok(changed)
@@ -516,28 +495,13 @@ pub(super) fn apply_bound_model_section(
         return;
     }
     let selected = (!selected_section.trim().is_empty()).then(|| selected_section.to_owned());
-    let before = crate::state::SchematicSnapshot::capture(&app.state.schematic.document());
-    let Some(binding) = app
+    if app
         .state
         .schematic
-        .document
-        .components
-        .iter_mut()
-        .find(|component| component.id == component_id)
-        .and_then(|component| component.library_cell.as_mut())
-    else {
-        return;
-    };
-    if binding.model_section == selected {
-        return;
+        .select_instance_model_section(component_id, selected)
+    {
+        app.invalidate_simulation_preflight();
     }
-    binding.model_section = selected;
-    app.state.schematic.is_dirty = true;
-    app.state.schematic.bump_topology_version();
-    app.state
-        .schematic
-        .commit_undo_from(before, "select instance model section");
-    app.invalidate_simulation_preflight();
 }
 
 pub(super) fn parameters_section(

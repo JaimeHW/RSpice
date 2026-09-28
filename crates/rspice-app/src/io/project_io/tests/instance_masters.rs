@@ -34,11 +34,11 @@ fn load_repairs_missing_instance_master() {
         .get(&top.key())
         .expect("the parent drawing loads");
     assert_eq!(
-        restored.document.components.len(),
+        restored.document().components.len(),
         1,
         "the placement is repaired, not dropped"
     );
-    let binding = restored.document.components[0]
+    let binding = restored.document().components[0]
         .library_cell
         .as_ref()
         .expect("it still names the master it wants");
@@ -90,11 +90,11 @@ fn load_breaks_an_instantiation_cycle_and_names_both_ends() {
     let loaded = load_project_text(&json, None).expect("a recursive hierarchy still opens");
 
     let placements = loaded.workspace.schematic_buffers[&top.key()]
-        .document
+        .document()
         .components
         .len()
         + loaded.workspace.schematic_buffers[&amp.key()]
-            .document
+            .document()
             .components
             .len();
     assert_eq!(
@@ -150,12 +150,14 @@ fn unresolved_generated_veriloga_bindings_survive_project_save_and_reload() {
         let top = workspace.active_view.key();
         let schematic = workspace.schematic_buffers.get_mut(&top).unwrap();
         schematic.add_library_cell_component(Point::new(10, 20), binding);
-        let before = serde_json::to_value(&schematic.document.components[0]).unwrap();
+        let before = serde_json::to_value(&schematic.document().components[0]).unwrap();
         let json = serde_json::to_string(&ProjectFile::new(workspace, libraries)).unwrap();
 
         let loaded =
             load_project_text(&json, None).expect("an unresolved model must not cost the project");
-        let restored = &loaded.workspace.schematic_buffers[&top].document.components[0];
+        let restored = &loaded.workspace.schematic_buffers[&top]
+            .document()
+            .components[0];
         assert_eq!(serde_json::to_value(restored).unwrap(), before);
         assert!(
             validate_generated_veriloga_binding(restored.library_cell.as_ref().unwrap()).is_err()
@@ -174,7 +176,7 @@ fn unresolved_generated_veriloga_bindings_survive_project_save_and_reload() {
         assert_eq!(
             serde_json::to_value(
                 &reloaded.workspace.schematic_buffers[&top]
-                    .document
+                    .document()
                     .components[0]
             )
             .unwrap(),

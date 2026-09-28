@@ -1651,7 +1651,11 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = Workspace::Design;
         app.state.project_lifecycle.project_open = true;
-        app.state.schematic.document.components.clear();
+        app.state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .clear();
 
         let origin = Point::new(20, 20);
         let load_id = app
@@ -1666,7 +1670,7 @@ mod tests {
             if let Some(component) = app
                 .state
                 .schematic
-                .document
+                .document_mut_for_test()
                 .components
                 .iter_mut()
                 .find(|component| component.id == id)

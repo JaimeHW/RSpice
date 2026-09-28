@@ -297,13 +297,8 @@ fn instance_nets(state: &AppState, component_id: u64) -> [String; 2] {
 /// re-type a family change performs. `None` when the definition cannot be
 /// adopted onto it at all.
 fn realized(component: &Component, definition: &StimulusDefinition) -> Option<Component> {
-    if definition.adoption_fit(component) == AdoptionFit::Kind {
-        return None;
-    }
-    let mut candidate = component.clone();
-    candidate.kind = definition.component_type();
-    definition.adopt_onto(&mut candidate).ok()?;
-    Some(candidate)
+    crate::state::SchematicState::prepare_stimulus_adoption(component, definition)
+        .map(|prepared| prepared.into_component())
 }
 
 /// What confirming would do, in the one line a footer has for it.
@@ -409,9 +404,9 @@ pub(crate) fn commit_adoption(
         AdoptionFit::Replace { .. } => true,
         AdoptionFit::Kind => return Err(definition.kind_refusal(&expected)),
     };
-    let candidate =
-        realized(&expected, definition).ok_or_else(|| definition.kind_refusal(&expected))?;
-    let reference = candidate.spice_instance_name();
+    let candidate = crate::state::SchematicState::prepare_stimulus_adoption(&expected, definition)
+        .ok_or_else(|| definition.kind_refusal(&expected))?;
+    let reference = candidate.component().spice_instance_name();
     if re_placed {
         // Not a property edit, and the property-edit transaction says so:
         // `prepare_component_edit` refuses any candidate whose type differs
@@ -426,25 +421,18 @@ pub(crate) fn commit_adoption(
             ));
         }
         let description = format!("adopt {} onto {reference}", definition.name());
-        let replaced = state.schematic.with_undo(description, |schematic| {
-            if let Some(held) = schematic
-                .document
-                .components
-                .iter_mut()
-                .find(|component| component.id == component_id)
-            {
-                *held = candidate;
-            }
-            schematic.is_dirty = true;
-            schematic.bump_topology_version();
-        });
+        let replaced = candidate.replace_family(&mut state.schematic, description);
         if !replaced {
             return Err(format!(
                 "{reference} was not re-placed: the active schematic view is read-only."
             ));
         }
     } else {
-        state.edit_component_transaction(&expected, candidate, "adopt stimulus definition")?;
+        state.edit_component_transaction(
+            &expected,
+            candidate.into_component(),
+            "adopt stimulus definition",
+        )?;
     }
     Ok(if re_placed {
         format!(

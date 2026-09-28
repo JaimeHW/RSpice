@@ -216,7 +216,7 @@ fn state_with_hierarchy_record() -> (AppState, CellViewRef, CellViewRef) {
 #[test]
 fn guarded_history_refuses_to_overwrite_a_modified_child() {
     let (mut state, _, _) = state_with_hierarchy_record();
-    state.schematic.document.components[0].value = "changed".to_owned();
+    state.schematic.document_mut_for_test().components[0].value = "changed".to_owned();
     assert!(!state.can_undo_project_design());
     assert_eq!(state.undo_project_design().expect("guarded"), None);
 }
@@ -270,7 +270,7 @@ fn hierarchy_history_refuses_dangling_external_master_reference() {
     let mut schematic = SchematicState::default();
     let id = schematic.add_component(ComponentType::CellInstance, Point::origin());
     let component = schematic
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == id)
@@ -305,7 +305,7 @@ fn new_hierarchy_target_refuses_to_resolve_an_existing_dangling_instance() {
         .add_component(ComponentType::CellInstance, Point::origin());
     state
         .schematic
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == id)
@@ -510,7 +510,7 @@ fn undo_restores_objects_to_the_sheet_they_were_recorded_on() {
     let before_parent = state.schematic.clone();
     let mut after_parent = before_parent.clone();
     after_parent
-        .document
+        .document_mut_for_test()
         .components
         .retain(|component| component.id != extracted);
     let target = CellViewRef::new(&parent_ref.library, "child", "schematic");
@@ -732,7 +732,7 @@ fn placed_binding<'a>(
         .schematic_buffers
         .get(&document.key())
         .expect("the buffer that placed the master")
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == object)
@@ -1117,8 +1117,8 @@ fn symbol_definition_and_generated_fixture_share_one_history_record() {
             .workspace
             .schematic_buffers
             .get(&fixture_ref.key())
-            .is_some_and(|stored| SchematicSnapshot::capture(&fixture.document)
-                .is_equal_document(&stored.document))
+            .is_some_and(|stored| SchematicSnapshot::capture(&fixture.document())
+                .is_equal_document(&stored.document()))
     );
 
     assert!(state.undo_project_design().expect("undo").is_some());

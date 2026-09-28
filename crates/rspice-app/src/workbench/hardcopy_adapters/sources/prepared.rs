@@ -163,30 +163,35 @@ struct PreparedSchematicOwner {
 }
 
 impl PreparedSchematicOwner {
-    fn capture(schematic: SchematicState) -> Self {
+    fn capture(mut schematic: SchematicState) -> Self {
+        let selection = std::mem::take(&mut schematic.selection);
+        let document = schematic.into_document();
         Self {
-            components: schematic.document.components,
-            wires: schematic.document.wires,
-            buses: schematic.document.buses,
-            bus_taps: schematic.document.bus_taps,
-            junctions: schematic.document.junctions,
-            net_labels: schematic.document.net_labels,
-            design_notes: schematic.document.design_notes,
-            documentation_shapes: schematic.document.documentation_shapes,
-            selection: schematic.selection,
+            components: document.components,
+            wires: document.wires,
+            buses: document.buses,
+            bus_taps: document.bus_taps,
+            junctions: document.junctions,
+            net_labels: document.net_labels,
+            design_notes: document.design_notes,
+            documentation_shapes: document.documentation_shapes,
+            selection,
         }
     }
 
     fn restore(self) -> SchematicState {
-        let mut schematic = SchematicState::default();
-        schematic.document.components = self.components;
-        schematic.document.wires = self.wires;
-        schematic.document.buses = self.buses;
-        schematic.document.bus_taps = self.bus_taps;
-        schematic.document.junctions = self.junctions;
-        schematic.document.net_labels = self.net_labels;
-        schematic.document.design_notes = self.design_notes;
-        schematic.document.documentation_shapes = self.documentation_shapes;
+        let mut schematic =
+            SchematicState::from_document(rspice_design::schematic::document::SchematicDocument {
+                components: self.components,
+                wires: self.wires,
+                buses: self.buses,
+                bus_taps: self.bus_taps,
+                junctions: self.junctions,
+                net_labels: self.net_labels,
+                design_notes: self.design_notes,
+                documentation_shapes: self.documentation_shapes,
+                ..Default::default()
+            });
         schematic.selection = self.selection;
         schematic
     }
@@ -203,14 +208,15 @@ struct PreparedSchematicInterfaceOwner {
 impl PreparedSchematicInterfaceOwner {
     fn capture(schematic: SchematicState) -> Self {
         Self {
-            components: schematic.document.components,
+            components: schematic.into_document().components,
         }
     }
 
     fn restore(self) -> SchematicState {
-        let mut schematic = SchematicState::default();
-        schematic.document.components = self.components;
-        schematic
+        SchematicState::from_document(rspice_design::schematic::document::SchematicDocument {
+            components: self.components,
+            ..Default::default()
+        })
     }
 }
 

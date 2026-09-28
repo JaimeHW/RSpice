@@ -97,7 +97,7 @@ pub(super) fn large_corpus_app() -> RSpiceApp {
         } else {
             pdk_model_name(library, index % MODELS_PER_LIBRARY)
         };
-        schematic.document.components.push(component);
+        schematic.document_mut_for_test().components.push(component);
     }
     app.state.workspace.save_active_schematic(&schematic);
     app

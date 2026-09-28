@@ -1163,10 +1163,10 @@ mod shortcut_ownership_tests {
     fn assert_grid_pitch_contract(app: &RSpiceApp, pitch: crate::state::SchematicGridPitch) {
         let expected = pitch.canvas_grid_size();
         assert_eq!(
-            app.state.schematic.document.document_policy.grid_pitch,
+            app.state.schematic.document().document_policy.grid_pitch,
             pitch
         );
-        assert_eq!(app.state.schematic.document.grid_size, expected);
+        assert_eq!(app.state.schematic.document().grid_size, expected);
         assert_eq!(app.state.schematic.snap_engine.grid_size, expected);
         assert_eq!(app.state.ui.schematic_snap.grid_size, expected);
     }
@@ -1182,8 +1182,10 @@ mod shortcut_ownership_tests {
             app.state
                 .schematic
                 .with_undo("change schematic grid pitch", |schematic| {
-                    schematic.document.document_policy.grid_pitch = SchematicGridPitch::Mil25;
-                    schematic.document.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
+                    schematic.document_mut_for_test().document_policy.grid_pitch =
+                        SchematicGridPitch::Mil25;
+                    schematic.document_mut_for_test().grid_size =
+                        SchematicGridPitch::Mil25.canvas_grid_size();
                     schematic.snap_engine.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
                 })
         );
@@ -1209,7 +1211,7 @@ mod shortcut_ownership_tests {
         let before = state.workspace.design_management.clone();
         let drawn = state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .map(|component| component.id)
@@ -1252,12 +1254,12 @@ mod shortcut_ownership_tests {
                     schematic.add_component(ComponentType::Resistor, Point::origin());
                 })
         );
-        let drawn = app.state.schematic.document.components.len();
+        let drawn = app.state.schematic.document().components.len();
         let owner = publish_sheet_assignment(&mut app.state);
 
         app.action_edit_undo();
         assert_eq!(
-            app.state.schematic.document.components.len(),
+            app.state.schematic.document().components.len(),
             drawn,
             "the edit made before the ascent is not what Undo owes the operator"
         );
@@ -1278,7 +1280,7 @@ mod shortcut_ownership_tests {
                 .sheet_catalog(&owner.key())
                 .is_some()
         );
-        assert_eq!(app.state.schematic.document.components.len(), drawn);
+        assert_eq!(app.state.schematic.document().components.len(), drawn);
     }
 
     #[test]
@@ -1301,11 +1303,11 @@ mod shortcut_ownership_tests {
                     schematic.add_component(ComponentType::Capacitor, Point::new(40, 0));
                 })
         );
-        assert_eq!(app.state.schematic.document.components.len(), 2);
+        assert_eq!(app.state.schematic.document().components.len(), 2);
 
         app.action_edit_undo();
         assert_eq!(
-            app.state.schematic.document.components.len(),
+            app.state.schematic.document().components.len(),
             1,
             "the newest step is the document edit made after the transaction"
         );
@@ -1326,10 +1328,10 @@ mod shortcut_ownership_tests {
                 .is_none(),
             "the transaction is next, ahead of the older document edit"
         );
-        assert_eq!(app.state.schematic.document.components.len(), 1);
+        assert_eq!(app.state.schematic.document().components.len(), 1);
 
         app.action_edit_undo();
-        assert!(app.state.schematic.document.components.is_empty());
+        assert!(app.state.schematic.document().components.is_empty());
     }
 
     #[test]
@@ -1400,7 +1402,7 @@ mod shortcut_ownership_tests {
         use crate::state::{Bus, BusDeclaration, Point};
 
         let mut app = RSpiceApp::test_instance();
-        app.state.schematic.document.buses.push(
+        app.state.schematic.document_mut_for_test().buses.push(
             Bus::segment(
                 87,
                 Point::new(0, 0),

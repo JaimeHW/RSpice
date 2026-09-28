@@ -510,13 +510,7 @@ fn apply_instance_resolution(
     let mut documents = Vec::with_capacity(drawings);
     for (reference, before) in edited {
         let mut after = before.clone();
-        after
-            .document
-            .components
-            .retain(|component| !places_target(component));
-        after.recalculate_runtime_state();
-        after.bump_topology_version();
-        after.is_dirty = true;
+        after.remove_master_placements(&library, &cell, view.as_deref());
         let key = reference.key();
         if key == active_key {
             state.schematic = after.clone();
@@ -1444,7 +1438,7 @@ mod tests {
     #[test]
     fn deleting_cell_blocks_live_variant_then_removes_and_tombstones_design_management_ownership() {
         let mut state = state_with_open_amp_cell();
-        let object_id = state.schematic.document.components[0].id;
+        let object_id = state.schematic.document().components[0].id;
         let owner = CellViewRef::new("work", "amp", "schematic").key();
         let sheet_id = state
             .workspace
@@ -1609,7 +1603,7 @@ mod tests {
     #[test]
     fn deleting_cell_publishes_annotation_tombstones_without_a_sheet_catalog() {
         let mut state = state_with_open_amp_cell();
-        let object_id = state.schematic.document.components[0].id;
+        let object_id = state.schematic.document().components[0].id;
         let owner = CellViewRef::new("work", "amp", "schematic").key();
         let object = crate::state::SchematicObjectKey::new(&owner, object_id)
             .expect("scoped schematic object");
@@ -1742,7 +1736,7 @@ mod tests {
     #[test]
     fn keeping_placements_leaves_them_drawn_and_unresolved() {
         let mut state = default_project_with_active_top_instancing_amp();
-        let binding = state.schematic.document.components[0]
+        let binding = state.schematic.document_mut_for_test().components[0]
             .library_cell
             .as_mut()
             .expect("the fixture places amp");
@@ -1763,11 +1757,11 @@ mod tests {
             .get(&CellViewRef::new("user", "top", "schematic").key())
             .expect("the parent drawing survives");
         assert_eq!(
-            top.document.components.len(),
+            top.document().components.len(),
             1,
             "the placement stays drawn"
         );
-        let binding = top.document.components[0]
+        let binding = top.document().components[0]
             .library_cell
             .as_ref()
             .expect("it keeps naming the master it wants");
@@ -1803,7 +1797,7 @@ mod tests {
         for key in [&top_key, &aux_key] {
             assert!(
                 app.state.workspace.schematic_buffers[key]
-                    .document
+                    .document()
                     .components
                     .is_empty(),
                 "{key} still places the deleted master"
@@ -1824,7 +1818,7 @@ mod tests {
         for key in [&top_key, &aux_key] {
             assert_eq!(
                 app.state.workspace.schematic_buffers[key]
-                    .document
+                    .document()
                     .components
                     .len(),
                 1,

@@ -180,7 +180,7 @@ fn stage_literal_tuning_binding(
     let component = app
         .state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == component_id)
@@ -351,10 +351,10 @@ fn reverting_a_literal_value_proposal_discards_variable_and_binding_only() {
         crate::state::ComponentType::Resistor,
         crate::state::Point::origin(),
     );
-    app.state.schematic.document.components[0].value = "10k".to_owned();
+    app.state.schematic.document_mut_for_test().components[0].value = "10k".to_owned();
     let plan_id = app.state.sim_setup.stable_analysis_plan().unwrap().id();
     let workspace_before = serde_json::to_vec(&app.state.workspace).unwrap();
-    let value_before = app.state.schematic.document.components[0].value.clone();
+    let value_before = app.state.schematic.document().components[0].value.clone();
     stage_literal_tuning_binding(&mut app, component_id, "R1_VALUE");
 
     assert!(tuning_is_dirty(&app));
@@ -377,7 +377,7 @@ fn reverting_a_literal_value_proposal_discards_variable_and_binding_only() {
             .all(|draft| !draft.proposed)
     );
     assert_eq!(
-        app.state.schematic.document.components[0].value,
+        app.state.schematic.document().components[0].value,
         value_before
     );
     assert_eq!(
@@ -403,7 +403,7 @@ fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
     let component_id = app
         .state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.kind == crate::state::ComponentType::Resistor)
@@ -412,13 +412,15 @@ fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
     let component_index = app
         .state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .position(|component| component.id == component_id)
         .unwrap();
-    app.state.schematic.document.components[component_index].name = "RLOAD".to_owned();
-    app.state.schematic.document.components[component_index].value = "10k".to_owned();
+    app.state.schematic.document_mut_for_test().components[component_index].name =
+        "RLOAD".to_owned();
+    app.state.schematic.document_mut_for_test().components[component_index].value =
+        "10k".to_owned();
     app.state.schematic.bump_topology_version();
     let plan_id = app.state.sim_setup.stable_analysis_plan().unwrap().id();
     let source_plan_revision = app
@@ -446,7 +448,7 @@ fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
     assert_eq!(
         app.state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == component_id)
@@ -485,7 +487,7 @@ fn tuning_commit_rechecks_live_schematic_authority_after_staging() {
     let component_id = app
         .state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.kind == crate::state::ComponentType::Resistor)
@@ -494,13 +496,15 @@ fn tuning_commit_rechecks_live_schematic_authority_after_staging() {
     let component_index = app
         .state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .position(|component| component.id == component_id)
         .unwrap();
-    app.state.schematic.document.components[component_index].name = "RLOCKED".to_owned();
-    app.state.schematic.document.components[component_index].value = "10k".to_owned();
+    app.state.schematic.document_mut_for_test().components[component_index].name =
+        "RLOCKED".to_owned();
+    app.state.schematic.document_mut_for_test().components[component_index].value =
+        "10k".to_owned();
     app.state.schematic.bump_topology_version();
     stage_literal_tuning_binding(&mut app, component_id, "RLOCKED_VALUE");
 
@@ -512,7 +516,7 @@ fn tuning_commit_rechecks_live_schematic_authority_after_staging() {
         .unwrap()
         .revision();
     let topology_before = app.state.schematic.topology_version();
-    let value_before = app.state.schematic.document.components[component_index]
+    let value_before = app.state.schematic.document().components[component_index]
         .value
         .clone();
     let can_undo_before = app.state.schematic.can_undo();
@@ -549,7 +553,7 @@ fn tuning_commit_rechecks_live_schematic_authority_after_staging() {
     );
     assert_eq!(app.state.schematic.topology_version(), topology_before);
     assert_eq!(
-        app.state.schematic.document.components[component_index].value,
+        app.state.schematic.document().components[component_index].value,
         value_before
     );
     assert_eq!(app.state.schematic.can_undo(), can_undo_before);
@@ -565,8 +569,8 @@ fn failed_literal_value_run_preparation_rolls_back_plan_and_schematic() {
         crate::state::ComponentType::Resistor,
         crate::state::Point::origin(),
     );
-    app.state.schematic.document.components[0].name = "RFAIL".to_owned();
-    app.state.schematic.document.components[0].value = "10k".to_owned();
+    app.state.schematic.document_mut_for_test().components[0].name = "RFAIL".to_owned();
+    app.state.schematic.document_mut_for_test().components[0].value = "10k".to_owned();
     let plan_id = app.state.sim_setup.stable_analysis_plan().unwrap().id();
     let source_plan_revision = app
         .state
@@ -593,7 +597,7 @@ fn failed_literal_value_run_preparation_rolls_back_plan_and_schematic() {
         source_plan_revision
     );
     assert_eq!(app.state.schematic.topology_version(), source_topology);
-    assert_eq!(app.state.schematic.document.components[0].value, "10k");
+    assert_eq!(app.state.schematic.document().components[0].value, "10k");
     assert_eq!(app.state.schematic.can_undo(), source_can_undo);
     assert_eq!(
         serde_json::to_vec(&app.state.workspace).unwrap(),
@@ -764,7 +768,7 @@ fn responsive_verify_geometry_matches_mockup_breakpoints() {
 #[test]
 fn soa_cross_probe_selects_the_exact_schematic_device() {
     let mut app = RSpiceApp::test_instance();
-    app.state.schematic.document.components.push(
+    app.state.schematic.document_mut_for_test().components.push(
         crate::state::Component::new(
             42,
             crate::state::ComponentType::Nmos,

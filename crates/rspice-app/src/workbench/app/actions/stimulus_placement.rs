@@ -100,7 +100,7 @@ mod tests {
         let component = app
             .state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == id)

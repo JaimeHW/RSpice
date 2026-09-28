@@ -1236,8 +1236,12 @@ fn commit_explicit_junction(state: &mut AppState, requested: Point) -> JunctionP
     let grid_size = state.schematic.document().grid_size;
     let active_wires =
         objects_on_active_sheet(state, &state.schematic.document().wires, |item| item.id);
-    let mut hit_schematic = crate::state::SchematicState::default();
-    hit_schematic.document.wires = active_wires.into_owned();
+    let hit_schematic = crate::state::SchematicState::from_document(
+        rspice_design::schematic::document::SchematicDocument {
+            wires: active_wires.into_owned(),
+            ..Default::default()
+        },
+    );
     let Some(target) = hit_schematic.nearest_junction_candidate(requested, grid_size) else {
         return JunctionPlacementOutcome::NoIntersection;
     };
@@ -2029,7 +2033,6 @@ fn retain_probe_flag(
     )>,
 ) -> Result<u64, String> {
     probe_edit_identity_is_current(state)?;
-    let mut probe_id = 0;
     let source_expression = spelling.map(|spelling| spelling.engine().trim().to_owned());
     let label = spelling.map(|spelling| spelling.display().trim().to_owned());
     let validation_reference = label.as_deref().unwrap_or("P1");
@@ -2058,18 +2061,7 @@ fn retain_probe_flag(
         if needs_binding_refresh {
             state
                 .schematic
-                .with_undo("bind schematic probe output", |schematic| {
-                    if let Some(probe) = schematic
-                        .document
-                        .probes
-                        .iter_mut()
-                        .find(|probe| probe.id == existing_id)
-                        && let Some((plan_id, output_id)) = binding
-                    {
-                        probe.bind_saved_output(plan_id, output_id);
-                        schematic.is_dirty = true;
-                    }
-                });
+                .bind_probe_saved_output(existing_id, binding);
             state.sync_active_schematic_to_workspace();
         }
         let id = existing_id;
@@ -2079,26 +2071,10 @@ fn retain_probe_flag(
         );
         return Ok(id);
     }
-    let changed = state
-        .schematic
-        .with_undo("place schematic probe", |schematic| {
-            let id = schematic.next_id();
-            let reference = label.clone().unwrap_or_else(|| format!("P{id}"));
-            if let Ok(mut probe) =
-                SchematicProbe::new(id, position, reference, source_expression.clone())
-            {
-                if let Some((plan_id, output_id)) = binding {
-                    probe.bind_saved_output(plan_id, output_id);
-                }
-                schematic.document.probes.push(probe);
-                schematic.selection.select_only_probe(id);
-                schematic.is_dirty = true;
-                probe_id = id;
-            }
-        });
-    if !changed || probe_id == 0 {
-        return Err("the probe marker did not change the active schematic".to_owned());
-    }
+    let probe_id =
+        state
+            .schematic
+            .place_schematic_probe(position, label, source_expression, binding)?;
     state.dialogs.interaction.schematic_keyboard_focus = Some(
         crate::workbench::app_state::SchematicKeyboardFocus::Probe(probe_id),
     );

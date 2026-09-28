@@ -457,7 +457,7 @@ fn valid_configuration_app() -> (RSpiceApp, ConfigurationSetId) {
     ] {
         let id = master.add_component(crate::state::ComponentType::Port, position);
         master
-            .document
+            .document_mut_for_test()
             .components
             .iter_mut()
             .find(|component| component.id == id)
@@ -644,7 +644,11 @@ fn new_configuration_requires_a_real_dut_in_the_selected_root() {
             crate::state::Point::new(20 * i32::try_from(id).expect("small id"), 20),
         );
         instance.name = name.to_owned();
-        app.state.schematic.document.components.push(instance);
+        app.state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(instance);
     }
     assert_eq!(
         default_dut_path_for_root(&app.state.workspace, &app.state.schematic, &root).as_deref(),

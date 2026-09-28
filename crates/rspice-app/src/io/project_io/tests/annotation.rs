@@ -39,7 +39,7 @@ fn pending_annotation() -> PendingAnnotation {
     let mut master = SchematicState::default();
     let voltage = master.add_component(ComponentType::VoltageSource, Point::new(100, 0));
     master
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == voltage)
@@ -47,7 +47,7 @@ fn pending_annotation() -> PendingAnnotation {
         .name = "V42".to_owned();
     let dependent = master.add_component(ComponentType::Cccs, Point::new(200, 0));
     master
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == dependent)
@@ -66,7 +66,7 @@ fn pending_annotation() -> PendingAnnotation {
         Point::new(100, 0),
         LibraryCellInstance::new("user", &child.cell, "schematic"),
     );
-    top.document
+    top.document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == parent)
@@ -76,7 +76,7 @@ fn pending_annotation() -> PendingAnnotation {
         Point::new(200, 0),
         LibraryCellInstance::new("user", &child.cell, "schematic"),
     );
-    top.document
+    top.document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == other)
@@ -132,7 +132,7 @@ fn pending_annotation() -> PendingAnnotation {
             .schematic_buffers
             .get_mut(&reference.key())
             .unwrap()
-            .document
+            .document_mut_for_test()
             .probes
             .push(probe);
     }
@@ -214,7 +214,7 @@ fn reopening_pending_annotation_aligns_hierarchy_outputs_and_bound_probes_once()
         let schematic = &workspace.schematic_buffers[&reference.key()];
         assert_eq!(
             schematic
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|component| component.id == component_id)
@@ -223,17 +223,17 @@ fn reopening_pending_annotation_aligns_hierarchy_outputs_and_bound_probes_once()
             name
         );
         assert_eq!(
-            schematic.document.probes[0].source_expression.as_deref(),
+            schematic.document().probes[0].source_expression.as_deref(),
             Some("I(/X1/V1)")
         );
-        assert_eq!(schematic.document.probes[0].reference, "Source current");
+        assert_eq!(schematic.document().probes[0].reference, "Source current");
         assert_eq!(
-            schematic.document.probes[0].saved_output_id,
+            schematic.document().probes[0].saved_output_id,
             Some(fixture.outputs[0].1)
         );
     }
     let dependent = workspace.schematic_buffers[&fixture.child.key()]
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == fixture.dependent)
@@ -278,7 +278,7 @@ fn damage_pending_annotation(fixture: &mut PendingAnnotation, failure: &str) {
     match failure {
         "unrecorded name" => {
             master
-                .document
+                .document_mut_for_test()
                 .components
                 .iter_mut()
                 .find(|component| component.id == fixture.voltage)
@@ -288,7 +288,7 @@ fn damage_pending_annotation(fixture: &mut PendingAnnotation, failure: &str) {
         "collision" => {
             let id = master.add_component(ComponentType::VoltageSource, Point::new(300, 0));
             master
-                .document
+                .document_mut_for_test()
                 .components
                 .iter_mut()
                 .find(|component| component.id == id)
@@ -297,7 +297,7 @@ fn damage_pending_annotation(fixture: &mut PendingAnnotation, failure: &str) {
         }
         "malformed reference" => {
             master
-                .document
+                .document_mut_for_test()
                 .components
                 .iter_mut()
                 .find(|component| component.id == fixture.dependent)
@@ -337,7 +337,7 @@ fn annotation_restoration_refuses_before_publishing_any_project_owner() {
             .map(|(key, source)| {
                 (
                     key.clone(),
-                    crate::state::SchematicSnapshot::capture(&source.document),
+                    crate::state::SchematicSnapshot::capture(&source.document()),
                 )
             })
             .collect();
@@ -355,8 +355,9 @@ fn annotation_restoration_refuses_before_publishing_any_project_owner() {
         assert_eq!(fixture.project.workspace.project_metadata_dirty, dirty);
         for (key, snapshot) in snapshots {
             assert!(
-                snapshot
-                    .is_equal_document(&fixture.project.workspace.schematic_buffers[&key].document)
+                snapshot.is_equal_document(
+                    &fixture.project.workspace.schematic_buffers[&key].document()
+                )
             );
         }
         let bytes = serialize_project_file(&fixture.project).unwrap();
@@ -387,7 +388,7 @@ fn restoration_follows_the_complete_recorded_name_lineage() {
     let child = &loaded.workspace.schematic_buffers[&fixture.child.key()];
     assert_eq!(
         child
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == fixture.voltage)
@@ -396,7 +397,7 @@ fn restoration_follows_the_complete_recorded_name_lineage() {
         "V9"
     );
     let dependent = child
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == fixture.dependent)
@@ -460,8 +461,11 @@ fn assert_restored_annotation(state: &AppState, fixture: &PendingAnnotation) {
     for reference in [&fixture.root, &fixture.child] {
         let restored = &state.workspace.schematic_buffers[&reference.key()];
         let canonical = &expected.workspace.schematic_buffers[&reference.key()];
-        assert_eq!(restored.document.components, canonical.document.components);
-        assert_eq!(restored.document.probes, canonical.document.probes);
+        assert_eq!(
+            restored.document().components,
+            canonical.document().components
+        );
+        assert_eq!(restored.document().probes, canonical.document().probes);
     }
     assert_eq!(
         state.workspace.configuration_sets,
@@ -478,8 +482,8 @@ fn assert_restored_annotation(state: &AppState, fixture: &PendingAnnotation) {
     );
     if let Some(active) = state.workspace.active_context_schematic() {
         assert_eq!(
-            state.schematic.document.components,
-            active.document.components
+            state.schematic.document().components,
+            active.document().components
         );
     }
     assert_eq!(
@@ -597,18 +601,18 @@ fn failed_session_annotation_preserves_documents_blocks_execution_and_retries_af
                 for reference in [&fixture.root, &fixture.child] {
                     assert_eq!(
                         restored.workspace.schematic_buffers[&reference.key()]
-                            .document
+                            .document()
                             .components,
                         source.workspace.schematic_buffers[&reference.key()]
-                            .document
+                            .document()
                             .components
                     );
                     assert_eq!(
                         restored.workspace.schematic_buffers[&reference.key()]
-                            .document
+                            .document()
                             .probes,
                         source.workspace.schematic_buffers[&reference.key()]
-                            .document
+                            .document()
                             .probes
                     );
                 }
@@ -659,11 +663,15 @@ fn failed_session_annotation_preserves_documents_blocks_execution_and_retries_af
                 // Repair the invalid owner, but keep active and inactive edit
                 // transactions pending: neither may be overwritten by recovery.
                 restored.schematic.begin_operation("Repair reference owner");
-                restored.schematic.document.components.clone_from(
-                    &fixture.project.workspace.schematic_buffers[&fixture.child.key()]
-                        .document
-                        .components,
-                );
+                restored
+                    .schematic
+                    .document_mut_for_test()
+                    .components
+                    .clone_from(
+                        &fixture.project.workspace.schematic_buffers[&fixture.child.key()]
+                            .document()
+                            .components,
+                    );
                 restored
                     .workspace
                     .plan_data_mut(fixture.outputs[0].0)

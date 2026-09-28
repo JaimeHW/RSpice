@@ -489,18 +489,19 @@ mod tests {
         state.ui.schematic_snap.snap_to_wire_segments = false;
         state.ui.schematic_snap.grid_size = 999;
         let mut loaded = SchematicState::default();
-        loaded.document.document_policy.grid_pitch = crate::state::SchematicGridPitch::Metric;
-        loaded.document.grid_size = 123;
+        loaded.document_mut_for_test().document_policy.grid_pitch =
+            crate::state::SchematicGridPitch::Metric;
+        loaded.document_mut_for_test().grid_size = 123;
         loaded.snap_engine = crate::state::SnapEngine::default();
 
         replace_active_schematic_document(&mut state, loaded);
 
         let expected = crate::state::SchematicGridPitch::Metric.canvas_grid_size();
         assert_eq!(
-            state.schematic.document.document_policy.grid_pitch,
+            state.schematic.document().document_policy.grid_pitch,
             crate::state::SchematicGridPitch::Metric
         );
-        assert_eq!(state.schematic.document.grid_size, expected);
+        assert_eq!(state.schematic.document().grid_size, expected);
         assert_eq!(state.schematic.snap_engine.grid_size, expected);
         assert_eq!(state.schematic.snap_engine.snap_radius, 8);
         assert!(!state.schematic.snap_engine.snap_to_grid);

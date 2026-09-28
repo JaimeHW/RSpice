@@ -708,8 +708,12 @@ fn draw_junction_preview(
     let requested = resolve_grid_pointer(state, viewport, hover_pos).snapped_position;
     let active_wires =
         objects_on_active_sheet(state, &state.schematic.document().wires, |item| item.id);
-    let mut hit_schematic = crate::state::SchematicState::default();
-    hit_schematic.document.wires = active_wires.into_owned();
+    let hit_schematic = crate::state::SchematicState::from_document(
+        rspice_design::schematic::document::SchematicDocument {
+            wires: active_wires.into_owned(),
+            ..Default::default()
+        },
+    );
     let candidate =
         hit_schematic.nearest_junction_candidate(requested, state.schematic.document().grid_size);
     let preview = candidate.unwrap_or(requested);
@@ -1399,7 +1403,7 @@ mod tests {
             name: "IN".to_string(),
             direction: crate::state::PortDirection::In,
         }]);
-        state.schematic.document.components.push(
+        state.schematic.document_mut_for_test().components.push(
             crate::state::Component::new(
                 1,
                 ComponentType::CellInstance,
@@ -1408,7 +1412,7 @@ mod tests {
             .with_library_cell(binding),
         );
         let symbol_context = crate::schematic::view::SchematicSymbolContext::from_state(&state);
-        let component = &state.schematic.document.components[0];
+        let component = &state.schematic.document().components[0];
         let terminal =
             component.terminal_positions_resolved(symbol_context.resolved_symbol(component))[0].1;
         let near_terminal = crate::state::Point::new(terminal.x + 1, terminal.y);
@@ -1435,7 +1439,7 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .wires
             .push(crate::state::Wire::segment(
                 5,
@@ -1450,7 +1454,7 @@ mod tests {
         };
         let pointer = viewport.schematic_to_screen(Point::new(7, 10)) + egui::vec2(0.0, 2.0);
 
-        assert_eq!(state.schematic.document.grid_size, 10);
+        assert_eq!(state.schematic.document().grid_size, 10);
         let result = resolve_wire_preview_snap(&state, &symbol_context, &viewport, pointer)
             .expect("representable conductor acquisition");
         assert_eq!(
@@ -1483,15 +1487,19 @@ mod tests {
         let component = Component::new(7, ComponentType::Resistor, Point::new(20, 20))
             .with_name_value("R7", "1k");
         let terminal_position = component.terminal_positions()[0].1;
-        state.schematic.document.components.push(component);
         state
             .schematic
-            .document
+            .document_mut_for_test()
+            .components
+            .push(component);
+        state
+            .schematic
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(1, terminal_position, "VOUT"));
         let terminal = state.schematic.snap_engine.find_snap_target(
             terminal_position,
-            &state.schematic.document.components,
+            &state.schematic.document().components,
             &[],
             &[],
         );

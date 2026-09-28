@@ -29,7 +29,7 @@ fn rename_source(fixture: &mut Fixture, child: &CellViewRef) {
     let expected = fixture
         .state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == fixture.sources[0])
@@ -82,7 +82,7 @@ fn bulk_annotation_revision_exhaustion_preserves_source_and_history() {
         fixture.state.workspace.project.revision(),
         ObjectRevision::new(u64::MAX).unwrap()
     );
-    let snapshot = SchematicSnapshot::capture(&fixture.state.schematic.document);
+    let snapshot = SchematicSnapshot::capture(&fixture.state.schematic.document());
     let catalog = fixture.state.workspace.design_management.clone();
     let configurations = fixture.state.workspace.configuration_sets.clone();
     let outputs = fixture
@@ -99,7 +99,7 @@ fn bulk_annotation_revision_exhaustion_preserves_source_and_history() {
     assert_eq!(fixture.state.project_undo_sequence(), Some(sequence));
     assert_eq!(fixture.state.project_redo_sequence(), None);
     assert_eq!(fixture.state.workspace.active_schematic_reference(), active);
-    assert!(snapshot.is_equal_document(&fixture.state.schematic.document));
+    assert!(snapshot.is_equal_document(&fixture.state.schematic.document()));
     assert_eq!(fixture.state.workspace.design_management, catalog);
     assert_eq!(fixture.state.workspace.configuration_sets, configurations);
     assert_eq!(
@@ -124,7 +124,7 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
                 .schematic_buffers
                 .get_mut(&other.key())
                 .unwrap()
-                .document
+                .document_mut_for_test()
                 .probes
                 .clear();
             rename_source(&mut fixture, &child);
@@ -139,7 +139,7 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
                 .schematic_buffers
                 .get_mut(&other.key())
                 .unwrap();
-            other_source.document.probes.push(
+            other_source.document_mut_for_test().probes.push(
                 SchematicProbe::new(
                     4000,
                     Point::new(23, 57),
@@ -166,7 +166,9 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
             let state = &mut fixture.state;
             let snapshots = [&root, &child, &other].map(|reference| {
                 SchematicSnapshot::capture(
-                    &schematic_for_reference(state, reference).unwrap().document,
+                    &schematic_for_reference(state, reference)
+                        .unwrap()
+                        .document(),
                 )
             });
             let outputs = state
@@ -181,9 +183,13 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
             assert_eq!(state.workspace.active_schematic_reference(), root);
             assert_eq!(sequence(state, forward), before_sequence);
             for (reference, snapshot) in [&root, &child, &other].into_iter().zip(&snapshots) {
-                assert!(snapshot.is_equal_document(
-                    &schematic_for_reference(state, reference).unwrap().document
-                ));
+                assert!(
+                    snapshot.is_equal_document(
+                        &schematic_for_reference(state, reference)
+                            .unwrap()
+                            .document()
+                    )
+                );
             }
             assert_eq!(
                 state
@@ -226,7 +232,7 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
                     .any(|document| document.reference() == &other)
             );
             let probe = &state.workspace.schematic_buffers[&other.key()]
-                .document
+                .document()
                 .probes[0];
             assert_eq!(probe.id, 4000);
             assert_eq!(probe.position, Point::new(23, 57));
@@ -238,7 +244,7 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
             assert!(cross_history(state, !forward).unwrap().is_some());
             assert_eq!(
                 state.workspace.schematic_buffers[&other.key()]
-                    .document
+                    .document()
                     .probes[0]
                     .source_expression
                     .as_deref(),
@@ -277,12 +283,12 @@ fn new_output_revision_exhaustion_keeps_history_and_navigation_intact() {
             .unwrap()
             .saved_outputs
             .clone();
-        let snapshot = SchematicSnapshot::capture(&state.schematic.document);
+        let snapshot = SchematicSnapshot::capture(&state.schematic.document());
         let before_sequence = sequence(state, forward);
         assert!(cross_history(state, forward).is_err());
         assert_eq!(state.workspace.active_schematic_reference(), root);
         assert_eq!(sequence(state, forward), before_sequence);
-        assert!(snapshot.is_equal_document(&state.schematic.document));
+        assert!(snapshot.is_equal_document(&state.schematic.document()));
         assert_eq!(
             state
                 .workspace
@@ -373,7 +379,7 @@ fn history_resolves_current_configuration_roots_before_rewriting_shared_output_t
         let mut independent_source = SchematicState::default();
         let id = independent_source.add_component(ComponentType::VoltageSource, Point::origin());
         independent_source
-            .document
+            .document_mut_for_test()
             .components
             .iter_mut()
             .find(|component| component.id == id)
@@ -389,7 +395,7 @@ fn history_resolves_current_configuration_roots_before_rewriting_shared_output_t
             LibraryCellInstance::new(&root.library, &independent.cell, "schematic"),
         );
         other_source
-            .document
+            .document_mut_for_test()
             .components
             .iter_mut()
             .find(|component| component.id == id)
@@ -472,7 +478,7 @@ fn history_resolves_current_configuration_roots_before_rewriting_shared_output_t
             );
             assert_eq!(
                 state.workspace.schematic_buffers[&independent.key()]
-                    .document
+                    .document()
                     .components[0]
                     .name,
                 target_name
@@ -480,7 +486,7 @@ fn history_resolves_current_configuration_roots_before_rewriting_shared_output_t
             assert_eq!(
                 schematic_for_reference(state, &child)
                     .unwrap()
-                    .document
+                    .document()
                     .components
                     .iter()
                     .find(|component| component.id == fixture.sources[0])
@@ -499,7 +505,7 @@ fn new_saved_outputs_follow_both_directions_of_a_past_component_rename() {
     state.activate_history_document(&child, "Edit reused master");
     let expected = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == fixture.sources[0])

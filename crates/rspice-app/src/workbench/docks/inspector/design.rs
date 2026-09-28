@@ -1529,18 +1529,7 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
         let changed = app
             .state
             .schematic
-            .with_undo("edit schematic probe", |schematic| {
-                if let Some(live) = schematic
-                    .document
-                    .probes
-                    .iter_mut()
-                    .find(|probe| probe.id == id)
-                {
-                    live.enabled = enabled;
-                    live.plot_on_materialization = plot_on_materialization;
-                    schematic.is_dirty = true;
-                }
-            });
+            .edit_probe_intent(id, enabled, plot_on_materialization);
         if changed {
             app.state.sync_active_schematic_to_workspace();
             app.invalidate_simulation_preflight();

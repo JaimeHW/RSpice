@@ -84,7 +84,7 @@ pub struct PendingPartModel {
 /// Schematic editor state over one persisted design document.
 #[derive(Debug, Clone)]
 pub struct SchematicState {
-    pub document: SchematicDocument,
+    pub(in crate::state::schematic) document: SchematicDocument,
 
     /// Current selection (runtime state, never part of the design document).
     pub selection: Selection,
@@ -236,6 +236,21 @@ impl SchematicState {
         &self.document
     }
 
+    pub(crate) fn document_and_selection(&mut self) -> (&SchematicDocument, &mut Selection) {
+        (&self.document, &mut self.selection)
+    }
+
+    pub(crate) fn into_document(self) -> SchematicDocument {
+        self.document
+    }
+
+    /// Fixtures can model invalid or externally changed content without a
+    /// mutable document accessor in production.
+    #[cfg(test)]
+    pub(crate) fn document_mut_for_test(&mut self) -> &mut SchematicDocument {
+        &mut self.document
+    }
+
     /// Create fresh editor state around an owned document. Saved-file loading
     /// retains its separate legacy runtime defaults in Deserialize.
     pub(crate) fn from_document(document: SchematicDocument) -> Self {
@@ -339,5 +354,17 @@ impl SchematicState {
         let grid_size = self.document.document_policy.grid_pitch.canvas_grid_size();
         self.document.grid_size = grid_size;
         self.snap_engine.grid_size = grid_size;
+    }
+}
+
+impl SchematicState {
+    pub(crate) fn strip_runtime_for_project_save(&mut self) {
+        self.selection = Default::default();
+        self.wire_drawing = Default::default();
+        self.clipboard = Default::default();
+        self.preview_rotation = Default::default();
+        self.preview_mirror_h = false;
+        self.document.connections.clear();
+        self.is_dirty = false;
     }
 }

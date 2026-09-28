@@ -822,7 +822,7 @@ mod tests {
         for (index, name) in names.iter().enumerate() {
             let id = schematic.add_component(ComponentType::Port, Point::new(index as i32 * 20, 0));
             schematic
-                .document
+                .document_mut_for_test()
                 .components
                 .iter_mut()
                 .find(|component| component.id == id)
@@ -925,7 +925,7 @@ mod tests {
             .get(&key)
             .expect("new schematic view owns an explicit document buffer");
         assert_eq!(
-            document.document.document_policy.property_commit,
+            document.document().document_policy.property_commit,
             PropertyCommitPolicy::ApplyValidFields
         );
     }

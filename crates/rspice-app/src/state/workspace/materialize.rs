@@ -1,4 +1,4 @@
-//! Host source checks and projected cross-sheet geometry.
+//! Host source checks for project hierarchy materialization.
 
 pub(super) use super::hierarchy_resolver::hierarchy_stop_view;
 pub(crate) use super::hierarchy_resolver::metadata_value;
@@ -34,153 +34,6 @@ pub(crate) fn project_veriloga_binding_for_view(
         libraries.catalog(),
         reference,
     )
-}
-
-pub(super) fn translated_point(
-    point: crate::state::Point,
-    delta: crate::state::Point,
-) -> Result<crate::state::Point, crate::state::DesignManagementError> {
-    Ok(crate::state::Point::new(
-        point
-            .x
-            .checked_add(delta.x)
-            .ok_or(crate::state::DesignManagementError::NumericRange(
-                "materialized sheet x coordinate",
-            ))?,
-        point
-            .y
-            .checked_add(delta.y)
-            .ok_or(crate::state::DesignManagementError::NumericRange(
-                "materialized sheet y coordinate",
-            ))?,
-    ))
-}
-
-/// The world point one named terminal of a placed instance sits at, read from
-/// the instance's own durable placement and bound interface.
-///
-/// A bound cell instance names its terminals twice: by interface port where
-/// the binding carries one, and by ordinal position otherwise. A contract may
-/// have been authored against either spelling, so both are matched — against
-/// the same transformed point in both cases, because placement, rotation and
-/// mirror are what put the terminal there.
-fn component_terminal_point(
-    component: &crate::state::Component,
-    terminal_name: &str,
-) -> Option<crate::state::Point> {
-    let interface = component.instance_pin_layout();
-    component
-        .terminal_positions()
-        .into_iter()
-        .enumerate()
-        .find(|(index, (label, _))| {
-            label.eq_ignore_ascii_case(terminal_name)
-                || interface.get(*index).is_some_and(|(port, _)| {
-                    port.as_deref()
-                        .is_some_and(|port| port.eq_ignore_ascii_case(terminal_name))
-                })
-        })
-        .map(|(_, (_, point))| point)
-}
-
-/// Resolve one typed cross-sheet endpoint against the authored topology and
-/// then project it into the endpoint sheet's execution namespace. A wire
-/// point must still lie on its retained conductor; a component terminal must
-/// still sit on one. Stale contracts fail before DRC or netlisting rather
-/// than silently connecting a label to a component origin.
-///
-/// Both endpoints resolve from durable design data alone. The runtime
-/// connection cache is stripped on save and rebuilt only for the buffer the
-/// session has open, so a contract that resolved through it failed for every
-/// cell view that was not the active one.
-pub(super) fn projected_cross_sheet_anchor(
-    source: &SchematicState,
-    projected: &SchematicState,
-    endpoint: &crate::state::CrossSheetPortEndpoint,
-    delta: crate::state::Point,
-) -> Result<crate::state::Point, crate::state::DesignManagementError> {
-    let authored_point = match &endpoint.anchor {
-        crate::state::CrossSheetPortAnchor::WirePoint { wire_id, point } => {
-            let wire = source
-                .document()
-                .wires
-                .iter()
-                .find(|wire| wire.id == *wire_id)
-                .ok_or_else(|| crate::state::DesignManagementError::MissingReference {
-                    domain: "cross-sheet wire anchor",
-                    identity: wire_id.to_string(),
-                })?;
-            if !wire.contains_point(*point) {
-                return Err(crate::state::DesignManagementError::MissingReference {
-                    domain: "cross-sheet wire anchor point",
-                    identity: format!("{}@{},{}", wire_id, point.x, point.y),
-                });
-            }
-            *point
-        }
-        crate::state::CrossSheetPortAnchor::ComponentTerminal {
-            component_id,
-            terminal_name,
-        } => {
-            let component = source
-                .document()
-                .components
-                .iter()
-                .find(|component| component.id == *component_id)
-                .ok_or_else(|| crate::state::DesignManagementError::MissingReference {
-                    domain: "cross-sheet component anchor",
-                    identity: component_id.to_string(),
-                })?;
-            let point = component_terminal_point(component, terminal_name).ok_or_else(|| {
-                crate::state::DesignManagementError::MissingReference {
-                    domain: "cross-sheet component terminal",
-                    identity: format!("{}:{}", component_id, terminal_name),
-                }
-            })?;
-            if !source
-                .document()
-                .wires
-                .iter()
-                .any(|wire| wire.contains_point(point))
-            {
-                return Err(crate::state::DesignManagementError::MissingReference {
-                    domain: "cross-sheet component terminal connection",
-                    identity: format!("{}:{}", component_id, terminal_name),
-                });
-            }
-            point
-        }
-    };
-    let anchor = translated_point(authored_point, delta)?;
-    match &endpoint.anchor {
-        crate::state::CrossSheetPortAnchor::WirePoint { wire_id, .. } => {
-            if !projected
-                .document()
-                .wires
-                .iter()
-                .any(|wire| wire.id == *wire_id && wire.contains_point(anchor))
-            {
-                return Err(crate::state::DesignManagementError::MissingReference {
-                    domain: "projected cross-sheet wire anchor",
-                    identity: wire_id.to_string(),
-                });
-            }
-        }
-        crate::state::CrossSheetPortAnchor::ComponentTerminal { component_id, .. } => {
-            if !projected
-                .document()
-                .components
-                .iter()
-                .any(|component| component.id == *component_id)
-            {
-                return Err(crate::state::DesignManagementError::MissingReference {
-                    domain: "projected cross-sheet component anchor",
-                    identity: component_id.to_string(),
-                });
-            }
-        }
-    }
-    Ok(anchor)
 }
 
 pub(super) fn source_paths_match(left: &Path, right: &Path) -> bool {
@@ -316,7 +169,7 @@ mod tests {
         let moved_wire = schematic
             .add_wire(vec![Point::new(140, 0), Point::new(180, 0)])
             .expect("a conductor reaching the moved anode");
-        schematic.document.connections.clear();
+        schematic.document_mut_for_test().connections.clear();
 
         let main = workspace
             .design_management
@@ -377,7 +230,7 @@ mod tests {
 
         assert_eq!(
             projected
-                .document
+                .document()
                 .net_labels
                 .iter()
                 .filter(|label| label.name == "BIAS")
@@ -399,7 +252,7 @@ mod tests {
         let stationary_wire = schematic
             .add_wire(vec![Point::new(20, 0), Point::new(60, 0)])
             .expect("a conductor reaching the stationary cathode");
-        schematic.document.connections.clear();
+        schematic.document_mut_for_test().connections.clear();
 
         let main = workspace
             .design_management

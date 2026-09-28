@@ -387,25 +387,14 @@ impl RSpiceApp {
             dependencies: fresh_report.dependencies().to_vec(),
             advisory_dispositions: dispositions,
         };
-        let revision_id = match self.state.schematic.append_validated_revision(request) {
-            Ok(id) => id,
+        let (revision_id, original_journal, expected_journal, expected_design_digest) = match self
+            .state
+            .schematic
+            .record_validated_save_revision(request, original_journal, original_dirty)
+        {
+            Ok(recorded) => recorded,
             Err(error) => {
-                self.state.schematic.document.validated_revisions = original_journal;
-                self.state.schematic.is_dirty = original_dirty;
-                self.state.dialogs.check_and_save.validation_error =
-                    Some(format!("Validated revision could not be recorded: {error}"));
-                return;
-            }
-        };
-        let expected_journal = self.state.schematic.document().validated_revisions.clone();
-        let expected_design_digest = match self.state.schematic.validated_design_content_digest() {
-            Ok(digest) => digest,
-            Err(error) => {
-                self.state.schematic.document.validated_revisions = original_journal;
-                self.state.schematic.is_dirty = original_dirty;
-                self.state.dialogs.check_and_save.validation_error = Some(format!(
-                    "The guarded working-design digest could not be recorded: {error}"
-                ));
+                self.state.dialogs.check_and_save.validation_error = Some(error);
                 return;
             }
         };
@@ -636,15 +625,12 @@ fn rollback_exact_journal(
     expected_design_digest: crate::product::ContentDigest,
     original_dirty: bool,
 ) -> Result<(), String> {
-    if &schematic.document().validated_revisions != expected_journal {
-        return Err("its validated revision history changed after publication began".to_owned());
-    }
-    let current_design_digest = schematic
-        .validated_design_content_digest()
-        .map_err(|error| format!("its working-design guard could not be verified: {error}"))?;
-    schematic.document.validated_revisions = original_journal.clone();
-    schematic.is_dirty = original_dirty || current_design_digest != expected_design_digest;
-    Ok(())
+    schematic.rollback_validated_save_journal(
+        original_journal,
+        expected_journal,
+        expected_design_digest,
+        original_dirty,
+    )
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1219,7 +1205,7 @@ mod tests {
     #[test]
     fn rollback_requires_the_exact_post_append_journal() {
         let mut schematic = crate::state::SchematicState::default();
-        let original = schematic.document.validated_revisions.clone();
+        let original = schematic.document().validated_revisions.clone();
         let revision_request = |note: &str, marker: u8| ValidatedRevisionRequest {
             project_id: Uuid::new_v4().to_string(),
             project_revision: u64::from(marker),
@@ -1234,7 +1220,7 @@ mod tests {
         schematic
             .append_validated_revision(revision_request("Validated source", 7))
             .expect("append guarded revision");
-        let expected = schematic.document.validated_revisions.clone();
+        let expected = schematic.document().validated_revisions.clone();
         let expected_design_digest = schematic
             .validated_design_content_digest()
             .expect("design digest");
@@ -1247,12 +1233,12 @@ mod tests {
             false,
         )
         .expect("exact journal rolls back");
-        assert_eq!(schematic.document.validated_revisions, original);
+        assert_eq!(schematic.document().validated_revisions, original);
 
         schematic
             .append_validated_revision(revision_request("Newer revision", 9))
             .expect("append newer revision");
-        let retained = schematic.document.validated_revisions.clone();
+        let retained = schematic.document().validated_revisions.clone();
         assert!(
             rollback_exact_journal(
                 &mut schematic,
@@ -1263,7 +1249,7 @@ mod tests {
             )
             .is_err()
         );
-        assert_eq!(schematic.document.validated_revisions, retained);
+        assert_eq!(schematic.document().validated_revisions, retained);
 
         let guarded_design = schematic
             .validated_design_content_digest()
@@ -1275,6 +1261,6 @@ mod tests {
         rollback_exact_journal(&mut schematic, &original, &retained, guarded_design, false)
             .expect("journal rollback preserves a newer design edit");
         assert!(schematic.is_dirty);
-        assert_eq!(schematic.document.validated_revisions, original);
+        assert_eq!(schematic.document().validated_revisions, original);
     }
 }

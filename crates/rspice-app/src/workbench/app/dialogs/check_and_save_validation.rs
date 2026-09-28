@@ -988,7 +988,7 @@ mod tests {
             .add_component(ComponentType::Resistor, Point::new(40, 40));
         let placed = state
             .schematic
-            .document
+            .document_mut_for_test()
             .components
             .iter_mut()
             .find(|component| component.id == resistor)
@@ -1051,7 +1051,7 @@ mod tests {
         let mut master = crate::state::SchematicState::default();
         let port = master.add_component(ComponentType::Port, Point::new(20, 0));
         master
-            .document
+            .document_mut_for_test()
             .components
             .iter_mut()
             .find(|component| component.id == port)
@@ -1072,7 +1072,7 @@ mod tests {
             .add_library_cell_component(Point::new(100, 0), binding);
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .components
             .iter_mut()
             .find(|component| component.id == instance)
@@ -1121,7 +1121,7 @@ mod tests {
             .add_library_cell_component(Point::new(100, 0), binding);
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .components
             .iter_mut()
             .find(|component| component.id == instance)

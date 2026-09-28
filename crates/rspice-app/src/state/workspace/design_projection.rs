@@ -561,7 +561,10 @@ impl ProjectWorkspace {
             updates.push((key.clone(), replacement));
         }
         for (key, replacement) in updates {
-            replacement.apply_to(&mut projected.get_mut(&key).expect("prepared document").document);
+            projected
+                .get_mut(&key)
+                .expect("prepared document")
+                .apply_variant_replacement(replacement);
         }
         Ok(())
     }

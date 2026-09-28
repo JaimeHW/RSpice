@@ -21,7 +21,7 @@ fn retain_annotation(
             .iter()
             .map(|id| {
                 let component = schematic
-                    .document
+                    .document()
                     .components
                     .iter()
                     .find(|component| component.id == *id)
@@ -56,20 +56,20 @@ fn unapplied_annotation_projects_controlled_source_references_with_names() {
     set_name(&mut active, voltage, "V42");
     let controlled = active.add_component(ComponentType::Cccs, Point::new(500, 0));
     active
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == controlled)
         .unwrap()
         .params = "vref=V42 gain=2".to_owned();
     retain_annotation(&mut workspace, &reference, &active, &[voltage]);
-    let original = crate::state::SchematicSnapshot::capture(&active.document);
+    let original = crate::state::SchematicSnapshot::capture(&active.document());
     let catalog = workspace.design_management.clone();
     let projection = projection_of(&workspace, &libraries, &reference, &active);
     let projected = projection.root_schematic().unwrap();
     assert_eq!(
         projected
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == voltage)
@@ -78,7 +78,7 @@ fn unapplied_annotation_projects_controlled_source_references_with_names() {
         "V1"
     );
     let controlled = projected
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == controlled)
@@ -86,7 +86,7 @@ fn unapplied_annotation_projects_controlled_source_references_with_names() {
     let parameters = crate::state::parse_replacement_parameters_strict(&controlled.params).unwrap();
     assert_eq!(parameters["vref"], "V1");
     assert_eq!(parameters["gain"], "2");
-    assert!(original.is_equal_document(&active.document));
+    assert!(original.is_equal_document(&active.document()));
     assert_eq!(workspace.design_management, catalog);
     assert!(Arc::ptr_eq(
         &projection,
@@ -94,8 +94,8 @@ fn unapplied_annotation_projects_controlled_source_references_with_names() {
     ));
     let repeated = projection_of(&workspace, &libraries, &reference, projected);
     assert_eq!(
-        repeated.root_schematic().unwrap().document.components,
-        projected.document.components
+        repeated.root_schematic().unwrap().document().components,
+        projected.document().components
     );
 }
 
@@ -107,7 +107,7 @@ fn projection_resolves_swapped_windings_from_the_original_names() {
     set_name(&mut active, first, "L1");
     set_name(&mut active, second, "L2");
     active
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == first)
@@ -115,16 +115,16 @@ fn projection_resolves_swapped_windings_from_the_original_names() {
         .params = "coupled_to=L2 coupling_factor=-0.5".to_owned();
     let coupling = active.add_component(ComponentType::CoupledInductor, Point::new(800, 0));
     active
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == coupling)
         .unwrap()
         .params = "inductors='l1, L2'".to_owned();
     retain_annotation(&mut workspace, &reference, &active, &[first, second]);
-    let original = crate::state::SchematicSnapshot::capture(&active.document);
+    let original = crate::state::SchematicSnapshot::capture(&active.document());
     let projection = projection_of(&workspace, &libraries, &reference, &active);
-    let components = &projection.root_schematic().unwrap().document.components;
+    let components = &projection.root_schematic().unwrap().document().components;
     let first = components
         .iter()
         .find(|component| component.id == first)
@@ -149,7 +149,7 @@ fn projection_resolves_swapped_windings_from_the_original_names() {
         crate::state::parse_params_string(&coupling.params)["inductors"],
         "L2, L1"
     );
-    assert!(original.is_equal_document(&active.document));
+    assert!(original.is_equal_document(&active.document()));
 }
 
 #[test]
@@ -164,7 +164,7 @@ fn a_failed_annotation_projection_leaves_the_source_and_cached_projection_intact
         if malformed {
             let dependent = active.add_component(ComponentType::Cccs, Point::new(500, 0));
             active
-                .document
+                .document_mut_for_test()
                 .components
                 .iter_mut()
                 .find(|component| component.id == dependent)
@@ -174,14 +174,14 @@ fn a_failed_annotation_projection_leaves_the_source_and_cached_projection_intact
             let collision = active.add_component(ComponentType::VoltageSource, Point::new(500, 0));
             set_name(&mut active, collision, "V1");
         }
-        let original = crate::state::SchematicSnapshot::capture(&active.document);
+        let original = crate::state::SchematicSnapshot::capture(&active.document());
         let catalog = workspace.design_management.clone();
         let error = workspace
             .design_projection(&libraries, &reference, &active)
             .unwrap_err();
         assert!(error.to_string().contains("reference annotation"));
         assert!(error.to_string().contains(&reference.key()));
-        assert!(original.is_equal_document(&active.document));
+        assert!(original.is_equal_document(&active.document()));
         assert_eq!(workspace.design_management, catalog);
         assert!(Arc::ptr_eq(
             &cached,
@@ -200,7 +200,7 @@ fn omitted_variant_components_do_not_participate_in_annotation_references() {
     set_name(&mut active, voltage, "V42");
     let omitted = active.add_component(ComponentType::Cccs, Point::new(500, 0));
     active
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == omitted)
@@ -229,7 +229,7 @@ fn omitted_variant_components_do_not_participate_in_annotation_references() {
         .set_active(variant)
         .unwrap();
     let projection = projection_of(&workspace, &libraries, &reference, &active);
-    let components = &projection.root_schematic().unwrap().document.components;
+    let components = &projection.root_schematic().unwrap().document().components;
     assert!(!components.iter().any(|component| component.id == omitted));
     assert_eq!(
         components
@@ -241,7 +241,7 @@ fn omitted_variant_components_do_not_participate_in_annotation_references() {
     );
     assert!(
         active
-            .document
+            .document()
             .components
             .iter()
             .any(|component| component.id == omitted)

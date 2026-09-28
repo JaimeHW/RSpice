@@ -123,7 +123,7 @@ mod tests {
         let viewport = viewport(1.0);
         let pointer = Pos2::new(17.0, 23.0);
         let mut state = AppState::default();
-        state.schematic.document.grid_size = 10;
+        state.schematic.document_mut_for_test().grid_size = 10;
 
         state.schematic.snap_engine.enabled = false;
         let disabled = resolve_grid_pointer(&state, &viewport, pointer);

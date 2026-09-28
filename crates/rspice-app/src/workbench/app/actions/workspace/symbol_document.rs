@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
 use crate::state::{
     CellViewRef, ModelBoundSymbolDefinition, PinFindingKind, PortSpec,
-    SYMBOL_DOCUMENT_METADATA_KEY, SchematicState, SymbolDocument, SymbolEditorMetadata,
+    SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
 };
 use crate::workbench::app_state::AppState;
 use crate::workbench::{SymbolCommitIntent, SymbolDocumentSnapshot};
@@ -145,9 +145,10 @@ impl AppState {
                 &snapshot.renames,
             );
             for schematic in self.workspace.schematic_buffers.values_mut() {
-                remap_symbol_instance_wires(schematic, &reference, &pin_remaps);
+                schematic.remap_symbol_instance_wires(&reference, &pin_remaps);
             }
-            remap_symbol_instance_wires(&mut self.schematic, &reference, &pin_remaps);
+            self.schematic
+                .remap_symbol_instance_wires(&reference, &pin_remaps);
         }
         self.apply_symbol_pin_renames(&reference, &snapshot.renames);
         self.workspace.set_active_dirty(true);
@@ -178,9 +179,10 @@ impl AppState {
             let pin_remaps =
                 symbol_pin_position_remaps(&previous_document, document, &BTreeMap::new());
             for schematic in self.workspace.schematic_buffers.values_mut() {
-                remap_symbol_instance_wires(schematic, &reference, &pin_remaps);
+                schematic.remap_symbol_instance_wires(&reference, &pin_remaps);
             }
-            remap_symbol_instance_wires(&mut self.schematic, &reference, &pin_remaps);
+            self.schematic
+                .remap_symbol_instance_wires(&reference, &pin_remaps);
         }
         self.workspace.set_active_dirty(true);
         Ok(())
@@ -226,9 +228,10 @@ impl AppState {
             let pin_remaps =
                 symbol_pin_position_remaps(&previous_document, document, &intent.renames);
             for schematic in self.workspace.schematic_buffers.values_mut() {
-                remap_symbol_instance_wires(schematic, &reference, &pin_remaps);
+                schematic.remap_symbol_instance_wires(&reference, &pin_remaps);
             }
-            remap_symbol_instance_wires(&mut self.schematic, &reference, &pin_remaps);
+            self.schematic
+                .remap_symbol_instance_wires(&reference, &pin_remaps);
         }
         let renamed = self.apply_symbol_pin_renames(&reference, &intent.renames);
         if renamed > 0 {
@@ -403,9 +406,11 @@ impl AppState {
             .collect();
         let mut renamed = 0;
         for schematic in self.workspace.schematic_buffers.values_mut() {
-            renamed += rename_instance_terminals(schematic, reference, &lowered);
+            renamed += schematic.rename_instance_terminals(reference, &lowered);
         }
-        renamed += rename_instance_terminals(&mut self.schematic, reference, &lowered);
+        renamed += self
+            .schematic
+            .rename_instance_terminals(reference, &lowered);
         renamed
     }
 
@@ -524,38 +529,4 @@ impl AppState {
             Err(error) => self.push_user_message(ConsoleMessage::warning(error)),
         }
     }
-}
-
-fn remap_symbol_instance_wires(
-    schematic: &mut SchematicState,
-    reference: &CellViewRef,
-    pin_remaps: &std::collections::HashMap<String, (crate::state::Point, crate::state::Point)>,
-) -> bool {
-    if !rspice_design::symbol::edit::remap_symbol_instance_wires(
-        &mut schematic.document,
-        reference,
-        pin_remaps,
-    ) {
-        return false;
-    }
-    schematic.is_dirty = true;
-    schematic.bump_topology_version();
-    true
-}
-
-fn rename_instance_terminals(
-    schematic: &mut SchematicState,
-    reference: &CellViewRef,
-    renames: &BTreeMap<String, String>,
-) -> usize {
-    let renamed = rspice_design::symbol::edit::rename_instance_terminals(
-        &mut schematic.document,
-        reference,
-        renames,
-    );
-    if renamed > 0 {
-        schematic.is_dirty = true;
-        schematic.bump_topology_version();
-    }
-    renamed
 }

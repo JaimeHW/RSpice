@@ -2372,13 +2372,7 @@ fn sanitize_library_view_runtime_state(libraries: &mut crate::state::LibraryMana
 }
 
 fn strip_schematic_runtime_state(schematic: &mut crate::state::SchematicState) {
-    schematic.selection = Default::default();
-    schematic.wire_drawing = Default::default();
-    schematic.clipboard = Default::default();
-    schematic.preview_rotation = Default::default();
-    schematic.preview_mirror_h = false;
-    schematic.document.connections.clear();
-    schematic.is_dirty = false;
+    schematic.strip_runtime_for_project_save();
 }
 
 #[cfg(test)]

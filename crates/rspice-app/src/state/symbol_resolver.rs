@@ -284,7 +284,7 @@ mod tests {
         for (idx, (name, _direction)) in ports.iter().enumerate() {
             let id = schematic.add_component(ComponentType::Port, Point::new(idx as i32 * 40, 0));
             schematic
-                .document
+                .document_mut_for_test()
                 .components
                 .iter_mut()
                 .find(|c| c.id == id)

@@ -296,17 +296,7 @@ fn apply_commit(state: &mut AppState, commit: NetLabelPlacementCommit) -> Result
         "place net label"
     };
     let changed = state.schematic.with_undo(undo_label, |schematic| {
-        let id = schematic.add_net_label(commit.anchor, commit.name);
-        // Inside the same transaction, so no recorded state ever holds the
-        // connector as an ordinary local label.
-        if let Some(label) = schematic
-            .document
-            .net_labels
-            .iter_mut()
-            .find(|label| label.id == id)
-        {
-            label.kind = kind;
-        }
+        let id = schematic.add_net_label_with_kind(commit.anchor, commit.name, kind);
         placed_id = Some(id);
     });
     match (changed, placed_id) {
@@ -518,7 +508,7 @@ mod tests {
             );
             assert_eq!(app.state.dialogs.net_label_placement.name, "BUSY");
             assert!(app.state.dialogs.net_label_placement.dirty);
-            assert!(app.state.schematic.document.net_labels.is_empty());
+            assert!(app.state.schematic.document().net_labels.is_empty());
         }
     }
 
@@ -527,7 +517,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let topology_before = app.state.schematic.topology_version();
         open_at(&mut app, Point::new(40, -20));
-        assert!(app.state.schematic.document.net_labels.is_empty());
+        assert!(app.state.schematic.document().net_labels.is_empty());
         assert!(!app.state.schematic.can_undo());
         assert_eq!(app.state.schematic.topology_version(), topology_before);
 
@@ -537,13 +527,13 @@ mod tests {
         };
         let id = apply_commit(&mut app.state, *commit).expect("placement");
         assert_eq!(
-            app.state.schematic.document.net_labels,
+            app.state.schematic.document().net_labels,
             vec![NetLabel::new(id, Point::new(40, -20), "DATA[7]")]
         );
         assert!(app.state.schematic.can_undo());
         assert_eq!(app.state.schematic.tool, Tool::Label);
         assert!(app.state.schematic.undo());
-        assert!(app.state.schematic.document.net_labels.is_empty());
+        assert!(app.state.schematic.document().net_labels.is_empty());
         assert!(!app.state.schematic.can_undo());
     }
 
@@ -556,7 +546,7 @@ mod tests {
             validate_draft(&app.state),
             DraftValidation::Invalid(_)
         ));
-        assert!(app.state.schematic.document.net_labels.is_empty());
+        assert!(app.state.schematic.document().net_labels.is_empty());
         assert!(!app.state.schematic.can_undo());
 
         app.state.dialogs.net_label_placement.name = "DATA[7".to_owned();
@@ -564,7 +554,7 @@ mod tests {
             validate_draft(&app.state),
             DraftValidation::Invalid(_)
         ));
-        assert!(app.state.schematic.document.net_labels.is_empty());
+        assert!(app.state.schematic.document().net_labels.is_empty());
         assert!(!app.state.schematic.can_undo());
     }
 
@@ -578,7 +568,7 @@ mod tests {
         assert!(app.state.dialogs.net_label_placement.open);
         assert!(app.state.dialogs.net_label_placement.attempt_close());
         assert!(!app.state.dialogs.net_label_placement.open);
-        assert!(app.state.schematic.document.net_labels.is_empty());
+        assert!(app.state.schematic.document().net_labels.is_empty());
         assert!(!app.state.schematic.can_undo());
         assert_eq!(app.state.schematic.tool, Tool::Label);
     }
@@ -603,7 +593,7 @@ mod tests {
             DraftValidation::Invalid(_)
         ));
         assert!(apply_commit(&mut app.state, *commit).is_err());
-        assert!(app.state.schematic.document.net_labels.is_empty());
+        assert!(app.state.schematic.document().net_labels.is_empty());
         assert!(!app.state.schematic.can_undo());
     }
 
@@ -622,7 +612,7 @@ mod tests {
             app.render_net_label_dialog(ctx)
         });
         assert!(!app.state.dialogs.net_label_placement.open);
-        assert_eq!(app.state.schematic.document.net_labels[0].name, "afe_out");
+        assert_eq!(app.state.schematic.document().net_labels[0].name, "afe_out");
         assert!(app.state.schematic.can_undo());
 
         open_at(&mut app, Point::new(60, 50));
@@ -640,7 +630,7 @@ mod tests {
             app.render_net_label_dialog(ctx)
         });
         assert!(!app.state.dialogs.net_label_placement.open);
-        assert_eq!(app.state.schematic.document.net_labels.len(), 1);
+        assert_eq!(app.state.schematic.document().net_labels.len(), 1);
     }
 
     #[test]
@@ -661,9 +651,9 @@ mod tests {
             .schematic_buffers
             .get(&key)
             .expect("active schematic is retained by the project workspace");
-        assert_eq!(retained.document.net_labels.len(), 1);
-        assert_eq!(retained.document.net_labels[0].pos, Point::new(80, 30));
-        assert_eq!(retained.document.net_labels[0].name, "project_net");
+        assert_eq!(retained.document().net_labels.len(), 1);
+        assert_eq!(retained.document().net_labels[0].pos, Point::new(80, 30));
+        assert_eq!(retained.document().net_labels[0].name, "project_net");
     }
 
     #[test]
@@ -687,7 +677,7 @@ mod tests {
         let id = apply_commit(&mut app.state, *commit).expect("placement");
 
         assert_eq!(
-            app.state.schematic.document.net_labels,
+            app.state.schematic.document().net_labels,
             vec![NetLabel::off_sheet(
                 id,
                 Point::new(60, -40),
@@ -701,7 +691,7 @@ mod tests {
             "history must name what was placed"
         );
         assert!(app.state.schematic.undo());
-        assert!(app.state.schematic.document.net_labels.is_empty());
+        assert!(app.state.schematic.document().net_labels.is_empty());
 
         // The plain label tool still publishes a local label through the same
         // transaction. The primary action closes the dialog after a commit,
@@ -729,19 +719,25 @@ mod tests {
             .expect("second sheet conductor");
         assert_ne!(near, far);
         let near_label = schematic.next_id();
-        schematic.document.net_labels.push(NetLabel::off_sheet(
-            near_label,
-            Point::origin(),
-            "BIAS",
-            CrossSheetPortDirection::Output,
-        ));
+        schematic
+            .document_mut_for_test()
+            .net_labels
+            .push(NetLabel::off_sheet(
+                near_label,
+                Point::origin(),
+                "BIAS",
+                CrossSheetPortDirection::Output,
+            ));
         let far_label = schematic.next_id();
-        schematic.document.net_labels.push(NetLabel::off_sheet(
-            far_label,
-            Point::new(1_000_000, 0),
-            "BIAS",
-            CrossSheetPortDirection::Input,
-        ));
+        schematic
+            .document_mut_for_test()
+            .net_labels
+            .push(NetLabel::off_sheet(
+                far_label,
+                Point::new(1_000_000, 0),
+                "BIAS",
+                CrossSheetPortDirection::Input,
+            ));
 
         let joined: Vec<_> = crate::simulation::netlist_gen::design_nets(&schematic)
             .into_iter()

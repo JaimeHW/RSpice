@@ -10,7 +10,7 @@ fn global_app_resolver_uses_exact_active_design_registry_identity() {
     let mut state = AppState::default();
     state
         .schematic
-        .document
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
     let reference = state.workspace.active_view.clone();
@@ -125,7 +125,7 @@ fn prepared_resolution_is_send_owned_and_snapshot_isolated() {
     let mut state = AppState::default();
     state
         .schematic
-        .document
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
     let reference = state.workspace.active_view.clone();
@@ -144,7 +144,7 @@ fn prepared_resolution_is_send_owned_and_snapshot_isolated() {
     let prepared =
         prepare_retained_hardcopy_resolution(&state, &source_key, HardcopyScope::ActiveDocument)
             .unwrap();
-    state.schematic.document.wires[0].points[1].x = 9_999;
+    state.schematic.document_mut_for_test().wires[0].points[1].x = 9_999;
     let worker_resolved = prepared.resolve_owned().unwrap();
     assert_eq!(worker_resolved, synchronous);
 }
@@ -154,7 +154,7 @@ fn prepared_design_worker_fixture() -> (PreparedRetainedHardcopyResolution, Reso
     let mut state = AppState::default();
     state
         .schematic
-        .document
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(771, Point::new(-4, 3), Point::new(29, 3)));
     let active_view = state.workspace.active_view.clone();
@@ -266,7 +266,7 @@ fn enumeration_exposes_all_sheets_exact_members_and_available_named_sets() {
     let mut state = AppState::default();
     state
         .schematic
-        .document
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(91, Point::new(0, 0), Point::new(20, 0)));
     let reference = state.workspace.active_view.clone();
@@ -371,7 +371,7 @@ fn global_app_resolver_does_not_guess_a_background_design_document() {
     let mut state = AppState::default();
     state
         .schematic
-        .document
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(1, Point::new(0, 0), Point::new(10, 0)));
     let error = resolve_active_app_hardcopy_source(&state).unwrap_err();

@@ -372,14 +372,18 @@ mod tests {
     #[test]
     fn hidden_identity_anchor_is_suppressed_but_unowned_point_remains_visible() {
         let mut state = state_with_hidden_object(20);
-        state.schematic.document.components.push(Component::new(
-            20,
-            ComponentType::Resistor,
-            Point::new(10, 10),
-        ));
         state
             .schematic
-            .document
+            .document_mut_for_test()
+            .components
+            .push(Component::new(
+                20,
+                ComponentType::Resistor,
+                Point::new(10, 10),
+            ));
+        state
+            .schematic
+            .document_mut_for_test()
             .wires
             .push(Wire::segment(20, Point::origin(), Point::new(20, 0)));
 

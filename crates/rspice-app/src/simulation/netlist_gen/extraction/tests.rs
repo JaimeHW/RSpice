@@ -15,7 +15,7 @@ use rspice_design::connectivity::{
 fn named_port(schematic: &mut SchematicState, at: Point, name: &str) {
     let id = schematic.add_component(ComponentType::Port, at);
     schematic
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == id)
@@ -48,21 +48,23 @@ fn net_identity_folds_case_under_every_policy() {
         NetNamingPolicy::SpiceCompatibleRelaxed,
     ] {
         let mut schematic = SchematicState::default();
-        schematic.document.document_policy.net_naming = policy;
+        schematic.document_mut_for_test().document_policy.net_naming = policy;
+        schematic.document_mut_for_test().wires.push(Wire::segment(
+            1,
+            Point::new(0, 0),
+            Point::new(40, 0),
+        ));
+        schematic.document_mut_for_test().wires.push(Wire::segment(
+            2,
+            Point::new(0, 40),
+            Point::new(40, 40),
+        ));
         schematic
-            .document
-            .wires
-            .push(Wire::segment(1, Point::new(0, 0), Point::new(40, 0)));
-        schematic
-            .document
-            .wires
-            .push(Wire::segment(2, Point::new(0, 40), Point::new(40, 40)));
-        schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(1, Point::new(20, 0), "Out"));
         schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(2, Point::new(20, 40), "out"));
 
@@ -86,10 +88,11 @@ fn one_conductor_binds_its_terminals_and_a_lone_terminal_stands_alone() {
     let source = schematic.add_component(ComponentType::VoltageSource, Point::new(0, 0));
     let resistor = schematic.add_component(ComponentType::Resistor, Point::new(60, -20));
     schematic.add_component(ComponentType::Ground, Point::new(0, 30));
-    schematic
-        .document
-        .wires
-        .push(Wire::segment(1, Point::new(0, -20), Point::new(40, -20)));
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        1,
+        Point::new(0, -20),
+        Point::new(40, -20),
+    ));
 
     let extracted = extract(&schematic, None);
 
@@ -122,7 +125,7 @@ fn a_terminal_is_attached_by_a_conductor_a_twin_or_a_label() {
     let left = schematic.add_component(ComponentType::Resistor, Point::new(20, 0));
     let right = schematic.add_component(ComponentType::Resistor, Point::new(60, 0));
     schematic
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(1, Point::new(0, 0), "bias"));
 
@@ -143,14 +146,16 @@ fn a_terminal_is_attached_by_a_conductor_a_twin_or_a_label() {
 #[test]
 fn an_unmarked_crossing_stays_disconnected_until_a_junction_marks_it() {
     let mut schematic = SchematicState::default();
-    schematic
-        .document
-        .wires
-        .push(Wire::segment(1, Point::new(0, -100), Point::new(0, 100)));
-    schematic
-        .document
-        .wires
-        .push(Wire::segment(2, Point::new(-100, 0), Point::new(100, 0)));
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        1,
+        Point::new(0, -100),
+        Point::new(0, 100),
+    ));
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        2,
+        Point::new(-100, 0),
+        Point::new(100, 0),
+    ));
 
     assert_eq!(extract(&schematic, None).nets.len(), 2);
 
@@ -161,14 +166,16 @@ fn an_unmarked_crossing_stays_disconnected_until_a_junction_marks_it() {
 #[test]
 fn an_endpoint_meeting_a_segment_connects_without_a_junction() {
     let mut schematic = SchematicState::default();
-    schematic
-        .document
-        .wires
-        .push(Wire::segment(1, Point::new(-100, 0), Point::new(100, 0)));
-    schematic
-        .document
-        .wires
-        .push(Wire::segment(2, Point::new(0, 0), Point::new(0, 100)));
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        1,
+        Point::new(-100, 0),
+        Point::new(100, 0),
+    ));
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        2,
+        Point::new(0, 0),
+        Point::new(0, 100),
+    ));
 
     assert_eq!(extract(&schematic, None).nets.len(), 1);
 }
@@ -179,13 +186,13 @@ fn an_endpoint_meeting_a_segment_connects_without_a_junction() {
 #[test]
 fn a_full_range_diagonal_keeps_its_exact_attachments() {
     let mut schematic = SchematicState::default();
-    schematic.document.wires.push(Wire::segment(
+    schematic.document_mut_for_test().wires.push(Wire::segment(
         1,
         Point::new(i32::MIN, i32::MIN),
         Point::new(i32::MAX, i32::MAX),
     ));
     schematic
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(1, Point::origin(), "diag"));
 
@@ -198,16 +205,17 @@ fn a_full_range_diagonal_keeps_its_exact_attachments() {
 #[test]
 fn a_label_on_no_conductor_is_reported_as_an_orphan() {
     let mut schematic = SchematicState::default();
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        1,
+        Point::new(0, 0),
+        Point::new(20, 0),
+    ));
     schematic
-        .document
-        .wires
-        .push(Wire::segment(1, Point::new(0, 0), Point::new(20, 0)));
-    schematic
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(1, Point::new(10, 0), "mid"));
     schematic
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(2, Point::new(100, 100), "orphan"));
 
@@ -231,13 +239,14 @@ fn a_label_on_no_conductor_is_reported_as_an_orphan() {
 #[test]
 fn an_interface_port_outranks_a_label() {
     let mut schematic = SchematicState::default();
-    schematic
-        .document
-        .wires
-        .push(Wire::segment(1, Point::new(0, 0), Point::new(60, 0)));
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        1,
+        Point::new(0, 0),
+        Point::new(60, 0),
+    ));
     named_port(&mut schematic, Point::new(10, 0), "vin");
     schematic
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(1, Point::new(40, 0), "sense"));
 
@@ -249,16 +258,17 @@ fn an_interface_port_outranks_a_label() {
 #[test]
 fn the_lowest_numbered_label_wins_a_conflict() {
     let mut schematic = SchematicState::default();
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        1,
+        Point::new(0, 0),
+        Point::new(60, 0),
+    ));
     schematic
-        .document
-        .wires
-        .push(Wire::segment(1, Point::new(0, 0), Point::new(60, 0)));
-    schematic
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(7, Point::new(40, 0), "late"));
     schematic
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(2, Point::new(20, 0), "early"));
 
@@ -276,12 +286,13 @@ fn the_lowest_numbered_label_wins_a_conflict() {
 #[test]
 fn a_ground_symbol_outranks_every_other_name() {
     let mut schematic = SchematicState::default();
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        1,
+        Point::new(0, 0),
+        Point::new(60, 0),
+    ));
     schematic
-        .document
-        .wires
-        .push(Wire::segment(1, Point::new(0, 0), Point::new(60, 0)));
-    schematic
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(1, Point::new(20, 0), "sense"));
     schematic.add_component(ComponentType::Ground, Point::new(0, 10));
@@ -301,10 +312,11 @@ fn a_typed_bus_member_outranks_a_disagreeing_label() {
             Some(BusDeclaration::parse("DATA[7:0]").expect("bus declaration")),
         )
         .expect("bus geometry");
-    schematic
-        .document
-        .wires
-        .push(Wire::segment(100, Point::new(5, 10), Point::new(20, 10)));
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        100,
+        Point::new(5, 10),
+        Point::new(20, 10),
+    ));
     schematic
         .place_bus_tap(
             bus,
@@ -315,7 +327,7 @@ fn a_typed_bus_member_outranks_a_disagreeing_label() {
         )
         .expect("tap geometry");
     schematic
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(101, Point::new(15, 10), "foo"));
 

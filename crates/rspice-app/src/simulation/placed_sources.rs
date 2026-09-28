@@ -1456,7 +1456,7 @@ mod tests {
 
     fn schematic_with(components: Vec<Component>) -> SchematicState {
         let mut schematic = SchematicState::default();
-        schematic.document.components = components;
+        schematic.document_mut_for_test().components = components;
         schematic
     }
 
@@ -1581,7 +1581,9 @@ mod tests {
         let listed = placed_rf_ports(&schematic, None);
         assert_eq!(
             listed[0].nets.len(),
-            schematic.document.components[0].terminal_positions().len()
+            schematic.document().components[0]
+                .terminal_positions()
+                .len()
         );
         assert!(
             listed[0].nets.iter().all(|net| !net.is_empty()),
@@ -1788,7 +1790,9 @@ mod tests {
         let pins = listed[0].nets.len();
         assert_eq!(
             pins,
-            schematic.document.components[0].terminal_positions().len()
+            schematic.document().components[0]
+                .terminal_positions()
+                .len()
         );
         assert!(
             listed[0].nets.iter().all(|net| !net.is_empty()),
@@ -2222,12 +2226,17 @@ mod tests {
         #[test]
         fn a_source_inside_a_child_master_is_listed_under_the_occurrence_that_reaches_it() {
             let mut root = SchematicState::default();
-            root.document
+            root.document_mut_for_test().components.push(source(
+                1,
+                ComponentType::VoltageSource,
+                "VDD",
+                "",
+            ));
+            root.document_mut_for_test()
                 .components
-                .push(source(1, ComponentType::VoltageSource, "VDD", ""));
-            root.document.components.push(instance(2, "XAFE", "afe"));
+                .push(instance(2, "XAFE", "afe"));
             let mut child = SchematicState::default();
-            child.document.components.push(source(
+            child.document_mut_for_test().components.push(source(
                 10,
                 ComponentType::VoltageSourceSin,
                 "V1",
@@ -2253,16 +2262,23 @@ mod tests {
         #[test]
         fn one_drawn_source_reached_twice_is_two_rows() {
             let mut root = SchematicState::default();
-            root.document.components.push(instance(1, "XA", "afe"));
-            root.document.components.push(instance(2, "XB", "afe"));
+            root.document_mut_for_test()
+                .components
+                .push(instance(1, "XA", "afe"));
+            root.document_mut_for_test()
+                .components
+                .push(instance(2, "XB", "afe"));
             let mut child = SchematicState::default();
-            child.document.components.push(source(
+            child.document_mut_for_test().components.push(source(
                 10,
                 ComponentType::VoltageSourceSin,
                 "V1",
                 "freq=1k",
             ));
-            child.document.components.push(port(11, "P1", "port=1"));
+            child
+                .document_mut_for_test()
+                .components
+                .push(port(11, "P1", "port=1"));
 
             let design = Design::new(root, &[("afe", child)]);
 
@@ -2292,9 +2308,11 @@ mod tests {
         #[test]
         fn a_child_master_source_is_read_by_the_plans_whole_design_analyses() {
             let mut root = SchematicState::default();
-            root.document.components.push(instance(1, "XAFE", "afe"));
+            root.document_mut_for_test()
+                .components
+                .push(instance(1, "XAFE", "afe"));
             let mut child = SchematicState::default();
-            child.document.components.push(source(
+            child.document_mut_for_test().components.push(source(
                 10,
                 ComponentType::VoltageSourcePulse,
                 "V1",
@@ -2322,15 +2340,18 @@ mod tests {
         #[test]
         fn a_master_that_places_nothing_contributes_nothing() {
             let mut root = SchematicState::default();
-            root.document
+            root.document_mut_for_test()
                 .components
                 .push(instance(1, "XEMPTY", "empty"));
-            root.document
+            root.document_mut_for_test()
                 .components
                 .push(instance(2, "XGONE", "absent"));
-            root.document
-                .components
-                .push(source(3, ComponentType::VoltageSource, "V1", ""));
+            root.document_mut_for_test().components.push(source(
+                3,
+                ComponentType::VoltageSource,
+                "V1",
+                "",
+            ));
 
             let design = Design::new(root, &[("empty", SchematicState::default())]);
 
@@ -2350,10 +2371,14 @@ mod tests {
         #[test]
         fn the_whole_design_walk_is_not_repeated_for_one_projection() {
             let mut root = SchematicState::default();
-            root.document.components.push(instance(1, "XA", "afe"));
-            root.document.components.push(instance(2, "XB", "afe"));
+            root.document_mut_for_test()
+                .components
+                .push(instance(1, "XA", "afe"));
+            root.document_mut_for_test()
+                .components
+                .push(instance(2, "XB", "afe"));
             let mut child = SchematicState::default();
-            child.document.components.push(source(
+            child.document_mut_for_test().components.push(source(
                 10,
                 ComponentType::VoltageSourceSin,
                 "V1",
@@ -2396,7 +2421,7 @@ mod tests {
             // digests differently is a different projection, and a different
             // projection is a different answer.
             let mut edited = design;
-            edited.root.document.components.push(source(
+            edited.root.document_mut_for_test().components.push(source(
                 4,
                 ComponentType::VoltageSource,
                 "VDD",
@@ -2438,7 +2463,7 @@ mod tests {
             use crate::state::stimulus_library::draft::DefinitionDraft;
 
             let mut root = SchematicState::default();
-            root.document.components.push(source(
+            root.document_mut_for_test().components.push(source(
                 1,
                 ComponentType::VoltageSourceSin,
                 "V1",

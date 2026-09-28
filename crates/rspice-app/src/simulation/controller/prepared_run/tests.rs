@@ -605,7 +605,7 @@ fn frozen_hierarchy_rejects_stale_instance_model_library_metadata() {
         .add_component(ComponentType::Diode, Point::new(160, 80));
     let component = state
         .schematic
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == id)
@@ -632,7 +632,7 @@ fn frozen_hierarchy_rejects_stale_instance_model_library_metadata() {
 
     state
         .schematic
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == id)
@@ -821,7 +821,7 @@ fn prepared_snapshot_detects_non_topology_source_mutation() {
         .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
         .expect("prepare first snapshot");
     let topology = state.schematic.topology_version();
-    state.schematic.document.components[0].value = "2k".to_owned();
+    state.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
     let changed = controller
         .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
         .expect("prepare changed snapshot");
@@ -2261,7 +2261,7 @@ fn a_generated_run_set_names_its_unresolved_device_models() {
     let mut state = technology_free_runnable_state();
     let bound = state
         .schematic
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.name == "R1")

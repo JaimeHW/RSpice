@@ -54,6 +54,23 @@ impl SchematicState {
         self.bump_topology_version();
         id
     }
+    pub(crate) fn add_net_label_with_kind(
+        &mut self,
+        pos: Point,
+        name: String,
+        kind: crate::state::NetLabelKind,
+    ) -> u64 {
+        let id = self.add_net_label(pos, name);
+        if let Some(label) = self
+            .document
+            .net_labels
+            .iter_mut()
+            .find(|label| label.id == id)
+        {
+            label.kind = kind;
+        }
+        id
+    }
 }
 
 #[cfg(test)]

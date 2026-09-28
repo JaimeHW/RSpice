@@ -66,7 +66,10 @@ fn the_bridge_writes_the_card_the_generated_deck_carries() {
     source.name = "V1".to_owned();
     source.value = "0".to_owned();
     source.params = "v2=5 tr=1n tf=1n pw=1u per=2u".to_owned();
-    schematic.document.components.push(source.clone());
+    schematic
+        .document_mut_for_test()
+        .components
+        .push(source.clone());
 
     let generator_card = source_card_text(&source, ["in", "0"]).expect("card");
     assert_eq!(generator_card, "V1 in 0 PULSE(0 5 0 1n 1n 1u 2u)");
@@ -75,7 +78,7 @@ fn the_bridge_writes_the_card_the_generated_deck_carries() {
     // the nets differ, because the sheet resolves those and the bridge names
     // them.
     schematic
-        .document
+        .document_mut_for_test()
         .wires
         .push(Wire::new(1, vec![Point::new(4, 4), Point::new(8, 4)]));
     let deck = crate::simulation::netlist_gen::NetlistGenerator::new(&schematic).generate();

@@ -195,7 +195,7 @@ mod tests {
         let b = Point::new(40, 0);
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .wires
             .push(Wire::new(91, vec![a, b]));
         state.simulation.cross_probe.update(

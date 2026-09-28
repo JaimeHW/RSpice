@@ -58,7 +58,7 @@ fn state_with_selected_source(library_edits: usize, adopt: bool) -> AppState {
     use crate::state::stimulus_library::definition::StimulusDefinition;
 
     let mut state = AppState::default();
-    state.schematic.document.components.clear();
+    state.schematic.document_mut_for_test().components.clear();
     let mut definition = StimulusDefinition::new("sensor_drive", ComponentType::VoltageSourceSin)
         .expect("a definition");
     definition.value = "0".to_owned();
@@ -84,7 +84,11 @@ fn state_with_selected_source(library_edits: usize, adopt: bool) -> AppState {
         draft.edit(|working| working.params = format!("va=1 freq={}k", edit + 2));
         state.workspace.stimulus_library.apply(&mut draft);
     }
-    state.schematic.document.components.push(source);
+    state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(source);
     state.schematic.selection.select_component(7);
     state
 }
@@ -199,7 +203,7 @@ fn a_stimulus_verb_goes_where_component_properties_sends_it() {
     let mut behind = state_with_selected_source(1, true);
     assert!(action_availability(ContextAction::ReadoptStimulus, &behind).0);
     stimulus::execute(ContextAction::ReadoptStimulus, &mut behind);
-    let source = &behind.schematic.document.components[0];
+    let source = &behind.schematic.document().components[0];
     assert!(source.params.contains("freq=2k"), "{}", source.params);
     assert_eq!(
         behind
@@ -233,13 +237,17 @@ fn a_stimulus_verb_goes_where_component_properties_sends_it() {
 #[test]
 fn header_summary_uses_the_selected_instance_identity_and_master() {
     let mut state = AppState::default();
-    state.schematic.document.components.clear();
+    state.schematic.document_mut_for_test().components.clear();
     let mut component =
         Component::new(7, ComponentType::CellInstance, Point::origin()).with_library_cell(
             LibraryCellInstance::new("vendor_analog", "OPA189_A", "schematic"),
         );
     component.name = "U1".to_owned();
-    state.schematic.document.components.push(component);
+    state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(component);
     state.schematic.selection.select_component(7);
 
     let summary = selection_summary(&state, ContextTarget::Canvas);
@@ -335,12 +343,12 @@ fn focused_keyboard_context_row_activates_with_enter_or_space() {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut state = AppState::default();
-        state.schematic.document.components.clear();
-        state.schematic.document.components.push(Component::new(
-            7,
-            ComponentType::Resistor,
-            Point::origin(),
-        ));
+        state.schematic.document_mut_for_test().components.clear();
+        state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(Component::new(7, ComponentType::Resistor, Point::origin()));
         state.schematic.selection.select_only_component(7);
         state.dialogs.interaction.context_target = Some((ContextTarget::Component(7), (0, 0)));
         let symbol_context = SchematicSymbolContext::from_state(&state);
@@ -429,7 +437,7 @@ fn actions_are_truthfully_disabled_without_a_compatible_selection() {
     let point = Point::new(4, 4);
     junction_state
         .schematic
-        .document
+        .document_mut_for_test()
         .junctions
         .push(Junction::new(81, point));
     junction_state
@@ -460,8 +468,8 @@ fn properties_context_action_is_available_for_one_live_bus_or_tap() {
         BusTapOrientation::Down,
     )
     .unwrap();
-    state.schematic.document.buses.push(bus);
-    state.schematic.document.bus_taps.push(tap);
+    state.schematic.document_mut_for_test().buses.push(bus);
+    state.schematic.document_mut_for_test().bus_taps.push(tap);
 
     state.schematic.selection.select_only_bus(31);
     assert!(action_availability(ContextAction::Properties, &state).0);
@@ -476,9 +484,9 @@ fn properties_context_action_is_available_for_one_live_bus_or_tap() {
 fn pointer_target_prefers_a_junction_over_its_underlying_wire() {
     let mut state = AppState::default();
     let point = Point::new(10, 10);
-    state.schematic.document.wires =
+    state.schematic.document_mut_for_test().wires =
         vec![Wire::new(17, vec![Point::new(0, 10), Point::new(20, 10)])];
-    state.schematic.document.junctions = vec![Junction::new(18, point)];
+    state.schematic.document_mut_for_test().junctions = vec![Junction::new(18, point)];
     let symbol_context = SchematicSymbolContext::from_state(&state);
     let ctx = Context::default();
     let viewport = pointer_viewport();
@@ -502,7 +510,11 @@ fn pointer_target_prefers_a_junction_over_its_underlying_wire() {
 fn net_label_context_exposes_the_complete_object_lifecycle() {
     let mut state = AppState::default();
     let label = NetLabel::new(73, Point::new(40, 40), "afe_out");
-    state.schematic.document.net_labels.push(label.clone());
+    state
+        .schematic
+        .document_mut_for_test()
+        .net_labels
+        .push(label.clone());
     state.schematic.selection.select_only_net_label(label.id);
 
     assert!(action_availability(ContextAction::Properties, &state).0);
@@ -544,7 +556,11 @@ fn design_note_context_exposes_only_compatible_object_lifecycle_actions() {
         "Review bias path",
     )
     .unwrap();
-    state.schematic.document.design_notes.push(note.clone());
+    state
+        .schematic
+        .document_mut_for_test()
+        .design_notes
+        .push(note.clone());
     state.schematic.selection.select_only_design_note(note.id);
 
     assert!(action_availability(ContextAction::Properties, &state).0);
@@ -592,7 +608,7 @@ fn documentation_shape_context_exposes_the_complete_non_electrical_lifecycle() {
     .unwrap();
     state
         .schematic
-        .document
+        .document_mut_for_test()
         .documentation_shapes
         .push(shape.clone());
     state
@@ -632,43 +648,51 @@ fn documentation_shape_context_exposes_the_complete_non_electrical_lifecycle() {
 #[test]
 fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
     let mut state = AppState::default();
-    state.schematic.document.components.clear();
-    state.schematic.document.wires.clear();
+    state.schematic.document_mut_for_test().components.clear();
+    state.schematic.document_mut_for_test().wires.clear();
     let mut component = Component::new(41, ComponentType::Resistor, Point::new(20, 30));
     component.name = "R1".to_owned();
-    state.schematic.document.components.push(component);
+    state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(component);
     state.sync_active_schematic_to_workspace();
     state.schematic.init_undo_history();
     state.schematic.selection.select_component(41);
 
     state.duplicate_schematic_selection_at(Point::new(22, 32));
-    assert_eq!(state.schematic.document.components.len(), 2);
+    assert_eq!(state.schematic.document().components.len(), 2);
     assert!(state.schematic.can_undo());
     assert!(state.schematic.undo());
-    assert_eq!(state.schematic.document.components.len(), 1);
+    assert_eq!(state.schematic.document().components.len(), 1);
 
     state.schematic.selection.select_component(41);
     state.delete_schematic_selection();
-    assert!(state.schematic.document.components.is_empty());
+    assert!(state.schematic.document().components.is_empty());
     assert!(state.schematic.undo());
-    assert_eq!(state.schematic.document.components.len(), 1);
+    assert_eq!(state.schematic.document().components.len(), 1);
 
     let label = NetLabel::new(73, Point::new(40, 40), "sense_out");
-    state.schematic.document.net_labels.push(label.clone());
+    state
+        .schematic
+        .document_mut_for_test()
+        .net_labels
+        .push(label.clone());
     state.sync_active_schematic_to_workspace();
     state.schematic.selection.select_only_net_label(label.id);
 
     state.duplicate_schematic_selection_at(Point::new(42, 42));
-    assert_eq!(state.schematic.document.net_labels.len(), 2);
+    assert_eq!(state.schematic.document().net_labels.len(), 2);
     assert!(state.schematic.can_undo());
     assert!(state.schematic.undo());
-    assert_eq!(state.schematic.document.net_labels, vec![label.clone()]);
+    assert_eq!(state.schematic.document().net_labels, vec![label.clone()]);
 
     state.schematic.selection.select_only_net_label(label.id);
     state.delete_schematic_selection();
-    assert!(state.schematic.document.net_labels.is_empty());
+    assert!(state.schematic.document().net_labels.is_empty());
     assert!(state.schematic.undo());
-    assert_eq!(state.schematic.document.net_labels, vec![label]);
+    assert_eq!(state.schematic.document().net_labels, vec![label]);
 }
 
 /// The canvas row asks the schematic the same staleness question the
@@ -682,7 +706,7 @@ fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
     let mut master = crate::state::SchematicState::default();
     let port = master.add_component(ComponentType::Port, Point::new(20, 0));
     master
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == port)
@@ -709,7 +733,7 @@ fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
         .schematic_buffers
         .get_mut(MASTER)
         .expect("the fixture registers the master")
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.value == "a")
@@ -734,7 +758,7 @@ fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
     });
 
     assert_eq!(
-        state.schematic.document.components[0]
+        state.schematic.document().components[0]
             .library_cell
             .as_ref()
             .expect("the instance stays bound")
@@ -802,7 +826,11 @@ fn state_with_reported_device_op(device: &str) -> AppState {
     let mut state = AppState::default();
     let mut component = Component::new(1, ComponentType::Nmos, Point::new(40, 30));
     component.name = device.to_owned();
-    state.schematic.document.components.push(component);
+    state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(component);
     state.schematic.selection.select_only_component(1);
 
     let mut analysis = AnalysisResult::new(1, AnalysisType::DcOp, "OP");
@@ -844,7 +872,11 @@ fn operating_point_hop_leaves_the_report_unfiltered_when_the_device_is_unreporte
     // an empty inspector instead of the report the reader asked to open.
     let mut unreported = Component::new(2, ComponentType::Nmos, Point::new(80, 30));
     unreported.name = "M2".to_owned();
-    state.schematic.document.components.push(unreported);
+    state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(unreported);
     state.schematic.selection.select_only_component(2);
 
     // A stale filter is the failure this guards: the previous device's name

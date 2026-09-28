@@ -46,7 +46,7 @@ fn place_port(state: &mut AppState, name: &str) {
         .add_component(crate::state::ComponentType::Port, Point::origin());
     state
         .schematic
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == id)
@@ -260,7 +260,7 @@ fn enter_arms_the_whole_sequence_without_touching_the_document() {
     assert_eq!(sequence.discipline, PortDiscipline::Logic);
     assert!(sequence.authority.is_some());
 
-    assert!(app.state.schematic.document.components.is_empty());
+    assert!(app.state.schematic.document().components.is_empty());
     assert!(!app.state.schematic.is_dirty);
     assert!(!app.state.schematic.can_undo());
     // The canvas owns the keyboard, so R, M and Esc work before the pointer
@@ -365,7 +365,7 @@ fn a_blocked_form_never_arms_on_enter() {
         assert!(app.state.dialogs.pin_port.open);
         assert_eq!(app.state.schematic.tool, Tool::Select);
         assert!(app.state.schematic.pending_port_sequence.is_none());
-        assert!(app.state.schematic.document.components.is_empty());
+        assert!(app.state.schematic.document().components.is_empty());
     }
 }
 
@@ -387,7 +387,7 @@ fn escape_closes_the_form_at_once() {
 
     assert!(!app.state.dialogs.pin_port.open);
     assert!(app.state.schematic.pending_port_sequence.is_none());
-    assert!(app.state.schematic.document.components.is_empty());
+    assert!(app.state.schematic.document().components.is_empty());
 }
 
 /// A duplicate of a name already on the sheet is refused before arming, in the

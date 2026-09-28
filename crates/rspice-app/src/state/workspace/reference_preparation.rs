@@ -1,9 +1,7 @@
 //! Prepare component references independently of editor history and permissions.
 
 use super::*;
-use rspice_design::references::{
-    PathMappings, ReferenceComponents, remap_instance_probes_many, remap_schematic_probes,
-};
+use rspice_design::references::{PathMappings, ReferenceComponents, remap_instance_probes_many};
 
 pub(crate) struct SchematicReferenceTransaction {
     pub(crate) before: BTreeMap<String, SchematicState>,
@@ -143,15 +141,14 @@ impl ProjectWorkspace {
             let Some(mappings) = probe_roots.get(&root.key().to_ascii_lowercase()) else {
                 continue;
             };
-            if let Some(probes) = remap_schematic_probes(&source.document().probes, mappings)? {
+            if let Some(probes) = source.prepare_probe_reference_update(mappings)? {
                 before
                     .entry(key.clone())
                     .or_insert_with(|| (*source).clone());
                 let candidate = after
                     .entry(key.clone())
                     .or_insert_with(|| (*source).clone());
-                candidate.document.probes = probes;
-                candidate.is_dirty = true;
+                probes.apply_to(candidate);
             }
         }
         for schematic in after.values_mut() {

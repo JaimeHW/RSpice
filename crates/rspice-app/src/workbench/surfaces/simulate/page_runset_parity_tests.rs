@@ -81,7 +81,7 @@ pub(super) fn instance_of(
 pub(super) fn drive_pss_from_the_fixture_supply(state: &mut AppState) {
     let supply = state
         .schematic
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.name == "VCC")

@@ -14,12 +14,16 @@ fn catalog_test_diode(params: &str) -> (RSpiceApp, u64) {
     let mut library = ModelLibrary::new("models");
     library.add_model(DeviceModel::new("junction", ModelType::Diode));
     app.state.model_library_manager.add_library(library);
-    app.state.schematic.document.components.clear();
+    app.state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
     let id = app
         .state
         .schematic
         .add_component(ComponentType::Diode, crate::state::Point::origin());
-    app.state.schematic.document.components[0].params = params.to_owned();
+    app.state.schematic.document_mut_for_test().components[0].params = params.to_owned();
     app.state.schematic.clear_undo_history();
     app.state.schematic.is_dirty = false;
     (app, id)
@@ -31,21 +35,24 @@ fn catalog_binding_preserves_raw_parameters_and_refuses_malformed_text_atomicall
     let (mut app, id) = catalog_test_diode(original);
     bind_component_model_from_catalog(&mut app, id, "models", "junction").unwrap();
     assert_eq!(
-        app.state.schematic.document.components[0].params,
+        app.state.schematic.document().components[0].params,
         format!("{original} model=junction model_library=models")
     );
     assert!(app.state.schematic.undo());
-    assert_eq!(app.state.schematic.document.components[0].params, original);
+    assert_eq!(
+        app.state.schematic.document().components[0].params,
+        original
+    );
     assert!(!app.state.schematic.can_undo());
 
     let (mut app, id) = catalog_test_diode("note='unterminated");
-    let before = app.state.schematic.document.components[0].clone();
+    let before = app.state.schematic.document().components[0].clone();
     assert!(
         bind_component_model_from_catalog(&mut app, id, "models", "junction")
             .unwrap_err()
             .contains("unterminated")
     );
-    assert_eq!(app.state.schematic.document.components[0], before);
+    assert_eq!(app.state.schematic.document().components[0], before);
     assert!(!app.state.schematic.is_dirty);
     assert!(!app.state.schematic.can_undo());
 }
@@ -54,7 +61,7 @@ fn catalog_binding_preserves_raw_parameters_and_refuses_malformed_text_atomicall
 fn catalog_binding_resolves_the_pending_inspector_draft_before_model_publication() {
     use crate::workbench::state::{InlineEditField, InlineEditSession};
     let (mut app, id) = catalog_test_diode(r#"note="a  b""#);
-    let expected = app.state.schematic.document.components[0].clone();
+    let expected = app.state.schematic.document().components[0].clone();
     let mut candidate = expected.clone();
     candidate.name = "D42".to_owned();
     let authority = app.state.inline_edit_authority();
@@ -69,15 +76,15 @@ fn catalog_binding_resolves_the_pending_inspector_draft_before_model_publication
         widget: None,
     });
     assert!(bind_component_model_from_catalog(&mut app, id, "models", "junction").is_err());
-    assert_eq!(app.state.schematic.document.components[0], expected);
+    assert_eq!(app.state.schematic.document().components[0], expected);
     app.state
         .workbench
         .inline_edit
         .set_draft("D42".to_owned(), Ok(candidate));
     bind_component_model_from_catalog(&mut app, id, "models", "junction").unwrap();
-    assert_eq!(app.state.schematic.document.components[0].name, "D42");
+    assert_eq!(app.state.schematic.document().components[0].name, "D42");
     assert!(
-        app.state.schematic.document.components[0]
+        app.state.schematic.document().components[0]
             .params
             .starts_with(r#"note="a  b" "#)
     );
@@ -105,7 +112,7 @@ fn catalog_binding_uses_the_resolved_project_global_provider() {
         )
         .expect("provider decision");
     let component_id = 9_001;
-    app.state.schematic.document.components.push(
+    app.state.schematic.document_mut_for_test().components.push(
         Component::new(
             component_id,
             ComponentType::Diode,
@@ -119,7 +126,7 @@ fn catalog_binding_uses_the_resolved_project_global_provider() {
     let params = crate::state::parse_params_string(
         &app.state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == component_id)
@@ -150,7 +157,7 @@ fn catalog_binding_rejects_an_incompatible_primitive_without_mutation() {
     library.add_model(DeviceModel::new("junction", ModelType::Diode));
     app.state.model_library_manager.add_library(library);
     let component_id = 9_002;
-    app.state.schematic.document.components.push(
+    app.state.schematic.document_mut_for_test().components.push(
         Component::new(
             component_id,
             ComponentType::Resistor,
@@ -162,7 +169,7 @@ fn catalog_binding_rejects_an_incompatible_primitive_without_mutation() {
     let params_before = app
         .state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == component_id)
@@ -178,7 +185,7 @@ fn catalog_binding_rejects_an_incompatible_primitive_without_mutation() {
     assert_eq!(
         app.state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == component_id)
@@ -400,7 +407,7 @@ fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
     let b = crate::state::Point::new(40, 0);
     app.state
         .schematic
-        .document
+        .document_mut_for_test()
         .wires
         .push(crate::state::Wire::new(91, vec![a, b]));
     app.state.simulation.cross_probe.update(

@@ -607,11 +607,15 @@ mod tests {
     #[test]
     fn cancelled_project_open_after_discard_confirmation_keeps_live_schematic() {
         let mut state = crate::workbench::app_state::AppState::default();
-        state.schematic.document.components.push(Component::new(
-            42,
-            ComponentType::Resistor,
-            Point::new(10, 20),
-        ));
+        state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(Component::new(
+                42,
+                ComponentType::Resistor,
+                Point::new(10, 20),
+            ));
         state.schematic.is_dirty = true;
         let active_key = state.workspace.active_key();
         assert!(
@@ -619,7 +623,7 @@ mod tests {
                 .workspace
                 .schematic_buffers
                 .get(&active_key)
-                .is_none_or(|schematic| schematic.document.components.is_empty()),
+                .is_none_or(|schematic| schematic.document().components.is_empty()),
             "test requires unsynced live schematic state"
         );
 
@@ -639,8 +643,8 @@ mod tests {
             |_state| false,
         );
 
-        assert_eq!(app.state.schematic.document.components.len(), 1);
-        assert_eq!(app.state.schematic.document.components[0].id, 42);
+        assert_eq!(app.state.schematic.document().components.len(), 1);
+        assert_eq!(app.state.schematic.document().components[0].id, 42);
         assert!(app.state.schematic.is_dirty);
     }
 
@@ -719,7 +723,7 @@ mod tests {
                 .schematic_buffers
                 .get(&active_key)
                 .expect("saved active design")
-                .document
+                .document()
                 .components
                 .len(),
             1
@@ -795,7 +799,7 @@ mod tests {
                 .schematic_buffers
                 .get(&schematic_app.state.workspace.active_key())
                 .expect("saved active schematic")
-                .document
+                .document()
                 .components
                 .len(),
             1
@@ -959,7 +963,7 @@ mod tests {
                 .schematic_buffers
                 .get(&active_key)
                 .expect("saved active schematic")
-                .document
+                .document()
                 .components
                 .len(),
             1
@@ -1010,7 +1014,7 @@ mod tests {
         app.begin_close_project_after_save();
 
         assert!(app.state.project_lifecycle.project_open);
-        assert_eq!(app.state.schematic.document.components.len(), 1);
+        assert_eq!(app.state.schematic.document().components.len(), 1);
         assert!(matches!(
             app.state.dialogs.project_review_dialog.request.as_ref(),
             Some(crate::workbench::app::ProjectReviewRequest::CloseProject)

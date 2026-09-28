@@ -363,22 +363,23 @@ impl SchematicSymbolContext {
             schematic.selection.clear();
         }
 
+        let (document, selection) = schematic.document_and_selection();
         let mut count = 0;
 
-        for component in &schematic.document.components {
+        for component in &document.components {
             let (min, max) = self.component_bounds(component);
             let matches = if enclosed_only {
                 rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
             } else {
                 rects_intersect(min, max, min_x, min_y, max_x, max_y)
             };
-            if matches && !schematic.selection.has_component(component.id) {
-                schematic.selection.select_component(component.id);
+            if matches && !selection.has_component(component.id) {
+                selection.select_component(component.id);
                 count += 1;
             }
         }
 
-        for wire in &schematic.document.wires {
+        for wire in &document.wires {
             let wire_in_rect = if enclosed_only {
                 wire.points
                     .iter()
@@ -388,13 +389,13 @@ impl SchematicSymbolContext {
                     segment_intersects_rect(points[0], points[1], min_x, min_y, max_x, max_y)
                 })
             };
-            if wire_in_rect && !schematic.selection.has_wire(wire.id) {
-                schematic.selection.select_wire(wire.id);
+            if wire_in_rect && !selection.has_wire(wire.id) {
+                selection.select_wire(wire.id);
                 count += 1;
             }
         }
 
-        for bus in &schematic.document.buses {
+        for bus in &document.buses {
             let bus_in_rect = if enclosed_only {
                 bus.points
                     .iter()
@@ -404,13 +405,13 @@ impl SchematicSymbolContext {
                     segment_intersects_rect(points[0], points[1], min_x, min_y, max_x, max_y)
                 })
             };
-            if bus_in_rect && !schematic.selection.has_bus(bus.id) {
-                schematic.selection.select_bus(bus.id);
+            if bus_in_rect && !selection.has_bus(bus.id) {
+                selection.select_bus(bus.id);
                 count += 1;
             }
         }
 
-        for tap in &schematic.document.bus_taps {
+        for tap in &document.bus_taps {
             let route = crate::schematic::bus_geometry::bus_tap_route_points(tap);
             let tap_in_rect = if enclosed_only {
                 route
@@ -421,48 +422,48 @@ impl SchematicSymbolContext {
                     segment_intersects_rect(segment[0], segment[1], min_x, min_y, max_x, max_y)
                 })
             };
-            if tap_in_rect && !schematic.selection.has_bus_tap(tap.id) {
-                schematic.selection.select_bus_tap(tap.id);
+            if tap_in_rect && !selection.has_bus_tap(tap.id) {
+                selection.select_bus_tap(tap.id);
                 count += 1;
             }
         }
 
-        for junction in &schematic.document.junctions {
+        for junction in &document.junctions {
             if point_in_rect(junction.pos, min_x, min_y, max_x, max_y)
-                && !schematic.selection.has_junction(junction.pos)
+                && !selection.has_junction(junction.pos)
             {
-                schematic.selection.select_junction(junction.pos);
+                selection.select_junction(junction.pos);
                 count += 1;
             }
         }
 
-        for label in &schematic.document.net_labels {
+        for label in &document.net_labels {
             let (min, max) = net_labels::world_bounds(label);
             let matches = if enclosed_only {
                 rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
             } else {
                 rects_intersect(min, max, min_x, min_y, max_x, max_y)
             };
-            if matches && !schematic.selection.has_net_label(label.id) {
-                schematic.selection.net_labels.insert(label.id);
+            if matches && !selection.has_net_label(label.id) {
+                selection.net_labels.insert(label.id);
                 count += 1;
             }
         }
 
-        for note in &schematic.document.design_notes {
+        for note in &document.design_notes {
             let (min, max) = design_notes::conservative_world_bounds(note);
             let matches = if enclosed_only {
                 rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
             } else {
                 rects_intersect(min, max, min_x, min_y, max_x, max_y)
             };
-            if matches && !schematic.selection.has_design_note(note.id) {
-                schematic.selection.select_design_note(note.id);
+            if matches && !selection.has_design_note(note.id) {
+                selection.select_design_note(note.id);
                 count += 1;
             }
         }
 
-        for shape in &schematic.document.documentation_shapes {
+        for shape in &document.documentation_shapes {
             let matches = documentation_shapes::shape_intersects_rect(
                 shape,
                 min_x,
@@ -471,21 +472,21 @@ impl SchematicSymbolContext {
                 max_y,
                 enclosed_only,
             );
-            if matches && !schematic.selection.has_documentation_shape(shape.id) {
-                schematic.selection.select_documentation_shape(shape.id);
+            if matches && !selection.has_documentation_shape(shape.id) {
+                selection.select_documentation_shape(shape.id);
                 count += 1;
             }
         }
 
-        for probe in &schematic.document.probes {
+        for probe in &document.probes {
             let (min, max) = probe.world_bounds();
             let matches = if enclosed_only {
                 rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
             } else {
                 rects_intersect(min, max, min_x, min_y, max_x, max_y)
             };
-            if matches && !schematic.selection.has_probe(probe.id) {
-                schematic.selection.select_probe(probe.id);
+            if matches && !selection.has_probe(probe.id) {
+                selection.select_probe(probe.id);
                 count += 1;
             }
         }
@@ -1435,7 +1436,7 @@ mod tests {
         let b = Point::new(40, 0);
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .wires
             .push(crate::state::Wire::new(1, vec![a, b]));
         state.simulation.cross_probe.update(
@@ -1497,7 +1498,7 @@ mod tests {
         let b = Point::new(40, 0);
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .wires
             .push(crate::state::Wire::new(1, vec![a, b]));
         state.simulation.cross_probe.update(
@@ -1598,7 +1599,7 @@ mod tests {
             revision: 0,
         };
         let mut schematic = SchematicState::default();
-        schematic.document.components.push(component);
+        schematic.document_mut_for_test().components.push(component);
 
         assert_eq!(context.content_bounds(&schematic), Some((80, 10, 220, 90)));
     }
@@ -1608,7 +1609,7 @@ mod tests {
         let mut schematic = SchematicState::default();
         let label = NetLabel::new(77, Point::new(100, 80), "afe_out");
         let (min, max) = net_labels::world_bounds(&label);
-        schematic.document.net_labels.push(label);
+        schematic.document_mut_for_test().net_labels.push(label);
         let context = SchematicSymbolContext::default();
 
         assert_eq!(
@@ -1637,7 +1638,7 @@ mod tests {
         )
         .unwrap();
         let (min, max) = design_notes::conservative_world_bounds(&note);
-        schematic.document.design_notes.push(note);
+        schematic.document_mut_for_test().design_notes.push(note);
         let context = SchematicSymbolContext::default();
 
         assert_eq!(
@@ -1682,7 +1683,7 @@ mod tests {
             revision: 0,
         };
         let mut schematic = SchematicState::default();
-        schematic.document.components.push(component);
+        schematic.document_mut_for_test().components.push(component);
 
         let selected = context.select_in_rect(
             &mut schematic,
@@ -1697,11 +1698,14 @@ mod tests {
     #[test]
     fn enclosed_selection_rejects_partial_component_intersections() {
         let mut schematic = SchematicState::default();
-        schematic.document.components.push(Component::new(
-            1,
-            ComponentType::Resistor,
-            Point::new(100, 50),
-        ));
+        schematic
+            .document_mut_for_test()
+            .components
+            .push(Component::new(
+                1,
+                ComponentType::Resistor,
+                Point::new(100, 50),
+            ));
         let context = SchematicSymbolContext::default();
 
         assert_eq!(
@@ -1719,7 +1723,7 @@ mod tests {
     fn intersecting_selection_detects_wire_crossing_without_an_inside_vertex() {
         let mut schematic = SchematicState::default();
         schematic.add_wire(vec![Point::new(0, 50), Point::new(100, 50)]);
-        let wire_id = schematic.document.wires[0].id;
+        let wire_id = schematic.document().wires[0].id;
         let context = SchematicSymbolContext::default();
 
         assert_eq!(
@@ -1779,7 +1783,7 @@ mod tests {
         );
         let component = state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == id)
@@ -1810,7 +1814,7 @@ mod tests {
         let context = SchematicSymbolContext::from_state(&state);
         let component = state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == id)
@@ -1842,27 +1846,27 @@ mod tests {
         use crate::state::{Junction, NetLabel, Wire};
 
         let mut state = AppState::default();
-        state.schematic.document.components.push(Component::new(
-            1,
-            ComponentType::Resistor,
-            Point::new(0, 0),
-        ));
         state
             .schematic
-            .document
+            .document_mut_for_test()
+            .components
+            .push(Component::new(1, ComponentType::Resistor, Point::new(0, 0)));
+        state
+            .schematic
+            .document_mut_for_test()
             .wires
             .push(Wire::new(2, vec![Point::new(0, 0), Point::new(10, 0)]));
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .junctions
             .push(Junction::new(3, Point::new(10, 0)));
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(4, Point::new(10, 0), "OUT"));
-        state.schematic.document.design_notes.push(
+        state.schematic.document_mut_for_test().design_notes.push(
             crate::state::DesignNote::new(
                 5,
                 Point::new(20, 10),
@@ -1921,7 +1925,11 @@ mod tests {
         let mut component = Component::new(17, ComponentType::Resistor, Point::new(40, 20));
         component.name = "RGAIN".to_owned();
         component.value = "499 ohm".to_owned();
-        state.schematic.document.components.push(component);
+        state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(component);
         state.schematic.selection.select_only_component(17);
 
         let output = ctx.run_ui(

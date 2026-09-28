@@ -82,7 +82,7 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
             grid_size: 10,
             document_policy: crate::state::SchematicDocumentPolicy::default(),
             snapshot: crate::state::SchematicSnapshot::capture(
-                &crate::state::SchematicState::default().document,
+                &crate::state::SchematicState::default().document(),
             ),
             selection: crate::state::Selection::default(),
         });
@@ -97,7 +97,7 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
                 grid_size: 10,
                 document_policy: crate::state::SchematicDocumentPolicy::default(),
                 snapshot: crate::state::SchematicSnapshot::capture(
-                    &crate::state::SchematicState::default().document,
+                    &crate::state::SchematicState::default().document(),
                 ),
                 selection: crate::state::Selection::default(),
             },
@@ -117,7 +117,7 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
                 grid_size: 10,
                 document_policy: crate::state::SchematicDocumentPolicy::default(),
                 snapshot: crate::state::SchematicSnapshot::capture(
-                    &crate::state::SchematicState::default().document,
+                    &crate::state::SchematicState::default().document(),
                 ),
                 selection: crate::state::Selection::default(),
             },
@@ -135,14 +135,14 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
                 grid_size: 10,
                 document_policy: crate::state::SchematicDocumentPolicy::default(),
                 snapshot: crate::state::SchematicSnapshot::capture(
-                    &crate::state::SchematicState::default().document,
+                    &crate::state::SchematicState::default().document(),
                 ),
                 selection: crate::state::Selection::default(),
             },
             replacement_authority: {
                 let mut schematic = crate::state::SchematicState::default();
                 schematic
-                    .document
+                    .document_mut_for_test()
                     .components
                     .push(crate::state::Component::new(
                         1,

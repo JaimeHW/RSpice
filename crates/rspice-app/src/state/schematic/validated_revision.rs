@@ -387,3 +387,72 @@ mod tests {
         );
     }
 }
+
+impl SchematicState {
+    pub(crate) fn copy_without_validated_revisions(&self) -> Self {
+        let mut copy = self.clone();
+        copy.document.validated_revisions = ValidatedRevisionJournal::default();
+        copy
+    }
+
+    pub(crate) fn record_validated_save_revision(
+        &mut self,
+        request: ValidatedRevisionRequest,
+        original_journal: ValidatedRevisionJournal,
+        original_dirty: bool,
+    ) -> Result<
+        (
+            ValidatedSchematicRevisionId,
+            ValidatedRevisionJournal,
+            ValidatedRevisionJournal,
+            ContentDigest,
+        ),
+        String,
+    > {
+        let revision_id = match self.append_validated_revision(request) {
+            Ok(id) => id,
+            Err(error) => {
+                self.document.validated_revisions = original_journal;
+                self.is_dirty = original_dirty;
+                return Err(format!("Validated revision could not be recorded: {error}"));
+            }
+        };
+        let expected_journal = self.document.validated_revisions.clone();
+        let expected_design_digest = match self.validated_design_content_digest() {
+            Ok(digest) => digest,
+            Err(error) => {
+                self.document.validated_revisions = original_journal;
+                self.is_dirty = original_dirty;
+                return Err(format!(
+                    "The guarded working-design digest could not be recorded: {error}"
+                ));
+            }
+        };
+        Ok((
+            revision_id,
+            original_journal,
+            expected_journal,
+            expected_design_digest,
+        ))
+    }
+
+    pub(crate) fn rollback_validated_save_journal(
+        &mut self,
+        original_journal: &ValidatedRevisionJournal,
+        expected_journal: &ValidatedRevisionJournal,
+        expected_design_digest: crate::product::ContentDigest,
+        original_dirty: bool,
+    ) -> Result<(), String> {
+        if &self.document.validated_revisions != expected_journal {
+            return Err(
+                "its validated revision history changed after publication began".to_owned(),
+            );
+        }
+        let current_design_digest = self
+            .validated_design_content_digest()
+            .map_err(|error| format!("its working-design guard could not be verified: {error}"))?;
+        self.document.validated_revisions = original_journal.clone();
+        self.is_dirty = original_dirty || current_design_digest != expected_design_digest;
+        Ok(())
+    }
+}

@@ -16,7 +16,7 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
         .components
         .insert(fixture.sources[0]);
     let root_selection = fixture.state.workspace.schematic_buffers[&root.key()]
-        .document
+        .document()
         .components[0]
         .id;
     for reference in [&root, &other] {
@@ -27,19 +27,19 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
             .get_mut(&reference.key())
             .unwrap();
         source.with_undo("temporary move", |source| {
-            source.document.components[0].pos.x += 10
+            source.document_mut_for_test().components[0].pos.x += 10
         });
         assert!(source.undo());
         assert!(source.can_redo());
         source
             .selection
             .components
-            .insert(source.document.components[0].id);
+            .insert(source.document().components[0].id);
     }
     let expected = fixture
         .state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == fixture.sources[0])
@@ -82,7 +82,7 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
         ] {
             let schematic = schematic_for_reference(state, document).unwrap();
             assert!(!schematic.can_redo());
-            for (probe, parent) in schematic.document.probes.iter().zip(parents) {
+            for (probe, parent) in schematic.document().probes.iter().zip(parents) {
                 assert_eq!(
                     probe.source_expression.as_deref(),
                     Some(format!("I(/{parent}/{name})").as_str())
@@ -135,7 +135,7 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
             let expected = fixture
                 .state
                 .schematic
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|component| component.id == fixture.sources[0])
@@ -165,12 +165,12 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
                     .unwrap()
                     .begin_operation("Pending inactive gesture");
             }
-            let before = SchematicSnapshot::capture(&fixture.state.schematic.document);
+            let before = SchematicSnapshot::capture(&fixture.state.schematic.document());
             let root_before = SchematicSnapshot::capture(
-                &fixture.state.workspace.schematic_buffers[&root.key()].document,
+                &fixture.state.workspace.schematic_buffers[&root.key()].document(),
             );
             let other_before = SchematicSnapshot::capture(
-                &fixture.state.workspace.schematic_buffers[&other.key()].document,
+                &fixture.state.workspace.schematic_buffers[&other.key()].document(),
             );
             let outputs = fixture
                 .state
@@ -192,12 +192,12 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
                     "{failure}"
                 );
             }
-            assert!(before.is_equal_document(&fixture.state.schematic.document));
+            assert!(before.is_equal_document(&fixture.state.schematic.document()));
             assert!(root_before.is_equal_document(
-                &fixture.state.workspace.schematic_buffers[&root.key()].document
+                &fixture.state.workspace.schematic_buffers[&root.key()].document()
             ));
             assert!(other_before.is_equal_document(
-                &fixture.state.workspace.schematic_buffers[&other.key()].document
+                &fixture.state.workspace.schematic_buffers[&other.key()].document()
             ));
             assert_eq!(
                 fixture
@@ -257,7 +257,7 @@ fn renaming_a_parent_updates_descended_probes_and_their_occurrence() {
         let expected = fixture
             .state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.name == original)
@@ -272,7 +272,7 @@ fn renaming_a_parent_updates_descended_probes_and_their_occurrence() {
             for reference in [&root, &child] {
                 let source = schematic_for_reference(state, reference).unwrap();
                 assert_eq!(
-                    source.document.probes[0].source_expression.as_deref(),
+                    source.document().probes[0].source_expression.as_deref(),
                     Some(format!("I(/{name}/V42)").as_str())
                 );
             }
@@ -299,7 +299,7 @@ fn renaming_a_parent_updates_descended_probes_and_their_occurrence() {
             );
             assert_eq!(
                 state.workspace.schematic_buffers[&other.key()]
-                    .document
+                    .document()
                     .probes[0]
                     .source_expression
                     .as_deref(),
@@ -368,15 +368,17 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
         .add_saved_output(second_plan, output)
         .unwrap();
     fixture.state.sim_setup.activate_plan(fixture.plan).unwrap();
-    fixture.state.schematic.document.probes[0].bind_saved_output(second_plan, second_output);
-    fixture.state.schematic.document.probes[1].bind_saved_output(fixture.plan, first_output);
+    fixture.state.schematic.document_mut_for_test().probes[0]
+        .bind_saved_output(second_plan, second_output);
+    fixture.state.schematic.document_mut_for_test().probes[1]
+        .bind_saved_output(fixture.plan, first_output);
     fixture
         .state
         .workspace
         .schematic_buffers
         .get_mut(&child.key())
         .unwrap()
-        .document
+        .document_mut_for_test()
         .probes[0]
         .bind_saved_output(second_plan, second_output);
     // A buffered document can carry references even without an open tab.
@@ -391,7 +393,7 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
     let expected = fixture
         .state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == fixture.sources[0])
@@ -446,7 +448,7 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
             (&other, vec!["X5"]),
         ] {
             let source = &loaded.workspace.schematic_buffers[&reference.key()];
-            for (probe, parent) in source.document.probes.iter().zip(parents) {
+            for (probe, parent) in source.document().probes.iter().zip(parents) {
                 assert_eq!(
                     probe.source_expression.as_deref(),
                     Some(format!("I(/{parent}/{name})").as_str())
@@ -455,7 +457,7 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
         }
         let source = &loaded.workspace.schematic_buffers[&child.key()];
         let component = source
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == fixture.sources[0])
@@ -471,7 +473,7 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
         );
         assert_eq!(
             source
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|component| component.id == fixture.dependents[0])
@@ -500,17 +502,17 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
             assert_eq!(saved.source_expression, format!("I(/X1/{name})"));
         }
         assert_eq!(
-            source.document.probes[0].saved_output_id,
+            source.document().probes[0].saved_output_id,
             Some(second_output)
         );
-        assert_eq!(source.document.probes[0].plan_id, Some(second_plan));
+        assert_eq!(source.document().probes[0].plan_id, Some(second_plan));
         let projection = loaded
             .workspace
             .design_projection(&loaded.libraries, &child, source)
             .unwrap();
         assert_eq!(
             projection.schematic_buffers()[&child.key()]
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|component| component.id == fixture.sources[0])

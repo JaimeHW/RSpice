@@ -682,7 +682,7 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(crate::state::NetLabel::new(
                 7,
@@ -724,7 +724,7 @@ mod tests {
         );
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(crate::state::NetLabel::new(
                 7,
@@ -768,7 +768,7 @@ mod tests {
             .set_toggle(TogglePreference::CrossProbeBehavior, false);
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(crate::state::NetLabel::new(
                 7,
@@ -796,7 +796,7 @@ mod tests {
         );
         let emitted = state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == component_id)

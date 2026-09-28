@@ -27,7 +27,7 @@ pub(super) fn terminal_positions(
 
 #[cfg(test)]
 pub(super) fn display_net_name(schematic: &SchematicState, name: &str) -> String {
-    rspice_design::connectivity::display_net_name(&schematic.document, name)
+    rspice_design::connectivity::display_net_name(&schematic.document(), name)
 }
 
 #[cfg(test)]

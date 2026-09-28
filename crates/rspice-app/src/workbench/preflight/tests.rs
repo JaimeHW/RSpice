@@ -672,7 +672,7 @@ fn unresolved_hierarchy_is_an_ordered_preflight_blocker() {
             .schematic_buffers
             .get(&crate::state::CellViewRef::default_top().key())
             .expect("persisted root schematic")
-            .document
+            .document()
             .components
             .is_empty(),
         "fixture must remain unsynchronized to exercise the live overlay"
@@ -713,7 +713,7 @@ fn a_topology_the_engine_refuses_is_an_ordered_preflight_blocker() {
         .add_component(ComponentType::Capacitor, Point::new(100, -10));
     state
         .schematic
-        .document
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(1, Point::new(0, -10), Point::new(80, -10)));
 
@@ -870,7 +870,7 @@ fn state_with_a_stop_view_warning() -> AppState {
         .add_library_cell_component(crate::state::Point::new(100, 0), binding);
     state
         .schematic
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == instance)

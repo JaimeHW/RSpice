@@ -1024,7 +1024,7 @@ mod tests {
                 .schematic_buffers
                 .get(&parent_ref.key())
                 .expect("parent buffer")
-                .document
+                .document()
                 .components
                 .iter()
                 .any(|component| component.kind == ComponentType::CellInstance)
@@ -1071,7 +1071,7 @@ mod tests {
             .add_component(ComponentType::Resistor, Point::origin());
         let selected_name = state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == selected)
@@ -1101,13 +1101,13 @@ mod tests {
                 )
                 .expect("saved output"),
             );
-        let before = crate::state::SchematicSnapshot::capture(&state.schematic.document);
+        let before = crate::state::SchematicSnapshot::capture(&state.schematic.document());
 
         open_create_hierarchy_dialog(&mut state);
         assert!(state.dialogs.create_hierarchy.open);
         let error = commit_create_hierarchy(&mut state).expect_err("reference must block");
         assert!(error.contains("saved output 'branch_current'"), "{error}");
-        assert!(before.is_equal_document(&state.schematic.document));
+        assert!(before.is_equal_document(&state.schematic.document()));
         assert!(
             state
                 .library_manager

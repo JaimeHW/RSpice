@@ -68,13 +68,11 @@ impl ProjectWorkspace {
         let mut after = BTreeMap::new();
         for (key, names) in by_document {
             let source = &self.schematic_buffers[&key];
-            let mut candidate = source.clone();
-            candidate.document.components =
-                source.prepare_component_renames(&names).map_err(|reason| {
+            let candidate = source
+                .renamed_reference_candidate(&names)
+                .map_err(|reason| {
                     format!("Cannot restore reference annotation in '{key}': {reason}")
                 })?;
-            candidate.is_dirty = true;
-            candidate.bump_topology_version();
             before.insert(key.clone(), source.clone());
             after.insert(key, candidate);
         }

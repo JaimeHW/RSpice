@@ -114,7 +114,7 @@ fn source_replacement_uses_the_requested_corner(
         std::fs::write(&path, ".lib TT\n.subckt vendor_load a b params: scale=1\nRload a b {1000*scale}\n.ends vendor_load\n.endl TT\n.lib FF\n.subckt vendor_load a b params: scale=1\nRload a b {7000*scale}\n.ends vendor_load\n.endl FF\n.lib NO_MASTER\n.subckt unrelated a b\nRload a b 42k\n.ends unrelated\n.endl NO_MASTER\n").unwrap();
         let (mut workspace, mut libraries, mut top) = fixture(configured);
         connect_testbench(&mut top, &workspace, &libraries);
-        top.document.components[0].params = "scale=2".to_owned();
+        top.document_mut_for_test().components[0].params = "scale=2".to_owned();
         let mut view = View::new("spice", ViewType::Spice).with_path(path.clone());
         for (key, value) in [
             ("netlist.ports", "a,b"),
@@ -172,7 +172,7 @@ fn source_replacement_uses_the_requested_corner(
         activate(
             &mut workspace,
             &active,
-            top.document.components[0].id,
+            top.document().components[0].id,
             change,
         );
         let original = serde_json::to_value((&top, &workspace.schematic_buffers)).unwrap();
@@ -303,20 +303,21 @@ fn connect_testbench(
     workspace: &ProjectWorkspace,
     libraries: &LibraryManager,
 ) {
-    top.document.wires.clear();
-    top.document.net_labels.clear();
+    top.document_mut_for_test().wires.clear();
+    top.document_mut_for_test().net_labels.clear();
     // Labels provide ground. Keep the supply outside the swept symbol bounds
     // so an orientation cannot accidentally short a DUT terminal to it.
-    top.document
+    top.document_mut_for_test()
         .components
         .retain(|component| component.kind != ComponentType::Ground);
-    for component in &mut top.document.components {
+    for component in &mut top.document_mut_for_test().components {
         if component.kind == ComponentType::VoltageSource {
             component.pos = Point::new(-1000, 1000);
         }
     }
     let resolver = crate::state::SymbolResolver::new(libraries, &workspace.schematic_buffers);
-    for component in &top.document.components {
+    let document = top.document_mut_for_test();
+    for component in &document.components {
         if component.kind != ComponentType::CellInstance
             && component.kind != ComponentType::VoltageSource
         {
@@ -331,8 +332,8 @@ fn connect_testbench(
             .into_iter()
             .enumerate()
         {
-            top.document.net_labels.push(NetLabel::new(
-                1000 + top.document.net_labels.len() as u64,
+            document.net_labels.push(NetLabel::new(
+                1000 + document.net_labels.len() as u64,
                 point,
                 if index == 0 { "drive" } else { "0" },
             ));
@@ -368,14 +369,17 @@ fn source_current(
 #[test]
 fn a_replacement_cannot_infer_the_pins_of_an_unresolved_source_instance() {
     let (mut workspace, libraries, mut top) = fixture(false);
-    let source = top.document.components[0].library_cell.as_mut().unwrap();
+    let source = top.document_mut_for_test().components[0]
+        .library_cell
+        .as_mut()
+        .unwrap();
     source.cell = "missing".to_owned();
     source.terminal_order.clear();
     let active = workspace.active_view.clone();
     activate(
         &mut workspace,
         &active,
-        top.document.components[0].id,
+        top.document().components[0].id,
         replacement(),
     );
     let error = workspace
@@ -396,7 +400,7 @@ fn a_live_master_interface_owns_the_source_pins_during_replacement() {
     activate(
         &mut workspace,
         &active,
-        top.document.components[0].id,
+        top.document().components[0].id,
         replacement(),
     );
     let master = CellViewRef::new("work", "div", "schematic");
@@ -423,7 +427,7 @@ fn a_live_master_interface_owns_the_source_pins_during_replacement() {
     let projected = workspace
         .design_projection(&libraries, &master, &live)
         .unwrap();
-    let placed = &projected.root_schematic().unwrap().document.components[0];
+    let placed = &projected.root_schematic().unwrap().document().components[0];
     assert_eq!(
         placed.library_cell.as_ref().unwrap().terminal_order,
         ["a", "b", "bias"]
@@ -437,7 +441,7 @@ fn a_live_master_interface_owns_the_source_pins_during_replacement() {
         .design_projection(&libraries, &master, &live)
         .unwrap();
     assert!(std::sync::Arc::ptr_eq(&projected, &same));
-    live.document.components.pop();
+    live.document_mut_for_test().components.pop();
     assert!(
         workspace
             .design_projection(&libraries, &master, &live)
@@ -453,11 +457,11 @@ fn replacement_keeps_vector_terminals_and_their_conductor_order() {
             .schematic_buffers
             .get_mut(&format!("work/{name}/schematic"))
             .unwrap()
-            .document
+            .document_mut_for_test()
             .components[0]
             .value = "DATA[3:0]".to_owned();
     }
-    top.document.components[0]
+    top.document_mut_for_test().components[0]
         .library_cell
         .as_mut()
         .unwrap()
@@ -473,26 +477,26 @@ fn replacement_keeps_vector_terminals_and_their_conductor_order() {
         ]);
     let resolver = crate::state::SymbolResolver::new(&libraries, &workspace.schematic_buffers);
     let symbol =
-        resolver.resolve_binding(top.document.components[0].library_cell.as_ref().unwrap());
-    let original_pins = top.document.components[0].terminal_positions_resolved(symbol.as_ref());
+        resolver.resolve_binding(top.document().components[0].library_cell.as_ref().unwrap());
+    let original_pins = top.document().components[0].terminal_positions_resolved(symbol.as_ref());
     workspace
         .schematic_buffers
         .get_mut("work/alternate/schematic")
         .unwrap()
-        .document
+        .document_mut_for_test()
         .components
         .reverse();
     let active = workspace.active_view.clone();
     activate(
         &mut workspace,
         &active,
-        top.document.components[0].id,
+        top.document().components[0].id,
         replacement(),
     );
     let projection = workspace
         .design_projection(&libraries, &active, &top)
         .unwrap();
-    let placed = &projection.root_schematic().unwrap().document.components[0];
+    let placed = &projection.root_schematic().unwrap().document().components[0];
     let binding = placed.library_cell.as_ref().unwrap();
     assert_eq!(binding.terminal_order, ["b", "DATA[3:0]"]);
     assert_eq!(binding.terminal_widths(), [1, 4]);
@@ -512,14 +516,14 @@ fn named_replacement_terminals_keep_their_nets_when_the_master_order_changes() {
             .schematic_buffers
             .get_mut("work/alternate/schematic")
             .unwrap()
-            .document
+            .document_mut_for_test()
             .components
             .reverse();
         let active = workspace.active_view.clone();
         activate(
             &mut workspace,
             &active,
-            top.document.components[0].id,
+            top.document().components[0].id,
             replacement(),
         );
         let projection = workspace
@@ -560,11 +564,11 @@ fn incompatible_replacements_refuse_without_changing_the_source_or_prior_project
         };
         let id = if nested {
             workspace.schematic_buffers[&owner.key()]
-                .document
+                .document()
                 .components[1]
                 .id
         } else {
-            top.document.components[0].id
+            top.document().components[0].id
         };
         activate(&mut workspace, &owner, id, replacement());
         let original = workspace
@@ -577,11 +581,11 @@ fn incompatible_replacements_refuse_without_changing_the_source_or_prior_project
             .unwrap();
         match defect {
             "count" => target
-                .document
+                .document_mut_for_test()
                 .components
                 .retain(|component| component.value != "b"),
-            "name" => target.document.components[0].value = "different".to_owned(),
-            "width" => target.document.components[0].value = "a[3:0]".to_owned(),
+            "name" => target.document_mut_for_test().components[0].value = "different".to_owned(),
+            "width" => target.document_mut_for_test().components[0].value = "a[3:0]".to_owned(),
             _ => unreachable!(),
         }
         let source = serde_json::to_value((&top, &workspace.schematic_buffers)).unwrap();
@@ -614,7 +618,7 @@ fn replacement_connectivity_follows_the_projected_sheet_translation() {
     connect_testbench(&mut top, &workspace, &libraries);
     let owner = CellViewRef::new("work", "div", "schematic");
     let objects = workspace.schematic_buffers[&owner.key()]
-        .document
+        .document()
         .components
         .iter()
         .map(|component| component.id)
@@ -652,12 +656,12 @@ fn replacement_connectivity_follows_the_projected_sheet_translation() {
         .design_projection(&libraries, &workspace.active_view, &top)
         .unwrap();
     let placed = &projection.schematic_buffers()[&owner.key()]
-        .document
+        .document()
         .components[1];
     assert_ne!(
         placed.pos,
         workspace.schematic_buffers[&owner.key()]
-            .document
+            .document()
             .components[1]
             .pos
     );
@@ -672,7 +676,7 @@ fn replacement_pin_layout_is_rebuilt_when_the_authored_symbol_changes() {
     activate(
         &mut workspace,
         &active,
-        top.document.components[0].id,
+        top.document().components[0].id,
         replacement(),
     );
     let original = workspace
@@ -699,7 +703,7 @@ fn replacement_pin_layout_is_rebuilt_when_the_authored_symbol_changes() {
         .unwrap();
     assert!(!std::sync::Arc::ptr_eq(&original, &updated));
     let layout =
-        updated.root_schematic().unwrap().document.components[0].execution_terminal_layout();
+        updated.root_schematic().unwrap().document().components[0].execution_terminal_layout();
     assert_eq!(
         layout.unwrap(),
         &[
@@ -709,7 +713,7 @@ fn replacement_pin_layout_is_rebuilt_when_the_authored_symbol_changes() {
     );
     assert_ne!(
         layout,
-        original.root_schematic().unwrap().document.components[0].execution_terminal_layout()
+        original.root_schematic().unwrap().document().components[0].execution_terminal_layout()
     );
     connect_testbench(&mut top, &workspace, &libraries);
     let rewired = workspace
@@ -766,7 +770,7 @@ fn variant_replacements_preserve_the_electrical_load_through_all_orientations() 
                                 ComponentType::CellInstance
                             };
                             let component = source_document
-                                .document
+                                .document_mut_for_test()
                                 .components
                                 .iter_mut()
                                 .find(|component| component.kind == source_kind)
@@ -778,7 +782,7 @@ fn variant_replacements_preserve_the_electrical_load_through_all_orientations() 
                             if nested {
                                 let pins = component.terminal_positions();
                                 for (port, (_, point)) in source_document
-                                    .document
+                                    .document_mut_for_test()
                                     .components
                                     .iter_mut()
                                     .filter(|component| component.kind == ComponentType::Port)
@@ -809,7 +813,7 @@ fn variant_replacements_preserve_the_electrical_load_through_all_orientations() 
                                 "configured={configured} authored={authored} nested={nested} rotation={rotation:?} mirrors={mirror_h}/{mirror_v}: {actual}"
                             );
                             let placed = projection.schematic_buffers()[&owner.key()]
-                                .document
+                                .document()
                                 .components
                                 .iter()
                                 .find(|component| component.id == source_id)
@@ -847,7 +851,7 @@ fn a_primitive_replacement_uses_the_requested_schematic_views_ports() {
         .add_view(View::new("rf_impl", ViewType::Schematic));
     let mut target = two_port_master("9k");
     for (port, name) in target
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .filter(|component| component.kind == ComponentType::Port)
@@ -861,7 +865,7 @@ fn a_primitive_replacement_uses_the_requested_schematic_views_ports() {
     connect_testbench(&mut top, &workspace, &libraries);
     let owner = CellViewRef::new("work", "div", "schematic");
     let source_id = workspace.schematic_buffers[&owner.key()]
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.kind == ComponentType::Resistor)
@@ -876,7 +880,7 @@ fn a_primitive_replacement_uses_the_requested_schematic_views_ports() {
         .design_projection(&libraries, &workspace.active_view, &top)
         .unwrap();
     let placed = projection.schematic_buffers()[&owner.key()]
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == source_id)
@@ -897,7 +901,7 @@ fn a_variant_replacement_owns_the_plan_and_emitted_master() {
             .design_projection(&libraries, &active, &top)
             .unwrap();
         let instance = top
-            .document
+            .document()
             .components
             .iter()
             .find(|c| c.name == "X1")
@@ -935,7 +939,7 @@ fn a_variant_replacement_owns_the_plan_and_emitted_master() {
             "div"
         );
         assert_eq!(
-            top.document
+            top.document()
                 .components
                 .iter()
                 .find(|c| c.id == instance)
@@ -961,7 +965,7 @@ fn a_primitive_substitution_inside_a_buffered_master_enters_the_hierarchy() {
         let (mut workspace, libraries, top) = fixture(configured);
         let child = CellViewRef::new("work", "div", "schematic");
         let resistor = workspace.schematic_buffers[&child.key()]
-            .document
+            .document()
             .components
             .iter()
             .find(|c| c.kind == ComponentType::Resistor)
@@ -996,7 +1000,7 @@ fn a_primitive_substitution_inside_a_buffered_master_enters_the_hierarchy() {
         );
         assert_eq!(
             workspace.schematic_buffers[&child.key()]
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|c| c.id == resistor)
@@ -1025,7 +1029,7 @@ fn omitted_instances_do_not_require_or_emit_their_missing_master() {
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         assert_eq!(subckt_headers(&result.netlist), vec![".subckt div a b"]);
         assert!(!result.netlist.lines().any(|line| line.starts_with("X2 ")));
-        assert!(top.document.components.iter().any(|c| c.id == omitted));
+        assert!(top.document().components.iter().any(|c| c.id == omitted));
     }
 }
 
@@ -1044,7 +1048,7 @@ fn a_variant_cannot_silently_remove_the_configured_dut() {
         .design_projection(&libraries, &active, &top)
         .unwrap();
     let instance = top
-        .document
+        .document()
         .components
         .iter()
         .find(|c| c.name == "X1")
@@ -1056,5 +1060,5 @@ fn a_variant_cannot_silently_remove_the_configured_dut() {
         .expect_err("the selected DUT no longer exists in this variant");
     assert!(error.to_string().contains("configured DUT path"), "{error}");
     assert!(original.plan().binding(&instance_path("/X1")).is_some());
-    assert!(top.document.components.iter().any(|c| c.id == instance));
+    assert!(top.document().components.iter().any(|c| c.id == instance));
 }

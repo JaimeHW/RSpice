@@ -11,7 +11,7 @@ use crate::state::ValidatedRevisionJournal;
 /// A placement that carries a copy of its master's netlist identity, which is
 /// what makes a dangling instance look resolved when it is not.
 fn amp_placement_with_netlist_identity(state: &mut AppState) {
-    let binding = state.schematic.document.components[0]
+    let binding = state.schematic.document_mut_for_test().components[0]
         .library_cell
         .as_mut()
         .expect("the fixture places amp");
@@ -42,7 +42,7 @@ fn copy_cell_resets_the_validated_revision_journal() {
         .get(&CellViewRef::new("work", "amp", "schematic").key())
         .expect("the source buffer survives the copy");
     assert_eq!(
-        source.document.validated_revisions.records().len(),
+        source.document().validated_revisions.records().len(),
         1,
         "copying must not disturb the original's review history"
     );
@@ -52,12 +52,12 @@ fn copy_cell_resets_the_validated_revision_journal() {
         .get(&CellViewRef::new("work", "amp_copy", "schematic").key())
         .expect("the copy carries the drawn content");
     assert_eq!(
-        copy.document.components.len(),
-        source.document.components.len(),
+        copy.document().components.len(),
+        source.document().components.len(),
         "the copy is the same drawing"
     );
     assert_eq!(
-        copy.document.validated_revisions,
+        copy.document().validated_revisions,
         ValidatedRevisionJournal::default(),
         "a copy has been reviewed by nobody and starts its own history"
     );
@@ -104,7 +104,7 @@ fn deleting_a_cell_removes_the_physical_layout_of_every_view_it_owned() {
 fn undo_revalidates_instance_bindings() {
     let mut state = state_with_populated_user_library();
     amp_placement_with_netlist_identity(&mut state);
-    let placement = state.schematic.document.components[0].id;
+    let placement = state.schematic.document().components[0].id;
     state.schematic.selection.select_component(placement);
     assert!(
         state.schematic.delete_selection(),
@@ -122,7 +122,7 @@ fn undo_revalidates_instance_bindings() {
     assert!(state.schematic.undo(), "undo puts the placement back");
     state.sync_active_schematic_to_workspace();
 
-    let binding = state.schematic.document.components[0]
+    let binding = state.schematic.document().components[0]
         .library_cell
         .as_ref()
         .expect("the restored placement keeps its binding");

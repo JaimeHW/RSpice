@@ -539,7 +539,7 @@ mod tests {
     #[test]
     fn open_uses_exact_default_count_and_collision_free_naming() {
         let mut state = AppState::default();
-        state.schematic.document.components.push(
+        state.schematic.document_mut_for_test().components.push(
             Component::new(4, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k"),
         );
         state.schematic.selection.select_only_component(4);
@@ -588,7 +588,7 @@ mod tests {
     #[test]
     fn radial_documentation_accepts_notes_and_starts_at_the_selection_center() {
         let mut state = AppState::default();
-        state.schematic.document.design_notes.push(
+        state.schematic.document_mut_for_test().design_notes.push(
             DesignNote::new(
                 11,
                 Point::new(120, -40),
@@ -612,7 +612,7 @@ mod tests {
     #[test]
     fn rectangular_array_highlights_only_the_incompatible_count_field() {
         let mut state = AppState::default();
-        state.schematic.document.components.push(
+        state.schematic.document_mut_for_test().components.push(
             Component::new(4, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k"),
         );
         state.schematic.selection.select_only_component(4);
@@ -630,7 +630,7 @@ mod tests {
     #[test]
     fn malformed_naming_highlights_only_the_naming_field() {
         let mut state = AppState::default();
-        state.schematic.document.components.push(
+        state.schematic.document_mut_for_test().components.push(
             Component::new(4, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k"),
         );
         state.schematic.selection.select_only_component(4);
@@ -660,7 +660,7 @@ mod tests {
     #[test]
     fn stale_operation_is_not_misrepresented_as_a_field_error() {
         let mut state = AppState::default();
-        state.schematic.document.components.push(
+        state.schematic.document_mut_for_test().components.push(
             Component::new(4, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k"),
         );
         state.schematic.selection.select_only_component(4);

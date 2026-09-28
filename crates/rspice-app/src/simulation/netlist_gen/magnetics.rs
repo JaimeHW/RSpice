@@ -516,14 +516,15 @@ mod tests {
         let resistor = Component::new(2, ComponentType::Resistor, Point::new(200, 0))
             .with_name_value("R1", "50");
         let mut add = |component: Component, nodes: &[&str]| {
+            let document = schematic.document_mut_for_test();
             for ((_, point), node) in component.terminal_positions().iter().zip(nodes) {
-                schematic.document.net_labels.push(NetLabel::new(
-                    schematic.document.net_labels.len() as u64 + 1,
+                document.net_labels.push(NetLabel::new(
+                    document.net_labels.len() as u64 + 1,
                     *point,
                     *node,
                 ));
             }
-            schematic.document.components.push(component);
+            document.components.push(component);
         };
         add(source, &["in", "0"]);
         add(resistor, &["in", "p"]);
@@ -616,7 +617,7 @@ mod tests {
         ] {
             for coefficient in ["-1.01", "1.01", "NaN", "inf", "-inf"] {
                 let schematic = circuit(kind, coefficient, false);
-                let before = schematic.document.components.clone();
+                let before = schematic.document().components.clone();
                 let result = generated(&schematic);
                 assert!(
                     result
@@ -626,7 +627,7 @@ mod tests {
                     "{kind:?}, k={coefficient}: {:?}",
                     result.errors
                 );
-                assert_eq!(schematic.document.components, before);
+                assert_eq!(schematic.document().components, before);
             }
         }
     }
@@ -651,7 +652,7 @@ mod tests {
 
         for params in ["", "coupling_factor=0", "coupling_factor=-0"] {
             let mut schematic = circuit(ComponentType::Inductor, "0", false);
-            schematic.document.components[2].params = params.to_owned();
+            schematic.document_mut_for_test().components[2].params = params.to_owned();
             let result = generated(&schematic);
             assert!(result.errors.is_empty(), "{:?}", result.errors);
             let deck = Netlist::parse(&result.netlist).unwrap();
@@ -661,14 +662,14 @@ mod tests {
             )));
         }
         let mut schematic = circuit(ComponentType::Inductor, "-0.75", false);
-        schematic.document.components[2].params = "coupling_factor=-0.75".to_owned();
+        schematic.document_mut_for_test().components[2].params = "coupling_factor=-0.75".to_owned();
         assert!(
             generated(&schematic)
                 .errors
                 .iter()
                 .any(|error| error.contains("no target winding"))
         );
-        schematic.document.components[2].params = "coupled_to=L2".to_owned();
+        schematic.document_mut_for_test().components[2].params = "coupled_to=L2".to_owned();
         assert!(
             generated(&schematic)
                 .errors
@@ -680,7 +681,8 @@ mod tests {
     #[test]
     fn reciprocal_coupling_definitions_must_agree_in_polarity() {
         let mut schematic = circuit(ComponentType::Inductor, "-0.75", false);
-        schematic.document.components[3].params = "coupled_to=L1 coupling_factor=-0.75".to_owned();
+        schematic.document_mut_for_test().components[3].params =
+            "coupled_to=L1 coupling_factor=-0.75".to_owned();
         let result = generated(&schematic);
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         let deck = Netlist::parse(&result.netlist).unwrap();
@@ -695,7 +697,8 @@ mod tests {
             1
         );
 
-        schematic.document.components[3].params = "coupled_to=L1 coupling_factor=0.75".to_owned();
+        schematic.document_mut_for_test().components[3].params =
+            "coupled_to=L1 coupling_factor=0.75".to_owned();
         assert!(
             generated(&schematic)
                 .errors

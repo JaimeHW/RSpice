@@ -77,7 +77,11 @@ fn adopter(state: &mut AppState, name: &str, instance: &str) -> u64 {
     let mut component = Component::new(id, definition.component_type(), Point::new(4, 4));
     component.name = instance.to_owned();
     definition.adopt_onto(&mut component).expect("adopt");
-    state.schematic.document.components.push(component);
+    state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(component);
     id
 }
 
@@ -388,7 +392,7 @@ fn applying_a_rename_repoints_every_adopter() {
     let component = app
         .state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == id)

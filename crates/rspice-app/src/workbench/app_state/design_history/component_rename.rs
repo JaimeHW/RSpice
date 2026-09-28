@@ -101,35 +101,29 @@ impl AppState {
         description: &str,
     ) -> Result<bool, String> {
         let document = self.workspace.active_schematic_reference();
-        let components = self
+        let writable = self.project_lifecycle.project_open && !document_read_only(self, &document);
+        let prepared = self
             .schematic
-            .prepare_component_edit(expected, candidate.clone())?;
-        if self.schematic.document().components == components {
+            .prepare_component_transaction(expected, candidate.clone())?;
+        if !prepared.changes_document() {
             return Ok(false);
         }
-        if !self.project_lifecycle.project_open || document_read_only(self, &document) {
+        if !writable {
             return Err(
                 "Component editing requires an open, writable project and document.".to_owned(),
             );
         }
-        if self.schematic.has_pending_operation() {
+        if prepared.has_pending_operation() {
             return Err(
                 "Finish or cancel the active schematic gesture before editing properties."
                     .to_owned(),
             );
         }
         if candidate.name == expected.name || expected.kind.spice_prefix().is_empty() {
-            let before = SchematicSnapshot::capture(&self.schematic.document());
-            self.schematic.document.components = components;
-            self.schematic.is_dirty = true;
-            self.schematic.bump_topology_version();
-            self.schematic.commit_undo_from(before, description);
+            prepared.commit_local(description);
             return Ok(true);
         }
-        let mut after_schematic = self.schematic.clone();
-        after_schematic.document.components = components;
-        after_schematic.is_dirty = true;
-        after_schematic.bump_topology_version();
+        let after_schematic = prepared.into_reference_candidate();
         let transaction = self.prepare_schematic_reference_transaction(
             BTreeMap::from([(document.key(), self.schematic.clone())]),
             BTreeMap::from([(document.key(), after_schematic)]),

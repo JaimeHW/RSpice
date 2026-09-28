@@ -113,7 +113,7 @@ fn schematic_and_exact_veriloga_instance_double_click_destinations_are_distinct(
     library.add_cell(veriloga_cell);
     state.library_manager.add_library(library);
 
-    state.schematic.document.components.push(
+    state.schematic.document_mut_for_test().components.push(
         Component::new(41, ComponentType::CellInstance, Point::new(20, 20)).with_library_cell(
             crate::state::LibraryCellInstance::new(
                 &schematic_reference.library,
@@ -122,7 +122,7 @@ fn schematic_and_exact_veriloga_instance_double_click_destinations_are_distinct(
             ),
         ),
     );
-    state.schematic.document.components.push(
+    state.schematic.document_mut_for_test().components.push(
         Component::new(42, ComponentType::CellInstance, Point::new(40, 20)).with_library_cell(
             crate::state::LibraryCellInstance::new(
                 &veriloga_reference.library,
@@ -229,12 +229,12 @@ fn wire_probe_resolves_from_live_connectivity_without_retained_run_data() {
     let mut state = AppState::default();
     state
         .schematic
-        .document
+        .document_mut_for_test()
         .wires
         .push(Wire::new(91, vec![Point::new(0, 20), Point::new(80, 20)]));
     state
         .schematic
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(92, Point::new(40, 20), "OUT"));
 
@@ -256,7 +256,7 @@ fn wire_probe_resolves_from_live_connectivity_without_retained_run_data() {
 #[test]
 fn component_probe_never_fabricates_a_voltage_node_from_instance_identity() {
     let mut state = AppState::default();
-    state.schematic.document.components.push(
+    state.schematic.document_mut_for_test().components.push(
         Component::new(17, ComponentType::CellInstance, Point::origin())
             .with_name_value("XAMP", ""),
     );
@@ -272,7 +272,7 @@ fn component_probe_never_fabricates_a_voltage_node_from_instance_identity() {
 #[test]
 fn voltage_source_component_probe_preserves_device_current_semantics() {
     let mut state = AppState::default();
-    state.schematic.document.components.push(
+    state.schematic.document_mut_for_test().components.push(
         Component::new(23, ComponentType::VoltageSource, Point::origin())
             .with_name_value("VBIAS", "1.8"),
     );
@@ -287,7 +287,7 @@ fn voltage_source_component_probe_preserves_device_current_semantics() {
 #[test]
 fn ordinary_component_body_probe_requests_device_current_not_nearest_pin_voltage() {
     let mut state = AppState::default();
-    state.schematic.document.components.push(
+    state.schematic.document_mut_for_test().components.push(
         Component::new(24, ComponentType::Resistor, Point::origin()).with_name_value("RLOAD", "1k"),
     );
     let symbols = SchematicSymbolContext::from_state(&state);
@@ -301,7 +301,7 @@ fn ordinary_component_body_probe_requests_device_current_not_nearest_pin_voltage
 #[test]
 fn exact_component_terminal_probe_requests_its_node_voltage() {
     let mut state = AppState::default();
-    state.schematic.document.components.push(
+    state.schematic.document_mut_for_test().components.push(
         Component::new(25, ComponentType::Resistor, Point::origin()).with_name_value("RLOAD", "1k"),
     );
     let symbols = SchematicSymbolContext::from_state(&state);
@@ -328,7 +328,7 @@ fn synthesized_and_multi_port_component_bodies_fail_closed() {
         let id = 100 + index as u64;
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .components
             .push(Component::new(id, kind, Point::origin()));
         let symbols = SchematicSymbolContext::from_state(&state);
@@ -442,15 +442,15 @@ fn empty_space_probe_retains_one_unbound_marker_and_undo_removes_it() {
 
     let id =
         retain_probe_flag(&mut state, position, None, None).expect("editable active schematic");
-    assert_eq!(state.schematic.document.probes.len(), 1);
-    assert_eq!(state.schematic.document.probes[0].id, id);
-    assert_eq!(state.schematic.document.probes[0].position, position);
+    assert_eq!(state.schematic.document().probes.len(), 1);
+    assert_eq!(state.schematic.document().probes[0].id, id);
+    assert_eq!(state.schematic.document().probes[0].position, position);
     assert_eq!(
-        state.schematic.document.probes[0].reference,
+        state.schematic.document().probes[0].reference,
         format!("P{id}")
     );
     assert!(
-        state.schematic.document.probes[0]
+        state.schematic.document().probes[0]
             .source_expression
             .is_none()
     );
@@ -460,7 +460,7 @@ fn empty_space_probe_retains_one_unbound_marker_and_undo_removes_it() {
     );
 
     assert!(state.schematic.undo());
-    assert!(state.schematic.document.probes.is_empty());
+    assert!(state.schematic.document().probes.is_empty());
 }
 
 #[test]
@@ -468,7 +468,7 @@ fn probe_marker_rejects_read_only_and_replaced_view_identity_without_mutation() 
     let mut read_only = AppState::default();
     read_only.schematic.read_only = true;
     assert!(retain_probe_flag(&mut read_only, Point::origin(), None, None).is_err());
-    assert!(read_only.schematic.document.probes.is_empty());
+    assert!(read_only.schematic.document().probes.is_empty());
     assert!(!read_only.schematic.can_undo());
 
     let mut read_only_reference = AppState::default();
@@ -476,13 +476,13 @@ fn probe_marker_rejects_read_only_and_replaced_view_identity_without_mutation() 
         .workspace
         .set_active_read_only_reference(true);
     assert!(retain_probe_flag(&mut read_only_reference, Point::origin(), None, None).is_err());
-    assert!(read_only_reference.schematic.document.probes.is_empty());
+    assert!(read_only_reference.schematic.document().probes.is_empty());
     assert!(!read_only_reference.schematic.can_undo());
 
     let mut replaced = AppState::default();
     replaced.workspace.active_view.view = "symbol".to_owned();
     assert!(retain_probe_flag(&mut replaced, Point::origin(), None, None).is_err());
-    assert!(replaced.schematic.document.probes.is_empty());
+    assert!(replaced.schematic.document().probes.is_empty());
     assert!(!replaced.schematic.can_undo());
 }
 
@@ -497,9 +497,9 @@ fn bound_probe_marker_retains_the_exact_source_expression() {
     )
     .expect("bound marker");
 
-    assert_eq!(state.schematic.document.probes[0].reference, "V(OUT)");
+    assert_eq!(state.schematic.document().probes[0].reference, "V(OUT)");
     assert_eq!(
-        state.schematic.document.probes[0]
+        state.schematic.document().probes[0]
             .source_expression
             .as_deref(),
         Some("V(OUT)")
@@ -553,9 +553,9 @@ fn an_occurrence_probe_saves_the_display_name_and_requests_the_engine_node() {
 
     retain_probe_flag(&mut state, Point::new(10, 20), Some(&spelling), None)
         .expect("marker retains");
-    assert_eq!(state.schematic.document.probes[0].reference, "V(/X1/n1)");
+    assert_eq!(state.schematic.document().probes[0].reference, "V(/X1/n1)");
     assert_eq!(
-        state.schematic.document.probes[0]
+        state.schematic.document().probes[0]
             .source_expression
             .as_deref(),
         Some("V(x1.n1)")
@@ -579,13 +579,16 @@ fn bound_probe_marker_retains_stable_plan_output_identity() {
     )
     .expect("bound marker");
 
-    assert_eq!(state.schematic.document.probes[0].plan_id, Some(binding.0));
     assert_eq!(
-        state.schematic.document.probes[0].saved_output_id,
+        state.schematic.document().probes[0].plan_id,
+        Some(binding.0)
+    );
+    assert_eq!(
+        state.schematic.document().probes[0].saved_output_id,
         Some(binding.1)
     );
-    assert!(state.schematic.document.probes[0].enabled);
-    assert!(state.schematic.document.probes[0].plot_on_materialization);
+    assert!(state.schematic.document().probes[0].enabled);
+    assert!(state.schematic.document().probes[0].plot_on_materialization);
 }
 
 #[test]
@@ -610,7 +613,7 @@ fn equivalent_probe_marker_placement_reuses_identity_without_an_undo_step() {
     .expect("existing marker");
 
     assert_eq!(repeated, id);
-    assert_eq!(state.schematic.document.probes.len(), 1);
+    assert_eq!(state.schematic.document().probes.len(), 1);
     assert_eq!(state.schematic.selection.single_probe(), Some(id));
     assert!(!state.schematic.can_undo());
 }
@@ -627,7 +630,7 @@ fn late_safe_mode_activation_rejects_probe_marker_without_mutation() {
     );
 
     assert!(retain_probe_flag(&mut state, Point::new(10, 20), None, None).is_err());
-    assert!(state.schematic.document.probes.is_empty());
+    assert!(state.schematic.document().probes.is_empty());
     assert!(!state.schematic.is_dirty);
     assert!(!state.schematic.can_undo());
 }
@@ -639,7 +642,7 @@ fn route_finish_helper_commits_wire_and_bus_without_secondary_click() {
     state.schematic.extend_wire(Point::new(20, 0));
     with_test_ui(|ui| assert!(finish_active_route(ui, &mut state)));
     assert!(!state.schematic.wire_drawing.active);
-    assert_eq!(state.schematic.document.wires.len(), 1);
+    assert_eq!(state.schematic.document().wires.len(), 1);
 
     state
         .schematic
@@ -651,7 +654,7 @@ fn route_finish_helper_commits_wire_and_bus_without_secondary_click() {
     state.schematic.extend_bus(Point::new(20, 20));
     with_test_ui(|ui| assert!(finish_active_route(ui, &mut state)));
     assert!(!state.schematic.bus_drawing.active);
-    assert_eq!(state.schematic.document.buses.len(), 1);
+    assert_eq!(state.schematic.document().buses.len(), 1);
 }
 
 #[test]
@@ -791,15 +794,15 @@ fn armed_move_exclusively_owns_selection_drag_routing() {
 #[test]
 fn armed_move_commits_once_syncs_workspace_and_retains_selection() {
     let mut state = AppState::default();
-    state.schematic.document.components.push(Component::new(
-        1,
-        ComponentType::Resistor,
-        Point::origin(),
-    ));
-    let terminal = state.schematic.document.components[0].terminal_positions()[0].1;
     state
         .schematic
-        .document
+        .document_mut_for_test()
+        .components
+        .push(Component::new(1, ComponentType::Resistor, Point::origin()));
+    let terminal = state.schematic.document().components[0].terminal_positions()[0].1;
+    state
+        .schematic
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(2, terminal, Point::new(20, 0)));
     state.schematic.selection.select_only_component(1);
@@ -811,11 +814,11 @@ fn armed_move_commits_once_syncs_workspace_and_retains_selection() {
     commit_armed_move_selection(&mut state, &symbols);
 
     assert_eq!(
-        state.schematic.document.components[0].pos,
+        state.schematic.document().components[0].pos,
         Point::new(0, 10)
     );
     assert_eq!(
-        state.schematic.document.wires[0].points[0],
+        state.schematic.document().wires[0].points[0],
         Point::new(terminal.x, terminal.y + 10)
     );
     assert_eq!(state.schematic.undo_description(), Some("move selection"));
@@ -827,13 +830,16 @@ fn armed_move_commits_once_syncs_workspace_and_retains_selection() {
             .workspace
             .active_schematic()
             .expect("active workspace buffer")
-            .document
+            .document()
             .components[0]
             .pos,
         Point::new(0, 10)
     );
     assert!(state.schematic.undo());
-    assert_eq!(state.schematic.document.components[0].pos, Point::origin());
+    assert_eq!(
+        state.schematic.document().components[0].pos,
+        Point::origin()
+    );
     assert!(
         !state.schematic.can_undo(),
         "the gesture owns one undo record"
@@ -843,11 +849,11 @@ fn armed_move_commits_once_syncs_workspace_and_retains_selection() {
 #[test]
 fn cancelling_armed_move_preserves_geometry_selection_and_history() {
     let mut state = AppState::default();
-    state.schematic.document.components.push(Component::new(
-        1,
-        ComponentType::Resistor,
-        Point::origin(),
-    ));
+    state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(Component::new(1, ComponentType::Resistor, Point::origin()));
     state.schematic.selection.select_only_component(1);
     state.schematic.init_undo_history();
     arm_test_move(&mut state, crate::state::MoveSelectionMode::Shove);
@@ -855,7 +861,10 @@ fn cancelling_armed_move_preserves_geometry_selection_and_history() {
 
     crate::workbench::app::cancel_armed_move_selection(&mut state);
 
-    assert_eq!(state.schematic.document.components[0].pos, Point::origin());
+    assert_eq!(
+        state.schematic.document().components[0].pos,
+        Point::origin()
+    );
     assert!(state.schematic.selection.has_component(1));
     assert_eq!(state.schematic.tool, Tool::Select);
     assert!(!state.schematic.can_undo());
@@ -887,8 +896,8 @@ fn validated_port_contract_places_once_and_undo_redo_is_exact() {
 
     place_component(&mut state, ComponentType::Port, Point::new(20, 30));
 
-    assert_eq!(state.schematic.document.components.len(), 1);
-    let placed = state.schematic.document.components[0].clone();
+    assert_eq!(state.schematic.document().components.len(), 1);
+    let placed = state.schematic.document().components[0].clone();
     assert_eq!(placed.pos, Point::new(20, 30));
     assert_eq!(placed.value, "BIAS_EN");
     let contract = placed.port_contract().expect("typed interface contract");
@@ -905,9 +914,9 @@ fn validated_port_contract_places_once_and_undo_redo_is_exact() {
     );
 
     assert!(state.schematic.undo());
-    assert!(state.schematic.document.components.is_empty());
+    assert!(state.schematic.document().components.is_empty());
     assert!(state.schematic.redo());
-    assert_eq!(state.schematic.document.components, [placed]);
+    assert_eq!(state.schematic.document().components, [placed]);
 }
 
 /// The batch: one click per name, one undo record per click, the interface
@@ -924,8 +933,8 @@ fn each_click_places_the_next_name_with_the_next_interface_order() {
             ComponentType::Port,
             Point::new(20 * (index as i32 + 1), 30),
         );
-        assert_eq!(state.schematic.document.components.len(), index + 1);
-        let placed = &state.schematic.document.components[index];
+        assert_eq!(state.schematic.document().components.len(), index + 1);
+        let placed = &state.schematic.document().components[index];
         assert_eq!(placed.value, expected);
         assert_eq!(
             placed
@@ -954,7 +963,7 @@ fn each_click_places_the_next_name_with_the_next_interface_order() {
     assert!(state.schematic.pending_port_sequence.is_none());
     for expected in [2, 1, 0] {
         assert!(state.schematic.undo());
-        assert_eq!(state.schematic.document.components.len(), expected);
+        assert_eq!(state.schematic.document().components.len(), expected);
     }
 }
 
@@ -969,7 +978,7 @@ fn rotation_and_mirror_of_the_ghost_land_on_the_placed_pin() {
 
     place_component(&mut state, ComponentType::Port, Point::new(20, 30));
 
-    let placed = &state.schematic.document.components[0];
+    let placed = &state.schematic.document().components[0];
     assert_eq!(placed.rotation, crate::state::Rotation::R90);
     assert!(placed.mirror_h);
 }
@@ -985,7 +994,7 @@ fn a_name_taken_after_arming_is_refused_at_the_click_and_the_sequence_survives()
         .add_component(ComponentType::Port, Point::origin());
     state
         .schematic
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == taken)
@@ -995,7 +1004,7 @@ fn a_name_taken_after_arming_is_refused_at_the_click_and_the_sequence_survives()
     place_component(&mut state, ComponentType::Port, Point::new(20, 30));
 
     assert_eq!(
-        state.schematic.document.components.len(),
+        state.schematic.document().components.len(),
         1,
         "nothing was placed"
     );
@@ -1017,7 +1026,7 @@ fn validated_design_note_contract_places_once_without_changing_topology() {
         DesignNoteKind::PlainText,
         "Bias network",
         state.schematic.topology_version(),
-        &state.schematic.document.design_notes,
+        &state.schematic.document().design_notes,
     )
     .unwrap()
     .with_document_authority(
@@ -1031,16 +1040,16 @@ fn validated_design_note_contract_places_once_without_changing_topology() {
 
     place_pending_design_note(&mut state, Point::new(20, 30));
 
-    assert_eq!(state.schematic.document.design_notes.len(), 1);
+    assert_eq!(state.schematic.document().design_notes.len(), 1);
     assert_eq!(
-        state.schematic.document.design_notes[0].pos,
+        state.schematic.document().design_notes[0].pos,
         Point::new(20, 30)
     );
     assert_eq!(state.schematic.topology_version(), topology);
     assert!(state.schematic.pending_design_note.is_none());
     assert_eq!(state.schematic.tool, Tool::Select);
     assert!(state.schematic.undo());
-    assert!(state.schematic.document.design_notes.is_empty());
+    assert!(state.schematic.document().design_notes.is_empty());
 }
 
 #[test]
@@ -1080,7 +1089,7 @@ fn every_documentation_shape_gesture_commits_once_and_remains_non_electrical() {
             PendingDocumentationShapePlacement::new(
                 kind,
                 topology,
-                &state.schematic.document.documentation_shapes,
+                &state.schematic.document().documentation_shapes,
             )
             .with_document_authority(
                 state.design_execution_epoch,
@@ -1096,17 +1105,17 @@ fn every_documentation_shape_gesture_commits_once_and_remains_non_electrical() {
         }
 
         assert_eq!(
-            state.schematic.document.documentation_shapes.len(),
+            state.schematic.document().documentation_shapes.len(),
             1,
             "{kind:?}"
         );
         assert_eq!(
-            state.schematic.document.documentation_shapes[0].kind(),
+            state.schematic.document().documentation_shapes[0].kind(),
             kind
         );
         assert_eq!(state.schematic.topology_version(), topology);
-        assert!(state.schematic.document.components.is_empty());
-        assert!(state.schematic.document.wires.is_empty());
+        assert!(state.schematic.document().components.is_empty());
+        assert!(state.schematic.document().wires.is_empty());
         assert_eq!(state.schematic.tool, Tool::Select);
         assert!(state.schematic.pending_documentation_shape.is_none());
         assert!(
@@ -1121,7 +1130,7 @@ fn every_documentation_shape_gesture_commits_once_and_remains_non_electrical() {
             Some("draw documentation shape")
         );
         assert!(state.schematic.undo());
-        assert!(state.schematic.document.documentation_shapes.is_empty());
+        assert!(state.schematic.document().documentation_shapes.is_empty());
         assert!(
             !state.schematic.can_undo(),
             "{kind:?} must create one undo step"
@@ -1136,7 +1145,7 @@ fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
         PendingDocumentationShapePlacement::new(
             DocumentationShapeKind::Line,
             state.schematic.topology_version(),
-            &state.schematic.document.documentation_shapes,
+            &state.schematic.document().documentation_shapes,
         )
         .with_document_authority(
             state.design_execution_epoch,
@@ -1149,7 +1158,7 @@ fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
 
     with_test_ui(|ui| handle_documentation_shape_click(ui, &mut state, Point::new(0, 0), false));
 
-    assert!(state.schematic.document.documentation_shapes.is_empty());
+    assert!(state.schematic.document().documentation_shapes.is_empty());
     assert!(state.schematic.pending_documentation_shape.is_none());
     assert!(
         state
@@ -1165,12 +1174,12 @@ fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
 #[test]
 fn focused_keyboard_cursor_places_exact_grid_resolved_shape_points() {
     let mut state = AppState::default();
-    let grid = state.schematic.document.grid_size;
+    let grid = state.schematic.document().grid_size;
     state.schematic.pending_documentation_shape = Some(
         PendingDocumentationShapePlacement::new(
             DocumentationShapeKind::Line,
             state.schematic.topology_version(),
-            &state.schematic.document.documentation_shapes,
+            &state.schematic.document().documentation_shapes,
         )
         .with_document_authority(
             state.design_execution_epoch,
@@ -1217,9 +1226,9 @@ fn focused_keyboard_cursor_places_exact_grid_resolved_shape_points() {
     );
     keyboard_frame(&[egui::Key::ArrowDown, egui::Key::Enter], &mut state);
 
-    assert_eq!(state.schematic.document.documentation_shapes.len(), 1);
+    assert_eq!(state.schematic.document().documentation_shapes.len(), 1);
     assert_eq!(
-        state.schematic.document.documentation_shapes[0].geometry,
+        state.schematic.document().documentation_shapes[0].geometry,
         crate::state::DocumentationShapeGeometry::Line {
             start: Point::new(grid, 0),
             end: Point::new(grid, grid),
@@ -1249,7 +1258,7 @@ fn stale_design_note_authority_is_consumed_without_document_mutation() {
         DesignNoteKind::ReviewNote,
         "Review bias path",
         state.schematic.topology_version(),
-        &state.schematic.document.design_notes,
+        &state.schematic.document().design_notes,
     )
     .unwrap()
     .with_document_authority(
@@ -1263,7 +1272,7 @@ fn stale_design_note_authority_is_consumed_without_document_mutation() {
 
     place_pending_design_note(&mut state, Point::new(20, 30));
 
-    assert!(state.schematic.document.design_notes.is_empty());
+    assert!(state.schematic.document().design_notes.is_empty());
     assert!(state.schematic.pending_design_note.is_none());
     assert_eq!(state.schematic.tool, Tool::Select);
     assert!(!state.schematic.can_undo());
@@ -1276,7 +1285,7 @@ fn port_placement_without_a_current_validated_contract_fails_closed() {
 
     place_component(&mut state, ComponentType::Port, Point::new(20, 30));
 
-    assert!(state.schematic.document.components.is_empty());
+    assert!(state.schematic.document().components.is_empty());
     assert!(!state.schematic.can_undo());
     assert_eq!(state.schematic.tool, Tool::Select);
     assert!(state.schematic.pending_port_sequence.is_none());
@@ -1293,8 +1302,8 @@ fn a_topology_change_alone_does_not_end_the_sequence() {
 
     place_component(&mut state, ComponentType::Port, Point::new(40, 10));
 
-    assert_eq!(state.schematic.document.components.len(), 1);
-    assert_eq!(state.schematic.document.components[0].value, "OUT");
+    assert_eq!(state.schematic.document().components.len(), 1);
+    assert_eq!(state.schematic.document().components[0].value, "OUT");
     assert_eq!(state.schematic.tool, Tool::Place(ComponentType::Port));
 }
 
@@ -1308,7 +1317,7 @@ fn a_changed_document_ends_the_sequence_without_placing() {
 
     place_component(&mut state, ComponentType::Port, Point::new(40, 10));
 
-    assert!(state.schematic.document.components.is_empty());
+    assert!(state.schematic.document().components.is_empty());
     assert!(!state.schematic.can_undo());
     assert_eq!(state.schematic.tool, Tool::Select);
     assert!(state.schematic.pending_port_sequence.is_none());
@@ -1342,21 +1351,21 @@ fn click_and_drag_share_one_overlapping_object_priority() {
     let mut state = AppState::default();
     state
         .schematic
-        .document
+        .document_mut_for_test()
         .components
         .push(Component::new(10, ComponentType::Resistor, point));
     state
         .schematic
-        .document
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(11, Point::new(0, 0), Point::new(20, 0)));
     state
         .schematic
-        .document
+        .document_mut_for_test()
         .junctions
         .push(Junction::new(12, point));
-    state.schematic.document.buses.push(bus);
-    state.schematic.document.bus_taps.push(tap);
+    state.schematic.document_mut_for_test().buses.push(bus);
+    state.schematic.document_mut_for_test().bus_taps.push(tap);
     let context = SchematicSymbolContext::default();
     let ctx = egui::Context::default();
     let viewport = pointer_viewport();
@@ -1389,7 +1398,7 @@ fn click_and_drag_share_one_overlapping_object_priority() {
         "disabled instance hit-testing must fall through to enabled conductors"
     );
     state.ui.schematic_selection_filter.instances = true;
-    state.schematic.document.components.clear();
+    state.schematic.document_mut_for_test().components.clear();
     assert_eq!(
         pointer_target(
             &state,
@@ -1402,7 +1411,7 @@ fn click_and_drag_share_one_overlapping_object_priority() {
         ),
         Some(PointerTarget::BusTap(21))
     );
-    state.schematic.document.bus_taps.clear();
+    state.schematic.document_mut_for_test().bus_taps.clear();
     assert_eq!(
         pointer_target(
             &state,
@@ -1415,7 +1424,7 @@ fn click_and_drag_share_one_overlapping_object_priority() {
         ),
         Some(PointerTarget::Junction(point))
     );
-    state.schematic.document.junctions.clear();
+    state.schematic.document_mut_for_test().junctions.clear();
     assert_eq!(
         pointer_target(
             &state,
@@ -1428,7 +1437,7 @@ fn click_and_drag_share_one_overlapping_object_priority() {
         ),
         Some(PointerTarget::Bus(20))
     );
-    state.schematic.document.buses.clear();
+    state.schematic.document_mut_for_test().buses.clear();
     assert_eq!(
         pointer_target(
             &state,
@@ -1447,7 +1456,7 @@ fn click_and_drag_share_one_overlapping_object_priority() {
 fn hidden_overlapping_component_cannot_block_active_component_hit() {
     let point = Point::new(10, 10);
     let mut state = AppState::default();
-    state.schematic.document.components = vec![
+    state.schematic.document_mut_for_test().components = vec![
         Component::new(20, ComponentType::Capacitor, point),
         Component::new(10, ComponentType::Resistor, point),
     ];
@@ -1499,7 +1508,7 @@ fn hidden_overlapping_component_cannot_block_active_component_hit() {
 fn inactive_sheet_probe_cannot_block_active_probe_hit() {
     let point = Point::new(10, 10);
     let mut state = AppState::default();
-    state.schematic.document.probes = vec![
+    state.schematic.document_mut_for_test().probes = vec![
         SchematicProbe::new(30, point, "V(active)", Some("V(active)".to_owned())).unwrap(),
         SchematicProbe::new(31, point, "V(hidden)", Some("V(hidden)".to_owned())).unwrap(),
     ];
@@ -1566,8 +1575,8 @@ fn double_click_property_dispatch_selects_taps_before_their_source_bus() {
         BusTapOrientation::Down,
     )
     .unwrap();
-    state.schematic.document.buses.push(bus);
-    state.schematic.document.bus_taps.push(tap);
+    state.schematic.document_mut_for_test().buses.push(bus);
+    state.schematic.document_mut_for_test().bus_taps.push(tap);
     let symbol_context = SchematicSymbolContext::from_state(&state);
     let ctx = egui::Context::default();
     let viewport = pointer_viewport();
@@ -1594,15 +1603,19 @@ fn double_click_property_dispatch_selects_taps_before_their_source_bus() {
 fn net_label_text_bounds_are_a_first_class_pointer_target() {
     let mut state = AppState::default();
     let label = NetLabel::new(31, Point::new(40, 40), "afe_out");
-    state.schematic.document.net_labels.push(label.clone());
-    state.schematic.document.components.push(Component::new(
-        10,
-        ComponentType::Resistor,
-        label.pos,
-    ));
     state
         .schematic
-        .document
+        .document_mut_for_test()
+        .net_labels
+        .push(label.clone());
+    state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(Component::new(10, ComponentType::Resistor, label.pos));
+    state
+        .schematic
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(11, Point::new(0, 40), Point::new(100, 40)));
     let symbol_context = SchematicSymbolContext::default();
@@ -1643,7 +1656,7 @@ fn net_label_text_bounds_are_a_first_class_pointer_target() {
             if draft.original.id == label.id
     ));
 
-    state.schematic.document.net_labels.clear();
+    state.schematic.document_mut_for_test().net_labels.clear();
     assert_eq!(
         pointer_target(
             &state,
@@ -1662,7 +1675,7 @@ fn net_label_text_bounds_are_a_first_class_pointer_target() {
 #[test]
 fn requirement_link_activation_uses_owned_specifications_or_safe_external_url() {
     let mut state = AppState::default();
-    state.schematic.document.design_notes.push(
+    state.schematic.document_mut_for_test().design_notes.push(
         crate::state::DesignNote::new(
             32,
             Point::new(20, 20),
@@ -1683,7 +1696,7 @@ fn requirement_link_activation_uses_owned_specifications_or_safe_external_url() 
     );
     assert!(state.ui.results.spec_drafts.is_some());
 
-    state.schematic.document.design_notes.push(
+    state.schematic.document_mut_for_test().design_notes.push(
         crate::state::DesignNote::new(
             33,
             Point::new(30, 20),
@@ -1712,7 +1725,7 @@ fn requirement_link_activation_uses_owned_specifications_or_safe_external_url() 
 #[test]
 fn explicit_junction_placement_requires_two_wires_and_is_one_undo_step() {
     let mut state = AppState::default();
-    state.schematic.document.wires = vec![
+    state.schematic.document_mut_for_test().wires = vec![
         Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
         Wire::new(2, vec![Point::new(20, 0), Point::new(20, 40)]),
     ];
@@ -1743,7 +1756,7 @@ fn explicit_junction_placement_requires_two_wires_and_is_one_undo_step() {
 #[test]
 fn clicking_an_existing_junction_removes_it_as_one_undo_step() {
     let mut state = AppState::default();
-    state.schematic.document.wires = vec![
+    state.schematic.document_mut_for_test().wires = vec![
         Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
         Wire::new(2, vec![Point::new(20, 0), Point::new(20, 40)]),
     ];
@@ -1785,22 +1798,22 @@ fn clicking_an_existing_junction_removes_it_as_one_undo_step() {
 /// owner gets wrong.
 fn canvas_net_corpus() -> Vec<(&'static str, AppState)> {
     let mut plain = AppState::default();
-    plain.schematic.document.wires = vec![
+    plain.schematic.document_mut_for_test().wires = vec![
         Wire::segment(1, Point::new(0, 0), Point::new(40, 0)),
         Wire::segment(2, Point::new(40, 0), Point::new(40, 40)),
     ];
     plain
         .schematic
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(3, Point::new(20, 0), "sense"));
 
     let mut separated = AppState::default();
-    separated.schematic.document.wires = vec![
+    separated.schematic.document_mut_for_test().wires = vec![
         Wire::segment(11, Point::new(0, 0), Point::new(40, 0)),
         Wire::segment(12, Point::new(0, 100), Point::new(40, 100)),
     ];
-    separated.schematic.document.net_labels = vec![
+    separated.schematic.document_mut_for_test().net_labels = vec![
         NetLabel::new(21, Point::new(20, 0), "VDD"),
         NetLabel::new(22, Point::new(20, 100), "VDD"),
     ];
@@ -1822,11 +1835,11 @@ fn canvas_net_corpus() -> Vec<(&'static str, AppState)> {
         BusTapOrientation::Down,
     )
     .unwrap();
-    tapped.schematic.document.buses.push(bus);
-    tapped.schematic.document.bus_taps.push(tap);
+    tapped.schematic.document_mut_for_test().buses.push(bus);
+    tapped.schematic.document_mut_for_test().bus_taps.push(tap);
     tapped
         .schematic
-        .document
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(42, Point::new(40, 20), Point::new(80, 20)));
 
@@ -1860,7 +1873,7 @@ fn the_canvas_net_partition_is_the_one_extractions_partition() {
         let connectivity = extract(&state.schematic, None);
         let wire_ids = state
             .schematic
-            .document
+            .document()
             .wires
             .iter()
             .map(|wire| wire.id)
@@ -1897,7 +1910,7 @@ fn alt_click_lights_every_group_the_deck_joins_under_one_name() {
 fn automatic_t_marker_is_not_an_explicit_junction_toggle_target() {
     let point = Point::new(20, 20);
     let mut state = AppState::default();
-    state.schematic.document.wires = vec![
+    state.schematic.document_mut_for_test().wires = vec![
         Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
         Wire::new(2, vec![point, Point::new(20, 40)]),
     ];

@@ -30,7 +30,7 @@ pub(super) fn calculate_bounds_with_context(
     let mut max_x = f64::MIN;
     let mut max_y = f64::MIN;
 
-    for comp in &state.document.components {
+    for comp in &state.document().components {
         let (comp_min_x, comp_min_y, comp_max_x, comp_max_y) = comp.bounding_box();
         min_x = min_x.min(comp_min_x as f64 * config.grid_size);
         min_y = min_y.min(comp_min_y as f64 * config.grid_size);
@@ -38,7 +38,7 @@ pub(super) fn calculate_bounds_with_context(
         max_y = max_y.max(comp_max_y as f64 * config.grid_size);
     }
 
-    for wire in &state.document.wires {
+    for wire in &state.document().wires {
         for point in &wire.points {
             let x = point.x as f64 * config.grid_size;
             let y = point.y as f64 * config.grid_size;

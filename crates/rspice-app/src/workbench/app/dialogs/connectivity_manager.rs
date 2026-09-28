@@ -1382,27 +1382,7 @@ fn apply_repair_to_candidate(
 ) -> Result<(), String> {
     match repair.action.as_ref() {
         Some(ConnectivityRepairAction::RenameLabels { canonical, labels }) => {
-            crate::state::NetLabel::validate_name(
-                canonical,
-                candidate.document().document_policy.net_naming,
-            )
-            .map_err(|error| format!("Canonical global name is invalid: {error}."))?;
-            for (id, expected) in labels {
-                let label = candidate
-                    .document
-                    .net_labels
-                    .iter_mut()
-                    .find(|label| label.id == *id)
-                    .ok_or_else(|| format!("Net label #{id} no longer exists."))?;
-                if label.name != *expected {
-                    return Err(format!(
-                        "Net label #{id} changed from '{expected}' to '{}'. Refresh the report.",
-                        label.name
-                    ));
-                }
-                label.name.clone_from(canonical);
-            }
-            Ok(())
+            candidate.repair_candidate_net_labels(canonical, labels)
         }
         None => Err("The selected finding requires a manual endpoint decision.".to_owned()),
     }
@@ -2080,12 +2060,12 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(10, Point::new(0, 0), "VDD!"));
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(11, Point::new(1, 0), "VDD"));
         state.sync_active_schematic_to_workspace();
@@ -2107,7 +2087,7 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(10, Point::new(0, 0), "VCC"));
         state.workspace.connectivity.technology_global_nets =
@@ -2157,9 +2137,10 @@ mod tests {
     #[test]
     fn alias_candidate_rejects_stale_label_identity() {
         let mut state = SchematicState::default();
-        state.document.document_policy.net_naming = NetNamingPolicy::StrictCaseSensitive;
+        state.document_mut_for_test().document_policy.net_naming =
+            NetNamingPolicy::StrictCaseSensitive;
         state
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(3, Point::origin(), "OLD"));
         let repair = ConnectivityRepair {
@@ -2180,7 +2161,7 @@ mod tests {
             },
         };
         assert!(apply_repair_to_candidate(&mut state, &repair).is_err());
-        assert_eq!(state.document.net_labels[0].name, "OLD");
+        assert_eq!(state.document().net_labels[0].name, "OLD");
     }
 
     #[test]
@@ -2212,12 +2193,12 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(10, Point::origin(), "SENSE_P"));
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .wires
             .push(Wire::segment(11, Point::origin(), Point::new(20, 0)));
         state.sync_active_schematic_to_workspace();
@@ -2225,7 +2206,7 @@ mod tests {
         let report =
             build_report(&state, &ConnectivityPolicy::default()).expect("a resolved design");
 
-        assert_eq!(report.buses.len(), state.schematic.document.buses.len());
+        assert_eq!(report.buses.len(), state.schematic.document().buses.len());
     }
 
     /// Give the workspace an active configuration that cannot resolve: its DUT
@@ -2258,12 +2239,12 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .wires
             .push(Wire::segment(1, Point::origin(), Point::new(20, 0)));
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(2, Point::origin(), "VOUT"));
         state.sync_active_schematic_to_workspace();
@@ -2291,7 +2272,7 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(10, Point::origin(), "VDD!"));
         state.sync_active_schematic_to_workspace();

@@ -1250,7 +1250,7 @@ mod tests {
         let mut state = crate::state::SchematicState::default();
         append(&mut state, "Update compensation");
         let rows = state
-            .document
+            .document()
             .validated_revisions
             .records()
             .iter()
@@ -1280,19 +1280,19 @@ mod tests {
     fn semantic_compare_and_restore_are_exact_and_undoable() {
         let mut state = crate::state::SchematicState::default();
         append(&mut state, "Empty baseline");
-        let first = state.document.validated_revisions.records()[0].clone();
+        let first = state.document().validated_revisions.records()[0].clone();
         state.add_component(ComponentType::Resistor, Point::new(10, 20));
         append(&mut state, "Add resistor");
-        let second = state.document.validated_revisions.records()[1].clone();
+        let second = state.document().validated_revisions.records()[1].clone();
         let delta = first.semantic_delta_to(&second);
         assert_eq!(delta.components.added, 1);
 
         state
             .restore_validated_revision(first.id())
             .expect("validated restore");
-        assert!(state.document.components.is_empty());
+        assert!(state.document().components.is_empty());
         assert!(state.undo());
-        assert_eq!(state.document.components.len(), 1);
+        assert_eq!(state.document().components.len(), 1);
     }
 
     #[test]

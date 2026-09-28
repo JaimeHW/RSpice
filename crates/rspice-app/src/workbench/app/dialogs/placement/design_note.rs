@@ -577,7 +577,7 @@ mod tests {
             "Browser recovery qualification"
         );
         assert!(app.state.dialogs.design_note.dirty);
-        assert!(app.state.schematic.document.design_notes.is_empty());
+        assert!(app.state.schematic.document().design_notes.is_empty());
     }
 
     #[test]
@@ -614,7 +614,7 @@ mod tests {
         };
         assert_eq!(pending.text, "Bias network");
         assert!(pending.document_authority.is_some());
-        assert!(state.schematic.document.design_notes.is_empty());
+        assert!(state.schematic.document().design_notes.is_empty());
     }
 
     #[test]

@@ -54,15 +54,7 @@ impl AppState {
             let source = schematic_for_reference(self, &reference)
                 .ok_or_else(|| format!("Reference document '{key}' is unavailable."))?;
             validate_reference_document(self, key, source)?;
-            let mut candidate = source.clone();
-            candidate.apply_snapshot(target);
-            // A probe follows its current occurrence. Restoring a captured
-            // expression first would apply the inverse mapping twice or carry
-            // an old root's meaning into a newly selected configuration.
-            candidate
-                .document
-                .probes
-                .clone_from(&source.document().probes);
+            let candidate = source.reference_history_candidate(target);
             sources.insert(key.clone(), source.clone());
             candidates.insert(key.clone(), candidate);
         }

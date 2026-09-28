@@ -259,14 +259,18 @@ mod tests {
             "Bias network\nKeep clear",
         )
         .unwrap();
-        state.schematic.document.design_notes.push(note.clone());
+        state
+            .schematic
+            .document_mut_for_test()
+            .design_notes
+            .push(note.clone());
         let bounds = hit_bounds(&ctx, &viewport, &note, &state).expect("visible note");
 
         assert_eq!(
             design_note_at(
                 &ctx,
                 &viewport,
-                &state.schematic.document.design_notes,
+                &state.schematic.document().design_notes,
                 &state,
                 bounds.center()
             ),
@@ -276,7 +280,7 @@ mod tests {
             design_note_at(
                 &ctx,
                 &viewport,
-                &state.schematic.document.design_notes,
+                &state.schematic.document().design_notes,
                 &state,
                 bounds.right_bottom() + egui::Vec2::splat(0.1)
             ),
@@ -293,14 +297,14 @@ mod tests {
             bounds: Rect::from_min_size(Pos2::ZERO, egui::Vec2::splat(500.0)),
         };
         let mut state = AppState::default();
-        state.schematic.document.design_notes = vec![
+        state.schematic.document_mut_for_test().design_notes = vec![
             DesignNote::new(1, Point::new(20, 20), DesignNoteKind::PlainText, "same").unwrap(),
             DesignNote::new(2, Point::new(20, 20), DesignNoteKind::ReviewNote, "same").unwrap(),
         ];
         let bounds = hit_bounds(
             &ctx,
             &viewport,
-            &state.schematic.document.design_notes[1],
+            &state.schematic.document().design_notes[1],
             &state,
         )
         .unwrap();
@@ -308,7 +312,7 @@ mod tests {
             design_note_at(
                 &ctx,
                 &viewport,
-                &state.schematic.document.design_notes,
+                &state.schematic.document().design_notes,
                 &state,
                 bounds.center()
             ),

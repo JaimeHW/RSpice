@@ -1076,7 +1076,7 @@ mod tests {
             .add_component(ComponentType::VoltageSource, Point::origin());
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .components
             .iter_mut()
             .find(|component| component.id == id)

@@ -153,47 +153,13 @@ pub(crate) fn apply_selection_layout(
                         symbol_context.terminal_points(component)
                     })
             }
-            TargetKind::DesignNote => {
-                let note = state
-                    .schematic
-                    .document
-                    .design_notes
-                    .iter_mut()
-                    .find(|note| note.id == target.id)
-                    .expect("validated design-note target remains live");
-                note.translate(delta);
-            }
-            TargetKind::DocumentationShape => {
-                let shape = state
-                    .schematic
-                    .document
-                    .documentation_shapes
-                    .iter_mut()
-                    .find(|shape| shape.id == target.id)
-                    .expect("validated documentation-shape target remains live");
-                shape.translate(delta);
-            }
-            TargetKind::Probe => {
-                let probe = state
-                    .schematic
-                    .document
-                    .probes
-                    .iter_mut()
-                    .find(|probe| probe.id == target.id)
-                    .expect("validated probe target remains live");
-                probe.position = Point::new(
-                    probe
-                        .position
-                        .x
-                        .checked_add(delta.x)
-                        .expect("layout preflighted probe x"),
-                    probe
-                        .position
-                        .y
-                        .checked_add(delta.y)
-                        .expect("layout preflighted probe y"),
-                );
-            }
+            TargetKind::DesignNote => state
+                .schematic
+                .translate_layout_design_note(target.id, delta),
+            TargetKind::DocumentationShape => state
+                .schematic
+                .translate_layout_documentation_shape(target.id, delta),
+            TargetKind::Probe => state.schematic.translate_layout_probe(target.id, delta),
         }
     }
     state.schematic.is_dirty = true;
@@ -481,11 +447,15 @@ mod tests {
     fn selected_components(positions: &[(u64, i32, i32)]) -> AppState {
         let mut state = AppState::default();
         for &(id, x, y) in positions {
-            state.schematic.document.components.push(Component::new(
-                id,
-                ComponentType::Resistor,
-                Point::new(x, y),
-            ));
+            state
+                .schematic
+                .document_mut_for_test()
+                .components
+                .push(Component::new(
+                    id,
+                    ComponentType::Resistor,
+                    Point::new(x, y),
+                ));
             state.schematic.selection.select_component(id);
         }
         state.schematic.init_undo_history();
@@ -505,7 +475,7 @@ mod tests {
             let mut state = selected_components(&[(3, 70, 90), (1, 10, 10), (2, 40, 50)]);
             let original: Vec<Point> = state
                 .schematic
-                .document
+                .document()
                 .components
                 .iter()
                 .map(|component| component.pos)
@@ -518,7 +488,7 @@ mod tests {
             assert_eq!(
                 state
                     .schematic
-                    .document
+                    .document()
                     .components
                     .iter()
                     .map(|component| component.pos)
@@ -549,7 +519,7 @@ mod tests {
         let context = SchematicSymbolContext::from_state(&state);
         let mut bounds: Vec<_> = state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .map(|component| {
@@ -568,10 +538,14 @@ mod tests {
     #[test]
     fn incompatible_and_read_only_selections_fail_without_undo() {
         let mut state = selected_components(&[(1, 0, 0), (2, 40, 0)]);
-        state.schematic.document.wires.push(crate::state::Wire::new(
-            9,
-            vec![Point::origin(), Point::new(10, 0)],
-        ));
+        state
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(crate::state::Wire::new(
+                9,
+                vec![Point::origin(), Point::new(10, 0)],
+            ));
         state.schematic.selection.select_wire(9);
         let context = SchematicSymbolContext::from_state(&state);
         assert_eq!(
@@ -592,14 +566,14 @@ mod tests {
     #[test]
     fn probe_layout_is_non_electrical_and_undoable() {
         let mut state = AppState::default();
-        state.schematic.document.probes = vec![
+        state.schematic.document_mut_for_test().probes = vec![
             SchematicProbe::new(20, Point::new(10, 10), "V(out)", None).unwrap(),
             SchematicProbe::new(21, Point::new(40, 30), "V(out)", None).unwrap(),
         ];
         state.schematic.selection.select_probe(20);
         state.schematic.selection.select_probe(21);
         state.schematic.init_undo_history();
-        let original = state.schematic.document.probes.clone();
+        let original = state.schematic.document().probes.clone();
         let topology = state.schematic.topology_version();
         let context = SchematicSymbolContext::from_state(&state);
 
@@ -607,12 +581,12 @@ mod tests {
             apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft)
                 .unwrap()
         );
-        assert_eq!(state.schematic.document.probes[0].position.x, 10);
-        assert_eq!(state.schematic.document.probes[1].position.x, 10);
+        assert_eq!(state.schematic.document().probes[0].position.x, 10);
+        assert_eq!(state.schematic.document().probes[1].position.x, 10);
         assert_eq!(state.schematic.topology_version(), topology);
 
         assert!(state.schematic.undo());
-        assert_eq!(state.schematic.document.probes, original);
+        assert_eq!(state.schematic.document().probes, original);
         assert_eq!(state.schematic.topology_version(), topology);
         assert!(!state.schematic.can_undo());
     }
@@ -647,13 +621,13 @@ mod tests {
             .expect("hidden assignment");
         catalog.set_active(first).expect("active sheet");
         let context = SchematicSymbolContext::from_state(&state);
-        let before = state.schematic.document.components.clone();
+        let before = state.schematic.document().components.clone();
 
         assert_eq!(
             apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft),
             Err(SelectionLayoutError::OffActiveSheet)
         );
-        assert_eq!(state.schematic.document.components, before);
+        assert_eq!(state.schematic.document().components, before);
         assert!(!state.schematic.can_undo());
     }
 }

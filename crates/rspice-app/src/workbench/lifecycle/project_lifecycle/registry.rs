@@ -656,7 +656,7 @@ mod tests {
         let mut state = AppState::default();
         let active = state.workspace.active_view.clone();
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
-        state.schematic.document.design_notes.push(
+        state.schematic.document_mut_for_test().design_notes.push(
             DesignNote::new(
                 71,
                 Point::new(4, 6),
@@ -677,7 +677,7 @@ mod tests {
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active.clone())));
 
         let mut edited_state = state;
-        edited_state.schematic.document.design_notes[0]
+        edited_state.schematic.document_mut_for_test().design_notes[0]
             .update(DesignNoteKind::PlainText, "Updated bias network")
             .unwrap();
         let edited = super::super::snapshot(&edited_state).expect("edited snapshot");
@@ -691,19 +691,24 @@ mod tests {
     fn documentation_shape_edits_participate_in_the_schematic_document_digest() {
         let mut state = AppState::default();
         let active = state.workspace.active_view.clone();
-        state.schematic.document.documentation_shapes.push(
-            DocumentationShape::new(
-                72,
-                DocumentationShapeGeometry::Rectangle {
-                    first: Point::new(4, 6),
-                    opposite: Point::new(14, 12),
-                },
-            )
-            .unwrap(),
-        );
+        state
+            .schematic
+            .document_mut_for_test()
+            .documentation_shapes
+            .push(
+                DocumentationShape::new(
+                    72,
+                    DocumentationShapeGeometry::Rectangle {
+                        first: Point::new(4, 6),
+                        opposite: Point::new(14, 12),
+                    },
+                )
+                .unwrap(),
+            );
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
 
-        state.schematic.document.documentation_shapes[0].translate(Point::new(3, -2));
+        state.schematic.document_mut_for_test().documentation_shapes[0]
+            .translate(Point::new(3, -2));
         let edited = super::super::snapshot(&state).expect("edited shape snapshot");
         let baseline_digest = document_digests(&baseline)
             .unwrap()

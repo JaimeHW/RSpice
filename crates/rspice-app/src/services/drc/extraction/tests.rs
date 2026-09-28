@@ -25,7 +25,7 @@ fn port(name: &str, direction: PortDirection) -> PortSpec {
 fn named_port(schematic: &mut SchematicState, at: Point, name: &str) {
     let id = schematic.add_component(ComponentType::Port, at);
     schematic
-        .document
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == id)
@@ -35,7 +35,7 @@ fn named_port(schematic: &mut SchematicState, at: Point, name: &str) {
 
 fn reference_of(schematic: &SchematicState, id: u64) -> String {
     schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == id)
@@ -81,7 +81,7 @@ fn library_with_authored_amp_symbol() -> (LibraryManager, HashMap<String, Schema
     for (idx, name) in ["IN", "OUT"].iter().enumerate() {
         let id = master.add_component(ComponentType::Port, Point::new(idx as i32 * 40, 0));
         master
-            .document
+            .document_mut_for_test()
             .components
             .iter_mut()
             .find(|component| component.id == id)
@@ -113,10 +113,11 @@ fn tapped_bus_schematic() -> SchematicState {
             Some(BusDeclaration::parse("DATA[7:0]").expect("bus declaration")),
         )
         .expect("bus geometry");
-    schematic
-        .document
-        .wires
-        .push(Wire::segment(100, Point::new(20, 40), Point::new(60, 40)));
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        100,
+        Point::new(20, 40),
+        Point::new(60, 40),
+    ));
     schematic
         .place_bus_tap(
             bus,
@@ -136,7 +137,10 @@ fn hierarchy_extraction_uses_authored_symbol_pin_coordinates() {
     let (libraries, buffers) = library_with_authored_amp_symbol();
     let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
     let mut schematic = SchematicState::default();
-    schematic.document.components.push(authored_amp_instance());
+    schematic
+        .document_mut_for_test()
+        .components
+        .push(authored_amp_instance());
 
     let (components, _) = extract_checked_design(&schematic, &hierarchy);
     let pins: HashMap<_, _> = components[0]
@@ -156,11 +160,12 @@ fn hierarchy_resolved_unconnected_pin_check_uses_authored_terminal_geometry() {
     let mut instance = authored_amp_instance();
     instance.name = "X1".to_owned();
     let mut schematic = SchematicState::default();
-    schematic.document.components.push(instance);
-    schematic
-        .document
-        .wires
-        .push(Wire::segment(90, Point::new(40, 40), Point::new(60, 40)));
+    schematic.document_mut_for_test().components.push(instance);
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        90,
+        Point::new(40, 40),
+        Point::new(60, 40),
+    ));
 
     let result = run_drc_check_with_hierarchy_and_config(
         &schematic,
@@ -191,7 +196,7 @@ fn canonical_property_schema_extracts_only_definite_parameter_failures() {
     resistor.name = "R20".to_owned();
     resistor.value.clear(); // The canonical 1k default is an effective value.
     resistor.params = "m=0".to_owned();
-    schematic.document.components.push(resistor);
+    schematic.document_mut_for_test().components.push(resistor);
 
     let (components, _) = extract_checked_design(&schematic, &HierarchySource::empty());
     assert!(components[0].missing_parameters.is_empty());
@@ -218,7 +223,7 @@ fn unresolvable_project_cell_is_reported_as_definitively_unknown() {
         Component::new(30, ComponentType::CellInstance, Point::origin()).with_library_cell(binding);
     instance.name = "X30".to_owned();
     let mut schematic = SchematicState::default();
-    schematic.document.components.push(instance);
+    schematic.document_mut_for_test().components.push(instance);
 
     let (components, _) = extract_checked_design(&schematic, &HierarchySource::empty());
     assert_eq!(components[0].component_known, Some(false));
@@ -233,10 +238,11 @@ fn typed_bus_member_conflict_is_reported_by_drc_and_honors_severity_policy() {
             Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
         )
         .unwrap();
-    schematic
-        .document
-        .wires
-        .push(Wire::segment(100, Point::new(5, 10), Point::new(20, 10)));
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        100,
+        Point::new(5, 10),
+        Point::new(20, 10),
+    ));
     schematic
         .place_bus_tap(
             bus_id,
@@ -247,7 +253,7 @@ fn typed_bus_member_conflict_is_reported_by_drc_and_honors_severity_policy() {
         )
         .unwrap();
     schematic
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(101, Point::new(15, 10), "FOO"));
 
@@ -292,11 +298,15 @@ fn duplicate_authored_cell_outputs_on_bus_member_are_reported_with_policy_severi
     second.pos = Point::new(300, 50);
 
     let mut schematic = SchematicState::default();
-    schematic.document.components.extend([first, second]);
     schematic
-        .document
-        .wires
-        .push(Wire::segment(20, Point::new(170, 70), Point::new(370, 70)));
+        .document_mut_for_test()
+        .components
+        .extend([first, second]);
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        20,
+        Point::new(170, 70),
+        Point::new(370, 70),
+    ));
     let bus_id = schematic
         .add_bus(
             vec![Point::new(270, 0), Point::new(370, 0)],
@@ -343,7 +353,7 @@ fn duplicate_authored_cell_outputs_on_bus_member_are_reported_with_policy_severi
 fn bus_drc_locations_preserve_full_u64_identity() {
     let mut schematic = SchematicState::default();
     schematic
-        .document
+        .document_mut_for_test()
         .buses
         .push(Bus::segment(u64::MAX, Point::new(0, 0), Point::new(20, 0), None).unwrap());
     let result = run(
@@ -369,10 +379,11 @@ fn an_autonamed_single_connection_node_is_reported_floating() {
     schematic.add_component(ComponentType::VoltageSource, Point::new(0, 0));
     let resistor = schematic.add_component(ComponentType::Resistor, Point::new(60, -20));
     schematic.add_component(ComponentType::Ground, Point::new(0, 30));
-    schematic
-        .document
-        .wires
-        .push(Wire::segment(1, Point::new(0, -20), Point::new(40, -20)));
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        1,
+        Point::new(0, -20),
+        Point::new(40, -20),
+    ));
 
     let result = run(
         &schematic,
@@ -399,20 +410,22 @@ fn an_autonamed_single_connection_node_is_reported_floating() {
 #[test]
 fn an_orphan_label_and_a_dangling_wire_chain_are_exact_and_deterministic() {
     let mut schematic = SchematicState::default();
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        20,
+        Point::new(0, 0),
+        Point::new(20, 0),
+    ));
+    schematic.document_mut_for_test().wires.push(Wire::segment(
+        10,
+        Point::new(20, 0),
+        Point::new(40, 0),
+    ));
     schematic
-        .document
-        .wires
-        .push(Wire::segment(20, Point::new(0, 0), Point::new(20, 0)));
-    schematic
-        .document
-        .wires
-        .push(Wire::segment(10, Point::new(20, 0), Point::new(40, 0)));
-    schematic
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(1, Point::new(10, 0), "onwire"));
     schematic
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(2, Point::new(100, 100), "orphan"));
 
@@ -457,7 +470,7 @@ fn a_labelled_terminal_with_no_conductor_is_floating_under_the_label_name() {
     let mut schematic = SchematicState::default();
     let resistor = schematic.add_component(ComponentType::Resistor, Point::new(20, 0));
     schematic
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(1, Point::new(40, 0), "dangling"));
 
@@ -523,52 +536,57 @@ fn fixture_corpus() -> Vec<(&'static str, SchematicState)> {
     divider.add_component(ComponentType::VoltageSource, Point::new(0, 0));
     divider.add_component(ComponentType::Resistor, Point::new(60, -20));
     divider.add_component(ComponentType::Ground, Point::new(0, 30));
-    divider
-        .document
-        .wires
-        .push(Wire::segment(1, Point::new(0, -20), Point::new(40, -20)));
+    divider.document_mut_for_test().wires.push(Wire::segment(
+        1,
+        Point::new(0, -20),
+        Point::new(40, -20),
+    ));
     corpus.push(("grounded divider", divider));
 
     let mut crossing = SchematicState::default();
-    crossing
-        .document
-        .wires
-        .push(Wire::segment(1, Point::new(0, -100), Point::new(0, 100)));
-    crossing
-        .document
-        .wires
-        .push(Wire::segment(2, Point::new(-100, 0), Point::new(100, 0)));
+    crossing.document_mut_for_test().wires.push(Wire::segment(
+        1,
+        Point::new(0, -100),
+        Point::new(0, 100),
+    ));
+    crossing.document_mut_for_test().wires.push(Wire::segment(
+        2,
+        Point::new(-100, 0),
+        Point::new(100, 0),
+    ));
     crossing.add_junction(Point::new(0, 0));
     crossing.add_component(ComponentType::Resistor, Point::new(120, 0));
     corpus.push(("marked crossing", crossing));
 
     let mut diagonal = SchematicState::default();
-    diagonal
-        .document
-        .wires
-        .push(Wire::segment(1, Point::new(0, 0), Point::new(80, 80)));
+    diagonal.document_mut_for_test().wires.push(Wire::segment(
+        1,
+        Point::new(0, 0),
+        Point::new(80, 80),
+    ));
     diagonal.add_component(ComponentType::Resistor, Point::new(60, 40));
     diagonal
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(1, Point::new(20, 20), "slant"));
     corpus.push(("any-angle conductor", diagonal));
 
     let mut named = SchematicState::default();
     named
-        .document
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(1, Point::new(0, 0), Point::new(60, 0)));
+    named.document_mut_for_test().wires.push(Wire::segment(
+        2,
+        Point::new(0, 40),
+        Point::new(60, 40),
+    ));
     named
-        .document
-        .wires
-        .push(Wire::segment(2, Point::new(0, 40), Point::new(60, 40)));
-    named
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(1, Point::new(20, 0), "Out"));
     named
-        .document
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(2, Point::new(20, 40), "out"));
     named_port(&mut named, Point::new(70, 0), "vin");
@@ -618,11 +636,12 @@ fn erc_and_netlist_agree_on_nets() {
     let mut placed = SchematicState::default();
     let mut instance = authored_amp_instance();
     instance.name = "X1".to_owned();
-    placed.document.components.push(instance);
-    placed
-        .document
-        .wires
-        .push(Wire::segment(90, Point::new(40, 40), Point::new(60, 40)));
+    placed.document_mut_for_test().components.push(instance);
+    placed.document_mut_for_test().wires.push(Wire::segment(
+        90,
+        Point::new(40, 40),
+        Point::new(60, 40),
+    ));
     assert_erc_and_deck_agree("placed project cell", &placed, &hierarchy);
 }
 

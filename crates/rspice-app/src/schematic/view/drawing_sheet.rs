@@ -1899,18 +1899,26 @@ mod tests {
     #[test]
     fn overflow_report_retains_exact_item_identity_severity_coordinates_and_zone() {
         let mut state = AppState::default();
-        state.schematic.document.components.push(
+        state.schematic.document_mut_for_test().components.push(
             Component::new(11, ComponentType::Resistor, Point::new(1_100, 100))
                 .with_name_value("R_OUT", "1k"),
         );
-        state.schematic.document.wires.push(Wire::new(
-            21,
-            vec![Point::new(-100, 100), Point::new(-80, 100)],
-        ));
-        state.schematic.document.wires.push(Wire::new(
-            22,
-            vec![Point::new(500, 650), Point::new(520, 650)],
-        ));
+        state
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(Wire::new(
+                21,
+                vec![Point::new(-100, 100), Point::new(-80, 100)],
+            ));
+        state
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(Wire::new(
+                22,
+                vec![Point::new(500, 650), Point::new(520, 650)],
+            ));
         let symbol_context = SchematicSymbolContext::from_state(&state);
         let sheet = ActiveDrawingSheet::resolve(&state);
 
@@ -1956,15 +1964,15 @@ mod tests {
         let mut state = AppState::default();
         state
             .schematic
-            .document
+            .document_mut_for_test()
             .junctions
             .push(Junction::new(31, Point::new(1_100, 100)));
-        state.schematic.document.net_labels.push(NetLabel::new(
-            32,
-            Point::new(1_100, 140),
-            "OUTSIDE",
-        ));
-        state.schematic.document.design_notes.push(
+        state
+            .schematic
+            .document_mut_for_test()
+            .net_labels
+            .push(NetLabel::new(32, Point::new(1_100, 140), "OUTSIDE"));
+        state.schematic.document_mut_for_test().design_notes.push(
             DesignNote::new(
                 33,
                 Point::new(1_100, 180),
@@ -1973,16 +1981,20 @@ mod tests {
             )
             .expect("valid design note"),
         );
-        state.schematic.document.documentation_shapes.push(
-            DocumentationShape::new(
-                34,
-                DocumentationShapeGeometry::Line {
-                    start: Point::new(1_100, 220),
-                    end: Point::new(1_140, 240),
-                },
-            )
-            .expect("valid documentation line"),
-        );
+        state
+            .schematic
+            .document_mut_for_test()
+            .documentation_shapes
+            .push(
+                DocumentationShape::new(
+                    34,
+                    DocumentationShapeGeometry::Line {
+                        start: Point::new(1_100, 220),
+                        end: Point::new(1_140, 240),
+                    },
+                )
+                .expect("valid documentation line"),
+            );
         let symbol_context = SchematicSymbolContext::from_state(&state);
         let sheet = ActiveDrawingSheet::resolve(&state);
 
@@ -2015,14 +2027,14 @@ mod tests {
     #[test]
     fn component_overflow_includes_the_hardcopy_name_and_value_extent() {
         let mut state = AppState::default();
-        state.schematic.document.components.push(
+        state.schematic.document_mut_for_test().components.push(
             Component::new(61, ComponentType::Resistor, Point::new(1_000, 100))
                 .with_name_value("R_INSTANCE_NAME_REACHES_BEYOND_THE_PAPER_EDGE", "1k"),
         );
         let symbol_context = SchematicSymbolContext::from_state(&state);
         let sheet = ActiveDrawingSheet::resolve(&state);
         let (body_min, body_max) =
-            symbol_context.component_bounds(&state.schematic.document.components[0]);
+            symbol_context.component_bounds(&state.schematic.document().components[0]);
         let body = WorldRect::from_points(body_min, body_max);
         let object = active_object_bounds(&state, &symbol_context)
             .into_iter()
@@ -2056,7 +2068,11 @@ mod tests {
         let route = vec![Point::new(0, 15), Point::new(0, 0), Point::new(15, 0)];
         let route_bounds = points_bounds(&route).expect("the route has points");
         let mut state = AppState::default();
-        state.schematic.document.wires.push(Wire::new(91, route));
+        state
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(Wire::new(91, route));
         let symbol_context = SchematicSymbolContext::from_state(&state);
         let object = active_object_bounds(&state, &symbol_context)
             .into_iter()
@@ -2094,10 +2110,14 @@ mod tests {
     #[test]
     fn overflow_navigation_selects_and_centers_the_exact_current_target() {
         let mut state = AppState::default();
-        state.schematic.document.wires.push(Wire::new(
-            41,
-            vec![Point::new(1_080, 120), Point::new(1_120, 120)],
-        ));
+        state
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(Wire::new(
+                41,
+                vec![Point::new(1_080, 120), Point::new(1_120, 120)],
+            ));
         let expected_center = {
             let symbol_context = SchematicSymbolContext::from_state(&state);
             let sheet = ActiveDrawingSheet::resolve(&state);

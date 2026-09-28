@@ -127,10 +127,7 @@ impl AppState {
         for (key, names) in names {
             let source = projected[&key];
             validate_reference_document(self, &key, source)?;
-            let mut candidate = source.clone();
-            candidate.document.components = source.prepare_component_renames(&names)?;
-            candidate.is_dirty = true;
-            candidate.bump_topology_version();
+            let candidate = source.renamed_reference_candidate(&names)?;
             before.insert(key.clone(), source.clone());
             after.insert(key, candidate);
         }

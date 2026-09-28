@@ -276,11 +276,11 @@ mod tests {
     #[test]
     fn armed_array_commit_creates_one_transaction_and_returns_to_select() {
         let mut state = AppState::default();
-        state.schematic.document.components.push(Component::new(
-            1,
-            ComponentType::Resistor,
-            Point::origin(),
-        ));
+        state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(Component::new(1, ComponentType::Resistor, Point::origin()));
         state.schematic.selection.select_only_component(1);
         state.schematic.recalculate_runtime_state();
         state.schematic.clear_undo_history();
@@ -292,23 +292,23 @@ mod tests {
 
         commit_armed_array_selection(&mut state, &symbols);
 
-        assert_eq!(state.schematic.document.components.len(), 8);
+        assert_eq!(state.schematic.document().components.len(), 8);
         assert_eq!(state.schematic.undo_description(), Some("create array"));
         assert_eq!(state.schematic.tool, Tool::Select);
         assert!(!state.dialogs.array_selection.armed);
         assert!(state.schematic.undo());
-        assert_eq!(state.schematic.document.components.len(), 1);
+        assert_eq!(state.schematic.document().components.len(), 1);
         assert!(!state.schematic.can_undo());
     }
 
     #[test]
     fn rejected_array_candidate_stays_armed_without_mutating_the_document() {
         let mut state = AppState::default();
-        state.schematic.document.components.push(Component::new(
-            1,
-            ComponentType::Resistor,
-            Point::origin(),
-        ));
+        state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(Component::new(1, ComponentType::Resistor, Point::origin()));
         state.schematic.selection.select_only_component(1);
         state.schematic.recalculate_runtime_state();
         state.schematic.clear_undo_history();
@@ -320,7 +320,7 @@ mod tests {
 
         commit_armed_array_selection(&mut state, &symbols);
 
-        assert_eq!(state.schematic.document.components.len(), 1);
+        assert_eq!(state.schematic.document().components.len(), 1);
         assert!(state.dialogs.array_selection.armed);
         assert_eq!(state.schematic.tool, Tool::ArraySelection);
         assert!(state.dialogs.array_selection.preview_error.is_some());
