@@ -7,7 +7,7 @@
 //!
 //! # One publication policy
 //!
-//! Every artifact this crate publishes uses the same policy, so no caller can
+//! The artifact APIs below use the same policy, so no caller can
 //! weaken the durability of one result: the complete staging file is flushed
 //! and synchronized, the replace itself is durable
 //! (`MOVEFILE_WRITE_THROUGH` on Windows), the published directory entry is
@@ -41,6 +41,11 @@
 //! named publication phase on its own thread. Nothing is armed unless a caller
 //! constructs a guard, and the seam is a thread-local read on the path that
 //! already calls `fsync`.
+
+// Native project saves require expected-content checks, writer leases and
+// retained recovery journals beyond artifact staging. Keep that protocol opt-in.
+#[cfg(feature = "durable-file")]
+pub mod durable_file;
 
 pub mod fault;
 mod recovery;

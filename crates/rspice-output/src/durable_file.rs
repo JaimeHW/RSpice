@@ -33,9 +33,8 @@ const RECOVERY_RESOLUTION_LEN: usize = 80;
 const RECOVERY_FLAG_BEFORE_PRESENT: u8 = 1;
 const RECOVERY_FLAG_READ_ONLY: u8 = 2;
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ExpectedContent {
+pub enum ExpectedContent {
     /// Publication is valid only while the destination does not exist.
     Missing,
     /// Publication is valid only while the destination still contains the
@@ -44,7 +43,7 @@ pub(crate) enum ExpectedContent {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum CompareExchangeError {
+pub enum CompareExchangeError {
     #[error("destination changed before publication (expected {expected:?}, found {actual:?})")]
     Conflict {
         expected: ExpectedContent,
@@ -336,8 +335,7 @@ impl Drop for DestinationLease {
 /// hashes the canonical pathname. The destination lease serializes this with
 /// every cooperating writer. Recovery is deliberately non-destructive: an
 /// ambiguous or externally changed endpoint is preserved and reported.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn reconcile_publication(path: &Path) -> Result<(), CompareExchangeError> {
+pub fn reconcile_publication(path: &Path) -> Result<(), CompareExchangeError> {
     std::fs::create_dir_all(parent_directory(path))?;
     let destination = resolved_destination(path);
     let path = destination.as_path();
@@ -352,10 +350,7 @@ pub(crate) fn reconcile_publication(path: &Path) -> Result<(), CompareExchangeEr
 /// Capture the exact picker-time destination state after reconciling any
 /// durable publication evidence. Callers receive a compare-and-exchange token,
 /// never overwrite authority.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn observe_expected_content(
-    path: &Path,
-) -> Result<ExpectedContent, CompareExchangeError> {
+pub fn observe_expected_content(path: &Path) -> Result<ExpectedContent, CompareExchangeError> {
     std::fs::create_dir_all(parent_directory(path))?;
     let destination = resolved_destination(path);
     let path = destination.as_path();
@@ -372,7 +367,7 @@ pub(crate) fn observe_expected_content(
 /// If it or any durability step fails, the previous target remains in place
 /// whenever publication has not already completed, and callers receive an
 /// error so they can retain dirty state and recovery evidence.
-pub(crate) fn atomic_write_with<E>(
+pub fn atomic_write_with<E>(
     path: &Path,
     write: impl FnOnce(&mut File) -> Result<(), E>,
 ) -> Result<(), E>
@@ -540,7 +535,7 @@ where
     Ok(())
 }
 
-pub(crate) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
     atomic_write_with(path, |file| file.write_all(bytes))
 }
 
@@ -552,7 +547,7 @@ pub(crate) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
 /// predecessor, verifies its exact digest, and rolls it back on conflict.
 /// Recovery evidence is never deleted when publication or rollback becomes
 /// uncertain.
-pub(crate) fn compare_exchange_bytes(
+pub fn compare_exchange_bytes(
     path: &Path,
     expected: ExpectedContent,
     bytes: &[u8],
@@ -564,7 +559,7 @@ pub(crate) fn compare_exchange_bytes(
 /// canonical file are forced to owner-read/write permissions before any
 /// secret-bearing predecessor evidence can be retired.
 #[cfg(unix)]
-pub(crate) fn compare_exchange_bytes_owner_only(
+pub fn compare_exchange_bytes_owner_only(
     path: &Path,
     expected: ExpectedContent,
     bytes: &[u8],
@@ -1127,7 +1122,7 @@ fn sync_windows_published_successor(
 
 /// Copy `source` to `target` through the same durable publication boundary.
 /// An existing target is never truncated in place.
-pub(crate) fn atomic_copy(source: &Path, target: &Path) -> io::Result<()> {
+pub fn atomic_copy(source: &Path, target: &Path) -> io::Result<()> {
     let mut source = File::open(source)?;
     atomic_write_with(target, |target| {
         std::io::copy(&mut source, target)?;
@@ -1136,7 +1131,7 @@ pub(crate) fn atomic_copy(source: &Path, target: &Path) -> io::Result<()> {
 }
 
 /// Persist a successful metadata-only transaction such as recovery deletion.
-pub(crate) fn sync_parent_of(path: &Path) -> io::Result<()> {
+pub fn sync_parent_of(path: &Path) -> io::Result<()> {
     sync_parent_directory(parent_directory(path))
 }
 

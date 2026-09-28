@@ -9,11 +9,28 @@ publish.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+durable-file = [
+    "dep:sha2",
+    "dep:uuid",
+    "dep:rustix",
+    "windows-sys/Win32_Security",
+    "windows-sys/Win32_Security_Authorization",
+    "windows-sys/Win32_System_IO",
+]
+
 [dependencies]
 thiserror.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+sha2 = { workspace = true, optional = true }
+uuid = { version = "1", features = ["v4"], optional = true }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [

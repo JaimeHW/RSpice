@@ -222,7 +222,7 @@ jobs:
           cargo test --locked -p rspice-veriloga --no-default-features --features native,wasm-jit --test rust_codegen_feature
       - name: Test remaining workspace crates
         run: >-
-          cargo test --locked --workspace --no-fail-fast
+          cargo test --locked --workspace --no-fail-fast --features rspice-output/durable-file
           --exclude rspice-core --exclude rspice-app --exclude rspice-conformance
           --exclude rspice-python --exclude rspice-wasm
           --exclude 'rspice-veriloga-model*' --exclude 'rspice-*-catalog-dump'
@@ -422,7 +422,7 @@ jobs:
       - name: Unit tests
         run: cargo test --locked -p rspice-core --lib
       - name: Output and managed-runtime tests
-        run: cargo test --locked -p rspice-output -p rspice-automation-runtime
+        run: cargo test --locked -p rspice-output -p rspice-automation-runtime --features rspice-output/durable-file
       - name: CLI integration tests
         run: cargo test --locked -p rspice-cli --tests
       - name: UI library tests
@@ -587,7 +587,7 @@ jobs:
           RUSTFLAGS: -D warnings
         run: cargo check --locked -p rspice-core --no-default-features --features veriloga-model-diode-cmc,veriloga-builtins-noise
       - name: Output-layer tests
-        run: cargo test --locked -p rspice-output
+        run: cargo test --locked -p rspice-output --features durable-file
       - name: CLI integration tests
         run: cargo test --locked -p rspice-cli --tests
       - name: UI library tests

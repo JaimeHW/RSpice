@@ -135,6 +135,7 @@ rand = "0.8"
 lopdf = { version = "0.44", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rspice-output = { workspace = true, features = ["durable-file"] }
 # Native builds expose egui's semantic tree to platform assistive technology
 # through AccessKit. Keep this target-specific: eframe's browser backend does
 # not currently publish its AccessKit tree to the DOM.
@@ -189,9 +190,6 @@ rspice-core = { path = "../rspice-core", version = "0.1.0", features = ["verilog
 # Mobile/tablet and other unqualified architectures retain portable bytecode.
 rspice-core = { path = "../rspice-core", version = "0.1.0", features = ["veriloga"] }
 
-[target.'cfg(unix)'.dependencies]
-rustix = { version = "1", features = ["fs"] }
-
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
@@ -199,11 +197,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Printing",
     "Win32_Security",
-    "Win32_Security_Authorization",
     "Win32_Security_Cryptography",
     "Win32_Storage_FileSystem",
     "Win32_Storage_Xps",
-    "Win32_System_IO",
 ] }
 
 [target.'cfg(windows)'.build-dependencies]

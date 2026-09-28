@@ -5254,6 +5254,7 @@ dependencies = [
  "rspice-formats",
  "rspice-hardcopy-contract",
  "rspice-model-library",
+ "rspice-output",
  "rspice-pack",
  "rspice-project",
  "rspice-publication-contract",
@@ -5261,7 +5262,6 @@ dependencies = [
  "rspice-simulation",
  "rspice-simulation-contract",
  "rspice-veriloga",
- "rustix 1.1.4",
  "rustyhdf5",
  "semver",
  "serde",
@@ -5601,7 +5601,10 @@ name = "rspice-output"
 version = "0.1.0"
 dependencies = [
  "proptest",
+ "rustix 1.1.4",
+ "sha2 0.10.9",
  "thiserror 2.0.20",
+ "uuid",
  "windows-sys 0.61.2",
 ]
 

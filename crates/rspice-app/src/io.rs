@@ -12,7 +12,7 @@
 //! - `waveform_io` - Waveform export (CSV, TSV, Touchstone)
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) mod durable_file;
+pub(crate) use rspice_output::durable_file;
 pub(crate) mod file_exchange;
 pub(crate) mod generated_bundle;
 pub(crate) mod netlist_export;
