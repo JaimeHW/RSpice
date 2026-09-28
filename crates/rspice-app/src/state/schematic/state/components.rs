@@ -192,9 +192,12 @@ mod tests {
             port("OUT", PortDirection::Out),
         ]);
 
-        SymbolResolver::new(&libraries, &HashMap::new())
-            .resolve_binding(&binding)
-            .expect("symbol resolves")
+        SymbolResolver::<rspice_design::schematic::owned::Schematic>::new(
+            &libraries,
+            &HashMap::new(),
+        )
+        .resolve_binding(&binding)
+        .expect("symbol resolves")
     }
 
     fn resolved_terminal_points(

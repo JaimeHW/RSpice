@@ -1093,7 +1093,7 @@ fn build_rows(
     buffers.push((
         active_key.clone(),
         active_hierarchy_path(state),
-        &state.schematic,
+        state.schematic.document(),
         true,
     ));
     match filter.hierarchy_scope {
@@ -1106,7 +1106,12 @@ fn build_rows(
                 .collect::<HashSet<_>>();
             for (key, schematic) in &state.workspace.schematic_buffers {
                 if !key.eq_ignore_ascii_case(&active_key) && hierarchy_keys.contains(key) {
-                    buffers.push((key.clone(), schematic_display_path(key), schematic, false));
+                    buffers.push((
+                        key.clone(),
+                        schematic_display_path(key),
+                        schematic.document(),
+                        false,
+                    ));
                 }
             }
         }
@@ -1114,7 +1119,12 @@ fn build_rows(
         SelectionBulkHierarchyScope::CompleteProject => {
             for (key, schematic) in &state.workspace.schematic_buffers {
                 if !key.eq_ignore_ascii_case(&active_key) {
-                    buffers.push((key.clone(), schematic_display_path(key), schematic, false));
+                    buffers.push((
+                        key.clone(),
+                        schematic_display_path(key),
+                        schematic.document(),
+                        false,
+                    ));
                 }
             }
         }
@@ -1157,7 +1167,7 @@ fn append_buffer_rows(
     rows: &mut Vec<SelectionBulkRow>,
     view_key: &str,
     display_path: &str,
-    schematic: &SchematicState,
+    schematic: &rspice_design::schematic::document::SchematicDocument,
     active_owner: bool,
     filter: &SelectionBulkFilter,
     property: SelectionBulkProperty,
@@ -1171,7 +1181,7 @@ fn append_buffer_rows(
     };
     match filter.object_kind {
         SelectionBulkObjectKind::InstancesAndParameters | SelectionBulkObjectKind::PortsAndPins => {
-            for component in &schematic.document().components {
+            for component in &schematic.components {
                 let is_port = component.kind == ComponentType::Port;
                 if (filter.object_kind == SelectionBulkObjectKind::InstancesAndParameters
                     && is_port)
@@ -1229,7 +1239,7 @@ fn append_buffer_rows(
             if !filter.model_cell.trim().is_empty() || !filter.current_property.trim().is_empty() {
                 return;
             }
-            for wire in &schematic.document().wires {
+            for wire in &schematic.wires {
                 if on_current_sheet(wire.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1242,7 +1252,7 @@ fn append_buffer_rows(
                     ));
                 }
             }
-            for bus in &schematic.document().buses {
+            for bus in &schematic.buses {
                 if on_current_sheet(bus.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1258,7 +1268,7 @@ fn append_buffer_rows(
                     ));
                 }
             }
-            for tap in &schematic.document().bus_taps {
+            for tap in &schematic.bus_taps {
                 if on_current_sheet(tap.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1271,7 +1281,7 @@ fn append_buffer_rows(
                     ));
                 }
             }
-            for junction in &schematic.document().junctions {
+            for junction in &schematic.junctions {
                 if on_current_sheet(junction.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1284,7 +1294,7 @@ fn append_buffer_rows(
                     ));
                 }
             }
-            for label in &schematic.document().net_labels {
+            for label in &schematic.net_labels {
                 if on_current_sheet(label.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1302,7 +1312,7 @@ fn append_buffer_rows(
             if !filter.model_cell.trim().is_empty() || !filter.current_property.trim().is_empty() {
                 return;
             }
-            for note in &schematic.document().design_notes {
+            for note in &schematic.design_notes {
                 if on_current_sheet(note.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1315,7 +1325,7 @@ fn append_buffer_rows(
                     ));
                 }
             }
-            for shape in &schematic.document().documentation_shapes {
+            for shape in &schematic.documentation_shapes {
                 if on_current_sheet(shape.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1840,8 +1850,7 @@ mod tests {
         state.schematic.session.selection.select_component(1);
         state
             .workspace
-            .schematic_buffers
-            .insert("user/child/schematic".to_owned(), SchematicState::default());
+            .insert_schematic_editor("user/child/schematic".to_owned(), SchematicState::default());
         let authority = SelectionBulkEditAuthority::capture(&state);
         assert!(authority.stale_reason(&state).is_none());
 
@@ -1850,9 +1859,9 @@ mod tests {
         state.schematic.session.selection.select_component(1);
         state
             .workspace
-            .schematic_buffers
-            .get_mut("user/child/schematic")
+            .schematic_editor_mut("user/child/schematic")
             .expect("external buffer")
+            .editor
             .document_mut_for_test()
             .components
             .push(component(2, "X2", Some("tt")));
@@ -1867,8 +1876,7 @@ mod tests {
         external.document_mut_for_test().components = vec![component(2, "X2", Some("ff"))];
         state
             .workspace
-            .schematic_buffers
-            .insert("user/child/schematic".to_owned(), external);
+            .insert_schematic_editor("user/child/schematic".to_owned(), external);
         let filter = SelectionBulkFilter {
             hierarchy_scope: SelectionBulkHierarchyScope::CompleteProject,
             ..SelectionBulkFilter::default()

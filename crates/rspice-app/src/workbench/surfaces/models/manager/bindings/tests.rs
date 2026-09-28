@@ -18,7 +18,7 @@ fn design_with_unresolved(count: u64) -> AppState {
     let mut schematic = state
         .workspace
         .active_schematic()
-        .cloned()
+        .map(|source| source.clone_editor())
         .expect("an active schematic exists");
     for index in 0..count {
         let mut component = Component::new(index + 1, ComponentType::Nmos, Point::origin());
@@ -95,7 +95,7 @@ fn an_instance_bound_to_the_wrong_provider_says_which_one_wins() {
     let mut schematic = state
         .workspace
         .active_schematic()
-        .cloned()
+        .map(|source| source.clone_editor())
         .expect("an active schematic exists");
     let mut component = Component::new(1, ComponentType::Nmos, Point::origin());
     component.name = "M1".to_owned();

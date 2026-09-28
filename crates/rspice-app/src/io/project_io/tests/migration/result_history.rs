@@ -1331,7 +1331,7 @@ fn project_text_load_rejects_missing_active_schematic_buffer() {
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     let mut project = ProjectFile::new(workspace, libraries);
     let active_key = project.workspace.active_key();
-    project.workspace.schematic_buffers.remove(&active_key);
+    project.workspace.remove_schematic_editor(&active_key);
     let json = serde_json::to_string_pretty(&project).expect("corrupt fixture serializes");
 
     let err =
@@ -1352,17 +1352,16 @@ fn project_text_load_rejects_workspace_references_missing_from_libraries() {
     let ghost_key = ghost.key();
     let schematic = workspace
         .schematic_buffers
-        .values()
+        .keys()
         .next()
-        .cloned()
+        .and_then(|key| workspace.clone_schematic_editor(key))
         .expect("default project has a schematic buffer");
     workspace.active_view = ghost.clone();
     workspace.open_views = vec![OpenCellView::new(ghost.clone(), ViewType::Schematic)];
     workspace.hierarchy_stack = vec![ghost.clone()];
     workspace.schematic_buffers.clear();
-    workspace
-        .schematic_buffers
-        .insert(ghost_key.clone(), schematic);
+    workspace.schematic_sessions.clear();
+    workspace.insert_schematic_editor(ghost_key.clone(), schematic);
     let project = ProjectFile::new(workspace, libraries);
     let json = serde_json::to_string_pretty(&project).expect("corrupt fixture serializes");
 
@@ -1568,11 +1567,11 @@ fn project_load_rejects_orphan_and_malformed_schematic_buffers() {
         let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
         let buffer = workspace
             .schematic_buffers
-            .values()
+            .keys()
             .next()
-            .cloned()
+            .and_then(|key| workspace.clone_schematic_editor(key))
             .expect("default schematic buffer");
-        workspace.schematic_buffers.insert(key.to_owned(), buffer);
+        workspace.insert_schematic_editor(key.to_owned(), buffer);
         let project = ProjectFile::new(workspace, libraries);
         let json = serde_json::to_string_pretty(&project).expect("buffer fixture serializes");
 
@@ -1592,13 +1591,11 @@ fn project_load_rejects_schematic_buffer_bound_to_symbol_view() {
     add_top_symbol_view(&mut libraries);
     let buffer = workspace
         .schematic_buffers
-        .values()
+        .keys()
         .next()
-        .cloned()
+        .and_then(|key| workspace.clone_schematic_editor(key))
         .expect("default schematic buffer");
-    workspace
-        .schematic_buffers
-        .insert("user/top/symbol".to_owned(), buffer);
+    workspace.insert_schematic_editor("user/top/symbol".to_owned(), buffer);
     let project = ProjectFile::new(workspace, libraries);
     let json = serde_json::to_string_pretty(&project).expect("buffer fixture serializes");
 

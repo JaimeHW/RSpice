@@ -21,12 +21,12 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
         .components[0]
         .id;
     for reference in [&root, &other] {
-        let source = fixture
+        let mut stored_source = fixture
             .state
             .workspace
-            .schematic_buffers
-            .get_mut(&reference.key())
+            .schematic_editor_mut(&reference.key())
             .unwrap();
+        let source = &mut stored_source.editor;
         source.with_undo("temporary move", |source| {
             source.document_mut_for_test().components[0].pos.x += 10
         });
@@ -83,7 +83,7 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
             (&other, vec!["X5"]),
         ] {
             let schematic = schematic_for_reference(state, document).unwrap();
-            assert!(!schematic.can_redo());
+            assert!(!schematic.design.history().can_redo());
             for (probe, parent) in schematic.document().probes.iter().zip(parents) {
                 assert_eq!(
                     probe.source_expression.as_deref(),
@@ -109,8 +109,7 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
                 .contains(&fixture.sources[0])
         );
         assert!(
-            state.workspace.schematic_buffers[&root.key()]
-                .session
+            state.workspace.schematic_sessions[&root.key()]
                 .selection
                 .components
                 .contains(&root_selection)
@@ -164,9 +163,9 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
                 fixture
                     .state
                     .workspace
-                    .schematic_buffers
-                    .get_mut(&other.key())
+                    .schematic_editor_mut(&other.key())
                     .unwrap()
+                    .editor
                     .begin_operation("Pending inactive gesture");
             }
             let before = SchematicSnapshot::capture(&fixture.state.schematic.document());
@@ -226,9 +225,9 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
             fixture
                 .state
                 .workspace
-                .schematic_buffers
-                .get_mut(&other.key())
+                .schematic_editor_mut(&other.key())
                 .unwrap()
+                .editor
                 .cancel_operation();
             if history {
                 assert!(fixture.state.undo_project_design().unwrap().is_some());
@@ -379,9 +378,9 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
     fixture
         .state
         .workspace
-        .schematic_buffers
-        .get_mut(&child.key())
+        .schematic_editor_mut(&child.key())
         .unwrap()
+        .editor
         .document_mut_for_test()
         .probes[0]
         .bind_saved_output(second_plan, second_output);
@@ -459,7 +458,7 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
                 );
             }
         }
-        let source = &loaded.workspace.schematic_buffers[&child.key()];
+        let source = loaded.workspace.schematic_editor(&child.key()).unwrap();
         let component = source
             .document()
             .components
@@ -512,7 +511,7 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
         assert_eq!(source.document().probes[0].plan_id, Some(second_plan));
         let projection = loaded
             .workspace
-            .design_projection(&loaded.libraries, &child, source)
+            .design_projection(&loaded.libraries, &child, &source)
             .unwrap();
         assert_eq!(
             projection.schematic_buffers()[&child.key()]

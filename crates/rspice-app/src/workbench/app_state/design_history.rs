@@ -1037,12 +1037,8 @@ impl AppState {
             {
                 continue;
             }
-            if let Some(schematic) = self
-                .workspace
-                .schematic_buffers
-                .get_mut(&placement.document)
-            {
-                restore_placement_binding(schematic, placement);
+            if let Some(mut schematic) = self.workspace.schematic_editor_mut(&placement.document) {
+                restore_placement_binding(&mut schematic.editor, placement);
             }
             // The active drawing is a copy of its buffer, and a history step
             // must not reload it from the workspace: that would re-derive
@@ -1082,7 +1078,7 @@ impl AppState {
         self.workspace.save_active_schematic(&self.schematic);
         self.workspace.activate_view(reference.clone(), view_type);
         let key = self.workspace.active_schematic_reference().key();
-        if let Some(buffer) = self.workspace.schematic_buffers.get(&key).cloned() {
+        if let Some(buffer) = self.workspace.clone_schematic_editor(&key) {
             self.schematic = buffer;
         }
         self.bump_active_schematic_epoch();
@@ -1756,22 +1752,22 @@ fn cell_semantics_match(left: Option<&Cell>, right: Option<&Cell>) -> bool {
 fn schematic_for_reference<'a>(
     state: &'a AppState,
     reference: &CellViewRef,
-) -> Option<&'a SchematicState> {
+) -> Option<crate::state::SchematicEditorRef<'a>> {
     if state.workspace.active_schematic_reference() == *reference {
-        Some(&state.schematic)
+        Some(state.schematic.editor_ref())
     } else {
-        state.workspace.schematic_buffers.get(&reference.key())
+        state.workspace.schematic_editor(&reference.key())
     }
 }
 
 fn schematic_option_matches(
-    observed: Option<&SchematicState>,
+    observed: Option<impl AsRef<rspice_design::schematic::document::SchematicDocument>>,
     expected: Option<&SchematicState>,
 ) -> bool {
     match (observed, expected) {
         (None, None) => true,
         (Some(observed), Some(expected)) => {
-            SchematicSnapshot::capture(&expected.document()).is_equal_document(&observed.document())
+            SchematicSnapshot::capture(&expected.document()).is_equal_document(observed.as_ref())
         }
         _ => false,
     }
@@ -1787,8 +1783,7 @@ fn apply_symbol_fixture(
         Some(schematic) => {
             state
                 .workspace
-                .schematic_buffers
-                .insert(key.clone(), schematic.clone());
+                .insert_schematic_editor(key.clone(), schematic.clone());
             if state.workspace.active_schematic_reference() == *reference {
                 state.schematic = schematic.clone();
             }
@@ -1802,7 +1797,7 @@ fn apply_symbol_fixture(
             }
         }
         None => {
-            state.workspace.schematic_buffers.remove(&key);
+            state.workspace.remove_schematic_editor(&key);
         }
     }
 }
@@ -2034,17 +2029,16 @@ impl InstanceRemovalDocument {
             state.schematic.apply_snapshot(snapshot);
             state
                 .workspace
-                .schematic_buffers
-                .insert(key, state.schematic.clone());
+                .insert_schematic_editor(key, state.schematic.clone());
             return Ok(());
         }
-        let Some(schematic) = state.workspace.schematic_buffers.get_mut(&key) else {
+        let Some(mut stored) = state.workspace.schematic_editor_mut(&key) else {
             return Err(format!(
                 "Instance removal cannot restore '{}' because it is no longer loaded.",
                 self.reference.display_path()
             ));
         };
-        schematic.apply_snapshot(snapshot);
+        stored.editor.apply_snapshot(snapshot);
         Ok(())
     }
 }
@@ -2089,8 +2083,7 @@ fn apply_schematic_map(
             }
             state
                 .workspace
-                .schematic_buffers
-                .insert(active_key.clone(), state.schematic.clone());
+                .insert_schematic_editor(active_key.clone(), state.schematic.clone());
             continue;
         }
         let Some(existing_key) = state
@@ -2104,11 +2097,11 @@ fn apply_schematic_map(
                 "Design management cannot restore schematic '{key}' because it is no longer open."
             ));
         };
-        let schematic = state
+        let mut stored = state
             .workspace
-            .schematic_buffers
-            .get_mut(&existing_key)
+            .schematic_editor_mut(&existing_key)
             .expect("the retained schematic key remains present");
+        let schematic = &mut stored.editor;
         let selection = preserve_selection.then(|| schematic.session.selection.clone());
         schematic.apply_snapshot(snapshot);
         if let Some(selection) = selection {
@@ -2143,15 +2136,15 @@ pub(crate) fn validate_hierarchy_target_unreferenced(
     state: &AppState,
     target: &CellViewRef,
 ) -> Result<(), String> {
-    let references_target = |schematic: &SchematicState| {
+    let references_target = |schematic: &rspice_design::schematic::document::SchematicDocument| {
         schematic_references_master(schematic, &target.library, &target.cell)
     };
-    if references_target(&state.schematic)
+    if references_target(state.schematic.document())
         || state
             .workspace
             .schematic_buffers
             .values()
-            .any(references_target)
+            .any(|schematic| references_target(schematic.document()))
     {
         return Err(format!(
             "Cell '{}/{}' is already referenced by an open schematic and cannot be created implicitly by hierarchy extraction.",
@@ -2245,8 +2238,7 @@ impl HierarchyExtractionRecord {
         }
         state
             .workspace
-            .schematic_buffers
-            .remove(&self.target_schematic_ref.key());
+            .remove_schematic_editor(&self.target_schematic_ref.key());
         apply_design_snapshot(state, &self.parent_ref, &self.before_parent)?;
         state.workspace.open_views = restored_open_views(
             &self.open_views_before,
@@ -2287,8 +2279,7 @@ impl HierarchyExtractionRecord {
         apply_design_snapshot(state, &self.parent_ref, &self.after_parent)?;
         state
             .workspace
-            .schematic_buffers
-            .insert(self.target_schematic_ref.key(), self.child_template.clone());
+            .insert_schematic_editor(self.target_schematic_ref.key(), self.child_template.clone());
         state.workspace.open_views = restored_open_views(
             &self.open_views_after,
             &current_open_views,
@@ -2333,21 +2324,19 @@ fn apply_design_snapshot(
         state.schematic.apply_snapshot(snapshot);
         state
             .workspace
-            .schematic_buffers
-            .insert(reference.key(), state.schematic.clone());
+            .insert_schematic_editor(reference.key(), state.schematic.clone());
         return Ok(());
     }
-    let schematic = state
+    let mut schematic = state
         .workspace
-        .schematic_buffers
-        .get_mut(&reference.key())
+        .schematic_editor_mut(&reference.key())
         .ok_or_else(|| {
             format!(
                 "Schematic '{}' is no longer open.",
                 reference.display_path()
             )
         })?;
-    schematic.apply_snapshot(snapshot);
+    schematic.editor.apply_snapshot(snapshot);
     Ok(())
 }
 
@@ -2357,9 +2346,8 @@ fn schematic_read_only(state: &AppState, reference: &CellViewRef) -> bool {
     } else {
         state
             .workspace
-            .schematic_buffers
-            .get(&reference.key())
-            .is_some_and(|schematic| schematic.session.read_only)
+            .schematic_editor(&reference.key())
+            .is_some_and(|schematic| schematic.read_only())
     }
 }
 
@@ -2388,11 +2376,7 @@ fn schematic_clone(state: &AppState, reference: &CellViewRef) -> Option<Schemati
     if state.workspace.active_schematic_reference() == *reference {
         Some(state.schematic.clone())
     } else {
-        state
-            .workspace
-            .schematic_buffers
-            .get(&reference.key())
-            .cloned()
+        state.workspace.clone_schematic_editor(&reference.key())
     }
 }
 
@@ -2446,7 +2430,7 @@ fn has_external_master_reference(state: &AppState, record: &HierarchyExtractionR
     let target_cell = record.target_schematic_ref.cell.as_str();
     let is_external =
         |key: &str| key != record.parent_ref.key() && key != record.target_schematic_ref.key();
-    let references_target = |schematic: &SchematicState| {
+    let references_target = |schematic: &rspice_design::schematic::document::SchematicDocument| {
         schematic_references_master(schematic, target_library, target_cell)
     };
 
@@ -2454,17 +2438,17 @@ fn has_external_master_reference(state: &AppState, record: &HierarchyExtractionR
         .workspace
         .schematic_buffers
         .iter()
-        .any(|(key, schematic)| is_external(key) && references_target(schematic))
+        .any(|(key, schematic)| is_external(key) && references_target(schematic.document()))
         || (is_external(&state.workspace.active_schematic_reference().key())
-            && references_target(&state.schematic))
+            && references_target(state.schematic.document()))
 }
 
 fn schematic_references_master(
-    schematic: &SchematicState,
+    schematic: &rspice_design::schematic::document::SchematicDocument,
     target_library: &str,
     target_cell: &str,
 ) -> bool {
-    schematic.document().components.iter().any(|component| {
+    schematic.components.iter().any(|component| {
         component.kind == ComponentType::CellInstance
             && component.library_cell.as_ref().is_some_and(|binding| {
                 binding.library == target_library && binding.cell == target_cell

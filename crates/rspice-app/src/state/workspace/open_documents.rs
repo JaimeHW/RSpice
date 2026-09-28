@@ -31,14 +31,14 @@ impl ProjectWorkspace {
     /// Resolve the exact root schematic while projecting the live editor only
     /// when it is the selected root. A different open tab can never silently
     /// replace the configuration's simulation source.
-    pub fn simulation_root_schematic<'a>(
+    pub(crate) fn simulation_root_schematic<'a>(
         &'a self,
         active_reference: &CellViewRef,
         active_schematic: &'a SchematicState,
-    ) -> Option<&'a SchematicState> {
+    ) -> Option<SchematicEditorRef<'a>> {
         let root = self.simulation_root_reference();
         if root.key().eq_ignore_ascii_case(&active_reference.key()) {
-            Some(active_schematic)
+            Some(active_schematic.editor_ref())
         } else {
             find_schematic(self, &root)
         }
@@ -371,12 +371,14 @@ impl ProjectWorkspace {
     ) -> Self {
         let project = ProjectDescriptor::new(name, root_library, top_cell);
         let active_view = CellViewRef::new(root_library, top_cell, DEFAULT_SCHEMATIC_VIEW);
-        let mut schematic_buffers = HashMap::new();
-        schematic_buffers.insert(active_view.key(), SchematicState::default());
+        let (design, session) = SchematicState::default().into_parts();
+        let schematic_buffers = HashMap::from([(active_view.key(), design)]);
+        let schematic_sessions = HashMap::from([(active_view.key(), session)]);
         let mut workspace = Self {
             project,
             open_views: vec![OpenCellView::new(active_view.clone(), ViewType::Schematic)],
             schematic_buffers,
+            schematic_sessions,
             active_view,
             ..Self::default()
         };
@@ -402,8 +404,12 @@ impl ProjectWorkspace {
         active_reference: &'a CellViewRef,
         active_schematic: &'a SchematicState,
     ) -> HierarchyResolution {
-        HierarchyResolver::new(self, libraries, Some((active_reference, active_schematic)))
-            .resolve()
+        HierarchyResolver::new(
+            self,
+            libraries,
+            Some((active_reference, active_schematic.editor_ref())),
+        )
+        .resolve()
     }
 
     /// Materialize the exact multi-sheet, active-variant, and annotation
@@ -493,11 +499,13 @@ impl ProjectWorkspace {
 
     pub fn ensure_active_buffer(&mut self) {
         let key = self.active_key();
-        self.schematic_buffers.entry(key).or_default();
+        if !self.schematic_buffers.contains_key(&key) {
+            self.insert_schematic_editor(key, SchematicState::default());
+        }
     }
 
-    pub fn active_schematic(&self) -> Option<&SchematicState> {
-        self.schematic_buffers.get(&self.active_key())
+    pub(crate) fn active_schematic(&self) -> Option<SchematicEditorRef<'_>> {
+        self.schematic_editor(&self.active_key())
     }
 
     pub fn active_schematic_reference(&self) -> CellViewRef {
@@ -511,9 +519,9 @@ impl ProjectWorkspace {
         self.active_view.clone()
     }
 
-    pub fn active_context_schematic(&self) -> Option<&SchematicState> {
+    pub(crate) fn active_context_schematic(&self) -> Option<SchematicEditorRef<'_>> {
         let reference = self.active_schematic_reference();
-        self.schematic_buffers.get(&reference.key())
+        self.schematic_editor(&reference.key())
     }
 
     pub fn save_active_schematic(&mut self, schematic: &SchematicState) {
@@ -521,7 +529,7 @@ impl ProjectWorkspace {
             return;
         }
         let key = self.active_key();
-        self.schematic_buffers.insert(key, schematic.clone());
+        self.insert_schematic_editor(key, schematic.clone());
         self.set_active_dirty(schematic.session.is_dirty);
     }
 
@@ -529,8 +537,8 @@ impl ProjectWorkspace {
         for view in &mut self.open_views {
             view.dirty = false;
         }
-        for schematic in self.schematic_buffers.values_mut() {
-            schematic.session.is_dirty = false;
+        for session in self.schematic_sessions.values_mut() {
+            session.is_dirty = false;
         }
         self.netlist_source_dirty = false;
         self.project_sources_dirty = false;
@@ -545,10 +553,11 @@ impl ProjectWorkspace {
 
     pub fn any_dirty(&self) -> bool {
         self.open_views.iter().any(|view| view.dirty)
-            || self
-                .schematic_buffers
-                .values()
-                .any(|schematic| schematic.session.is_dirty)
+            || self.schematic_buffers.keys().any(|key| {
+                self.schematic_sessions
+                    .get(key)
+                    .is_some_and(|session| session.is_dirty)
+            })
             || self.netlist_source_dirty
             || self.project_sources_dirty
             || self.project_metadata_dirty
@@ -1066,8 +1075,8 @@ impl ProjectWorkspace {
             self.open_views
                 .push(OpenCellView::new(reference.clone(), view_type));
         }
-        if is_schematic_like(view_type) {
-            self.schematic_buffers.entry(reference.key()).or_default();
+        if is_schematic_like(view_type) && !self.schematic_buffers.contains_key(&reference.key()) {
+            self.insert_schematic_editor(reference.key(), SchematicState::default());
         }
         self.project_active_occurrence();
     }

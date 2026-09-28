@@ -80,7 +80,7 @@ pub fn library_cell_placement_candidates(
                     ViewType::Schematic => {
                         let reference = CellViewRef::new(&library.name, &cell.name, &view.name);
                         if let Some(master) = workspace.schematic_buffers.get(&reference.key()) {
-                            binding.bind_interface(&master.interface_ports());
+                            binding.bind_interface(&master.document().interface_ports());
                             (
                                 !is_current,
                                 if is_current {

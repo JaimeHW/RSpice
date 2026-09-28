@@ -55,17 +55,19 @@ impl AppState {
                 .ok_or_else(|| format!("Reference document '{key}' is unavailable."))?;
             validate_reference_document(self, key, source)?;
             let candidate = source.reference_history_candidate(target);
-            sources.insert(key.clone(), source.clone());
+            sources.insert(key.clone(), source.clone_editor());
             candidates.insert(key.clone(), candidate);
         }
         self.prepare_schematic_reference_transaction(sources, candidates)
             .map(|transaction| transaction.into_history(forward))
     }
 
-    pub(super) fn schematic_reference_sources(&self) -> BTreeMap<String, &SchematicState> {
+    pub(super) fn schematic_reference_sources(
+        &self,
+    ) -> BTreeMap<String, crate::state::SchematicEditorRef<'_>> {
         self.workspace.schematic_reference_sources(
             &self.workspace.active_schematic_reference(),
-            &self.schematic,
+            self.schematic.editor_ref(),
         )
     }
 
@@ -75,17 +77,17 @@ impl AppState {
         after: BTreeMap<String, SchematicState>,
     ) -> Result<SchematicReferenceTransaction, String> {
         for (key, source) in &before {
-            validate_reference_document(self, key, source)?;
+            validate_reference_document(self, key, source.editor_ref())?;
         }
         let transaction = self.workspace.prepare_schematic_reference_transaction(
             &self.library_manager,
             &self.workspace.active_schematic_reference(),
-            &self.schematic,
+            self.schematic.editor_ref(),
             before,
             after,
         )?;
         for (key, source) in &transaction.before {
-            validate_reference_document(self, key, source)?;
+            validate_reference_document(self, key, source.editor_ref())?;
         }
         Ok(transaction)
     }
@@ -94,7 +96,7 @@ impl AppState {
 pub(super) fn validate_reference_document(
     state: &AppState,
     key: &str,
-    source: &SchematicState,
+    source: crate::state::SchematicEditorRef<'_>,
 ) -> Result<(), String> {
     let reference = reference_from_key(key)?;
     if !state.project_lifecycle.project_open || document_read_only(state, &reference) {
@@ -102,7 +104,7 @@ pub(super) fn validate_reference_document(
             "Reference editing requires an open, writable schematic '{key}'."
         ));
     }
-    if source.has_pending_operation() {
+    if source.design.pending_operation_id().is_some() {
         return Err(format!(
             "Finish or cancel the schematic gesture in '{key}' before changing references."
         ));

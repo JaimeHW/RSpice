@@ -710,8 +710,7 @@ mod tests {
         master.add_component(ComponentType::Resistor, Point::new(30, 0));
         app.state
             .workspace
-            .schematic_buffers
-            .insert(shared.key(), master);
+            .insert_schematic_editor(shared.key(), master);
 
         let mut binding = LibraryCellInstance::new(&shared.library, &shared.cell, &shared.view);
         binding.bind_interface(&[]);
@@ -721,8 +720,7 @@ mod tests {
         app.state.schematic = root_sheet.clone();
         app.state
             .workspace
-            .schematic_buffers
-            .insert(root.key(), root_sheet);
+            .insert_schematic_editor(root.key(), root_sheet);
         (app, shared)
     }
 
@@ -754,9 +752,7 @@ mod tests {
         let master = app
             .state
             .workspace
-            .schematic_buffers
-            .get(&shared.key())
-            .cloned()
+            .clone_schematic_editor(&shared.key())
             .expect("the shared master buffer");
         app.state
             .workspace

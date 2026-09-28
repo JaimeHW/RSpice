@@ -444,8 +444,7 @@ fn opening_another_document_commits_to_the_original_component_and_preserves_refu
             .app
             .state
             .workspace
-            .schematic_buffers
-            .insert(other.key(), other_schematic);
+            .insert_schematic_editor(other.key(), other_schematic);
         editor.edit("Instance", if valid { "V9" } else { "invalid name" });
         editor.app.state.open_workspace_view(other.clone());
         if valid {

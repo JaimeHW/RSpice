@@ -16,7 +16,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::state::{CellViewRef, SchematicState, SheetId, UndoSequence, next_undo_sequence};
+use crate::state::{CellViewRef, SheetId, UndoSequence, next_undo_sequence};
 use crate::workbench::app_state::AppState;
 
 use super::schematic_for_reference;
@@ -81,7 +81,8 @@ impl DocumentCompensation {
         {
             return Ok(());
         }
-        let Some(live) = schematic_for_reference(state, &self.reference).map(live_object_ids)
+        let Some(live) =
+            schematic_for_reference(state, &self.reference).map(|source| live_object_ids(&source))
         else {
             return Ok(());
         };
@@ -190,43 +191,33 @@ impl RecordHeader {
 
 /// Every stable object identity a schematic currently holds — the live set
 /// sheet reconciliation is measured against.
-fn live_object_ids(schematic: &SchematicState) -> Vec<u64> {
+fn live_object_ids(
+    schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
+) -> Vec<u64> {
     schematic
-        .document()
+        .as_ref()
         .components
         .iter()
         .map(|object| object.id)
-        .chain(schematic.document().wires.iter().map(|object| object.id))
-        .chain(schematic.document().buses.iter().map(|object| object.id))
-        .chain(schematic.document().bus_taps.iter().map(|object| object.id))
+        .chain(schematic.as_ref().wires.iter().map(|object| object.id))
+        .chain(schematic.as_ref().buses.iter().map(|object| object.id))
+        .chain(schematic.as_ref().bus_taps.iter().map(|object| object.id))
+        .chain(schematic.as_ref().junctions.iter().map(|object| object.id))
+        .chain(schematic.as_ref().net_labels.iter().map(|object| object.id))
         .chain(
             schematic
-                .document()
-                .junctions
-                .iter()
-                .map(|object| object.id),
-        )
-        .chain(
-            schematic
-                .document()
-                .net_labels
-                .iter()
-                .map(|object| object.id),
-        )
-        .chain(
-            schematic
-                .document()
+                .as_ref()
                 .design_notes
                 .iter()
                 .map(|object| object.id),
         )
         .chain(
             schematic
-                .document()
+                .as_ref()
                 .documentation_shapes
                 .iter()
                 .map(|object| object.id),
         )
-        .chain(schematic.document().probes.iter().map(|object| object.id))
+        .chain(schematic.as_ref().probes.iter().map(|object| object.id))
         .collect()
 }

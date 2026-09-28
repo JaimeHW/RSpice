@@ -591,12 +591,11 @@ fn rollback_validated_save(
     } else {
         state
             .workspace
-            .schematic_buffers
-            .get_mut(target_view_key)
+            .schematic_editor_mut(target_view_key)
             .ok_or_else(|| "the validated source document is no longer open".to_owned())
-            .and_then(|schematic| {
+            .and_then(|mut schematic| {
                 rollback_exact_journal(
-                    schematic,
+                    &mut schematic.editor,
                     &original_journal,
                     &expected_journal,
                     expected_design_digest,
@@ -1223,6 +1222,8 @@ mod tests {
             .expect("append guarded revision");
         let expected = schematic.document().validated_revisions.clone();
         let expected_design_digest = schematic
+            .editor_ref()
+            .design
             .validated_design_content_digest()
             .expect("design digest");
 
@@ -1253,6 +1254,8 @@ mod tests {
         assert_eq!(schematic.document().validated_revisions, retained);
 
         let guarded_design = schematic
+            .editor_ref()
+            .design
             .validated_design_content_digest()
             .expect("guarded design digest");
         schematic.add_component(

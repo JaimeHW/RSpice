@@ -400,8 +400,7 @@ fn reused_master_fixture(
     ];
     state
         .workspace
-        .schematic_buffers
-        .insert(child_ref.key(), child);
+        .insert_schematic_editor(child_ref.key(), child);
     for (index, name) in original_names.iter().enumerate() {
         let id = state.schematic.add_library_cell_component(
             Point::new((2 - index as i32) * 100, 0),
@@ -448,8 +447,7 @@ fn reused_master_fixture(
     );
     state
         .workspace
-        .schematic_buffers
-        .insert(other_ref.key(), other);
+        .insert_schematic_editor(other_ref.key(), other);
     state
         .workspace
         .plan_data_mut(fixture.plan)

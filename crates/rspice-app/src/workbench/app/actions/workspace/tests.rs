@@ -88,8 +88,7 @@ fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() 
         .property_commit = crate::state::PropertyCommitPolicy::Atomic;
     state
         .workspace
-        .schematic_buffers
-        .insert(reference.key(), existing);
+        .insert_schematic_editor(reference.key(), existing);
 
     state.open_workspace_view(reference);
 
@@ -286,7 +285,7 @@ fn state_with_amp_symbol_pin(pin_name: &str, position: Option<Point>) -> AppStat
         .find(|component| component.id == port_id)
         .expect("port exists")
         .value = pin_name.to_owned();
-    state.workspace.schematic_buffers.insert(
+    state.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         schematic,
     );
@@ -322,7 +321,7 @@ fn state_with_unplaced_amp_symbol_pins(count: usize) -> AppState {
             .expect("port exists")
             .value = format!("P{index}");
     }
-    state.workspace.schematic_buffers.insert(
+    state.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         schematic,
     );
@@ -353,8 +352,7 @@ fn legacy_primitives_content_migrates_to_user_library() {
     drawn.add_component(ComponentType::Njfet, Point::new(0, 0));
     state
         .workspace
-        .schematic_buffers
-        .insert("primitives/ISource AC/schematic".to_owned(), drawn);
+        .insert_schematic_editor("primitives/ISource AC/schematic".to_owned(), drawn);
     state.workspace.active_view =
         crate::state::CellViewRef::new("primitives", "ISource AC", "schematic");
 
@@ -407,8 +405,7 @@ fn leaving_symbol_view_does_not_save_stale_schematic_under_symbol_key() {
     amp_buffer.add_component(ComponentType::Port, Point::new(0, 0));
     state
         .workspace
-        .schematic_buffers
-        .insert(amp_schematic.key(), amp_buffer.clone());
+        .insert_schematic_editor(amp_schematic.key(), amp_buffer.clone());
     state.schematic = amp_buffer;
     state.workspace.active_view = amp_schematic.clone();
     state.workspace.open_views = vec![crate::state::OpenCellView::new(
@@ -450,7 +447,7 @@ fn active_symbol_ports_read_the_paired_schematic_contract() {
         .find(|component| component.id == port_id)
         .expect("port exists")
         .value = "OUT".to_owned();
-    state.workspace.schematic_buffers.insert(
+    state.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         schematic,
     );
@@ -482,7 +479,7 @@ fn generating_active_symbol_document_writes_symbol_view_metadata() {
         .find(|component| component.id == port_id)
         .expect("port exists")
         .value = "IN".to_owned();
-    state.workspace.schematic_buffers.insert(
+    state.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         schematic,
     );
@@ -534,7 +531,7 @@ fn generate_symbol_document_is_one_undoable_transaction() {
         .find(|component| component.id == port_id)
         .expect("port exists")
         .value = "IN".to_owned();
-    state.workspace.schematic_buffers.insert(
+    state.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         schematic,
     );
@@ -597,7 +594,7 @@ fn undo_generate_symbol_restores_generated_fallback_metadata_state() {
         .find(|component| component.id == port_id)
         .expect("port exists")
         .value = "IN".to_owned();
-    state.workspace.schematic_buffers.insert(
+    state.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         schematic,
     );
@@ -674,7 +671,7 @@ fn undo_first_manual_symbol_edit_restores_generated_fallback_source() {
         .find(|component| component.id == port_id)
         .expect("port exists")
         .value = "IN".to_owned();
-    state.workspace.schematic_buffers.insert(
+    state.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         schematic,
     );
@@ -776,8 +773,7 @@ fn storing_symbol_document_remaps_open_instance_wires_by_pin_name() {
     ));
     state
         .workspace
-        .schematic_buffers
-        .insert(CellViewRef::new("work", "top", "schematic").key(), parent);
+        .insert_schematic_editor(CellViewRef::new("work", "top", "schematic").key(), parent);
 
     state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
     state
@@ -824,8 +820,7 @@ fn storing_symbol_document_remaps_instance_wires_when_origin_moves() {
     ));
     state
         .workspace
-        .schematic_buffers
-        .insert(CellViewRef::new("work", "top", "schematic").key(), parent);
+        .insert_schematic_editor(CellViewRef::new("work", "top", "schematic").key(), parent);
 
     state
         .store_active_symbol_document(&SymbolDocument {
@@ -872,8 +867,7 @@ fn storing_symbol_document_remaps_rotated_and_mirrored_instance_wires() {
     ));
     state
         .workspace
-        .schematic_buffers
-        .insert(CellViewRef::new("work", "top", "schematic").key(), parent);
+        .insert_schematic_editor(CellViewRef::new("work", "top", "schematic").key(), parent);
 
     state
         .store_active_symbol_document(&symbol_document(&[
@@ -911,8 +905,7 @@ fn storing_symbol_document_applies_wire_remaps_once() {
     ));
     state
         .workspace
-        .schematic_buffers
-        .insert(CellViewRef::new("work", "top", "schematic").key(), parent);
+        .insert_schematic_editor(CellViewRef::new("work", "top", "schematic").key(), parent);
 
     state
         .store_active_symbol_document(&symbol_document(&[
@@ -962,8 +955,7 @@ fn storing_symbol_document_remaps_all_open_parent_buffers() {
     ));
     state
         .workspace
-        .schematic_buffers
-        .insert(CellViewRef::new("work", "top", "schematic").key(), top);
+        .insert_schematic_editor(CellViewRef::new("work", "top", "schematic").key(), top);
 
     let mut tb = SchematicState::default();
     tb.document_mut_for_test().components.push(
@@ -977,8 +969,7 @@ fn storing_symbol_document_remaps_all_open_parent_buffers() {
     ));
     state
         .workspace
-        .schematic_buffers
-        .insert(CellViewRef::new("work", "tb", "schematic").key(), tb);
+        .insert_schematic_editor(CellViewRef::new("work", "tb", "schematic").key(), tb);
 
     state
         .store_active_symbol_document(&symbol_document(&[
@@ -1057,8 +1048,7 @@ fn copy_cell_flushes_live_active_schematic_before_copying_buffers() {
     let active_key = CellViewRef::new("work", "amp", "schematic").key();
     state
         .workspace
-        .schematic_buffers
-        .insert(active_key, SchematicState::default());
+        .insert_schematic_editor(active_key, SchematicState::default());
     state
         .schematic
         .add_component(ComponentType::Resistor, Point::new(20, 20));
@@ -1523,8 +1513,7 @@ fn opening_symbol_view_loads_the_paired_schematic_context() {
         .value = "PAIR".to_owned();
     state
         .workspace
-        .schematic_buffers
-        .insert(CellViewRef::new("work", "amp", "schematic").key(), paired);
+        .insert_schematic_editor(CellViewRef::new("work", "amp", "schematic").key(), paired);
 
     state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
 
@@ -1959,12 +1948,10 @@ fn state_with_populated_user_library() -> AppState {
     );
     state
         .workspace
-        .schematic_buffers
-        .insert(top.key(), top_schematic.clone());
+        .insert_schematic_editor(top.key(), top_schematic.clone());
     state
         .workspace
-        .schematic_buffers
-        .insert(amp.key(), SchematicState::default());
+        .insert_schematic_editor(amp.key(), SchematicState::default());
     state.workspace.open_views = vec![crate::state::OpenCellView::new(
         top.clone(),
         ViewType::Schematic,
@@ -2202,7 +2189,7 @@ fn delete_library_is_blocked_by_root_config_root_and_referenced_master() {
         Point::new(20, 20),
         LibraryCellInstance::new("user", "amp", "schematic"),
     );
-    state.workspace.schematic_buffers.insert(
+    state.workspace.insert_schematic_editor(
         CellViewRef::new("spare", "consumer", "schematic").key(),
         consumer_schematic,
     );
@@ -2239,8 +2226,7 @@ fn delete_library_removes_its_cells_and_restores_valid_focus() {
     let survivor = CellViewRef::new("spare", "keep", "schematic");
     state
         .workspace
-        .schematic_buffers
-        .insert(survivor.key(), SchematicState::default());
+        .insert_schematic_editor(survivor.key(), SchematicState::default());
     state
         .workspace
         .open_views

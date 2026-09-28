@@ -176,8 +176,13 @@ impl CheckAndSaveValidationReport {
         // What is about to be written: the persisted documents with the live
         // editor buffer over its own. Digests, revision journals, and symbol
         // contracts are statements about these; nothing hierarchy-derived is.
-        let mut buffers = state.workspace.schematic_buffers.clone();
-        buffers.insert(active_view.key(), state.schematic.clone());
+        let mut buffers = state
+            .workspace
+            .schematic_buffers
+            .iter()
+            .map(|(key, schematic)| (key.clone(), schematic))
+            .collect::<std::collections::HashMap<_, _>>();
+        buffers.insert(active_view.key(), state.schematic.editor_ref().design);
         let inspection = state.workspace.inspect_design_projection(
             &state.library_manager,
             &active_view,
@@ -400,10 +405,12 @@ impl CheckAndSaveValidationReport {
         }
 
         let mut documents = match effective_scope {
-            SaveScope::ActiveDocument => vec![(active_view.key(), state.schematic.clone())],
+            SaveScope::ActiveDocument => {
+                vec![(active_view.key(), state.schematic.editor_ref().design)]
+            }
             SaveScope::AllDocuments => buffers
                 .iter()
-                .map(|(key, schematic)| (key.clone(), schematic.clone()))
+                .map(|(key, schematic)| (key.clone(), *schematic))
                 .collect::<Vec<_>>(),
         };
         documents.sort_by(|left, right| left.0.cmp(&right.0));
@@ -702,14 +709,15 @@ fn component_property_findings(
 /// `locatable` states whether this document is the one the canvas is showing.
 /// Only then may a finding carry the object it is about, because a location
 /// names an object without naming the drawing that holds it.
-fn validate_component_contracts(
+fn validate_component_contracts<S: AsRef<rspice_design::schematic::document::SchematicDocument>>(
     document_key: &str,
-    schematic: &crate::state::SchematicState,
-    symbol_resolver: &SymbolResolver<'_>,
+    schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
+    symbol_resolver: &SymbolResolver<'_, S>,
     state: &AppState,
     locatable: bool,
     findings: &mut BTreeMap<String, CheckAndSaveFinding>,
 ) {
+    let schematic = schematic.as_ref();
     let segments = document_key.split('/').collect::<Vec<_>>();
     if segments.len() == 3 && !schematic.interface_ports().is_empty() {
         let reference = CellViewRef::new(segments[0], segments[1], segments[2]);
@@ -756,7 +764,7 @@ fn validate_component_contracts(
         })
     };
     let mut designators = BTreeMap::<String, Vec<u64>>::new();
-    for component in &schematic.document().components {
+    for component in &schematic.components {
         let component_identity = format!("{document_key}:{}", component.id);
         if !component.kind.spice_prefix().is_empty() {
             if let Err(error) = component.validate_reference_designator(component.name.trim()) {
@@ -1059,8 +1067,7 @@ mod tests {
             .value = "a".to_owned();
         state
             .workspace
-            .schematic_buffers
-            .insert("work/div/schematic".to_owned(), master);
+            .insert_schematic_editor("work/div/schematic".to_owned(), master);
 
         let mut binding = crate::state::LibraryCellInstance::new("work", "div", "schematic");
         binding.bind_interface(&[crate::state::PortSpec {
@@ -1112,8 +1119,7 @@ mod tests {
         master.add_component(ComponentType::Resistor, Point::new(30, 0));
         state
             .workspace
-            .schematic_buffers
-            .insert("work/amp/schematic".to_owned(), master);
+            .insert_schematic_editor("work/amp/schematic".to_owned(), master);
 
         let binding = crate::state::LibraryCellInstance::new("work", "amp", "schematic");
         let instance = state

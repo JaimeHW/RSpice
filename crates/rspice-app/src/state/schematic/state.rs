@@ -90,6 +90,93 @@ pub struct SchematicState {
     pub session: SchematicSession,
 }
 
+/// Borrow a stored design with the session belonging to the same document.
+#[derive(Clone, Copy)]
+pub(crate) struct SchematicEditorRef<'a> {
+    pub(crate) design: &'a rspice_design::schematic::owned::Schematic,
+    pub(crate) session: Option<&'a SchematicSession>,
+}
+
+impl<'a> SchematicEditorRef<'a> {
+    pub(crate) fn document(&self) -> &'a SchematicDocument {
+        self.design.document()
+    }
+
+    pub(crate) fn clone_editor(&self) -> SchematicState {
+        self.with_design(self.design.clone())
+    }
+
+    pub(crate) fn with_design(
+        self,
+        design: rspice_design::schematic::owned::Schematic,
+    ) -> SchematicState {
+        SchematicState::from_parts(design, self.session.cloned().unwrap_or_default())
+    }
+
+    pub(crate) fn is_dirty(&self) -> bool {
+        self.session.is_some_and(|session| session.is_dirty)
+    }
+
+    pub(crate) fn read_only(&self) -> bool {
+        self.session.is_some_and(|session| session.read_only)
+    }
+}
+
+impl AsRef<SchematicDocument> for SchematicEditorRef<'_> {
+    fn as_ref(&self) -> &SchematicDocument {
+        self.document()
+    }
+}
+
+/// Exclusive editor access to a stored design and its per-document session.
+/// Both values return to their borrowed slots when editing ends, including unwind.
+pub(crate) struct SchematicEditorMut<'a> {
+    pub(crate) editor: SchematicState,
+    design: &'a mut rspice_design::schematic::owned::Schematic,
+    session: &'a mut SchematicSession,
+}
+
+impl Drop for SchematicEditorMut<'_> {
+    fn drop(&mut self) {
+        std::mem::swap(self.design, &mut self.editor.design);
+        std::mem::swap(self.session, &mut self.editor.session);
+    }
+}
+
+impl SchematicState {
+    pub(crate) fn editor_ref(&self) -> SchematicEditorRef<'_> {
+        SchematicEditorRef {
+            design: &self.design,
+            session: Some(&self.session),
+        }
+    }
+
+    pub(crate) fn from_parts(
+        design: rspice_design::schematic::owned::Schematic,
+        session: SchematicSession,
+    ) -> Self {
+        Self { design, session }
+    }
+
+    pub(crate) fn into_parts(
+        self,
+    ) -> (rspice_design::schematic::owned::Schematic, SchematicSession) {
+        (self.design, self.session)
+    }
+
+    pub(crate) fn borrow_parts<'a>(
+        design: &'a mut rspice_design::schematic::owned::Schematic,
+        session: &'a mut SchematicSession,
+    ) -> SchematicEditorMut<'a> {
+        let editor = Self::from_parts(std::mem::take(design), std::mem::take(session));
+        SchematicEditorMut {
+            editor,
+            design,
+            session,
+        }
+    }
+}
+
 /// Per-document editor interaction and presentation, kept outside the design.
 #[derive(Debug, Clone)]
 pub struct SchematicSession {

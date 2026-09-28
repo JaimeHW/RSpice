@@ -123,7 +123,7 @@ impl AppState {
             .or_else(|| {
                 self.workspace
                     .simulation_root_schematic(&self.workspace.active_view, &self.schematic)
-                    .map(crate::state::SchematicState::topology_version)
+                    .map(|source| source.design.topology_version())
             })
             .unwrap_or(0);
         (root_key, revision, closure.into_iter().collect())

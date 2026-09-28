@@ -12,3 +12,16 @@ impl ProjectionSource for SchematicState {
         }
     }
 }
+
+impl ProjectionSource for super::SchematicEditorRef<'_> {
+    fn projection_source(&self) -> SchematicSource<'_> {
+        SchematicSource {
+            schematic: self.design,
+            current_file: self
+                .session
+                .and_then(|session| session.current_file.as_deref()),
+            read_only: self.read_only(),
+            modified: self.is_dirty(),
+        }
+    }
+}

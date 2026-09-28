@@ -128,8 +128,7 @@ impl Fixture {
         self.app
             .state
             .workspace
-            .schematic_buffers
-            .insert(reference.key(), SchematicState::default());
+            .insert_schematic_editor(reference.key(), SchematicState::default());
         reference
     }
 }
@@ -427,7 +426,7 @@ fn gesture_document_navigation_rolls_back_before_buffering_the_original() {
     assert_eq!(fixture.app.state.workspace.active_view, second);
     let buffer = &fixture.app.state.workspace.schematic_buffers[&original.key()];
     assert_eq!(buffer.document().components[0].pos, Point::new(100, 100));
-    assert!(!buffer.has_pending_operation());
+    assert!(buffer.pending_operation_id().is_none());
     fixture.app.state.open_workspace_view(original);
     fixture.frame(vec![fixture.button(170.0, false)], true);
     assert!(!fixture.app.state.schematic.can_undo());
@@ -547,7 +546,9 @@ fn gesture_new_window_owner_and_owner_window_close_restore_the_old_buffer() {
         // Closing an unrelated window must not cancel the primary gesture.
         fixture.app.state.cancel_schematic_drag_in_window(secondary);
         assert!(
-            fixture.app.state.workspace.schematic_buffers[&original.key()].has_pending_operation()
+            fixture.app.state.workspace.schematic_buffers[&original.key()]
+                .pending_operation_id()
+                .is_some()
         );
         if close_owner {
             fixture.app.state.cancel_schematic_drag_in_window(primary);
@@ -565,7 +566,7 @@ fn gesture_new_window_owner_and_owner_window_close_restore_the_old_buffer() {
             );
         }
         let buffer = &fixture.app.state.workspace.schematic_buffers[&original.key()];
-        assert!(!buffer.has_pending_operation());
+        assert!(buffer.pending_operation_id().is_none());
         assert_eq!(buffer.document().components[0].pos, Point::new(100, 100));
     }
 }

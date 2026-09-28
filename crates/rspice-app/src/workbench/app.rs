@@ -1755,8 +1755,7 @@ mod tests {
     ) {
         state
             .workspace
-            .schematic_buffers
-            .insert(root.key(), schematic);
+            .insert_schematic_editor(root.key(), schematic);
         let mut catalog = ConfigurationSetCatalog::default();
         catalog
             .create(ConfigurationSetDefinition {

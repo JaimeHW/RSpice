@@ -2167,7 +2167,7 @@ mod tests {
                     let mut master = Cell::new(*cell);
                     master.add_view(View::new("schematic", ViewType::Schematic));
                     work.add_cell(master);
-                    workspace.schematic_buffers.insert(
+                    workspace.insert_schematic_editor(
                         CellViewRef::new("work", *cell, "schematic").key(),
                         schematic.clone(),
                     );
@@ -2179,9 +2179,7 @@ mod tests {
                 top_cell.add_view(View::new(&active.view, ViewType::Schematic));
                 top.add_cell(top_cell);
                 libraries.add_library(top);
-                workspace
-                    .schematic_buffers
-                    .insert(active.key(), root.clone());
+                workspace.insert_schematic_editor(active.key(), root.clone());
                 Self {
                     libraries,
                     workspace,

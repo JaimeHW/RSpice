@@ -205,8 +205,8 @@ impl AppState {
         // its own rather than through the whole save-and-revalidate path an edit
         // takes.
         let active_key = state.workspace.active_schematic_reference().key();
-        if let Some(buffer) = state.workspace.schematic_buffers.get_mut(&active_key) {
-            buffer.session.selection = state.schematic.session.selection.clone();
+        if let Some(mut buffer) = state.workspace.schematic_editor_mut(&active_key) {
+            buffer.editor.session.selection = state.schematic.session.selection.clone();
         }
         state.push_user_message(ConsoleMessage::info(format!(
             "Selected {}.",

@@ -231,8 +231,7 @@ impl RSpiceApp {
                 let reference = crate::state::CellViewRef::new(&library, &name, view_name);
                 self.state
                     .workspace
-                    .schematic_buffers
-                    .insert(reference.key(), seeded_schematic.clone());
+                    .insert_schematic_editor(reference.key(), seeded_schematic.clone());
             }
             self.state
                 .publish_project_library_mutation(project_mutation);

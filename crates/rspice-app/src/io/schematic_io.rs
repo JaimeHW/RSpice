@@ -357,12 +357,12 @@ pub(crate) fn serialize_schematic_file(file: &SchematicFile) -> Result<String, S
 /// defaulted), so `load_schematic_text` reads it unchanged; saves keep
 /// their pretty-printed form via `save_schematic_file`.
 pub(crate) fn serialize_schematic_for_wire(
-    schematic: &SchematicState,
+    schematic: &rspice_design::schematic::owned::Schematic,
 ) -> Result<Vec<u8>, SchematicIoError> {
     #[derive(Serialize)]
     struct WireFile<'a> {
         version: SchematicVersion,
-        schematic: &'a SchematicState,
+        schematic: &'a rspice_design::schematic::owned::Schematic,
     }
     serde_json::to_vec(&WireFile {
         version: SchematicVersion::current(),

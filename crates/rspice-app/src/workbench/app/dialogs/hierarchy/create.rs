@@ -692,12 +692,8 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
         .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?
         .add_cell(target_cell.clone());
     let mut next_workspace = state.workspace.clone();
-    next_workspace
-        .schematic_buffers
-        .insert(parent_ref.key(), candidate.parent.clone());
-    next_workspace
-        .schematic_buffers
-        .insert(target_schematic_ref.key(), candidate.child.clone());
+    next_workspace.insert_schematic_editor(parent_ref.key(), candidate.parent.clone());
+    next_workspace.insert_schematic_editor(target_schematic_ref.key(), candidate.child.clone());
     let candidate_resolution = next_workspace.resolve_hierarchy(&next_libraries);
     let new_failures = unresolved_hierarchy(&candidate_resolution)
         .difference(&baseline_failures)
@@ -807,7 +803,7 @@ fn source_schematic_with_canonical_connections(state: &AppState) -> crate::state
 fn generated_for(
     _state: &AppState,
     schematic: &crate::state::SchematicState,
-    buffers: &std::collections::HashMap<String, crate::state::SchematicState>,
+    buffers: &std::collections::HashMap<String, rspice_design::schematic::owned::Schematic>,
     libraries: &crate::state::LibraryManager,
 ) -> crate::simulation::netlist_gen::NetlistResult {
     let hierarchy = HierarchySource::from_workspace(libraries, buffers);
@@ -882,8 +878,14 @@ fn validate_candidate_drc(
     baseline: &crate::state::SchematicState,
     parent: &crate::state::SchematicState,
     child: &crate::state::SchematicState,
-    baseline_buffers: &std::collections::HashMap<String, crate::state::SchematicState>,
-    candidate_buffers: &std::collections::HashMap<String, crate::state::SchematicState>,
+    baseline_buffers: &std::collections::HashMap<
+        String,
+        rspice_design::schematic::owned::Schematic,
+    >,
+    candidate_buffers: &std::collections::HashMap<
+        String,
+        rspice_design::schematic::owned::Schematic,
+    >,
     baseline_libraries: &crate::state::LibraryManager,
     candidate_libraries: &crate::state::LibraryManager,
 ) -> Result<(), String> {

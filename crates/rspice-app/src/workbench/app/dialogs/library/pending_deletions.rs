@@ -489,8 +489,16 @@ fn apply_instance_resolution(
         .filter(|(key, schematic)| {
             key.as_str() != active_key && schematic.document().components.iter().any(&places_target)
         })
-        .filter_map(|(key, schematic)| {
-            buffer_reference(key).map(|reference| (reference, schematic.clone()))
+        .filter_map(|(key, _)| {
+            buffer_reference(key).map(|reference| {
+                (
+                    reference,
+                    state
+                        .workspace
+                        .clone_schematic_editor(key)
+                        .expect("retained drawing"),
+                )
+            })
         })
         .collect::<Vec<_>>();
     if state
@@ -515,7 +523,7 @@ fn apply_instance_resolution(
         if key == active_key {
             state.schematic = after.clone();
         }
-        state.workspace.schematic_buffers.insert(key, after.clone());
+        state.workspace.insert_schematic_editor(key, after.clone());
         documents.push((reference, before, after));
     }
     state.record_instance_removal_transaction(
@@ -629,9 +637,8 @@ fn library_deletion_impact(
             .view()
             .is_none_or(|view| view == crate::state::workspace::DEFAULT_SCHEMATIC_VIEW);
 
-    let count_references = |schematic: &crate::state::SchematicState| {
-        schematic
-            .document()
+    let count_references = |document: &rspice_design::schematic::document::SchematicDocument| {
+        document
             .components
             .iter()
             .filter(|component| {
@@ -644,13 +651,13 @@ fn library_deletion_impact(
             .count()
     };
     let active_key = state.workspace.active_view.key();
-    let instance_references = count_references(&state.schematic)
+    let instance_references = count_references(state.schematic.document())
         + state
             .workspace
             .schematic_buffers
             .iter()
             .filter(|(key, _)| !key.eq_ignore_ascii_case(&active_key))
-            .map(|(_, schematic)| count_references(schematic))
+            .map(|(_, schematic)| count_references(schematic.document()))
             .sum::<usize>();
 
     LibraryDeletionImpact {
@@ -797,12 +804,10 @@ mod tests {
         amp_schematic.add_component(ComponentType::Resistor, Point::new(10, 10));
         state
             .workspace
-            .schematic_buffers
-            .insert(amp_ref.key(), amp_schematic.clone());
+            .insert_schematic_editor(amp_ref.key(), amp_schematic.clone());
         state
             .workspace
-            .schematic_buffers
-            .insert(keep_ref.key(), SchematicState::default());
+            .insert_schematic_editor(keep_ref.key(), SchematicState::default());
         state.workspace.open_views = vec![
             OpenCellView::new(keep_ref.clone(), ViewType::Schematic),
             OpenCellView::new(amp_ref.clone(), ViewType::Schematic),
@@ -882,16 +887,13 @@ mod tests {
         let leaf = CellViewRef::new("work", "leaf", "schematic");
         state
             .workspace
-            .schematic_buffers
-            .insert(top.key(), SchematicState::default());
+            .insert_schematic_editor(top.key(), SchematicState::default());
         state
             .workspace
-            .schematic_buffers
-            .insert(amp.key(), SchematicState::default());
+            .insert_schematic_editor(amp.key(), SchematicState::default());
         state
             .workspace
-            .schematic_buffers
-            .insert(leaf.key(), SchematicState::default());
+            .insert_schematic_editor(leaf.key(), SchematicState::default());
         state.workspace.open_views = vec![
             OpenCellView::new(top.clone(), ViewType::Schematic),
             OpenCellView::new(amp.clone(), ViewType::Schematic),
@@ -914,8 +916,7 @@ mod tests {
         }
         state
             .workspace
-            .schematic_buffers
-            .insert(keep_ref.key(), SchematicState::default());
+            .insert_schematic_editor(keep_ref.key(), SchematicState::default());
         state.workspace.open_views = vec![
             OpenCellView::new(
                 CellViewRef::new("user", "top", "schematic"),
@@ -944,7 +945,7 @@ mod tests {
             Point::new(40, 40),
             LibraryCellInstance::new("user", "amp", "schematic"),
         );
-        state.workspace.schematic_buffers.insert(aux_ref.key(), aux);
+        state.workspace.insert_schematic_editor(aux_ref.key(), aux);
         state
             .workspace
             .open_views
@@ -982,12 +983,10 @@ mod tests {
 
         state
             .workspace
-            .schematic_buffers
-            .insert(top_ref.key(), top.clone());
+            .insert_schematic_editor(top_ref.key(), top.clone());
         state
             .workspace
-            .schematic_buffers
-            .insert(amp_ref.key(), SchematicState::default());
+            .insert_schematic_editor(amp_ref.key(), SchematicState::default());
         state.workspace.open_views = vec![OpenCellView::new(top_ref.clone(), ViewType::Schematic)];
         state.workspace.active_view = top_ref.clone();
         state.workspace.hierarchy_stack = vec![top_ref];
@@ -1073,15 +1072,16 @@ mod tests {
             .find(|open| open.reference == CellViewRef::new("work", "amp", "schematic"))
             .expect("amp schematic is open")
             .dirty = true;
-        let keep = state
+        let mut stored_keep = state
             .workspace
-            .schematic_buffers
-            .get_mut(&CellViewRef::new("work", "keep", "schematic").key())
+            .schematic_editor_mut(&CellViewRef::new("work", "keep", "schematic").key())
             .expect("keep schematic buffer exists");
+        let keep = &mut stored_keep.editor;
         keep.add_library_cell_component(
             Point::origin(),
             LibraryCellInstance::new("work", "amp", "schematic"),
         );
+        drop(stored_keep);
         let target = LibraryDeletionTarget::Cell {
             library: "work".to_owned(),
             cell: "amp".to_owned(),

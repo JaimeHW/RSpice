@@ -128,7 +128,7 @@ impl AppState {
             let source = projected[&key];
             validate_reference_document(self, &key, source)?;
             let candidate = source.renamed_reference_candidate(&names)?;
-            before.insert(key.clone(), source.clone());
+            before.insert(key.clone(), source.clone_editor());
             after.insert(key, candidate);
         }
         self.prepare_schematic_reference_transaction(before, after)
@@ -147,8 +147,7 @@ impl AppState {
             if key.eq_ignore_ascii_case(&active_key) {
                 self.schematic = schematic.clone();
                 self.workspace
-                    .schematic_buffers
-                    .insert(active_key.clone(), schematic.clone());
+                    .insert_schematic_editor(active_key.clone(), schematic.clone());
             } else if let Some(existing_key) = self
                 .workspace
                 .schematic_buffers
@@ -157,8 +156,7 @@ impl AppState {
                 .cloned()
             {
                 self.workspace
-                    .schematic_buffers
-                    .insert(existing_key, schematic.clone());
+                    .insert_schematic_editor(existing_key, schematic.clone());
             }
             if let Some(open) = self
                 .workspace

@@ -79,7 +79,7 @@ pub(super) fn large_corpus_app() -> RSpiceApp {
         .state
         .workspace
         .active_schematic()
-        .cloned()
+        .map(|source| source.clone_editor())
         .unwrap_or_default();
     for index in 0..COMPONENTS {
         let mut component = Component::new(

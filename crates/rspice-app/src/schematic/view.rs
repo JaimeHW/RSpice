@@ -1846,12 +1846,15 @@ mod tests {
         let library_changed = symbol_context_revision(&state);
         assert_ne!(library_changed, baseline);
 
-        let buffer = state
+        state
             .workspace
-            .schematic_buffers
-            .entry("work/amp/schematic".to_owned())
-            .or_default();
-        buffer.add_component(ComponentType::Port, Point::origin());
+            .insert_schematic_editor("work/amp/schematic".to_owned(), SchematicState::default());
+        state
+            .workspace
+            .schematic_editor_mut("work/amp/schematic")
+            .unwrap()
+            .editor
+            .add_component(ComponentType::Port, Point::origin());
         assert_ne!(symbol_context_revision(&state), library_changed);
     }
 

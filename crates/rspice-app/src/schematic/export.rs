@@ -1028,9 +1028,12 @@ mod tests {
         cell.add_view(symbol_view);
         library.add_cell(cell);
         libraries.add_library(library);
-        let resolved = SymbolResolver::new(&libraries, &HashMap::new())
-            .resolve_binding(&binding)
-            .expect("authored symbol resolves");
+        let resolved = SymbolResolver::<rspice_design::schematic::owned::Schematic>::new(
+            &libraries,
+            &HashMap::new(),
+        )
+        .resolve_binding(&binding)
+        .expect("authored symbol resolves");
 
         let svg = export_to_svg_with_resolved_symbols(
             &schematic,

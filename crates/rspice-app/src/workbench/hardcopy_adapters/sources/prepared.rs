@@ -51,7 +51,8 @@ pub(super) enum PreparedRetainedHardcopyPayload {
         identity: HardcopySourceIdentity,
         schematic: SchematicState,
         library_manager: crate::state::LibraryManager,
-        schematic_buffers: std::collections::HashMap<String, SchematicState>,
+        schematic_buffers:
+            std::collections::HashMap<String, rspice_design::schematic::owned::Schematic>,
         sheet_catalog: Option<SheetCatalog>,
         sheet_id: Option<SheetId>,
         project_default_drawing_sheet: SchematicSheetFormat,
@@ -206,17 +207,19 @@ struct PreparedSchematicInterfaceOwner {
 }
 
 impl PreparedSchematicInterfaceOwner {
-    fn capture(schematic: SchematicState) -> Self {
+    fn capture(schematic: rspice_design::schematic::owned::Schematic) -> Self {
         Self {
             components: schematic.into_document().components,
         }
     }
 
-    fn restore(self) -> SchematicState {
-        SchematicState::from_document(rspice_design::schematic::document::SchematicDocument {
-            components: self.components,
-            ..Default::default()
-        })
+    fn restore(self) -> rspice_design::schematic::owned::Schematic {
+        rspice_design::schematic::owned::Schematic::from_document(
+            rspice_design::schematic::document::SchematicDocument {
+                components: self.components,
+                ..Default::default()
+            },
+        )
     }
 }
 

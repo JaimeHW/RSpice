@@ -135,6 +135,7 @@ pub use state::{
     MoveSelectionMode, PendingStimulusPlacement, SchematicState, StretchOrthogonalPolicy,
     StretchTarget,
 };
+pub(crate) use state::{SchematicEditorMut, SchematicEditorRef, SchematicSession};
 /// Reachable only from the drawing tests; production callers inside the
 /// schematic state reach the constant through its defining module.
 #[cfg(test)]

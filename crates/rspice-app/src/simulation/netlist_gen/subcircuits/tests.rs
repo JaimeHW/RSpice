@@ -42,7 +42,7 @@ fn projection_nets_extract_the_root_once_and_stay_with_the_projection() {
     libraries.add_library(user);
 
     let mut workspace = ProjectWorkspace::default();
-    workspace.schematic_buffers.insert(
+    workspace.insert_schematic_editor(
         CellViewRef::new("work", "div", "schematic").key(),
         div_master(),
     );
@@ -59,9 +59,7 @@ fn projection_nets_extract_the_root_once_and_stay_with_the_projection() {
         .wires
         .push(Wire::new(2, vec![Point::new(130, 0), Point::new(130, 10)]));
     let active = workspace.active_view.clone();
-    workspace
-        .schematic_buffers
-        .insert(active.key(), top.clone());
+    workspace.insert_schematic_editor(active.key(), top.clone());
 
     let projection = workspace
         .configuration_execution_projection(&libraries, &active, &top)

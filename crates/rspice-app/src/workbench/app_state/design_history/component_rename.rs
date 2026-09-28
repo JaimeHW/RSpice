@@ -182,7 +182,7 @@ impl AppState {
                     .schematic_buffers
                     .get_mut(key)
                     .expect("guarded reference document")
-                    .clear_schematic_redo();
+                    .clear_redo();
             }
         }
         self.workspace.save_active_schematic(&self.schematic);

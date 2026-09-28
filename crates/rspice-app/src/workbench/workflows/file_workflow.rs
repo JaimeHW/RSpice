@@ -120,8 +120,7 @@ fn replace_active_schematic_document(state: &mut AppState, mut schematic: Schema
             let dirty = state.schematic.session.is_dirty;
             state
                 .workspace
-                .schematic_buffers
-                .insert(reference.key(), state.schematic.clone());
+                .insert_schematic_editor(reference.key(), state.schematic.clone());
             if let Some(open_view) = state
                 .workspace
                 .open_views
@@ -644,8 +643,7 @@ mod tests {
         state.schematic = stale.clone();
         state
             .workspace
-            .schematic_buffers
-            .insert(reference.key(), stale);
+            .insert_schematic_editor(reference.key(), stale);
     }
 
     #[test]
@@ -669,12 +667,12 @@ mod tests {
 
         let buffer = state
             .workspace
-            .schematic_buffers
+            .schematic_sessions
             .get(&schematic_reference.key())
             .expect("paired schematic buffer exists");
         assert!(state.schematic.session.current_file.is_none());
-        assert!(buffer.session.current_file.is_none());
-        assert!(!buffer.session.is_dirty);
+        assert!(buffer.current_file.is_none());
+        assert!(!buffer.is_dirty);
         assert!(
             !state.workspace.schematic_buffers.contains_key(&symbol_key),
             "symbol view must not gain a schematic buffer"
@@ -724,11 +722,11 @@ mod tests {
         );
         let buffer = state
             .workspace
-            .schematic_buffers
+            .schematic_sessions
             .get(&schematic_reference.key())
             .expect("paired schematic buffer exists");
         assert_eq!(
-            buffer.session.current_file.as_deref(),
+            buffer.current_file.as_deref(),
             Some(Path::new("fresh-symbol-context.rsch"))
         );
         assert!(

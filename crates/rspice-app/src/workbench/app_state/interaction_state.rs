@@ -227,13 +227,10 @@ impl super::AppState {
         if active {
             self.schematic.cancel_operation();
         } else if owner.project == self.workspace.project.id()
-            && let Some(schematic) = self
-                .workspace
-                .schematic_buffers
-                .get_mut(&owner.document.key())
-            && schematic.pending_operation_id() == Some(owner.operation_id)
+            && let Some(mut schematic) = self.workspace.schematic_editor_mut(&owner.document.key())
+            && schematic.editor.pending_operation_id() == Some(owner.operation_id)
         {
-            schematic.cancel_operation();
+            schematic.editor.cancel_operation();
         }
         self.dialogs.interaction.drag.cancel();
         true

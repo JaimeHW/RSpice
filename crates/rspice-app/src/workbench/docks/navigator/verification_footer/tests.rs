@@ -271,8 +271,7 @@ fn hierarchical_design() -> RSpiceApp {
     }
     app.state
         .workspace
-        .schematic_buffers
-        .insert(CellViewRef::new("work", "afe", "schematic").key(), child);
+        .insert_schematic_editor(CellViewRef::new("work", "afe", "schematic").key(), child);
     app
 }
 

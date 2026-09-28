@@ -207,8 +207,7 @@ fn generated_fixture_is_real_editable_topology_in_the_atomic_publication() {
     let fixture_ref = CellViewRef::new("analog_blocks", "nmos_core", "testbench");
     let fixture = state
         .workspace
-        .schematic_buffers
-        .get(&fixture_ref.key())
+        .schematic_editor(&fixture_ref.key())
         .expect("published editable fixture");
     assert_eq!(
         fixture
@@ -239,7 +238,7 @@ fn generated_fixture_is_real_editable_topology_in_the_atomic_publication() {
         "ground is generated only for the explicitly electrical-ground pin"
     );
     assert_eq!(fixture.document().wires.len(), 5);
-    assert!(fixture.session.is_dirty);
+    assert!(fixture.is_dirty());
     let dut = fixture
         .document()
         .components

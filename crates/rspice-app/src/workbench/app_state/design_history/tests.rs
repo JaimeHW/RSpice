@@ -102,12 +102,10 @@ fn state_with_descended_hierarchy_record() -> (AppState, CellViewRef, CellViewRe
         .add_cell(cell.clone());
     state
         .workspace
-        .schematic_buffers
-        .insert(parent_ref.key(), after_parent.clone());
+        .insert_schematic_editor(parent_ref.key(), after_parent.clone());
     state
         .workspace
-        .schematic_buffers
-        .insert(target.key(), child.clone());
+        .insert_schematic_editor(target.key(), child.clone());
     state.schematic = child.clone();
     state
         .workspace
@@ -184,12 +182,10 @@ fn state_with_hierarchy_record() -> (AppState, CellViewRef, CellViewRef) {
         .add_cell(cell.clone());
     state
         .workspace
-        .schematic_buffers
-        .insert(parent_ref.key(), after_parent.clone());
+        .insert_schematic_editor(parent_ref.key(), after_parent.clone());
     state
         .workspace
-        .schematic_buffers
-        .insert(target.key(), child.clone());
+        .insert_schematic_editor(target.key(), child.clone());
     state.schematic = child.clone();
     state.workspace.active_view = target.clone();
     let open_views_after = state.workspace.open_views.clone();
@@ -282,8 +278,7 @@ fn hierarchy_history_refuses_dangling_external_master_reference() {
     ));
     state
         .workspace
-        .schematic_buffers
-        .insert(unrelated.key(), schematic);
+        .insert_schematic_editor(unrelated.key(), schematic);
 
     assert!(!state.can_undo_project_design());
     assert!(state.undo_project_design().is_err());
@@ -325,13 +320,14 @@ fn new_hierarchy_target_refuses_to_resolve_an_existing_dangling_instance() {
 #[test]
 fn project_undo_and_redo_preserve_parent_view_runtime() {
     let (mut state, parent, _) = state_with_hierarchy_record();
-    let parent_buffer = state
+    let mut stored_parent_buffer = state
         .workspace
-        .schematic_buffers
-        .get_mut(&parent.key())
+        .schematic_editor_mut(&parent.key())
         .expect("parent");
+    let parent_buffer = &mut stored_parent_buffer.editor;
     parent_buffer.session.zoom = 2.75;
     parent_buffer.session.pan = (140.0, -35.0);
+    drop(stored_parent_buffer);
 
     assert!(state.undo_project_design().expect("undo").is_some());
     assert_eq!(state.schematic.session.zoom, 2.75);
@@ -343,11 +339,11 @@ fn project_undo_and_redo_preserve_parent_view_runtime() {
     assert!(state.redo_project_design().expect("redo").is_some());
     let parent_buffer = state
         .workspace
-        .schematic_buffers
+        .schematic_sessions
         .get(&parent.key())
         .expect("parent");
-    assert_eq!(parent_buffer.session.zoom, 1.5);
-    assert_eq!(parent_buffer.session.pan, (-20.0, 85.0));
+    assert_eq!(parent_buffer.zoom, 1.5);
+    assert_eq!(parent_buffer.pan, (-20.0, 85.0));
 }
 
 #[test]
@@ -525,12 +521,10 @@ fn undo_restores_objects_to_the_sheet_they_were_recorded_on() {
         .add_cell(cell.clone());
     state
         .workspace
-        .schematic_buffers
-        .insert(parent_ref.key(), after_parent.clone());
+        .insert_schematic_editor(parent_ref.key(), after_parent.clone());
     state
         .workspace
-        .schematic_buffers
-        .insert(target.key(), child.clone());
+        .insert_schematic_editor(target.key(), child.clone());
     state.schematic = child.clone();
     state.workspace.active_view = target.clone();
     state.record_hierarchy_extraction(HierarchyExtractionHistoryEntry {
@@ -778,8 +772,7 @@ fn undoing_a_publish_unresolves_the_placements_it_leaves_behind() {
     let placed = buffer.add_library_cell_component(Point::origin(), binding);
     state
         .workspace
-        .schematic_buffers
-        .insert(elsewhere.key(), buffer);
+        .insert_schematic_editor(elsewhere.key(), buffer);
     assert_ne!(state.workspace.active_schematic_reference(), elsewhere);
 
     assert!(state.undo_project_design().expect("undo").is_some());

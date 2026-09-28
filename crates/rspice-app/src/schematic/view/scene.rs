@@ -12,7 +12,7 @@ use crate::simulation::netlist_gen::{bus_notations, projection_nets};
 use crate::state::{
     CellViewRef, Component, CrossProbeIndex, DesignNote, DesignNoteKind, DesignReviewState, Point,
     SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicHierarchyVisibility,
-    SchematicNetHighlighting, SchematicReviewMarkerVisibility, SchematicState,
+    SchematicNetHighlighting, SchematicReviewMarkerVisibility,
 };
 use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};
 
@@ -500,7 +500,9 @@ const PARENT_CONTEXT_STROKE_WIDTH: f32 = 1.1;
 /// occurrence, and active-only — which is also what an isolated or read-only
 /// open leaves behind — is none. A document opened at its own root has no
 /// ancestor to draw under it either way.
-fn parent_context_sheets(state: &AppState) -> Vec<(String, &SchematicState)> {
+fn parent_context_sheets(
+    state: &AppState,
+) -> Vec<(String, &rspice_design::schematic::owned::Schematic)> {
     let levels = match state.ui.schematic_visibility.hierarchy {
         SchematicHierarchyVisibility::ActiveOnly => return Vec::new(),
         SchematicHierarchyVisibility::ActiveAndParent => 1,
@@ -1486,6 +1488,7 @@ fn empty_hint_estimated_width(line: &str) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::SchematicState;
     use crate::state::{
         AnalysisResult, AnalysisType, ComponentType, DcOpResult, Junction, OperatingPointValue,
         PortDirection, PortSpec, ResolvedCellSymbol, SimulationRun, SymbolDocument, SymbolPin,
@@ -1521,8 +1524,7 @@ mod tests {
         let root = state.workspace.active_view.clone();
         state
             .workspace
-            .schematic_buffers
-            .insert(root.key(), sheet_with_one_wire());
+            .insert_schematic_editor(root.key(), sheet_with_one_wire());
         state.workspace.descend_into(
             "X1".to_owned(),
             CellViewRef::new("user", "amp", "schematic"),
@@ -1647,7 +1649,7 @@ mod tests {
         assert_eq!(one_level.len(), 1);
         assert_eq!(one_level[0].1.document().wires.len(), 1);
 
-        state.workspace.schematic_buffers.insert(
+        state.workspace.insert_schematic_editor(
             CellViewRef::new("user", "amp", "schematic").key(),
             sheet_with_one_wire(),
         );

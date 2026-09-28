@@ -32,13 +32,13 @@ fn bus_sheet(declaration: &str) -> SchematicState {
 /// else. Every owned surface is checked against bit 3 of it, read inside
 /// instance `x1`.
 fn fixture_notations() -> BusNotations {
-    BusNotations::of_sheets(std::iter::once(&bus_sheet("DATA[7:0]")))
+    BusNotations::of_sheets(std::iter::once(bus_sheet("DATA[7:0]").document()))
 }
 
 #[test]
 fn a_declared_bit_renders_in_the_notation_its_bus_was_drawn_in() {
     for (declaration, bit) in [("DATA[7:0]", "DATA[3]"), ("DATA<7:0>", "DATA<3>")] {
-        let notations = BusNotations::of_sheets(std::iter::once(&bus_sheet(declaration)));
+        let notations = BusNotations::of_sheets(std::iter::once(bus_sheet(declaration).document()));
 
         assert_eq!(notations.display("DATA#3"), bit);
         assert_eq!(notations.display("data#3"), bit.to_ascii_lowercase());
@@ -68,7 +68,7 @@ fn a_dotted_bus_name_is_preferred_over_the_suffix_it_ends_with() {
         .document_mut_for_test()
         .buses
         .push(drawn_bus(2, "data[7:0]"));
-    let notations = BusNotations::of_sheets(std::iter::once(&sheet));
+    let notations = BusNotations::of_sheets(std::iter::once(sheet.document()));
 
     assert_eq!(notations.display("x1.afe.data#3"), "x1.afe.data<3>");
     assert_eq!(notations.display("x1.data#3"), "x1.data[3]");
@@ -109,7 +109,10 @@ fn a_name_no_bus_declares_is_never_reshaped() {
 /// all: quoting either would name a declaration the other sheet does not have.
 #[test]
 fn a_bus_declared_in_two_notations_keeps_its_deck_name() {
-    let notations = BusNotations::of_sheets([&bus_sheet("DATA[7:0]"), &bus_sheet("DATA<7:0>")]);
+    let notations = BusNotations::of_sheets([
+        bus_sheet("DATA[7:0]").document(),
+        bus_sheet("DATA<7:0>").document(),
+    ]);
 
     assert_eq!(notations.display("DATA#3"), "DATA#3");
 }
@@ -127,7 +130,7 @@ fn a_vector_interface_pin_declares_its_own_bits() {
         .find(|component| component.id == id)
         .expect("the placed port")
         .value = "BUS<3:0>".to_owned();
-    let notations = BusNotations::of_sheets(std::iter::once(&sheet));
+    let notations = BusNotations::of_sheets(std::iter::once(sheet.document()));
 
     assert_eq!(notations.display("V(x1.bus#2)"), "V(x1.bus<2>)");
 }

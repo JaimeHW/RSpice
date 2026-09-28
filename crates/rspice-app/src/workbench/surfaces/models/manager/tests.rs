@@ -34,7 +34,7 @@ fn bound_consumers_are_attributed_only_to_the_effective_provider() {
     let mut schematic = state
         .workspace
         .active_schematic()
-        .cloned()
+        .map(|source| source.clone_editor())
         .expect("an active schematic exists");
     let mut component = Component::new(1, ComponentType::Nmos, Point::origin());
     component.name = "M1".to_owned();

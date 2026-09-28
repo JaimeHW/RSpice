@@ -22,15 +22,13 @@ fn fixture(configured: bool) -> (ProjectWorkspace, LibraryManager, SchematicStat
     libraries.add_library(work);
     let mut workspace = ProjectWorkspace::default();
     for (name, value) in [("div", "1k"), ("alternate", "7k")] {
-        workspace.schematic_buffers.insert(
+        workspace.insert_schematic_editor(
             CellViewRef::new("work", name, "schematic").key(),
             two_port_master(value),
         );
     }
     let top = top_with_instance(&["a", "b"]);
-    workspace
-        .schematic_buffers
-        .insert(workspace.active_view.key(), top.clone());
+    workspace.insert_schematic_editor(workspace.active_view.key(), top.clone());
     if configured {
         workspace
             .configuration_sets
@@ -141,9 +139,7 @@ fn source_replacement_uses_the_requested_corner(
             .unwrap();
         cell.remove_view("schematic");
         cell.add_view(view);
-        workspace
-            .schematic_buffers
-            .remove("work/alternate/schematic");
+        workspace.remove_schematic_editor("work/alternate/schematic");
         if configured {
             let current = workspace.configuration_sets.active().unwrap();
             let (id, revision) = (current.id(), current.revision());
@@ -404,13 +400,13 @@ fn a_live_master_interface_owns_the_source_pins_during_replacement() {
         replacement(),
     );
     let master = CellViewRef::new("work", "div", "schematic");
-    let mut live = workspace.schematic_buffers[&master.key()].clone();
+    let mut live = workspace.clone_schematic_editor(&master.key()).unwrap();
     place_port(&mut live, "bias", Point::new(200, 0));
     place_port(
-        workspace
-            .schematic_buffers
-            .get_mut("work/alternate/schematic")
-            .unwrap(),
+        &mut workspace
+            .schematic_editor_mut("work/alternate/schematic")
+            .unwrap()
+            .editor,
         "bias",
         Point::new(300, 0),
     );
@@ -454,9 +450,9 @@ fn replacement_keeps_vector_terminals_and_their_conductor_order() {
     let (mut workspace, libraries, mut top) = fixture(false);
     for name in ["div", "alternate"] {
         workspace
-            .schematic_buffers
-            .get_mut(&format!("work/{name}/schematic"))
+            .schematic_editor_mut(&format!("work/{name}/schematic"))
             .unwrap()
+            .editor
             .document_mut_for_test()
             .components[0]
             .value = "DATA[3:0]".to_owned();
@@ -480,9 +476,9 @@ fn replacement_keeps_vector_terminals_and_their_conductor_order() {
         resolver.resolve_binding(top.document().components[0].library_cell.as_ref().unwrap());
     let original_pins = top.document().components[0].terminal_positions_resolved(symbol.as_ref());
     workspace
-        .schematic_buffers
-        .get_mut("work/alternate/schematic")
+        .schematic_editor_mut("work/alternate/schematic")
         .unwrap()
+        .editor
         .document_mut_for_test()
         .components
         .reverse();
@@ -513,9 +509,9 @@ fn named_replacement_terminals_keep_their_nets_when_the_master_order_changes() {
         let (mut workspace, libraries, mut top) = fixture(configured);
         connect_testbench(&mut top, &workspace, &libraries);
         workspace
-            .schematic_buffers
-            .get_mut("work/alternate/schematic")
+            .schematic_editor_mut("work/alternate/schematic")
             .unwrap()
+            .editor
             .document_mut_for_test()
             .components
             .reverse();
@@ -574,11 +570,13 @@ fn incompatible_replacements_refuse_without_changing_the_source_or_prior_project
         let original = workspace
             .design_projection(&libraries, &active, &top)
             .unwrap();
-        let original_master = workspace.schematic_buffers["work/alternate/schematic"].clone();
-        let target = workspace
-            .schematic_buffers
-            .get_mut("work/alternate/schematic")
+        let original_master = workspace
+            .clone_schematic_editor("work/alternate/schematic")
             .unwrap();
+        let mut stored_target = workspace
+            .schematic_editor_mut("work/alternate/schematic")
+            .unwrap();
+        let target = &mut stored_target.editor;
         match defect {
             "count" => target
                 .document_mut_for_test()
@@ -588,6 +586,7 @@ fn incompatible_replacements_refuse_without_changing_the_source_or_prior_project
             "width" => target.document_mut_for_test().components[0].value = "a[3:0]".to_owned(),
             _ => unreachable!(),
         }
+        drop(stored_target);
         let source = serde_json::to_value((&top, &workspace.schematic_buffers)).unwrap();
         let error = workspace
             .design_projection(&libraries, &active, &top)
@@ -598,9 +597,7 @@ fn incompatible_replacements_refuse_without_changing_the_source_or_prior_project
             source
         );
         assert!((source_current(&original, &libraries) + 5.0 / 7000.0).abs() < 1e-12);
-        workspace
-            .schematic_buffers
-            .insert("work/alternate/schematic".to_owned(), original_master);
+        workspace.insert_schematic_editor("work/alternate/schematic".to_owned(), original_master);
         let restored = workspace
             .design_projection(&libraries, &active, &top)
             .unwrap();
@@ -759,11 +756,11 @@ fn variant_replacements_preserve_the_electrical_load_through_all_orientations() 
                             } else {
                                 workspace.active_view.clone()
                             };
-                            let source_document = if nested {
-                                workspace.schematic_buffers.get_mut(&owner.key()).unwrap()
-                            } else {
-                                &mut top
-                            };
+                            let mut stored_source = nested
+                                .then(|| workspace.schematic_editor_mut(&owner.key()).unwrap());
+                            let source_document = stored_source
+                                .as_mut()
+                                .map_or(&mut top, |source| &mut source.editor);
                             let source_kind = if nested {
                                 ComponentType::Resistor
                             } else {
@@ -791,6 +788,7 @@ fn variant_replacements_preserve_the_electrical_load_through_all_orientations() 
                                     port.pos = point - ComponentType::Port.terminal_offsets()[0].1;
                                 }
                             }
+                            drop(stored_source);
                             connect_testbench(&mut top, &workspace, &libraries);
                             let active = workspace.active_view.clone();
                             let original = workspace
@@ -859,9 +857,7 @@ fn a_primitive_replacement_uses_the_requested_schematic_views_ports() {
     {
         port.value = name.to_owned();
     }
-    workspace
-        .schematic_buffers
-        .insert("work/alternate/rf_impl".to_owned(), target);
+    workspace.insert_schematic_editor("work/alternate/rf_impl".to_owned(), target);
     connect_testbench(&mut top, &workspace, &libraries);
     let owner = CellViewRef::new("work", "div", "schematic");
     let source_id = workspace.schematic_buffers[&owner.key()]

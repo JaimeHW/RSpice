@@ -635,7 +635,7 @@ fn place(state: &mut AppState, components: Vec<crate::state::Component>) {
     let mut schematic = state
         .workspace
         .active_schematic()
-        .cloned()
+        .map(|source| source.clone_editor())
         .expect("an active schematic exists");
     schematic.document_mut_for_test().components = components;
     // Something unrelated on the sheet, so a card that counted every instance
@@ -766,7 +766,7 @@ fn a_repainted_instances_card_walks_the_sheet_once() {
     let existing = state
         .workspace
         .active_schematic()
-        .cloned()
+        .map(|source| source.clone_editor())
         .expect("an active schematic")
         .into_document()
         .components;

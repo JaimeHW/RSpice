@@ -185,8 +185,9 @@ pub(crate) fn refresh_catalog_if_requested(app: &mut RSpiceApp) {
         .state
         .workspace
         .schematic_buffers
-        .values()
-        .filter_map(|schematic| schematic.session.current_file.clone())
+        .keys()
+        .filter_map(|key| app.state.workspace.schematic_sessions.get(key))
+        .filter_map(|session| session.current_file.clone())
         .collect::<Vec<_>>();
     if let Some(path) = app.state.schematic.session.current_file.clone() {
         live_paths.push(path);
@@ -757,9 +758,7 @@ fn build_comparison_workspace(
     recovered.session.read_only = false;
     recovered.session.needs_history_reset = true;
     let candidate_reference = workspace.active_view.clone();
-    workspace
-        .schematic_buffers
-        .insert(candidate_reference.key(), recovered.clone());
+    workspace.insert_schematic_editor(candidate_reference.key(), recovered.clone());
     workspace.set_active_dirty(true);
 
     if let Some(mut baseline) = baseline {
@@ -786,9 +785,7 @@ fn build_comparison_workspace(
         baseline.session.read_only = true;
         baseline.session.needs_history_reset = true;
         let baseline_reference = CellViewRef::new(BASELINE_LIBRARY, BASELINE_CELL, BASELINE_VIEW);
-        workspace
-            .schematic_buffers
-            .insert(baseline_reference.key(), baseline);
+        workspace.insert_schematic_editor(baseline_reference.key(), baseline);
         workspace
             .open_views
             .push(OpenCellView::new(baseline_reference, ViewType::Schematic));

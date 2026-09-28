@@ -57,7 +57,7 @@ fn state_with_open_symbol(parent_instances: usize) -> AppState {
             .expect("port exists")
             .value = name.to_owned();
     }
-    state.workspace.schematic_buffers.insert(
+    state.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         declaring,
     );
@@ -68,8 +68,7 @@ fn state_with_open_symbol(parent_instances: usize) -> AppState {
     }
     state
         .workspace
-        .schematic_buffers
-        .insert(PARENT.to_owned(), parent);
+        .insert_schematic_editor(PARENT.to_owned(), parent);
 
     state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
     // The live sheet is replaced when the view opens, so its instance is

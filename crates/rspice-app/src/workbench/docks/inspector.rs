@@ -1036,12 +1036,12 @@ fn inspector_action_enabled(ui: &mut Ui, label: &str, enabled: bool) -> bool {
 
 fn library_usage(app: &RSpiceApp, reference: &CellViewRef) -> Vec<String> {
     fn collect(
-        schematic: &crate::state::SchematicState,
+        schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
         owner: &str,
         reference: &CellViewRef,
         consumers: &mut Vec<String>,
     ) {
-        if schematic.document().components.iter().any(|component| {
+        if schematic.as_ref().components.iter().any(|component| {
             component.library_cell.as_ref().is_some_and(|binding| {
                 binding.library.eq_ignore_ascii_case(&reference.library)
                     && binding.cell.eq_ignore_ascii_case(&reference.cell)

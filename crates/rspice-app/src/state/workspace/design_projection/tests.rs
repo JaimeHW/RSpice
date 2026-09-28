@@ -93,9 +93,7 @@ fn workspace_with_two_cell_views() -> (
     libraries.add_library(work);
 
     let mut workspace = ProjectWorkspace::default();
-    workspace
-        .schematic_buffers
-        .insert(child_key(), amp_master());
+    workspace.insert_schematic_editor(child_key(), amp_master());
 
     let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
     binding.terminal_order = vec!["a".to_owned(), "b".to_owned()];
@@ -106,9 +104,7 @@ fn workspace_with_two_cell_views() -> (
     set_name(&mut top, load, LOAD_NAME);
 
     let active_reference = workspace.active_view.clone();
-    workspace
-        .schematic_buffers
-        .insert(active_reference.key(), top.clone());
+    workspace.insert_schematic_editor(active_reference.key(), top.clone());
 
     let mut catalog = ConfigurationSetCatalog::default();
     catalog
@@ -171,10 +167,10 @@ fn projection_is_not_rebuilt_without_a_key_change() {
     );
 
     set_first_resistor_value(
-        workspace
-            .schematic_buffers
-            .get_mut(&child_key())
-            .expect("the fixture persists the child schematic"),
+        &mut workspace
+            .schematic_editor_mut(&child_key())
+            .expect("the fixture persists the child schematic")
+            .editor,
         "9k",
     );
     assert!(
@@ -323,10 +319,10 @@ fn a_memo_hit_carries_what_a_full_rebuild_would_have_produced() {
         match step {
             0 => set_first_resistor_value(&mut active, "5k"),
             1 => set_first_resistor_value(
-                workspace
-                    .schematic_buffers
-                    .get_mut(&child_key())
-                    .expect("the fixture persists the child schematic"),
+                &mut workspace
+                    .schematic_editor_mut(&child_key())
+                    .expect("the fixture persists the child schematic")
+                    .editor,
                 "7k",
             ),
             2 => {
@@ -334,9 +330,10 @@ fn a_memo_hit_carries_what_a_full_rebuild_would_have_produced() {
                     GlobalNetPromotionPolicy::TechnologyDefinedOnly;
             }
             _ => {
-                workspace
-                    .schematic_buffers
-                    .insert("user/spare/schematic".to_owned(), SchematicState::default());
+                workspace.insert_schematic_editor(
+                    "user/spare/schematic".to_owned(),
+                    SchematicState::default(),
+                );
             }
         }
 
@@ -427,8 +424,7 @@ fn two_hundred_projections_over_thirty_cell_views() {
     while workspace.schematic_buffers.len() < CELL_VIEWS {
         let ordinal = workspace.schematic_buffers.len();
         workspace
-            .schematic_buffers
-            .insert(format!("user/pad{ordinal:02}/schematic"), filler.clone());
+            .insert_schematic_editor(format!("user/pad{ordinal:02}/schematic"), filler.clone());
     }
 
     let _ = projection_of(&workspace, &libraries, &reference, &active);

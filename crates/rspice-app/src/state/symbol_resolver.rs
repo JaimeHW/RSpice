@@ -1,21 +1,19 @@
 //! Resolve symbols over the current editor buffers and library catalog.
 
-use super::{CellViewRef, LibraryCellInstance, LibraryManager, SchematicState};
+use super::{CellViewRef, LibraryCellInstance, LibraryManager};
 pub use rspice_design::resolved_symbol::{
     ResolvedCellSymbol, ResolvedSymbolIssueKind, ResolvedSymbolSource,
 };
+use rspice_design::schematic::{document::SchematicDocument, owned::Schematic};
 use rspice_design::symbol_resolver as resolution;
 use std::collections::HashMap;
 
-pub struct SymbolResolver<'a> {
-    resolver: resolution::SymbolResolver<'a, SchematicState>,
+pub struct SymbolResolver<'a, S: AsRef<SchematicDocument> = Schematic> {
+    resolver: resolution::SymbolResolver<'a, S>,
 }
 
-impl<'a> SymbolResolver<'a> {
-    pub fn new(
-        libraries: &'a LibraryManager,
-        schematic_buffers: &'a HashMap<String, SchematicState>,
-    ) -> Self {
+impl<'a, S: AsRef<SchematicDocument>> SymbolResolver<'a, S> {
+    pub fn new(libraries: &'a LibraryManager, schematic_buffers: &'a HashMap<String, S>) -> Self {
         Self {
             resolver: resolution::SymbolResolver::new(libraries.catalog(), schematic_buffers),
         }

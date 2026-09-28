@@ -47,7 +47,7 @@ fn resolved_amp_symbol() -> ResolvedCellSymbol {
         port("OUT", PortDirection::Out),
     ]);
 
-    SymbolResolver::new(&libraries, &HashMap::new())
+    SymbolResolver::<rspice_design::schematic::owned::Schematic>::new(&libraries, &HashMap::new())
         .resolve_binding(&binding)
         .expect("symbol resolves")
 }

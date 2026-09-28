@@ -677,7 +677,7 @@ pub(super) fn add_schematic_master(
     if cell.get_view("schematic").is_none() {
         cell.add_view(View::new("schematic", ViewType::Schematic));
     }
-    workspace.schematic_buffers.insert(
+    workspace.insert_schematic_editor(
         CellViewRef::new(library_name, cell_name, "schematic").key(),
         schematic,
     );
@@ -712,13 +712,14 @@ fn hierarchy_resolution_counts_transitive_repeated_instances() {
     let mut libraries = LibraryManager::default();
     workspace.ensure_library_model(&mut libraries);
 
-    let top = workspace
-        .schematic_buffers
-        .get_mut(&CellViewRef::default_top().key())
+    let mut stored_top = workspace
+        .schematic_editor_mut(&CellViewRef::default_top().key())
         .expect("top buffer");
+    let top = &mut stored_top.editor;
     top.add_library_cell_component(Point::new(20, 20), instance("work", "amp"));
     top.add_library_cell_component(Point::new(80, 20), instance("work", "amp"));
 
+    drop(stored_top);
     let mut amp = SchematicState::default();
     amp.add_library_cell_component(Point::new(40, 40), instance("work", "bias"));
     add_schematic_master(&mut libraries, &mut workspace, "work", "amp", amp);
@@ -765,12 +766,13 @@ fn active_configuration_drives_exact_path_resolution_and_receipt_identity() {
     let mut workspace = ProjectWorkspace::default();
     let mut libraries = LibraryManager::default();
     workspace.ensure_library_model(&mut libraries);
-    let top = workspace
-        .schematic_buffers
-        .get_mut(&CellViewRef::default_top().key())
+    let mut stored_top = workspace
+        .schematic_editor_mut(&CellViewRef::default_top().key())
         .expect("top buffer");
+    let top = &mut stored_top.editor;
     top.add_library_cell_component(Point::new(20, 20), instance("work", "amp"));
     top.add_library_cell_component(Point::new(80, 20), instance("work", "amp"));
+    drop(stored_top);
     add_schematic_master(
         &mut libraries,
         &mut workspace,
@@ -879,11 +881,12 @@ fn reviewed_fallback_is_resolved_and_retained_in_the_hierarchy_receipt() {
     let mut workspace = ProjectWorkspace::default();
     let mut libraries = LibraryManager::default();
     workspace.ensure_library_model(&mut libraries);
-    let top = workspace
-        .schematic_buffers
-        .get_mut(&CellViewRef::default_top().key())
+    let mut stored_top = workspace
+        .schematic_editor_mut(&CellViewRef::default_top().key())
         .expect("top buffer");
+    let top = &mut stored_top.editor;
     top.add_library_cell_component(Point::new(20, 20), instance("work", "amp"));
+    drop(stored_top);
     add_schematic_master(
         &mut libraries,
         &mut workspace,
@@ -1123,9 +1126,9 @@ fn hierarchy_resolution_reports_unbound_and_recursive_masters() {
     let mut libraries = LibraryManager::default();
     workspace.ensure_library_model(&mut libraries);
     workspace
-        .schematic_buffers
-        .get_mut(&CellViewRef::default_top().key())
+        .schematic_editor_mut(&CellViewRef::default_top().key())
         .expect("top buffer")
+        .editor
         .add_library_cell_component(Point::new(20, 20), instance("missing", "unbound"));
 
     let unresolved = workspace.resolve_hierarchy(&libraries);
@@ -1138,12 +1141,13 @@ fn hierarchy_resolution_reports_unbound_and_recursive_masters() {
     );
     assert!(unresolved.bindings[1].diagnostic.is_some());
 
-    let top = workspace
-        .schematic_buffers
-        .get_mut(&CellViewRef::default_top().key())
+    let mut stored_top = workspace
+        .schematic_editor_mut(&CellViewRef::default_top().key())
         .expect("top buffer");
+    let top = &mut stored_top.editor;
     top.document_mut_for_test().components.clear();
     top.add_library_cell_component(Point::new(20, 20), instance("work", "loop"));
+    drop(stored_top);
     let mut loop_master = SchematicState::default();
     loop_master.add_library_cell_component(Point::new(20, 20), instance("work", "loop"));
     add_schematic_master(&mut libraries, &mut workspace, "work", "loop", loop_master);
@@ -1172,10 +1176,8 @@ fn hierarchy_resolution_projects_unsaved_active_topology() {
     let mut libraries = LibraryManager::default();
     workspace.ensure_library_model(&mut libraries);
     let mut live = workspace
-        .schematic_buffers
-        .get(&CellViewRef::default_top().key())
-        .expect("top buffer")
-        .clone();
+        .clone_schematic_editor(&CellViewRef::default_top().key())
+        .expect("top buffer");
     live.add_library_cell_component(Point::new(20, 20), instance("missing", "live_child"));
 
     let persisted = workspace.resolve_hierarchy(&libraries);
@@ -1200,11 +1202,11 @@ fn hierarchy_resolution_rejects_orphan_schematic_buffers() {
     let mut libraries = LibraryManager::default();
     workspace.ensure_library_model(&mut libraries);
     workspace
-        .schematic_buffers
-        .get_mut(&CellViewRef::default_top().key())
+        .schematic_editor_mut(&CellViewRef::default_top().key())
         .expect("top buffer")
+        .editor
         .add_library_cell_component(Point::new(20, 20), instance("orphan", "amp"));
-    workspace.schematic_buffers.insert(
+    workspace.insert_schematic_editor(
         CellViewRef::new("orphan", "amp", "schematic").key(),
         SchematicState::default(),
     );
@@ -1256,9 +1258,9 @@ fn configuration_veriloga_binding_uses_exact_project_bundle_on_all_targets() {
     let mut placed = LibraryCellInstance::new("models", "amp", "schematic");
     placed.terminal_order = vec!["in".to_owned(), "out".to_owned()];
     workspace
-        .schematic_buffers
-        .get_mut(&CellViewRef::default_top().key())
+        .schematic_editor_mut(&CellViewRef::default_top().key())
         .expect("top buffer")
+        .editor
         .add_library_cell_component(Point::new(20, 20), placed);
     workspace
         .configuration_sets
@@ -1280,7 +1282,7 @@ fn configuration_veriloga_binding_uses_exact_project_bundle_on_all_targets() {
     let active = workspace
         .active_schematic()
         .expect("active schematic")
-        .clone();
+        .clone_editor();
     let projection = workspace
         .configuration_execution_projection(&libraries, &CellViewRef::default_top(), &active)
         .expect("resolve project-owned Verilog-A binding");
@@ -1334,9 +1336,9 @@ fn hierarchy_resolution_rejects_missing_and_conflicting_source_bindings() {
     binding.terminal_order = vec!["in".to_owned(), "out".to_owned()];
     binding.source_path = Some(missing_path);
     workspace
-        .schematic_buffers
-        .get_mut(&CellViewRef::default_top().key())
+        .schematic_editor_mut(&CellViewRef::default_top().key())
         .expect("top buffer")
+        .editor
         .add_library_cell_component(Point::new(20, 20), binding.clone());
 
     let missing = workspace.resolve_hierarchy(&libraries);
@@ -1355,9 +1357,9 @@ fn hierarchy_resolution_rejects_missing_and_conflicting_source_bindings() {
         .file_path = Some(authoritative);
     binding.source_path = Some(conflicting);
     workspace
-        .schematic_buffers
-        .get_mut(&CellViewRef::default_top().key())
+        .schematic_editor_mut(&CellViewRef::default_top().key())
         .expect("top buffer")
+        .editor
         .document_mut_for_test()
         .components
         .last_mut()

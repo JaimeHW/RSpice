@@ -19,6 +19,7 @@ mod open_documents;
 mod plan_data;
 mod reference_changes;
 mod reference_preparation;
+mod schematic_buffers;
 
 // The two functions are renamed on export: bare `normalize` and
 // `collation_key` say nothing about what they normalize outside their module,
@@ -64,6 +65,7 @@ use crate::product::{
     AnalysisInstanceId, CaptureGroupId, ContentDigest, DesignVariableId, ObjectRevision,
     ResultDocumentId, RevisionError, SavedOutputId, SimulationPlanId, SpecificationId,
 };
+use crate::state::schematic::SchematicEditorRef;
 #[cfg(test)]
 use crate::state::{Cell, View};
 use crate::state::{Library, LibraryCellInstance, LibraryManager, SchematicState, ViewType};
@@ -401,7 +403,9 @@ pub struct ProjectWorkspace {
     /// `hierarchy_stack[1..]`, and a projection for the same reason.
     #[serde(default, skip_serializing)]
     pub hierarchy_instances: Vec<String>,
-    pub schematic_buffers: HashMap<String, SchematicState>,
+    pub schematic_buffers: HashMap<String, rspice_design::schematic::owned::Schematic>,
+    #[serde(skip)]
+    pub(crate) schematic_sessions: HashMap<String, crate::state::schematic::SchematicSession>,
     /// Derived projection, retained only while all of its inputs match.
     #[serde(skip)]
     design_projection_cache: rspice_design::projection::DesignProjectionCache,
@@ -540,8 +544,9 @@ pub struct ProjectWorkspace {
 impl Default for ProjectWorkspace {
     fn default() -> Self {
         let active_view = CellViewRef::default_top();
-        let mut schematic_buffers = HashMap::new();
-        schematic_buffers.insert(active_view.key(), SchematicState::default());
+        let (design, session) = SchematicState::default().into_parts();
+        let schematic_buffers = HashMap::from([(active_view.key(), design)]);
+        let schematic_sessions = HashMap::from([(active_view.key(), session)]);
 
         Self {
             project: ProjectDescriptor::default(),
@@ -554,6 +559,7 @@ impl Default for ProjectWorkspace {
             hierarchy_stack: vec![active_view],
             hierarchy_instances: Vec::new(),
             schematic_buffers,
+            schematic_sessions,
             design_projection_cache: rspice_design::projection::DesignProjectionCache::default(),
             specs: Vec::new(),
             simulation_plan_payloads: Vec::new(),

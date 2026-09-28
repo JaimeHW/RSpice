@@ -55,13 +55,9 @@ fn pending_annotation() -> PendingAnnotation {
         .params = "vref=V42".to_owned();
     project
         .workspace
-        .schematic_buffers
-        .insert(child.key(), master);
-    let top = project
-        .workspace
-        .schematic_buffers
-        .get_mut(&root.key())
-        .unwrap();
+        .insert_schematic_editor(child.key(), master);
+    let mut stored_top = project.workspace.schematic_editor_mut(&root.key()).unwrap();
+    let top = &mut stored_top.editor;
     let parent = top.add_library_cell_component(
         Point::new(100, 0),
         LibraryCellInstance::new("user", &child.cell, "schematic"),
@@ -82,6 +78,7 @@ fn pending_annotation() -> PendingAnnotation {
         .find(|component| component.id == other)
         .unwrap()
         .name = "X7".to_owned();
+    drop(stored_top);
     project
         .workspace
         .configuration_sets
@@ -129,9 +126,9 @@ fn pending_annotation() -> PendingAnnotation {
         probe.bind_saved_output(first_plan, outputs[0].1);
         project
             .workspace
-            .schematic_buffers
-            .get_mut(&reference.key())
+            .schematic_editor_mut(&reference.key())
             .unwrap()
+            .editor
             .document_mut_for_test()
             .probes
             .push(probe);
@@ -187,7 +184,7 @@ fn reopening_pending_annotation_aligns_hierarchy_outputs_and_bound_probes_once()
         .design_projection(
             &loaded.libraries,
             &fixture.child,
-            &workspace.schematic_buffers[&fixture.child.key()],
+            &workspace.schematic_editor(&fixture.child.key()).unwrap(),
         )
         .unwrap();
     assert!(
@@ -269,12 +266,12 @@ fn reopening_pending_annotation_aligns_hierarchy_outputs_and_bound_probes_once()
 }
 
 fn damage_pending_annotation(fixture: &mut PendingAnnotation, failure: &str) {
-    let master = fixture
+    let mut stored_master = fixture
         .project
         .workspace
-        .schematic_buffers
-        .get_mut(&fixture.child.key())
+        .schematic_editor_mut(&fixture.child.key())
         .unwrap();
+    let master = &mut stored_master.editor;
     match failure {
         "unrecorded name" => {
             master
@@ -305,6 +302,7 @@ fn damage_pending_annotation(fixture: &mut PendingAnnotation, failure: &str) {
                 .params = "vref='unfinished".to_owned()
         }
         "output revision" => {
+            drop(stored_master);
             fixture
                 .project
                 .workspace
@@ -436,7 +434,7 @@ fn annotation_session(project: &ProjectFile) -> AppState {
         schematic: project
             .workspace
             .active_context_schematic()
-            .cloned()
+            .map(|source| source.clone_editor())
             .unwrap_or_default(),
         workspace: project.workspace.clone(),
         library_manager: project.libraries.clone(),
@@ -495,7 +493,10 @@ fn assert_restored_annotation(state: &AppState, fixture: &PendingAnnotation) {
             .design_projection(
                 &state.library_manager,
                 &fixture.child,
-                &state.workspace.schematic_buffers[&fixture.child.key()],
+                &state
+                    .workspace
+                    .schematic_editor(&fixture.child.key())
+                    .unwrap(),
             )
             .is_ok()
     );
@@ -555,9 +556,11 @@ fn session_retains_unsaved_schematic_flags_across_document_switches() {
         let mut restored = restore_annotation_session(&state, ron);
         for reference in [&fixture.root, &fixture.child] {
             assert!(
-                restored.workspace.schematic_buffers[&reference.key()]
-                    .session
-                    .is_dirty
+                restored
+                    .workspace
+                    .schematic_editor(&reference.key())
+                    .unwrap()
+                    .is_dirty()
             );
             assert!(
                 restored
@@ -575,7 +578,7 @@ fn session_retains_unsaved_schematic_flags_across_document_switches() {
             .workspace
             .active_context_schematic()
             .unwrap()
-            .clone();
+            .clone_editor();
         restored.sync_active_schematic_to_workspace();
         let repeated = restore_annotation_session(&restored, ron);
         assert!(repeated.schematic.session.is_dirty);
@@ -692,17 +695,17 @@ fn failed_session_annotation_preserves_documents_blocks_execution_and_retries_af
                 restored.schematic.end_operation();
                 restored
                     .workspace
-                    .schematic_buffers
-                    .get_mut(&fixture.root.key())
+                    .schematic_editor_mut(&fixture.root.key())
                     .unwrap()
+                    .editor
                     .begin_operation("Other unfinished edit");
                 restored.sync_active_schematic_to_workspace();
                 assert!(restored.workspace.annotation_restoration_error().is_some());
                 restored
                     .workspace
-                    .schematic_buffers
-                    .get_mut(&fixture.root.key())
+                    .schematic_editor_mut(&fixture.root.key())
                     .unwrap()
+                    .editor
                     .end_operation();
                 // Checking a repaired document uses the normal sync/retry path.
                 // DRC findings are independent of the restored reference closure.

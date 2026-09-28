@@ -744,8 +744,7 @@ fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
     binding.bind_interface(&master.interface_ports());
     state
         .workspace
-        .schematic_buffers
-        .insert(MASTER.to_owned(), master);
+        .insert_schematic_editor(MASTER.to_owned(), master);
     let instance = state
         .schematic
         .add_library_cell_component(Point::new(100, 0), binding);
@@ -762,9 +761,9 @@ fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
 
     state
         .workspace
-        .schematic_buffers
-        .get_mut(MASTER)
+        .schematic_editor_mut(MASTER)
         .expect("the fixture registers the master")
+        .editor
         .document_mut_for_test()
         .components
         .iter_mut()

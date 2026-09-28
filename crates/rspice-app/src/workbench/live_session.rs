@@ -1668,8 +1668,7 @@ fn install_schematic_buffer(
     }
     state
         .workspace
-        .schematic_buffers
-        .insert(cell_key.to_owned(), prepared);
+        .insert_schematic_editor(cell_key.to_owned(), prepared);
 }
 
 fn content_type_for(doc: &str) -> &'static str {
@@ -1696,7 +1695,7 @@ fn host_document_version(state: &AppState, doc: &str) -> Option<u64> {
             .workspace
             .schematic_buffers
             .get(cell_key)
-            .map(SchematicState::content_version)
+            .map(|schematic| schematic.content_version())
     }
 }
 

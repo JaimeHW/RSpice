@@ -913,12 +913,12 @@ fn library_view_usage(state: &AppState, reference: &CellViewRef) -> Vec<String> 
 }
 
 fn collect_library_view_usage(
-    schematic: &crate::state::SchematicState,
+    schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
     owner: &str,
     reference: &CellViewRef,
     consumers: &mut Vec<String>,
 ) {
-    for component in &schematic.document().components {
+    for component in &schematic.as_ref().components {
         let Some(binding) = component.library_cell.as_ref() else {
             continue;
         };
@@ -1503,8 +1503,7 @@ mod tests {
         inactive.add_library_cell_component(crate::state::Point::origin(), binding);
         app.state
             .workspace
-            .schematic_buffers
-            .insert("work/consumer/schematic".to_owned(), inactive);
+            .insert_schematic_editor("work/consumer/schematic".to_owned(), inactive);
 
         let consumers = library_view_usage(&app.state, &reference);
         assert_eq!(consumers.len(), 2);

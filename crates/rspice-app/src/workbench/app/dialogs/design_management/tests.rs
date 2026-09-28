@@ -100,8 +100,7 @@ fn connectivity_only_variant_comparison_detects_dnp_topology_change() {
     let owner = state.workspace.active_view.key();
     state
         .workspace
-        .schematic_buffers
-        .insert(owner.clone(), state.schematic.clone());
+        .insert_schematic_editor(owner.clone(), state.schematic.clone());
     let reference = state
         .workspace
         .design_management

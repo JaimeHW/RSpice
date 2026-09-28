@@ -12,12 +12,6 @@ use crate::product::ContentDigest;
 use crate::time_compat::checked_unix_time_ms;
 
 impl SchematicState {
-    pub(crate) fn validated_design_content_digest(
-        &self,
-    ) -> Result<ContentDigest, ValidatedRevisionError> {
-        self.design.validated_design_content_digest()
-    }
-
     pub fn seed_accepted_revision_baseline(
         &mut self,
         accepted: &SchematicState,
@@ -79,6 +73,8 @@ mod tests {
 
     fn request(state: &SchematicState, project_id: Uuid) -> ValidatedRevisionRequest {
         let design_digest = state
+            .editor_ref()
+            .design
             .validated_design_content_digest()
             .expect("snapshot digest");
         ValidatedRevisionRequest {
@@ -109,7 +105,11 @@ mod tests {
         let accepted = SchematicState::default();
         let mut state = accepted.clone();
         state.add_component(ComponentType::Resistor, Point::new(10, 10));
-        let design = state.validated_design_content_digest().unwrap();
+        let design = state
+            .editor_ref()
+            .design
+            .validated_design_content_digest()
+            .unwrap();
         let journal = state.design.document().validated_revisions.clone();
         let dirty = state.session.is_dirty;
         for epoch in [
@@ -134,7 +134,14 @@ mod tests {
             });
             assert_eq!(state.design.document().validated_revisions, journal);
             assert_eq!(state.session.is_dirty, dirty);
-            assert_eq!(state.validated_design_content_digest().unwrap(), design);
+            assert_eq!(
+                state
+                    .editor_ref()
+                    .design
+                    .validated_design_content_digest()
+                    .unwrap(),
+                design
+            );
         }
         state
             .append_validated_revision(request(&state, project_id))
@@ -169,11 +176,13 @@ mod tests {
     }
 }
 
-impl SchematicState {
-    pub(crate) fn copy_without_validated_revisions(&self) -> Self {
-        self.clone_with_design(self.design.copy_without_validated_revisions())
+impl super::SchematicEditorRef<'_> {
+    pub(crate) fn copy_without_validated_revisions(&self) -> SchematicState {
+        self.with_design(self.design.copy_without_validated_revisions())
     }
+}
 
+impl SchematicState {
     pub(crate) fn record_validated_save_revision(
         &mut self,
         request: ValidatedRevisionRequest,

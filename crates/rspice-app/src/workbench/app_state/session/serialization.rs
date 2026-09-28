@@ -128,12 +128,12 @@ impl serde::Serialize for AppState {
             .workspace
             .schematic_buffers
             .values()
-            .any(crate::state::SchematicState::has_pending_operation)
+            .any(|schematic| schematic.pending_operation_id().is_some())
         {
             committed_workspace = self.workspace.clone();
-            for schematic in committed_workspace.schematic_buffers.values_mut() {
+            committed_workspace.for_each_schematic_editor_mut(|_, schematic| {
                 schematic.cancel_operation();
-            }
+            });
             &committed_workspace
         } else {
             &self.workspace
@@ -265,11 +265,15 @@ impl<'de> serde::Deserialize<'de> for AppState {
         // retain it, including inactive schematics that will be reopened later.
         for open in &project_workspace.open_views {
             if open.dirty
-                && let Some(schematic) = project_workspace
+                && project_workspace
                     .schematic_buffers
-                    .get_mut(&open.reference.key())
+                    .contains_key(&open.reference.key())
             {
-                schematic.session.is_dirty = true;
+                project_workspace
+                    .schematic_sessions
+                    .entry(open.reference.key())
+                    .or_default()
+                    .is_dirty = true;
             }
         }
         // Restore the entire reference closure before acquiring the active
@@ -278,7 +282,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
         let annotation_restoration = project_workspace.restore_pending_annotation(&library_manager);
         let schematic = project_workspace
             .active_context_schematic()
-            .cloned()
+            .map(|source| source.clone_editor())
             .unwrap_or_default();
         // Re-verify the stored key; the grant itself is never trusted from disk.
         let license = de

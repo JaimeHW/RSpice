@@ -2110,16 +2110,15 @@ fn default_dut_path_for_root(
 ) -> Option<String> {
     let root_key = root.key();
     let schematic = if root_key.eq_ignore_ascii_case(&workspace.active_view.key()) {
-        Some(active_schematic)
+        Some(active_schematic.document())
     } else {
         workspace
             .schematic_buffers
             .iter()
             .find(|(key, _)| key.eq_ignore_ascii_case(&root_key))
-            .map(|(_, schematic)| schematic)
+            .map(|(_, schematic)| schematic.document())
     }?;
     schematic
-        .document()
         .components
         .iter()
         .filter(|component| component.kind == crate::state::ComponentType::CellInstance)

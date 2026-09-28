@@ -2312,8 +2312,7 @@ fn author_two_occurrences_of_one_cell(state: &mut AppState) {
     }
     state
         .workspace
-        .schematic_buffers
-        .insert(CellViewRef::new("user", "pad", "schematic").key(), master);
+        .insert_schematic_editor(CellViewRef::new("user", "pad", "schematic").key(), master);
 
     let mut binding = LibraryCellInstance::new("user", "pad", "schematic");
     binding.bind_interface(&[]);

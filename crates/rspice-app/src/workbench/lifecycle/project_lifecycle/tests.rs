@@ -1747,8 +1747,7 @@ fn saving_one_cell_view_publishes_only_that_cell_views_sheets() {
     }
     state
         .workspace
-        .schematic_buffers
-        .insert(other.key(), crate::state::SchematicState::default());
+        .insert_schematic_editor(other.key(), crate::state::SchematicState::default());
     for reference in [&active, &other] {
         state
             .workspace

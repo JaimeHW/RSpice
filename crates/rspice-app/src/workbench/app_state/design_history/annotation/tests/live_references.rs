@@ -121,9 +121,9 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
             fixture
                 .state
                 .workspace
-                .schematic_buffers
-                .get_mut(&other.key())
+                .schematic_editor_mut(&other.key())
                 .unwrap()
+                .editor
                 .document_mut_for_test()
                 .probes
                 .clear();
@@ -133,12 +133,12 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
             }
             let from = if forward { "V42" } else { "V9" };
             let to = if forward { "V9" } else { "V42" };
-            let other_source = fixture
+            let mut stored_other_source = fixture
                 .state
                 .workspace
-                .schematic_buffers
-                .get_mut(&other.key())
+                .schematic_editor_mut(&other.key())
                 .unwrap();
+            let other_source = &mut stored_other_source.editor;
             other_source.document_mut_for_test().probes.push(
                 SchematicProbe::new(
                     4000,
@@ -148,6 +148,10 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
                 )
                 .unwrap(),
             );
+            if !read_only {
+                other_source.begin_operation("Pending new consumer gesture");
+            }
+            drop(stored_other_source);
             if read_only {
                 fixture
                     .state
@@ -157,8 +161,6 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
                     .find(|open| open.reference == other)
                     .unwrap()
                     .read_only_reference = true;
-            } else {
-                other_source.begin_operation("Pending new consumer gesture");
             }
             fixture
                 .state
@@ -211,9 +213,9 @@ fn new_probe_owners_refuse_atomically_before_history_navigation_and_can_retry() 
             } else {
                 state
                     .workspace
-                    .schematic_buffers
-                    .get_mut(&other.key())
+                    .schematic_editor_mut(&other.key())
                     .unwrap()
+                    .editor
                     .cancel_operation();
             }
             assert!(cross_history(state, forward).unwrap().is_some());
@@ -387,8 +389,7 @@ fn history_resolves_current_configuration_roots_before_rewriting_shared_output_t
             .name = target_name.to_owned();
         state
             .workspace
-            .schematic_buffers
-            .insert(independent.key(), independent_source);
+            .insert_schematic_editor(independent.key(), independent_source);
         let mut other_source = SchematicState::default();
         let id = other_source.add_library_cell_component(
             Point::origin(),
@@ -403,8 +404,7 @@ fn history_resolves_current_configuration_roots_before_rewriting_shared_output_t
             .name = "X2".to_owned();
         state
             .workspace
-            .schematic_buffers
-            .insert(other.key(), other_source);
+            .insert_schematic_editor(other.key(), other_source);
         let mut definition = state
             .workspace
             .configuration_sets

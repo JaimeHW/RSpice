@@ -39,7 +39,7 @@ fn add_master(
     if target.get_view("schematic").is_none() {
         target.add_view(View::new("schematic", ViewType::Schematic));
     }
-    state.workspace.schematic_buffers.insert(
+    state.workspace.insert_schematic_editor(
         CellViewRef::new(library, cell, "schematic").key(),
         schematic,
     );

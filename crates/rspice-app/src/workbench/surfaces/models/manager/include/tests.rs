@@ -141,7 +141,7 @@ fn an_instance_naming_something_the_closure_defines_is_not_unresolved() {
     let mut schematic = state
         .workspace
         .active_schematic()
-        .cloned()
+        .map(|source| source.clone_editor())
         .unwrap_or_default();
     for (id, name, model) in [(1u64, "M1", "nch"), (2, "M2", "comparator_fast")] {
         let mut component = crate::state::Component::new(
@@ -235,7 +235,7 @@ fn render_a_populated_include_page() {
     let mut schematic = state
         .workspace
         .active_schematic()
-        .cloned()
+        .map(|source| source.clone_editor())
         .unwrap_or_default();
     for (id, name, model) in [
         (1u64, "M1", "nch_core"),

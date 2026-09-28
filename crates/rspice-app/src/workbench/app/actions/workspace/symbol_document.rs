@@ -35,10 +35,10 @@ impl AppState {
         let reference = &self.workspace.active_view;
         let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");
         if self.workspace.active_view == schematic_ref {
-            return self.schematic.interface_ports();
+            return self.schematic.document().interface_ports();
         }
         if let Some(schematic) = self.workspace.schematic_buffers.get(&schematic_ref.key()) {
-            let ports = schematic.interface_ports();
+            let ports = schematic.document().interface_ports();
             if !ports.is_empty() {
                 return ports;
             }
@@ -144,9 +144,10 @@ impl AppState {
                 &snapshot.document,
                 &snapshot.renames,
             );
-            for schematic in self.workspace.schematic_buffers.values_mut() {
-                schematic.remap_symbol_instance_wires(&reference, &pin_remaps);
-            }
+            self.workspace
+                .for_each_schematic_editor_mut(|_, schematic| {
+                    schematic.remap_symbol_instance_wires(&reference, &pin_remaps);
+                });
             self.schematic
                 .remap_symbol_instance_wires(&reference, &pin_remaps);
         }
@@ -177,9 +178,10 @@ impl AppState {
         if let Some(previous_document) = previous_document {
             let pin_remaps =
                 symbol_pin_position_remaps(&previous_document, document, &BTreeMap::new());
-            for schematic in self.workspace.schematic_buffers.values_mut() {
-                schematic.remap_symbol_instance_wires(&reference, &pin_remaps);
-            }
+            self.workspace
+                .for_each_schematic_editor_mut(|_, schematic| {
+                    schematic.remap_symbol_instance_wires(&reference, &pin_remaps);
+                });
             self.schematic
                 .remap_symbol_instance_wires(&reference, &pin_remaps);
         }
@@ -227,9 +229,10 @@ impl AppState {
         if let Some(previous_document) = previous_document {
             let pin_remaps =
                 symbol_pin_position_remaps(&previous_document, document, &intent.renames);
-            for schematic in self.workspace.schematic_buffers.values_mut() {
-                schematic.remap_symbol_instance_wires(&reference, &pin_remaps);
-            }
+            self.workspace
+                .for_each_schematic_editor_mut(|_, schematic| {
+                    schematic.remap_symbol_instance_wires(&reference, &pin_remaps);
+                });
             self.schematic
                 .remap_symbol_instance_wires(&reference, &pin_remaps);
         }
@@ -405,9 +408,10 @@ impl AppState {
             .map(|(from, to)| (from.to_ascii_lowercase(), to.clone()))
             .collect();
         let mut renamed = 0;
-        for schematic in self.workspace.schematic_buffers.values_mut() {
-            renamed += schematic.rename_instance_terminals(reference, &lowered);
-        }
+        self.workspace
+            .for_each_schematic_editor_mut(|_, schematic| {
+                renamed += schematic.rename_instance_terminals(reference, &lowered);
+            });
         renamed += self
             .schematic
             .rename_instance_terminals(reference, &lowered);

@@ -383,7 +383,7 @@ impl ProjectFile {
         let mut repairs = Vec::new();
         let mut missing = Vec::new();
         for schematic in self.workspace.schematic_buffers.values_mut() {
-            missing.extend(schematic.revalidate_instance_bindings(&self.libraries));
+            missing.extend(schematic.revalidate_instance_bindings(self.libraries.catalog()));
         }
         missing.sort_unstable();
         missing.dedup();
@@ -453,12 +453,13 @@ impl ProjectFile {
         while let Some((owner, master)) = first_instantiation_back_edge(&edges) {
             edges[owner].retain(|candidate| *candidate != master);
             let master_key = owners[master].clone();
-            let schematic = self
+            let mut schematic = self
                 .workspace
-                .schematic_buffers
-                .get_mut(&owners[owner])
+                .schematic_editor_mut(&owners[owner])
                 .expect("the buffer the cycle graph was built from remains present");
-            schematic.remove_cyclic_master_placements(&master_key);
+            schematic
+                .editor
+                .remove_cyclic_master_placements(&master_key);
             repairs.push(format!(
                 "'{}' instantiated '{master_key}', which reaches back to it. That placement was removed so the hierarchy can be walked.",
                 owners[owner]

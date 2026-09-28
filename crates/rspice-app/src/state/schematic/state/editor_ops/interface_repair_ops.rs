@@ -28,7 +28,10 @@ impl SchematicState {
     ///
     /// Every surface that offers the repair asks this, so a disabled row and
     /// the deck's own refusal cannot disagree about which instances are stale.
-    pub fn selected_instance_interface_is_stale(&self, masters: &HashMap<String, Self>) -> bool {
+    pub fn selected_instance_interface_is_stale<S: AsRef<SchematicDocument>>(
+        &self,
+        masters: &HashMap<String, S>,
+    ) -> bool {
         let Some((component_id, master_ports)) = selected_master_interface(self, masters) else {
             return false;
         };
@@ -66,10 +69,10 @@ impl SchematicState {
     }
 
     /// Rebind the selected instance with validation completed before history begins.
-    pub fn update_selected_instance_interface(
+    pub fn update_selected_instance_interface<S: AsRef<SchematicDocument>>(
         &mut self,
         libraries: &LibraryManager,
-        masters: &HashMap<String, Self>,
+        masters: &HashMap<String, S>,
     ) -> Result<String, SchematicReplacementError> {
         if self.session.read_only {
             return Err(SchematicReplacementError::ReadOnly);
@@ -94,9 +97,9 @@ impl SchematicState {
 /// The selected instance and the interface its master presents now, when the
 /// selection is exactly one cell instance bound to a project schematic. Any
 /// other selection has no master interface to be measured against.
-fn selected_master_interface(
+fn selected_master_interface<S: AsRef<SchematicDocument>>(
     schematic: &SchematicState,
-    masters: &HashMap<String, SchematicState>,
+    masters: &HashMap<String, S>,
 ) -> Option<(u64, Vec<PortSpec>)> {
     let component_id = schematic.session.selection.single_component()?;
     let component = schematic

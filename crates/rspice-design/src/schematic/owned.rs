@@ -41,6 +41,12 @@ pub struct Schematic {
     history: EditHistory,
 }
 
+impl AsRef<SchematicDocument> for Schematic {
+    fn as_ref(&self) -> &SchematicDocument {
+        self.document()
+    }
+}
+
 impl serde::Serialize for Schematic {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serde::Serialize::serialize(self.document(), serializer)

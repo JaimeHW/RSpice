@@ -184,9 +184,7 @@ pub(crate) fn accepted_active_schematic(state: &AppState) -> Option<crate::state
     accepted
         .baseline()
         .workspace
-        .schematic_buffers
-        .get(&state.workspace.active_view.key())
-        .cloned()
+        .clone_schematic_editor(&state.workspace.active_view.key())
 }
 
 /// Monotonic identity of the accepted canonical baseline. Validation receipts
@@ -277,21 +275,19 @@ fn capture_snapshot(
         workspace.active_view_type(),
         ViewType::Schematic | ViewType::Testbench
     ) {
-        workspace
-            .schematic_buffers
-            .insert(workspace.active_key(), state.schematic.clone());
+        workspace.insert_schematic_editor(workspace.active_key(), state.schematic.clone());
     }
     // A save/checkpoint retains committed content even when a native window
     // currently holds a live pointer preview in one of the runtime buffers.
     if matches!(content, SnapshotContent::Committed) {
-        for schematic in workspace.schematic_buffers.values_mut() {
+        workspace.for_each_schematic_editor_mut(|_, schematic| {
             schematic.cancel_operation();
-        }
+        });
     }
     workspace.mark_all_clean();
-    for schematic in workspace.schematic_buffers.values_mut() {
+    workspace.for_each_schematic_editor_mut(|_, schematic| {
         strip_schematic_runtime_state(schematic);
-    }
+    });
 
     let mut libraries = state.library_manager.clone();
     sanitize_library_view_runtime_state(&mut libraries);
@@ -445,9 +441,11 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
         state.workspace.project_metadata_dirty = true;
         state.workspace.netlist_source_dirty = true;
         state.workspace.project_sources_dirty = true;
-        for schematic in state.workspace.schematic_buffers.values_mut() {
-            schematic.session.is_dirty = true;
-        }
+        state
+            .workspace
+            .for_each_schematic_editor_mut(|_, schematic| {
+                schematic.session.is_dirty = true;
+            });
         for view in &mut state.workspace.open_views {
             view.dirty = true;
         }
@@ -465,8 +463,8 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
         })
         .collect::<Vec<_>>();
     for (reference, dirty) in &cell_dirty {
-        if let Some(buffer) = state.workspace.schematic_buffers.get_mut(&reference.key()) {
-            buffer.session.is_dirty = *dirty;
+        if let Some(mut buffer) = state.workspace.schematic_editor_mut(&reference.key()) {
+            buffer.editor.session.is_dirty = *dirty;
         }
         if let Some(open) = state
             .workspace
@@ -1397,7 +1395,7 @@ fn rebase_pending_operation_dirty_state(
             .workspace
             .schematic_buffers
             .values()
-            .any(crate::state::SchematicState::has_pending_operation)
+            .any(|schematic| schematic.pending_operation_id().is_some())
     {
         return;
     }
@@ -1427,11 +1425,13 @@ fn rebase_pending_operation_dirty_state(
         let was_dirty = dirty(&state.workspace.active_schematic_reference().key());
         state.schematic.set_pending_was_dirty(was_dirty);
     }
-    for (key, schematic) in &mut state.workspace.schematic_buffers {
-        if schematic.has_pending_operation() {
-            schematic.set_pending_was_dirty(dirty(key));
-        }
-    }
+    state
+        .workspace
+        .for_each_schematic_editor_mut(|key, schematic| {
+            if schematic.has_pending_operation() {
+                schematic.set_pending_was_dirty(dirty(key));
+            }
+        });
 }
 
 fn adopt_successful_save(
@@ -1645,8 +1645,8 @@ pub(crate) fn begin_browser_binding_promotion(state: &mut AppState) -> BrowserOp
 fn mark_active_document_clean(state: &mut AppState) {
     match active_document(state) {
         ProjectDocumentId::CellView(reference) => {
-            if let Some(buffer) = state.workspace.schematic_buffers.get_mut(&reference.key()) {
-                buffer.session.is_dirty = false;
+            if let Some(mut buffer) = state.workspace.schematic_editor_mut(&reference.key()) {
+                buffer.editor.session.is_dirty = false;
             }
             if reference == state.workspace.active_view {
                 state.schematic.session.is_dirty = false;
@@ -2128,15 +2128,12 @@ fn overlay_cell_view(
         .map_err(ProjectLifecycleError::InvalidState)?;
 
     let key = reference.key();
-    match working.workspace.schematic_buffers.get(&key) {
+    match working.workspace.clone_schematic_editor(&key) {
         Some(buffer) => {
-            target
-                .workspace
-                .schematic_buffers
-                .insert(key, buffer.clone());
+            target.workspace.insert_schematic_editor(key, buffer);
         }
         None => {
-            target.workspace.schematic_buffers.remove(&key);
+            target.workspace.remove_schematic_editor(&key);
         }
     }
     target
@@ -2201,15 +2198,12 @@ fn revert_cell_view(
             ProjectLifecycleError::InvalidState("active cell no longer exists".to_owned())
         })?;
     let key = reference.key();
-    match baseline.workspace.schematic_buffers.get(&key) {
+    match baseline.workspace.clone_schematic_editor(&key) {
         Some(buffer) => {
-            state
-                .workspace
-                .schematic_buffers
-                .insert(key, buffer.clone());
+            state.workspace.insert_schematic_editor(key, buffer);
         }
         None => {
-            state.workspace.schematic_buffers.remove(&key);
+            state.workspace.remove_schematic_editor(&key);
         }
     }
     state

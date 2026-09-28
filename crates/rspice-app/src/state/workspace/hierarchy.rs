@@ -26,7 +26,7 @@ impl ProjectWorkspace {
         root: &CellViewRef,
         configuration: Option<crate::state::ConfigurationSetId>,
         active_reference: &'a CellViewRef,
-        active_schematic: &'a SchematicState,
+        active_schematic: SchematicEditorRef<'a>,
     ) -> Result<HierarchyResolution, String> {
         root.validate_name_segments()
             .map_err(|error| error.to_string())?;
@@ -56,7 +56,7 @@ impl ProjectWorkspace {
 pub(super) struct HierarchyResolver<'a> {
     workspace: &'a ProjectWorkspace,
     libraries: &'a LibraryManager,
-    active_overlay: Option<(&'a CellViewRef, &'a SchematicState)>,
+    active_overlay: Option<(&'a CellViewRef, SchematicEditorRef<'a>)>,
     root: CellViewRef,
     configuration: Option<&'a crate::state::ConfigurationSet>,
 }
@@ -65,7 +65,7 @@ impl<'a> HierarchyResolver<'a> {
     pub(super) fn new(
         workspace: &'a ProjectWorkspace,
         libraries: &'a LibraryManager,
-        active_overlay: Option<(&'a CellViewRef, &'a SchematicState)>,
+        active_overlay: Option<(&'a CellViewRef, SchematicEditorRef<'a>)>,
     ) -> Self {
         Self::with_authority(
             workspace,
@@ -79,7 +79,7 @@ impl<'a> HierarchyResolver<'a> {
     pub(super) fn with_authority(
         workspace: &'a ProjectWorkspace,
         libraries: &'a LibraryManager,
-        active_overlay: Option<(&'a CellViewRef, &'a SchematicState)>,
+        active_overlay: Option<(&'a CellViewRef, SchematicEditorRef<'a>)>,
         root: CellViewRef,
         configuration: Option<&'a crate::state::ConfigurationSet>,
     ) -> Self {
@@ -99,6 +99,7 @@ impl<'a> HierarchyResolver<'a> {
     pub(super) fn resolve_all(self) -> (HierarchyResolution, ConfigurationExecutionPlan) {
         let documents = WorkspaceHierarchyDocuments {
             buffers: &self.workspace.schematic_buffers,
+            sessions: &self.workspace.schematic_sessions,
             active_overlay: self.active_overlay,
         };
         let context = HierarchyContext {
@@ -113,8 +114,9 @@ impl<'a> HierarchyResolver<'a> {
 }
 
 struct WorkspaceHierarchyDocuments<'a> {
-    buffers: &'a HashMap<String, SchematicState>,
-    active_overlay: Option<(&'a CellViewRef, &'a SchematicState)>,
+    buffers: &'a HashMap<String, rspice_design::schematic::owned::Schematic>,
+    sessions: &'a HashMap<String, crate::state::schematic::SchematicSession>,
+    active_overlay: Option<(&'a CellViewRef, SchematicEditorRef<'a>)>,
 }
 
 impl HierarchyDocuments for WorkspaceHierarchyDocuments<'_> {
@@ -129,11 +131,14 @@ impl HierarchyDocuments for WorkspaceHierarchyDocuments<'_> {
             self.buffers
                 .iter()
                 .find(|(key, _)| key.eq_ignore_ascii_case(&reference.key()))
-                .map(|(_, schematic)| schematic)
+                .map(|(key, design)| SchematicEditorRef {
+                    design,
+                    session: self.sessions.get(key),
+                })
         }?;
         Some(HierarchySchematic {
-            document: &schematic.document(),
-            modified: schematic.session.is_dirty,
+            document: schematic.document(),
+            modified: schematic.is_dirty(),
         })
     }
 }
@@ -162,10 +167,13 @@ impl HierarchySourceFiles for WorkspaceSourceFiles {
 pub(super) fn find_schematic<'a>(
     workspace: &'a ProjectWorkspace,
     reference: &CellViewRef,
-) -> Option<&'a SchematicState> {
+) -> Option<SchematicEditorRef<'a>> {
     workspace
         .schematic_buffers
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case(&reference.key()))
-        .map(|(_, schematic)| schematic)
+        .map(|(key, design)| SchematicEditorRef {
+            design,
+            session: workspace.schematic_sessions.get(key),
+        })
 }

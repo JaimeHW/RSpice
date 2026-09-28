@@ -378,6 +378,7 @@ fn author_amp_symbol(state: &mut AppState, schematic: &CellViewRef, symbol: &Cel
         .schematic_buffers
         .get(&schematic.key())
         .expect("the amp schematic was saved to the workspace")
+        .document()
         .interface_ports();
     let mut document = SymbolDocument::generated_from_ports(&ports);
     document.body.push(SymbolShape::Text {
@@ -662,34 +663,25 @@ fn interface_of(state: &AppState, library: &str, cell: &str) -> Vec<PortSpec> {
         .schematic_buffers
         .get(&reference.key())
         .expect("the master schematic was saved to the workspace")
+        .document()
         .interface_ports()
 }
 
 /// Every stable object identity a schematic owns, which is what governed sheet
 /// membership is keyed on.
-fn live_object_ids(schematic: &SchematicState) -> Vec<u64> {
+fn live_object_ids(
+    schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
+) -> Vec<u64> {
     schematic
-        .document()
+        .as_ref()
         .components
         .iter()
         .map(|object| object.id)
-        .chain(schematic.document().wires.iter().map(|object| object.id))
-        .chain(schematic.document().buses.iter().map(|object| object.id))
-        .chain(schematic.document().bus_taps.iter().map(|object| object.id))
-        .chain(
-            schematic
-                .document()
-                .junctions
-                .iter()
-                .map(|object| object.id),
-        )
-        .chain(
-            schematic
-                .document()
-                .net_labels
-                .iter()
-                .map(|object| object.id),
-        )
+        .chain(schematic.as_ref().wires.iter().map(|object| object.id))
+        .chain(schematic.as_ref().buses.iter().map(|object| object.id))
+        .chain(schematic.as_ref().bus_taps.iter().map(|object| object.id))
+        .chain(schematic.as_ref().junctions.iter().map(|object| object.id))
+        .chain(schematic.as_ref().net_labels.iter().map(|object| object.id))
         .collect()
 }
 

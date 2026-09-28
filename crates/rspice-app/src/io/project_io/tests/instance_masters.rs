@@ -18,9 +18,9 @@ fn load_repairs_missing_instance_master() {
     binding.module_name = Some("ghost".to_owned());
     binding.source_path = Some(std::path::PathBuf::from("cells/ghost.sp"));
     workspace
-        .schematic_buffers
-        .get_mut(&top.key())
+        .schematic_editor_mut(&top.key())
         .expect("the bootstrapped top buffer")
+        .editor
         .add_library_cell_component(Point::new(10, 10), binding);
     let json = serialize_project_file(&ProjectFile::new(workspace, libraries))
         .expect("a project may name a master it has lost");
@@ -75,11 +75,11 @@ fn load_breaks_an_instantiation_cycle_and_names_both_ends() {
         Point::new(0, 0),
         LibraryCellInstance::new("user", "top", "schematic"),
     );
-    workspace.schematic_buffers.insert(amp.key(), amp_schematic);
+    workspace.insert_schematic_editor(amp.key(), amp_schematic);
     workspace
-        .schematic_buffers
-        .get_mut(&top.key())
+        .schematic_editor_mut(&top.key())
         .expect("the bootstrapped top buffer")
+        .editor
         .add_library_cell_component(
             Point::new(10, 10),
             LibraryCellInstance::new("user", "amp", "schematic"),
@@ -148,9 +148,11 @@ fn unresolved_generated_veriloga_bindings_survive_project_save_and_reload() {
         let mut libraries = LibraryManager::with_primitives();
         let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
         let top = workspace.active_view.key();
-        let schematic = workspace.schematic_buffers.get_mut(&top).unwrap();
+        let mut stored_schematic = workspace.schematic_editor_mut(&top).unwrap();
+        let schematic = &mut stored_schematic.editor;
         schematic.add_library_cell_component(Point::new(10, 20), binding);
         let before = serde_json::to_value(&schematic.document().components[0]).unwrap();
+        drop(stored_schematic);
         let json = serde_json::to_string(&ProjectFile::new(workspace, libraries)).unwrap();
 
         let loaded =

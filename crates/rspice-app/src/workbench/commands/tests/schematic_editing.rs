@@ -726,7 +726,7 @@ fn updating_pins_from_contract_needs_an_open_symbol_with_an_interface() {
         .find(|component| component.id == port)
         .expect("port exists")
         .value = "IN".to_owned();
-    app.state.workspace.schematic_buffers.insert(
+    app.state.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         schematic,
     );
@@ -833,8 +833,7 @@ fn app_with_a_placed_cell_instance() -> (RSpiceApp, String) {
     binding.bind_interface(&master.interface_ports());
     app.state
         .workspace
-        .schematic_buffers
-        .insert(master_key.clone(), master);
+        .insert_schematic_editor(master_key.clone(), master);
 
     let schematic = &mut app.state.schematic;
     let instance = schematic.add_library_cell_component(Point::new(100, 0), binding);
@@ -892,11 +891,12 @@ fn updating_an_instance_interface_is_offered_only_for_a_stale_placement() {
     );
 
     rename_master_port(
-        app.state
+        &mut app
+            .state
             .workspace
-            .schematic_buffers
-            .get_mut(&master_key)
-            .expect("the fixture registers the master"),
+            .schematic_editor_mut(&master_key)
+            .expect("the fixture registers the master")
+            .editor,
         "a",
         "ain",
     );
@@ -929,11 +929,12 @@ fn repairing_a_stale_instance_restores_its_x_line() {
 
     let (mut app, master_key) = app_with_a_placed_cell_instance();
     rename_master_port(
-        app.state
+        &mut app
+            .state
             .workspace
-            .schematic_buffers
-            .get_mut(&master_key)
-            .expect("the fixture registers the master"),
+            .schematic_editor_mut(&master_key)
+            .expect("the fixture registers the master")
+            .editor,
         "a",
         "ain",
     );

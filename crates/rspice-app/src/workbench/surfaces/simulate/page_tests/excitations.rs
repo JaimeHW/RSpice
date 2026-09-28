@@ -24,8 +24,7 @@ fn add_master(app: &mut RSpiceApp, cell: &str, schematic: crate::state::Schemati
     }
     app.state
         .workspace
-        .schematic_buffers
-        .insert(CellViewRef::new("work", cell, "schematic").key(), schematic);
+        .insert_schematic_editor(CellViewRef::new("work", cell, "schematic").key(), schematic);
 }
 
 /// One component of the fixture design, under the name the deck carries.

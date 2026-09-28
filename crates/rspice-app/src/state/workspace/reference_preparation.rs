@@ -14,14 +14,22 @@ impl ProjectWorkspace {
     pub(crate) fn schematic_reference_sources<'a>(
         &'a self,
         active_reference: &CellViewRef,
-        active_schematic: &'a SchematicState,
-    ) -> BTreeMap<String, &'a SchematicState> {
+        active_schematic: SchematicEditorRef<'a>,
+    ) -> BTreeMap<String, SchematicEditorRef<'a>> {
         let active = active_reference.key();
         let mut sources: BTreeMap<_, _> = self
             .schematic_buffers
             .iter()
             .filter(|(key, _)| !key.eq_ignore_ascii_case(&active))
-            .map(|(key, source)| (key.clone(), source))
+            .map(|(key, design)| {
+                (
+                    key.clone(),
+                    SchematicEditorRef {
+                        design,
+                        session: self.schematic_sessions.get(key),
+                    },
+                )
+            })
             .collect();
         sources.insert(active, active_schematic);
         sources
@@ -34,7 +42,7 @@ impl ProjectWorkspace {
         &self,
         libraries: &LibraryManager,
         active_reference: &CellViewRef,
-        active_schematic: &SchematicState,
+        active_schematic: SchematicEditorRef<'_>,
         mut before: BTreeMap<String, SchematicState>,
         mut after: BTreeMap<String, SchematicState>,
     ) -> Result<SchematicReferenceTransaction, String> {
@@ -144,10 +152,10 @@ impl ProjectWorkspace {
             if let Some(probes) = source.prepare_probe_reference_update(mappings)? {
                 before
                     .entry(key.clone())
-                    .or_insert_with(|| (*source).clone());
+                    .or_insert_with(|| source.clone_editor());
                 let candidate = after
                     .entry(key.clone())
-                    .or_insert_with(|| (*source).clone());
+                    .or_insert_with(|| source.clone_editor());
                 probes.apply_to(candidate);
             }
         }

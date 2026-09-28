@@ -728,16 +728,14 @@ fn configured_exact_paths_materialize_distinct_schematic_and_source_views() {
     libraries.add_library(work);
 
     let mut workspace = ProjectWorkspace::default();
-    workspace.schematic_buffers.insert(
+    workspace.insert_schematic_editor(
         CellViewRef::new("work", "div", "schematic").key(),
         div_master(),
     );
     let mut top = SchematicState::default();
     top.add_library_cell_component(Point::new(100, 0), binding("div", &["a", "b"]));
     top.add_library_cell_component(Point::new(240, 0), binding("div", &["a", "b"]));
-    workspace
-        .schematic_buffers
-        .insert(workspace.active_view.key(), top.clone());
+    workspace.insert_schematic_editor(workspace.active_view.key(), top.clone());
 
     let mut catalog = ConfigurationSetCatalog::default();
     catalog
@@ -882,20 +880,18 @@ fn two_instances_with_different_descendant_bindings_emit_v2() {
     wrap_master.add_library_cell_component(Point::new(120, 0), binding("div", &["a", "b"]));
 
     let mut workspace = ProjectWorkspace::default();
-    workspace.schematic_buffers.insert(
+    workspace.insert_schematic_editor(
         CellViewRef::new("work", "div", "schematic").key(),
         div_master(),
     );
-    workspace.schematic_buffers.insert(
+    workspace.insert_schematic_editor(
         CellViewRef::new("work", "wrap", "schematic").key(),
         wrap_master,
     );
     let mut top = SchematicState::default();
     top.add_library_cell_component(Point::new(100, 0), binding("wrap", &["p", "q"]));
     top.add_library_cell_component(Point::new(400, 0), binding("wrap", &["p", "q"]));
-    workspace
-        .schematic_buffers
-        .insert(workspace.active_view.key(), top.clone());
+    workspace.insert_schematic_editor(workspace.active_view.key(), top.clone());
 
     let mut catalog = ConfigurationSetCatalog::default();
     catalog
@@ -965,13 +961,14 @@ fn configured_builtin_xspice_is_a_valid_executable_leaf() {
         .expect("astate catalog descriptor");
     let binding =
         crate::state::builtin_xspice_library_binding(descriptor).expect("astate placement binding");
-    let top = workspace
-        .schematic_buffers
-        .get_mut(&CellViewRef::default_top().key())
+    let mut stored_top = workspace
+        .schematic_editor_mut(&CellViewRef::default_top().key())
         .expect("top schematic");
+    let top = &mut stored_top.editor;
     top.document_mut_for_test().components.clear();
     top.add_library_cell_component(Point::new(100, 100), binding.clone());
     assert_eq!(top.document().components[0].name, "A1");
+    drop(stored_top);
 
     workspace
         .configuration_sets
@@ -992,10 +989,8 @@ fn configured_builtin_xspice_is_a_valid_executable_leaf() {
 
     let active = workspace.active_view.clone();
     let top = workspace
-        .schematic_buffers
-        .get(&CellViewRef::default_top().key())
-        .expect("top schematic")
-        .clone();
+        .clone_schematic_editor(&CellViewRef::default_top().key())
+        .expect("top schematic");
     let projection = workspace
         .configuration_execution_projection(&libraries, &active, &top)
         .expect("built-in resolves under configuration");

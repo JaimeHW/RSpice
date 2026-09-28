@@ -34,10 +34,6 @@ impl SchematicState {
     ) {
         self.design.restore_placement_binding(object, expected)
     }
-
-    pub(crate) fn migrate_generated_bindings(&mut self) -> (usize, usize) {
-        self.design.migrate_generated_bindings()
-    }
 }
 
 impl SchematicState {

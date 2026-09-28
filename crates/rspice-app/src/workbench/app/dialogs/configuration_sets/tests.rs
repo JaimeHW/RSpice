@@ -466,8 +466,7 @@ fn valid_configuration_app() -> (RSpiceApp, ConfigurationSetId) {
     }
     app.state
         .workspace
-        .schematic_buffers
-        .insert(reference.key(), master);
+        .insert_schematic_editor(reference.key(), master);
     let mut binding = crate::state::LibraryCellInstance::new("work", cell_name, "schematic");
     binding.terminal_order = vec!["a".to_owned(), "b".to_owned()];
     app.state

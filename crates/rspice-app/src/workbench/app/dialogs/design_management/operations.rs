@@ -516,8 +516,12 @@ pub(super) fn renumber_request(
     owner_key: &str,
     inputs: &SubflowInputs,
 ) -> Result<RenumberRequest, String> {
-    let mut documents = workspace.schematic_buffers.clone();
-    documents.insert(owner_key.to_owned(), active_schematic.clone());
+    let mut documents = workspace
+        .schematic_buffers
+        .iter()
+        .map(|(key, schematic)| (key.clone(), schematic))
+        .collect::<std::collections::HashMap<_, _>>();
+    documents.insert(owner_key.to_owned(), active_schematic.editor_ref().design);
     let occurrence = workspace.occurrence_path().to_string();
     let mut objects = Vec::new();
     for (cell_view_key, schematic) in &documents {

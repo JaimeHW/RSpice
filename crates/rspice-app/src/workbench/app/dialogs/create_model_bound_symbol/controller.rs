@@ -980,11 +980,7 @@ pub(super) fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(
         let before = if state.workspace.active_view == reference {
             Some(state.schematic.clone())
         } else {
-            state
-                .workspace
-                .schematic_buffers
-                .get(&reference.key())
-                .cloned()
+            state.workspace.clone_schematic_editor(&reference.key())
         };
         let after = crate::state::build_symbol_test_fixture(&definition)
             .map_err(|error| error.to_string())?;

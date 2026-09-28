@@ -59,9 +59,7 @@ fn is_schematic_like(view_type: ViewType) -> bool {
 fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> SchematicState {
     let mut schematic = state
         .workspace
-        .schematic_buffers
-        .get(&reference.key())
-        .cloned()
+        .clone_schematic_editor(&reference.key())
         .unwrap_or_else(|| state.new_schematic_document());
     // Workspace buffers round-trip through serde, which skips the runtime
     // ID counter and name counters: without recalculation a freshly placed
@@ -488,15 +486,14 @@ impl AppState {
             .cloned()
             .collect();
         for key in legacy_keys {
-            let Some(buffer) = self.workspace.schematic_buffers.remove(&key) else {
+            let Some(buffer) = self.workspace.remove_schematic_editor(&key) else {
                 continue;
             };
             let tail = &key[legacy_prefix.len()..];
             let new_key = format!("{user}/{tail}");
-            self.workspace
-                .schematic_buffers
-                .entry(new_key)
-                .or_insert(buffer);
+            if !self.workspace.schematic_buffers.contains_key(&new_key) {
+                self.workspace.insert_schematic_editor(new_key, buffer);
+            }
 
             // Make the migrated cell/view exist in the user library so the
             // browser lists it and tabs resolve.
@@ -534,8 +531,7 @@ impl AppState {
                 // Window projection may retain a live gesture in a runtime
                 // buffer; it must not publish symbols or sheet transactions.
                 self.workspace
-                    .schematic_buffers
-                    .insert(active.key(), self.schematic.clone());
+                    .insert_schematic_editor(active.key(), self.schematic.clone());
                 return;
             }
             self.reconcile_active_sheet_membership(&active);
@@ -567,14 +563,14 @@ impl AppState {
             .workspace
             .schematic_buffers
             .values()
-            .any(SchematicState::has_pending_operation)
+            .any(|schematic| schematic.pending_operation_id().is_some())
         {
             return;
         }
         match self.workspace.restore_pending_annotation(&self.library_manager) {
             Ok(count) => {
                 if let Some(schematic) = self.workspace.active_context_schematic() {
-                    self.schematic = schematic.clone();
+                    self.schematic = schematic.clone_editor();
                 }
                 self.push_user_message(ConsoleMessage::info(format!(
                     "Reference annotation recovery completed ({count} component(s) updated)."
@@ -610,9 +606,7 @@ impl AppState {
                 (
                     self.workspace.design_management.clone(),
                     self.workspace
-                        .schematic_buffers
-                        .get(&active.key())
-                        .cloned()
+                        .clone_schematic_editor(&active.key())
                         .unwrap_or_else(|| self.schematic.clone()),
                 )
             });
@@ -878,6 +872,9 @@ impl AppState {
         self.workspace
             .schematic_buffers
             .retain(|key, _| !key.starts_with(&prefix));
+        self.workspace
+            .schematic_sessions
+            .retain(|key, _| !key.starts_with(&prefix));
         let orphaned_layouts = self
             .workspace
             .physical_layout_documents()
@@ -893,7 +890,7 @@ impl AppState {
             .retain(|open| open.reference.library != library || open.reference.cell != cell);
         let libraries = &self.library_manager;
         for schematic in self.workspace.schematic_buffers.values_mut() {
-            schematic.revalidate_instance_bindings(libraries);
+            schematic.revalidate_instance_bindings(libraries.catalog());
         }
         let hierarchy_pruned = self.workspace.retain_valid_occurrences(|reference| {
             reference.library != library || reference.cell != cell
@@ -917,7 +914,7 @@ impl AppState {
         let project_root_removed = self.workspace.project.root_library == library
             && self.workspace.project.top_cell == cell
             && view == crate::state::workspace::DEFAULT_SCHEMATIC_VIEW;
-        self.workspace.schematic_buffers.remove(&deleted.key());
+        self.workspace.remove_schematic_editor(&deleted.key());
         self.workspace.remove_physical_layout_document(&deleted);
         self.workspace
             .open_views
@@ -1077,10 +1074,14 @@ impl AppState {
         let reference = CellViewRef::new(library_name, cell_name, view_name);
         self.workspace.project.root_library = reference.library.clone();
         self.workspace.project.top_cell = reference.cell.clone();
-        self.workspace
+        if !self
+            .workspace
             .schematic_buffers
-            .entry(reference.key())
-            .or_default();
+            .contains_key(&reference.key())
+        {
+            self.workspace
+                .insert_schematic_editor(reference.key(), SchematicState::default());
+        }
         reference
     }
 
@@ -1164,11 +1165,10 @@ impl AppState {
             let new_key = CellViewRef::new(dst_library, new_name, view.as_str()).key();
             if let Some(buffer) = self
                 .workspace
-                .schematic_buffers
-                .get(&old_key)
-                .map(SchematicState::copy_without_validated_revisions)
+                .schematic_editor(&old_key)
+                .map(|source| source.copy_without_validated_revisions())
             {
-                self.workspace.schematic_buffers.insert(new_key, buffer);
+                self.workspace.insert_schematic_editor(new_key, buffer);
             }
         }
         self.workspace
@@ -1272,11 +1272,10 @@ impl AppState {
             .cloned()
             .collect();
         for key in moved_keys {
-            if let Some(buffer) = self.workspace.schematic_buffers.remove(&key) {
+            if let Some(buffer) = self.workspace.remove_schematic_editor(&key) {
                 let tail = &key[old_prefix.len()..];
                 self.workspace
-                    .schematic_buffers
-                    .insert(format!("{library}/{new_name}/{tail}"), buffer);
+                    .insert_schematic_editor(format!("{library}/{new_name}/{tail}"), buffer);
             }
         }
         self.workspace
@@ -1299,9 +1298,8 @@ impl AppState {
         let mut remap_schematic = |schematic: &mut crate::state::SchematicState| {
             remapped += schematic.rename_cell_bindings(library, cell, new_name);
         };
-        for buffer in self.workspace.schematic_buffers.values_mut() {
-            remap_schematic(buffer);
-        }
+        self.workspace
+            .for_each_schematic_editor_mut(|_, buffer| remap_schematic(buffer));
         remap_schematic(&mut self.schematic);
 
         if !renamed_source_ids.is_empty() {
@@ -1441,11 +1439,10 @@ impl AppState {
             .cloned()
             .collect();
         for key in moved_keys {
-            if let Some(buffer) = self.workspace.schematic_buffers.remove(&key) {
+            if let Some(buffer) = self.workspace.remove_schematic_editor(&key) {
                 let tail = &key[old_prefix.len()..];
                 self.workspace
-                    .schematic_buffers
-                    .insert(format!("{new_name}/{tail}"), buffer);
+                    .insert_schematic_editor(format!("{new_name}/{tail}"), buffer);
             }
         }
         self.workspace
@@ -1683,14 +1680,9 @@ impl AppState {
 
         let old_reference = CellViewRef::new(library, cell, view);
         let new_reference = CellViewRef::new(library, cell, new_name);
-        if let Some(buffer) = self
-            .workspace
-            .schematic_buffers
-            .remove(&old_reference.key())
-        {
+        if let Some(buffer) = self.workspace.remove_schematic_editor(&old_reference.key()) {
             self.workspace
-                .schematic_buffers
-                .insert(new_reference.key(), buffer);
+                .insert_schematic_editor(new_reference.key(), buffer);
         }
         self.workspace
             .commit_prepared_physical_layout_catalog(candidate_layouts);
@@ -1735,12 +1727,12 @@ impl AppState {
     fn remap_instance_bindings(&mut self, rebind: impl Fn(&mut SchematicState) -> usize) -> usize {
         let active_key = self.workspace.active_key();
         let mut remapped = 0usize;
-        for (key, buffer) in &mut self.workspace.schematic_buffers {
+        self.workspace.for_each_schematic_editor_mut(|key, buffer| {
             let count = rebind(buffer);
             if !key.eq_ignore_ascii_case(&active_key) {
                 remapped += count;
             }
-        }
+        });
         remapped += rebind(&mut self.schematic);
         remapped
     }
@@ -1754,9 +1746,8 @@ impl AppState {
     pub(crate) fn external_instance_references_to_library(&self, library: &str) -> usize {
         let active_key = self.workspace.active_key();
         let owned_prefix = format!("{library}/");
-        let count = |schematic: &SchematicState| {
-            schematic
-                .document()
+        let count = |document: &rspice_design::schematic::document::SchematicDocument| {
+            document
                 .components
                 .iter()
                 .filter(|component| {
@@ -1770,7 +1761,7 @@ impl AppState {
         let live = if self.workspace.active_view.library == library {
             0
         } else {
-            count(&self.schematic)
+            count(self.schematic.document())
         };
         live + self
             .workspace
@@ -1779,7 +1770,7 @@ impl AppState {
             .filter(|(key, _)| {
                 !key.eq_ignore_ascii_case(&active_key) && !key.starts_with(&owned_prefix)
             })
-            .map(|(_, schematic)| count(schematic))
+            .map(|(_, schematic)| count(schematic.document()))
             .sum::<usize>()
     }
 
@@ -1820,6 +1811,9 @@ impl AppState {
         let prefix = format!("{library}/");
         self.workspace
             .schematic_buffers
+            .retain(|key, _| !key.starts_with(&prefix));
+        self.workspace
+            .schematic_sessions
             .retain(|key, _| !key.starts_with(&prefix));
         self.workspace
             .open_views

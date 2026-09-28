@@ -1,10 +1,12 @@
 //! Bind project authority and the live editor to the headless design projection.
 use super::hierarchy::WorkspaceSourceFiles;
 use super::*;
-use rspice_design::projection::ProjectionContext;
 pub use rspice_design::projection::{
     ConfigurationExecutionPlanError, ConfigurationExecutionProjection, DesignProjection,
     DesignProjectionKey,
+};
+use rspice_design::projection::{
+    ProjectionContext, ProjectionSource, ProjectionSources, SchematicSource,
 };
 #[cfg(test)]
 use rspice_design::projection::{materialization_count, reset_materialization_count};
@@ -17,7 +19,7 @@ impl ProjectWorkspace {
         &self,
         libraries: &LibraryManager,
         active_reference: &CellViewRef,
-        active_schematic: &SchematicState,
+        active_schematic: &impl ProjectionSource,
     ) -> Result<Arc<DesignProjection>, ConfigurationExecutionPlanError> {
         self.inspect_design_projection(libraries, active_reference, active_schematic)?
             .into_execution()
@@ -27,7 +29,7 @@ impl ProjectWorkspace {
         &self,
         libraries: &LibraryManager,
         active_reference: &CellViewRef,
-        active_schematic: &SchematicState,
+        active_schematic: &impl ProjectionSource,
     ) -> Result<Arc<DesignProjection>, ConfigurationExecutionPlanError> {
         if let Some(error) = self.annotation_restoration_error() {
             return Err(ConfigurationExecutionPlanError::DesignManagement(format!(
@@ -45,7 +47,7 @@ impl ProjectWorkspace {
         &self,
         libraries: &LibraryManager,
         active_reference: &CellViewRef,
-        active_schematic: &SchematicState,
+        active_schematic: &impl ProjectionSource,
     ) -> Option<DesignProjectionKey> {
         if self.annotation_restoration_error().is_some() {
             return None;
@@ -61,14 +63,17 @@ impl ProjectWorkspace {
         &self,
         libraries: &LibraryManager,
         active_reference: &CellViewRef,
-        active_schematic: &SchematicState,
+        active_schematic: &impl ProjectionSource,
     ) -> Result<ConfigurationExecutionProjection, ConfigurationExecutionPlanError> {
         self.design_projection(libraries, active_reference, active_schematic)
     }
 
-    fn projection_context(&self) -> ProjectionContext<'_, SchematicState, WorkspaceSourceFiles> {
+    fn projection_context(
+        &self,
+    ) -> ProjectionContext<'_, WorkspaceProjectionSources<'_>, WorkspaceSourceFiles> {
         ProjectionContext {
             schematic_buffers: &self.schematic_buffers,
+            sources: WorkspaceProjectionSources(&self.schematic_sessions),
             configuration_sets: &self.configuration_sets,
             design_management: &self.design_management,
             connectivity: &self.connectivity,
@@ -78,6 +83,26 @@ impl ProjectWorkspace {
             root: self.simulation_root_reference(),
             source_files: &WorkspaceSourceFiles,
             cache: &self.design_projection_cache,
+        }
+    }
+}
+
+struct WorkspaceProjectionSources<'a>(
+    &'a HashMap<String, crate::state::schematic::SchematicSession>,
+);
+
+impl ProjectionSources for WorkspaceProjectionSources<'_> {
+    fn schematic_source<'a>(
+        &'a self,
+        key: &str,
+        schematic: &'a rspice_design::schematic::owned::Schematic,
+    ) -> SchematicSource<'a> {
+        let session = self.0.get(key);
+        SchematicSource {
+            schematic,
+            current_file: session.and_then(|session| session.current_file.as_deref()),
+            read_only: session.is_some_and(|session| session.read_only),
+            modified: session.is_some_and(|session| session.is_dirty),
         }
     }
 }

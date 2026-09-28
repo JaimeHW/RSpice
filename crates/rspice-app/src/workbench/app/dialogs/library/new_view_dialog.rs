@@ -280,8 +280,7 @@ impl RSpiceApp {
                     let reference = crate::state::CellViewRef::new(&library, &cell, &view_name);
                     self.state
                         .workspace
-                        .schematic_buffers
-                        .insert(reference.key(), seeded_schematic);
+                        .insert_schematic_editor(reference.key(), seeded_schematic);
                 }
                 self.state
                     .publish_project_library_mutation(project_mutation);
@@ -622,13 +621,13 @@ fn cell_schematic_ports(
 ) -> Vec<crate::state::PortSpec> {
     let reference = crate::state::CellViewRef::new(library, cell, "schematic");
     if state.workspace.active_view == reference {
-        return state.schematic.interface_ports();
+        return state.schematic.document().interface_ports();
     }
     state
         .workspace
         .schematic_buffers
         .get(&reference.key())
-        .map(|schematic| schematic.interface_ports())
+        .map(|schematic| schematic.document().interface_ports())
         .unwrap_or_default()
 }
 
@@ -660,12 +659,12 @@ fn derive_cell_interface(
         }
         let reference = crate::state::CellViewRef::new(library_name, cell_name, &view.name);
         let schematic = if app.state.workspace.active_view == reference {
-            Some(&app.state.schematic)
+            Some(app.state.schematic.editor_ref().design)
         } else {
             app.state.workspace.schematic_buffers.get(&reference.key())
         };
         if let Some(schematic) = schematic {
-            let ports = schematic.interface_ports();
+            let ports = schematic.document().interface_ports();
             if !ports.is_empty() {
                 contracts.push((reference.display_path(), ports));
             }
@@ -937,7 +936,7 @@ mod tests {
         cell.add_view(View::new("schematic", ViewType::Schematic));
         library.add_cell(cell);
         app.state.library_manager.add_library(library);
-        app.state.workspace.schematic_buffers.insert(
+        app.state.workspace.insert_schematic_editor(
             CellViewRef::new("interface_test", "amp", "schematic").key(),
             schematic_with_ports(&["IN", "OUT"]),
         );

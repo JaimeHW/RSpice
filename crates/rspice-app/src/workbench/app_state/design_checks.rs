@@ -270,12 +270,20 @@ fn design_check_input_digest(
     if let Some(error) = state.workspace.annotation_restoration_error() {
         return Err(format!("reference annotation restoration failed: {error}"));
     }
-    let mut live_buffers = state.workspace.schematic_buffers.clone();
+    let mut live_buffers = state
+        .workspace
+        .schematic_buffers
+        .iter()
+        .map(|(key, schematic)| (key.clone(), schematic))
+        .collect::<std::collections::HashMap<_, _>>();
     if matches!(
         state.workspace.active_view_type(),
         ViewType::Schematic | ViewType::Testbench
     ) {
-        live_buffers.insert(state.workspace.active_view.key(), state.schematic.clone());
+        live_buffers.insert(
+            state.workspace.active_view.key(),
+            state.schematic.editor_ref().design,
+        );
     }
     let mut schematic_digests = live_buffers
         .iter()
@@ -344,16 +352,14 @@ mod tests {
         let other = CellViewRef::new(&root.library, "aux", &root.view);
         state
             .workspace
-            .schematic_buffers
-            .insert(other.key(), crate::state::SchematicState::default());
+            .insert_schematic_editor(other.key(), crate::state::SchematicState::default());
         state
             .publish_active_design_check_result(completed_result())
             .expect("publish root receipt");
 
         state
             .workspace
-            .schematic_buffers
-            .insert(root.key(), state.schematic.clone());
+            .insert_schematic_editor(root.key(), state.schematic.clone());
         state.workspace.active_view = other;
         state.schematic = crate::state::SchematicState::default();
         state.refresh_active_design_check_projection();
@@ -437,8 +443,7 @@ mod tests {
             .expect("publish root receipt");
         state
             .workspace
-            .schematic_buffers
-            .insert(root.key(), state.schematic.clone());
+            .insert_schematic_editor(root.key(), state.schematic.clone());
         let layout = CellViewRef::new(&root.library, &root.cell, "layout");
         state
             .workspace

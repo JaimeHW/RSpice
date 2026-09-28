@@ -225,7 +225,11 @@ mod tests {
     #[test]
     fn placed_review_note_anchors_to_latest_validated_revision() {
         let mut schematic = SchematicState::default();
-        let validation_receipt_digest = schematic.validated_design_content_digest().unwrap();
+        let validation_receipt_digest = schematic
+            .editor_ref()
+            .design
+            .validated_design_content_digest()
+            .unwrap();
         schematic
             .append_validated_revision(ValidatedRevisionRequest {
                 project_id: ProjectId::new().to_string(),

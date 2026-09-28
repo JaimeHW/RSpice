@@ -86,9 +86,9 @@ fn custom_stop_view_name_stops_the_hierarchy() {
     let mut libraries = LibraryManager::default();
     workspace.ensure_library_model(&mut libraries);
     workspace
-        .schematic_buffers
-        .get_mut(&CellViewRef::default_top().key())
+        .schematic_editor_mut(&CellViewRef::default_top().key())
         .expect("top buffer")
+        .editor
         .add_library_cell_component(Point::new(20, 20), instance("work", "amp"));
     add_schematic_master(
         &mut libraries,
@@ -122,10 +122,8 @@ fn custom_stop_view_name_stops_the_hierarchy() {
 
     let active = workspace.active_view.clone();
     let root = workspace
-        .schematic_buffers
-        .get(&CellViewRef::default_top().key())
-        .expect("top buffer")
-        .clone();
+        .clone_schematic_editor(&CellViewRef::default_top().key())
+        .expect("top buffer");
     let projection = workspace
         .configuration_execution_projection(&libraries, &active, &root)
         .expect("the corner view resolves");
@@ -163,9 +161,9 @@ fn custom_executable_view_name_is_accepted() {
     let mut libraries = LibraryManager::default();
     workspace.ensure_library_model(&mut libraries);
     workspace
-        .schematic_buffers
-        .get_mut(&CellViewRef::default_top().key())
+        .schematic_editor_mut(&CellViewRef::default_top().key())
         .expect("top buffer")
+        .editor
         .add_library_cell_component(Point::new(20, 20), instance("work", "amp"));
     add_schematic_master(
         &mut libraries,
@@ -180,9 +178,7 @@ fn custom_executable_view_name_is_accepted() {
         .expect("the library exists")
         .get_or_create_cell("amp")
         .add_view(View::new("schematic_fast", ViewType::Schematic));
-    workspace
-        .schematic_buffers
-        .insert(fast.key(), SchematicState::default());
+    workspace.insert_schematic_editor(fast.key(), SchematicState::default());
     workspace
         .configuration_sets
         .create(view_policy_configuration(
@@ -210,9 +206,9 @@ fn stop_view_matching_a_schematic_warns_and_descends() {
     let mut libraries = LibraryManager::default();
     workspace.ensure_library_model(&mut libraries);
     workspace
-        .schematic_buffers
-        .get_mut(&CellViewRef::default_top().key())
+        .schematic_editor_mut(&CellViewRef::default_top().key())
         .expect("top buffer")
+        .editor
         .add_library_cell_component(Point::new(20, 20), instance("work", "amp"));
     add_schematic_master(
         &mut libraries,
@@ -267,12 +263,13 @@ fn a_configuration_written_before_the_implicit_root_names_the_same_instances() {
     let mut workspace = ProjectWorkspace::default();
     let mut libraries = LibraryManager::default();
     workspace.ensure_library_model(&mut libraries);
-    let top = workspace
-        .schematic_buffers
-        .get_mut(&CellViewRef::default_top().key())
+    let mut stored_top = workspace
+        .schematic_editor_mut(&CellViewRef::default_top().key())
         .expect("top buffer");
+    let top = &mut stored_top.editor;
     top.add_library_cell_component(Point::new(20, 20), instance("work", "amp"));
     top.add_library_cell_component(Point::new(80, 20), instance("work", "amp"));
+    drop(stored_top);
     add_schematic_master(
         &mut libraries,
         &mut workspace,
@@ -391,16 +388,17 @@ fn an_instance_the_grammar_cannot_name_is_reported_rather_than_skipped() {
     let mut workspace = ProjectWorkspace::default();
     let mut libraries = LibraryManager::default();
     workspace.ensure_library_model(&mut libraries);
-    let top = workspace
-        .schematic_buffers
-        .get_mut(&CellViewRef::default_top().key())
+    let mut stored_top = workspace
+        .schematic_editor_mut(&CellViewRef::default_top().key())
         .expect("top buffer");
+    let top = &mut stored_top.editor;
     top.add_library_cell_component(Point::new(20, 20), instance("work", "amp"));
     top.document_mut_for_test()
         .components
         .last_mut()
         .expect("placed instance")
         .name = "X 1".to_owned();
+    drop(stored_top);
     add_schematic_master(
         &mut libraries,
         &mut workspace,
@@ -433,12 +431,13 @@ fn no_configuration_still_builds_a_plan() {
     let mut workspace = ProjectWorkspace::default();
     let mut libraries = LibraryManager::default();
     workspace.ensure_library_model(&mut libraries);
-    let top = workspace
-        .schematic_buffers
-        .get_mut(&CellViewRef::default_top().key())
+    let mut stored_top = workspace
+        .schematic_editor_mut(&CellViewRef::default_top().key())
         .expect("top buffer");
+    let top = &mut stored_top.editor;
     top.add_library_cell_component(Point::new(20, 20), instance("work", "amp"));
     top.add_library_cell_component(Point::new(120, 20), instance("work", "amp"));
+    drop(stored_top);
     add_schematic_master(
         &mut libraries,
         &mut workspace,
@@ -452,10 +451,8 @@ fn no_configuration_still_builds_a_plan() {
     );
     let active = workspace.active_view.clone();
     let root = workspace
-        .schematic_buffers
-        .get(&active.key())
-        .expect("top buffer")
-        .clone();
+        .clone_schematic_editor(&active.key())
+        .expect("top buffer");
 
     let projection = workspace
         .configuration_execution_projection(&libraries, &active, &root)
@@ -526,9 +523,9 @@ fn either_desktop_binding_syntax_keeps_an_absolute_source_identity() {
         binding.terminal_order = vec!["in".to_owned(), "out".to_owned()];
         binding.source_path = Some(source_path.clone());
         workspace
-            .schematic_buffers
-            .get_mut(&CellViewRef::default_top().key())
+            .schematic_editor_mut(&CellViewRef::default_top().key())
             .expect("top buffer")
+            .editor
             .add_library_cell_component(Point::new(20, 20), binding);
 
         let resolution = workspace.resolve_hierarchy(&libraries);

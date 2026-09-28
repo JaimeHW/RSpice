@@ -63,7 +63,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
     let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut library_manager);
     let schematic = workspace
         .active_schematic()
-        .cloned()
+        .map(|source| source.clone_editor())
         .unwrap_or_else(crate::state::SchematicState::default);
     workspace.save_active_schematic(&schematic);
     let sim_setup = crate::workbench::app_state::SimSetupState::new();

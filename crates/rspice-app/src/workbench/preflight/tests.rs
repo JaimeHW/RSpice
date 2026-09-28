@@ -570,16 +570,17 @@ fn report_currentness_tracks_the_configured_root_not_an_unrelated_active_editor(
     let mut state = AppState::default();
     let configured_root = state.workspace.simulation_root_reference();
     let configured_root_key = configured_root.key();
-    let configured_schematic = state
+    let mut stored_configured_schematic = state
         .workspace
-        .schematic_buffers
-        .get_mut(&configured_root_key)
+        .schematic_editor_mut(&configured_root_key)
         .expect("default configured root buffer");
+    let configured_schematic = &mut stored_configured_schematic.editor;
     configured_schematic.add_component(
         crate::state::ComponentType::Ground,
         crate::state::Point::new(40, 40),
     );
     let configured_revision = configured_schematic.topology_version();
+    drop(stored_configured_schematic);
 
     state.workspace.active_view =
         crate::state::CellViewRef::new("user", "unrelated_editor", "schematic");
@@ -622,8 +623,7 @@ fn report_currentness_expires_when_a_referenced_child_topology_changes() {
     );
     state
         .workspace
-        .schematic_buffers
-        .insert(child.key(), child_schematic.clone());
+        .insert_schematic_editor(child.key(), child_schematic.clone());
 
     let report = collect_report(&state);
     let root_revision = report.topology_revision;
@@ -638,7 +638,7 @@ fn report_currentness_expires_when_a_referenced_child_topology_changes() {
     // before activating the child view. Mirror that contract explicitly;
     // otherwise this synthetic state would replace the edited root with
     // the stale default buffer and test a transition the UI cannot make.
-    state.workspace.schematic_buffers.insert(
+    state.workspace.insert_schematic_editor(
         crate::state::CellViewRef::default_top().key(),
         state.schematic.clone(),
     );
@@ -861,8 +861,7 @@ fn state_with_a_stop_view_warning() -> AppState {
     );
     state
         .workspace
-        .schematic_buffers
-        .insert("work/amp/schematic".to_owned(), master);
+        .insert_schematic_editor("work/amp/schematic".to_owned(), master);
 
     let binding = crate::state::LibraryCellInstance::new("work", "amp", "schematic");
     let instance = state

@@ -67,13 +67,13 @@ impl ProjectWorkspace {
         let mut before = BTreeMap::new();
         let mut after = BTreeMap::new();
         for (key, names) in by_document {
-            let source = &self.schematic_buffers[&key];
+            let source = self.schematic_editor(&key).expect("annotation source");
             let candidate = source
                 .renamed_reference_candidate(&names)
                 .map_err(|reason| {
                     format!("Cannot restore reference annotation in '{key}': {reason}")
                 })?;
-            before.insert(key.clone(), source.clone());
+            before.insert(key.clone(), source.clone_editor());
             after.insert(key, candidate);
         }
         // The overlay must be an actual source, including projects last saved
@@ -93,7 +93,8 @@ impl ProjectWorkspace {
         let transaction = self.prepare_schematic_reference_transaction(
             libraries,
             &active_reference,
-            &self.schematic_buffers[active_key],
+            self.schematic_editor(active_key)
+                .expect("annotation overlay"),
             before,
             after,
         )?;
@@ -104,7 +105,7 @@ impl ProjectWorkspace {
                     open.dirty = true;
                 }
             }
-            self.schematic_buffers.insert(key, schematic);
+            self.insert_schematic_editor(key, schematic);
         }
         Ok(count)
     }

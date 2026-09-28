@@ -240,10 +240,10 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
         .unwrap();
         let loaded = crate::io::load_project_file(&path).unwrap();
         let reference = loaded.workspace.active_schematic_reference();
-        let source = &loaded.workspace.schematic_buffers[&reference.key()];
+        let source = loaded.workspace.schematic_editor(&reference.key()).unwrap();
         let projection = loaded
             .workspace
-            .design_projection(&loaded.libraries, &reference, source)
+            .design_projection(&loaded.libraries, &reference, &source)
             .unwrap();
         for schematic in [
             source.document(),

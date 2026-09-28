@@ -1336,18 +1336,21 @@ impl AppState {
     }
 }
 
-fn schematic_has_authored_content(schematic: &crate::state::SchematicState) -> bool {
-    !schematic.document().components.is_empty()
-        || !schematic.document().wires.is_empty()
-        || !schematic.document().buses.is_empty()
-        || !schematic.document().bus_taps.is_empty()
-        || !schematic.document().design_notes.is_empty()
-        || !schematic.document().documentation_shapes.is_empty()
-        || !schematic.document().probes.is_empty()
-        || !schematic.document().net_labels.is_empty()
-        || !schematic.document().junctions.is_empty()
-        || !schematic.document().connections.is_empty()
-        || !schematic.document().validated_revisions.is_empty()
+fn schematic_has_authored_content(
+    schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
+) -> bool {
+    let schematic = schematic.as_ref();
+    !schematic.components.is_empty()
+        || !schematic.wires.is_empty()
+        || !schematic.buses.is_empty()
+        || !schematic.bus_taps.is_empty()
+        || !schematic.design_notes.is_empty()
+        || !schematic.documentation_shapes.is_empty()
+        || !schematic.probes.is_empty()
+        || !schematic.net_labels.is_empty()
+        || !schematic.junctions.is_empty()
+        || !schematic.connections.is_empty()
+        || !schematic.validated_revisions.is_empty()
 }
 
 #[cfg(test)]

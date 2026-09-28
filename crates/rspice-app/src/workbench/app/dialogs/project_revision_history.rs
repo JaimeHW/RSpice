@@ -1227,7 +1227,11 @@ mod tests {
     use crate::state::{ComponentType, Point, ValidatedRevisionRequest, ValidationFindingCounts};
 
     fn append(state: &mut crate::state::SchematicState, note: &str) {
-        let digest = state.validated_design_content_digest().unwrap();
+        let digest = state
+            .editor_ref()
+            .design
+            .validated_design_content_digest()
+            .unwrap();
         state
             .append_validated_revision(ValidatedRevisionRequest {
                 project_id: ProjectId::new().to_string(),

@@ -57,11 +57,29 @@ use rspice_design_model::{
 };
 
 /// The live design and source metadata needed to freeze one schematic.
+#[derive(Clone, Copy)]
 pub struct SchematicSource<'a> {
     pub schematic: &'a Schematic,
     pub current_file: Option<&'a Path>,
     pub read_only: bool,
     pub modified: bool,
+}
+
+impl AsRef<SchematicDocument> for SchematicSource<'_> {
+    fn as_ref(&self) -> &SchematicDocument {
+        self.schematic.document()
+    }
+}
+
+impl ProjectionSource for SchematicSource<'_> {
+    fn projection_source(&self) -> SchematicSource<'_> {
+        *self
+    }
+}
+
+/// Borrow the metadata associated with each stored design without owning editor state.
+pub trait ProjectionSources {
+    fn schematic_source<'a>(&'a self, key: &str, schematic: &'a Schematic) -> SchematicSource<'a>;
 }
 
 /// Borrow design authority without retaining editor interaction or history.
@@ -142,8 +160,9 @@ impl DesignProjectionCache {
 }
 
 /// Borrowed authorities required to materialize and resolve a design.
-pub struct ProjectionContext<'a, S, F> {
-    pub schematic_buffers: &'a HashMap<String, S>,
+pub struct ProjectionContext<'a, M, F> {
+    pub schematic_buffers: &'a HashMap<String, Schematic>,
+    pub sources: M,
     pub configuration_sets: &'a ConfigurationSetCatalog,
     pub design_management: &'a DesignManagementCatalog,
     pub connectivity: &'a ConnectivityContract,
@@ -430,7 +449,7 @@ pub fn materialization_count() -> u64 {
     MATERIALIZATIONS.with(std::cell::Cell::get)
 }
 
-impl<S: ProjectionSource, F: HierarchySourceFiles> ProjectionContext<'_, S, F> {
+impl<M: ProjectionSources, F: HierarchySourceFiles> ProjectionContext<'_, M, F> {
     /// Inspect the materialized circuit even when its configured hierarchy
     /// cannot execute. The receipt and execution route share this cache;
     /// structural materialization errors still refuse the entire projection.
@@ -438,7 +457,7 @@ impl<S: ProjectionSource, F: HierarchySourceFiles> ProjectionContext<'_, S, F> {
         &self,
         libraries: &LibraryCatalog,
         active_reference: &CellViewRef,
-        active_schematic: &S,
+        active_schematic: &impl ProjectionSource,
     ) -> Result<Arc<DesignProjection>, ConfigurationExecutionPlanError> {
         let inputs = self.design_inputs(active_reference, active_schematic);
         let key = inputs
@@ -472,7 +491,7 @@ impl<S: ProjectionSource, F: HierarchySourceFiles> ProjectionContext<'_, S, F> {
         &self,
         libraries: &LibraryCatalog,
         active_reference: &CellViewRef,
-        active_schematic: &S,
+        active_schematic: &impl ProjectionSource,
     ) -> Option<DesignProjectionKey> {
         self.design_inputs(active_reference, active_schematic)
             .map(|inputs| self.projection_key(libraries, &inputs))
@@ -496,7 +515,7 @@ impl<S: ProjectionSource, F: HierarchySourceFiles> ProjectionContext<'_, S, F> {
         &self,
         libraries: &LibraryCatalog,
         active_reference: &CellViewRef,
-        active_schematic: &S,
+        active_schematic: &impl ProjectionSource,
         inputs: Option<&DesignInputs>,
         key: Option<DesignProjectionKey>,
     ) -> Result<DesignProjection, ConfigurationExecutionPlanError> {
@@ -511,7 +530,11 @@ impl<S: ProjectionSource, F: HierarchySourceFiles> ProjectionContext<'_, S, F> {
                 continue;
             }
             let memo_key = inputs.and_then(|inputs| inputs.memo_key(cell_view_key));
-            let materialized = self.materialized_cell_view(cell_view_key, schematic, memo_key)?;
+            let materialized = self.materialized_cell_view(
+                cell_view_key,
+                &self.sources.schematic_source(cell_view_key, schematic),
+                memo_key,
+            )?;
             schematic_buffers.insert(cell_view_key.clone(), materialized);
         }
         let memo_key = inputs.and_then(|inputs| inputs.memo_key(&active_key));
@@ -570,7 +593,7 @@ impl<S: ProjectionSource, F: HierarchySourceFiles> ProjectionContext<'_, S, F> {
         &self,
         libraries: &LibraryCatalog,
         active_reference: &CellViewRef,
-        active_schematic: &S,
+        active_schematic: &impl ProjectionSource,
         projected: &mut HashMap<String, ProjectedSchematic>,
     ) -> Result<(), ConfigurationExecutionPlanError> {
         let variants = self.design_management.variants();
@@ -600,14 +623,14 @@ impl<S: ProjectionSource, F: HierarchySourceFiles> ProjectionContext<'_, S, F> {
                 .find(|(key, _)| key.eq_ignore_ascii_case(object.cell_view_key()))
                 .ok_or_else(|| refusal("source document is unavailable".to_owned()))?;
             let source_document = if key.eq_ignore_ascii_case(&active_reference.key()) {
-                active_schematic
+                active_schematic.as_ref()
             } else {
                 self.schematic_buffers
                     .get(key)
                     .ok_or_else(|| refusal("authored document is unavailable".to_owned()))?
+                    .document()
             };
             let source = source_document
-                .as_ref()
                 .components
                 .iter()
                 .find(|component| component.id == object.object_id())
@@ -684,7 +707,7 @@ impl<S: ProjectionSource, F: HierarchySourceFiles> ProjectionContext<'_, S, F> {
     fn materialized_cell_view(
         &self,
         cell_view_key: &str,
-        source: &S,
+        source: &impl ProjectionSource,
         memo_key: Option<BufferMemoKey>,
     ) -> Result<ProjectedSchematic, ConfigurationExecutionPlanError> {
         if let Some(memo_key) = memo_key.as_ref() {
@@ -728,7 +751,7 @@ impl<S: ProjectionSource, F: HierarchySourceFiles> ProjectionContext<'_, S, F> {
     fn design_inputs(
         &self,
         active_reference: &CellViewRef,
-        active_schematic: &S,
+        active_schematic: &impl ProjectionSource,
     ) -> Option<DesignInputs> {
         let mut hasher = sha2::Sha256::new();
         hash_serialized(&mut hasher, &self.configuration_sets)?;
@@ -744,7 +767,10 @@ impl<S: ProjectionSource, F: HierarchySourceFiles> ProjectionContext<'_, S, F> {
             if *cell_view_key == active_key {
                 continue;
             }
-            cell_views.insert(cell_view_key.clone(), cell_view_digest(schematic)?);
+            cell_views.insert(
+                cell_view_key.clone(),
+                cell_view_digest(&self.sources.schematic_source(cell_view_key, schematic))?,
+            );
         }
         cell_views.insert(active_key.clone(), cell_view_digest(active_schematic)?);
 

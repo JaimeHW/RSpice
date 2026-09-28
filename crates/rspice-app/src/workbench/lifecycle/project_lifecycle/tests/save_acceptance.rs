@@ -68,7 +68,7 @@ fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() 
                 Point::new(150, 100)
             );
             let key = state.workspace.active_key();
-            let mut inactive_copy = state.workspace.schematic_buffers[&key].clone();
+            let mut inactive_copy = state.workspace.clone_schematic_editor(&key).unwrap();
             assert!(inactive_copy.cancel_operation());
             assert_eq!(inactive_copy.session.is_dirty, later_change != 0);
             assert!(state.schematic.cancel_operation());
@@ -218,11 +218,11 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
     assert!(state.schematic.session.is_dirty);
     assert!(state.workspace.open_views.iter().all(|view| view.dirty));
     assert!(
-        state
+        state.workspace.schematic_buffers.keys().all(|key| state
             .workspace
-            .schematic_buffers
-            .values()
-            .all(|schematic| schematic.session.is_dirty)
+            .schematic_editor(key)
+            .unwrap()
+            .is_dirty())
     );
     assert!(state.workspace.project_metadata_dirty);
     assert!(state.workspace.netlist_source_dirty);

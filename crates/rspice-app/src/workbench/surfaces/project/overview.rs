@@ -382,7 +382,7 @@ impl OverviewSnapshot {
             crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
         );
         let root_schematic = if state.workspace.active_view == root_reference {
-            Some(&state.schematic)
+            Some(state.schematic.editor_ref().design)
         } else {
             state.workspace.schematic_buffers.get(&root_reference.key())
         };
@@ -600,8 +600,8 @@ impl OverviewSnapshot {
             })
             .collect::<Vec<_>>();
         let mut retained_revision_ids = BTreeSet::new();
-        for schematic in
-            std::iter::once(&state.schematic).chain(state.workspace.schematic_buffers.values())
+        for schematic in std::iter::once(state.schematic.editor_ref().design)
+            .chain(state.workspace.schematic_buffers.values())
         {
             for revision in schematic
                 .document()
@@ -678,7 +678,7 @@ impl OverviewSnapshot {
         // Counted from the retained records themselves, not from what the loops
         // above collected: each of those is capped, so reporting their length
         // would describe the cap rather than the project.
-        let retained_revision_total = std::iter::once(&state.schematic)
+        let retained_revision_total = std::iter::once(state.schematic.editor_ref().design)
             .chain(state.workspace.schematic_buffers.values())
             .flat_map(|schematic| schematic.document().validated_revisions.records().iter())
             .map(|revision| revision.id().as_uuid())
