@@ -9,7 +9,6 @@ mod accepted_project;
 mod persistence;
 mod result_cache;
 
-use accepted_project::AcceptedProject;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use persistence::{
     start_browser_checkpoint_list, start_browser_checkpoint_publish, start_browser_checkpoint_read,
@@ -18,6 +17,7 @@ pub(crate) use persistence::{
 pub(crate) use rspice_project::persistence::native::DestinationAuthority;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_project::persistence::native::{NativeCopyDestination, NativeSaveDestination};
+use std::rc::Rc;
 mod registry;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -68,7 +68,8 @@ struct BrowserConflict {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ProjectLifecycleState {
     pub(crate) authority: ProjectLifecycle,
-    accepted: Option<AcceptedProject>,
+    accepted_session: Rc<crate::state::workspace::WorkspaceSession>,
+    accepted_binding: Option<PersistenceBinding>,
     #[cfg(not(target_arch = "wasm32"))]
     unreadable_native_binding: Option<persistence::UnreadableNativeBinding>,
     result_cache: result_cache::ResultCache,
@@ -87,15 +88,17 @@ impl ProjectLifecycleState {
         self.authority.operation_in_progress()
     }
 
-    pub(crate) fn accepted(&self) -> Option<&AcceptedProject> {
-        self.accepted.as_ref()
+    pub(crate) fn accepted(&self) -> Option<&rspice_project::AcceptedProject> {
+        self.authority.accepted()
+    }
+
+    pub(crate) fn binding(&self) -> Option<&PersistenceBinding> {
+        self.accepted_binding.as_ref()
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn canonical_native_path(&self) -> Option<&Path> {
-        self.accepted
-            .as_ref()
-            .and_then(|accepted| accepted.binding.as_ref())
+        self.binding()
             .map(|binding| binding.canonical_path.as_path())
     }
 }
@@ -106,18 +109,10 @@ impl ProjectLifecycleState {
 /// Workflows such as Check and save use this same decision before presenting
 /// their document scope and before freezing validation evidence.
 pub(crate) fn effective_save_scope(state: &AppState, requested: SaveScope) -> SaveScope {
-    let first_save = state.project_lifecycle.accepted.is_none()
-        || state
-            .project_lifecycle
-            .accepted
-            .as_ref()
-            .and_then(|accepted| accepted.binding.as_ref())
-            .is_none();
-    if first_save {
-        SaveScope::AllDocuments
-    } else {
-        requested
-    }
+    state
+        .project_lifecycle
+        .authority
+        .effective_save_scope(requested, state.project_lifecycle.binding().is_some())
 }
 
 /// Exact active schematic from the currently accepted canonical project.
@@ -125,9 +120,10 @@ pub(crate) fn effective_save_scope(state: &AppState, requested: SaveScope) -> Sa
 /// predates that journal. A missing canonical binding or a newly created view
 /// has no predecessor and therefore returns `None`.
 pub(crate) fn accepted_active_schematic(state: &AppState) -> Option<crate::state::SchematicState> {
-    let accepted = state.project_lifecycle.accepted.as_ref()?;
-    accepted.binding.as_ref()?;
-    accepted.clone_schematic_editor(&state.workspace.content.active_view.key())
+    state.project_lifecycle.binding()?;
+    state
+        .project_lifecycle
+        .accepted_schematic_editor(&state.workspace.content.active_view.key())
 }
 
 /// Monotonic identity of the accepted canonical baseline. Validation receipts
@@ -229,14 +225,9 @@ pub(crate) fn generated_netlist_input_digest(
 }
 
 pub(crate) fn has_unsaved_changes(state: &AppState) -> bool {
-    state.project_lifecycle.authority.has_unsaved_changes(
-        state
-            .project_lifecycle
-            .accepted
-            .as_ref()
-            .map(AcceptedProject::content),
-        || capture_snapshot(state, SnapshotContent::Current).map(|snapshot| snapshot.file),
-    )
+    state.project_lifecycle.authority.has_unsaved_changes(|| {
+        capture_snapshot(state, SnapshotContent::Current).map(|snapshot| snapshot.file)
+    })
 }
 
 pub(crate) fn operation_in_progress(state: &AppState) -> bool {
@@ -265,25 +256,18 @@ pub(crate) fn active_document(state: &AppState) -> ProjectDocumentId {
 
 pub(crate) fn active_document_is_dirty(state: &AppState) -> bool {
     state.project_lifecycle.authority.document_is_dirty(
-        state
-            .project_lifecycle
-            .accepted
-            .as_ref()
-            .map(AcceptedProject::content),
         || active_document(state),
         || capture_snapshot(state, SnapshotContent::Current).map(|snapshot| snapshot.file),
     )
 }
 
 pub(crate) fn refresh_registry(state: &mut AppState) -> Result<(), ProjectLifecycleError> {
-    let comparison = state.project_lifecycle.authority.prepare_registry_refresh(
-        state
-            .project_lifecycle
-            .accepted
-            .as_ref()
-            .map(AcceptedProject::content),
-        || capture_snapshot(state, SnapshotContent::Current).map(|snapshot| snapshot.file),
-    );
+    let comparison = state
+        .project_lifecycle
+        .authority
+        .prepare_registry_refresh(|| {
+            capture_snapshot(state, SnapshotContent::Current).map(|snapshot| snapshot.file)
+        });
     let result = state
         .project_lifecycle
         .authority
@@ -365,10 +349,8 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
         .authority
         .registry()
         .is_dirty(&ProjectDocumentId::ProjectConfiguration);
-    if let Some(accepted) = state.project_lifecycle.accepted.as_ref() {
-        accepted
-            .content()
-            .apply_source_dirty_flags(&mut state.workspace.content);
+    if let Some(accepted) = state.project_lifecycle.accepted() {
+        accepted.apply_source_dirty_flags(&mut state.workspace.content);
     }
 }
 
@@ -383,9 +365,7 @@ pub(crate) fn initialize_from_session(state: &mut AppState) {
                 let session_project_id = state.workspace.content.project.id().to_string();
                 match persistence::restore_native_binding(&path, &session_project_id, &receipt) {
                     Ok((baseline, binding)) => {
-                        state.project_lifecycle.accepted =
-                            Some(AcceptedProject::new(baseline, Some(binding)));
-                        state.project_lifecycle.authority.restore_accepted_content();
+                        state.project_lifecycle.restore_project(baseline, binding);
                         state.browser_project_binding_receipt = None;
                     }
                     Err(error) => {
@@ -480,9 +460,10 @@ pub(crate) fn poll_browser_binding_restore(state: &mut AppState) {
                 ));
                 return;
             }
-            state.project_lifecycle.accepted = Some(AcceptedProject::new(*baseline, Some(binding)));
+            state
+                .project_lifecycle
+                .accept_project(*baseline, Some(binding));
             state.native_project_binding_receipt = None;
-            state.project_lifecycle.authority.accept_content();
             let _ = refresh_registry(state);
         }
         persistence::BrowserRestoreResult::ReconnectRequired { binding } => {
@@ -538,8 +519,7 @@ pub(crate) fn accept_loaded_project(
     #[cfg(target_arch = "wasm32")]
     release_replaced_browser_bindings(&state.project_lifecycle, binding.as_ref());
     state.project_lifecycle.authority.open_session();
-    state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, binding));
-    state.project_lifecycle.authority.accept_content();
+    state.project_lifecycle.accept_project(baseline, binding);
     #[cfg(not(target_arch = "wasm32"))]
     {
         state.project_lifecycle.unreadable_native_binding = None;
@@ -554,9 +534,7 @@ pub(crate) fn accept_loaded_project(
         state.native_project_binding_receipt = None;
         state.browser_project_binding_receipt = state
             .project_lifecycle
-            .accepted
-            .as_ref()
-            .and_then(|accepted| accepted.binding.as_ref())
+            .binding()
             .and_then(PersistenceBinding::durable_browser_receipt);
         state.project_lifecycle.browser_reconnect_binding = None;
         state.project_lifecycle.browser_conflict = None;
@@ -617,9 +595,8 @@ fn release_replaced_browser_bindings(
 ) {
     let retained = browser_binding_handle_id(retained);
     let accepted = lifecycle
-        .accepted
-        .as_ref()
-        .and_then(|accepted| browser_binding_handle_id(accepted.binding.as_ref()));
+        .binding()
+        .and_then(|binding| browser_binding_handle_id(Some(binding)));
     let reconnect = browser_binding_handle_id(lifecycle.browser_reconnect_binding.as_ref());
     let conflict = lifecycle
         .browser_conflict
@@ -733,11 +710,7 @@ pub(crate) fn save_native(
         &persistence::NativeStorage,
         path,
         authority,
-        state
-            .project_lifecycle
-            .accepted
-            .as_ref()
-            .and_then(|accepted| accepted.binding.as_ref()),
+        state.project_lifecycle.binding(),
         state.project_lifecycle.unreadable_native_binding.as_ref(),
     )?;
     let scope = effective_save_scope(state, requested_scope);
@@ -749,10 +722,7 @@ pub(crate) fn save_native(
             SaveScope::AllDocuments => working,
             SaveScope::ActiveDocument => state
                 .project_lifecycle
-                .accepted
-                .as_ref()
-                .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?
-                .document_candidate(&working, &active_document(state))?,
+                .accepted_document_candidate(&working, &active_document(state))?,
         };
         let ProjectSnapshot {
             file,
@@ -837,10 +807,7 @@ pub(crate) fn prepare_browser_save(
         } else {
             state
                 .project_lifecycle
-                .accepted
-                .as_ref()
-                .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?
-                .document_candidate(&working, &saved_document)?
+                .accepted_document_candidate(&working, &saved_document)?
         };
         let ProjectSnapshot {
             file,
@@ -859,17 +826,13 @@ pub(crate) fn prepare_browser_save(
             .then(|| {
                 state
                     .project_lifecycle
-                    .accepted
-                    .as_ref()
-                    .and_then(|accepted| accepted.binding.as_ref())
+                    .binding()
                     .or(state.project_lifecycle.browser_reconnect_binding.as_ref())
             })
             .flatten();
         let source_handle_id = state
             .project_lifecycle
-            .accepted
-            .as_ref()
-            .and_then(|accepted| accepted.binding.as_ref())
+            .binding()
             .or(state.project_lifecycle.browser_reconnect_binding.as_ref())
             .or(state
                 .project_lifecycle
@@ -1149,7 +1112,9 @@ fn adopt_successful_save(
             state.workspace.content.project.path = candidate.file.workspace.project.path.clone();
         }
     }
-    state.project_lifecycle.accepted = Some(AcceptedProject::new(candidate, Some(binding)));
+    state
+        .project_lifecycle
+        .accept_project(candidate, Some(binding));
     #[cfg(not(target_arch = "wasm32"))]
     {
         state.native_project_binding_receipt = Some(native_receipt);
@@ -1162,7 +1127,6 @@ fn adopt_successful_save(
         state.project_lifecycle.browser_reconnect_binding = None;
         state.project_lifecycle.browser_conflict = None;
     }
-    state.project_lifecycle.authority.accept_content();
     #[cfg(not(target_arch = "wasm32"))]
     match scope {
         SaveScope::AllDocuments => {
@@ -1256,9 +1220,8 @@ pub(crate) fn record_browser_save_conflict(
     }
     let binding = state
         .project_lifecycle
-        .accepted
-        .as_ref()
-        .and_then(|accepted| accepted.binding.clone())
+        .binding()
+        .cloned()
         .or_else(|| state.project_lifecycle.browser_reconnect_binding.clone());
     if let Some(binding) = binding {
         state.project_lifecycle.browser_conflict = Some(BrowserConflict {
@@ -1283,19 +1246,14 @@ pub(crate) fn complete_browser_binding_promotion(
     }
     state.project_lifecycle.authority.finish_browser_promotion();
     if result.is_ok()
-        && let Some(PersistenceBinding::Browser { binding, .. }) = state
-            .project_lifecycle
-            .accepted
-            .as_mut()
-            .and_then(|accepted| accepted.binding.as_mut())
+        && let Some(PersistenceBinding::Browser { binding, .. }) =
+            state.project_lifecycle.accepted_binding.as_mut()
     {
         binding.persisted_generation = Some(binding.receipt.accepted_generation);
     }
     state.browser_project_binding_receipt = state
         .project_lifecycle
-        .accepted
-        .as_ref()
-        .and_then(|accepted| accepted.binding.as_ref())
+        .binding()
         .and_then(PersistenceBinding::durable_browser_receipt);
     true
 }
@@ -1304,9 +1262,8 @@ pub(crate) fn complete_browser_binding_promotion(
 fn browser_handle_is_current(state: &AppState, handle_id: u64) -> bool {
     let lifecycle = &state.project_lifecycle;
     lifecycle
-        .accepted
-        .as_ref()
-        .and_then(|accepted| browser_binding_handle_id(accepted.binding.as_ref()))
+        .binding()
+        .and_then(|binding| browser_binding_handle_id(Some(binding)))
         .into_iter()
         .chain(browser_binding_handle_id(
             lifecycle.browser_reconnect_binding.as_ref(),
@@ -1374,14 +1331,7 @@ pub(crate) fn prepare_revert_active_document(
     {
         return Err(ProjectLifecycleError::ActiveRun);
     }
-    state.project_lifecycle.authority.prepare_revert(
-        id,
-        state
-            .project_lifecycle
-            .accepted
-            .as_ref()
-            .map(AcceptedProject::content),
-    )
+    state.project_lifecycle.authority.prepare_revert(id)
 }
 
 pub(crate) fn confirm_revert_active_document(
@@ -1419,12 +1369,7 @@ fn revert_document_in_place(
     state: &mut AppState,
     id: ProjectDocumentId,
 ) -> Result<(), ProjectLifecycleError> {
-    let baseline = state
-        .project_lifecycle
-        .accepted
-        .as_ref()
-        .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?
-        .clone_snapshot();
+    let baseline = state.project_lifecycle.accepted_snapshot()?;
     let baseline_project_id = baseline.file.workspace.project.id();
 
     match id {
@@ -1553,14 +1498,9 @@ fn revert_document_in_place(
 /// nothing to diff against: its configuration stands for the whole unsaved
 /// project, as one document.
 pub(crate) fn dirty_documents(state: &AppState) -> Vec<ProjectDocumentId> {
-    state.project_lifecycle.authority.dirty_documents(
-        state
-            .project_lifecycle
-            .accepted
-            .as_ref()
-            .map(AcceptedProject::content),
-        || capture_snapshot(state, SnapshotContent::Current).map(|snapshot| snapshot.file),
-    )
+    state.project_lifecycle.authority.dirty_documents(|| {
+        capture_snapshot(state, SnapshotContent::Current).map(|snapshot| snapshot.file)
+    })
 }
 
 pub(crate) fn dirty_document_count(state: &AppState) -> usize {

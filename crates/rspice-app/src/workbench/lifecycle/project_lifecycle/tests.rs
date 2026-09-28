@@ -50,7 +50,9 @@ fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
         .activate(crate::workbench::state::Workspace::Project);
     let baseline = snapshot(&state).expect("baseline");
     state.project_lifecycle.authority.open_session();
-    state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline.clone(), None));
+    state
+        .project_lifecycle
+        .accept_project(baseline.clone(), None);
     insert_configuration_root(
         &mut state,
         "Browser release",
@@ -182,7 +184,9 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
     state.provision_test_project_technology_contract();
     let baseline = snapshot(&state).expect("baseline");
     state.project_lifecycle.authority.open_session();
-    state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline.clone(), None));
+    state
+        .project_lifecycle
+        .accept_project(baseline.clone(), None);
     let id = insert_configuration_root(
         &mut state,
         "Release",
@@ -274,7 +278,9 @@ fn cell_veriloga_view_and_source_are_one_lifecycle_document() {
     state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
     let baseline = snapshot(&state).expect("baseline");
     state.project_lifecycle.authority.open_session();
-    state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline.clone(), None));
+    state
+        .project_lifecycle
+        .accept_project(baseline.clone(), None);
 
     assert_eq!(
         active_document(&state),
@@ -367,7 +373,9 @@ fn project_configuration_never_accepts_or_discards_unsaved_cell_views() {
     );
 
     working_state.project_lifecycle.authority.open_session();
-    working_state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, None));
+    working_state
+        .project_lifecycle
+        .accept_project(baseline, None);
     revert_document(&mut working_state, ProjectDocumentId::ProjectConfiguration)
         .expect("revert configuration");
     assert!(
@@ -439,7 +447,7 @@ fn reverting_new_cell_configuration_removes_orphan_sources_and_restores_focus() 
             crate::state::ViewType::VerilogA,
         ));
     state.project_lifecycle.authority.open_session();
-    state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, None));
+    state.project_lifecycle.accept_project(baseline, None);
 
     revert_document(&mut state, ProjectDocumentId::ProjectConfiguration)
         .expect("revert new cell configuration");
@@ -491,7 +499,7 @@ fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() 
         "module behavior(p, n); inout p, n; endmodule",
     );
     state.project_lifecycle.authority.open_session();
-    state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, None));
+    state.project_lifecycle.accept_project(baseline, None);
 
     revert_document(&mut state, ProjectDocumentId::CellView(reference.clone()))
         .expect("revert new view");
@@ -576,7 +584,9 @@ fn reverting_the_code_document_restores_sources_and_clears_dirty_state() {
     ensure_veriloga_source(&mut state, "module sensor_bridge; endmodule");
     let baseline = snapshot(&state).unwrap();
     state.project_lifecycle.authority.open_session();
-    state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline.clone(), None));
+    state
+        .project_lifecycle
+        .accept_project(baseline.clone(), None);
     state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
     state
         .workspace
@@ -758,7 +768,7 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
     let mut exact = serde_json::from_str::<Box<AppState>>(&session).expect("restore exact session");
     initialize_from_session(exact.as_mut());
     assert_eq!(canonical_native_path(&exact), Some(canonical.clone()));
-    assert!(exact.project_lifecycle.accepted.is_some());
+    assert!(exact.project_lifecycle.accepted().is_some());
 
     let mut same_project =
         Box::new(crate::io::load_project_file(&canonical).expect("load fixture"));
@@ -776,7 +786,7 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
     let mut digest_conflict =
         serde_json::from_str::<Box<AppState>>(&session).expect("restore conflicted session");
     initialize_from_session(digest_conflict.as_mut());
-    assert!(digest_conflict.project_lifecycle.accepted.is_none());
+    assert!(digest_conflict.project_lifecycle.accepted().is_none());
     assert!(canonical_native_path(&digest_conflict).is_none());
     assert_eq!(
         digest_conflict.native_project_binding_receipt,
@@ -799,7 +809,7 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
     let mut identity_conflict =
         serde_json::from_str::<Box<AppState>>(&session).expect("restore identity-conflict session");
     initialize_from_session(identity_conflict.as_mut());
-    assert!(identity_conflict.project_lifecycle.accepted.is_none());
+    assert!(identity_conflict.project_lifecycle.accepted().is_none());
     assert!(canonical_native_path(&identity_conflict).is_none());
 
     std::fs::write(&canonical, &accepted_bytes).expect("restore exact fixture bytes");
@@ -812,14 +822,14 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
     let mut legacy =
         serde_json::from_value::<Box<AppState>>(legacy_value).expect("restore legacy session");
     initialize_from_session(legacy.as_mut());
-    assert!(legacy.project_lifecycle.accepted.is_none());
+    assert!(legacy.project_lifecycle.accepted().is_none());
     assert!(canonical_native_path(&legacy).is_none());
 
     std::fs::remove_file(&canonical).expect("remove canonical fixture");
     let mut missing =
         serde_json::from_str::<Box<AppState>>(&session).expect("restore missing session");
     initialize_from_session(missing.as_mut());
-    assert!(missing.project_lifecycle.accepted.is_none());
+    assert!(missing.project_lifecycle.accepted().is_none());
     assert!(canonical_native_path(&missing).is_none());
     remove_project_artifacts(&path);
 }
@@ -1058,8 +1068,7 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
     assert_eq!(
         state
             .project_lifecycle
-            .accepted
-            .as_ref()
+            .accepted()
             .expect("accepted save")
             .baseline()
             .workspace
@@ -1069,8 +1078,7 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
     assert_eq!(
         state
             .project_lifecycle
-            .accepted
-            .as_ref()
+            .accepted()
             .expect("accepted save")
             .baseline()
             .workspace
@@ -1562,8 +1570,7 @@ fn saving_active_cell_never_dirties_project_configuration() {
     assert_eq!(
         state
             .project_lifecycle
-            .accepted
-            .as_ref()
+            .accepted()
             .expect("accepted save")
             .baseline()
             .libraries

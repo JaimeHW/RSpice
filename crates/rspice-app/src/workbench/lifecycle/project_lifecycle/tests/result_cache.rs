@@ -26,7 +26,7 @@ fn unchanged_dirty_queries_do_not_rebuild_validate_or_hash_retained_results() {
             "#ffffff",
         )];
         let baseline = snapshot(&state).unwrap();
-        state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, None));
+        state.project_lifecycle.accept_project(baseline, None);
         assert!(!has_unsaved_changes(&state));
         let work = WorkCounts::reset();
         registry::RESULT_FINGERPRINT_PASSES.with(|passes| passes.set(0));
@@ -138,7 +138,7 @@ fn runtime_changes_and_clones_reuse_results_but_invalid_edits_do_not() {
     let (mut state, _) = super::durable_content::retained_results();
     let baseline = snapshot(&state).unwrap();
     let retained = baseline.file.simulation_results.clone();
-    state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, None));
+    state.project_lifecycle.accept_project(baseline, None);
     assert!(!has_unsaved_changes(&state));
     state.simulation.progress = 0.75;
     state.simulation.status = "runtime status".to_owned();
@@ -196,7 +196,7 @@ fn result_fingerprint_cache_preserves_signed_zero_in_annotation_edits() {
         )
         .unwrap();
     let baseline = snapshot(&state).unwrap();
-    state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, None));
+    state.project_lifecycle.accept_project(baseline, None);
     assert!(!has_unsaved_changes(&state));
     state.ui.results.markers[0].x = -0.0;
     assert!(has_unsaved_changes(&state));

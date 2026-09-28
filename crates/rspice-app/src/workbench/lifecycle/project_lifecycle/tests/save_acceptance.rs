@@ -27,14 +27,7 @@ fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() 
             let candidate = snapshot(&state).unwrap();
             let (bytes, _) =
                 rspice_project::persistence::serialized_project(&candidate.file).unwrap();
-            let accepted_digest = state
-                .project_lifecycle
-                .accepted()
-                .unwrap()
-                .binding
-                .as_ref()
-                .unwrap()
-                .accepted_digest;
+            let accepted_digest = state.project_lifecycle.binding().unwrap().accepted_digest;
             if later_change == 1 {
                 state
                     .schematic
@@ -106,14 +99,7 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
         .unwrap();
         let saved_document = active_document(&state);
         let previous_generation = accepted_generation(&state);
-        let previous_digest = state
-            .project_lifecycle
-            .accepted()
-            .unwrap()
-            .binding
-            .as_ref()
-            .unwrap()
-            .accepted_digest;
+        let previous_digest = state.project_lifecycle.binding().unwrap().accepted_digest;
         state.schematic.with_undo("Place resistor", |schematic| {
             schematic.add_component(ComponentType::Resistor, Point::new(1, 1));
         });
@@ -152,10 +138,13 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
         );
         let accepted = state.project_lifecycle.accepted().unwrap();
         assert_eq!(
-            accepted.content().fingerprints().unwrap().content_digest(),
+            accepted.fingerprints().unwrap().content_digest(),
             candidate_content
         );
-        assert_eq!(accepted.binding.as_ref().unwrap().accepted_digest, digest);
+        assert_eq!(
+            state.project_lifecycle.binding().unwrap().accepted_digest,
+            digest
+        );
         assert_eq!(
             registry::content_digest(&crate::io::load_project_file(&path).unwrap().file).unwrap(),
             candidate_content
@@ -215,7 +204,9 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
 #[test]
 fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
     let mut state = AppState::default();
-    state.project_lifecycle.accepted = Some(AcceptedProject::new(snapshot(&state).unwrap(), None));
+    state
+        .project_lifecycle
+        .accept_project(snapshot(&state).unwrap(), None);
     refresh_registry(&mut state).unwrap();
     let library_revision = state.library_manager.revision();
     let valid_reltol = state.sim_setup.options.reltol;

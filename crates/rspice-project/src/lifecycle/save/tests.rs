@@ -64,7 +64,7 @@ fn late_browser_completion_preserves_the_current_transaction() {
         let mut lifecycle = ProjectLifecycle::default();
         let (prepared, project_id, publication) = prepare(&mut lifecycle, false);
         let current = if context_only {
-            lifecycle.accept_content();
+            lifecycle.accept_content(prepared.candidate().clone());
             prepared.transaction()
         } else {
             lifecycle.cancel_browser_operation();
@@ -113,7 +113,7 @@ fn canonical_completion_requires_exact_bytes_and_defers_transaction_end_until_ad
         receipt.accepted_digest
     );
     assert!(completion.candidate.workspace.project.path.is_none());
-    lifecycle.accept_content();
+    lifecycle.accept_content(completion.candidate);
     lifecycle.cancel_transaction();
     assert!(!lifecycle.operation_in_progress());
 }

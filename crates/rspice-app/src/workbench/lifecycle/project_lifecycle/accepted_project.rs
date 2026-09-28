@@ -1,78 +1,71 @@
-//! Pair immutable accepted content with editor state and its platform binding.
-//!
-//! This owner stays on the UI thread. Binding/permission changes do not alter
-//! accepted content; an acknowledged save or load constructs a new owner.
+//! Pair project-owned accepted content with its application editor session.
 
 use std::rc::Rc;
 
+use super::{PersistenceBinding, ProjectDocumentId, ProjectLifecycleError, ProjectLifecycleState};
 use crate::io::ProjectSnapshot;
-use crate::state::{SchematicState, workspace::WorkspaceSession};
-use rspice_project::ProjectFile;
+use crate::state::SchematicState;
 
-use super::{PersistenceBinding, ProjectDocumentId, ProjectLifecycleError};
-
-#[derive(Debug)]
-struct AcceptedContent {
-    project: rspice_project::AcceptedProject,
-    workspace_session: WorkspaceSession,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct AcceptedProject {
-    // Canonical content, fingerprints and the matching editor session share
-    // one allocation. Drafts and save candidates receive explicit copies.
-    content: Rc<AcceptedContent>,
-    pub(crate) binding: Option<PersistenceBinding>,
-}
-
-impl AcceptedProject {
-    pub(super) fn new(baseline: ProjectSnapshot, binding: Option<PersistenceBinding>) -> Self {
+impl ProjectLifecycleState {
+    pub(super) fn accept_project(
+        &mut self,
+        baseline: ProjectSnapshot,
+        binding: Option<PersistenceBinding>,
+    ) {
         let ProjectSnapshot {
             file,
             workspace_session,
         } = baseline;
-        let project = rspice_project::AcceptedProject::new(file);
-        Self {
-            content: Rc::new(AcceptedContent {
-                project,
-                workspace_session,
-            }),
-            binding,
-        }
+        self.authority.accept_content(file);
+        self.accepted_session = Rc::new(workspace_session);
+        self.accepted_binding = binding;
     }
 
-    pub(super) fn content(&self) -> &rspice_project::AcceptedProject {
-        &self.content.project
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn restore_project(
+        &mut self,
+        baseline: ProjectSnapshot,
+        binding: PersistenceBinding,
+    ) {
+        let ProjectSnapshot {
+            file,
+            workspace_session,
+        } = baseline;
+        self.authority.restore_accepted_content(file);
+        self.accepted_session = Rc::new(workspace_session);
+        self.accepted_binding = Some(binding);
     }
 
-    pub(super) fn baseline(&self) -> &ProjectFile {
-        self.content.project.baseline()
+    pub(super) fn accepted_snapshot(&self) -> Result<ProjectSnapshot, ProjectLifecycleError> {
+        let accepted = self
+            .authority
+            .accepted()
+            .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?;
+        Ok(ProjectSnapshot {
+            file: accepted.baseline().clone(),
+            workspace_session: (*self.accepted_session).clone(),
+        })
     }
 
-    pub(super) fn clone_snapshot(&self) -> ProjectSnapshot {
-        ProjectSnapshot {
-            file: self.baseline().clone(),
-            workspace_session: self.content.workspace_session.clone(),
-        }
+    pub(super) fn accepted_schematic_editor(&self, key: &str) -> Option<SchematicState> {
+        let accepted = self.authority.accepted()?;
+        self.accepted_session
+            .clone_schematic_editor(&accepted.baseline().workspace, key)
     }
 
-    pub(super) fn clone_schematic_editor(&self, key: &str) -> Option<SchematicState> {
-        self.content
-            .workspace_session
-            .clone_schematic_editor(&self.baseline().workspace, key)
-    }
-
-    pub(super) fn document_candidate(
+    pub(super) fn accepted_document_candidate(
         &self,
         working: &ProjectSnapshot,
         id: &ProjectDocumentId,
     ) -> Result<ProjectSnapshot, ProjectLifecycleError> {
-        let file = self
-            .content
-            .project
+        let accepted = self
+            .authority
+            .accepted()
+            .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?;
+        let file = accepted
             .document_candidate(&working.file, id)
             .map_err(ProjectLifecycleError::InvalidState)?;
-        let mut workspace_session = self.content.workspace_session.clone();
+        let mut workspace_session = (*self.accepted_session).clone();
         if let ProjectDocumentId::CellView(reference) = id {
             let key = reference.key();
             if working.file.workspace.schematic_buffers.contains_key(&key) {

@@ -707,11 +707,7 @@ impl OverviewSnapshot {
             project_revision: project.revision().get(),
             schema_version: project.schema_version(),
             path: project_persistence_location(app),
-            persistence_bound: state
-                .project_lifecycle
-                .accepted()
-                .and_then(|accepted| accepted.binding.as_ref())
-                .is_some(),
+            persistence_bound: state.project_lifecycle.binding().is_some(),
             descriptor_root: format!("{}/{}", project.root_library, project.top_cell),
             simulation_root: configuration.root.clone(),
             technology: project.technology_binding().map_or_else(
@@ -1152,12 +1148,7 @@ fn project_persistence_location(app: &RSpiceApp) -> String {
                 |path| path.display().to_string(),
             )
     };
-    let Some(binding) = app
-        .state
-        .project_lifecycle
-        .accepted()
-        .and_then(|accepted| accepted.binding.as_ref())
-    else {
+    let Some(binding) = app.state.project_lifecycle.binding() else {
         return fallback();
     };
 

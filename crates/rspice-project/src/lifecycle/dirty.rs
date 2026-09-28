@@ -22,13 +22,12 @@ impl ProjectLifecycle {
 
     pub fn has_unsaved_changes(
         &self,
-        accepted: Option<&AcceptedProject>,
         capture: impl FnOnce() -> Result<ProjectFile, ProjectLifecycleError>,
     ) -> bool {
         if !self.is_open() {
             return false;
         }
-        let Some(accepted) = accepted else {
+        let Some(accepted) = self.accepted() else {
             return true;
         };
         match capture()
@@ -45,14 +44,13 @@ impl ProjectLifecycle {
 
     pub fn document_is_dirty(
         &self,
-        accepted: Option<&AcceptedProject>,
         document: impl FnOnce() -> ProjectDocumentId,
         capture: impl FnOnce() -> Result<ProjectFile, ProjectLifecycleError>,
     ) -> bool {
-        if accepted.is_none() {
+        if self.accepted().is_none() {
             return self.is_open();
         }
-        self.current_registry(accepted, capture)
+        self.current_registry(capture)
             .map(|registry| registry.is_dirty(&document()))
             .unwrap_or(true)
     }
@@ -61,17 +59,16 @@ impl ProjectLifecycle {
     /// no accepted baseline or the working content cannot be compared.
     pub fn dirty_documents(
         &self,
-        accepted: Option<&AcceptedProject>,
         capture: impl FnOnce() -> Result<ProjectFile, ProjectLifecycleError>,
     ) -> Vec<ProjectDocumentId> {
-        if accepted.is_none() {
+        if self.accepted().is_none() {
             return if self.is_open() {
                 vec![ProjectDocumentId::ProjectConfiguration]
             } else {
                 Vec::new()
             };
         }
-        let Ok(registry) = self.current_registry(accepted, capture) else {
+        let Ok(registry) = self.current_registry(capture) else {
             return vec![ProjectDocumentId::ProjectConfiguration];
         };
         registry
@@ -84,11 +81,11 @@ impl ProjectLifecycle {
 
     fn current_registry(
         &self,
-        accepted: Option<&AcceptedProject>,
         capture: impl FnOnce() -> Result<ProjectFile, ProjectLifecycleError>,
     ) -> Result<DocumentRegistry, ProjectLifecycleError> {
         let current = self.working_fingerprints(&capture()?)?;
-        let accepted = accepted
+        let accepted = self
+            .accepted()
             .map(AcceptedProject::fingerprints)
             .transpose()
             .map_err(ProjectLifecycleError::InvalidState)?;
@@ -101,13 +98,12 @@ impl ProjectLifecycle {
     /// A closed project clears its registry without capturing working content.
     pub fn prepare_registry_refresh(
         &self,
-        accepted: Option<&AcceptedProject>,
         capture: impl FnOnce() -> Result<ProjectFile, ProjectLifecycleError>,
     ) -> Result<DocumentRegistry, ProjectLifecycleError> {
         if !self.is_open() {
             return Ok(DocumentRegistry::default());
         }
-        self.current_registry(accepted, capture)
+        self.current_registry(capture)
     }
 
     pub fn finish_registry_refresh(

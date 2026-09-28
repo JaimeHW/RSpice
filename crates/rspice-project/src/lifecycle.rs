@@ -9,11 +9,12 @@ pub use save::{
 
 use crate::persistence::BrowserBindingReceipt;
 use crate::{
-    AcceptedProject,
+    AcceptedProject, ProjectFile,
     registry::{DocumentRegistry, ProjectDocumentId, ResultFingerprintCache},
 };
 
 use rspice_app_types::product::{ContentDigest, TransactionId};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveScope {
@@ -111,6 +112,7 @@ pub struct ProjectLifecycle {
     project_open: bool,
     transaction: Option<LifecycleTransaction>,
     accepted_generation: u64,
+    accepted: Option<Arc<AcceptedProject>>,
     registry: DocumentRegistry,
     result_fingerprints: ResultFingerprintCache,
     browser_operation_generation: u64,
@@ -125,6 +127,7 @@ impl Default for ProjectLifecycle {
             project_open: true,
             transaction: None,
             accepted_generation: 0,
+            accepted: None,
             registry: DocumentRegistry::default(),
             result_fingerprints: ResultFingerprintCache::default(),
             browser_operation_generation: 1,
@@ -169,12 +172,30 @@ impl ProjectLifecycle {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn restore_accepted_content(&mut self) {
+    pub fn restore_accepted_content(&mut self, baseline: ProjectFile) {
+        self.accept_content(baseline);
         self.accepted_generation = 1;
     }
 
-    pub fn accept_content(&mut self) {
+    /// Install one immutable baseline and advance its review/callback identity
+    /// together. Lifecycle clones share that content and its cached fingerprints.
+    pub fn accept_content(&mut self, baseline: ProjectFile) {
+        self.accepted = Some(Arc::new(AcceptedProject::new(baseline)));
         self.accepted_generation = self.accepted_generation.wrapping_add(1).max(1);
+    }
+
+    pub fn accepted(&self) -> Option<&AcceptedProject> {
+        self.accepted.as_deref()
+    }
+
+    /// A first canonical save requires the complete working set. A platform
+    /// binding alone cannot supply the accepted content for a document overlay.
+    pub fn effective_save_scope(&self, requested: SaveScope, has_binding: bool) -> SaveScope {
+        if self.accepted.is_none() || !has_binding {
+            SaveScope::AllDocuments
+        } else {
+            requested
+        }
     }
 
     pub fn operation_in_progress(&self) -> bool {
@@ -259,10 +280,10 @@ impl ProjectLifecycle {
     pub fn prepare_revert(
         &self,
         document: ProjectDocumentId,
-        accepted: Option<&AcceptedProject>,
     ) -> Result<RevertReviewToken, ProjectLifecycleError> {
         self.require_open_project()?;
-        accepted.ok_or(ProjectLifecycleError::NoAcceptedBaseline)?;
+        self.accepted()
+            .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?;
         Ok(RevertReviewToken {
             document,
             accepted_generation: self.accepted_generation,
@@ -444,6 +465,135 @@ mod tests {
             "logical-project",
             Some(&receipt),
             9,
+        ));
+    }
+    fn project() -> ProjectFile {
+        use rspice_design::library::{Cell, Library, View, ViewType};
+        let workspace = crate::ProjectWorkspace::default();
+        let mut cell = Cell::new(workspace.project.top_cell.clone());
+        cell.add_view(View::new(
+            workspace.active_view.view.clone(),
+            ViewType::Schematic,
+        ));
+        let mut library = Library::new(workspace.project.root_library.clone());
+        library.add_cell(cell);
+        let mut libraries = crate::ProjectLibraries::default();
+        libraries.add_library(library);
+        ProjectFile::new(workspace, libraries)
+    }
+
+    #[test]
+    fn replacing_or_closing_a_lifecycle_preserves_independent_accepted_snapshots() {
+        let mut lifecycle = ProjectLifecycle::default();
+        lifecycle.accept_content(project());
+        let retained = lifecycle.clone();
+        assert!(std::ptr::eq(
+            lifecycle.accepted().unwrap(),
+            retained.accepted().unwrap()
+        ));
+        let original = retained
+            .accepted()
+            .unwrap()
+            .fingerprints()
+            .unwrap()
+            .content_digest();
+        let mut changed = lifecycle.accepted().unwrap().baseline().clone();
+        changed
+            .workspace
+            .project
+            .rename("Replacement".to_owned())
+            .unwrap();
+        lifecycle.accept_content(changed);
+        assert_eq!(lifecycle.accepted_generation(), 2);
+        assert!(!std::ptr::eq(
+            lifecycle.accepted().unwrap(),
+            retained.accepted().unwrap()
+        ));
+        assert_eq!(
+            retained
+                .accepted()
+                .unwrap()
+                .fingerprints()
+                .unwrap()
+                .content_digest(),
+            original
+        );
+
+        for close in [false, true] {
+            let mut current = lifecycle.clone();
+            let epoch = current.epoch();
+            if close {
+                current.close_project();
+            } else {
+                current.reset_for_new_project();
+            }
+            assert!(current.accepted().is_none());
+            assert_eq!(current.accepted_generation(), 0);
+            assert_ne!(current.epoch(), epoch);
+            assert_eq!(current.is_open(), !close);
+            assert!(lifecycle.accepted().is_some());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            lifecycle.restore_accepted_content(retained.accepted().unwrap().baseline().clone());
+            assert_eq!(lifecycle.accepted_generation(), 1);
+            assert_eq!(
+                lifecycle
+                    .accepted()
+                    .unwrap()
+                    .fingerprints()
+                    .unwrap()
+                    .content_digest(),
+                original
+            );
+        }
+    }
+
+    #[test]
+    fn dirty_queries_scope_and_revert_reviews_use_the_owned_baseline() {
+        let mut lifecycle = ProjectLifecycle::default();
+        assert!(
+            lifecycle.has_unsaved_changes(|| panic!("unaccepted content must not be captured"))
+        );
+        assert_eq!(
+            lifecycle.effective_save_scope(SaveScope::ActiveDocument, true),
+            SaveScope::AllDocuments
+        );
+        let mut working = project();
+        lifecycle.accept_content(working.clone());
+        assert!(!lifecycle.has_unsaved_changes(|| Ok(working.clone())));
+        assert!(lifecycle.dirty_documents(|| Ok(working.clone())).is_empty());
+        assert!(!lifecycle.document_is_dirty(
+            || ProjectDocumentId::ProjectConfiguration,
+            || Ok(working.clone())
+        ));
+        assert_eq!(
+            lifecycle.effective_save_scope(SaveScope::ActiveDocument, false),
+            SaveScope::AllDocuments
+        );
+        assert_eq!(
+            lifecycle.effective_save_scope(SaveScope::ActiveDocument, true),
+            SaveScope::ActiveDocument
+        );
+
+        let review = lifecycle
+            .prepare_revert(ProjectDocumentId::ProjectConfiguration)
+            .unwrap();
+        working
+            .workspace
+            .project
+            .rename("Changed working content".to_owned())
+            .unwrap();
+        assert!(lifecycle.has_unsaved_changes(|| Ok(working.clone())));
+        assert_eq!(
+            lifecycle.dirty_documents(|| Ok(working.clone())),
+            [ProjectDocumentId::ProjectConfiguration]
+        );
+        lifecycle.accept_content(working.clone());
+        assert!(!lifecycle.has_unsaved_changes(|| Ok(working)));
+        assert!(matches!(
+            lifecycle.validate_revert(&review, &ProjectDocumentId::ProjectConfiguration),
+            Err(ProjectLifecycleError::RevertReviewStale)
         ));
     }
 }
