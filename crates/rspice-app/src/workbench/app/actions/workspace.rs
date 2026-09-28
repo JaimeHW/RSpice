@@ -498,19 +498,14 @@ impl AppState {
             // Make the migrated cell/view exist in the user library so the
             // browser lists it and tabs resolve.
             if let Some((cell_name, view_name)) = tail.split_once('/')
-                && let Some(library) = self.library_manager.get_library_mut(user)
+                && let Some(mut library) = self.library_manager.edit_library(user)
             {
-                if library.get_cell(cell_name).is_none() {
-                    library.add_cell(crate::state::Cell::new(cell_name));
-                }
-                if let Some(cell) = library.get_cell_mut(cell_name)
-                    && cell.get_view(view_name).is_none()
-                {
-                    cell.add_view(crate::state::View::new(
-                        view_name,
-                        crate::state::ViewType::Schematic,
-                    ));
-                }
+                library.ensure_cell_view(
+                    cell_name,
+                    view_name,
+                    crate::state::ViewType::Schematic,
+                    "",
+                );
             }
         }
 
@@ -701,12 +696,8 @@ impl AppState {
             {
                 return;
             }
-            if let Some(cell) = self
-                .library_manager
-                .get_library_mut(&reference.library)
-                .and_then(|library| library.get_cell_mut(&reference.cell))
-            {
-                cell.remove_view("symbol");
+            if let Some(mut library) = self.library_manager.edit_library(&reference.library) {
+                library.remove_view(&reference.cell, "symbol");
             }
             return;
         }
@@ -726,13 +717,9 @@ impl AppState {
                     symbol_error =
                         Some(format!("Generated symbol could not be refreshed: {error}"));
                 } else if view.metadata != before
-                    && let Some(target) = self
-                        .library_manager
-                        .get_library_mut(&reference.library)
-                        .and_then(|library| library.get_cell_mut(&reference.cell))
-                        .and_then(|cell| cell.get_view_mut("symbol"))
+                    && let Some(mut library) = self.library_manager.edit_library(&reference.library)
                 {
-                    target.metadata = view.metadata;
+                    library.replace_view_metadata(&reference.cell, "symbol", view.metadata);
                 }
             }
             Some(_) => {} // hand-authored symbol: leave it alone
@@ -745,12 +732,10 @@ impl AppState {
                     SymbolDocument::generated_from_ports(&ports).store_in_view(&mut view)
                 {
                     symbol_error = Some(format!("Generated symbol could not be created: {error}"));
-                } else if let Some(cell) = self
-                    .library_manager
-                    .get_library_mut(&reference.library)
-                    .and_then(|library| library.get_cell_mut(&reference.cell))
+                } else if let Some(mut library) =
+                    self.library_manager.edit_library(&reference.library)
                 {
-                    cell.add_view(view);
+                    library.add_view(&reference.cell, view);
                 }
             }
         }
@@ -1080,7 +1065,7 @@ impl AppState {
             index += 1;
         };
 
-        if let Some(library) = self.library_manager.get_library_mut(&library_name) {
+        if let Some(mut library) = self.library_manager.edit_library(&library_name) {
             let mut cell = crate::state::Cell::new(&cell_name);
             cell.add_view(View::new(&view_name, ViewType::Schematic));
             library.add_cell(cell);
@@ -1162,7 +1147,7 @@ impl AppState {
         let view_names: Vec<String> = copy.views.keys().cloned().collect();
         let view_count = view_names.len();
         self.library_manager
-            .get_library_mut(dst_library)
+            .edit_library(dst_library)
             .ok_or_else(|| format!("Library '{dst_library}' disappeared during the copy"))?
             .add_cell(copy);
 
@@ -1266,16 +1251,13 @@ impl AppState {
             },
         )?;
 
-        let library_mut = self
+        let mut library_edit = self
             .library_manager
-            .get_library_mut(library)
+            .edit_library(library)
             .ok_or_else(|| format!("Library '{library}' disappeared during the rename"))?;
-        let mut moved = library_mut
-            .cells
-            .remove(cell)
-            .ok_or_else(|| format!("Cell '{cell}' disappeared during the rename"))?;
-        moved.name = new_name.to_owned();
-        library_mut.cells.insert(new_name.to_owned(), moved);
+        if !library_edit.rename_cell(cell, new_name) {
+            return Err(format!("Cell '{cell}' disappeared during the rename"));
+        }
 
         // Buffers move with the cell.
         let old_prefix = format!("{library}/{cell}/");
@@ -1687,17 +1669,14 @@ impl AppState {
             },
         )?;
 
-        let owning_cell = self
+        let renamed = self
             .library_manager
-            .get_library_mut(library)
-            .and_then(|library| library.get_cell_mut(cell))
+            .edit_library(library)
+            .and_then(|mut library| library.rename_view(cell, view, new_name))
             .ok_or_else(|| format!("Cell '{library}/{cell}' disappeared during the rename"))?;
-        let mut moved = owning_cell
-            .views
-            .remove(view)
-            .ok_or_else(|| format!("View '{view}' disappeared during the rename"))?;
-        moved.name = new_name.to_owned();
-        owning_cell.views.insert(new_name.to_owned(), moved);
+        if !renamed {
+            return Err(format!("View '{view}' disappeared during the rename"));
+        }
 
         let old_reference = CellViewRef::new(library, cell, view);
         let new_reference = CellViewRef::new(library, cell, new_name);

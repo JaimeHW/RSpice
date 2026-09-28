@@ -215,9 +215,9 @@ fn provision_libraries(state: &mut AppState) {
     user_filter.description = "Project RC filter".to_owned();
     user_filter.add_view(View::new(SCHEMATIC_VIEW, ViewType::Schematic));
 
-    let user = state
+    let mut user = state
         .library_manager
-        .get_library_mut(USER_LIBRARY)
+        .edit_library(USER_LIBRARY)
         .expect("the bootstrapped workspace owns the project library");
     user.add_cell(amp);
     user.add_cell(user_filter);

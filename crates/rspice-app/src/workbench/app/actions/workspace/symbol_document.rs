@@ -25,8 +25,7 @@ use rspice_design::symbol::publication::{
 };
 
 use rspice_design::symbol::edit::{
-    restore_symbol_snapshot_in_view, symbol_metadata_snapshot_from_view,
-    symbol_pin_position_remaps, symbol_snapshot_from_view,
+    symbol_metadata_snapshot_from_view, symbol_pin_position_remaps, symbol_snapshot_from_view,
 };
 
 use super::{MAX_FINDING_ROWS, log_severity_from_drc, parse_encoded_ports};
@@ -129,15 +128,16 @@ impl AppState {
             return Err(self.read_only_master_message());
         }
         let previous_document = self.load_active_symbol_document().ok();
-        let Some(view) = self
+        let Some(()) = self
             .library_manager
-            .get_library_mut(&reference.library)
-            .and_then(|library| library.get_cell_mut(&reference.cell))
-            .and_then(|cell| cell.get_view_mut(&reference.view))
+            .edit_library(&reference.library)
+            .and_then(|mut library| {
+                library.restore_symbol_snapshot(&reference.cell, &reference.view, snapshot)
+            })
         else {
             return Err(format!("View '{}' not found", reference.display_path()));
         };
-        restore_symbol_snapshot_in_view(view, snapshot);
+
         if let Some(previous_document) = previous_document {
             let pin_remaps = symbol_pin_position_remaps(
                 &previous_document,
@@ -164,17 +164,16 @@ impl AppState {
             return Err(self.read_only_master_message());
         }
         let previous_document = self.load_active_symbol_document().ok();
-        let Some(view) = self
+        let Some(result) = self
             .library_manager
-            .get_library_mut(&reference.library)
-            .and_then(|library| library.get_cell_mut(&reference.cell))
-            .and_then(|cell| cell.get_view_mut(&reference.view))
+            .edit_library(&reference.library)
+            .and_then(|mut library| {
+                library.store_symbol_document(&reference.cell, &reference.view, document)
+            })
         else {
             return Err(format!("View '{}' not found", reference.display_path()));
         };
-        document.store_in_view(view)?;
-        view.metadata.remove("generated");
-        view.metadata.remove("ports");
+        result?;
         if let Some(previous_document) = previous_document {
             let pin_remaps =
                 symbol_pin_position_remaps(&previous_document, document, &BTreeMap::new());
@@ -215,15 +214,16 @@ impl AppState {
         }
         let bundle = EncodedSymbolEditorBundle::encode(document, metadata)?;
         let previous_document = self.load_active_symbol_document().ok();
-        let Some(view) = self
+        let Some(()) = self
             .library_manager
-            .get_library_mut(&reference.library)
-            .and_then(|library| library.get_cell_mut(&reference.cell))
-            .and_then(|cell| cell.get_view_mut(&reference.view))
+            .edit_library(&reference.library)
+            .and_then(|mut library| {
+                library.store_symbol_editor_bundle(&reference.cell, &reference.view, bundle)
+            })
         else {
             return Err(format!("View '{}' not found", reference.display_path()));
         };
-        bundle.store_in_view(view);
+
         if let Some(previous_document) = previous_document {
             let pin_remaps =
                 symbol_pin_position_remaps(&previous_document, document, &intent.renames);

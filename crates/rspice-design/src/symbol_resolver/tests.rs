@@ -85,7 +85,7 @@ fn library_with_amp_and_ports(
 fn library_with_invalid_symbol_metadata() -> (LibraryCatalog, HashMap<String, SchematicDocument>) {
     let (mut libraries, buffers) = library_with_amp(None);
     let symbol_view = libraries
-        .get_library_mut("work")
+        .library_mut_for_test("work")
         .and_then(|library| library.get_cell_mut("amp"))
         .and_then(|cell| cell.get_view_mut("symbol"))
         .expect("symbol view exists");

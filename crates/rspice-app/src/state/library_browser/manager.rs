@@ -100,9 +100,16 @@ impl LibraryManager {
         self.catalog.libraries_by_key()
     }
 
-    /// Get mutable library by name (assumes mutation: bumps the revision)
+    pub(crate) fn edit_library(
+        &mut self,
+        name: &str,
+    ) -> Option<rspice_design::library::LibraryEdit<'_>> {
+        self.catalog.edit_library(name)
+    }
+
+    #[cfg(test)]
     pub fn get_library_mut(&mut self, name: &str) -> Option<&mut Library> {
-        self.catalog.get_library_mut(name)
+        self.catalog.library_mut_for_test(name)
     }
 
     /// Get libraries sorted by name

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use super::Library;
+use super::{Library, LibraryEdit};
 
 /// Library membership and content, independent of browser selection and filters.
 #[derive(Debug, Clone, Default)]
@@ -51,9 +51,18 @@ impl LibraryCatalog {
     }
 
     /// Pessimistically advances revision, including a missing-key lookup.
-    pub fn get_library_mut(&mut self, name: &str) -> Option<&mut Library> {
+    pub fn edit_library(&mut self, name: &str) -> Option<LibraryEdit<'_>> {
+        self.library_for_edit(name).map(LibraryEdit::new)
+    }
+
+    fn library_for_edit(&mut self, name: &str) -> Option<&mut Library> {
         self.revision = self.revision.wrapping_add(1);
         self.libraries.get_mut(name)
+    }
+
+    #[cfg(any(test, feature = "schematic-test-fixtures"))]
+    pub fn library_mut_for_test(&mut self, name: &str) -> Option<&mut Library> {
+        self.library_for_edit(name)
     }
 
     pub fn libraries_sorted(&self) -> Vec<&Library> {

@@ -1818,11 +1818,11 @@ fn replace_symbol_cell(
         .project
         .next_revision()
         .map_err(|error| error.to_string())?;
-    let library = state
+    let mut library = state
         .library_manager
-        .get_library_mut(library_name)
+        .edit_library(library_name)
         .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?;
-    if library.read_only {
+    if library.library().read_only {
         return Err(format!("Library '{library_name}' is read-only."));
     }
     match replacement {
@@ -2236,9 +2236,9 @@ impl HierarchyExtractionRecord {
             .cloned()
             .ok_or_else(|| "The generated hierarchy cell no longer exists.".to_owned())?;
         let current_open_views = state.workspace.open_views.clone();
-        let library = state
+        let mut library = state
             .library_manager
-            .get_library_mut(&self.target_schematic_ref.library)
+            .edit_library(&self.target_schematic_ref.library)
             .ok_or_else(|| "The target library no longer exists.".to_owned())?;
         if !library.remove_cell(&self.target_schematic_ref.cell) {
             return Err("The generated hierarchy cell no longer exists.".to_owned());
@@ -2279,9 +2279,9 @@ impl HierarchyExtractionRecord {
         }
         self.validate_mutation(state, "redone")?;
         let current_open_views = state.workspace.open_views.clone();
-        let library = state
+        let mut library = state
             .library_manager
-            .get_library_mut(&self.target_schematic_ref.library)
+            .edit_library(&self.target_schematic_ref.library)
             .ok_or_else(|| "The target library no longer exists.".to_owned())?;
         library.add_cell(self.target_cell.clone());
         apply_design_snapshot(state, &self.parent_ref, &self.after_parent)?;

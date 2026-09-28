@@ -424,7 +424,8 @@ impl ProjectWorkspace {
         &self,
         cell_view_key: &str,
         source: &SchematicState,
-    ) -> Result<rspice_design::projection::ProjectedSchematic, crate::state::DesignManagementError> {
+    ) -> Result<rspice_design::projection::ProjectedSchematic, crate::state::DesignManagementError>
+    {
         use rspice_design::projection::ProjectionSource;
         source.materialize(&self.design_management, cell_view_key)
     }
@@ -1468,20 +1469,8 @@ pub fn ensure_cell_view(
         libraries.add_library(Library::new(library_name));
     }
 
-    if let Some(library) = libraries.get_library_mut(library_name) {
-        if library.get_cell(cell_name).is_none() {
-            let mut cell = Cell::new(cell_name);
-            cell.description = "Top-level design cell".to_string();
-            cell.add_view(View::new(view_name, view_type));
-            library.add_cell(cell);
-            return;
-        }
-
-        if let Some(cell) = library.get_cell_mut(cell_name)
-            && cell.get_view(view_name).is_none()
-        {
-            cell.add_view(View::new(view_name, view_type));
-        }
+    if let Some(mut library) = libraries.edit_library(library_name) {
+        library.ensure_cell_view(cell_name, view_name, view_type, "Top-level design cell");
     }
 }
 

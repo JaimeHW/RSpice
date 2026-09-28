@@ -969,12 +969,10 @@ pub(super) fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(
         .validation_digest()
         .map_err(|error| error.to_string())?;
     let mut candidate = state.library_manager.clone();
-    let library = candidate
-        .get_library_mut(&library_name)
-        .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?;
-    crate::state::prepare_symbol_construction(&definition, library)
-        .map_err(|error| error.to_string())?
-        .commit(library)
+    candidate
+        .edit_library(&library_name)
+        .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?
+        .construct_symbol(&definition)
         .map_err(|error| error.to_string())?;
 
     let fixture = if definition.generated_views.simulation_test_fixture {

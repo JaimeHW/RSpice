@@ -50,7 +50,7 @@ fn catalog_preserves_project_json_and_session_ron_contracts() {
 fn catalog_revisions_distinguish_edits_runtime_projection_and_snapshot_replacement() {
     let snapshot: LibraryManager = serde_json::from_str(JSON).unwrap();
     let mut manager = snapshot.clone();
-    assert!(manager.get_library_mut("missing").is_none());
+    assert!(manager.edit_library("missing").is_none());
     assert_eq!(manager.revision(), 18);
     assert!(manager.remove_library("missing").is_none());
     assert_eq!(manager.revision(), 19);
@@ -79,6 +79,6 @@ fn catalog_revisions_distinguish_edits_runtime_projection_and_snapshot_replaceme
     let mut manager: LibraryManager = serde_json::from_str(&exhausted).unwrap();
     assert!(manager.replace_catalog_from_snapshot(&snapshot).is_err());
     assert_eq!(serde_json::to_string(&manager).unwrap(), exhausted);
-    assert!(manager.get_library_mut("missing").is_none());
+    assert!(manager.edit_library("missing").is_none());
     assert_eq!(manager.revision(), 0);
 }

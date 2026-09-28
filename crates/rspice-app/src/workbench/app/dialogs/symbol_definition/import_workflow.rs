@@ -133,12 +133,11 @@ impl RSpiceApp {
             .to_owned();
         let mut candidate = self.state.library_manager.clone();
         let result = (|| {
-            let library = candidate
-                .get_library_mut(&library_name)
-                .ok_or_else(|| format!("Target library '{library_name}' no longer exists."))?;
-            let plan = crate::state::prepare_symbol_construction(&imported.definition, library)
+            candidate
+                .edit_library(&library_name)
+                .ok_or_else(|| format!("Target library '{library_name}' no longer exists."))?
+                .construct_symbol(&imported.definition)
                 .map_err(|error| error.to_string())?;
-            plan.commit(library).map_err(|error| error.to_string())?;
             publish_symbol_definition_candidate(
                 &mut self.state,
                 candidate,

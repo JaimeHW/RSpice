@@ -187,12 +187,11 @@ impl RSpiceApp {
                 .replace_parameter_form(draft)
                 .map_err(|error| error.to_string())?;
             let mut candidate = self.state.library_manager.clone();
-            let library = candidate
-                .get_library_mut(&target.library)
-                .ok_or_else(|| format!("Library '{}' no longer exists.", target.library))?;
-            let plan = crate::state::prepare_symbol_construction(&replacement, library)
+            candidate
+                .edit_library(&target.library)
+                .ok_or_else(|| format!("Library '{}' no longer exists.", target.library))?
+                .construct_symbol(&replacement)
                 .map_err(|error| error.to_string())?;
-            plan.commit(library).map_err(|error| error.to_string())?;
             publish_symbol_definition_candidate(
                 &mut self.state,
                 candidate,

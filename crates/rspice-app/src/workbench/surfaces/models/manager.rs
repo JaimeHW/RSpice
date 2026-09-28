@@ -1483,12 +1483,11 @@ fn author_technology_symbol_variant(
             .expect("target library was resolved above"),
     )
     .map_err(|error| error.to_string())?;
-    plan.commit(
-        candidate
-            .get_library_mut(target_library)
-            .expect("target library remains present in candidate"),
-    )
-    .map_err(|error| error.to_string())?;
+    candidate
+        .edit_library(target_library)
+        .expect("target library remains present in candidate")
+        .commit_symbol_construction(plan)
+        .map_err(|error| error.to_string())?;
     let revision = publish_symbol_definition_candidate(
         app.state,
         candidate,

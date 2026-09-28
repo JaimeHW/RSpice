@@ -213,7 +213,7 @@ impl RSpiceApp {
             }
         };
         let seeded_schematic = self.state.new_schematic_document();
-        if let Some(lib) = self.state.library_manager.get_library_mut(&library) {
+        if let Some(mut lib) = self.state.library_manager.edit_library(&library) {
             lib.add_cell(cell);
             for view_name in [
                 self.state

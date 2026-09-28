@@ -271,9 +271,8 @@ impl RSpiceApp {
             }
         };
         let seeded_schematic = self.state.new_schematic_document();
-        if let Some(lib) = self.state.library_manager.get_library_mut(&library) {
-            if let Some(cell_ref) = lib.get_cell_mut(&cell) {
-                cell_ref.add_view(seeded_view);
+        if let Some(mut lib) = self.state.library_manager.edit_library(&library) {
+            if lib.add_view(&cell, seeded_view).is_some() {
                 if matches!(
                     view_type,
                     crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
@@ -359,17 +358,17 @@ impl RSpiceApp {
             }
         };
         let mut candidate_libraries = self.state.library_manager.clone();
-        let Some(candidate_library) = candidate_libraries.get_library_mut(library) else {
+        let Some(mut candidate_library) = candidate_libraries.edit_library(library) else {
             self.state.dialogs.new_view_error = Some(format!("Library '{library}' not found"));
             return outcome;
         };
-        if candidate_library.read_only {
+        if candidate_library.library().read_only {
             self.state.dialogs.new_view_error = Some(format!(
                 "Library '{library}' became read only before the Layout view could be created"
             ));
             return outcome;
         }
-        let Some(candidate_cell) = candidate_library.get_cell_mut(cell) else {
+        let Some(candidate_cell) = candidate_library.library().get_cell(cell) else {
             self.state.dialogs.new_view_error =
                 Some(format!("Cell '{cell}' not found in library '{library}'"));
             return outcome;
@@ -385,10 +384,10 @@ impl RSpiceApp {
             ));
             return outcome;
         }
-        candidate_cell.add_view(crate::state::View::new(
-            view_name,
-            crate::state::ViewType::Layout,
-        ));
+        candidate_library.add_view(
+            cell,
+            crate::state::View::new(view_name, crate::state::ViewType::Layout),
+        );
         let project_mutation = match self.state.preflight_project_library_mutation(
             crate::state::ProjectLibraryMutation::CreateView {
                 library: library.to_owned(),
@@ -512,17 +511,17 @@ impl RSpiceApp {
         view.metadata
             .insert("veriloga.ports".to_owned(), encoded_ports);
         let mut candidate_libraries = self.state.library_manager.clone();
-        let Some(candidate_library) = candidate_libraries.get_library_mut(library) else {
+        let Some(mut candidate_library) = candidate_libraries.edit_library(library) else {
             self.state.dialogs.new_view_error = Some(format!("Library '{library}' not found"));
             return outcome;
         };
-        if candidate_library.read_only {
+        if candidate_library.library().read_only {
             self.state.dialogs.new_view_error = Some(format!(
                 "Library '{library}' became read only before the view could be created"
             ));
             return outcome;
         }
-        let Some(candidate_cell) = candidate_library.get_cell_mut(cell) else {
+        let Some(candidate_cell) = candidate_library.library().get_cell(cell) else {
             self.state.dialogs.new_view_error =
                 Some(format!("Cell '{cell}' not found in library '{library}'"));
             return outcome;
@@ -538,7 +537,7 @@ impl RSpiceApp {
             ));
             return outcome;
         }
-        candidate_cell.add_view(view);
+        candidate_library.add_view(cell, view);
 
         let project_mutation = match self.state.preflight_project_library_mutation(
             crate::state::ProjectLibraryMutation::CreateView {

@@ -600,13 +600,8 @@ impl AppState {
         self.workspace
             .commit_physical_layout_document(document)
             .map_err(|error| format!("Physical layout was not committed: {error}"))?;
-        if let Some(view) = self
-            .library_manager
-            .get_library_mut(&owner.library)
-            .and_then(|library| library.get_cell_mut(&owner.cell))
-            .and_then(|cell| cell.get_view_mut(&owner.view))
-        {
-            view.modified = true;
+        if let Some(mut library) = self.library_manager.edit_library(&owner.library) {
+            library.mark_view_modified(&owner.cell, &owner.view);
         }
         if let Some(open) = self
             .workspace
@@ -720,13 +715,8 @@ impl AppState {
         self.workspace
             .commit_physical_layout_document(document)
             .map_err(|error| format!("Physical-layout transaction was not committed: {error}"))?;
-        if let Some(view) = self
-            .library_manager
-            .get_library_mut(&owner.library)
-            .and_then(|library| library.get_cell_mut(&owner.cell))
-            .and_then(|cell| cell.get_view_mut(&owner.view))
-        {
-            view.modified = true;
+        if let Some(mut library) = self.library_manager.edit_library(&owner.library) {
+            library.mark_view_modified(&owner.cell, &owner.view);
         }
         if let Some(open) = self
             .workspace

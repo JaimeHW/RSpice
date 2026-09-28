@@ -289,7 +289,7 @@ impl RSpiceApp {
                 }
             };
             let mut deleted = false;
-            if let Some(lib) = self.state.library_manager.get_library_mut(&lib_name) {
+            if let Some(mut lib) = self.state.library_manager.edit_library(&lib_name) {
                 deleted = lib.remove_cell(&cell_name);
                 if deleted {
                     apply_design_management_removal(&mut self.state, ownership_removal);
@@ -354,10 +354,10 @@ impl RSpiceApp {
                 }
             };
             let mut deleted = false;
-            if let Some(lib) = self.state.library_manager.get_library_mut(&lib_name)
-                && let Some(cell) = lib.get_cell_mut(&cell_name)
+            if let Some(mut lib) = self.state.library_manager.edit_library(&lib_name)
+                && let Some(removed) = lib.remove_view(&cell_name, &view_name)
             {
-                deleted = cell.remove_view(&view_name);
+                deleted = removed;
                 if deleted {
                     apply_design_management_removal(&mut self.state, ownership_removal);
                     remove_project_sources_for_deleted_scope(

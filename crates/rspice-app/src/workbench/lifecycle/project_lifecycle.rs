@@ -2174,9 +2174,9 @@ fn revert_cell_view(
     let Some(baseline_view) = baseline_view else {
         let removed = state
             .library_manager
-            .get_library_mut(&reference.library)
-            .and_then(|library| library.get_cell_mut(&reference.cell))
-            .is_some_and(|cell| cell.remove_view(&reference.view));
+            .edit_library(&reference.library)
+            .and_then(|mut library| library.remove_view(&reference.cell, &reference.view))
+            .unwrap_or(false);
         if !removed {
             return Err(ProjectLifecycleError::NoAcceptedBaseline);
         }
@@ -2195,14 +2195,13 @@ fn revert_cell_view(
         }
         return Ok(());
     };
-    let target_cell = state
+    state
         .library_manager
-        .get_library_mut(&reference.library)
-        .and_then(|library| library.get_cell_mut(&reference.cell))
+        .edit_library(&reference.library)
+        .and_then(|mut library| library.add_view(&reference.cell, baseline_view))
         .ok_or_else(|| {
             ProjectLifecycleError::InvalidState("active cell no longer exists".to_owned())
         })?;
-    target_cell.add_view(baseline_view);
     let key = reference.key();
     match baseline.workspace.schematic_buffers.get(&key) {
         Some(buffer) => {
@@ -2320,11 +2319,8 @@ fn merge_project_structure_with_document_content(
         })
         .collect::<Vec<_>>();
     for (library, cell) in cells {
-        if let Some(cell) = merged
-            .get_library_mut(&library)
-            .and_then(|library| library.get_cell_mut(&cell))
-        {
-            cell.views.clear();
+        if let Some(mut library) = merged.edit_library(&library) {
+            library.clear_views(&cell);
         }
     }
     let references = content
@@ -2346,11 +2342,8 @@ fn merge_project_structure_with_document_content(
         else {
             continue;
         };
-        if let Some(cell) = merged
-            .get_library_mut(&reference.library)
-            .and_then(|library| library.get_cell_mut(&reference.cell))
-        {
-            cell.add_view(view);
+        if let Some(mut library) = merged.edit_library(&reference.library) {
+            library.add_view(&reference.cell, view);
         }
     }
     merged

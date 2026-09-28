@@ -681,7 +681,7 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
 
     let mut next_libraries = state.library_manager.clone();
     next_libraries
-        .get_library_mut(&library_name)
+        .edit_library(&library_name)
         .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?
         .add_cell(target_cell.clone());
     let mut next_workspace = state.workspace.clone();

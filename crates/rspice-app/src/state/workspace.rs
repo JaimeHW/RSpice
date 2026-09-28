@@ -68,9 +68,9 @@ use crate::product::{
     AnalysisInstanceId, CaptureGroupId, ContentDigest, DesignVariableId, ObjectRevision, ProjectId,
     ResultDocumentId, RevisionError, SavedOutputId, SimulationPlanId, SpecificationId,
 };
-use crate::state::{
-    Cell, Library, LibraryCellInstance, LibraryManager, SchematicState, View, ViewType,
-};
+#[cfg(test)]
+use crate::state::{Cell, View};
+use crate::state::{Library, LibraryCellInstance, LibraryManager, SchematicState, ViewType};
 #[cfg(test)]
 use rspice_app_types::hierarchy_path::InstancePath;
 #[cfg(test)]
