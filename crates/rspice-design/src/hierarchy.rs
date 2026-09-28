@@ -20,20 +20,20 @@
 //! and each master is named once here. A generator that named masters itself
 //! would be a second answer to the same question.
 
-use rspice_app_types::hierarchy_path::{HierarchyPathError, InstancePath, InstancePathPattern};
-use rspice_app_types::product::{ContentDigest, ProjectId};
-use rspice_design::configuration_set::{
+use crate::configuration_set::{
     ConfigurationPlatform, ConfigurationSet, ConfigurationSetId, ConfigurationSetOverride,
     UnresolvedBindingPolicy,
 };
-use rspice_design::library::{Cell, Library, LibraryCatalog, View, ViewType};
-use rspice_design::project_sources::{ProjectSourceId, ProjectSourceOwner, ProjectSourceRegistry};
-use rspice_design::schematic::component::LibraryCellInstance;
-use rspice_design::schematic::component_type::ComponentType;
-use rspice_design::schematic::device_catalog::validate_builtin_xspice_binding;
-use rspice_design::schematic::document::SchematicDocument;
-use rspice_design::schematic::generated_veriloga_catalog::validate_generated_veriloga_binding;
-use rspice_design::schematic::port::{PortDirection, PortSpec};
+use crate::library::{Cell, Library, LibraryCatalog, View, ViewType};
+use crate::project_sources::{ProjectSourceId, ProjectSourceOwner, ProjectSourceRegistry};
+use crate::schematic::component::LibraryCellInstance;
+use crate::schematic::component_type::ComponentType;
+use crate::schematic::device_catalog::validate_builtin_xspice_binding;
+use crate::schematic::document::SchematicDocument;
+use crate::schematic::generated_veriloga_catalog::validate_generated_veriloga_binding;
+use crate::schematic::port::{PortDirection, PortSpec};
+use rspice_app_types::hierarchy_path::{HierarchyPathError, InstancePath, InstancePathPattern};
+use rspice_app_types::product::{ContentDigest, ProjectId};
 use rspice_design_model::cell_view::{CellViewRef, DEFAULT_SCHEMATIC_VIEW};
 use sha2::Digest as _;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -556,6 +556,13 @@ struct HierarchyMaster<'a> {
     materialized_binding: Option<LibraryCellInstance>,
 }
 
+struct BindingRowOutcome<'a> {
+    master: Option<HierarchyMaster<'a>>,
+    status: HierarchyBindingStatus,
+    used_review_fallback: bool,
+    diagnostic: Option<String>,
+}
+
 impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D, F> {
     fn new(
         context: HierarchyContext<'a, D, F>,
@@ -821,10 +828,12 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                 instance_path,
                 depth,
                 is_root,
-                master.map(|(master, _)| master),
-                HierarchyBindingStatus::Recursive,
-                false,
-                Some(format!("recursive hierarchy: {chain}")),
+                BindingRowOutcome {
+                    master: master.map(|(master, _)| master),
+                    status: HierarchyBindingStatus::Recursive,
+                    used_review_fallback: false,
+                    diagnostic: Some(format!("recursive hierarchy: {chain}")),
+                },
             );
             self.upsert(row, instance_path);
             return;
@@ -974,10 +983,12 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             instance_path,
             depth,
             is_root,
-            master.clone(),
-            status,
-            used_review_fallback,
-            diagnostic,
+            BindingRowOutcome {
+                master: master.clone(),
+                status,
+                used_review_fallback,
+                diagnostic,
+            },
         );
         if let Some(section) = model_section {
             row.model_section = section;
@@ -1188,10 +1199,12 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             instance_path,
             depth,
             is_root,
-            None,
-            status,
-            false,
-            diagnostic,
+            BindingRowOutcome {
+                master: None,
+                status,
+                used_review_fallback: false,
+                diagnostic,
+            },
         )
     }
 
@@ -1202,11 +1215,14 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         instance_path: &InstancePath,
         depth: usize,
         is_root: bool,
-        master: Option<HierarchyMaster<'_>>,
-        status: HierarchyBindingStatus,
-        used_review_fallback: bool,
-        diagnostic: Option<String>,
+        outcome: BindingRowOutcome<'_>,
     ) -> ResolvedHierarchyBinding {
+        let BindingRowOutcome {
+            master,
+            status,
+            used_review_fallback,
+            diagnostic,
+        } = outcome;
         let search_order = self.view_search_order(
             binding.map_or(reference.view.as_str(), |value| value.view.as_str()),
             is_root,

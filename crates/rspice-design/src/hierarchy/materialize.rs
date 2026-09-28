@@ -1,7 +1,7 @@
 //! Authoritative schematic and retained-source binding materialization.
 
 use super::*;
-use rspice_design::schematic::interface_repair::same_terminal_contract;
+use crate::schematic::interface_repair::same_terminal_contract;
 
 pub(super) fn is_project_virtual_source_path(path: &Path) -> bool {
     path.to_str()
@@ -180,14 +180,14 @@ pub fn project_veriloga_binding_for_view(
             )
         })?
         .to_owned();
-    let source_key = rspice_design::project_sources::project_veriloga_bundle_source_key(
+    let source_key = crate::project_sources::project_veriloga_bundle_source_key(
         project_id,
         bundle,
         &selected_module,
     )
     .map_err(|error| error.to_string())?;
     let netlist_alias =
-        rspice_design::project_sources::project_veriloga_bundle_alias(bundle, &selected_module)
+        crate::project_sources::project_veriloga_bundle_alias(bundle, &selected_module)
             .map_err(|error| error.to_string())?;
     Ok(ConfigurationVerilogABinding {
         source_bundle_id: bundle.id(),

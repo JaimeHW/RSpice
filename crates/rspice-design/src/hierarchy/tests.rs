@@ -1,7 +1,7 @@
 //! Headless hierarchy resolution using borrowed design documents.
 
 use super::*;
-use rspice_design::schematic::component::Component;
+use crate::schematic::component::Component;
 use rspice_design_model::Point;
 
 struct Documents(HashMap<String, (SchematicDocument, bool)>);

@@ -14,7 +14,7 @@ mod design_intent;
 mod design_projection;
 mod document_occurrence;
 mod hierarchy;
-mod hierarchy_resolver;
+use rspice_design::hierarchy as hierarchy_resolver;
 mod materialize;
 mod netlist_profile;
 #[cfg(test)]
