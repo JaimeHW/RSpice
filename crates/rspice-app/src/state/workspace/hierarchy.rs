@@ -12,7 +12,6 @@ use hierarchy_core::{
     HierarchyContext, HierarchyDocuments, HierarchySchematic, HierarchySourceFiles,
 };
 pub(crate) use hierarchy_core::{assign_master_names, master_closure_digest};
-pub(super) use hierarchy_core::{find_cell, find_view};
 
 #[cfg(test)]
 mod tests;
@@ -58,7 +57,6 @@ pub(super) struct HierarchyResolver<'a> {
     workspace: &'a ProjectWorkspace,
     libraries: &'a LibraryManager,
     active_overlay: Option<(&'a CellViewRef, &'a SchematicState)>,
-    projected_buffers: Option<&'a HashMap<String, SchematicState>>,
     root: CellViewRef,
     configuration: Option<&'a crate::state::ConfigurationSet>,
 }
@@ -89,18 +87,9 @@ impl<'a> HierarchyResolver<'a> {
             workspace,
             libraries,
             active_overlay,
-            projected_buffers: None,
             root,
             configuration,
         }
-    }
-
-    pub(super) fn with_projected_buffers(
-        mut self,
-        buffers: &'a HashMap<String, SchematicState>,
-    ) -> Self {
-        self.projected_buffers = Some(buffers);
-        self
     }
 
     pub(super) fn resolve(self) -> HierarchyResolution {
@@ -111,7 +100,6 @@ impl<'a> HierarchyResolver<'a> {
         let documents = WorkspaceHierarchyDocuments {
             buffers: &self.workspace.schematic_buffers,
             active_overlay: self.active_overlay,
-            projected_buffers: self.projected_buffers,
         };
         let context = HierarchyContext {
             documents: &documents,
@@ -127,17 +115,11 @@ impl<'a> HierarchyResolver<'a> {
 struct WorkspaceHierarchyDocuments<'a> {
     buffers: &'a HashMap<String, SchematicState>,
     active_overlay: Option<(&'a CellViewRef, &'a SchematicState)>,
-    projected_buffers: Option<&'a HashMap<String, SchematicState>>,
 }
 
 impl HierarchyDocuments for WorkspaceHierarchyDocuments<'_> {
     fn find_schematic(&self, reference: &CellViewRef) -> Option<HierarchySchematic<'_>> {
-        let schematic = if let Some(buffers) = self.projected_buffers {
-            buffers
-                .iter()
-                .find(|(key, _)| key.eq_ignore_ascii_case(&reference.key()))
-                .map(|(_, schematic)| schematic)
-        } else if let Some((overlay_reference, schematic)) = self.active_overlay
+        let schematic = if let Some((overlay_reference, schematic)) = self.active_overlay
             && overlay_reference
                 .key()
                 .eq_ignore_ascii_case(&reference.key())
@@ -156,7 +138,7 @@ impl HierarchyDocuments for WorkspaceHierarchyDocuments<'_> {
     }
 }
 
-struct WorkspaceSourceFiles;
+pub(super) struct WorkspaceSourceFiles;
 
 impl HierarchySourceFiles for WorkspaceSourceFiles {
     fn source_paths_match(&self, left: &Path, right: &Path) -> bool {
@@ -175,10 +157,6 @@ impl HierarchySourceFiles for WorkspaceSourceFiles {
     ) -> Result<(), String> {
         validate_source_file(source_path, view_type, binding)
     }
-}
-
-pub(super) fn find_library<'a>(libraries: &'a LibraryManager, name: &str) -> Option<&'a Library> {
-    hierarchy_core::find_library(libraries.catalog(), name)
 }
 
 pub(super) fn find_schematic<'a>(

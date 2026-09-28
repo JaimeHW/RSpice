@@ -14,7 +14,7 @@ impl ProjectWorkspace {
         self.annotation_restoration_error = result.as_ref().err().cloned();
         // Success changes reference owners; refusal changes their eligibility.
         // Neither may reuse a projection handed out before this attempt.
-        self.design_projection_cache.get_mut().take();
+        self.design_projection_cache.invalidate();
         result
     }
 

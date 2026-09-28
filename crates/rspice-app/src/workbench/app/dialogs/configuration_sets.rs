@@ -591,7 +591,7 @@ impl RSpiceApp {
         let generated = projected.bind_generated_netlist_provenance(generated.netlist);
         crate::simulation::controller::prepared_run::expand_generated_dependencies(
             &generated,
-            root.current_file.as_deref(),
+            root.current_file(),
             &self.state.workspace.project.include_search_chain(),
             &self.state.model_library_manager,
         )
@@ -1163,7 +1163,7 @@ fn configuration_netlist_digest(
     let source = workspace.bind_generated_netlist_provenance(generated.netlist);
     let (source, _) = crate::simulation::controller::prepared_run::expand_generated_dependencies(
         &source,
-        root.current_file.as_deref(),
+        root.current_file(),
         &workspace.project.include_search_chain(),
         model_libraries,
     )

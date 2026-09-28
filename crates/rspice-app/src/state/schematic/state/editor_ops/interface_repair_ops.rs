@@ -18,6 +18,7 @@ use super::super::super::{
 };
 use super::super::*;
 use crate::state::{LibraryManager, SymbolResolver};
+use rspice_design::schematic::document::SchematicDocument;
 use rspice_design::schematic::interface_repair::interface_is_stale;
 use std::collections::HashMap;
 
@@ -45,7 +46,10 @@ impl SchematicState {
     ///
     /// A review surface lists these; the repair itself still acts on the
     /// selection, so the two never answer the staleness question differently.
-    pub fn stale_instance_interfaces(&self, masters: &HashMap<String, Self>) -> Vec<String> {
+    pub fn stale_instance_interfaces<S: AsRef<SchematicDocument>>(
+        &self,
+        masters: &HashMap<String, S>,
+    ) -> Vec<String> {
         self.design
             .document()
             .components
@@ -111,15 +115,15 @@ fn selected_master_interface(
 /// The interface the binding's master presents now, when the master is a
 /// project schematic that declares one. A binding with no such master has
 /// nothing to be measured against.
-fn master_interface(
+fn master_interface<S: AsRef<SchematicDocument>>(
     binding: &LibraryCellInstance,
-    masters: &HashMap<String, SchematicState>,
+    masters: &HashMap<String, S>,
 ) -> Option<Vec<PortSpec>> {
     let master = masters.get(&format!(
         "{}/{}/{}",
         binding.library, binding.cell, binding.view
     ))?;
-    let ports = master.interface_ports();
+    let ports = master.as_ref().interface_ports();
     (!ports.is_empty()).then_some(ports)
 }
 

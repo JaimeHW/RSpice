@@ -361,7 +361,7 @@ impl CheckAndSaveValidationReport {
                     .bind_generated_netlist_provenance(generated.netlist);
                 match crate::simulation::controller::prepared_run::expand_generated_dependencies(
                     &generated_source,
-                    root.current_file.as_deref(),
+                    root.current_file(),
                     &state.workspace.project.include_search_chain(),
                     &state.model_library_manager,
                 ) {
@@ -846,7 +846,7 @@ fn validate_component_contracts(
 fn projected_document<'a>(
     projection: Option<&'a crate::state::workspace::ConfigurationExecutionProjection>,
     cell_view_key: &str,
-) -> Option<&'a crate::state::SchematicState> {
+) -> Option<&'a rspice_design::projection::ProjectedSchematic> {
     projection?
         .schematic_buffers()
         .iter()

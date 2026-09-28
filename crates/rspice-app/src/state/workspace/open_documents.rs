@@ -419,12 +419,14 @@ impl ProjectWorkspace {
     /// order so coincident coordinates on different pages cannot create an
     /// accidental electrical connection. Explicit cross-sheet port contracts
     /// are then materialized as identically named labels at both endpoints.
+    #[cfg(test)]
     pub(super) fn materialize_design_management_schematic(
         &self,
         cell_view_key: &str,
         source: &SchematicState,
-    ) -> Result<SchematicState, crate::state::DesignManagementError> {
-        source.materialize_design_management_schematic(&self.design_management, cell_view_key)
+    ) -> Result<rspice_design::projection::ProjectedSchematic, crate::state::DesignManagementError> {
+        use rspice_design::projection::ProjectionSource;
+        source.materialize(&self.design_management, cell_view_key)
     }
 
     /// Ensure the workspace's top library/cell/view exists in the library tree.

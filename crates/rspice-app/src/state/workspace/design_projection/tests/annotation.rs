@@ -92,7 +92,8 @@ fn unapplied_annotation_projects_controlled_source_references_with_names() {
         &projection,
         &projection_of(&workspace, &libraries, &reference, &active)
     ));
-    let repeated = projection_of(&workspace, &libraries, &reference, projected);
+    let materialized = SchematicState::from_document(projected.document().clone());
+    let repeated = projection_of(&workspace, &libraries, &reference, &materialized);
     assert_eq!(
         repeated.root_schematic().unwrap().document().components,
         projected.document().components

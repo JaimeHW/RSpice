@@ -245,10 +245,12 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
             .workspace
             .design_projection(&loaded.libraries, &reference, source)
             .unwrap();
-        for schematic in [source, projection.root_schematic().unwrap()] {
+        for schematic in [
+            source.document(),
+            projection.root_schematic().unwrap().document(),
+        ] {
             assert_eq!(
                 schematic
-                    .document()
                     .components
                     .iter()
                     .find(|c| c.id == fixture.sources[0])
@@ -258,7 +260,6 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
             );
             assert_eq!(
                 schematic
-                    .document()
                     .components
                     .iter()
                     .find(|c| c.id == fixture.dependents[0])
@@ -267,7 +268,7 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
                 format!("vref={name}")
             );
             assert_eq!(
-                schematic.document().probes[0].source_expression.as_deref(),
+                schematic.probes[0].source_expression.as_deref(),
                 Some(format!("I({name})").as_str())
             );
         }

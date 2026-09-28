@@ -25,8 +25,7 @@ use crate::state::workspace::{
     DesignProjection,
 };
 use crate::state::{
-    CellViewRef, ComponentType, DesignManagementCatalog, InstancePath, LibraryCellInstance,
-    SchematicState, SheetId,
+    CellViewRef, ComponentType, DesignManagementCatalog, InstancePath, LibraryCellInstance, SheetId,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
@@ -347,7 +346,7 @@ fn identity(reference: &CellViewRef) -> String {
 fn materialized<'a>(
     projection: &'a DesignProjection,
     reference: &CellViewRef,
-) -> Option<&'a SchematicState> {
+) -> Option<&'a rspice_design::projection::ProjectedSchematic> {
     let key = reference.key();
     projection
         .schematic_buffers()

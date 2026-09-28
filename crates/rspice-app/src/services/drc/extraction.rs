@@ -5,14 +5,15 @@ use super::netlist_gen::extraction::ExtractedConnectivity;
 use crate::state::ComponentType;
 use rspice_design::drc::DrcResult;
 use rspice_design::drc::{ComponentInfo, DrcConfig, extract_components};
+use rspice_design::schematic::document::SchematicDocument;
 
 /// Resolve the design once, and bind every placed component to it.
 pub(super) fn extract_checked_design(
-    schematic: &crate::state::SchematicState,
+    schematic: &impl AsRef<SchematicDocument>,
     hierarchy: &HierarchySource<'_>,
 ) -> (Vec<ComponentInfo>, ExtractedConnectivity) {
     let connectivity = super::netlist_gen::extraction::extract(schematic, Some(hierarchy));
-    let components = extract_components(&schematic.document(), &connectivity, |comp| {
+    let components = extract_components(schematic.as_ref(), &connectivity, |comp| {
         if comp.kind != ComponentType::CellInstance {
             return Some(true);
         }
@@ -39,11 +40,11 @@ pub(super) fn extract_checked_design(
 
 /// Run DRC using the active hierarchy's symbol and binding authority.
 pub fn run_drc_check_with_hierarchy_and_config(
-    schematic: &crate::state::SchematicState,
+    schematic: &impl AsRef<SchematicDocument>,
     hierarchy: &HierarchySource<'_>,
     config: DrcConfig,
 ) -> DrcResult {
-    rspice_design::drc::run_check(&schematic.document(), config, || {
+    rspice_design::drc::run_check(schematic.as_ref(), config, || {
         extract_checked_design(schematic, hierarchy)
     })
 }

@@ -933,11 +933,7 @@ pub struct ProjectWorkspace {
     pub schematic_buffers: HashMap<String, SchematicState>,
     /// Derived projection, retained only while all of its inputs match.
     #[serde(skip)]
-    design_projection_cache: std::cell::RefCell<Option<std::sync::Arc<DesignProjection>>>,
-    /// Per-document materialization memo; edits invalidate only affected views.
-    #[serde(skip)]
-    materialized_buffers:
-        std::cell::RefCell<HashMap<String, (BufferMemoKey, std::sync::Arc<SchematicState>)>>,
+    design_projection_cache: rspice_design::projection::DesignProjectionCache,
     /// Measurement specifications for the results specs matrix. Project
     /// design intent, so it persists with the workspace.
     #[serde(default)]
@@ -1087,8 +1083,7 @@ impl Default for ProjectWorkspace {
             hierarchy_stack: vec![active_view],
             hierarchy_instances: Vec::new(),
             schematic_buffers,
-            design_projection_cache: std::cell::RefCell::new(None),
-            materialized_buffers: std::cell::RefCell::new(HashMap::new()),
+            design_projection_cache: rspice_design::projection::DesignProjectionCache::default(),
             specs: Vec::new(),
             simulation_plan_payloads: Vec::new(),
             physical_layout_documents: BTreeMap::new(),

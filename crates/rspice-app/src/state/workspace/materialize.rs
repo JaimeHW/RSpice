@@ -1,27 +1,7 @@
 //! Host source checks for project hierarchy materialization.
 
-pub(super) use super::hierarchy_resolver::hierarchy_stop_view;
 pub(crate) use super::hierarchy_resolver::metadata_value;
 use super::*;
-
-pub(super) fn materialize_authoritative_source_binding(
-    placed: &LibraryCellInstance,
-    library: &Library,
-    cell: &Cell,
-    view: &View,
-    workspace: &ProjectWorkspace,
-    libraries: &LibraryManager,
-) -> Result<LibraryCellInstance, String> {
-    super::hierarchy_resolver::materialize_authoritative_source_binding(
-        placed,
-        library,
-        cell,
-        view,
-        workspace.project.id(),
-        &workspace.project_sources,
-        libraries.catalog(),
-    )
-}
 
 pub(crate) fn project_veriloga_binding_for_view(
     workspace: &ProjectWorkspace,

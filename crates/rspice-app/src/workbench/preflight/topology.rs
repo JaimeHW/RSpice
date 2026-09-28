@@ -13,10 +13,14 @@
 //! check read. A second tracing pass here could refuse a topology the emitted
 //! deck does not have.
 
+#[cfg(test)]
+use crate::state::SchematicState;
+use rspice_design::schematic::document::SchematicDocument;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::simulation::netlist_gen::extraction::ExtractedConnectivity;
-use crate::state::{Component, ComponentType, PortDirection, SchematicState, is_ground_reference};
+use crate::state::{Component, ComponentType, PortDirection, is_ground_reference};
 use crate::workbench::state::{PreflightIssue, PreflightRemediation};
 
 /// Row labels the Solver surface states as enforced contract. The refusal and
@@ -33,9 +37,10 @@ const CONTROL_GATE_PIN: &str = "G";
 
 /// Every topology refusal this design carries, in reporting order.
 pub(super) fn topology_blockers(
-    schematic: &SchematicState,
+    schematic: &impl AsRef<SchematicDocument>,
     connectivity: &ExtractedConnectivity,
 ) -> Vec<PreflightIssue> {
+    let schematic = schematic.as_ref();
     let mut nodes = Nodes::default();
     let mut terminals: HashMap<u64, Vec<TerminalNode>> = HashMap::new();
     for terminal in &connectivity.terminals {
@@ -207,7 +212,7 @@ fn designator(component: &Component) -> String {
 /// A design with no reference node at all is not reported here: every node
 /// would be listed, burying the missing-ground finding that owns that state.
 fn no_dc_path_issue(
-    schematic: &SchematicState,
+    schematic: &SchematicDocument,
     nodes: &Nodes,
     terminals: &HashMap<u64, Vec<TerminalNode>>,
 ) -> Option<PreflightIssue> {
@@ -219,7 +224,7 @@ fn no_dc_path_issue(
         }
     }
 
-    for component in &schematic.document().components {
+    for component in &schematic.components {
         let Some(pins) = terminals.get(&component.id) else {
             continue;
         };
@@ -279,7 +284,7 @@ fn no_dc_path_issue(
 /// this preflight leaves to the engine rather than a run it stops on a reading
 /// the deck may not share.
 fn voltage_source_loop_issues(
-    schematic: &SchematicState,
+    schematic: &SchematicDocument,
     nodes: &Nodes,
     terminals: &HashMap<u64, Vec<TerminalNode>>,
 ) -> Vec<PreflightIssue> {
@@ -288,7 +293,7 @@ fn voltage_source_loop_issues(
     let mut placed: Vec<String> = Vec::new();
     let mut issues = Vec::new();
 
-    for component in &schematic.document().components {
+    for component in &schematic.components {
         if !is_independent_voltage_source(component.kind) {
             continue;
         }

@@ -20,17 +20,6 @@ impl<'a> SymbolResolver<'a> {
             resolver: resolution::SymbolResolver::new(libraries.catalog(), schematic_buffers),
         }
     }
-    /// Overlay an unsaved editor buffer without cloning the workspace.
-    pub(crate) fn with_active_schematic(
-        mut self,
-        reference: &'a CellViewRef,
-        schematic: &'a SchematicState,
-    ) -> Self {
-        self.resolver = self
-            .resolver
-            .with_active_schematic(reference, schematic.document());
-        self
-    }
     pub fn resolve_binding(&self, binding: &LibraryCellInstance) -> Option<ResolvedCellSymbol> {
         self.resolver.resolve_binding(binding)
     }

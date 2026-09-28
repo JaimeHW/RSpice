@@ -13,9 +13,39 @@ use crate::state::workspace::{
     ConfigurationExecutionBinding, ConfigurationExecutionPlan, ConfigurationExecutionProjection,
     DesignProjection,
 };
-use crate::state::{
-    LibraryCellInstance, LibraryManager, ResolvedCellSymbol, SchematicState, SymbolResolver,
-};
+use crate::state::{LibraryCellInstance, LibraryManager, ResolvedCellSymbol};
+
+/// Borrow the source map's symbol and global declarations without copying it.
+trait SchematicBuffers {
+    fn resolve_symbol(
+        &self,
+        libraries: &LibraryManager,
+        binding: &LibraryCellInstance,
+    ) -> Option<ResolvedCellSymbol>;
+    fn explicit_global_declarations(&self) -> Vec<String>;
+}
+
+impl<S: AsRef<SchematicDocument>> SchematicBuffers for HashMap<String, S> {
+    fn resolve_symbol(
+        &self,
+        libraries: &LibraryManager,
+        binding: &LibraryCellInstance,
+    ) -> Option<ResolvedCellSymbol> {
+        rspice_design::symbol_resolver::SymbolResolver::new(libraries.catalog(), self)
+            .resolve_binding(binding)
+    }
+    fn explicit_global_declarations(&self) -> Vec<String> {
+        let mut declarations = self
+            .values()
+            .flat_map(|schematic| schematic.as_ref().net_labels.iter())
+            .filter(|label| label.name.ends_with('!'))
+            .map(|label| label.name.clone())
+            .collect::<Vec<_>>();
+        declarations.sort();
+        declarations.dedup();
+        declarations
+    }
+}
 
 /// Read-only access to project cell masters for hierarchical netlisting.
 ///
@@ -25,7 +55,7 @@ use crate::state::{
 pub struct HierarchySource<'a> {
     masters: HashMap<String, &'a SchematicDocument>,
     libraries: Option<&'a LibraryManager>,
-    schematic_buffers: Option<&'a HashMap<String, SchematicState>>,
+    schematic_buffers: Option<&'a dyn SchematicBuffers>,
     execution_plan: Option<ConfigurationExecutionPlan>,
     connectivity: Option<&'a crate::state::ConnectivityContract>,
     data_root: Option<std::path::PathBuf>,
@@ -94,9 +124,9 @@ impl<'a> HierarchySource<'a> {
 
     /// Index workspace schematic buffers and library symbol metadata so placed
     /// cell instances can use the same authored terminal geometry as the UI.
-    pub fn from_workspace(
+    pub fn from_workspace<S: AsRef<SchematicDocument>>(
         libraries: &'a LibraryManager,
-        buffers: &'a HashMap<String, SchematicState>,
+        buffers: &'a HashMap<String, S>,
     ) -> Self {
         let mut source = Self::from_buffers(buffers);
         source.libraries = Some(libraries);
@@ -209,17 +239,9 @@ impl<'a> HierarchySource<'a> {
     }
 
     fn explicit_global_declarations(&self) -> Vec<String> {
-        let mut declarations = self
-            .schematic_buffers
-            .into_iter()
-            .flat_map(|buffers| buffers.values())
-            .flat_map(|schematic| schematic.document().net_labels.iter())
-            .filter(|label| label.name.ends_with('!'))
-            .map(|label| label.name.clone())
-            .collect::<Vec<_>>();
-        declarations.sort();
-        declarations.dedup();
-        declarations
+        self.schematic_buffers
+            .map(SchematicBuffers::explicit_global_declarations)
+            .unwrap_or_default()
     }
 
     /// Register a master directly (tests, ad-hoc callers).
@@ -333,7 +355,7 @@ impl<'a> HierarchySource<'a> {
     pub fn resolved_symbol_for(&self, binding: &LibraryCellInstance) -> Option<ResolvedCellSymbol> {
         let libraries = self.libraries?;
         let schematic_buffers = self.schematic_buffers?;
-        SymbolResolver::new(libraries, schematic_buffers).resolve_binding(binding)
+        schematic_buffers.resolve_symbol(libraries, binding)
     }
 
     fn view_key(library: &str, cell: &str, view: &str) -> String {

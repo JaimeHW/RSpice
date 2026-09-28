@@ -5,6 +5,7 @@
 //! are explicit, stale guarded, validated on a cloned schematic, and published
 //! as one undo transaction.
 
+use rspice_design::schematic::document::SchematicDocument;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use egui::{Context, Grid, RichText, ScrollArea, Ui, Vec2};
@@ -316,7 +317,7 @@ fn preview_projection(
 fn projected_open_view<'a>(
     state: &AppState,
     projection: &'a DesignProjection,
-) -> Result<&'a SchematicState, String> {
+) -> Result<&'a rspice_design::projection::ProjectedSchematic, String> {
     let active_key = state.workspace.active_view.key();
     projection
         .schematic_buffers()
@@ -438,7 +439,7 @@ fn connectivity_drc_config(state: &AppState) -> DrcConfig {
 
 fn build_net_row(
     net: &DesignNet,
-    schematic: &SchematicState,
+    schematic: &impl AsRef<SchematicDocument>,
     drc: &DrcResult,
 ) -> ConnectivityNetRow {
     let (drivers, loads, discipline) = endpoint_contract(net, schematic);
@@ -475,13 +476,16 @@ fn build_net_row(
     }
 }
 
-fn endpoint_contract(net: &DesignNet, schematic: &SchematicState) -> (usize, usize, String) {
+fn endpoint_contract(
+    net: &DesignNet,
+    schematic: &impl AsRef<SchematicDocument>,
+) -> (usize, usize, String) {
     let mut drivers = 0;
     let mut loads = 0;
     let mut disciplines = BTreeSet::new();
     for terminal in &net.terminals {
         let Some(component) = schematic
-            .document()
+            .as_ref()
             .components
             .iter()
             .find(|component| component.id == terminal.component_id)

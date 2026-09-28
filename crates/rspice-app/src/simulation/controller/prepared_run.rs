@@ -380,7 +380,7 @@ impl SimulationController {
         let source = Self::apply_simulation_options_to_netlist(&source, &state.sim_setup.options);
         let (source, _) = expand_generated_dependencies_with_sealed_sources(
             &source,
-            root_schematic.current_file.as_deref(),
+            root_schematic.current_file(),
             &state.workspace.project.include_search_chain(),
             Some(&sealed_models),
         )?;
@@ -1028,7 +1028,7 @@ impl SimulationController {
         let (expanded_netlist, sealed_source_dependencies) =
             expand_generated_dependencies_with_sealed_sources(
                 &netlist,
-                root_schematic.current_file.as_deref(),
+                root_schematic.current_file(),
                 &state.workspace.project.include_search_chain(),
                 Some(&sealed_models),
             )?;
@@ -1102,7 +1102,7 @@ impl SimulationController {
         let touchstone_export = touchstone_export_policy(
             state,
             tasks.iter().map(PreparedTask::queued_analysis),
-            root_schematic.current_file.as_deref(),
+            root_schematic.current_file(),
         )?;
 
         PreparedRunSnapshot::new(SnapshotParts {

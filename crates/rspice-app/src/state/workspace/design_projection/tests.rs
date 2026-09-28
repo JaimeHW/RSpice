@@ -341,8 +341,11 @@ fn a_memo_hit_carries_what_a_full_rebuild_would_have_produced() {
         }
 
         let memoized = projection_of(&workspace, &libraries, &reference, &active);
-        let rebuilt = workspace
-            .build_design_projection(&libraries, &reference, &active, None, None)
+        let cache = rspice_design::projection::DesignProjectionCache::default();
+        let mut context = workspace.projection_context();
+        context.cache = &cache;
+        let rebuilt = context
+            .inspect_design_projection(libraries.catalog(), &reference, &active)
             .expect("the fixture rebuilds");
         assert_eq!(
             memoized.root(),
@@ -437,8 +440,7 @@ fn two_hundred_projections_over_thirty_cell_views() {
 
     let started = std::time::Instant::now();
     for _ in 0..CALLS {
-        *workspace.design_projection_cache.borrow_mut() = None;
-        workspace.materialized_buffers.borrow_mut().clear();
+        workspace.design_projection_cache.clear();
         let _ = projection_of(&workspace, &libraries, &reference, &active);
     }
     let cold = started.elapsed();

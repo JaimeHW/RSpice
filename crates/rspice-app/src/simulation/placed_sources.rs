@@ -75,6 +75,7 @@
 //! selectable. Listing the drawing once would state a number no run ever has,
 //! and would leave the reader no row to click through to the second instance.
 
+use rspice_design::schematic::document::SchematicDocument;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
@@ -319,9 +320,9 @@ fn occurrence_label(occurrence: Option<&InstancePath>) -> String {
 /// states about the design, which is a different and larger number wherever a
 /// source is drawn below the open sheet.
 #[must_use]
-pub fn placed_source_count(schematic: &SchematicState) -> usize {
+pub fn placed_source_count(schematic: &impl AsRef<SchematicDocument>) -> usize {
     schematic
-        .document()
+        .as_ref()
         .components
         .iter()
         .filter(|component| source_family(component.kind).is_some())
@@ -342,14 +343,14 @@ pub fn placed_source_count(schematic: &SchematicState) -> usize {
 /// for is a design that places no source at all, which is every sheet still
 /// being drawn.
 pub fn placed_sources(
-    schematic: &SchematicState,
+    schematic: &impl AsRef<SchematicDocument>,
     stimulus_library: &StimulusLibrary,
     plan: Option<&SimulationPlan>,
 ) -> Vec<PlacedSource> {
     #[cfg(test)]
     crate::simulation::cost_probe::record(crate::simulation::cost_probe::Derivation::PlacedSources);
     if !schematic
-        .document()
+        .as_ref()
         .components
         .iter()
         .any(|component| source_family(component.kind).is_some())
@@ -358,7 +359,7 @@ pub fn placed_sources(
     }
     let nets = net_names_by_terminal(schematic);
     let mut sources: Vec<PlacedSource> = schematic
-        .document()
+        .as_ref()
         .components
         .iter()
         .filter_map(|component| {
@@ -691,8 +692,8 @@ fn walk_design(
 /// Whether a master places anything either list would carry. Asked before the
 /// net summary is resolved, because resolving it is the expensive half and a
 /// master that places no excitation has no use for it.
-fn places_excitation(schematic: &SchematicState) -> bool {
-    schematic.document().components.iter().any(|component| {
+fn places_excitation(schematic: &impl AsRef<SchematicDocument>) -> bool {
+    schematic.as_ref().components.iter().any(|component| {
         source_family(component.kind).is_some() || component.kind == ComponentType::RfPort
     })
 }
@@ -705,7 +706,7 @@ fn places_excitation(schematic: &SchematicState) -> bool {
 fn materialized<'a>(
     projection: &'a DesignProjection,
     reference: &CellViewRef,
-) -> Option<&'a SchematicState> {
+) -> Option<&'a rspice_design::projection::ProjectedSchematic> {
     let key = reference.key();
     projection
         .schematic_buffers()
@@ -828,11 +829,11 @@ fn with_source_consumers(
 /// function returns before building it on a sheet that places no port, which is
 /// every design that is not an RF testbench.
 pub fn placed_rf_ports(
-    schematic: &SchematicState,
+    schematic: &impl AsRef<SchematicDocument>,
     plan: Option<&SimulationPlan>,
 ) -> Vec<PlacedRfPort> {
     if !schematic
-        .document()
+        .as_ref()
         .components
         .iter()
         .any(|component| component.kind == ComponentType::RfPort)
@@ -845,7 +846,7 @@ pub fn placed_rf_ports(
     // re-derived per port.
     let consumers = plan.map(port_consumers_for).unwrap_or_default();
     let mut ports: Vec<PlacedRfPort> = schematic
-        .document()
+        .as_ref()
         .components
         .iter()
         .filter(|component| component.kind == ComponentType::RfPort)
@@ -1390,7 +1391,9 @@ fn key_figure(
 }
 
 /// Net name for every terminal in the design, keyed by instance and pin.
-fn net_names_by_terminal(schematic: &SchematicState) -> HashMap<(u64, String), String> {
+fn net_names_by_terminal(
+    schematic: &impl AsRef<SchematicDocument>,
+) -> HashMap<(u64, String), String> {
     keyed_by_terminal(design_nets(schematic))
 }
 

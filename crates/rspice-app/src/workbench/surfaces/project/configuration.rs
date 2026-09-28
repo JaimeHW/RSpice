@@ -336,7 +336,7 @@ fn validate_candidate_configuration(
     let generated = workspace.bind_generated_netlist_provenance(generated.netlist);
     crate::simulation::controller::prepared_run::expand_generated_dependencies(
         &generated,
-        root.current_file.as_deref(),
+        root.current_file(),
         &app.state.workspace.project.include_search_chain(),
         &app.state.model_library_manager,
     )

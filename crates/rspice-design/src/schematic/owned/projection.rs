@@ -1,8 +1,9 @@
 //! Materialize authored sheets, variants and reference annotation for execution.
 
 use super::super::{
-    component::{Component, LibraryCellInstance, PreparedVariantReplacement},
+    component::{Component, LibraryCellInstance},
     component_type::ComponentType,
+    document::SchematicDocument,
     identity::DocumentRepair,
     net_label::NetLabel,
 };
@@ -21,10 +22,11 @@ impl Schematic {
         &self,
         design_management: &DesignManagementCatalog,
         cell_view_key: &str,
-    ) -> Result<(Schematic, DocumentRepair), DesignManagementError> {
+    ) -> Result<(SchematicDocument, DocumentRepair), DesignManagementError> {
         design_management.validate()?;
-        let source = self;
+        let source = &self.document;
         let mut projected = source.clone();
+        let mut identity = self.identity.clone();
 
         if let Some(catalog) = design_management.sheet_catalog(cell_view_key) {
             let offsets = catalog
@@ -43,36 +45,36 @@ impl Schematic {
                     .unwrap_or_else(Point::origin)
             };
 
-            for component in &mut projected.document.components {
+            for component in &mut projected.components {
                 component.pos = translated_point(component.pos, offset_for(component.id))?;
             }
-            for wire in &mut projected.document.wires {
+            for wire in &mut projected.wires {
                 let delta = offset_for(wire.id);
                 for point in &mut wire.points {
                     *point = translated_point(*point, delta)?;
                 }
             }
-            for bus in &mut projected.document.buses {
+            for bus in &mut projected.buses {
                 let delta = offset_for(bus.id);
                 for point in &mut bus.points {
                     *point = translated_point(*point, delta)?;
                 }
             }
-            for tap in &mut projected.document.bus_taps {
+            for tap in &mut projected.bus_taps {
                 let delta = offset_for(tap.id);
                 tap.bus_point = translated_point(tap.bus_point, delta)?;
                 tap.connection_point = translated_point(tap.connection_point, delta)?;
             }
-            for junction in &mut projected.document.junctions {
+            for junction in &mut projected.junctions {
                 junction.pos = translated_point(junction.pos, offset_for(junction.id))?;
             }
-            for label in &mut projected.document.net_labels {
+            for label in &mut projected.net_labels {
                 label.pos = translated_point(label.pos, offset_for(label.id))?;
             }
-            for note in &mut projected.document.design_notes {
+            for note in &mut projected.design_notes {
                 note.pos = translated_point(note.pos, offset_for(note.id))?;
             }
-            for shape in &mut projected.document.documentation_shapes {
+            for shape in &mut projected.documentation_shapes {
                 let delta = offset_for(shape.id);
                 let (minimum, maximum) = shape.bounds();
                 let _ = translated_point(minimum, delta)?;
@@ -98,8 +100,8 @@ impl Schematic {
                     // A materialized crossing is exactly what an authored
                     // off-sheet connector is, so it carries the contract's
                     // direction rather than reading as a plain local name.
-                    let next_id = projected.allocate_id();
-                    projected.document.net_labels.push(NetLabel::off_sheet(
+                    let next_id = identity.allocate(&projected);
+                    projected.net_labels.push(NetLabel::off_sheet(
                         next_id,
                         anchor,
                         contract.definition().net_name.clone(),
@@ -116,7 +118,7 @@ impl Schematic {
             .transpose()?;
         if let Some(resolved) = &active_variant {
             let mut do_not_populate = HashSet::new();
-            for component in &projected.document.components {
+            for component in &projected.components {
                 if matches!(
                     resolved.override_for(cell_view_key, component.id)?,
                     Some(VariantObjectOverride::DoNotPopulate { .. })
@@ -125,11 +127,9 @@ impl Schematic {
                 }
             }
             projected
-                .document
                 .components
                 .retain(|component| !do_not_populate.contains(&component.id));
             projected
-                .document
                 .connections
                 .retain(|connection| !do_not_populate.contains(&connection.component_id));
         }
@@ -144,7 +144,6 @@ impl Schematic {
             BTreeMap::new()
         } else {
             let sources = projected
-                .document
                 .components
                 .iter()
                 .map(|component| {
@@ -161,21 +160,18 @@ impl Schematic {
                 .collect()
         };
         if !names.is_empty() {
-            projected.document.components =
-                super::super::component_references::prepare_component_renames(
-                    &projected.document,
-                    &names,
-                )
-                .map_err(|reason| {
-                    DesignManagementError::InvalidAnnotationProjection {
+            projected.components =
+                super::super::component_references::prepare_component_renames(&projected, &names)
+                    .map_err(
+                    |reason| DesignManagementError::InvalidAnnotationProjection {
                         cell_view_key: cell_view_key.to_owned(),
                         reason,
-                    }
-                })?;
+                    },
+                )?;
         }
 
         if let Some(resolved) = &active_variant {
-            for component in &mut projected.document.components {
+            for component in &mut projected.components {
                 let Some(override_value) = resolved.override_for(cell_view_key, component.id)?
                 else {
                     continue;
@@ -213,7 +209,7 @@ impl Schematic {
                 }
             }
         }
-        let repaired = projected.repair_document();
+        let repaired = identity.repair_document(&mut projected);
         Ok((projected, repaired))
     }
 }
@@ -270,15 +266,14 @@ fn component_terminal_point(component: &Component, terminal_name: &str) -> Optio
 /// session has open, so a contract that resolved through it failed for every
 /// cell view that was not the active one.
 fn projected_cross_sheet_anchor(
-    source: &Schematic,
-    projected: &Schematic,
+    source: &SchematicDocument,
+    projected: &SchematicDocument,
     endpoint: &CrossSheetPortEndpoint,
     delta: Point,
 ) -> Result<Point, DesignManagementError> {
     let authored_point = match &endpoint.anchor {
         CrossSheetPortAnchor::WirePoint { wire_id, point } => {
             let wire = source
-                .document
                 .wires
                 .iter()
                 .find(|wire| wire.id == *wire_id)
@@ -299,7 +294,6 @@ fn projected_cross_sheet_anchor(
             terminal_name,
         } => {
             let component = source
-                .document
                 .components
                 .iter()
                 .find(|component| component.id == *component_id)
@@ -313,12 +307,7 @@ fn projected_cross_sheet_anchor(
                     identity: format!("{}:{}", component_id, terminal_name),
                 }
             })?;
-            if !source
-                .document
-                .wires
-                .iter()
-                .any(|wire| wire.contains_point(point))
-            {
+            if !source.wires.iter().any(|wire| wire.contains_point(point)) {
                 return Err(DesignManagementError::MissingReference {
                     domain: "cross-sheet component terminal connection",
                     identity: format!("{}:{}", component_id, terminal_name),
@@ -331,7 +320,6 @@ fn projected_cross_sheet_anchor(
     match &endpoint.anchor {
         CrossSheetPortAnchor::WirePoint { wire_id, .. } => {
             if !projected
-                .document
                 .wires
                 .iter()
                 .any(|wire| wire.id == *wire_id && wire.contains_point(anchor))
@@ -344,7 +332,6 @@ fn projected_cross_sheet_anchor(
         }
         CrossSheetPortAnchor::ComponentTerminal { component_id, .. } => {
             if !projected
-                .document
                 .components
                 .iter()
                 .any(|component| component.id == *component_id)
@@ -357,10 +344,4 @@ fn projected_cross_sheet_anchor(
         }
     }
     Ok(anchor)
-}
-
-impl Schematic {
-    pub fn apply_variant_replacement(&mut self, prepared: PreparedVariantReplacement) {
-        prepared.apply_to(&mut self.document);
-    }
 }

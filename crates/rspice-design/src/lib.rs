@@ -12,6 +12,7 @@ pub mod occurrence;
 pub mod parameters;
 pub mod physical_layout;
 pub mod project_sources;
+pub mod projection;
 pub mod properties;
 pub mod references;
 pub mod resolved_symbol;
