@@ -3,6 +3,7 @@
 use egui::{ComboBox, Context, Grid, RichText, ScrollArea, TextEdit, Ui, Vec2};
 
 use crate::diagnostics::ConsoleMessage;
+use crate::state::engineering_table::active_schematic_dataset;
 use crate::state::{
     EngineeringDataset, EngineeringFilterGrammar, EngineeringSortRule, EngineeringTableView,
     EngineeringViewScope, EngineeringVirtualizationPolicy, FrozenIdentifierPolicy, SortDirection,
@@ -56,7 +57,7 @@ pub(crate) fn open_engineering_table_dialog(state: &mut AppState) -> bool {
     if state.dialogs.engineering_table.open {
         return false;
     }
-    let dataset = EngineeringDataset::active_schematic(&state.schematic);
+    let dataset = active_schematic_dataset(&state.schematic);
     let mut view = state
         .ui
         .engineering_table_views
@@ -98,7 +99,7 @@ impl RSpiceApp {
             return;
         }
 
-        let dataset = EngineeringDataset::active_schematic(&self.state.schematic);
+        let dataset = active_schematic_dataset(&self.state.schematic);
         if self.state.dialogs.engineering_table.source_revision != dataset.source_revision {
             if let Some(draft) = self.state.dialogs.engineering_table.draft.as_mut() {
                 draft.normalize_for(&dataset);
@@ -832,7 +833,7 @@ impl RSpiceApp {
     }
 
     fn publish_imported_engineering_view(&mut self, source: &str) {
-        let dataset = EngineeringDataset::active_schematic(&self.state.schematic);
+        let dataset = active_schematic_dataset(&self.state.schematic);
         let scope = self.state.dialogs.engineering_table.save_scope;
         let result = match scope {
             EngineeringViewScope::Personal => self
@@ -1670,7 +1671,7 @@ mod tests {
     fn project_scope_is_versioned_while_personal_scope_is_not() {
         let mut app = RSpiceApp::test_instance();
         app.state.project_lifecycle.project_open = true;
-        let dataset = EngineeringDataset::active_schematic(&app.state.schematic);
+        let dataset = active_schematic_dataset(&app.state.schematic);
         app.state.dialogs.engineering_table.open(
             EngineeringTableView::for_dataset(&dataset),
             dataset.source_revision,

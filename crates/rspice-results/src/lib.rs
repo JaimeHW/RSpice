@@ -19,6 +19,7 @@ pub mod convergence_quality;
 pub mod current_impulses;
 pub mod dc_mismatch;
 pub mod dc_sweep;
+pub mod engineering_table;
 #[cfg(feature = "engine-evidence")]
 pub mod events;
 pub mod executed_deck;

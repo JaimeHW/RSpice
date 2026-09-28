@@ -1115,9 +1115,8 @@ mod symbol_selection_tests {
     #[test]
     fn personal_engineering_table_views_round_trip_with_the_ui_session() {
         let mut session = UiSessionState::new();
-        let dataset = crate::state::engineering_table::EngineeringDataset::active_schematic(
-            &Default::default(),
-        );
+        let dataset =
+            crate::state::engineering_table::active_schematic_dataset(&Default::default());
         let view = crate::state::engineering_table::EngineeringTableView::for_dataset(&dataset);
         session
             .engineering_table_views

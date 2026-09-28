@@ -5679,6 +5679,7 @@ dependencies = [
  "num-complex",
  "once_cell",
  "png",
+ "regex",
  "rspice-app-types",
  "rspice-core",
  "rspice-design-model",
