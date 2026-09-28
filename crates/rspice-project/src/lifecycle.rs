@@ -1,8 +1,12 @@
 //! Project incarnation, accepted-generation and single-operation authority.
 
 mod dirty;
+mod save;
+pub use save::{
+    BrowserCanonicalSave, BrowserSavePublication, PreparedBrowserSave, SaveContinuationEvent,
+    StagedBrowserSave,
+};
 
-#[cfg(any(test, target_arch = "wasm32"))]
 use crate::persistence::BrowserBindingReceipt;
 use crate::{
     AcceptedProject,
@@ -49,12 +53,10 @@ pub enum ProjectLifecycleError {
         "a project copy cannot replace the active project's canonical file; choose a different destination"
     )]
     CopyDestinationIsCanonical,
-    #[cfg(target_arch = "wasm32")]
     #[error(
         "browser canonical-binding restoration or promotion is still in progress; wait for it to finish before saving"
     )]
     BrowserBindingRestorePending,
-    #[cfg(target_arch = "wasm32")]
     #[error(
         "the canonical browser project changed outside RSpice; reopen it or save an independent project copy"
     )]
@@ -69,7 +71,6 @@ pub enum ProjectLifecycleError {
     Persistence(#[from] crate::persistence::PersistenceError),
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BrowserOperationContext {
     epoch: u64,
@@ -112,11 +113,8 @@ pub struct ProjectLifecycle {
     accepted_generation: u64,
     registry: DocumentRegistry,
     result_fingerprints: ResultFingerprintCache,
-    #[cfg(target_arch = "wasm32")]
     browser_operation_generation: u64,
-    #[cfg(target_arch = "wasm32")]
     browser_restore_pending: bool,
-    #[cfg(target_arch = "wasm32")]
     browser_promotion_pending: bool,
 }
 
@@ -129,11 +127,8 @@ impl Default for ProjectLifecycle {
             accepted_generation: 0,
             registry: DocumentRegistry::default(),
             result_fingerprints: ResultFingerprintCache::default(),
-            #[cfg(target_arch = "wasm32")]
             browser_operation_generation: 1,
-            #[cfg(target_arch = "wasm32")]
             browser_restore_pending: false,
-            #[cfg(target_arch = "wasm32")]
             browser_promotion_pending: false,
         }
     }
@@ -183,16 +178,7 @@ impl ProjectLifecycle {
     }
 
     pub fn operation_in_progress(&self) -> bool {
-        self.transaction.is_some() || {
-            #[cfg(target_arch = "wasm32")]
-            {
-                self.browser_binding_pending()
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                false
-            }
-        }
+        self.transaction.is_some() || self.browser_binding_pending()
     }
 
     /// Check before the application captures working content; beginning the
@@ -239,7 +225,6 @@ impl ProjectLifecycle {
     }
 
     pub fn begin_save(&mut self) -> Result<TransactionId, ProjectLifecycleError> {
-        #[cfg(target_arch = "wasm32")]
         self.require_browser_binding_ready()?;
         if self.transaction.is_some() {
             return Err(ProjectLifecycleError::TransactionInProgress);
@@ -256,14 +241,12 @@ impl ProjectLifecycle {
         self.transaction = None;
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn is_current_transaction(&self, id: TransactionId) -> bool {
         self.transaction
             .as_ref()
             .is_some_and(|transaction| transaction.id == id)
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn cancel_transaction_if(&mut self, id: TransactionId) -> bool {
         if self.is_current_transaction(id) {
             self.transaction = None;
@@ -300,12 +283,10 @@ impl ProjectLifecycle {
         Ok(())
     }
 
-    #[cfg(target_arch = "wasm32")]
     fn browser_binding_pending(&self) -> bool {
         self.browser_restore_pending || self.browser_promotion_pending
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn require_browser_binding_ready(&self) -> Result<(), ProjectLifecycleError> {
         if self.browser_binding_pending() {
             return Err(ProjectLifecycleError::BrowserBindingRestorePending);
@@ -313,28 +294,23 @@ impl ProjectLifecycle {
         Ok(())
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn begin_browser_restore(&mut self) {
         self.browser_restore_pending = true;
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn finish_browser_restore(&mut self) {
         self.browser_restore_pending = false;
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn finish_browser_promotion(&mut self) {
         self.browser_promotion_pending = false;
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn clear_browser_pending(&mut self) {
         self.browser_restore_pending = false;
         self.browser_promotion_pending = false;
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn browser_operation_context(
         &self,
         project_id: &str,
@@ -349,7 +325,6 @@ impl ProjectLifecycle {
         }
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn browser_operation_context_is_current(
         &self,
         context: &BrowserOperationContext,
@@ -366,14 +341,12 @@ impl ProjectLifecycle {
         )
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn begin_browser_promotion(&mut self) {
         self.browser_promotion_pending = true;
     }
 
     /// None means idle; Some reports whether a pending restore was cancelled.
     /// Every cancellation invalidates promises the platform cannot abort.
-    #[cfg(target_arch = "wasm32")]
     pub fn cancel_browser_operation(&mut self) -> Option<bool> {
         let restore_was_pending = self.browser_restore_pending;
         if !self.operation_in_progress() {
@@ -387,7 +360,6 @@ impl ProjectLifecycle {
     }
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
 fn operation_context_matches(
     context: &BrowserOperationContext,
     epoch: u64,

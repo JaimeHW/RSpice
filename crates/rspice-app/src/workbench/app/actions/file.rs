@@ -177,7 +177,7 @@ impl RSpiceApp {
     #[cfg(target_arch = "wasm32")]
     pub(in crate::workbench) fn handle_save_continuation_event(
         &mut self,
-        event: crate::workbench::workflows::project_workflow::SaveContinuationEvent,
+        event: rspice_project::lifecycle::SaveContinuationEvent,
     ) {
         if self.handle_check_and_save_continuation(&event) {
             return;

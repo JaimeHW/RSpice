@@ -18,6 +18,7 @@ mod registry;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
+#[cfg(any(test, not(target_arch = "wasm32")))]
 use std::path::PathBuf;
 
 pub(crate) use crate::product::TransactionId;
@@ -30,9 +31,9 @@ pub(crate) use registry::ProjectDocumentId;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use rspice_project::lifecycle::BrowserOperationContext;
 use rspice_project::lifecycle::ProjectLifecycle;
-pub(crate) use rspice_project::lifecycle::{ProjectLifecycleError, RevertReviewToken, SaveScope};
 #[cfg(target_arch = "wasm32")]
-use rspice_project::persistence::browser::BrowserWriteIntent;
+use rspice_project::lifecycle::{PreparedBrowserSave, StagedBrowserSave};
+pub(crate) use rspice_project::lifecycle::{ProjectLifecycleError, RevertReviewToken, SaveScope};
 
 use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
 use crate::io::{ProjectSimulationResults, ProjectSnapshot};
@@ -824,32 +825,11 @@ pub(crate) fn save_project_copy_native(
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) struct BrowserPreparedSave {
-    pub(crate) transaction: TransactionId,
-    pub(crate) context: BrowserOperationContext,
-    pub(crate) candidate: ProjectSnapshot,
-    pub(crate) scope: SaveScope,
-    /// Stable identity of the active document captured with the serialized
-    /// snapshot. Active-document continuations must not act on a different tab
-    /// that became active while the browser picker or permission prompt waited.
-    pub(crate) saved_document: ProjectDocumentId,
-    pub(crate) project_copy: bool,
+    pub(crate) save: PreparedBrowserSave,
+    workspace_session: crate::state::workspace::WorkspaceSession,
     pub(crate) suggested_name: String,
-    pub(crate) bytes: Vec<u8>,
-    pub(crate) staged_digest: ContentDigest,
-    pub(crate) target: BrowserWriteTarget,
+    pub(crate) handle_id: Option<u64>,
     pub(crate) source_handle_id: Option<u64>,
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) struct BrowserSavePublication {
-    pub(crate) handle_id: u64,
-    pub(crate) binding_id: uuid::Uuid,
-    pub(crate) backend: BrowserBindingBackend,
-    pub(crate) project_id: String,
-    pub(crate) generation: u64,
-    pub(crate) display_name: String,
-    pub(crate) digest: ContentDigest,
-    pub(crate) durable: bool,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -875,7 +855,7 @@ pub(crate) fn prepare_browser_save(
     let saved_document = active_document(state);
     let result = (|| {
         let working = snapshot(state)?;
-        let mut candidate = if project_copy || scope == SaveScope::AllDocuments {
+        let candidate = if project_copy || scope == SaveScope::AllDocuments {
             working
         } else {
             state
@@ -885,16 +865,19 @@ pub(crate) fn prepare_browser_save(
                 .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?
                 .document_candidate(&working, &saved_document)?
         };
-        if project_copy {
-            candidate.file.workspace.project = candidate
-                .file
-                .workspace
-                .project
-                .fork_copy_at(PathBuf::from(&suggested_name));
-        } else {
-            candidate.file.workspace.project.path = None;
-        }
-        let (bytes, staged_digest) = persistence::serialized_project(&candidate.file)?;
+        let ProjectSnapshot {
+            file,
+            workspace_session,
+        } = candidate;
+        let staged = StagedBrowserSave::new(
+            transaction,
+            context,
+            file,
+            scope,
+            saved_document,
+            project_copy,
+            &suggested_name,
+        )?;
         let existing_binding = (!project_copy)
             .then(|| {
                 state
@@ -919,38 +902,26 @@ pub(crate) fn prepare_browser_save(
             .map(|binding| match binding {
                 PersistenceBinding::Browser { handle_id, .. } => *handle_id,
             });
-        let project_id = candidate.file.workspace.project.id().to_string();
-        let target = if let Some(PersistenceBinding::Browser { handle_id, binding }) =
-            existing_binding
-        {
-            persistence::BrowserWriteTarget {
-                handle_id: Some(*handle_id),
-                intent: binding.prepare_write(project_id)?,
-            }
-        } else {
-            let backend = if project_copy || persistence::browser_external_canonical_supported() {
+        let handle_id = existing_binding.map(|binding| match binding {
+            PersistenceBinding::Browser { handle_id, .. } => *handle_id,
+        });
+        let binding = existing_binding.map(|binding| match binding {
+            PersistenceBinding::Browser { binding, .. } => binding,
+        });
+        let save = staged.bind(binding, || {
+            if project_copy || persistence::browser_external_canonical_supported() {
                 BrowserBindingBackend::ExternalFile
             } else if persistence::browser_opfs_supported() {
                 BrowserBindingBackend::Opfs
             } else {
                 BrowserBindingBackend::ExternalFile
-            };
-            persistence::BrowserWriteTarget {
-                handle_id: None,
-                intent: BrowserWriteIntent::fresh(project_id, backend),
             }
-        };
+        })?;
         Ok(BrowserPreparedSave {
-            transaction,
-            context,
-            candidate,
-            scope,
-            saved_document,
-            project_copy,
+            save,
+            workspace_session,
             suggested_name,
-            bytes,
-            staged_digest,
-            target,
+            handle_id,
             source_handle_id,
         })
     })();
@@ -970,12 +941,12 @@ pub(crate) fn saved_snapshot_authorizes_continuation(
     scope: SaveScope,
     saved_document: &ProjectDocumentId,
 ) -> bool {
-    match scope {
-        SaveScope::AllDocuments => !has_unsaved_changes(state),
-        SaveScope::ActiveDocument => {
-            active_document(state) == *saved_document && !active_document_is_dirty(state)
-        }
-    }
+    scope.authorizes_continuation(
+        saved_document,
+        || active_document(state),
+        || has_unsaved_changes(state),
+        || active_document_is_dirty(state),
+    )
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1049,53 +1020,33 @@ fn clear_browser_handles() {
 pub(crate) fn complete_browser_save(
     state: &mut AppState,
     prepared: BrowserPreparedSave,
-    publication: BrowserSavePublication,
+    handle_id: u64,
+    publication: rspice_project::lifecycle::BrowserSavePublication,
 ) -> Result<(), ProjectLifecycleError> {
-    let BrowserSavePublication {
-        handle_id,
-        binding_id,
-        backend,
-        project_id,
-        generation,
-        display_name,
-        digest,
-        durable,
-    } = publication;
-    let current = state
-        .project_lifecycle
-        .authority
-        .is_current_transaction(prepared.transaction);
-    if !current || !browser_operation_context_is_current(state, &prepared.context) {
-        persistence::release_browser_handle(handle_id);
-        return Err(ProjectLifecycleError::TransactionInProgress);
-    }
-    if prepared.project_copy {
-        persistence::release_browser_handle(handle_id);
+    let BrowserPreparedSave {
+        save,
+        workspace_session,
+        ..
+    } = prepared;
+    let completion = state.project_lifecycle.authority.complete_browser_save(
+        save,
+        &state.workspace.content.project.id().to_string(),
+        state.browser_project_binding_receipt.as_ref(),
+        publication,
+        || persistence::release_browser_handle(handle_id),
+    )?;
+    if let Some(completion) = completion {
+        let candidate = ProjectSnapshot {
+            file: completion.candidate,
+            workspace_session,
+        };
+        let binding = PersistenceBinding::Browser {
+            handle_id,
+            binding: completion.binding,
+        };
+        finish_successful_save(state, candidate, binding, completion.scope);
         state.project_lifecycle.authority.cancel_transaction();
-        return Ok(());
     }
-    let receipt = BrowserBindingReceipt {
-        binding_id,
-        backend,
-        project_id,
-        accepted_generation: generation,
-        accepted_digest: digest,
-    };
-    let binding = match prepared.target.intent.accept_publication(
-        prepared.staged_digest,
-        receipt,
-        display_name,
-        durable,
-    ) {
-        Ok(binding) => PersistenceBinding::Browser { handle_id, binding },
-        Err(error) => {
-            persistence::release_browser_handle(handle_id);
-            state.project_lifecycle.authority.cancel_transaction();
-            return Err(error);
-        }
-    };
-    finish_successful_save(state, prepared.candidate, binding, prepared.scope);
-    state.project_lifecycle.authority.cancel_transaction();
     Ok(())
 }
 
@@ -1325,7 +1276,7 @@ pub(crate) fn record_browser_save_conflict(
     prepared: &BrowserPreparedSave,
     observed_digest: ContentDigest,
 ) {
-    if !browser_operation_context_is_current(state, &prepared.context) {
+    if !browser_operation_context_is_current(state, prepared.save.context()) {
         return;
     }
     let binding = state

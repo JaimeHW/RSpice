@@ -4,6 +4,8 @@
 //! checkpoint and binding-receipt bookkeeping that makes a reopened project
 //! resume where it left off.
 
+#[cfg(target_arch = "wasm32")]
+use rspice_project::lifecycle::SaveContinuationEvent;
 use std::path::Path;
 
 use crate::diagnostics::ConsoleMessage;
@@ -449,17 +451,17 @@ fn start_browser_project_save(
             crate::workbench::lifecycle::project_lifecycle::browser_canonical_save_supported()
         },
     );
-    if prepared.target.handle_id.is_none()
-        && prepared.target.intent.backend
+    if prepared.handle_id.is_none()
+        && prepared.save.intent().backend
             == crate::workbench::lifecycle::project_lifecycle::BrowserBindingBackend::ExternalFile
         && !save_surface_supported
     {
-        let text = match String::from_utf8(std::mem::take(&mut prepared.bytes)) {
+        let text = match String::from_utf8(prepared.save.take_bytes()) {
             Ok(text) => text,
             Err(error) => {
                 crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
                     state,
-                    prepared.transaction,
+                    prepared.save.transaction(),
                 );
                 state.push_user_message(ConsoleMessage::error(format!(
                     "Project copy failed: serialized project was not UTF-8: {error}"
@@ -474,7 +476,7 @@ fn start_browser_project_save(
             Ok(()) => {
                 crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
                     state,
-                    prepared.transaction,
+                    prepared.save.transaction(),
                 );
                 state.push_user_message(ConsoleMessage::warning(if project_copy {
                     "Downloaded an independent project copy; the active project binding and dirty state are unchanged"
@@ -486,7 +488,7 @@ fn start_browser_project_save(
             Err(error) => {
                 crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
                     state,
-                    prepared.transaction,
+                    prepared.save.transaction(),
                 );
                 state.push_user_message(ConsoleMessage::error(format!(
                     "Project download failed: {error}"
@@ -496,10 +498,13 @@ fn start_browser_project_save(
         }
     }
 
-    let target = prepared.target.clone();
+    let target = crate::workbench::lifecycle::project_lifecycle::BrowserWriteTarget {
+        handle_id: prepared.handle_id,
+        intent: prepared.save.intent().clone(),
+    };
     let name = prepared.suggested_name.clone();
-    let bytes = std::mem::take(&mut prepared.bytes);
-    let transaction = prepared.transaction;
+    let bytes = prepared.save.take_bytes();
+    let transaction = prepared.save.transaction();
     match crate::workbench::lifecycle::project_lifecycle::start_browser_write(
         target,
         !project_copy,
@@ -542,50 +547,6 @@ struct BrowserProjectSaveCompletion {
 }
 
 #[cfg(target_arch = "wasm32")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SaveContinuationEvent {
-    Saved(crate::product::TransactionId),
-    SavedWithNewerChanges(crate::product::TransactionId),
-    Cancelled(crate::product::TransactionId),
-    Conflict(crate::product::TransactionId),
-    Failed(crate::product::TransactionId, String),
-    PublishedButNotAdopted(crate::product::TransactionId, String),
-}
-
-#[cfg(target_arch = "wasm32")]
-impl SaveContinuationEvent {
-    pub(crate) fn transaction(&self) -> crate::product::TransactionId {
-        match self {
-            Self::Saved(transaction)
-            | Self::SavedWithNewerChanges(transaction)
-            | Self::Cancelled(transaction)
-            | Self::Conflict(transaction)
-            | Self::Failed(transaction, _)
-            | Self::PublishedButNotAdopted(transaction, _) => *transaction,
-        }
-    }
-
-    pub(crate) fn authorizes_destructive_action(&self) -> bool {
-        matches!(self, Self::Saved(_))
-    }
-
-    pub(crate) fn needs_another_save(&self) -> bool {
-        matches!(self, Self::SavedWithNewerChanges(_))
-    }
-
-    pub(crate) fn failure_message(&self) -> Option<&str> {
-        match self {
-            Self::Cancelled(_) => Some("The canonical save was cancelled."),
-            Self::Conflict(_) => Some(
-                "The canonical project changed outside RSpice; reopen it or save an independent project copy.",
-            ),
-            Self::Failed(_, message) | Self::PublishedButNotAdopted(_, message) => Some(message),
-            Self::Saved(_) | Self::SavedWithNewerChanges(_) => None,
-        }
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
 thread_local! {
     static BROWSER_PROJECT_SAVE_RESULTS: std::cell::RefCell<std::collections::VecDeque<BrowserProjectSaveCompletion>> =
         const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
@@ -594,13 +555,13 @@ thread_local! {
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveContinuationEvent> {
     let completion = BROWSER_PROJECT_SAVE_RESULTS.with(|queue| queue.borrow_mut().pop_front())?;
-    let project_copy = completion.prepared.project_copy;
-    let transaction = completion.prepared.transaction;
-    let saved_scope = completion.prepared.scope;
-    let saved_document = completion.prepared.saved_document.clone();
+    let project_copy = completion.prepared.save.is_project_copy();
+    let transaction = completion.prepared.save.transaction();
+    let saved_scope = completion.prepared.save.scope();
+    let saved_document = completion.prepared.save.saved_document().clone();
     if !crate::workbench::lifecycle::project_lifecycle::browser_operation_context_is_current(
         state,
-        &completion.prepared.context,
+        completion.prepared.save.context(),
     ) {
         let terminal = match &completion.result {
             crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::Saved { .. }
@@ -651,14 +612,16 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
         } => match crate::workbench::lifecycle::project_lifecycle::complete_browser_save(
             state,
             completion.prepared,
-            crate::workbench::lifecycle::project_lifecycle::BrowserSavePublication {
-                handle_id,
-                binding_id,
-                backend,
-                project_id,
-                generation,
+            handle_id,
+            rspice_project::lifecycle::BrowserSavePublication {
+                receipt: rspice_project::persistence::BrowserBindingReceipt {
+                    binding_id,
+                    backend,
+                    project_id,
+                    accepted_generation: generation,
+                    accepted_digest: digest,
+                },
                 display_name: display_name.clone(),
-                digest,
                 durable: true,
             },
         ) {
@@ -709,14 +672,16 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
         } => match crate::workbench::lifecycle::project_lifecycle::complete_browser_save(
             state,
             completion.prepared,
-            crate::workbench::lifecycle::project_lifecycle::BrowserSavePublication {
-                handle_id,
-                binding_id,
-                backend,
-                project_id,
-                generation,
+            handle_id,
+            rspice_project::lifecycle::BrowserSavePublication {
+                receipt: rspice_project::persistence::BrowserBindingReceipt {
+                    binding_id,
+                    backend,
+                    project_id,
+                    accepted_generation: generation,
+                    accepted_digest: digest,
+                },
                 display_name: display_name.clone(),
-                digest,
                 durable: false,
             },
         ) {

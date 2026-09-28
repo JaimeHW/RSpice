@@ -55,7 +55,7 @@ fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
         CellViewRef::new("user", "top", "schematic"),
     );
 
-    let prepared = prepare_browser_save(
+    let mut prepared = prepare_browser_save(
         &mut state,
         SaveScope::ActiveDocument,
         false,
@@ -63,14 +63,15 @@ fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
     )
     .expect("prepare browser active save");
     assert_eq!(
-        prepared.saved_document,
-        ProjectDocumentId::ProjectConfiguration
+        prepared.save.saved_document(),
+        &ProjectDocumentId::ProjectConfiguration
     );
     assert_eq!(
-        prepared.candidate.file.workspace.configuration_sets,
+        prepared.save.candidate().workspace.configuration_sets,
         state.workspace.content.configuration_sets
     );
-    let staged_text = std::str::from_utf8(&prepared.bytes).expect("UTF-8 project bytes");
+    let bytes = prepared.save.take_bytes();
+    let staged_text = std::str::from_utf8(&bytes).expect("UTF-8 project bytes");
     let decoded = crate::io::project_io::load_project_text(staged_text, None)
         .expect("decode staged browser project");
     assert_eq!(

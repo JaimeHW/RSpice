@@ -15,8 +15,10 @@ use std::path::PathBuf;
 pub(crate) use rspice_project::persistence::BrowserBindingBackend;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_project::persistence::PersistenceError;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use rspice_project::persistence::serialized_project;
 pub(crate) use rspice_project::persistence::{
-    BrowserBindingReceipt, NativeBindingReceipt, digest_bytes, serialized_project,
+    BrowserBindingReceipt, NativeBindingReceipt, digest_bytes,
 };
 
 #[cfg(target_arch = "wasm32")]
