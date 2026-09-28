@@ -1964,8 +1964,11 @@ fn signed_revision_replacement_requires_exact_diff_evidence_and_retains_it() {
         .iter()
         .find(|package| package.manifest().revision == "2.4.0")
         .expect("candidate package");
-    let diff = crate::state::pdk_config::PdkTechnologyRevisionDiff::between(baseline, candidate)
-        .expect("exact revision diff");
+    let diff = crate::state::pdk_config::PdkTechnologyRevisionDiff::between(
+        baseline.metadata(),
+        candidate.metadata(),
+    )
+    .expect("exact revision diff");
     let evidence = crate::state::pdk_config::PdkTechnologyMigrationEvidence::from_diff(&diff)
         .expect("migration evidence");
     let baseline_binding = technology_binding_fixture()

@@ -315,7 +315,8 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                         || baseline.archive_digest() != candidate.archive_digest() =>
                 {
                     crate::state::pdk_config::PdkTechnologyRevisionDiff::between(
-                        baseline, candidate,
+                        baseline.metadata(),
+                        candidate.metadata(),
                     )
                     .map(Some)
                     .map_err(|error| error.to_string())
@@ -1049,8 +1050,11 @@ fn validate_migration_evidence_for_binding(
         }
         return Ok(());
     }
-    let diff = crate::state::pdk_config::PdkTechnologyRevisionDiff::between(baseline, candidate)
-        .map_err(|error| format!("Exact signed revision comparison failed: {error}"))?;
+    let diff = crate::state::pdk_config::PdkTechnologyRevisionDiff::between(
+        baseline.metadata(),
+        candidate.metadata(),
+    )
+    .map_err(|error| format!("Exact signed revision comparison failed: {error}"))?;
     if !diff.same_package_lineage {
         return Err(
             "Cross-technology replacement requires an independent migration copy; direct replacement is prohibited."

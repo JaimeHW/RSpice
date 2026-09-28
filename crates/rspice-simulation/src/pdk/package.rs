@@ -24,6 +24,12 @@ use veriloga_sources::seal_pdk_veriloga_sources;
 pub struct ValidatedPdkTechnologyPackage(PdkTechnologyPackageMetadata);
 
 impl ValidatedPdkTechnologyPackage {
+    /// Borrow retained metadata without transferring runtime execution authority.
+    #[must_use]
+    pub fn metadata(&self) -> &PdkTechnologyPackageMetadata {
+        &self.0
+    }
+
     #[must_use]
     pub fn manifest(&self) -> &PdkTechnologyManifest {
         self.0.manifest()

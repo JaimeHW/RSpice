@@ -1061,7 +1061,7 @@ fn compare_section(
             return;
         };
         let diff_result: Result<PdkTechnologyRevisionDiff, PdkTechnologyDiffError> =
-            PdkTechnologyRevisionDiff::between(baseline, candidate);
+            PdkTechnologyRevisionDiff::between(baseline.metadata(), candidate.metadata());
         let diff = match diff_result {
             Ok(diff) => diff,
             Err(error) => {
