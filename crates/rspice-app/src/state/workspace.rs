@@ -8,6 +8,7 @@ mod capture_group;
 mod design_intent;
 mod design_projection;
 mod hierarchy;
+pub(crate) use hierarchy::WorkspaceSourceFiles;
 use rspice_design::hierarchy as hierarchy_resolver;
 mod materialize;
 mod open_documents;
@@ -106,6 +107,12 @@ pub use super::project_sources::{ProjectSourceLanguage, ProjectSourceRegistry};
 #[derive(Debug, Clone)]
 pub struct ProjectWorkspace {
     pub content: rspice_project::ProjectWorkspace,
+    pub(crate) session: WorkspaceSession,
+}
+
+/// Runtime workspace state retained by application snapshots and editor sessions.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct WorkspaceSession {
     annotation_restoration_error: Option<String>,
     pub(crate) schematic_sessions: HashMap<String, crate::state::schematic::SchematicSession>,
     design_projection_cache: rspice_design::projection::DesignProjectionCache,
@@ -121,9 +128,7 @@ impl<'de> Deserialize<'de> for ProjectWorkspace {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Ok(Self {
             content: Deserialize::deserialize(deserializer)?,
-            annotation_restoration_error: None,
-            schematic_sessions: HashMap::new(),
-            design_projection_cache: Default::default(),
+            session: WorkspaceSession::default(),
         })
     }
 }
@@ -135,10 +140,23 @@ impl Default for ProjectWorkspace {
             HashMap::from([(content.active_view.key(), SchematicState::default().session)]);
         Self {
             content,
-            annotation_restoration_error: None,
-            schematic_sessions,
-            design_projection_cache: Default::default(),
+            session: WorkspaceSession {
+                schematic_sessions,
+                ..Default::default()
+            },
         }
+    }
+}
+
+impl ProjectWorkspace {
+    pub(crate) fn from_parts(
+        content: rspice_project::ProjectWorkspace,
+        session: WorkspaceSession,
+    ) -> Self {
+        Self { content, session }
+    }
+    pub(crate) fn into_parts(self) -> (rspice_project::ProjectWorkspace, WorkspaceSession) {
+        (self.content, self.session)
     }
 }
 

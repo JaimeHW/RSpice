@@ -12,7 +12,7 @@ fn schematic(cell: &str) -> CellViewRef {
 }
 
 /// A project whose libraries hold `top` and `amp`, with both open.
-fn two_document_project() -> ProjectFile {
+fn two_document_project() -> ProjectSnapshot {
     let mut libraries = LibraryManager::with_primitives();
     let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     let mut amp = Cell::new("amp");
@@ -23,7 +23,7 @@ fn two_document_project() -> ProjectFile {
         .add_cell(amp);
     workspace.open_view(schematic("amp"), ViewType::Schematic);
     workspace.ensure_library_model(&mut libraries);
-    ProjectFile::new(workspace, libraries)
+    ProjectSnapshot::new(workspace, libraries)
 }
 
 #[test]
@@ -31,12 +31,11 @@ fn a_saved_project_writes_occurrences_and_not_the_old_global_breadcrumb() {
     let mut project = two_document_project();
     // The descent has to start at the parent: descending into the document
     // that is already open is the same occurrence, and records no step.
-    project
-        .workspace
-        .activate_view(schematic("top"), ViewType::Schematic);
-    project
-        .workspace
-        .descend_into("XAMP".to_owned(), schematic("amp"), ViewType::Schematic);
+    let mut workspace =
+        ProjectWorkspace::from_parts(project.file.workspace, project.workspace_session);
+    workspace.activate_view(schematic("top"), ViewType::Schematic);
+    workspace.descend_into("XAMP".to_owned(), schematic("amp"), ViewType::Schematic);
+    (project.file.workspace, project.workspace_session) = workspace.into_parts();
 
     let text = serialize_project_file(&project).expect("the project serializes");
     let value: serde_json::Value = serde_json::from_str(&text).expect("the project is JSON");
@@ -51,13 +50,16 @@ fn a_saved_project_writes_occurrences_and_not_the_old_global_breadcrumb() {
     );
 
     let restored = load_project_text(&text, None).expect("the project reloads");
-    restored.validate().expect("the restored project validates");
-    assert!(restored.workspace_migration_warning.is_none());
+    restored
+        .file
+        .validate()
+        .expect("the restored project validates");
+    assert!(restored.file.workspace_migration_warning.is_none());
     assert_eq!(
-        restored.workspace.content.occurrence_path().to_string(),
+        restored.file.workspace.occurrence_path().to_string(),
         "/XAMP"
     );
-    assert_eq!(restored.workspace.content.active_view, schematic("amp"));
+    assert_eq!(restored.file.workspace.active_view, schematic("amp"));
 }
 
 #[test]
@@ -79,16 +81,19 @@ fn a_save_written_before_occurrences_folds_its_breadcrumb_onto_the_active_docume
     value["workspace"]["hierarchy_instances"] = serde_json::json!(["XAMP"]);
 
     let restored = load_project_text(&value.to_string(), None).expect("the legacy save loads");
-    restored.validate().expect("the migrated project validates");
-    assert!(restored.workspace_migration_warning.is_none());
+    restored
+        .file
+        .validate()
+        .expect("the migrated project validates");
+    assert!(restored.file.workspace_migration_warning.is_none());
     assert_eq!(
-        restored.workspace.content.occurrence_path().to_string(),
+        restored.file.workspace.occurrence_path().to_string(),
         "/XAMP"
     );
     assert_eq!(
         restored
+            .file
             .workspace
-            .content
             .active_occurrence()
             .map(|occurrence| occurrence.root.clone()),
         Some(schematic("top")),
@@ -111,14 +116,18 @@ fn a_save_whose_breadcrumb_arrays_disagree_keeps_the_shorter_prefix_and_warns() 
     value["workspace"]["hierarchy_instances"] = serde_json::json!([]);
 
     let restored = load_project_text(&value.to_string(), None).expect("the legacy save loads");
-    restored.validate().expect("the repaired project validates");
+    restored
+        .file
+        .validate()
+        .expect("the repaired project validates");
     let warning = restored
+        .file
         .workspace_migration_warning
         .as_deref()
         .expect("dropping a level the save could not name owes the reader a warning");
     assert!(warning.contains("1 level"), "{warning}");
     assert!(
-        restored.workspace.content.occurrence_path().is_root(),
+        restored.file.workspace.occurrence_path().is_root(),
         "an instance name that is missing is dropped, never invented from the cell name"
     );
 }
@@ -129,12 +138,15 @@ fn a_save_whose_breadcrumb_arrays_disagree_keeps_the_shorter_prefix_and_warns() 
 fn the_frozen_reference_project_gains_a_rooted_occurrence_per_document() {
     let project = load_project_text(include_str!("hierarchy_reference_legacy.rspiceproj"), None)
         .expect("the frozen reference loads");
-    project.validate().expect("the frozen reference validates");
-    assert!(project.workspace_migration_warning.is_none());
+    project
+        .file
+        .validate()
+        .expect("the frozen reference validates");
+    assert!(project.file.workspace_migration_warning.is_none());
 
-    for open_view in &project.workspace.content.open_views {
+    for open_view in &project.file.workspace.open_views {
         assert!(!open_view.occurrence.is_unrooted());
         assert_eq!(open_view.occurrence.terminal_master(), &open_view.reference);
     }
-    assert!(project.workspace.content.occurrence_path().is_root());
+    assert!(project.file.workspace.occurrence_path().is_root());
 }

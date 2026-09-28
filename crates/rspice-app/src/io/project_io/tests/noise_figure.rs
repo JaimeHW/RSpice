@@ -58,14 +58,17 @@ fn sampled_pnoise_studio_results_round_trip_and_reject_changed_geometry() {
     simulation.active_analysis_idx = Some(0);
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let project = ProjectFile::new_with_simulation_results(
+    let project = ProjectSnapshot::new_with_simulation_results(
         workspace,
         libraries,
         crate::io::capture_simulation_results(&simulation),
     );
     let json = serialize_project_file(&project).unwrap();
     let restored = crate::io::simulation_state_from_results(
-        load_project_text(&json, None).unwrap().simulation_results,
+        load_project_text(&json, None)
+            .unwrap()
+            .file
+            .simulation_results,
     )
     .unwrap();
     assert_eq!(
@@ -88,6 +91,7 @@ fn sampled_pnoise_studio_results_round_trip_and_reject_changed_geometry() {
         assert!(
             load_project_text(&changed.to_string(), None)
                 .unwrap()
+                .file
                 .simulation_results
                 .runs
                 .is_empty(),
@@ -99,6 +103,7 @@ fn sampled_pnoise_studio_results_round_trip_and_reject_changed_geometry() {
     assert!(
         load_project_text(&old.to_string(), None)
             .unwrap()
+            .file
             .simulation_results
             .runs
             .is_empty()
@@ -159,14 +164,17 @@ fn hbnoise_reference_results_survive_project_load_and_reject_tampering_and_old_s
         simulation.active_analysis_idx = Some(0);
         let mut libraries = LibraryManager::with_primitives();
         let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-        let project = ProjectFile::new_with_simulation_results(
+        let project = ProjectSnapshot::new_with_simulation_results(
             workspace,
             libraries,
             crate::io::capture_simulation_results(&simulation),
         );
         let json = serialize_project_file(&project).unwrap();
         let restored = crate::io::simulation_state_from_results(
-            load_project_text(&json, None).unwrap().simulation_results,
+            load_project_text(&json, None)
+                .unwrap()
+                .file
+                .simulation_results,
         )
         .unwrap();
         assert_eq!(
@@ -195,8 +203,8 @@ fn hbnoise_reference_results_survive_project_load_and_reject_tampering_and_old_s
             tampered["simulation_results"]["runs"][0]["analyses"][0]["noise_summary"]["noise_figure"]
                 [field] = serde_json::json!(500.0);
             let rejected = load_project_text(&tampered.to_string(), None).unwrap();
-            assert!(rejected.simulation_results.runs.is_empty());
-            assert!(rejected.simulation_results_warning.is_some());
+            assert!(rejected.file.simulation_results.runs.is_empty());
+            assert!(rejected.file.simulation_results_warning.is_some());
         }
         if conversion.is_some() {
             for (field, value) in [
@@ -210,31 +218,28 @@ fn hbnoise_reference_results_survive_project_load_and_reject_tampering_and_old_s
                 tampered["simulation_results"]["runs"][0]["analyses"][0]["noise_summary"]["conversion"]
                     [field] = value;
                 let rejected = load_project_text(&tampered.to_string(), None).unwrap();
-                assert!(rejected.simulation_results.runs.is_empty(), "{field}");
-                assert!(rejected.simulation_results_warning.is_some());
+                assert!(rejected.file.simulation_results.runs.is_empty(), "{field}");
+                assert!(rejected.file.simulation_results_warning.is_some());
             }
         }
         let mut v32: serde_json::Value = serde_json::from_str(&json).unwrap();
         v32["simulation_results"]["schema_version"] = serde_json::json!(32);
         let migrated = load_project_text(&v32.to_string(), None).unwrap();
         assert_eq!(
-            migrated.simulation_results.runs.is_empty(),
+            migrated.file.simulation_results.runs.is_empty(),
             conversion.is_some()
         );
         let mut old: serde_json::Value = serde_json::from_str(&json).unwrap();
         old["simulation_results"]["schema_version"] = serde_json::json!(31);
         let rejected = load_project_text(&old.to_string(), None).unwrap();
-        assert!(rejected.simulation_results.runs.is_empty());
-        assert!(
-            rejected
-                .simulation_results_warning
-                .unwrap()
-                .contains(if conversion.is_some() {
-                    "before v33"
-                } else {
-                    "before v32"
-                })
-        );
+        assert!(rejected.file.simulation_results.runs.is_empty());
+        assert!(rejected.file.simulation_results_warning.unwrap().contains(
+            if conversion.is_some() {
+                "before v33"
+            } else {
+                "before v32"
+            }
+        ));
     }
 }
 
@@ -275,14 +280,17 @@ fn noise_input_units_survive_projects_and_reject_unit_tampering() {
         simulation.active_analysis_idx = Some(0);
         let mut libraries = LibraryManager::with_primitives();
         let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-        let project = ProjectFile::new_with_simulation_results(
+        let project = ProjectSnapshot::new_with_simulation_results(
             workspace,
             libraries,
             crate::io::capture_simulation_results(&simulation),
         );
         let json = serialize_project_file(&project).unwrap();
         let restored = crate::io::simulation_state_from_results(
-            load_project_text(&json, None).unwrap().simulation_results,
+            load_project_text(&json, None)
+                .unwrap()
+                .file
+                .simulation_results,
         )
         .unwrap();
         assert_eq!(
@@ -297,12 +305,12 @@ fn noise_input_units_survive_projects_and_reject_unit_tampering() {
         old["simulation_results"]["schema_version"] = 33.into();
         let migrated = load_project_text(&old.to_string(), None).unwrap();
         assert_eq!(
-            migrated.simulation_results.runs.is_empty(),
+            migrated.file.simulation_results.runs.is_empty(),
             quantity.is_some()
         );
         if quantity.is_none() {
             assert_eq!(
-                crate::io::simulation_state_from_results(migrated.simulation_results)
+                crate::io::simulation_state_from_results(migrated.file.simulation_results)
                     .unwrap()
                     .active_analysis()
                     .unwrap()
@@ -322,6 +330,7 @@ fn noise_input_units_survive_projects_and_reject_unit_tampering() {
             assert!(
                 load_project_text(&changed.to_string(), None)
                     .unwrap()
+                    .file
                     .simulation_results
                     .runs
                     .is_empty()

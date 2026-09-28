@@ -26,7 +26,7 @@ impl ProjectWorkspace {
                     key.clone(),
                     SchematicEditorRef {
                         design,
-                        session: self.schematic_sessions.get(key),
+                        session: self.session.schematic_sessions.get(key),
                     },
                 )
             })

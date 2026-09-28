@@ -27,8 +27,9 @@ pub(crate) mod waveform_io;
 pub use generated_bundle::build_generated_bundle;
 pub use netlist_export::NetlistFormat;
 pub(crate) use project_execution::{capture_execution_context, restore_execution_context};
-#[allow(deprecated)]
-pub use project_io::{ProjectFile, ProjectIoError, ProjectSimulationResults, load_project_file};
+pub use project_io::{
+    ProjectIoError, ProjectSimulationResults, ProjectSnapshot, load_project_file,
+};
 pub(crate) use project_results::{
     capture_simulation_results, restore_simulation_results, simulation_state_from_results,
 };

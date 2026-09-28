@@ -637,7 +637,7 @@ fn schema_v13_migrates_prepared_receipts_to_an_explicit_default_specification_po
         ObjectRevision::INITIAL,
         ContentDigest::from_bytes([0xa1; 32]),
         PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0xa2; 32])),
-        &[analysis_kind_tag_for_plan_kind(AnalysisKind::Ac)],
+        &[AnalysisKind::Ac.canonical_kind().tag()],
     );
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
@@ -686,7 +686,7 @@ fn schema_v13_rejects_governed_specification_fields_from_a_later_schema() {
         ObjectRevision::INITIAL,
         ContentDigest::from_bytes([0xa3; 32]),
         PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0xa4; 32])),
-        &[analysis_kind_tag_for_plan_kind(AnalysisKind::Ac)],
+        &[AnalysisKind::Ac.canonical_kind().tag()],
     );
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
@@ -875,7 +875,7 @@ fn manual_deck_result_provenance_round_trips_without_a_simulation_plan() {
 
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let project = ProjectFile::new_with_simulation_results(
+    let project = ProjectSnapshot::new_with_simulation_results(
         workspace,
         libraries,
         crate::io::capture_simulation_results(&simulation),
@@ -884,7 +884,7 @@ fn manual_deck_result_provenance_round_trips_without_a_simulation_plan() {
     let json = serialize_project_file(&project)
         .expect("manual-deck result does not require a simulation-plan owner");
     let loaded = load_project_text(&json, None).expect("manual-deck project reloads");
-    let restored = crate::io::simulation_state_from_results(loaded.simulation_results)
+    let restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
         .expect("manual-deck result history restores");
     let provenance = restored.runs[0].analyses[0]
         .provenance
@@ -1270,6 +1270,7 @@ fn schema_v1_result_identity_migration_is_reproducible() {
 fn project_save_requires_result_provenance_to_be_closed_over_plan_or_tombstones() {
     let mut project = project_with_execution_context();
     let plan = project
+        .file
         .execution_context
         .as_ref()
         .expect("execution context")
@@ -1297,7 +1298,7 @@ fn project_save_requires_result_provenance_to_be_closed_over_plan_or_tombstones(
         &mut run,
         AnalysisResultSourceDomain::SimulationPlan,
         Some(plan.id()),
-        project.workspace.content.project.revision(),
+        project.file.workspace.project.revision(),
         ContentDigest::from_bytes([0x5b; 32]),
         PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x5a; 32])),
         &[2],
@@ -1305,19 +1306,19 @@ fn project_save_requires_result_provenance_to_be_closed_over_plan_or_tombstones(
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 31;
-    project.simulation_results = crate::io::capture_simulation_results(&simulation);
+    project.file.simulation_results = crate::io::capture_simulation_results(&simulation);
 
     serialize_project_file(&project).expect("current plan owns result source");
 
     let mut future_revision = project.clone();
     let future_source_revision =
         ObjectRevision::new(source_revision.get() + 1).expect("future fixture revision");
-    future_revision.simulation_results.runs[0].analyses[0]
+    future_revision.file.simulation_results.runs[0].analyses[0]
         .provenance
         .as_mut()
         .expect("provenance")
         .source_revision = future_source_revision;
-    future_revision.simulation_results.runs[0]
+    future_revision.file.simulation_results.runs[0]
         .prepared_receipt
         .as_mut()
         .expect("receipt")
@@ -1332,12 +1333,12 @@ fn project_save_requires_result_provenance_to_be_closed_over_plan_or_tombstones(
 
     let mut missing = project.clone();
     let orphaned_source_id = AnalysisInstanceId::new();
-    missing.simulation_results.runs[0].analyses[0]
+    missing.file.simulation_results.runs[0].analyses[0]
         .provenance
         .as_mut()
         .expect("provenance")
         .source_instance_id = orphaned_source_id;
-    missing.simulation_results.runs[0]
+    missing.file.simulation_results.runs[0]
         .prepared_receipt
         .as_mut()
         .expect("receipt")
@@ -1352,6 +1353,7 @@ fn project_save_requires_result_provenance_to_be_closed_over_plan_or_tombstones(
 
     let mut retained = project.clone();
     retained
+        .file
         .execution_context
         .as_mut()
         .expect("execution context")
@@ -1363,6 +1365,7 @@ fn project_save_requires_result_provenance_to_be_closed_over_plan_or_tombstones(
     serialize_project_file(&retained).expect("tombstone closes retained result reference");
 
     let removed_revision = retained
+        .file
         .execution_context
         .as_ref()
         .expect("execution context")
@@ -1375,12 +1378,12 @@ fn project_save_requires_result_provenance_to_be_closed_over_plan_or_tombstones(
         .expect("source tombstone")
         .removed_revision();
     let mut at_removal = retained.clone();
-    at_removal.simulation_results.runs[0].analyses[0]
+    at_removal.file.simulation_results.runs[0].analyses[0]
         .provenance
         .as_mut()
         .expect("provenance")
         .source_revision = removed_revision;
-    at_removal.simulation_results.runs[0]
+    at_removal.file.simulation_results.runs[0]
         .prepared_receipt
         .as_mut()
         .expect("receipt")
@@ -1395,6 +1398,7 @@ fn project_save_requires_result_provenance_to_be_closed_over_plan_or_tombstones(
 
     let mut unretained = project;
     unretained
+        .file
         .execution_context
         .as_mut()
         .expect("execution context")
@@ -1416,6 +1420,7 @@ fn project_save_rejects_result_revision_before_source_creation() {
     let mut project = project_with_execution_context();
     let (source_id, plan_id, created_revision) = {
         let plan = project
+            .file
             .execution_context
             .as_mut()
             .expect("execution context")
@@ -1443,7 +1448,7 @@ fn project_save_rejects_result_revision_before_source_creation() {
         &mut run,
         AnalysisResultSourceDomain::SimulationPlan,
         Some(plan_id),
-        project.workspace.content.project.revision(),
+        project.file.workspace.project.revision(),
         ContentDigest::from_bytes([0xc2; 32]),
         PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0xc1; 32])),
         &[2],
@@ -1451,7 +1456,7 @@ fn project_save_rejects_result_revision_before_source_creation() {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 36;
-    project.simulation_results = crate::io::capture_simulation_results(&simulation);
+    project.file.simulation_results = crate::io::capture_simulation_results(&simulation);
 
     let error = serialize_project_file(&project)
         .expect_err("source cannot own results from before it existed")

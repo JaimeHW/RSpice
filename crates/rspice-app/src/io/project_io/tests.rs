@@ -6,7 +6,10 @@
 //! assert a specific refusal, not just a successful round trip.
 
 use super::*;
-use crate::product::{DatasetId, ModelSourceId, RunId};
+use crate::product::{
+    AnalysisInstanceId, DatasetId, ModelSourceId, ObjectRevision, ProjectId, RunId,
+    SimulationPlanId,
+};
 use crate::simulation::{
     dialog::{DampingStrategy, IntegrationMethod, MatrixSolver},
     plan::AnalysisDraft,
@@ -22,7 +25,10 @@ use crate::state::{
     AnalysisResultFamilyMetadata, AnalysisResultPayload, ExecutionTarget, NoiseContributorRow,
     NoiseSummary, PreparedModelSourceIdentity, RunRetention, SpecificationPolicy,
 };
+use crate::state::{LibraryManager, ProjectWorkspace};
 use crate::workbench::app_state::AppState;
+use rspice_app_types::hierarchy_path::InstancePath;
+use rspice_results::provenance::AnalysisResultSourceDomain;
 use rspice_simulation_contract::analysis_kind::AnalysisKind;
 
 fn downgrade_result_digests_to_v6(results: &mut ProjectSimulationResults) {
@@ -88,41 +94,8 @@ fn downgrade_result_digests_to_v8(results: &mut ProjectSimulationResults) {
     }
 }
 
-#[test]
-fn in_memory_project_text_is_size_checked_before_parsing() {
-    assert!(validate_project_text_size(MAX_PROJECT_FILE_BYTES as usize).is_ok());
-    let error = validate_project_text_size(MAX_PROJECT_FILE_BYTES as usize + 1)
-        .expect_err("oversized project text is rejected");
-    assert!(matches!(error, ProjectIoError::InvalidData(_)));
-    assert!(error.to_string().contains("supported maximum"));
-    assert!(validate_legacy_project_text_size(MAX_LEGACY_PROJECT_FILE_BYTES as usize).is_ok());
-    let legacy_error =
-        validate_legacy_project_text_size(MAX_LEGACY_PROJECT_FILE_BYTES as usize + 1)
-            .expect_err("oversized legacy materialization is rejected");
-    assert!(matches!(legacy_error, ProjectIoError::InvalidData(_)));
-    assert!(legacy_error.to_string().contains("identity injection"));
-}
-
-#[test]
-fn current_project_text_routes_to_direct_deserialization() {
-    let mut libraries = LibraryManager::with_primitives();
-    let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let project = ProjectFile::new(workspace, libraries);
-    let json = serialize_project_file(&project).expect("current project serializes");
-
-    assert_eq!(
-        project_text_load_route(&json).expect("current route probes"),
-        ProjectTextLoadRoute::Direct
-    );
-    assert_eq!(
-        project_text_load_route(r#"{"workspace":{"project":{"schema_version":null,"id":null}}}"#)
-            .expect("present null fields still probe"),
-        ProjectTextLoadRoute::Direct,
-        "legacy ID injection is permitted only when both keys are absent"
-    );
-}
-
-fn project_with_two_authoritative_layout_documents() -> (ProjectFile, CellViewRef, CellViewRef) {
+fn project_with_two_authoritative_layout_documents() -> (ProjectSnapshot, CellViewRef, CellViewRef)
+{
     let mut state = AppState::default();
     state.provision_test_project_technology_contract();
     let top = CellViewRef::new("user", "top", "layout");
@@ -151,10 +124,10 @@ fn project_with_two_authoritative_layout_documents() -> (ProjectFile, CellViewRe
     (project, top, child)
 }
 
-fn insert_layout_instance(project: &mut ProjectFile, owner: &CellViewRef, master: CellViewRef) {
+fn insert_layout_instance(project: &mut ProjectSnapshot, owner: &CellViewRef, master: CellViewRef) {
     let mut document = project
+        .file
         .workspace
-        .content
         .physical_layout_document(owner)
         .expect("layout owner document")
         .clone();
@@ -178,8 +151,8 @@ fn insert_layout_instance(project: &mut ProjectFile, owner: &CellViewRef, master
         )
         .expect("layout instance transaction is locally valid");
     project
+        .file
         .workspace
-        .content
         .commit_physical_layout_document(document)
         .expect("layout document commits");
 }
@@ -190,12 +163,13 @@ fn project_validation_rejects_layout_hierarchy_without_authoritative_master_docu
     insert_layout_instance(&mut project, &top, child.clone());
     assert!(
         project
+            .file
             .workspace
-            .content
             .remove_physical_layout_document(&child)
     );
 
     let error = project
+        .file
         .validate()
         .expect_err("missing authoritative layout master must fail closed");
     assert!(
@@ -213,6 +187,7 @@ fn project_validation_rejects_recursive_physical_layout_hierarchy() {
     insert_layout_instance(&mut project, &child, top);
 
     let error = project
+        .file
         .validate()
         .expect_err("recursive layout hierarchy must fail closed");
     assert!(error.to_string().contains("recursive cycle"), "{error}");
@@ -510,7 +485,7 @@ fn project_run_round_trip_recomputes_and_rejects_tampered_specification_verdicts
     );
 }
 
-fn project_with_execution_context() -> ProjectFile {
+fn project_with_execution_context() -> ProjectSnapshot {
     use crate::state::model_library::{DeviceModel, ModelLibrary, ModelLibraryManager, ModelType};
     use crate::workbench::simulation_analysis_tabs::{TAB_AC, TAB_NOISE, TAB_TRANSIENT};
 
@@ -582,7 +557,7 @@ fn project_with_execution_context() -> ProjectFile {
         .expect("legacy execution fixture migrates at the load boundary");
     let execution_context = crate::io::capture_execution_context(&setup, &model_manager)
         .expect("execution fixture validates");
-    ProjectFile::new_with_execution_context(
+    ProjectSnapshot::new_with_execution_context(
         workspace,
         design_libraries,
         ProjectSimulationResults::default(),
@@ -618,11 +593,12 @@ fn cell_source_bundle(reference: CellViewRef) -> crate::state::ProjectSourceBund
 fn project_validation_requires_cell_source_owner_to_be_an_exact_veriloga_view() {
     let mut valid = project_with_execution_context();
     let reference = CellViewRef::new(
-        valid.workspace.content.project.root_library.clone(),
-        valid.workspace.content.project.top_cell.clone(),
+        valid.file.workspace.project.root_library.clone(),
+        valid.file.workspace.project.top_cell.clone(),
         "behavior",
     );
     valid
+        .file
         .libraries
         .get_library_mut(&reference.library)
         .and_then(|library| library.get_cell_mut(&reference.cell))
@@ -632,17 +608,21 @@ fn project_validation_requires_cell_source_owner_to_be_an_exact_veriloga_view() 
             ViewType::VerilogA,
         ));
     valid
+        .file
         .workspace
-        .content
         .project_sources
         .insert_bundle(cell_source_bundle(reference.clone()))
         .expect("unique source owner");
-    valid.validate().expect("exact Verilog-A owner is valid");
+    valid
+        .file
+        .validate()
+        .expect("exact Verilog-A owner is valid");
 
     let mut missing_source = valid.clone();
-    missing_source.workspace.content.project_sources = Default::default();
+    missing_source.file.workspace.project_sources = Default::default();
     assert!(
         missing_source
+            .file
             .validate()
             .expect_err("a Verilog-A view without its source must fail")
             .to_string()
@@ -650,10 +630,10 @@ fn project_validation_requires_cell_source_owner_to_be_an_exact_veriloga_view() 
     );
 
     let mut canonical_alias = valid.clone();
-    canonical_alias.workspace.content.project_sources = Default::default();
+    canonical_alias.file.workspace.project_sources = Default::default();
     canonical_alias
+        .file
         .workspace
-        .content
         .project_sources
         .insert_bundle(cell_source_bundle(CellViewRef::new(
             reference.library.to_uppercase(),
@@ -663,6 +643,7 @@ fn project_validation_requires_cell_source_owner_to_be_an_exact_veriloga_view() 
         .expect("registry accepts one canonical owner until tree validation");
     assert!(
         canonical_alias
+            .file
             .validate()
             .expect_err("canonical aliases must retain exact library-tree spelling")
             .to_string()
@@ -670,10 +651,10 @@ fn project_validation_requires_cell_source_owner_to_be_an_exact_veriloga_view() 
     );
 
     let mut missing = valid.clone();
-    missing.workspace.content.project_sources = Default::default();
+    missing.file.workspace.project_sources = Default::default();
     missing
+        .file
         .workspace
-        .content
         .project_sources
         .insert_bundle(cell_source_bundle(CellViewRef::new(
             &reference.library,
@@ -683,6 +664,7 @@ fn project_validation_requires_cell_source_owner_to_be_an_exact_veriloga_view() 
         .expect("registry permits unresolved owner until project validation");
     assert!(
         missing
+            .file
             .validate()
             .expect_err("missing owner must fail")
             .to_string()
@@ -690,20 +672,21 @@ fn project_validation_requires_cell_source_owner_to_be_an_exact_veriloga_view() 
     );
 
     let mut wrong_type = valid;
-    wrong_type.workspace.content.project_sources = Default::default();
+    wrong_type.file.workspace.project_sources = Default::default();
     let schematic = CellViewRef::new(
-        &wrong_type.workspace.content.project.root_library,
-        &wrong_type.workspace.content.project.top_cell,
+        &wrong_type.file.workspace.project.root_library,
+        &wrong_type.file.workspace.project.top_cell,
         crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
     wrong_type
+        .file
         .workspace
-        .content
         .project_sources
         .insert_bundle(cell_source_bundle(schematic))
         .expect("registry validates owner shape");
     assert!(
         wrong_type
+            .file
             .validate()
             .expect_err("schematic owner must fail")
             .to_string()
@@ -742,26 +725,10 @@ fn expected_digest_gate_rejects_replaced_bytes_before_parsing() {
 }
 
 #[test]
-fn suggested_project_save_path_defaults_and_enforces_extension() {
-    assert_eq!(
-        suggested_project_save_path(None),
-        PathBuf::from("untitled.rspiceproj")
-    );
-    assert_eq!(
-        suggested_project_save_path(Some("amp")),
-        PathBuf::from("amp.rspiceproj")
-    );
-    assert_eq!(
-        suggested_project_save_path(Some("amp.rspiceproj")),
-        PathBuf::from("amp.rspiceproj")
-    );
-}
-
-#[test]
 fn project_file_serializes_to_versioned_json() {
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
 
     let json = serialize_project_file(&project).expect("project serializes");
 
@@ -799,12 +766,12 @@ fn project_file_round_trips_configuration_execution_authority() {
         })
         .expect("configuration fixture");
     let expected = workspace.content.configuration_sets.clone();
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
 
     let json = serialize_project_file(&project).expect("configuration project serializes");
     let loaded = load_project_text(&json, None).expect("configuration project loads");
 
-    assert_eq!(loaded.workspace.content.configuration_sets, expected);
+    assert_eq!(loaded.file.workspace.configuration_sets, expected);
 }
 
 #[test]
@@ -818,16 +785,16 @@ fn project_file_round_trips_design_management_authority() {
         .bootstrap_for_cell_view(&owner, "Main", [11, 12])
         .expect("design-management fixture");
     let expected = workspace.content.design_management.clone();
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
 
     let json = serialize_project_file(&project).expect("design project serializes");
     let loaded = load_project_text(&json, None).expect("design project loads");
 
-    assert_eq!(loaded.workspace.content.design_management, expected);
+    assert_eq!(loaded.file.workspace.design_management, expected);
     assert_eq!(
         loaded
+            .file
             .workspace
-            .content
             .design_management
             .semantic_digest()
             .expect("loaded semantic digest"),
@@ -846,7 +813,7 @@ fn project_file_rejects_unsupported_design_management_schema() {
         .design_management
         .bootstrap_for_cell_view(&workspace.content.active_view.key(), "Main", [11])
         .expect("design-management fixture");
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
     let mut value = serde_json::to_value(project).expect("project JSON value");
     value["workspace"]["design_management"]["schema_version"] = serde_json::Value::from(999);
     let json = serde_json::to_string(&value).expect("malformed project JSON");
@@ -916,13 +883,13 @@ fn project_file_round_trips_project_owned_report_documents() {
         .expect("set page publication policies");
     workspace.content.report_documents.push(report.clone());
     workspace.content.report_documents_dirty = true;
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
 
     let json = serialize_project_file(&project).expect("project serializes");
     let restored = load_project_text(&json, None).expect("project reloads");
 
-    assert_eq!(restored.workspace.content.report_documents, vec![report]);
-    let restored_report = &restored.workspace.content.report_documents[0];
+    assert_eq!(restored.file.workspace.report_documents, vec![report]);
+    let restored_report = &restored.file.workspace.report_documents[0];
     assert_eq!(restored_report.revision_history().records().len(), 3);
     assert_eq!(
         restored_report
@@ -938,7 +905,7 @@ fn project_file_round_trips_project_owned_report_documents() {
             .pages()
             .is_empty()
     );
-    assert!(!restored.workspace.content.report_documents_dirty);
+    assert!(!restored.file.workspace.report_documents_dirty);
 }
 
 #[test]
@@ -946,6 +913,7 @@ fn project_execution_context_round_trips_every_persisted_input() {
     let project = project_with_execution_context();
     let expected = serde_json::to_value(
         project
+            .file
             .execution_context
             .as_ref()
             .expect("fixture has execution context"),
@@ -956,6 +924,7 @@ fn project_execution_context_round_trips_every_persisted_input() {
     let loaded = load_project_text(&json, None).expect("project reloads");
     let actual = serde_json::to_value(
         loaded
+            .file
             .execution_context
             .as_ref()
             .expect("execution context restored"),
@@ -998,12 +967,12 @@ fn project_execution_context_round_trips_every_persisted_input() {
 fn legacy_project_without_execution_context_remains_compatible() {
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
     let json = serialize_project_file(&project).expect("legacy-compatible project serializes");
 
     let loaded = load_project_text(&json, None).expect("legacy project opens");
 
-    assert!(loaded.execution_context.is_none());
+    assert!(loaded.file.execution_context.is_none());
 }
 
 #[test]
@@ -1026,7 +995,7 @@ fn unversioned_execution_context_migrates_to_sorted_legacy_order() {
         None,
     )
     .expect("legacy context migrates");
-    let context = loaded.execution_context.expect("context retained");
+    let context = loaded.file.execution_context.expect("context retained");
 
     assert_eq!(
         context.schema_version,
@@ -1160,8 +1129,8 @@ fn unfinished_analysis_drafts_are_project_data_not_file_corruption() {
     let loaded = load_project_text(&value.to_string(), None)
         .expect("draft syntax is validated by run preflight, not project loading");
     let (plan, _, _) = crate::io::restore_execution_context(
-        loaded.execution_context.expect("context retained"),
-        loaded.workspace.content.project.id(),
+        loaded.file.execution_context.expect("context retained"),
+        loaded.file.workspace.project.id(),
     )
     .expect("context enters application state");
 
@@ -1240,7 +1209,7 @@ fn project_file_round_trips_persisted_simulation_results() {
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
 
-    let project = ProjectFile::new_with_simulation_results(
+    let project = ProjectSnapshot::new_with_simulation_results(
         workspace,
         libraries,
         crate::io::capture_simulation_results(&simulation),
@@ -1249,7 +1218,7 @@ fn project_file_round_trips_persisted_simulation_results() {
 
     assert!(json.contains("\"simulation_results\""));
     let loaded = load_project_text(&json, None).expect("project reloads");
-    let restored = crate::io::simulation_state_from_results(loaded.simulation_results)
+    let restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
         .expect("validated project results restore");
 
     assert_eq!(restored.run_count(), 1);
@@ -1311,14 +1280,14 @@ fn project_file_round_trips_exact_pac_branch_current_trace() {
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
 
-    let project = ProjectFile::new_with_simulation_results(
+    let project = ProjectSnapshot::new_with_simulation_results(
         workspace,
         libraries,
         crate::io::capture_simulation_results(&simulation),
     );
     let json = serialize_project_file(&project).expect("project serializes with PAC current");
     let loaded = load_project_text(&json, None).expect("project reloads");
-    let restored = crate::io::simulation_state_from_results(loaded.simulation_results)
+    let restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
         .expect("validated project results restore");
     let current = &restored
         .active_analysis()

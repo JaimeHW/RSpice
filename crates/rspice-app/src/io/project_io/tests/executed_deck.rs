@@ -41,7 +41,7 @@ fn sealed_run(sequence: u64, byte: u8) -> SimulationRun {
         instance,
         ObjectRevision::INITIAL,
         Vec::new(),
-        analysis_kind_tag_for_plan_kind(AnalysisKind::Ac),
+        AnalysisKind::Ac.canonical_kind().tag(),
         ContentDigest::from_bytes([byte.wrapping_add(3); 32]),
     )
     .expect("prepared task receipt");

@@ -7,9 +7,9 @@
 use std::path::Path;
 
 use crate::diagnostics::ConsoleMessage;
-use crate::io::ProjectFile;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::io::ProjectIoError;
+use crate::io::ProjectSnapshot;
 use crate::workbench::app_state::AppState;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::lifecycle::project_lifecycle::DestinationAuthority;
@@ -1056,7 +1056,7 @@ pub(crate) fn load_project_from_path(state: &mut AppState, path: &Path) -> bool 
 #[cfg(test)]
 pub(crate) fn apply_loaded_project(
     state: &mut AppState,
-    project: ProjectFile,
+    project: ProjectSnapshot,
     origin: ProjectLoadOrigin<'_>,
 ) -> bool {
     let transaction =
@@ -1072,7 +1072,7 @@ pub(crate) fn apply_loaded_project(
 
 fn apply_loaded_project_authorized(
     state: &mut AppState,
-    mut project: ProjectFile,
+    mut project: ProjectSnapshot,
     origin: ProjectLoadOrigin<'_>,
     binding: Option<PersistenceBinding>,
     transaction: crate::product::TransactionId,
@@ -1088,9 +1088,10 @@ fn apply_loaded_project_authorized(
         lifecycle_error(state, error, "Project open blocked");
         return false;
     }
-    let accepted_execution_context = project.execution_context.clone();
-    let project_id = project.workspace.content.project.id();
+    let accepted_execution_context = project.file.execution_context.clone();
+    let project_id = project.file.workspace.project.id();
     let (simulation_plan, model_library_manager, execution_warnings) = match project
+        .file
         .execution_context
         .take()
     {
@@ -1153,9 +1154,7 @@ fn apply_loaded_project_authorized(
             )
         }
     };
-    project
-        .workspace
-        .ensure_library_model(&mut project.libraries);
+    project.ensure_library_model();
     match origin {
         #[cfg(not(target_arch = "wasm32"))]
         ProjectLoadOrigin::PersistentPath(_) => {
@@ -1164,25 +1163,28 @@ fn apply_loaded_project_authorized(
         ProjectLoadOrigin::LiveSession(_) => {
             // The host's on-disk location is meaningless on this machine and
             // must never become a save target here.
-            project.workspace.content.project.path = None;
+            project.file.workspace.project.path = None;
             state.browser_project_save_name = None;
         }
         #[cfg(any(test, target_arch = "wasm32"))]
         ProjectLoadOrigin::BrowserImport(name) | ProjectLoadOrigin::BrowserCanonical(name) => {
-            project.workspace.content.project.path = None;
+            project.file.workspace.project.path = None;
             state.browser_project_save_name = Some(name.to_string());
         }
     }
     let mut accepted_baseline = project.clone();
-    accepted_baseline.execution_context = accepted_execution_context;
-    let simulation_results = project.simulation_results;
-    let result_presentation = project.result_presentation;
-    let mut simulation_results_warning = project.simulation_results_warning;
-    let workspace_migration_warning = project.workspace_migration_warning;
+    accepted_baseline.file.execution_context = accepted_execution_context;
+    let simulation_results = project.file.simulation_results;
+    let result_presentation = project.file.result_presentation;
+    let mut simulation_results_warning = project.file.simulation_results_warning;
+    let workspace_migration_warning = project.file.workspace_migration_warning;
     state.clear_project_execution_context();
-    state.library_manager = project.libraries;
+    state.library_manager = project.file.libraries;
     state.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
-    state.workspace = project.workspace;
+    state.workspace = crate::state::ProjectWorkspace::from_parts(
+        project.file.workspace,
+        project.workspace_session,
+    );
     state.sim_setup = simulation_plan;
     state.model_library_manager = model_library_manager;
     state.restore_active_schematic_from_workspace();
@@ -1619,7 +1621,7 @@ fn finish_browser_canonical_open(
         binding_id: uuid::Uuid::new_v4(),
         backend:
             crate::workbench::lifecycle::project_lifecycle::BrowserBindingBackend::ExternalFile,
-        project_id: project.workspace.content.project.id().to_string(),
+        project_id: project.file.workspace.project.id().to_string(),
         accepted_generation: 1,
         display_name: display_name.clone(),
         accepted_digest: digest,

@@ -114,7 +114,7 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
                 .contains(&fixture.sources[0])
         );
         assert!(
-            state.workspace.schematic_sessions[&root.key()]
+            state.workspace.session.schematic_sessions[&root.key()]
                 .selection
                 .components
                 .contains(&root_selection)
@@ -479,7 +479,7 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
             (&child, vec!["X1"]),
             (&other, vec!["X5"]),
         ] {
-            let source = &loaded.workspace.content.schematic_buffers[&reference.key()];
+            let source = &loaded.file.workspace.schematic_buffers[&reference.key()];
             for (probe, parent) in source.document().probes.iter().zip(parents) {
                 assert_eq!(
                     probe.source_expression.as_deref(),
@@ -487,7 +487,7 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
                 );
             }
         }
-        let source = loaded.workspace.schematic_editor(&child.key()).unwrap();
+        let source = loaded.schematic_editor(&child.key()).unwrap();
         let component = source
             .document()
             .components
@@ -517,18 +517,13 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
             (fixture.plan, first_output, "X2"),
             (second_plan, second_output, "X1"),
         ] {
-            let saved = &loaded
-                .workspace
-                .content
-                .plan_data(plan)
-                .unwrap()
-                .saved_outputs[0];
+            let saved = &loaded.file.workspace.plan_data(plan).unwrap().saved_outputs[0];
             assert_eq!(saved.id, output);
             assert_eq!(saved.source_expression, format!("I(/{parent}/{name})"));
         }
         let second_outputs = &loaded
+            .file
             .workspace
-            .content
             .plan_data(second_plan)
             .unwrap()
             .saved_outputs;
@@ -544,9 +539,12 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
             Some(second_output)
         );
         assert_eq!(source.document().probes[0].plan_id, Some(second_plan));
-        let projection = loaded
-            .workspace
-            .design_projection(&loaded.libraries, &child, &source)
+        let workspace = crate::state::ProjectWorkspace::from_parts(
+            loaded.file.workspace.clone(),
+            loaded.workspace_session.clone(),
+        );
+        let projection = workspace
+            .design_projection(&loaded.file.libraries, &child, &source)
             .unwrap();
         assert_eq!(
             projection.schematic_buffers()[&child.key()]

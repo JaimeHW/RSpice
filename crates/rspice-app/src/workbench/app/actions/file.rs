@@ -721,8 +721,8 @@ mod tests {
         let saved_source = crate::io::load_project_file(&source).expect("reload Save All source");
         assert_eq!(
             saved_source
+                .file
                 .workspace
-                .content
                 .schematic_buffers
                 .get(&active_key)
                 .expect("saved active design")
@@ -733,6 +733,7 @@ mod tests {
         );
         assert_eq!(
             saved_source
+                .file
                 .execution_context
                 .expect("saved project execution context")
                 .simulation_plan
@@ -798,8 +799,8 @@ mod tests {
         let active_only = crate::io::load_project_file(&source).expect("reload active save");
         assert_eq!(
             active_only
+                .file
                 .workspace
-                .content
                 .schematic_buffers
                 .get(&schematic_app.state.workspace.content.active_key())
                 .expect("saved active schematic")
@@ -811,6 +812,7 @@ mod tests {
         assert!(
             !has_ac_analysis(
                 &active_only
+                    .file
                     .execution_context
                     .expect("active-save execution context")
                     .simulation_plan
@@ -963,8 +965,8 @@ mod tests {
         let persisted = crate::io::load_project_file(&path).expect("reload closed project");
         assert_eq!(
             persisted
+                .file
                 .workspace
-                .content
                 .schematic_buffers
                 .get(&active_key)
                 .expect("saved active schematic")
@@ -975,6 +977,7 @@ mod tests {
         );
         assert_eq!(
             persisted
+                .file
                 .execution_context
                 .expect("saved execution context")
                 .simulation_plan

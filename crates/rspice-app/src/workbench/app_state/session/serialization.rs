@@ -6,7 +6,7 @@
 //! no longer holds.
 
 use crate::diagnostics::ConsoleMessage;
-use crate::io::{ProjectExecutionContext, ProjectFile, ProjectSimulationResults};
+use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
 use crate::workbench::app_state::AppState;
 
 const LEGACY_SESSION_PROJECT_ID_NAMESPACE: uuid::Uuid =
@@ -96,7 +96,7 @@ impl serde::Serialize for AppState {
                         "session execution context is structurally invalid: {error}"
                     ))
                 })?;
-        if ProjectFile::validate_result_plan_references_for(
+        if rspice_project::ProjectFile::validate_result_plan_references_for(
             &simulation_results,
             Some(&execution_context.simulation_plan),
             self.workspace.content.project.revision(),
@@ -275,6 +275,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
                     .contains_key(&open.reference.key())
             {
                 project_workspace
+                    .session
                     .schematic_sessions
                     .entry(open.reference.key())
                     .or_default()
@@ -379,7 +380,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
             .migrate_to_current(project_id)
             .and_then(|()| simulation_results.validate())
             .and_then(|()| {
-                ProjectFile::validate_result_plan_references_for(
+                rspice_project::ProjectFile::validate_result_plan_references_for(
                     &simulation_results,
                     Some(&state.sim_setup),
                     state.workspace.content.project.revision(),

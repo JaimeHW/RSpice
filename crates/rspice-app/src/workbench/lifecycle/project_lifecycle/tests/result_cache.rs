@@ -48,7 +48,7 @@ fn unchanged_dirty_queries_do_not_rebuild_validate_or_hash_retained_results() {
             "{samples} samples: unchanged queries serialized and hashed retained results"
         );
         let mut oracle = snapshot(&state).unwrap();
-        oracle.simulation_results = crate::io::capture_simulation_results(&state.simulation);
+        oracle.file.simulation_results = crate::io::capture_simulation_results(&state.simulation);
         assert_eq!(
             working_fingerprints(&state).unwrap().content_digest(),
             registry::content_digest(&oracle).unwrap()
@@ -128,7 +128,7 @@ fn every_persisted_result_input_invalidates_the_snapshot_and_matches_fresh_captu
 fn runtime_changes_and_clones_reuse_results_but_invalid_edits_do_not() {
     let (mut state, _) = super::durable_content::retained_results();
     let baseline = snapshot(&state).unwrap();
-    let retained = baseline.simulation_results.clone();
+    let retained = baseline.file.simulation_results.clone();
     state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, None));
     assert!(!has_unsaved_changes(&state));
     state.simulation.progress = 0.75;
@@ -138,6 +138,7 @@ fn runtime_changes_and_clones_reuse_results_but_invalid_edits_do_not() {
     assert!(
         snapshot(&state)
             .unwrap()
+            .file
             .simulation_results
             .shares_content_with(&retained)
     );
@@ -145,6 +146,7 @@ fn runtime_changes_and_clones_reuse_results_but_invalid_edits_do_not() {
     assert!(
         snapshot(&fork)
             .unwrap()
+            .file
             .simulation_results
             .shares_content_with(&retained)
     );

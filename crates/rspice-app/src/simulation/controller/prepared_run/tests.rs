@@ -1047,7 +1047,7 @@ fn campaign_freezes_distinct_plan_members_without_switching_the_live_editor() {
         .expect("campaign member serializes");
     let loaded =
         crate::io::project_io::load_project_text(&json, None).expect("campaign member reloads");
-    let restored = crate::io::simulation_state_from_results(loaded.simulation_results)
+    let restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
         .expect("campaign result history restores");
     let restored_membership = restored.runs[0]
         .campaign_membership()

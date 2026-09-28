@@ -42,9 +42,9 @@ fn cleared_run_sequence_is_dirty_and_survives_scoped_and_all_saves() {
             scope == SaveScope::ActiveDocument
         );
         let saved = crate::io::load_project_file(&path).unwrap();
-        assert_eq!(saved.simulation_results.next_run_id, 1);
+        assert_eq!(saved.file.simulation_results.next_run_id, 1);
         let mut restored =
-            crate::io::simulation_state_from_results(saved.simulation_results).unwrap();
+            crate::io::simulation_state_from_results(saved.file.simulation_results).unwrap();
         assert!(restored.runs.is_empty());
         assert_eq!(restored.start_run().id, 2);
         remove_project_artifacts(&path);
@@ -119,11 +119,11 @@ impl Annotation {
     }
 }
 
-fn annotations(project: &ProjectFile) -> serde_json::Value {
+fn annotations(project: &ProjectSnapshot) -> serde_json::Value {
     serde_json::to_value((
-        &project.result_presentation.markers,
-        &project.result_presentation.log_y_panes,
-        &project.result_presentation.expression_groups,
+        &project.file.result_presentation.markers,
+        &project.file.result_presentation.log_y_panes,
+        &project.file.result_presentation.expression_groups,
     ))
     .unwrap()
 }
@@ -146,8 +146,8 @@ fn result_presentation_retains_flat_project_wire_format_and_legacy_defaults() {
         // Versions predating each field restore the other fields unchanged.
         let mut legacy = wire.clone();
         legacy.as_object_mut().unwrap().remove(name);
-        let restored: ProjectFile = serde_json::from_value(legacy.clone()).unwrap();
-        restored.validate().unwrap();
+        let restored: ProjectSnapshot = serde_json::from_value(legacy.clone()).unwrap();
+        restored.file.validate().unwrap();
         assert_eq!(serde_json::to_value(restored).unwrap(), legacy);
     }
     let text = crate::io::project_io::serialize_project_file(&project).unwrap();
@@ -206,14 +206,14 @@ fn every_result_annotation_is_dirty_revertible_and_independent_of_solver_inputs(
         let edited = snapshot(&state).unwrap();
         assert_ne!(annotations(&edited), annotations(&baseline));
         assert_eq!(
-            serde_json::to_value(&edited.simulation_results).unwrap(),
-            serde_json::to_value(&baseline.simulation_results).unwrap()
+            serde_json::to_value(&edited.file.simulation_results).unwrap(),
+            serde_json::to_value(&baseline.file.simulation_results).unwrap()
         );
         let token = prepare_revert_active_document(&state).unwrap();
         confirm_revert_active_document(&mut state, &token).unwrap();
         assert_eq!(
-            snapshot(&state).unwrap().simulation_results,
-            baseline.simulation_results
+            snapshot(&state).unwrap().file.simulation_results,
+            baseline.file.simulation_results
         );
         assert_eq!(
             annotations(&snapshot(&state).unwrap()),
@@ -260,7 +260,7 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
         let saved = crate::io::load_project_file(&path).unwrap();
         assert_eq!(annotations(&saved), annotations(&edited), "{annotation:?}");
         assert!(
-            saved.workspace.content.schematic_buffers[&state.workspace.content.active_view.key()]
+            saved.file.workspace.schematic_buffers[&state.workspace.content.active_view.key()]
                 .document()
                 .components
                 .is_empty()
@@ -307,8 +307,7 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
             annotations(&snapshot(&state).unwrap())
         );
         assert_eq!(
-            all_saved.workspace.content.schematic_buffers
-                [&state.workspace.content.active_view.key()]
+            all_saved.file.workspace.schematic_buffers[&state.workspace.content.active_view.key()]
                 .document()
                 .components
                 .len(),

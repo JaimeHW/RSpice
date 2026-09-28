@@ -471,8 +471,8 @@ fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
         )
         .unwrap();
         let loaded = crate::io::load_project_file(&path).unwrap();
-        let schematic = &loaded.workspace.content.schematic_buffers
-            [&loaded.workspace.content.active_schematic_reference().key()];
+        let schematic = &loaded.file.workspace.schematic_buffers
+            [&loaded.file.workspace.active_schematic_reference().key()];
         assert_eq!(schematic.document().components[0].name, name);
         assert_eq!(
             schematic.document().probes[0].source_expression.as_deref(),
@@ -480,13 +480,7 @@ fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
         );
         for plan in [first_plan, second_plan] {
             assert_eq!(
-                loaded
-                    .workspace
-                    .content
-                    .plan_data(plan)
-                    .unwrap()
-                    .saved_outputs[0]
-                    .source_expression,
+                loaded.file.workspace.plan_data(plan).unwrap().saved_outputs[0].source_expression,
                 format!("I({name})")
             );
         }

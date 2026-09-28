@@ -436,7 +436,7 @@ fn two_hundred_projections_over_thirty_cell_views() {
 
     let started = std::time::Instant::now();
     for _ in 0..CALLS {
-        workspace.design_projection_cache.clear();
+        workspace.session.design_projection_cache.clear();
         let _ = projection_of(&workspace, &libraries, &reference, &active);
     }
     let cold = started.elapsed();

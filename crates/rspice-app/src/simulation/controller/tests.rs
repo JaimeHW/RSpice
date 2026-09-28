@@ -1099,6 +1099,7 @@ fn controller_plan_run_receipt_survives_production_project_round_trip() {
     let loaded =
         crate::io::project_io::load_project_text(&json, None).expect("controller plan run reloads");
     let loaded_plan_id = loaded
+        .file
         .execution_context
         .as_ref()
         .expect("execution context retained")
@@ -1106,7 +1107,7 @@ fn controller_plan_run_receipt_survives_production_project_round_trip() {
         .stable_analysis_plan()
         .expect("stable plan retained")
         .id();
-    let restored = crate::io::simulation_state_from_results(loaded.simulation_results)
+    let restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
         .expect("controller plan history restores");
     let run = &restored.runs[0];
     let receipt = run.prepared_receipt().expect("prepared receipt retained");

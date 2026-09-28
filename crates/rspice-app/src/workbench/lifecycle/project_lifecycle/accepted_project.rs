@@ -5,14 +5,14 @@
 
 use std::rc::Rc;
 
-use crate::io::ProjectFile;
+use crate::io::ProjectSnapshot;
 
 use super::PersistenceBinding;
 use super::registry::DocumentFingerprints;
 
 #[derive(Debug)]
 struct AcceptedContent {
-    baseline: ProjectFile,
+    baseline: ProjectSnapshot,
     fingerprints: Result<DocumentFingerprints, String>,
 }
 
@@ -25,7 +25,7 @@ pub(crate) struct AcceptedProject {
 }
 
 impl AcceptedProject {
-    pub(super) fn new(baseline: ProjectFile, binding: Option<PersistenceBinding>) -> Self {
+    pub(super) fn new(baseline: ProjectSnapshot, binding: Option<PersistenceBinding>) -> Self {
         let fingerprints = super::registry::document_fingerprints(&baseline);
         Self {
             content: Rc::new(AcceptedContent {
@@ -36,7 +36,7 @@ impl AcceptedProject {
         }
     }
 
-    pub(super) fn baseline(&self) -> &ProjectFile {
+    pub(super) fn baseline(&self) -> &ProjectSnapshot {
         &self.content.baseline
     }
 

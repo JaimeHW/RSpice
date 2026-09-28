@@ -37,11 +37,14 @@ const SAVED_OUTPUT_EXPRESSION: &str = "V(out)";
 #[test]
 fn the_frozen_hierarchical_reference_still_loads_and_validates() {
     let project = load_project_text(FROZEN_PROJECT, None).expect("the frozen reference loads");
-    project.validate().expect("the frozen reference validates");
+    project
+        .file
+        .validate()
+        .expect("the frozen reference validates");
     assert!(
-        project.simulation_results_warning.is_none(),
+        project.file.simulation_results_warning.is_none(),
         "{:?}",
-        project.simulation_results_warning
+        project.file.simulation_results_warning
     );
 
     for view in [
@@ -51,17 +54,14 @@ fn the_frozen_hierarchical_reference_still_loads_and_validates() {
         "vendor/filter/schematic",
     ] {
         assert!(
-            project
-                .workspace
-                .content
-                .schematic_buffers
-                .contains_key(view),
+            project.file.workspace.schematic_buffers.contains_key(view),
             "{view} lost its schematic buffer"
         );
     }
     for library in [USER_LIBRARY, VENDOR_LIBRARY] {
         assert!(
             project
+                .file
                 .libraries
                 .get_library(library)
                 .and_then(|library| library.get_cell(FILTER_CELL))
@@ -71,6 +71,7 @@ fn the_frozen_hierarchical_reference_still_loads_and_validates() {
     }
     assert_eq!(
         project
+            .file
             .libraries
             .get_library(USER_LIBRARY)
             .and_then(|library| library.get_cell("amp"))
@@ -85,8 +86,8 @@ fn the_frozen_hierarchical_reference_keeps_its_sheets_configuration_and_outputs(
     let project = load_project_text(FROZEN_PROJECT, None).expect("the frozen reference loads");
 
     let catalog = project
+        .file
         .workspace
-        .content
         .design_management
         .sheet_catalog(AMP_VIEW_KEY)
         .expect("the amp sheet catalog is retained");
@@ -101,8 +102,8 @@ fn the_frozen_hierarchical_reference_keeps_its_sheets_configuration_and_outputs(
     );
 
     let configuration = project
+        .file
         .workspace
-        .content
         .configuration_sets
         .active()
         .expect("the reference configuration is still active");
@@ -110,21 +111,18 @@ fn the_frozen_hierarchical_reference_keeps_its_sheets_configuration_and_outputs(
     assert_eq!(configuration.root().key(), "user/top/schematic");
 
     let plan = project
+        .file
         .execution_context
         .as_ref()
         .and_then(|context| context.simulation_plan.analysis_plan.as_ref())
         .expect("the frozen reference carries a stable analysis plan")
         .id();
     assert_eq!(
-        project
-            .workspace
-            .content
-            .plan_data(plan)
-            .map(|payload| payload
-                .saved_outputs
-                .iter()
-                .map(|output| output.source_expression.as_str())
-                .collect::<Vec<_>>()),
+        project.file.workspace.plan_data(plan).map(|payload| payload
+            .saved_outputs
+            .iter()
+            .map(|output| output.source_expression.as_str())
+            .collect::<Vec<_>>()),
         Some(vec![SAVED_OUTPUT_EXPRESSION])
     );
 }
@@ -135,6 +133,7 @@ fn the_frozen_hierarchical_reference_rewrites_to_a_project_that_loads_again() {
     let rewritten = serialize_project_file(&project).expect("the loaded reference re-serializes");
     load_project_text(&rewritten, None)
         .expect("the re-serialized reference loads")
+        .file
         .validate()
         .expect("the re-serialized reference validates");
 }
@@ -149,8 +148,8 @@ fn legacy_paths_load_and_reserialize_in_the_new_grammar() {
 
     let loaded = load_project_text(FROZEN_PROJECT, None).expect("the frozen reference loads");
     let configuration = loaded
+        .file
         .workspace
-        .content
         .configuration_sets
         .active()
         .expect("the reference configuration is still active");
@@ -162,13 +161,13 @@ fn legacy_paths_load_and_reserialize_in_the_new_grammar() {
         "migration restates an authored choice rather than making one"
     );
     assert_eq!(
-        loaded.workspace.content.configuration_sets.schema_version(),
+        loaded.file.workspace.configuration_sets.schema_version(),
         crate::state::ConfigurationSetCatalog::default().schema_version(),
         "the catalog is relabelled as the schema it now holds"
     );
     loaded
+        .file
         .workspace
-        .content
         .configuration_sets
         .validate()
         .expect("the migrated catalog's digests cover what it now stores");
@@ -191,7 +190,7 @@ fn legacy_paths_load_and_reserialize_in_the_new_grammar() {
 
     let reloaded = load_project_text(&rewritten, None).expect("the migrated project reloads");
     assert_eq!(
-        reloaded.workspace.content.configuration_sets, loaded.workspace.content.configuration_sets,
+        reloaded.file.workspace.configuration_sets, loaded.file.workspace.configuration_sets,
         "migration is a one-time rewrite"
     );
 }
@@ -204,6 +203,7 @@ fn legacy_paths_load_and_reserialize_in_the_new_grammar() {
 fn the_frozen_symbol_sidecar_text_loads_as_body_geometry() {
     let project = load_project_text(FROZEN_PROJECT, None).expect("the frozen reference loads");
     let symbol = project
+        .file
         .libraries
         .get_library(USER_LIBRARY)
         .and_then(|library| library.get_cell("amp"))
@@ -229,7 +229,7 @@ fn a_configured_path_the_engine_cannot_name_is_refused_at_load() {
         .configuration_sets
         .create(configuration_named("Release", &root, "/XDUT"))
         .expect("an addressable configuration");
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
     let mut value: serde_json::Value =
         serde_json::from_str(&serialize_project_file(&project).expect("the project serializes"))
             .expect("the project is JSON");

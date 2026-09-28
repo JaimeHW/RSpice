@@ -1656,15 +1656,12 @@ mod tests {
         let text = std::str::from_utf8(&bytes).expect("publication is UTF-8");
         let artifact =
             crate::io::project_io::load_project_text(text, None).expect("artifact validates");
-        assert_eq!(artifact.workspace.content.project.id(), project_id);
-        assert_eq!(
-            artifact.workspace.content.project.revision(),
-            project_revision
-        );
+        assert_eq!(artifact.file.workspace.project.id(), project_id);
+        assert_eq!(artifact.file.workspace.project.revision(), project_revision);
         assert!(
             artifact
+                .file
                 .workspace
-                .content
                 .project
                 .library_publications()
                 .is_empty()

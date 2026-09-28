@@ -299,7 +299,7 @@ fn gesture_project_and_session_snapshots_preserve_committed_geometry() {
         crate::workbench::lifecycle::project_lifecycle::snapshot(&fixture.app.state).unwrap();
     let key = fixture.app.state.workspace.content.active_key();
     assert_eq!(
-        project.workspace.content.schematic_buffers[&key]
+        project.file.workspace.schematic_buffers[&key]
             .document()
             .components[0]
             .pos,
@@ -360,7 +360,7 @@ fn gesture_native_save_acceptance_rebases_cancel_and_release_dirty_state() {
             let saved = crate::io::load_project_file(&path).unwrap();
             let key = fixture.app.state.workspace.content.active_key();
             assert_eq!(
-                saved.workspace.content.schematic_buffers[&key]
+                saved.file.workspace.schematic_buffers[&key]
                     .document()
                     .components[0]
                     .pos,
@@ -493,7 +493,7 @@ fn gesture_window_projection_preserves_ownership_and_inactive_save_baselines() {
         let snapshot =
             crate::workbench::lifecycle::project_lifecycle::snapshot(&fixture.app.state).unwrap();
         assert_eq!(
-            snapshot.workspace.content.schematic_buffers[&original.key()]
+            snapshot.file.workspace.schematic_buffers[&original.key()]
                 .document()
                 .components[0]
                 .pos,

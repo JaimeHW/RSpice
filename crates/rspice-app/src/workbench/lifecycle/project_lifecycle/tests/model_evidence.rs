@@ -56,6 +56,7 @@ fn model_validation_receipt_is_dirty_and_survives_save_reload_and_revert() {
         save_native(&mut state, scope, &path, DestinationAuthority::Canonical).unwrap();
         let reloaded = crate::io::load_project_file(&path)
             .unwrap()
+            .file
             .execution_context
             .unwrap();
         assert_eq!(reloaded.model_validation_receipt, Some(receipt.clone()));
@@ -205,6 +206,7 @@ fn provider_decision_is_dirty_and_survives_save_reload_and_revert() {
         save_native(&mut state, scope, &path, DestinationAuthority::Canonical).unwrap();
         let reloaded = crate::io::load_project_file(&path)
             .unwrap()
+            .file
             .execution_context
             .unwrap();
         assert_eq!(reloaded.model_resolution_records, vec![decision.clone()]);

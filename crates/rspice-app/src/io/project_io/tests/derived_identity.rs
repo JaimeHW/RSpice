@@ -68,8 +68,11 @@ const SNAPSHOT: [u8; 32] = [0x5c; 32];
 
 /// The AC instance the execution-context fixture authors, with the revision
 /// and plan identity a run against it has to quote.
-fn authored_ac(project: &ProjectFile) -> (AnalysisInstanceId, ObjectRevision, SimulationPlanId) {
+fn authored_ac(
+    project: &ProjectSnapshot,
+) -> (AnalysisInstanceId, ObjectRevision, SimulationPlanId) {
     let plan = project
+        .file
         .execution_context
         .as_ref()
         .expect("execution context")
@@ -87,8 +90,12 @@ fn authored_ac(project: &ProjectFile) -> (AnalysisInstanceId, ObjectRevision, Si
 
 /// Author one more analysis of the given kind and answer with its identity and
 /// the plan revision that inserted it.
-fn author(project: &mut ProjectFile, kind: AnalysisKind) -> (AnalysisInstanceId, ObjectRevision) {
+fn author(
+    project: &mut ProjectSnapshot,
+    kind: AnalysisKind,
+) -> (AnalysisInstanceId, ObjectRevision) {
     let plan = project
+        .file
         .execution_context
         .as_mut()
         .expect("execution context")
@@ -102,7 +109,7 @@ fn author(project: &mut ProjectFile, kind: AnalysisKind) -> (AnalysisInstanceId,
 /// Attach one prepared run built from the supplied tasks, with a result for
 /// each of the first `produced` of them.
 fn attach_run(
-    project: &mut ProjectFile,
+    project: &mut ProjectSnapshot,
     plan_id: SimulationPlanId,
     source_revision: ObjectRevision,
     tasks: &[TaskFixture],
@@ -153,7 +160,7 @@ fn attach_run(
     let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
         source_domain: AnalysisResultSourceDomain::SimulationPlan,
         simulation_plan_id: Some(plan_id),
-        project_revision: project.workspace.content.project.revision(),
+        project_revision: project.file.workspace.project.revision(),
         prepared_snapshot_digest: snapshot,
         source_content_digest: ContentDigest::from_bytes([0x5b; 32]),
         source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes(
@@ -171,21 +178,22 @@ fn attach_run(
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = RUN_ID + 1;
-    project.simulation_results = crate::io::capture_simulation_results(&simulation);
+    project.file.simulation_results = crate::io::capture_simulation_results(&simulation);
 }
 
 /// Save, reload, and answer with the restored task identities. Panics with the
 /// reader's own warning if the run did not survive, because a dropped result
 /// history is the failure this whole module exists to keep from happening.
-fn round_trip_task_identities(project: &ProjectFile) -> Vec<AnalysisInstanceId> {
+fn round_trip_task_identities(project: &ProjectSnapshot) -> Vec<AnalysisInstanceId> {
     let json = serialize_project_file(project).expect("the project serializes");
     let restored = load_project_text(&json, None).expect("the project loads");
     assert!(
-        restored.simulation_results_warning.is_none(),
+        restored.file.simulation_results_warning.is_none(),
         "{:?}",
-        restored.simulation_results_warning
+        restored.file.simulation_results_warning
     );
     let run = restored
+        .file
         .simulation_results
         .runs
         .first()
@@ -368,12 +376,12 @@ fn every_truncation_of_a_multi_point_run_is_a_valid_prefix() {
             .unwrap_or_else(|error| panic!("prefix of {produced} results saves: {error}"));
         let restored = load_project_text(&json, None).expect("the project loads");
         assert!(
-            restored.simulation_results_warning.is_none(),
+            restored.file.simulation_results_warning.is_none(),
             "prefix of {produced} results: {:?}",
-            restored.simulation_results_warning
+            restored.file.simulation_results_warning
         );
         assert_eq!(
-            restored.simulation_results.runs[0].analyses.len(),
+            restored.file.simulation_results.runs[0].analyses.len(),
             produced,
             "the restored prefix keeps exactly the results the run produced"
         );
@@ -458,13 +466,14 @@ fn a_derived_identity_that_does_not_recompute_is_refused_on_load() {
 
     let restored = load_project_text(&tampered, None).expect("a tampered project still opens");
     let warning = restored
+        .file
         .simulation_results_warning
         .expect("the tampered history is refused with a stated reason");
     assert!(
         warning.contains("does not re-derive from analysis"),
         "{warning}"
     );
-    assert!(restored.simulation_results.runs.is_empty());
+    assert!(restored.file.simulation_results.runs.is_empty());
 }
 
 /// A manual deck authors no plan instance, so a manual-deck task has nothing
@@ -498,6 +507,7 @@ fn a_manual_deck_task_cannot_claim_a_derivation() {
 
     let restored = load_project_text(&manual, None).expect("the project still opens");
     let warning = restored
+        .file
         .simulation_results_warning
         .expect("a manual-deck derivation is refused with a stated reason");
     assert!(
@@ -531,7 +541,7 @@ fn a_receipt_written_before_derived_identities_still_loads() {
     );
 
     let restored = load_project_text(&json, None).expect("the project loads");
-    assert!(restored.simulation_results_warning.is_none());
+    assert!(restored.file.simulation_results_warning.is_none());
 }
 
 #[test]
@@ -555,6 +565,7 @@ fn an_older_schema_carrying_a_derivation_record_is_refused() {
 
     let restored = load_project_text(&relabelled, None).expect("the project still opens");
     let warning = restored
+        .file
         .simulation_results_warning
         .expect("a relabelled file is refused with a stated reason");
     assert!(

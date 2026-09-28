@@ -1025,9 +1025,9 @@ impl RSpiceApp {
             .map_err(|error| format!("project library rollback artifact is not UTF-8: {error}"))?;
         let mut artifact = crate::io::project_io::load_project_text(artifact_text, None)
             .map_err(|error| format!("project library rollback artifact is invalid: {error}"))?;
-        if artifact.workspace.content.project.id() != receipt.project_id()
-            || artifact.workspace.content.project.revision() != receipt.source_project_revision()
-            || artifact.libraries.revision() != receipt.library_revision()
+        if artifact.file.workspace.project.id() != receipt.project_id()
+            || artifact.file.workspace.project.revision() != receipt.source_project_revision()
+            || artifact.file.libraries.revision() != receipt.library_revision()
         {
             return Err(
                 "project library rollback artifact identity or revision does not match its receipt"
@@ -1036,16 +1036,11 @@ impl RSpiceApp {
         }
         let expected_prior_publications = usize::try_from(receipt.sequence() - 1)
             .map_err(|_| "project library publication sequence is invalid".to_owned())?;
-        if artifact
-            .workspace
-            .content
-            .project
-            .library_publications()
-            .len()
+        if artifact.file.workspace.project.library_publications().len()
             != expected_prior_publications
             || artifact
+                .file
                 .workspace
-                .content
                 .project
                 .library_publications()
                 .last()
@@ -1057,7 +1052,7 @@ impl RSpiceApp {
                     .to_owned(),
             );
         }
-        if artifact.workspace.content.project.technology_binding()
+        if artifact.file.workspace.project.technology_binding()
             != self.state.workspace.content.project.technology_binding()
         {
             return Err(
@@ -1076,9 +1071,9 @@ impl RSpiceApp {
         };
         let prepared = self.state.preflight_project_library_mutation(mutation)?;
 
-        let project_id = artifact.workspace.content.project.id();
+        let project_id = artifact.file.workspace.project.id();
         let (simulation_plan, model_library_manager, execution_warnings) =
-            match artifact.execution_context.take() {
+            match artifact.file.execution_context.take() {
                 Some(context) => crate::io::restore_execution_context(context, project_id).map_err(|error| {
                     format!("project library rollback execution context is invalid: {error}")
                 })?,
@@ -1096,21 +1091,24 @@ impl RSpiceApp {
 
         let mut candidate = self.state.clone();
         let mut current_project = candidate.workspace.content.project.clone();
-        current_project.root_library = artifact.workspace.content.project.root_library.clone();
-        current_project.top_cell = artifact.workspace.content.project.top_cell.clone();
-        artifact.workspace.content.project = current_project;
+        current_project.root_library = artifact.file.workspace.project.root_library.clone();
+        current_project.top_cell = artifact.file.workspace.project.top_cell.clone();
+        artifact.file.workspace.project = current_project;
         candidate.clear_design_execution_context();
         candidate
             .library_manager
-            .replace_catalog_from_snapshot(&artifact.libraries)?;
+            .replace_catalog_from_snapshot(&artifact.file.libraries)?;
         candidate.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
-        candidate.workspace = artifact.workspace;
+        candidate.workspace = crate::state::ProjectWorkspace::from_parts(
+            artifact.file.workspace,
+            artifact.workspace_session,
+        );
         candidate.sim_setup = simulation_plan;
         candidate.model_library_manager = model_library_manager;
         candidate.restore_active_schematic_from_workspace();
         candidate.simulation = crate::state::SimulationState::default();
         crate::io::restore_simulation_results(
-            artifact.simulation_results,
+            artifact.file.simulation_results,
             &mut candidate.simulation,
         )
         .map_err(|error| format!("project library rollback result history is invalid: {error}"))?;

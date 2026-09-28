@@ -102,7 +102,7 @@ fn removed_marker_id_is_not_reused_after_scoped_save_and_reopen() {
             let written = crate::io::load_project_file(&path).unwrap();
             let expected_components = usize::from(scope == SaveScope::AllDocuments);
             assert_eq!(
-                written.workspace.content.schematic_buffers[&state.workspace.content.active_key()]
+                written.file.workspace.schematic_buffers[&state.workspace.content.active_key()]
                     .document()
                     .components
                     .len(),
@@ -205,7 +205,7 @@ fn saving_another_document_does_not_publish_results_allocation_history() {
     assert!(has_unsaved_changes(&state));
     let written = crate::io::load_project_file(&path).unwrap();
     assert_eq!(
-        written.result_presentation.marker_id_high_water,
+        written.file.result_presentation.marker_id_high_water,
         Some(published)
     );
     state
@@ -221,10 +221,10 @@ fn saving_another_document_does_not_publish_results_allocation_history() {
     .unwrap();
     let written = crate::io::load_project_file(&path).unwrap();
     assert_eq!(
-        written.result_presentation.marker_id_high_water,
+        written.file.result_presentation.marker_id_high_water,
         Some(pending)
     );
-    assert_eq!(written.result_presentation.markers.len(), 1);
+    assert_eq!(written.file.result_presentation.markers.len(), 1);
     assert!(!has_unsaved_changes(&state));
     remove_project_artifacts(&path);
 }
@@ -310,7 +310,7 @@ fn legacy_marker_history_is_adopted_without_dirtying_an_unchanged_project() {
     );
     std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
     let written = crate::io::load_project_file(&path).unwrap();
-    assert_eq!(written.result_presentation.marker_id_high_water, None);
+    assert_eq!(written.file.result_presentation.marker_id_high_water, None);
     let mut reopened = AppState::default();
     assert!(load_project_from_path(&mut reopened, &path));
     assert!(!has_unsaved_changes(&reopened));

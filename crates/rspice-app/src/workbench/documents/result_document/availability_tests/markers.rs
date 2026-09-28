@@ -1,10 +1,10 @@
 //! Marker identity and payload failures must never corrupt saved annotations.
 
 use super::*;
-use crate::io::ProjectFile;
+use crate::io::ProjectSnapshot;
 
-fn marker_project(state: &AppState) -> ProjectFile {
-    ProjectFile::new_with_execution_context(
+fn marker_project(state: &AppState) -> ProjectSnapshot {
+    ProjectSnapshot::new_with_execution_context(
         state.workspace.clone(),
         state.library_manager.clone(),
         crate::io::capture_simulation_results(&state.simulation),
@@ -62,7 +62,7 @@ fn restored_maximum_marker_id_cannot_wrap_or_retarget_existing_annotations() {
     let project = marker_project(&state);
     let text = crate::io::project_io::serialize_project_file(&project).unwrap();
     let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
-    restore_presentation(&mut state, restored.result_presentation);
+    restore_presentation(&mut state, restored.file.result_presentation);
     assert_eq!(place_quick(&mut state, analysis, 0.75), None);
     assert_eq!(state.ui.results.markers.len(), 1);
     assert_eq!(state.ui.results.markers[0].id, u32::MAX);
@@ -95,7 +95,7 @@ fn nonfinite_marker_coordinates_are_refused_before_project_publication() {
     let (state, _) = marker_state(7);
     let mut project = marker_project(&state);
     for coordinate in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        project.result_presentation.markers[0].x = coordinate;
+        project.file.result_presentation.markers[0].x = coordinate;
         assert!(
             crate::io::project_io::serialize_project_file(&project).is_err(),
             "a nonfinite marker would serialize as null and make the project unreadable"
@@ -107,12 +107,12 @@ fn nonfinite_marker_coordinates_are_refused_before_project_publication() {
 fn marker_anchor_must_name_the_same_analysis_as_the_marker() {
     let (state, _) = marker_state(7);
     let mut project = marker_project(&state);
-    project.result_presentation.markers[0].anchor.analysis = AnalysisPresentationKey::new(
+    project.file.result_presentation.markers[0].anchor.analysis = AnalysisPresentationKey::new(
         crate::product::DatasetId::new(),
         &state.simulation.runs[0].analyses[0],
     );
     assert!(
-        project.validate().is_err(),
+        project.file.validate().is_err(),
         "one marker cannot identify two different datasets"
     );
 }
@@ -121,10 +121,10 @@ fn marker_anchor_must_name_the_same_analysis_as_the_marker() {
 fn duplicate_marker_ids_are_refused_before_project_publication() {
     let (state, _) = marker_state(7);
     let mut project = marker_project(&state);
-    let mut duplicate = project.result_presentation.markers[0].clone();
+    let mut duplicate = project.file.result_presentation.markers[0].clone();
     duplicate.note = "Another annotation".to_owned();
     duplicate.x = 0.75;
-    project.result_presentation.markers.push(duplicate);
+    project.file.result_presentation.markers.push(duplicate);
     assert!(
         crate::io::project_io::serialize_project_file(&project).is_err(),
         "duplicate IDs alias edit and delete operations"
@@ -164,7 +164,7 @@ fn last_marker_identity_can_be_allocated_once_and_remains_serializable() {
     let text = crate::io::project_io::serialize_project_file(&project).unwrap();
     let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
     assert_eq!(
-        serde_json::to_value(restored.result_presentation.markers).unwrap(),
+        serde_json::to_value(restored.file.result_presentation.markers).unwrap(),
         before
     );
 }
@@ -228,9 +228,9 @@ fn invalid_marker_placement_does_not_consume_an_identity_or_mutate_annotations()
 fn duplicate_ids_in_older_projects_are_repaired_without_losing_annotations() {
     let (mut state, _) = marker_state(7);
     let mut project = marker_project(&state);
-    let template = project.result_presentation.markers[0].clone();
-    project.result_presentation.marker_id_high_water = None;
-    project.result_presentation.markers = [0, 1, 2, 7, u32::MAX, 7, 0, u32::MAX]
+    let template = project.file.result_presentation.markers[0].clone();
+    project.file.result_presentation.marker_id_high_water = None;
+    project.file.result_presentation.markers = [0, 1, 2, 7, u32::MAX, 7, 0, u32::MAX]
         .into_iter()
         .enumerate()
         .map(|(index, id)| {
@@ -246,6 +246,7 @@ fn duplicate_ids_in_older_projects_are_repaired_without_losing_annotations() {
     let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
     assert_eq!(
         restored
+            .file
             .result_presentation
             .markers
             .iter()
@@ -255,16 +256,18 @@ fn duplicate_ids_in_older_projects_are_repaired_without_losing_annotations() {
     );
     assert!(
         restored
+            .file
             .workspace_migration_warning
             .as_deref()
             .unwrap()
             .contains("duplicate IDs")
     );
     for (original, repaired) in project
+        .file
         .result_presentation
         .markers
         .iter()
-        .zip(&restored.result_presentation.markers)
+        .zip(&restored.file.result_presentation.markers)
     {
         let mut expected = original.clone();
         expected.id = repaired.id;
@@ -275,17 +278,17 @@ fn duplicate_ids_in_older_projects_are_repaired_without_losing_annotations() {
     }
     let repeated = crate::io::project_io::load_project_text(&text, None).unwrap();
     assert_eq!(
-        serde_json::to_value(&restored.result_presentation.markers).unwrap(),
-        serde_json::to_value(repeated.result_presentation.markers).unwrap()
+        serde_json::to_value(&restored.file.result_presentation.markers).unwrap(),
+        serde_json::to_value(repeated.file.result_presentation.markers).unwrap()
     );
     let normalized_text = crate::io::project_io::serialize_project_file(&restored).unwrap();
     let normalized = crate::io::project_io::load_project_text(&normalized_text, None).unwrap();
     assert_eq!(
-        serde_json::to_value(&restored.result_presentation.markers).unwrap(),
-        serde_json::to_value(normalized.result_presentation.markers).unwrap()
+        serde_json::to_value(&restored.file.result_presentation.markers).unwrap(),
+        serde_json::to_value(normalized.file.result_presentation.markers).unwrap()
     );
 
-    restore_presentation(&mut state, restored.result_presentation);
+    restore_presentation(&mut state, restored.file.result_presentation);
     commit_marker_edit(
         &mut state,
         MarkerSelector::Quick(3),

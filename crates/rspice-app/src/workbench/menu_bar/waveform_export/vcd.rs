@@ -138,9 +138,9 @@ mod tests {
         let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
         let text = crate::io::project_io::serialize_project_file(&project).unwrap();
         let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
-        assert!(restored.simulation_results_warning.is_none());
+        assert!(restored.file.simulation_results_warning.is_none());
         let restored =
-            crate::io::simulation_state_from_results(restored.simulation_results).unwrap();
+            crate::io::simulation_state_from_results(restored.file.simulation_results).unwrap();
         let run = restored.active_run().unwrap();
         assert_eq!(run.lifecycle, SimulationRunLifecycle::LegacyUnknown);
         assert!(run.prepared_receipt().is_none());

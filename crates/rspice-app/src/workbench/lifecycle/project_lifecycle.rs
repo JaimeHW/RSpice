@@ -31,7 +31,7 @@ pub(crate) use registry::ProjectDocumentId;
 use transaction::{LifecycleTransaction, TransactionKind};
 
 use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
-use crate::io::{ProjectExecutionContext, ProjectFile, ProjectSimulationResults};
+use crate::io::{ProjectExecutionContext, ProjectSimulationResults, ProjectSnapshot};
 #[cfg(target_arch = "wasm32")]
 use crate::product::ContentDigest;
 use crate::state::{CellViewRef, ViewType};
@@ -183,7 +183,6 @@ pub(crate) fn accepted_active_schematic(state: &AppState) -> Option<crate::state
     accepted.binding.as_ref()?;
     accepted
         .baseline()
-        .workspace
         .clone_schematic_editor(&state.workspace.content.active_view.key())
 }
 
@@ -256,7 +255,7 @@ pub(crate) enum ProjectLifecycleError {
     Persistence(#[from] persistence::PersistenceError),
 }
 
-pub(crate) fn snapshot(state: &AppState) -> Result<ProjectFile, ProjectLifecycleError> {
+pub(crate) fn snapshot(state: &AppState) -> Result<ProjectSnapshot, ProjectLifecycleError> {
     capture_snapshot(state, SnapshotContent::Committed)
 }
 
@@ -269,7 +268,7 @@ enum SnapshotContent {
 fn capture_snapshot(
     state: &AppState,
     content: SnapshotContent,
-) -> Result<ProjectFile, ProjectLifecycleError> {
+) -> Result<ProjectSnapshot, ProjectLifecycleError> {
     let mut workspace = state.workspace.clone();
     if matches!(
         workspace.content.active_view_type(),
@@ -298,7 +297,7 @@ fn capture_snapshot(
     let execution_context =
         crate::io::capture_execution_context(&state.sim_setup, &state.model_library_manager)
             .map_err(ProjectLifecycleError::InvalidState)?;
-    let project = ProjectFile::new_with_execution_context(
+    let project = ProjectSnapshot::new_with_execution_context(
         workspace,
         libraries,
         simulation_results,
@@ -306,9 +305,11 @@ fn capture_snapshot(
     )
     .with_result_presentation(state.ui.results.project_presentation(&state.simulation));
     project
+        .file
         .validate()
         .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
     project
+        .file
         .simulation_results
         .validate()
         .map_err(ProjectLifecycleError::InvalidState)?;
@@ -328,20 +329,20 @@ pub(crate) fn generated_netlist_input_digest(
     // Execution provenance must describe the exact live input consumed by
     // generation, including an edit currently previewed in another window.
     let mut project = capture_snapshot(state, SnapshotContent::Current)?;
-    project.simulation_results = ProjectSimulationResults::default();
+    project.file.simulation_results = ProjectSimulationResults::default();
     // A receipt records validation of the existing inputs. Provider decisions
     // still participate because they select the source emitted to the engine.
-    if let Some(context) = project.execution_context.as_mut() {
+    if let Some(context) = project.file.execution_context.as_mut() {
         context.model_validation_receipt = None;
     }
     // Annotating a plot must never change what the netlist generator is
     // asked to produce.
-    project.result_presentation = Default::default();
-    project.workspace.content.netlist_source = None;
-    project.workspace.content.netlist_source_path = None;
-    project.workspace.content.netlist_document = None;
-    project.workspace.content.netlist_descriptor = None;
-    project.workspace.content.retained_netlist_decks.clear();
+    project.file.result_presentation = Default::default();
+    project.file.workspace.netlist_source = None;
+    project.file.workspace.netlist_source_path = None;
+    project.file.workspace.netlist_document = None;
+    project.file.workspace.netlist_descriptor = None;
+    project.file.workspace.retained_netlist_decks.clear();
     registry::content_digest(&project).map_err(ProjectLifecycleError::InvalidState)
 }
 
@@ -501,16 +502,15 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
         .registry
         .is_dirty(&ProjectDocumentId::ProjectConfiguration);
     if let Some(accepted) = state.project_lifecycle.accepted.as_ref() {
-        let baseline = &accepted.baseline().workspace;
+        let baseline = &accepted.baseline().file.workspace;
         state.workspace.content.netlist_source_dirty = state.workspace.content.netlist_source
-            != baseline.content.netlist_source
-            || state.workspace.content.netlist_source_path != baseline.content.netlist_source_path
-            || state.workspace.content.netlist_document != baseline.content.netlist_document
-            || state.workspace.content.netlist_descriptor != baseline.content.netlist_descriptor
-            || state.workspace.content.retained_netlist_decks
-                != baseline.content.retained_netlist_decks;
+            != baseline.netlist_source
+            || state.workspace.content.netlist_source_path != baseline.netlist_source_path
+            || state.workspace.content.netlist_document != baseline.netlist_document
+            || state.workspace.content.netlist_descriptor != baseline.netlist_descriptor
+            || state.workspace.content.retained_netlist_decks != baseline.retained_netlist_decks;
         state.workspace.content.project_sources_dirty =
-            state.workspace.content.project_sources != baseline.content.project_sources;
+            state.workspace.content.project_sources != baseline.project_sources;
     }
 }
 
@@ -615,7 +615,7 @@ pub(crate) fn poll_browser_binding_restore(state: &mut AppState) {
             ));
         }
         persistence::BrowserRestoreResult::Restored { baseline, binding } => {
-            if baseline.workspace.content.project.id() != state.workspace.content.project.id() {
+            if baseline.file.workspace.project.id() != state.workspace.content.project.id() {
                 release_browser_binding_handle(&binding);
                 state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
                     "Ignored a stale browser project binding for a different project identity",
@@ -667,16 +667,16 @@ pub(crate) fn poll_browser_binding_restore(state: &mut AppState) {
 
 pub(crate) fn accept_loaded_project(
     state: &mut AppState,
-    baseline: ProjectFile,
+    baseline: ProjectSnapshot,
     binding: Option<PersistenceBinding>,
 ) {
     state.workbench.clear_project_model_editor();
     state.clear_project_design_history();
     state.dialogs.check_and_save.close();
     #[cfg(not(target_arch = "wasm32"))]
-    let native_receipt = binding.as_ref().map(|binding| {
-        binding.native_receipt(&baseline.workspace.content.project.id().to_string())
-    });
+    let native_receipt = binding
+        .as_ref()
+        .map(|binding| binding.native_receipt(&baseline.file.workspace.project.id().to_string()));
     #[cfg(target_arch = "wasm32")]
     release_replaced_browser_bindings(&state.project_lifecycle, binding.as_ref());
     state.project_lifecycle.project_open = true;
@@ -892,7 +892,7 @@ pub(crate) fn normalize_native_path(path: &Path) -> Result<PathBuf, ProjectLifec
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn read_native_binding(
     path: &Path,
-) -> Result<(ProjectFile, PersistenceBinding), ProjectLifecycleError> {
+) -> Result<(ProjectSnapshot, PersistenceBinding), ProjectLifecycleError> {
     persistence::read_native_binding(path).map_err(ProjectLifecycleError::from)
 }
 
@@ -952,7 +952,7 @@ pub(crate) fn save_native(
                 baseline
             }
         };
-        candidate.workspace.content.project.set_path(path.clone());
+        candidate.file.workspace.project.set_path(path.clone());
         // Build every fallible post-save document digest before publishing.
         // Once the durable file replacement succeeds, adoption below is an
         // in-memory, infallible state transition.
@@ -994,7 +994,7 @@ pub(crate) fn save_project_copy_native(
     begin_save_transaction(state, TransactionKind::SaveProjectCopy)?;
     let result = (|| {
         let mut copy = snapshot(state)?;
-        copy.workspace.content.project = copy.workspace.content.project.fork_copy_at(path.clone());
+        copy.file.workspace.project = copy.file.workspace.project.fork_copy_at(path.clone());
         let (bytes, _) = persistence::serialized_project(&copy)?;
         // The picker authorizes this destination, while the captured exact
         // state still prevents a late create/edit from being overwritten.
@@ -1010,7 +1010,7 @@ pub(crate) fn save_project_copy_native(
 pub(crate) struct BrowserPreparedSave {
     pub(crate) transaction: TransactionId,
     pub(crate) context: BrowserOperationContext,
-    pub(crate) candidate: ProjectFile,
+    pub(crate) candidate: ProjectSnapshot,
     pub(crate) scope: SaveScope,
     /// Stable identity of the active document captured with the serialized
     /// snapshot. Active-document continuations must not act on a different tab
@@ -1082,13 +1082,13 @@ pub(crate) fn prepare_browser_save(
             baseline
         };
         if project_copy {
-            candidate.workspace.content.project = candidate
+            candidate.file.workspace.project = candidate
+                .file
                 .workspace
-                .content
                 .project
                 .fork_copy_at(PathBuf::from(&suggested_name));
         } else {
-            candidate.workspace.content.project.path = None;
+            candidate.file.workspace.project.path = None;
         }
         let (bytes, staged_digest) = persistence::serialized_project(&candidate)?;
         let existing_binding = (!project_copy)
@@ -1115,7 +1115,7 @@ pub(crate) fn prepare_browser_save(
             .map(|binding| match binding {
                 PersistenceBinding::Browser { handle_id, .. } => *handle_id,
             });
-        let project_id = candidate.workspace.content.project.id().to_string();
+        let project_id = candidate.file.workspace.project.id().to_string();
         let target = if let Some(PersistenceBinding::Browser {
             handle_id,
             binding_id,
@@ -1331,7 +1331,7 @@ pub(crate) fn complete_browser_save(
 #[cfg(any(test, target_arch = "wasm32"))]
 fn finish_successful_save(
     state: &mut AppState,
-    candidate: ProjectFile,
+    candidate: ProjectSnapshot,
     binding: PersistenceBinding,
     scope: SaveScope,
 ) {
@@ -1360,7 +1360,7 @@ fn finish_successful_save(
 
 fn prepare_post_save_registry(
     state: &AppState,
-    candidate: &ProjectFile,
+    candidate: &ProjectSnapshot,
     scope: SaveScope,
     content: SnapshotContent,
 ) -> Result<registry::DocumentRegistry, ProjectLifecycleError> {
@@ -1373,10 +1373,9 @@ fn prepare_post_save_registry(
         if scope == SaveScope::AllDocuments
             || active_document(state) == ProjectDocumentId::ProjectConfiguration
         {
-            current.workspace.content.project = candidate.workspace.content.project.clone();
+            current.file.workspace.project = candidate.file.workspace.project.clone();
         } else {
-            current.workspace.content.project.path =
-                candidate.workspace.content.project.path.clone();
+            current.file.workspace.project.path = candidate.file.workspace.project.path.clone();
         }
     }
     #[cfg(target_arch = "wasm32")]
@@ -1395,7 +1394,7 @@ fn prepare_post_save_registry(
 
 fn rebase_pending_operation_dirty_state(
     state: &mut AppState,
-    candidate: &ProjectFile,
+    candidate: &ProjectSnapshot,
     scope: SaveScope,
 ) {
     if !state.schematic.has_pending_operation()
@@ -1445,15 +1444,14 @@ fn rebase_pending_operation_dirty_state(
 
 fn adopt_successful_save(
     state: &mut AppState,
-    candidate: ProjectFile,
+    candidate: ProjectSnapshot,
     binding: PersistenceBinding,
     scope: SaveScope,
     post_save_registry: registry::DocumentRegistry,
 ) {
     rebase_pending_operation_dirty_state(state, &candidate, scope);
     #[cfg(not(target_arch = "wasm32"))]
-    let native_receipt =
-        binding.native_receipt(&candidate.workspace.content.project.id().to_string());
+    let native_receipt = binding.native_receipt(&candidate.file.workspace.project.id().to_string());
     #[cfg(target_arch = "wasm32")]
     let browser_receipt = binding.durable_browser_receipt();
     #[cfg(target_arch = "wasm32")]
@@ -1463,16 +1461,15 @@ fn adopt_successful_save(
         if scope == SaveScope::AllDocuments
             || active_document(state) == ProjectDocumentId::ProjectConfiguration
         {
-            state.retain_annotation_history_after_save_descriptor(
-                &candidate.workspace.content.project,
-            );
-            state.workspace.content.project = candidate.workspace.content.project.clone();
+            state
+                .retain_annotation_history_after_save_descriptor(&candidate.file.workspace.project);
+            state.workspace.content.project = candidate.file.workspace.project.clone();
         } else {
             // Saving one non-configuration document intentionally publishes a
             // candidate built on the accepted project descriptor. Preserve a
             // concurrent/unrelated live descriptor draft and update only the
             // canonical pathname established by this successful save.
-            state.workspace.content.project.path = candidate.workspace.content.project.path.clone();
+            state.workspace.content.project.path = candidate.file.workspace.project.path.clone();
         }
     }
     state.project_lifecycle.accepted = Some(AcceptedProject::new(candidate, Some(binding)));
@@ -1767,26 +1764,24 @@ fn revert_document_in_place(
         .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?
         .baseline()
         .clone();
-    let baseline_project_id = baseline.workspace.content.project.id();
+    let baseline_project_id = baseline.file.workspace.project.id();
 
     match id {
         ProjectDocumentId::ProjectConfiguration => {
-            let callback_receipts = baseline.workspace.content.pdk_callback_receipts().to_vec();
-            state.workspace.content.project = baseline.workspace.content.project;
-            state.workspace.content.configuration_sets =
-                baseline.workspace.content.configuration_sets;
-            state.workspace.content.design_management =
-                baseline.workspace.content.design_management;
+            let callback_receipts = baseline.file.workspace.pdk_callback_receipts().to_vec();
+            state.workspace.content.project = baseline.file.workspace.project;
+            state.workspace.content.configuration_sets = baseline.file.workspace.configuration_sets;
+            state.workspace.content.design_management = baseline.file.workspace.design_management;
             state
                 .workspace
                 .content
                 .replace_pdk_callback_receipts_for_lifecycle(callback_receipts)
                 .map_err(ProjectLifecycleError::InvalidState)?;
-            restore_project_structure_preserving_documents(state, baseline.libraries);
+            restore_project_structure_preserving_documents(state, baseline.file.libraries);
         }
         ProjectDocumentId::CellView(reference) => revert_cell_view(state, &baseline, &reference)?,
         ProjectDocumentId::SimulationPlan => {
-            let context = baseline.execution_context.ok_or_else(|| {
+            let context = baseline.file.execution_context.ok_or_else(|| {
                 ProjectLifecycleError::InvalidState(
                     "accepted project has no simulation plan".to_owned(),
                 )
@@ -1797,7 +1792,7 @@ fn revert_document_in_place(
             };
             state.sim_setup.prepare_after_restore();
             state.workspace.content.simulation_plan_payloads =
-                baseline.workspace.content.simulation_plan_payloads;
+                baseline.file.workspace.simulation_plan_payloads;
             if let Some(plan_id) = state
                 .sim_setup
                 .analysis_plan
@@ -1811,7 +1806,7 @@ fn revert_document_in_place(
             }
         }
         ProjectDocumentId::ModelCatalog => {
-            let context = baseline.execution_context.ok_or_else(|| {
+            let context = baseline.file.execution_context.ok_or_else(|| {
                 ProjectLifecycleError::InvalidState(
                     "accepted project has no model catalog".to_owned(),
                 )
@@ -1826,25 +1821,28 @@ fn revert_document_in_place(
         }
         ProjectDocumentId::ResultHistory => {
             let mut simulation = crate::state::SimulationState::default();
-            crate::io::restore_simulation_results(baseline.simulation_results, &mut simulation)
-                .map_err(ProjectLifecycleError::InvalidState)?;
+            crate::io::restore_simulation_results(
+                baseline.file.simulation_results,
+                &mut simulation,
+            )
+            .map_err(ProjectLifecycleError::InvalidState)?;
             state.simulation = simulation;
-            state.workspace.content.report_documents = baseline.workspace.content.report_documents;
+            state.workspace.content.report_documents = baseline.file.workspace.report_documents;
             state.workspace.content.report_documents_dirty = false;
             state.workspace.content.visualization_documents =
-                baseline.workspace.content.visualization_documents;
+                baseline.file.workspace.visualization_documents;
             state.workspace.content.visualization_documents_dirty = false;
             crate::workbench::documents::result_document::restore_presentation(
                 state,
-                baseline.result_presentation,
+                baseline.file.result_presentation,
             );
             state.clear_specialized_viewer_data();
         }
         ProjectDocumentId::VerificationSpecifications => {
-            state.workspace.content.specs = baseline.workspace.content.specs;
+            state.workspace.content.specs = baseline.file.workspace.specs;
         }
         ProjectDocumentId::StimulusLibrary => {
-            state.workspace.content.stimulus_library = baseline.workspace.content.stimulus_library;
+            state.workspace.content.stimulus_library = baseline.file.workspace.stimulus_library;
             // The reverted definitions may no longer hold the one the library
             // browser was reading, and a selection that resolves to nothing
             // leaves the workspace on an empty stage with a name in the dock.
@@ -1857,21 +1855,18 @@ fn revert_document_in_place(
             state.workbench.stimulus_browser.clear();
         }
         ProjectDocumentId::NetlistSource => {
-            state.workspace.content.netlist_source = baseline.workspace.content.netlist_source;
+            state.workspace.content.netlist_source = baseline.file.workspace.netlist_source;
             state.workspace.content.netlist_source_path =
-                baseline.workspace.content.netlist_source_path;
-            state.workspace.content.netlist_document = baseline.workspace.content.netlist_document;
-            state.workspace.content.netlist_descriptor =
-                baseline.workspace.content.netlist_descriptor;
+                baseline.file.workspace.netlist_source_path;
+            state.workspace.content.netlist_document = baseline.file.workspace.netlist_document;
+            state.workspace.content.netlist_descriptor = baseline.file.workspace.netlist_descriptor;
             state.workspace.content.retained_netlist_decks =
-                baseline.workspace.content.retained_netlist_decks;
+                baseline.file.workspace.retained_netlist_decks;
             state
                 .workspace
                 .content
                 .project_sources
-                .synchronize_code_workspace_bundles_from(
-                    &baseline.workspace.content.project_sources,
-                )
+                .synchronize_code_workspace_bundles_from(&baseline.file.workspace.project_sources)
                 .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
             state.workspace.content.netlist_source_dirty = false;
             state.workspace.content.project_sources_dirty = false;
@@ -2039,32 +2034,33 @@ fn advance_accepted_generation(lifecycle: &mut ProjectLifecycleState) {
 }
 
 fn overlay_document(
-    target: &mut ProjectFile,
-    working: &ProjectFile,
+    target: &mut ProjectSnapshot,
+    working: &ProjectSnapshot,
     id: &ProjectDocumentId,
 ) -> Result<(), ProjectLifecycleError> {
     match id {
         ProjectDocumentId::ProjectConfiguration => {
-            target.workspace.content.project = working.workspace.content.project.clone();
-            target.workspace.content.configuration_sets =
-                working.workspace.content.configuration_sets.clone();
-            target.workspace.content.design_management =
-                working.workspace.content.design_management.clone();
+            target.file.workspace.project = working.file.workspace.project.clone();
+            target.file.workspace.configuration_sets =
+                working.file.workspace.configuration_sets.clone();
+            target.file.workspace.design_management =
+                working.file.workspace.design_management.clone();
             target
+                .file
                 .workspace
-                .content
                 .replace_pdk_callback_receipts_for_lifecycle(
-                    working.workspace.content.pdk_callback_receipts().to_vec(),
+                    working.file.workspace.pdk_callback_receipts().to_vec(),
                 )
                 .map_err(ProjectLifecycleError::InvalidState)?;
-            target.libraries = merge_project_structure_with_document_content(
-                &working.libraries,
-                &target.libraries,
+            target.file.libraries = merge_project_structure_with_document_content(
+                &working.file.libraries,
+                &target.file.libraries,
             );
         }
         ProjectDocumentId::CellView(reference) => overlay_cell_view(target, working, reference)?,
         ProjectDocumentId::SimulationPlan => {
             ensure_execution_context(target, working)?.simulation_plan = working
+                .file
                 .execution_context
                 .as_ref()
                 .ok_or_else(|| {
@@ -2074,22 +2070,20 @@ fn overlay_document(
                 })?
                 .simulation_plan
                 .clone();
-            target.workspace.content.simulation_plan_payloads =
-                working.workspace.content.simulation_plan_payloads.clone();
+            target.file.workspace.simulation_plan_payloads =
+                working.file.workspace.simulation_plan_payloads.clone();
             if let Some(plan_id) = target
+                .file
                 .execution_context
                 .as_ref()
                 .and_then(|context| context.simulation_plan.analysis_plan.as_ref())
                 .map(crate::simulation::plan::SimulationPlan::id)
             {
-                target
-                    .workspace
-                    .content
-                    .sync_legacy_specs_projection(plan_id);
+                target.file.workspace.sync_legacy_specs_projection(plan_id);
             }
         }
         ProjectDocumentId::ModelCatalog => {
-            let source = working.execution_context.as_ref().ok_or_else(|| {
+            let source = working.file.execution_context.as_ref().ok_or_else(|| {
                 ProjectLifecycleError::InvalidState(
                     "working project has no model catalog".to_owned(),
                 )
@@ -2106,65 +2100,66 @@ fn overlay_document(
                 .clone_from(&source.model_validation_receipt);
         }
         ProjectDocumentId::ResultHistory => {
-            target.simulation_results = working.simulation_results.clone();
-            target.result_presentation = working.result_presentation.clone();
-            target.workspace.content.report_documents =
-                working.workspace.content.report_documents.clone();
-            target.workspace.content.visualization_documents =
-                working.workspace.content.visualization_documents.clone();
+            target.file.simulation_results = working.file.simulation_results.clone();
+            target.file.result_presentation = working.file.result_presentation.clone();
+            target.file.workspace.report_documents =
+                working.file.workspace.report_documents.clone();
+            target.file.workspace.visualization_documents =
+                working.file.workspace.visualization_documents.clone();
         }
         ProjectDocumentId::VerificationSpecifications => {
-            target.workspace.content.specs = working.workspace.content.specs.clone();
+            target.file.workspace.specs = working.file.workspace.specs.clone();
         }
         ProjectDocumentId::StimulusLibrary => {
-            target.workspace.content.stimulus_library =
-                working.workspace.content.stimulus_library.clone();
+            target.file.workspace.stimulus_library =
+                working.file.workspace.stimulus_library.clone();
         }
         ProjectDocumentId::NetlistSource => {
-            target.workspace.content.netlist_source =
-                working.workspace.content.netlist_source.clone();
-            target.workspace.content.netlist_source_path =
-                working.workspace.content.netlist_source_path.clone();
-            target.workspace.content.netlist_document =
-                working.workspace.content.netlist_document.clone();
-            target.workspace.content.netlist_descriptor =
-                working.workspace.content.netlist_descriptor.clone();
-            target.workspace.content.retained_netlist_decks =
-                working.workspace.content.retained_netlist_decks.clone();
+            target.file.workspace.netlist_source = working.file.workspace.netlist_source.clone();
+            target.file.workspace.netlist_source_path =
+                working.file.workspace.netlist_source_path.clone();
+            target.file.workspace.netlist_document =
+                working.file.workspace.netlist_document.clone();
+            target.file.workspace.netlist_descriptor =
+                working.file.workspace.netlist_descriptor.clone();
+            target.file.workspace.retained_netlist_decks =
+                working.file.workspace.retained_netlist_decks.clone();
             target
+                .file
                 .workspace
-                .content
                 .project_sources
-                .synchronize_code_workspace_bundles_from(&working.workspace.content.project_sources)
+                .synchronize_code_workspace_bundles_from(&working.file.workspace.project_sources)
                 .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
         }
     }
     target
+        .file
         .validate()
         .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))
 }
 
 fn ensure_execution_context<'a>(
-    target: &'a mut ProjectFile,
-    working: &ProjectFile,
+    target: &'a mut ProjectSnapshot,
+    working: &ProjectSnapshot,
 ) -> Result<&'a mut ProjectExecutionContext, ProjectLifecycleError> {
-    if target.execution_context.is_none() {
-        target.execution_context = working.execution_context.clone();
+    if target.file.execution_context.is_none() {
+        target.file.execution_context = working.file.execution_context.clone();
     }
-    target.execution_context.as_mut().ok_or_else(|| {
+    target.file.execution_context.as_mut().ok_or_else(|| {
         ProjectLifecycleError::InvalidState("project has no execution context".to_owned())
     })
 }
 
 fn overlay_cell_view(
-    target: &mut ProjectFile,
-    working: &ProjectFile,
+    target: &mut ProjectSnapshot,
+    working: &ProjectSnapshot,
     reference: &CellViewRef,
 ) -> Result<(), ProjectLifecycleError> {
     target
+        .file
         .libraries
         .overlay_cell_view_document_from_snapshot(
-            &working.libraries,
+            &working.file.libraries,
             &reference.library,
             &reference.cell,
             &reference.view,
@@ -2172,42 +2167,43 @@ fn overlay_cell_view(
         .map_err(ProjectLifecycleError::InvalidState)?;
 
     let key = reference.key();
-    match working.workspace.clone_schematic_editor(&key) {
+    match working.clone_schematic_editor(&key) {
         Some(buffer) => {
-            target.workspace.insert_schematic_editor(key, buffer);
+            target.insert_schematic_editor(key, buffer);
         }
         None => {
-            target.workspace.remove_schematic_editor(&key);
+            target.remove_schematic_editor(&key);
         }
     }
     target
+        .file
         .workspace
-        .content
-        .synchronize_physical_layout_document_from(reference, &working.workspace.content)
+        .synchronize_physical_layout_document_from(reference, &working.file.workspace)
         .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
     // Sheets are part of the drawing, not of project setup: a cell view that
     // is saved on its own carries its own sheet catalog, and leaves every
     // other cell view's sheets unpublished.
     target
+        .file
         .workspace
-        .content
-        .overlay_sheet_catalog_from(reference, &working.workspace.content)
+        .overlay_sheet_catalog_from(reference, &working.file.workspace)
         .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
     target
+        .file
         .workspace
-        .content
         .project_sources
-        .synchronize_cell_view_bundle_from(reference, &working.workspace.content.project_sources)
+        .synchronize_cell_view_bundle_from(reference, &working.file.workspace.project_sources)
         .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
     Ok(())
 }
 
 fn revert_cell_view(
     state: &mut AppState,
-    baseline: &ProjectFile,
+    baseline: &ProjectSnapshot,
     reference: &CellViewRef,
 ) -> Result<(), ProjectLifecycleError> {
     let baseline_view = baseline
+        .file
         .libraries
         .get_library(&reference.library)
         .and_then(|library| library.get_cell(&reference.cell))
@@ -2226,10 +2222,7 @@ fn revert_cell_view(
             .workspace
             .content
             .project_sources
-            .synchronize_cell_view_bundle_from(
-                reference,
-                &baseline.workspace.content.project_sources,
-            )
+            .synchronize_cell_view_bundle_from(reference, &baseline.file.workspace.project_sources)
             .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
         state.prune_workspace_after_view_deleted(
             &reference.library,
@@ -2249,7 +2242,7 @@ fn revert_cell_view(
             ProjectLifecycleError::InvalidState("active cell no longer exists".to_owned())
         })?;
     let key = reference.key();
-    match baseline.workspace.clone_schematic_editor(&key) {
+    match baseline.clone_schematic_editor(&key) {
         Some(buffer) => {
             state.workspace.insert_schematic_editor(key, buffer);
         }
@@ -2260,7 +2253,7 @@ fn revert_cell_view(
     state
         .workspace
         .content
-        .synchronize_physical_layout_document_from(reference, &baseline.workspace.content)
+        .synchronize_physical_layout_document_from(reference, &baseline.file.workspace)
         .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
     if reference == &state.workspace.content.active_view {
         state.restore_active_schematic_from_workspace();
@@ -2269,7 +2262,7 @@ fn revert_cell_view(
         .workspace
         .content
         .project_sources
-        .synchronize_cell_view_bundle_from(reference, &baseline.workspace.content.project_sources)
+        .synchronize_cell_view_bundle_from(reference, &baseline.file.workspace.project_sources)
         .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
     if source_changed {
         state.ui.code_workspace.veriloga = Default::default();

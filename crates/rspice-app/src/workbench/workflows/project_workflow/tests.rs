@@ -21,14 +21,14 @@ fn seal_legacy_unattributed(run: &mut crate::state::SimulationRun) {
         .expect("synthetic historical run has valid unattributed legacy provenance");
 }
 
-fn project_named(path: &str) -> ProjectFile {
+fn project_named(path: &str) -> ProjectSnapshot {
     let mut libraries = crate::state::LibraryManager::with_primitives();
     let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
     workspace
         .content
         .project
         .set_path(std::path::PathBuf::from(path));
-    ProjectFile::new(workspace, libraries)
+    ProjectSnapshot::new(workspace, libraries)
 }
 
 fn assert_active_grid_pitch_contract(state: &AppState, pitch: crate::state::SchematicGridPitch) {
@@ -251,7 +251,7 @@ fn save_copy_permission_never_turns_a_live_mirror_into_a_canonical_project() {
     assert_eq!(live_mirror_save_block(&state, true), None);
 }
 
-fn project_named_with_results(path: &str) -> ProjectFile {
+fn project_named_with_results(path: &str) -> ProjectSnapshot {
     let mut libraries = crate::state::LibraryManager::with_primitives();
     let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
     workspace
@@ -278,7 +278,7 @@ fn project_named_with_results(path: &str) -> ProjectFile {
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
 
-    ProjectFile::new_with_simulation_results(
+    ProjectSnapshot::new_with_simulation_results(
         workspace,
         libraries,
         crate::io::capture_simulation_results(&simulation),
@@ -396,7 +396,7 @@ fn browser_import_applies_project_clears_runs_and_skips_recents() {
     assert!(state.simulation.has_results());
 
     let mut project = project_named("browser-import.rspiceproj");
-    project.workspace.content.project.path = None;
+    project.file.workspace.project.path = None;
 
     let imported = apply_loaded_project(
         &mut state,
@@ -789,7 +789,7 @@ fn project_import_restores_plan_order_solver_options_and_model_catalog() {
         .content
         .project
         .set_path(std::path::PathBuf::from("context.rspiceproj"));
-    let project = ProjectFile::new_with_execution_context(
+    let project = ProjectSnapshot::new_with_execution_context(
         workspace,
         design_libraries,
         ProjectSimulationResults::default(),
@@ -876,7 +876,7 @@ fn invalid_execution_context_does_not_partially_replace_open_project() {
     instances.push(duplicate);
     let context: ProjectExecutionContext =
         serde_json::from_value(value).expect("corrupt structure deserializes for validation");
-    project.execution_context = Some(context);
+    project.file.execution_context = Some(context);
 
     let mut state = AppState::default();
     let original_project_name = state.workspace.content.project.display_name().to_owned();
@@ -1052,10 +1052,10 @@ fn save_project_to_path_writes_simulation_results() {
     let _ = std::fs::remove_file(&path);
 
     assert!(saved);
-    assert!(loaded.execution_context.is_some());
-    assert_eq!(loaded.simulation_results.runs.len(), 1);
+    assert!(loaded.file.execution_context.is_some());
+    assert_eq!(loaded.file.simulation_results.runs.len(), 1);
     assert_eq!(
-        loaded.simulation_results.runs[0].analyses[0].waveforms[0].name,
+        loaded.file.simulation_results.runs[0].analyses[0].waveforms[0].name,
         "V(out)"
     );
 }
@@ -1122,14 +1122,17 @@ fn save_project_to_path_round_trips_result_markers() {
     let _ = std::fs::remove_file(&path);
 
     assert!(saved);
-    assert_eq!(loaded.result_presentation.markers.len(), 1);
-    assert_eq!(loaded.result_presentation.markers[0].note, "settling point");
+    assert_eq!(loaded.file.result_presentation.markers.len(), 1);
+    assert_eq!(
+        loaded.file.result_presentation.markers[0].note,
+        "settling point"
+    );
 
     let mut reopened = AppState::default();
     reopened.simulation = state.simulation.clone();
     crate::workbench::documents::result_document::restore_presentation(
         &mut reopened,
-        loaded.result_presentation,
+        loaded.file.result_presentation,
     );
     assert_eq!(reopened.ui.results.markers.len(), 1);
     assert_eq!(reopened.ui.results.markers[0].note, "settling point");
@@ -1200,7 +1203,7 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
 
     assert!(saved);
     assert_eq!(
-        loaded.result_presentation.log_y_panes,
+        loaded.file.result_presentation.log_y_panes,
         vec![pane.clone()],
         "the save carries only the pane whose analysis this project retains"
     );
@@ -1208,7 +1211,7 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
     // An older file that already carries an orphan is still filtered on load.
     let mut reopened = AppState::default();
     reopened.simulation = state.simulation.clone();
-    let mut older_file = loaded.result_presentation.log_y_panes;
+    let mut older_file = loaded.file.result_presentation.log_y_panes;
     older_file.push(orphan);
     crate::workbench::documents::result_document::restore_log_y_panes(&mut reopened, older_file);
     assert_eq!(
@@ -1265,9 +1268,9 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
     let _ = std::fs::remove_file(&path);
 
     assert!(saved);
-    assert_eq!(loaded.result_presentation.expression_groups.len(), 1);
+    assert_eq!(loaded.file.result_presentation.expression_groups.len(), 1);
     assert_eq!(
-        loaded.result_presentation.expression_groups[0].traces,
+        loaded.file.result_presentation.expression_groups[0].traces,
         vec![crate::workbench::documents::result_document::ExprTrace {
             text: "V(out) * 2".to_owned(),
             complex_policy: crate::state::ComplexExpressionPolicy::Rectangular,
@@ -1279,7 +1282,7 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
     reopened.simulation = state.simulation.clone();
     crate::workbench::documents::result_document::restore_expression_groups(
         &mut reopened,
-        loaded.result_presentation.expression_groups,
+        loaded.file.result_presentation.expression_groups,
     );
     assert_eq!(
         reopened
@@ -1423,8 +1426,8 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
 
     assert!(saved);
     let restored = loaded
+        .file
         .workspace
-        .content
         .visualization_document(document_id)
         .expect("result document round trips");
     assert_eq!(restored.presentation().significant_digits, 13);
@@ -1545,7 +1548,8 @@ fn a_named_new_project_seeds_every_owner_of_its_identity() {
             .is_some()
     );
 
-    ProjectFile::new(state.workspace.clone(), state.library_manager.clone())
+    ProjectSnapshot::new(state.workspace.clone(), state.library_manager.clone())
+        .file
         .validate()
         .expect("a named new project satisfies the persisted project contract");
 }
@@ -1646,7 +1650,7 @@ fn a_disagreeing_legacy_corner_run_space_is_reported_on_load() {
         .content
         .project
         .set_path(std::path::PathBuf::from("legacy-corner.rspiceproj"));
-    let project = ProjectFile::new_with_execution_context(
+    let project = ProjectSnapshot::new_with_execution_context(
         workspace,
         design_libraries,
         ProjectSimulationResults::default(),

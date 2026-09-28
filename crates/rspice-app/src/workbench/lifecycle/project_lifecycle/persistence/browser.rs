@@ -625,7 +625,7 @@ pub(super) async fn restore_browser_binding(
             ));
         }
     };
-    if baseline.workspace.content.project.id().to_string() != receipt.project_id {
+    if baseline.file.workspace.project.id().to_string() != receipt.project_id {
         let handle_id = register_browser_handle(handle);
         return BrowserRestoreResult::Conflict {
             binding: binding_from_receipt(handle_id),
@@ -633,7 +633,7 @@ pub(super) async fn restore_browser_binding(
             reason: "canonical browser project identity no longer matches its binding".to_owned(),
         };
     }
-    baseline.workspace.content.project.path = None;
+    baseline.file.workspace.project.path = None;
     let handle_id = register_browser_handle(handle);
     BrowserRestoreResult::Restored {
         baseline: Box::new(baseline),

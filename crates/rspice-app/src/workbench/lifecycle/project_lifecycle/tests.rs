@@ -280,28 +280,28 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
     )
     .expect("overlay project configuration");
     assert_eq!(
-        accepted.workspace.content.configuration_sets,
-        edited.workspace.content.configuration_sets
+        accepted.file.workspace.configuration_sets,
+        edited.file.workspace.configuration_sets
     );
     assert_eq!(
-        accepted.workspace.content.design_management,
-        edited.workspace.content.design_management
+        accepted.file.workspace.design_management,
+        edited.file.workspace.design_management
     );
     assert_eq!(
-        accepted.workspace.content.pdk_callback_receipts(),
+        accepted.file.workspace.pdk_callback_receipts(),
         [callback_receipt.clone()]
     );
     assert_eq!(
         accepted
+            .file
             .workspace
-            .content
             .configuration_sets
             .find(id)
             .expect("configuration persisted")
             .semantic_digest(),
         edited
+            .file
             .workspace
-            .content
             .configuration_sets
             .find(id)
             .unwrap()
@@ -311,11 +311,11 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
     revert_document(&mut state, ProjectDocumentId::ProjectConfiguration).expect("revert catalog");
     assert_eq!(
         state.workspace.content.configuration_sets,
-        baseline.workspace.content.configuration_sets
+        baseline.file.workspace.configuration_sets
     );
     assert_eq!(
         state.workspace.content.design_management,
-        baseline.workspace.content.design_management
+        baseline.file.workspace.design_management
     );
     assert!(state.workspace.content.pdk_callback_receipts().is_empty());
     snapshot(&state).expect("reverted state remains valid");
@@ -367,16 +367,8 @@ fn cell_veriloga_view_and_source_are_one_lifecycle_document() {
     )
     .expect("overlay cell view");
     assert_eq!(
-        target
-            .workspace
-            .content
-            .project_sources
-            .get_bundle(source_id),
-        edited
-            .workspace
-            .content
-            .project_sources
-            .get_bundle(source_id)
+        target.file.workspace.project_sources.get_bundle(source_id),
+        edited.file.workspace.project_sources.get_bundle(source_id)
     );
 
     revert_document(&mut state, ProjectDocumentId::CellView(reference.clone()))
@@ -388,8 +380,8 @@ fn cell_veriloga_view_and_source_are_one_lifecycle_document() {
             .project_sources
             .get_bundle(source_id),
         baseline
+            .file
             .workspace
-            .content
             .project_sources
             .get_bundle(source_id)
     );
@@ -425,6 +417,7 @@ fn project_configuration_never_accepts_or_discards_unsaved_cell_views() {
 
     assert!(
         target
+            .file
             .libraries
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
@@ -434,8 +427,8 @@ fn project_configuration_never_accepts_or_discards_unsaved_cell_views() {
     );
     assert!(
         target
+            .file
             .workspace
-            .content
             .project_sources
             .get_bundle(source_id)
             .is_none()
@@ -615,12 +608,12 @@ fn code_document_overlay_copies_project_sources_atomically() {
     overlay_document(&mut target, &working, &ProjectDocumentId::NetlistSource).unwrap();
 
     assert_eq!(
-        target.workspace.content.project_sources,
-        working.workspace.content.project_sources
+        target.file.workspace.project_sources,
+        working.file.workspace.project_sources
     );
     assert_eq!(
-        target.workspace.content.netlist_source,
-        working.workspace.content.netlist_source
+        target.file.workspace.netlist_source,
+        working.file.workspace.netlist_source
     );
 }
 
@@ -664,7 +657,7 @@ fn reverting_the_code_document_restores_sources_and_clears_dirty_state() {
 
     assert_eq!(
         state.workspace.content.project_sources,
-        baseline.workspace.content.project_sources
+        baseline.file.workspace.project_sources
     );
     assert!(!state.workspace.content.project_sources_dirty);
     assert!(!state.workspace.content.netlist_source_dirty);
@@ -835,8 +828,8 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
     let mut same_project =
         Box::new(crate::io::load_project_file(&canonical).expect("load fixture"));
     same_project
+        .file
         .workspace
-        .content
         .project
         .rename("Externally renamed project")
         .expect("valid project name");
@@ -863,11 +856,7 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
 
     let mut different =
         Box::new(snapshot(&AppState::default()).expect("snapshot different project"));
-    different
-        .workspace
-        .content
-        .project
-        .set_path(canonical.clone());
+    different.file.workspace.project.set_path(canonical.clone());
     let different_bytes = crate::io::project_io::serialize_project_file(different.as_ref())
         .expect("serialize different-UUID replacement");
     std::fs::write(&canonical, different_bytes.as_bytes())
@@ -1043,11 +1032,11 @@ fn save_active_overlays_only_active_document_on_accepted_baseline() {
     );
 
     let persisted = crate::io::load_project_file(&path).expect("reload saved project");
-    let persisted_context = persisted.execution_context.expect("execution context");
+    let persisted_context = persisted.file.execution_context.expect("execution context");
     assert_eq!(
         persisted
+            .file
             .workspace
-            .content
             .schematic_buffers
             .get(&state.workspace.content.active_key())
             .expect("active buffer")
@@ -1112,11 +1101,11 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
 
     let persisted = crate::io::load_project_file(&path).expect("reload configuration save");
     assert_eq!(
-        persisted.workspace.content.configuration_sets,
+        persisted.file.workspace.configuration_sets,
         state.workspace.content.configuration_sets
     );
     assert_eq!(
-        persisted.workspace.content.design_management,
+        persisted.file.workspace.design_management,
         state.workspace.content.design_management
     );
     assert_eq!(
@@ -1126,8 +1115,8 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
             .as_ref()
             .expect("accepted save")
             .baseline()
+            .file
             .workspace
-            .content
             .configuration_sets,
         state.workspace.content.configuration_sets
     );
@@ -1138,8 +1127,8 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
             .as_ref()
             .expect("accepted save")
             .baseline()
+            .file
             .workspace
-            .content
             .design_management,
         state.workspace.content.design_management
     );
@@ -1170,11 +1159,11 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
         .expect("revert to exact saved catalog");
     assert_eq!(
         state.workspace.content.configuration_sets,
-        persisted.workspace.content.configuration_sets
+        persisted.file.workspace.configuration_sets
     );
     assert_eq!(
         state.workspace.content.design_management,
-        persisted.workspace.content.design_management
+        persisted.file.workspace.design_management
     );
     assert_eq!(
         state
@@ -1242,8 +1231,8 @@ fn save_active_design_preserves_unpublished_live_project_descriptor() {
     assert!(!active_document_is_dirty(&state));
 
     let persisted = crate::io::load_project_file(&path).expect("reload active save");
-    assert_eq!(persisted.workspace.content.project.name(), accepted_name);
-    assert!(persisted.workspace.content.project.description.is_empty());
+    assert_eq!(persisted.file.workspace.project.name(), accepted_name);
+    assert!(persisted.file.workspace.project.description.is_empty());
     remove_project_artifacts(&path);
 }
 
@@ -1326,7 +1315,7 @@ fn save_all_commits_complete_working_set() {
     .expect("save all");
 
     let persisted = crate::io::load_project_file(&path).expect("reload");
-    let persisted_context = persisted.execution_context.expect("context");
+    let persisted_context = persisted.file.execution_context.expect("context");
     assert_eq!(
         persisted_context
             .simulation_plan
@@ -1370,7 +1359,7 @@ fn project_copy_does_not_rebind_or_clean_source_project() {
     );
     assert!(has_unsaved_changes(&state));
     let copied = crate::io::load_project_file(&copy).expect("load copy");
-    assert_ne!(copied.workspace.content.project.id(), source_id);
+    assert_ne!(copied.file.workspace.project.id(), source_id);
     remove_project_artifacts(&source);
     remove_project_artifacts(&copy);
 }
@@ -1465,7 +1454,7 @@ fn deleted_source_allows_recovery_copy_but_unreadable_canonical_path_is_rejected
         .expect("missing source cannot alias an independent recovery destination");
     let recovered = crate::io::load_project_file(&recovery).expect("load recovery copy");
     assert_ne!(
-        recovered.workspace.content.project.id(),
+        recovered.file.workspace.project.id(),
         state.workspace.content.project.id()
     );
 
@@ -1550,11 +1539,12 @@ fn save_all_preserves_live_document_presentation_while_sanitizing_persisted_copy
 
     let persisted = crate::io::load_project_file(&path).expect("reload persisted project");
     assert_eq!(
-        persisted.libraries.revision(),
+        persisted.file.libraries.revision(),
         governed_revision,
         "persistence sanitization must preserve the exact governed revision"
     );
     let persisted_view = persisted
+        .file
         .libraries
         .get_library(&active.library)
         .and_then(|library| library.get_cell(&active.cell))
@@ -1628,6 +1618,7 @@ fn saving_active_cell_never_dirties_project_configuration() {
             .as_ref()
             .expect("accepted save")
             .baseline()
+            .file
             .libraries
             .revision(),
         governed_revision,
@@ -1783,10 +1774,10 @@ fn add_sheet(state: &mut AppState, reference: &CellViewRef, name: &str) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn sheet_names(project: &ProjectFile, key: &str) -> Vec<String> {
+fn sheet_names(project: &ProjectSnapshot, key: &str) -> Vec<String> {
     project
+        .file
         .workspace
-        .content
         .design_management
         .sheet_catalog(key)
         .expect("the cell view is governed")
@@ -1849,7 +1840,7 @@ fn saving_one_cell_view_publishes_only_that_cell_views_sheets() {
         "another cell view's sheet edit stays unsaved"
     );
     assert_eq!(
-        persisted.workspace.content.design_management.revision(),
+        persisted.file.workspace.design_management.revision(),
         state.workspace.content.design_management.revision(),
         "the merged file records the revision the session is actually at"
     );

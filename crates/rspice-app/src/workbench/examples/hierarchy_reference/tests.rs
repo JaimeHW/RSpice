@@ -27,15 +27,18 @@ fn instance_paths() -> Vec<InstancePath> {
 fn the_reference_project_round_trips_through_the_persisted_format() {
     let reference = build();
     let project = snapshot(&reference.state).expect("the reference project snapshots");
-    project.validate().expect("the snapshot validates");
+    project.file.validate().expect("the snapshot validates");
 
     let text = serialize_project_file(&project).expect("the reference project serializes");
     let restored = load_project_text(&text, None).expect("the serialized project loads");
-    restored.validate().expect("the restored project validates");
+    restored
+        .file
+        .validate()
+        .expect("the restored project validates");
     assert!(
-        restored.simulation_results_warning.is_none(),
+        restored.file.simulation_results_warning.is_none(),
         "{:?}",
-        restored.simulation_results_warning
+        restored.file.simulation_results_warning
     );
 
     for view in [
@@ -46,8 +49,8 @@ fn the_reference_project_round_trips_through_the_persisted_format() {
     ] {
         assert!(
             restored
+                .file
                 .workspace
-                .content
                 .schematic_buffers
                 .contains_key(&view.key()),
             "{} lost its schematic buffer",
@@ -56,6 +59,7 @@ fn the_reference_project_round_trips_through_the_persisted_format() {
     }
     assert_eq!(
         restored
+            .file
             .libraries
             .get_library(&reference.amp_symbol.library)
             .and_then(|library| library.get_cell(&reference.amp_symbol.cell))
@@ -65,8 +69,8 @@ fn the_reference_project_round_trips_through_the_persisted_format() {
     );
 
     let catalog = restored
+        .file
         .workspace
-        .content
         .design_management
         .sheet_catalog(&reference.amp_schematic.key())
         .expect("the amp sheet catalog is retained");
@@ -88,8 +92,8 @@ fn the_reference_project_round_trips_through_the_persisted_format() {
     );
 
     let configuration = restored
+        .file
         .workspace
-        .content
         .configuration_sets
         .active()
         .expect("the reference configuration stays active");
@@ -100,8 +104,8 @@ fn the_reference_project_round_trips_through_the_persisted_format() {
     );
     assert_eq!(
         restored
+            .file
             .workspace
-            .content
             .plan_data(reference.plan)
             .map(|payload| payload
                 .saved_outputs

@@ -142,10 +142,8 @@ impl ProjectWorkspace {
         let (design, session) = SchematicState::default().into_parts();
         let schematic_buffers = HashMap::from([(active_view.key(), design)]);
         let schematic_sessions = HashMap::from([(active_view.key(), session)]);
-        let mut workspace = Self {
-            schematic_sessions,
-            ..Self::default()
-        };
+        let mut workspace = Self::default();
+        workspace.session.schematic_sessions = schematic_sessions;
         workspace.content.project = project;
         workspace.content.open_views =
             vec![OpenCellView::new(active_view.clone(), ViewType::Schematic)];
@@ -199,55 +197,8 @@ impl ProjectWorkspace {
 
     /// Ensure the workspace's top library/cell/view exists in the library tree.
     pub fn ensure_library_model(&mut self, libraries: &mut LibraryManager) {
-        ensure_project_library(libraries, &self.content.project.root_library);
-
-        if self.content.active_view.library.is_empty() {
-            self.content.active_view.library = self.content.project.root_library.clone();
-        }
-        if self.content.active_view.cell.is_empty() {
-            self.content.active_view.cell = self.content.project.top_cell.clone();
-        }
-        if self.content.active_view.view.is_empty() {
-            self.content.active_view.view = DEFAULT_SCHEMATIC_VIEW.to_string();
-        }
-
-        let active_view_type = self
-            .content
-            .open_views
-            .iter()
-            .find(|open| open.reference == self.content.active_view)
-            .map(|open| open.view_type)
-            .or_else(|| library_view_type(libraries, &self.content.active_view))
-            .unwrap_or(ViewType::Schematic);
-
-        ensure_cell_view(
-            libraries,
-            &self.content.active_view.library,
-            &self.content.active_view.cell,
-            &self.content.active_view.view,
-            active_view_type,
-        );
-
-        if self.content.open_views.is_empty() {
-            self.content.open_views.push(OpenCellView::new(
-                self.content.active_view.clone(),
-                active_view_type,
-            ));
-        }
-        // Restore paths that never run project migration — session restore —
-        // reach the occurrence model only here. On a live workspace this is an
-        // identity, because the projection already mirrors the active
-        // document.
-        self.content.adopt_breadcrumb_for_active_document();
-
-        if is_schematic_like(active_view_type) {
-            self.ensure_active_buffer();
-        }
-        libraries.select_view(
-            &self.content.active_view.library,
-            &self.content.active_view.cell,
-            &self.content.active_view.view,
-        );
+        self.session
+            .ensure_library_model(&mut self.content, libraries);
     }
 
     pub fn ensure_active_buffer(&mut self) {
@@ -277,7 +228,7 @@ impl ProjectWorkspace {
 
     pub fn mark_all_clean(&mut self) {
         self.content.mark_all_clean();
-        for session in self.schematic_sessions.values_mut() {
+        for session in self.session.schematic_sessions.values_mut() {
             session.is_dirty = false;
         }
     }
@@ -285,7 +236,8 @@ impl ProjectWorkspace {
     pub fn any_dirty(&self) -> bool {
         self.content.any_dirty()
             || self.content.schematic_buffers.keys().any(|key| {
-                self.schematic_sessions
+                self.session
+                    .schematic_sessions
                     .get(key)
                     .is_some_and(|session| session.is_dirty)
             })
@@ -401,6 +353,66 @@ pub fn ensure_cell_view(
 
     if let Some(mut library) = libraries.edit_library(library_name) {
         library.ensure_cell_view(cell_name, view_name, view_type, "Top-level design cell");
+    }
+}
+
+impl super::WorkspaceSession {
+    pub(crate) fn ensure_library_model(
+        &mut self,
+        content: &mut rspice_project::ProjectWorkspace,
+        libraries: &mut LibraryManager,
+    ) {
+        ensure_project_library(libraries, &content.project.root_library);
+
+        if content.active_view.library.is_empty() {
+            content.active_view.library = content.project.root_library.clone();
+        }
+        if content.active_view.cell.is_empty() {
+            content.active_view.cell = content.project.top_cell.clone();
+        }
+        if content.active_view.view.is_empty() {
+            content.active_view.view = DEFAULT_SCHEMATIC_VIEW.to_string();
+        }
+
+        let active_view_type = content
+            .open_views
+            .iter()
+            .find(|open| open.reference == content.active_view)
+            .map(|open| open.view_type)
+            .or_else(|| library_view_type(libraries, &content.active_view))
+            .unwrap_or(ViewType::Schematic);
+
+        ensure_cell_view(
+            libraries,
+            &content.active_view.library,
+            &content.active_view.cell,
+            &content.active_view.view,
+            active_view_type,
+        );
+
+        if content.open_views.is_empty() {
+            content.open_views.push(OpenCellView::new(
+                content.active_view.clone(),
+                active_view_type,
+            ));
+        }
+        // Restore paths that never run project migration — session restore —
+        // reach the occurrence model only here. On a live workspace this is an
+        // identity, because the projection already mirrors the active
+        // document.
+        content.adopt_breadcrumb_for_active_document();
+
+        if is_schematic_like(active_view_type) {
+            let key = content.active_key();
+            if !content.schematic_buffers.contains_key(&key) {
+                self.insert_schematic_editor(content, key, SchematicState::default());
+            }
+        }
+        libraries.select_view(
+            &content.active_view.library,
+            &content.active_view.cell,
+            &content.active_view.view,
+        );
     }
 }
 

@@ -339,6 +339,7 @@ fn project_undo_and_redo_preserve_parent_view_runtime() {
     assert!(state.redo_project_design().expect("redo").is_some());
     let parent_buffer = state
         .workspace
+        .session
         .schematic_sessions
         .get(&parent.key())
         .expect("parent");

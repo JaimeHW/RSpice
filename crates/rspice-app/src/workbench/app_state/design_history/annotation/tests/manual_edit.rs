@@ -246,11 +246,14 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
         )
         .unwrap();
         let loaded = crate::io::load_project_file(&path).unwrap();
-        let reference = loaded.workspace.content.active_schematic_reference();
-        let source = loaded.workspace.schematic_editor(&reference.key()).unwrap();
-        let projection = loaded
-            .workspace
-            .design_projection(&loaded.libraries, &reference, &source)
+        let reference = loaded.file.workspace.active_schematic_reference();
+        let source = loaded.schematic_editor(&reference.key()).unwrap();
+        let workspace = crate::state::ProjectWorkspace::from_parts(
+            loaded.file.workspace.clone(),
+            loaded.workspace_session.clone(),
+        );
+        let projection = workspace
+            .design_projection(&loaded.file.libraries, &reference, &source)
             .unwrap();
         for schematic in [
             source.document(),
@@ -280,8 +283,8 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
             );
         }
         let outputs = &loaded
+            .file
             .workspace
-            .content
             .plan_data(fixture.plan)
             .unwrap()
             .saved_outputs;
@@ -291,7 +294,7 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
             Some(outputs[0].id)
         );
         assert_eq!(
-            loaded.workspace.content.design_management.annotation(),
+            loaded.file.workspace.design_management.annotation(),
             fixture
                 .state
                 .workspace

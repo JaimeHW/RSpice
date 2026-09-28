@@ -45,7 +45,7 @@ fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_abse
     state.active_analysis_idx = Some(0);
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let mut project = ProjectFile::new_with_simulation_results(
+    let mut project = ProjectSnapshot::new_with_simulation_results(
         workspace,
         libraries,
         crate::io::capture_simulation_results(&state),
@@ -53,11 +53,12 @@ fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_abse
     let json = serialize_project_file(&project).unwrap();
     let loaded = load_project_text(&json, None).unwrap();
     assert!(
-        loaded.simulation_results_warning.is_none(),
+        loaded.file.simulation_results_warning.is_none(),
         "{:?}",
-        loaded.simulation_results_warning
+        loaded.file.simulation_results_warning
     );
-    let restored = crate::io::simulation_state_from_results(loaded.simulation_results).unwrap();
+    let restored =
+        crate::io::simulation_state_from_results(loaded.file.simulation_results).unwrap();
     let analysis = restored.active_analysis().unwrap();
     assert!(!analysis.success);
     assert_eq!(analysis.monte_carlo_checkpoint.as_ref(), Some(&checkpoint));
@@ -97,10 +98,10 @@ fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_abse
         }
         let loaded = loaded.unwrap();
         assert!(
-            loaded.simulation_results.runs.is_empty(),
+            loaded.file.simulation_results.runs.is_empty(),
             "mutation {mutation} survived"
         );
-        assert!(loaded.simulation_results_warning.is_some());
+        assert!(loaded.file.simulation_results_warning.is_some());
     }
 
     let mut wrong_type = state.runs[0].analyses[0].clone();
@@ -116,15 +117,16 @@ fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_abse
     active.runs[0].lifecycle = SimulationRunLifecycle::Running;
     active.runs[0].analyses[0] = AnalysisResult::live_monte_carlo_partial("MC", checkpoint.clone())
         .with_provenance(state.runs[0].analyses[0].provenance.clone().unwrap());
-    project.simulation_results = crate::io::capture_simulation_results(&active);
+    project.file.simulation_results = crate::io::capture_simulation_results(&active);
     let live_json = serialize_project_file(&project).unwrap();
     let loaded = load_project_text(&live_json, None).unwrap();
     assert!(
-        loaded.simulation_results_warning.is_none(),
+        loaded.file.simulation_results_warning.is_none(),
         "{:?}",
-        loaded.simulation_results_warning
+        loaded.file.simulation_results_warning
     );
-    let restored = crate::io::simulation_state_from_results(loaded.simulation_results).unwrap();
+    let restored =
+        crate::io::simulation_state_from_results(loaded.file.simulation_results).unwrap();
     assert_eq!(
         restored.runs[0].lifecycle,
         SimulationRunLifecycle::Interrupted
@@ -147,7 +149,7 @@ fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_abse
     let digest = state.runs[0].dataset_content_digest();
     legacy.schema_version = 34;
     legacy
-        .migrate_to_current(project.workspace.content.project.id())
+        .migrate_to_current(project.file.workspace.project.id())
         .unwrap();
     let restored = crate::io::simulation_state_from_results(legacy).unwrap();
     assert!(
@@ -179,7 +181,7 @@ fn monte_carlo_project_restore_distinguishes_legacy_default_from_explicit_zero()
         draft.remove("explicit_seed");
         draft.insert(field.to_owned(), serde_json::json!(text));
         let loaded = load_project_text(&value.to_string(), None).unwrap();
-        let context = loaded.execution_context.unwrap();
+        let context = loaded.file.execution_context.unwrap();
         let stable = context.simulation_plan.stable_analysis_plan().unwrap();
         let instance = stable
             .instances()
@@ -258,14 +260,14 @@ fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
 
-    let project = ProjectFile::new_with_simulation_results(
+    let project = ProjectSnapshot::new_with_simulation_results(
         workspace,
         libraries,
         crate::io::capture_simulation_results(&simulation),
     );
     let json = serialize_project_file(&project).expect("family metadata serializes");
     let loaded = load_project_text(&json, None).expect("family metadata reloads");
-    let restored = crate::io::simulation_state_from_results(loaded.simulation_results)
+    let restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
         .expect("family metadata restores");
     assert_eq!(
         restored
@@ -277,9 +279,10 @@ fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence
     let mut stale: serde_json::Value = serde_json::from_str(&json).unwrap();
     stale["simulation_results"]["schema_version"] = serde_json::Value::from(30);
     let rejected = load_project_text(&serde_json::to_string(&stale).unwrap(), None).unwrap();
-    assert!(rejected.simulation_results.runs.is_empty());
+    assert!(rejected.file.simulation_results.runs.is_empty());
     assert!(
         rejected
+            .file
             .simulation_results_warning
             .unwrap()
             .contains("before v31")
@@ -290,9 +293,10 @@ fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence
     stale["simulation_results"]["runs"][0]["analyses"][0]["family_metadata"]["member_measurements"] =
         serde_json::json!([]);
     let rejected = load_project_text(&stale.to_string(), None).unwrap();
-    assert!(rejected.simulation_results.runs.is_empty());
+    assert!(rejected.file.simulation_results.runs.is_empty());
     assert!(
         rejected
+            .file
             .simulation_results_warning
             .unwrap()
             .contains("before v30")
@@ -313,8 +317,8 @@ fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence
         .expect("analysis object")
         .remove("result_data_digest");
     let migrated = load_project_text(&v6.to_string(), None).expect("v6 project migrates");
-    assert_eq!(migrated.simulation_results.schema_version, 40);
-    let migrated = crate::io::simulation_state_from_results(migrated.simulation_results)
+    assert_eq!(migrated.file.simulation_results.schema_version, 40);
+    let migrated = crate::io::simulation_state_from_results(migrated.file.simulation_results)
         .expect("migrated v6 results restore");
     assert!(
         migrated

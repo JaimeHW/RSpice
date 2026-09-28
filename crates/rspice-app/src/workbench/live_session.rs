@@ -1719,9 +1719,9 @@ fn serialize_host_document(state: &AppState, doc: &str) -> Option<Vec<u8>> {
         // Result datasets are deliberately not streamed — every participant
         // holds a full seat and runs the mirrored design locally — and the
         // host's on-disk path is machine-local, so neither crosses the wire.
-        project.simulation_results = Default::default();
-        project.simulation_results_warning = None;
-        project.workspace.content.project.path = None;
+        project.file.simulation_results = Default::default();
+        project.file.simulation_results_warning = None;
+        project.file.workspace.project.path = None;
         return match crate::io::project_io::serialize_project_file(&project) {
             Ok(text) => Some(text.into_bytes()),
             Err(error) => {

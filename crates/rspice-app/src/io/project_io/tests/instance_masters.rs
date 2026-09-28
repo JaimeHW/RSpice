@@ -22,15 +22,15 @@ fn load_repairs_missing_instance_master() {
         .expect("the bootstrapped top buffer")
         .editor
         .add_library_cell_component(Point::new(10, 10), binding);
-    let json = serialize_project_file(&ProjectFile::new(workspace, libraries))
+    let json = serialize_project_file(&ProjectSnapshot::new(workspace, libraries))
         .expect("a project may name a master it has lost");
 
     let loaded =
         load_project_text(&json, None).expect("a project whose master vanished still opens");
 
     let restored = loaded
+        .file
         .workspace
-        .content
         .schematic_buffers
         .get(&top.key())
         .expect("the parent drawing loads");
@@ -49,6 +49,7 @@ fn load_repairs_missing_instance_master() {
         "nothing may netlist a master the project no longer holds"
     );
     let warning = loaded
+        .file
         .workspace_migration_warning
         .expect("a silent repair is not a repair");
     assert!(
@@ -85,16 +86,16 @@ fn load_breaks_an_instantiation_cycle_and_names_both_ends() {
             Point::new(10, 10),
             LibraryCellInstance::new("user", "amp", "schematic"),
         );
-    let json = serialize_project_file(&ProjectFile::new(workspace, libraries))
+    let json = serialize_project_file(&ProjectSnapshot::new(workspace, libraries))
         .expect("a recursive hierarchy can be written");
 
     let loaded = load_project_text(&json, None).expect("a recursive hierarchy still opens");
 
-    let placements = loaded.workspace.content.schematic_buffers[&top.key()]
+    let placements = loaded.file.workspace.schematic_buffers[&top.key()]
         .document()
         .components
         .len()
-        + loaded.workspace.content.schematic_buffers[&amp.key()]
+        + loaded.file.workspace.schematic_buffers[&amp.key()]
             .document()
             .components
             .len();
@@ -103,6 +104,7 @@ fn load_breaks_an_instantiation_cycle_and_names_both_ends() {
         "exactly the edge that closes the loop is cut"
     );
     let warning = loaded
+        .file
         .workspace_migration_warning
         .expect("a silent repair is not a repair");
     assert!(
@@ -154,11 +156,11 @@ fn unresolved_generated_veriloga_bindings_survive_project_save_and_reload() {
         schematic.add_library_cell_component(Point::new(10, 20), binding);
         let before = serde_json::to_value(&schematic.document().components[0]).unwrap();
         drop(stored_schematic);
-        let json = serde_json::to_string(&ProjectFile::new(workspace, libraries)).unwrap();
+        let json = serde_json::to_string(&ProjectSnapshot::new(workspace, libraries)).unwrap();
 
         let loaded =
             load_project_text(&json, None).expect("an unresolved model must not cost the project");
-        let restored = &loaded.workspace.content.schematic_buffers[&top]
+        let restored = &loaded.file.workspace.schematic_buffers[&top]
             .document()
             .components[0];
         assert_eq!(serde_json::to_value(restored).unwrap(), before);
@@ -167,6 +169,7 @@ fn unresolved_generated_veriloga_bindings_survive_project_save_and_reload() {
         );
         assert!(
             loaded
+                .file
                 .workspace_migration_warning
                 .as_deref()
                 .unwrap()
@@ -178,7 +181,7 @@ fn unresolved_generated_veriloga_bindings_survive_project_save_and_reload() {
             load_project_text(&saved, None).expect("unresolved evidence remains loadable");
         assert_eq!(
             serde_json::to_value(
-                &reloaded.workspace.content.schematic_buffers[&top]
+                &reloaded.file.workspace.schematic_buffers[&top]
                     .document()
                     .components[0]
             )

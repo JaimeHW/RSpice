@@ -48,10 +48,4 @@ impl SchematicState {
         self.remove_stale_runtime_references(&repaired);
         self.session.is_dirty = true;
     }
-
-    pub(crate) fn remove_cyclic_master_placements(&mut self, master_key: &str) {
-        let repaired = self.design.remove_cyclic_master_placements(master_key);
-        self.repair_clipboard_after_load();
-        self.remove_stale_runtime_references(&repaired);
-    }
 }

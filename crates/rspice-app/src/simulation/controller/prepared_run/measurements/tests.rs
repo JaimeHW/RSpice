@@ -72,8 +72,8 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
     .unwrap();
     assert_eq!(
         loaded
+            .file
             .workspace
-            .content
             .plan_data(plan_id)
             .unwrap()
             .specification_definitions,
@@ -260,8 +260,8 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
     let loaded = crate::io::project_io::load_project_text(&json, None).unwrap();
     assert_eq!(
         loaded
+            .file
             .workspace
-            .content
             .plan_data(plan_id)
             .unwrap()
             .specification_definitions,

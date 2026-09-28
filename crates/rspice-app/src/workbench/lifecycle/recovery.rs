@@ -187,7 +187,7 @@ pub(crate) fn refresh_catalog_if_requested(app: &mut RSpiceApp) {
         .content
         .schematic_buffers
         .keys()
-        .filter_map(|key| app.state.workspace.schematic_sessions.get(key))
+        .filter_map(|key| app.state.workspace.session.schematic_sessions.get(key))
         .filter_map(|session| session.current_file.clone())
         .collect::<Vec<_>>();
     if let Some(path) = app.state.schematic.session.current_file.clone() {
@@ -573,16 +573,16 @@ fn project_owned_differences(state: &AppState) -> Result<ProjectOwnedDifferences
                 project_path.display()
             )
         })?;
-        if let Some(warning) = project.simulation_results_warning.as_deref() {
+        if let Some(warning) = project.file.simulation_results_warning.as_deref() {
             return Err(format!(
                 "saved project result snapshot could not be verified: {warning}"
             ));
         }
-        let execution = match project.execution_context.as_ref() {
+        let execution = match project.file.execution_context.as_ref() {
             Some(context) => canonical_execution_context(context)?,
             None => canonical_execution_context(&pristine_execution_context(&state.sim_setup)?)?,
         };
-        (execution, project.simulation_results)
+        (execution, project.file.simulation_results)
     } else {
         (
             canonical_execution_context(&pristine_execution_context(&state.sim_setup)?)?,

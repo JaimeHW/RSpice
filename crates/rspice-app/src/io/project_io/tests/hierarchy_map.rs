@@ -47,7 +47,7 @@ fn sealed_results(hierarchy_map: Vec<HierarchyMapRow>) -> ProjectSimulationResul
         instance,
         ObjectRevision::INITIAL,
         Vec::new(),
-        analysis_kind_tag_for_plan_kind(AnalysisKind::Ac),
+        AnalysisKind::Ac.canonical_kind().tag(),
         ContentDigest::from_bytes([0xb3; 32]),
     )
     .expect("prepared task receipt");

@@ -338,3 +338,5 @@ mod symbol_document_tests {
         assert_eq!(doc.pin_summary(&[]), PinSummary::NoSchematic);
     }
 }
+
+pub(crate) mod project_snapshot;

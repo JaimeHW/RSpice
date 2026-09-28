@@ -162,7 +162,7 @@ fn a_persisted_task_tag_must_match_the_plan_analysis_it_names() {
     // the plan analysis it names. That comparison and what dispatch stamps are
     // now one table, so this reads the table rather than a second list.
     for kind in AnalysisKind::ALL {
-        let tag = analysis_kind_tag_for_plan_kind(kind);
+        let tag = kind.canonical_kind().tag();
         assert_eq!(tag, kind.canonical_kind().tag());
         assert!(
             CanonicalAnalysisKind::from_tag(tag).is_some(),

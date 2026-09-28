@@ -39,17 +39,19 @@ fn monte_carlo_checkpoint_file_actions_preserve_owner_and_project_storage() {
     poll(&ctx, &mut app);
     let after = crate::workbench::lifecycle::project_lifecycle::snapshot(&app.state).unwrap();
     assert_ne!(
-        before.simulation_results, after.simulation_results,
+        before.file.simulation_results, after.file.simulation_results,
         "import invalidates cached project results"
     );
     assert!(
         before
+            .file
             .simulation_results
             .imported_monte_carlo_checkpoints
             .is_empty()
     );
     assert_eq!(
         after
+            .file
             .simulation_results
             .imported_monte_carlo_checkpoints
             .get(checkpoint.digest()),
@@ -57,9 +59,10 @@ fn monte_carlo_checkpoint_file_actions_preserve_owner_and_project_storage() {
     );
     let json = crate::io::project_io::serialize_project_file(&after).unwrap();
     let restored = crate::io::project_io::load_project_text(&json, None).unwrap();
-    assert!(restored.simulation_results_warning.is_none());
+    assert!(restored.file.simulation_results_warning.is_none());
     assert_eq!(
         restored
+            .file
             .simulation_results
             .imported_monte_carlo_checkpoints
             .get(checkpoint.digest()),

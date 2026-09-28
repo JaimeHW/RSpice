@@ -38,11 +38,12 @@ fn sensitivity_availability_survives_project_results_serialization_and_authentic
     ));
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let project = ProjectFile::new_with_simulation_results(workspace, libraries, saved.clone());
+    let project = ProjectSnapshot::new_with_simulation_results(workspace, libraries, saved.clone());
     let text = serialize_project_file(&project).unwrap();
     let loaded = load_project_text(&text, None).unwrap();
-    assert!(loaded.simulation_results_warning.is_none());
-    let restored = crate::io::simulation_state_from_results(loaded.simulation_results).unwrap();
+    assert!(loaded.file.simulation_results_warning.is_none());
+    let restored =
+        crate::io::simulation_state_from_results(loaded.file.simulation_results).unwrap();
     assert_eq!(
         restored.runs[0].analyses[0].result_payload,
         run.analyses[0].result_payload
@@ -133,10 +134,11 @@ fn current_impulse_project_history_round_trips_and_authenticates_charge() {
     let saved = crate::io::capture_simulation_results(&simulation);
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let project = ProjectFile::new_with_simulation_results(workspace, libraries, saved.clone());
+    let project = ProjectSnapshot::new_with_simulation_results(workspace, libraries, saved.clone());
     let loaded = load_project_text(&serialize_project_file(&project).unwrap(), None).unwrap();
-    assert!(loaded.simulation_results_warning.is_none());
-    let restored = crate::io::simulation_state_from_results(loaded.simulation_results).unwrap();
+    assert!(loaded.file.simulation_results_warning.is_none());
+    let restored =
+        crate::io::simulation_state_from_results(loaded.file.simulation_results).unwrap();
     assert_eq!(
         restored.runs[0].analyses[0].result_payload,
         run.analyses[0].result_payload
@@ -196,17 +198,17 @@ fn cleared_run_sequence_survives_project_round_trip() {
         simulation.clear_runs();
         let mut libraries = LibraryManager::with_primitives();
         let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-        let project = ProjectFile::new_with_simulation_results(
+        let project = ProjectSnapshot::new_with_simulation_results(
             workspace,
             libraries,
             crate::io::capture_simulation_results(&simulation),
         );
         let text = serialize_project_file(&project).expect("cleared history publishes");
         let loaded = load_project_text(&text, None).expect("cleared history reopens");
-        assert!(loaded.simulation_results_warning.is_none());
-        assert_eq!(loaded.simulation_results.next_run_id, last_sequence);
+        assert!(loaded.file.simulation_results_warning.is_none());
+        assert_eq!(loaded.file.simulation_results.next_run_id, last_sequence);
         let mut restored =
-            crate::io::simulation_state_from_results(loaded.simulation_results).unwrap();
+            crate::io::simulation_state_from_results(loaded.file.simulation_results).unwrap();
         assert!(restored.runs.is_empty());
         assert_eq!(restored.next_run_id, last_sequence);
         if last_sequence < u64::MAX {
@@ -226,7 +228,7 @@ fn project_text_load_drops_invalid_simulation_results_without_rejecting_workspac
     simulation.next_run_id = 1;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
-    let project = ProjectFile::new_with_simulation_results(
+    let project = ProjectSnapshot::new_with_simulation_results(
         workspace,
         libraries,
         crate::io::capture_simulation_results(&simulation),
@@ -237,9 +239,10 @@ fn project_text_load_drops_invalid_simulation_results_without_rejecting_workspac
 
     let loaded = load_project_text(&json, None).expect("workspace still loads");
 
-    assert!(loaded.simulation_results.is_empty());
+    assert!(loaded.file.simulation_results.is_empty());
     assert!(
         loaded
+            .file
             .simulation_results_warning
             .as_deref()
             .unwrap_or_default()
@@ -251,6 +254,7 @@ fn project_text_load_drops_invalid_simulation_results_without_rejecting_workspac
 fn project_load_clears_legacy_regression_baseline_after_result_migration() {
     let mut project = project_with_execution_context();
     let plan_id = project
+        .file
         .execution_context
         .as_ref()
         .expect("execution context")
@@ -265,10 +269,10 @@ fn project_load_clears_legacy_regression_baseline_after_result_migration() {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 71;
-    project.simulation_results = crate::io::capture_simulation_results(&simulation);
+    project.file.simulation_results = crate::io::capture_simulation_results(&simulation);
     project
+        .file
         .workspace
-        .content
         .plan_data_mut(plan_id)
         .expect("active plan payload")
         .regression_baseline_run = Some(baseline_id);
@@ -276,11 +280,11 @@ fn project_load_clears_legacy_regression_baseline_after_result_migration() {
     let json = serde_json::to_string_pretty(&project).expect("legacy baseline fixture");
     let loaded = load_project_text(&json, None).expect("project remains loadable");
 
-    assert_eq!(loaded.simulation_results.runs.len(), 1);
+    assert_eq!(loaded.file.simulation_results.runs.len(), 1);
     assert!(
         loaded
+            .file
             .workspace
-            .content
             .plan_data(plan_id)
             .expect("active plan payload")
             .regression_baseline_run
@@ -288,6 +292,7 @@ fn project_load_clears_legacy_regression_baseline_after_result_migration() {
     );
     assert!(
         loaded
+            .file
             .simulation_results_warning
             .as_deref()
             .unwrap_or_default()
@@ -301,6 +306,7 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
     let mut project = project_with_execution_context();
     let (plan_id, source_id, source_revision, dependencies) = {
         let plan = project
+            .file
             .execution_context
             .as_ref()
             .expect("execution context")
@@ -354,10 +360,10 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
         &mut run,
         AnalysisResultSourceDomain::SimulationPlan,
         Some(plan_id),
-        project.workspace.content.project.revision(),
+        project.file.workspace.project.revision(),
         ContentDigest::from_bytes([0xd2; 32]),
         PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0xd3; 32])),
-        &[analysis_kind_tag_for_plan_kind(AnalysisKind::Noise)],
+        &[AnalysisKind::Noise.canonical_kind().tag()],
     );
     let baseline_id = run.run_id;
     let legacy_analysis_digest = run.analyses[0]
@@ -372,15 +378,15 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
     assert!(simulation.set_run_retention(baseline_id, RunRetention::GoldenBaseline));
-    project.simulation_results = crate::io::capture_simulation_results(&simulation);
+    project.file.simulation_results = crate::io::capture_simulation_results(&simulation);
     assert_eq!(
-        project.simulation_results.runs[0].retention,
+        project.file.simulation_results.runs[0].retention,
         RunRetention::GoldenBaseline,
         "the persisted fixture must retain the runtime baseline pin",
     );
     project
+        .file
         .workspace
-        .content
         .plan_data_mut(plan_id)
         .expect("active plan payload")
         .regression_baseline_run = Some(baseline_id);
@@ -405,19 +411,19 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
     let loaded = load_project_text(&v11.to_string(), None)
         .expect("authentic schema-v11 project remains loadable");
 
-    assert_eq!(loaded.simulation_results.schema_version, 40);
-    assert_eq!(loaded.simulation_results.runs.len(), 1);
-    assert!(loaded.simulation_results_warning.is_none());
+    assert_eq!(loaded.file.simulation_results.schema_version, 40);
+    assert_eq!(loaded.file.simulation_results.runs.len(), 1);
+    assert!(loaded.file.simulation_results_warning.is_none());
     assert_eq!(
         loaded
+            .file
             .workspace
-            .content
             .plan_data(plan_id)
             .expect("active plan payload")
             .regression_baseline_run,
         Some(baseline_id)
     );
-    let restored = loaded.simulation_results.runs[0]
+    let restored = loaded.file.simulation_results.runs[0]
         .clone()
         .into_run()
         .expect("migrated result restores");
@@ -440,11 +446,11 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
         serde_json::json!(1.250_000_000_000_000_3e-6_f64);
     let rejected = load_project_text(&tampered_v11.to_string(), None)
         .expect("a bad result digest must not reject unrelated project documents");
-    assert!(rejected.simulation_results.is_empty());
+    assert!(rejected.file.simulation_results.is_empty());
     assert!(
         rejected
+            .file
             .workspace
-            .content
             .plan_data(plan_id)
             .expect("active plan payload")
             .regression_baseline_run
@@ -452,6 +458,7 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
     );
     assert!(
         rejected
+            .file
             .simulation_results_warning
             .as_deref()
             .unwrap_or_default()
@@ -463,6 +470,7 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
 fn project_load_clears_dangling_regression_baseline_without_rejecting_project() {
     let mut project = project_with_execution_context();
     let plan_id = project
+        .file
         .execution_context
         .as_ref()
         .expect("execution context")
@@ -471,8 +479,8 @@ fn project_load_clears_dangling_regression_baseline_without_rejecting_project() 
         .expect("stable plan")
         .id();
     project
+        .file
         .workspace
-        .content
         .plan_data_mut(plan_id)
         .expect("active plan payload")
         .regression_baseline_run = Some(crate::product::RunId::new());
@@ -480,11 +488,11 @@ fn project_load_clears_dangling_regression_baseline_without_rejecting_project() 
     let json = serde_json::to_string_pretty(&project).expect("dangling baseline fixture");
     let loaded = load_project_text(&json, None).expect("project remains loadable");
 
-    assert!(loaded.simulation_results.is_empty());
+    assert!(loaded.file.simulation_results.is_empty());
     assert!(
         loaded
+            .file
             .workspace
-            .content
             .plan_data(plan_id)
             .expect("active plan payload")
             .regression_baseline_run
@@ -492,6 +500,7 @@ fn project_load_clears_dangling_regression_baseline_without_rejecting_project() 
     );
     assert!(
         loaded
+            .file
             .simulation_results_warning
             .as_deref()
             .unwrap_or_default()
@@ -512,7 +521,7 @@ fn project_text_load_drops_unknown_analysis_type_results_without_parse_failure()
     simulation.next_run_id = 1;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
-    let project = ProjectFile::new_with_simulation_results(
+    let project = ProjectSnapshot::new_with_simulation_results(
         workspace,
         libraries,
         crate::io::capture_simulation_results(&simulation),
@@ -526,9 +535,10 @@ fn project_text_load_drops_unknown_analysis_type_results_without_parse_failure()
 
     let loaded = load_project_text(&json, None).expect("workspace still loads");
 
-    assert!(loaded.simulation_results.is_empty());
+    assert!(loaded.file.simulation_results.is_empty());
     assert!(
         loaded
+            .file
             .simulation_results_warning
             .as_deref()
             .unwrap_or_default()
@@ -732,7 +742,7 @@ fn project_results_v2_rejects_cross_bound_selection_and_active_overlay() {
 fn project_text_migrates_v1_result_sequences_once_to_stable_identities() {
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
     let project_value = serde_json::to_value(project).expect("project converts to JSON");
 
     // A schema-v1 golden record is authored from the fields that actually
@@ -811,65 +821,72 @@ fn project_text_migrates_v1_result_sequences_once_to_stable_identities() {
         }));
     }
     assert_eq!(
-        migrated_matrix[0].simulation_results, migrated_matrix[1].simulation_results,
+        migrated_matrix[0].file.simulation_results, migrated_matrix[1].file.simulation_results,
         "an omitted schema tag is exactly the schema-v1 wire contract"
     );
     let migrated = &migrated_matrix[0];
 
-    assert!(migrated.simulation_results_warning.is_none());
-    assert_eq!(migrated.simulation_results.schema_version, 40);
+    assert!(migrated.file.simulation_results_warning.is_none());
+    assert_eq!(migrated.file.simulation_results.schema_version, 40);
     assert!(
         migrated
+            .file
             .simulation_results
             .runs
             .iter()
             .all(|run| run.run_id.is_some() && run.dataset_id.is_some())
     );
-    let active_run_id = migrated.simulation_results.runs[1]
+    let active_run_id = migrated.file.simulation_results.runs[1]
         .run_id
         .expect("migrated active run id");
-    let active_dataset_id = migrated.simulation_results.runs[1]
+    let active_dataset_id = migrated.file.simulation_results.runs[1]
         .dataset_id
         .expect("migrated active dataset id");
-    let migrated_overlay_id = migrated.simulation_results.runs[0]
+    let migrated_overlay_id = migrated.file.simulation_results.runs[0]
         .dataset_id
         .expect("migrated overlay id");
     assert_eq!(
-        migrated.simulation_results.active_run_stable_id,
+        migrated.file.simulation_results.active_run_stable_id,
         Some(active_run_id)
     );
     assert_eq!(
-        migrated.simulation_results.active_dataset_id,
+        migrated.file.simulation_results.active_dataset_id,
         Some(active_dataset_id)
     );
     assert_eq!(
-        migrated.simulation_results.active_analysis_sequence,
+        migrated.file.simulation_results.active_analysis_sequence,
         Some(9)
     );
     assert_eq!(
-        migrated.simulation_results.overlay_dataset_ids,
+        migrated.file.simulation_results.overlay_dataset_ids,
         vec![migrated_overlay_id]
     );
-    assert!(migrated.simulation_results.active_run_id.is_none());
-    assert!(migrated.simulation_results.active_analysis_id.is_none());
-    assert!(migrated.simulation_results.overlay_run_ids.is_empty());
+    assert!(migrated.file.simulation_results.active_run_id.is_none());
+    assert!(
+        migrated
+            .file
+            .simulation_results
+            .active_analysis_id
+            .is_none()
+    );
+    assert!(migrated.file.simulation_results.overlay_run_ids.is_empty());
 
     let current_json = serialize_project_file(migrated).expect("migration persists");
     let reloaded = load_project_text(&current_json, None).expect("migrated project reloads");
     assert_eq!(
-        reloaded.simulation_results.active_run_stable_id,
+        reloaded.file.simulation_results.active_run_stable_id,
         Some(active_run_id)
     );
     assert_eq!(
-        reloaded.simulation_results.active_dataset_id,
+        reloaded.file.simulation_results.active_dataset_id,
         Some(active_dataset_id)
     );
     assert_eq!(
-        reloaded.simulation_results.active_analysis_sequence,
+        reloaded.file.simulation_results.active_analysis_sequence,
         Some(9)
     );
     assert_eq!(
-        reloaded.simulation_results.overlay_dataset_ids,
+        reloaded.file.simulation_results.overlay_dataset_ids,
         vec![migrated_overlay_id]
     );
 }
@@ -1142,18 +1159,18 @@ fn project_text_load_updates_source_path_without_renaming_identity() {
         .content
         .project
         .set_path(PathBuf::from("stale-native-path.rspiceproj"));
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
     let json = serialize_project_file(&project).expect("project serializes");
 
     let loaded = load_project_text(&json, Some(Path::new("browser-import.rspiceproj")))
         .expect("project text loads");
 
     assert_eq!(
-        loaded.workspace.content.project.path.as_deref(),
+        loaded.file.workspace.project.path.as_deref(),
         Some(Path::new("browser-import.rspiceproj"))
     );
     assert_eq!(
-        loaded.workspace.content.project.display_name(),
+        loaded.file.workspace.project.display_name(),
         "stale-native-path",
         "moving a project file must not silently rename its logical identity"
     );
@@ -1167,14 +1184,14 @@ fn project_text_load_without_source_path_clears_stale_file_identity() {
         .content
         .project
         .set_path(PathBuf::from("stale-native-path.rspiceproj"));
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
     let json = serialize_project_file(&project).expect("project serializes");
 
     let loaded = load_project_text(&json, None).expect("project text loads");
 
-    assert!(loaded.workspace.content.project.path.is_none());
+    assert!(loaded.file.workspace.project.path.is_none());
     assert_eq!(
-        loaded.workspace.content.project.display_name(),
+        loaded.file.workspace.project.display_name(),
         "stale-native-path"
     );
 }
@@ -1202,25 +1219,21 @@ fn legacy_project_migration_assigns_stable_identity_metadata() {
     legacy_plan.insert("analysis_order".to_owned(), serde_json::json!([1]));
     let legacy = serde_json::to_string_pretty(&value).expect("legacy fixture serializes");
 
-    assert_eq!(
-        project_text_load_route(&legacy).expect("legacy route probes"),
-        ProjectTextLoadRoute::LegacyProjectIdInjection
-    );
-
     let migrated = load_project_text(&legacy, None).expect("legacy project migrates");
     let replay = load_project_text(&legacy, None).expect("identical legacy bytes migrate again");
 
-    assert!(!migrated.workspace.content.project.id().as_uuid().is_nil());
+    assert!(!migrated.file.workspace.project.id().as_uuid().is_nil());
     assert_eq!(
-        migrated.workspace.content.project.schema_version(),
+        migrated.file.workspace.project.schema_version(),
         crate::state::PROJECT_DESCRIPTOR_SCHEMA_VERSION
     );
-    assert_eq!(migrated.workspace.content.project.revision().get(), 1);
+    assert_eq!(migrated.file.workspace.project.revision().get(), 1);
     assert_eq!(
-        migrated.workspace.content.project.id(),
-        replay.workspace.content.project.id()
+        migrated.file.workspace.project.id(),
+        replay.file.workspace.project.id()
     );
     let migrated_plan = migrated
+        .file
         .execution_context
         .as_ref()
         .expect("migrated execution context")
@@ -1228,6 +1241,7 @@ fn legacy_project_migration_assigns_stable_identity_metadata() {
         .stable_analysis_plan()
         .expect("migrated stable plan");
     let replay_plan = replay
+        .file
         .execution_context
         .as_ref()
         .expect("replayed execution context")
@@ -1250,18 +1264,14 @@ fn legacy_project_migration_assigns_stable_identity_metadata() {
 
     let migrated_json =
         serialize_project_file(&migrated).expect("migrated identity persists on save");
-    assert_eq!(
-        project_text_load_route(&migrated_json).expect("migrated route probes"),
-        ProjectTextLoadRoute::Direct
-    );
     let reloaded = load_project_text(&migrated_json, None).expect("migrated project reloads");
     assert_eq!(
-        reloaded.workspace.content.project.id(),
-        migrated.workspace.content.project.id()
+        reloaded.file.workspace.project.id(),
+        migrated.file.workspace.project.id()
     );
     assert_eq!(
-        reloaded.workspace.content.project.revision(),
-        migrated.workspace.content.project.revision()
+        reloaded.file.workspace.project.revision(),
+        migrated.file.workspace.project.revision()
     );
 }
 
@@ -1269,7 +1279,7 @@ fn legacy_project_migration_assigns_stable_identity_metadata() {
 fn project_load_rejects_unsupported_descriptor_schema() {
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
     let mut value = serde_json::to_value(project).expect("project converts to JSON");
     value["workspace"]["project"]["schema_version"] =
         serde_json::Value::from(crate::state::PROJECT_DESCRIPTOR_SCHEMA_VERSION + 1);
@@ -1286,7 +1296,7 @@ fn project_load_rejects_unsupported_descriptor_schema() {
 fn project_load_rejects_missing_or_null_identity_on_a_versioned_descriptor() {
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
     let value = serde_json::to_value(project).expect("project converts to JSON");
 
     let mut missing = value.clone();
@@ -1341,9 +1351,9 @@ fn project_load_rejects_missing_or_null_identity_on_a_versioned_descriptor() {
 fn project_text_load_rejects_missing_active_schematic_buffer() {
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let mut project = ProjectFile::new(workspace, libraries);
-    let active_key = project.workspace.content.active_key();
-    project.workspace.remove_schematic_editor(&active_key);
+    let mut project = ProjectSnapshot::new(workspace, libraries);
+    let active_key = project.file.workspace.active_key();
+    project.remove_schematic_editor(&active_key);
     let json = serde_json::to_string_pretty(&project).expect("corrupt fixture serializes");
 
     let err =
@@ -1373,9 +1383,9 @@ fn project_text_load_rejects_workspace_references_missing_from_libraries() {
     workspace.content.open_views = vec![OpenCellView::new(ghost.clone(), ViewType::Schematic)];
     workspace.content.hierarchy_stack = vec![ghost.clone()];
     workspace.content.schematic_buffers.clear();
-    workspace.schematic_sessions.clear();
+    workspace.session.schematic_sessions.clear();
     workspace.insert_schematic_editor(ghost_key.clone(), schematic);
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
     let json = serde_json::to_string_pretty(&project).expect("corrupt fixture serializes");
 
     let err = load_project_text(&json, None)
@@ -1395,7 +1405,7 @@ fn project_text_load_rejects_workspace_view_type_mismatch() {
     let active = workspace.content.active_view.clone();
     workspace.content.open_views = vec![OpenCellView::new(active.clone(), ViewType::Symbol)];
     let active_key = active.key();
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
     let json = serde_json::to_string_pretty(&project).expect("corrupt fixture serializes");
 
     let err =
@@ -1416,7 +1426,7 @@ fn project_text_load_rejects_active_view_missing_from_open_views() {
     let active = CellViewRef::new("user", "top", "symbol");
     workspace.content.active_view = active.clone();
     workspace.content.hierarchy_stack = vec![active.clone()];
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
     let json = serde_json::to_string_pretty(&project).expect("corrupt fixture serializes");
 
     let err = load_project_text(&json, None)
@@ -1461,7 +1471,7 @@ fn project_text_load_rejects_library_tree_key_name_mismatch() {
         let mut libraries = LibraryManager::with_primitives();
         let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
         let active = workspace.content.active_view.clone();
-        let project = ProjectFile::new(workspace, libraries);
+        let project = ProjectSnapshot::new(workspace, libraries);
         let mut value = serde_json::to_value(&project).expect("project converts to json value");
         mutate(&mut value, &active);
         let json = serde_json::to_string_pretty(&value).expect("corrupt fixture serializes");
@@ -1504,7 +1514,7 @@ fn project_load_rejects_unicode_canonical_library_cell_and_view_collisions() {
             _ => unreachable!(),
         }
 
-        let project = ProjectFile::new(workspace, libraries);
+        let project = ProjectSnapshot::new(workspace, libraries);
         let json = serde_json::to_string_pretty(&project).expect("fixture serializes");
         let error = load_project_text(&json, None)
             .expect_err("canonical library identities must be unique");
@@ -1535,7 +1545,7 @@ fn project_load_rejects_slash_alias_triples_before_key_lookup() {
     second_library.add_cell(second_cell);
     libraries.add_library(second_library);
 
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
     let json = serde_json::to_string_pretty(&project).expect("alias fixture serializes");
     let error = load_project_text(&json, None)
         .expect_err("two distinct triples must not alias one generated key");
@@ -1560,7 +1570,7 @@ fn project_load_rejects_lcv_names_outside_the_ui_contract() {
         .get_library_mut("user")
         .expect("default library")
         .add_cell(invalid_cell);
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
     let json = serde_json::to_string_pretty(&project).expect("invalid fixture serializes");
 
     let error = load_project_text(&json, None)
@@ -1586,7 +1596,7 @@ fn project_load_rejects_orphan_and_malformed_schematic_buffers() {
             .and_then(|key| workspace.clone_schematic_editor(key))
             .expect("default schematic buffer");
         workspace.insert_schematic_editor(key.to_owned(), buffer);
-        let project = ProjectFile::new(workspace, libraries);
+        let project = ProjectSnapshot::new(workspace, libraries);
         let json = serde_json::to_string_pretty(&project).expect("buffer fixture serializes");
 
         let error = load_project_text(&json, None)
@@ -1611,7 +1621,7 @@ fn project_load_rejects_schematic_buffer_bound_to_symbol_view() {
         .and_then(|key| workspace.clone_schematic_editor(key))
         .expect("default schematic buffer");
     workspace.insert_schematic_editor("user/top/symbol".to_owned(), buffer);
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
     let json = serde_json::to_string_pretty(&project).expect("buffer fixture serializes");
 
     let error =
@@ -1629,7 +1639,7 @@ fn project_load_rejects_duplicate_open_view_keys() {
         .content
         .open_views
         .push(workspace.content.open_views[0].clone());
-    let project = ProjectFile::new(workspace, libraries);
+    let project = ProjectSnapshot::new(workspace, libraries);
     let json = serde_json::to_string_pretty(&project).expect("duplicate fixture serializes");
 
     let error =
@@ -1638,32 +1648,6 @@ fn project_load_rejects_duplicate_open_view_keys() {
         error.to_string().contains("duplicate cell-view key")
             && error.to_string().contains("workspace.open_views")
     );
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-#[allow(deprecated)]
-fn legacy_public_project_save_is_create_only_and_preserves_existing_bytes() {
-    let root = std::env::temp_dir().join(format!(
-        "rspice-legacy-create-only-project-{}",
-        uuid::Uuid::new_v4()
-    ));
-    std::fs::create_dir_all(&root).expect("create isolated project test directory");
-    let path = root.join("design.rspiceproj");
-    std::fs::write(&path, "external project bytes").expect("write existing target");
-    let mut libraries = LibraryManager::with_primitives();
-    let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let project = ProjectFile::new(workspace, libraries);
-
-    let error = save_project_file(&project, &path)
-        .expect_err("legacy public save must not overwrite an existing destination");
-
-    assert!(error.to_string().contains("create-only"));
-    assert_eq!(
-        std::fs::read_to_string(&path).expect("read preserved destination"),
-        "external project bytes"
-    );
-    std::fs::remove_dir_all(root).expect("remove isolated project test directory");
 }
 
 #[test]
@@ -1678,14 +1662,11 @@ fn project_text_load_reports_parse_errors_without_filesystem() {
 fn canonical_plan_kind_tags_cover_the_complete_manifest_without_collisions() {
     let tags = AnalysisKind::ALL
         .into_iter()
-        .map(analysis_kind_tag_for_plan_kind)
+        .map(|kind| kind.canonical_kind().tag())
         .collect::<std::collections::HashSet<_>>();
     assert_eq!(tags.len(), AnalysisKind::ALL.len());
-    assert_eq!(analysis_kind_tag_for_plan_kind(AnalysisKind::Qpss), 26);
-    assert_eq!(
-        analysis_kind_tag_for_plan_kind(AnalysisKind::DcMismatch),
-        34
-    );
+    assert_eq!(AnalysisKind::Qpss.canonical_kind().tag(), 26);
+    assert_eq!(AnalysisKind::DcMismatch.canonical_kind().tag(), 34);
 }
 
 /// A project written before results were attributed to a PVT point still

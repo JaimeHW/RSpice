@@ -668,6 +668,7 @@ mod tests {
 
         let buffer = state
             .workspace
+            .session
             .schematic_sessions
             .get(&schematic_reference.key())
             .expect("paired schematic buffer exists");
@@ -727,6 +728,7 @@ mod tests {
         );
         let buffer = state
             .workspace
+            .session
             .schematic_sessions
             .get(&schematic_reference.key())
             .expect("paired schematic buffer exists");

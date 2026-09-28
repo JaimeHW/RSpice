@@ -883,6 +883,7 @@ impl AppState {
             .schematic_buffers
             .retain(|key, _| !key.starts_with(&prefix));
         self.workspace
+            .session
             .schematic_sessions
             .retain(|key, _| !key.starts_with(&prefix));
         let orphaned_layouts = self
@@ -1858,6 +1859,7 @@ impl AppState {
             .schematic_buffers
             .retain(|key, _| !key.starts_with(&prefix));
         self.workspace
+            .session
             .schematic_sessions
             .retain(|key, _| !key.starts_with(&prefix));
         self.workspace

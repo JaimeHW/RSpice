@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use sha2::{Digest as _, Sha256};
 
-use crate::io::{ProjectFile, ProjectIoError};
+use crate::io::{ProjectIoError, ProjectSnapshot};
 use crate::product::ContentDigest;
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -207,7 +207,7 @@ pub(crate) enum PersistenceError {
 }
 
 pub(crate) fn serialized_project(
-    project: &ProjectFile,
+    project: &ProjectSnapshot,
 ) -> Result<(Vec<u8>, ContentDigest), PersistenceError> {
     let contents = crate::io::project_io::serialize_project_file(project)?;
     let bytes = contents.into_bytes();
@@ -278,7 +278,7 @@ pub(crate) enum BrowserOpenResult {
 pub(crate) enum BrowserRestoreResult {
     Missing,
     Restored {
-        baseline: Box<ProjectFile>,
+        baseline: Box<ProjectSnapshot>,
         binding: PersistenceBinding,
     },
     ReconnectRequired {
@@ -805,7 +805,7 @@ pub(crate) fn publish_canonical_native(
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn read_native_binding(
     path: &Path,
-) -> Result<(ProjectFile, PersistenceBinding), PersistenceError> {
+) -> Result<(ProjectSnapshot, PersistenceBinding), PersistenceError> {
     let canonical_path = normalize_native_path(path)?;
     crate::io::durable_file::reconcile_publication(&canonical_path)
         .map_err(|error| PersistenceError::Platform(error.to_string()))?;
@@ -824,7 +824,7 @@ pub(crate) fn restore_native_binding(
     path: &Path,
     session_project_id: &str,
     receipt: &NativeBindingReceipt,
-) -> Result<(ProjectFile, PersistenceBinding), PersistenceError> {
+) -> Result<(ProjectSnapshot, PersistenceBinding), PersistenceError> {
     if receipt.project_id != session_project_id {
         return Err(PersistenceError::NativeReceiptMismatch(
             "logical project identity differs from the restored session".to_owned(),
@@ -845,7 +845,7 @@ pub(crate) fn restore_native_binding(
     else {
         return Err(PersistenceError::ExternalChange);
     };
-    if project.workspace.content.project.id().to_string() != receipt.project_id {
+    if project.file.workspace.project.id().to_string() != receipt.project_id {
         return Err(PersistenceError::NativeReceiptMismatch(
             "project file identity differs from the accepted logical project".to_owned(),
         ));

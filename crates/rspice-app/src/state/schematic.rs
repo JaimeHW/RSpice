@@ -101,8 +101,8 @@ pub use documentation_shape::{
     arc_parameters, geometry_from_points,
 };
 pub use generated_veriloga_catalog::{
-    GENERATED_VERILOGA_BINDING_SCHEMA_REVISION, generated_veriloga_devices,
-    generated_veriloga_library_binding, validate_generated_veriloga_binding,
+    generated_veriloga_devices, generated_veriloga_library_binding,
+    validate_generated_veriloga_binding,
 };
 pub use ground_names::is_ground_reference;
 pub(crate) use hierarchy::SheetMoveConnectivityPlan;

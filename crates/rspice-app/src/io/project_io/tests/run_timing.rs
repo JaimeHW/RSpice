@@ -71,9 +71,9 @@ fn negative_run_timing_is_rejected_before_project_publication() {
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     let mut project =
-        ProjectFile::new_with_simulation_results(workspace, libraries, timed_results());
+        ProjectSnapshot::new_with_simulation_results(workspace, libraries, timed_results());
     serialize_project_file(&project).unwrap();
-    project.simulation_results.runs[0].elapsed_time = -0.125;
+    project.file.simulation_results.runs[0].elapsed_time = -0.125;
     assert!(
         serialize_project_file(&project).is_err(),
         "a negative run duration cannot be published as valid evidence"

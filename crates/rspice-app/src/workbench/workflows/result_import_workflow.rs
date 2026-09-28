@@ -1440,9 +1440,9 @@ mod tests {
         let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
         let text = crate::io::project_io::serialize_project_file(&project).unwrap();
         let project = crate::io::project_io::load_project_text(&text, None).unwrap();
-        assert!(project.simulation_results_warning.is_none());
+        assert!(project.file.simulation_results_warning.is_none());
         let simulation =
-            crate::io::simulation_state_from_results(project.simulation_results).unwrap();
+            crate::io::simulation_state_from_results(project.file.simulation_results).unwrap();
         let restored = &simulation.active_run().unwrap().analyses[0];
         restored.validate_retained_evidence().unwrap();
         for (before, after) in parsed.waveforms.iter().zip(&restored.waveforms) {
@@ -1608,9 +1608,9 @@ mod tests {
         let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
         let text = crate::io::project_io::serialize_project_file(&project).unwrap();
         let project = crate::io::project_io::load_project_text(&text, None).unwrap();
-        assert!(project.simulation_results_warning.is_none());
+        assert!(project.file.simulation_results_warning.is_none());
         let simulation =
-            crate::io::simulation_state_from_results(project.simulation_results).unwrap();
+            crate::io::simulation_state_from_results(project.file.simulation_results).unwrap();
         let restored = &simulation.active_run().unwrap().analyses[0];
         restored.validate_retained_evidence().unwrap();
         assert_eq!(
@@ -1750,8 +1750,9 @@ mod tests {
             assert_eq!(
                 crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
                     .unwrap()
+                    .file
                     .simulation_results,
-                baseline.simulation_results
+                baseline.file.simulation_results
             );
         }
     }
@@ -1810,10 +1811,13 @@ mod tests {
         let text = crate::io::project_io::serialize_project_file(&project)
             .expect("imported evidence must be saveable");
         let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
-        assert!(restored.simulation_results_warning.is_none());
-        assert_eq!(restored.simulation_results, project.simulation_results);
+        assert!(restored.file.simulation_results_warning.is_none());
+        assert_eq!(
+            restored.file.simulation_results,
+            project.file.simulation_results
+        );
         let restored =
-            crate::io::simulation_state_from_results(restored.simulation_results).unwrap();
+            crate::io::simulation_state_from_results(restored.file.simulation_results).unwrap();
         let run = restored.active_run().unwrap();
         assert_eq!(run.lifecycle, SimulationRunLifecycle::LegacyUnknown);
         assert_eq!(run.elapsed_time, 0.0);
@@ -1832,8 +1836,8 @@ mod tests {
         let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
         let text = crate::io::project_io::serialize_project_file(&project).unwrap();
         let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
-        assert!(restored.simulation_results_warning.is_none());
-        let json = serde_json::to_value(&restored.simulation_results).unwrap();
+        assert!(restored.file.simulation_results_warning.is_none());
+        let json = serde_json::to_value(&restored.file.simulation_results).unwrap();
         let source = &json["runs"][0]["analyses"][0]["import_source"];
         assert_eq!(source["format"], "vcd");
         assert_eq!(source["source_name"], "capture.vcd");

@@ -1,6 +1,6 @@
 //! Capture project-document fingerprints from the application workspace.
 
-use crate::io::ProjectFile;
+use crate::io::ProjectSnapshot;
 use crate::product::ContentDigest;
 use crate::state::CellViewRef;
 use crate::workbench::state::Workspace;
@@ -20,14 +20,16 @@ thread_local! {
     pub(super) static FINGERPRINT_PASSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-pub(super) fn document_fingerprints(project: &ProjectFile) -> Result<DocumentFingerprints, String> {
+pub(super) fn document_fingerprints(
+    project: &ProjectSnapshot,
+) -> Result<DocumentFingerprints, String> {
     Ok(DocumentFingerprints::from_documents(document_digests(
         project,
     )?))
 }
 
 pub(super) fn document_fingerprints_with_results_cache(
-    project: &ProjectFile,
+    project: &ProjectSnapshot,
     cache: &ResultFingerprintCache,
 ) -> Result<DocumentFingerprints, String> {
     Ok(DocumentFingerprints::from_documents(
@@ -53,26 +55,26 @@ pub(crate) fn active_document(
     }
 }
 
-pub(crate) fn content_digest(project: &ProjectFile) -> Result<ContentDigest, String> {
+pub(crate) fn content_digest(project: &ProjectSnapshot) -> Result<ContentDigest, String> {
     document_fingerprints(project).map(|fingerprints| fingerprints.content_digest())
 }
 
 fn document_digests(
-    project: &ProjectFile,
+    project: &ProjectSnapshot,
 ) -> Result<HashMap<ProjectDocumentId, ContentDigest>, String> {
     document_digests_with_results_cache(project, None)
 }
 
 fn document_digests_with_results_cache(
-    project: &ProjectFile,
+    project: &ProjectSnapshot,
     results_cache: Option<&ResultFingerprintCache>,
 ) -> Result<HashMap<ProjectDocumentId, ContentDigest>, String> {
     #[cfg(test)]
     FINGERPRINT_PASSES.with(|passes| passes.set(passes.get() + 1));
     let mut documents = HashMap::new();
     let mut plan_payloads = project
+        .file
         .workspace
-        .content
         .simulation_plan_payloads
         .iter()
         .map(|record| (record.plan_id, &record.payload))
@@ -83,17 +85,18 @@ fn document_digests_with_results_cache(
     documents.insert(
         ProjectDocumentId::ProjectConfiguration,
         digest(&project_configuration_value(
-            &project.workspace.content.project,
-            &project.libraries,
-            &project.workspace.content.configuration_sets,
-            &project.workspace.content.design_management,
-            project.workspace.content.pdk_callback_receipts(),
+            &project.file.workspace.project,
+            &project.file.libraries,
+            &project.file.workspace.configuration_sets,
+            &project.file.workspace.design_management,
+            project.file.workspace.pdk_callback_receipts(),
         )?)?,
     );
     documents.insert(
         ProjectDocumentId::SimulationPlan,
         digest(&(
             project
+                .file
                 .execution_context
                 .as_ref()
                 .map(|context| &context.simulation_plan),
@@ -102,7 +105,7 @@ fn document_digests_with_results_cache(
     );
     documents.insert(
         ProjectDocumentId::ModelCatalog,
-        digest(&project.execution_context.as_ref().map(|context| {
+        digest(&project.file.execution_context.as_ref().map(|context| {
             (
                 &context.model_libraries,
                 &context.model_resolution_records,
@@ -114,16 +117,16 @@ fn document_digests_with_results_cache(
         ProjectDocumentId::ResultHistory,
         match results_cache {
             Some(cache) => cache.digest(
-                &project.simulation_results,
-                &project.workspace.content.report_documents,
-                &project.workspace.content.visualization_documents,
-                &project.result_presentation,
+                &project.file.simulation_results,
+                &project.file.workspace.report_documents,
+                &project.file.workspace.visualization_documents,
+                &project.file.result_presentation,
             )?,
             None => result_fingerprint::digest(
-                &project.simulation_results,
-                &project.workspace.content.report_documents,
-                &project.workspace.content.visualization_documents,
-                &project.result_presentation,
+                &project.file.simulation_results,
+                &project.file.workspace.report_documents,
+                &project.file.workspace.visualization_documents,
+                &project.file.result_presentation,
             )?,
         },
     );
@@ -133,7 +136,7 @@ fn document_digests_with_results_cache(
     // "no unsaved changes" over a library that had just been republished.
     documents.insert(
         ProjectDocumentId::StimulusLibrary,
-        digest(&project.workspace.content.stimulus_library)?,
+        digest(&project.file.workspace.stimulus_library)?,
     );
     documents.insert(
         ProjectDocumentId::VerificationSpecifications,
@@ -142,8 +145,8 @@ fn document_digests_with_results_cache(
         digest(&())?,
     );
     let code_workspace_sources = project
+        .file
         .workspace
-        .content
         .project_sources
         .iter_bundles()
         .filter(|bundle| {
@@ -156,27 +159,27 @@ fn document_digests_with_results_cache(
     documents.insert(
         ProjectDocumentId::NetlistSource,
         digest(&(
-            &project.workspace.content.netlist_source,
-            &project.workspace.content.netlist_source_path,
-            &project.workspace.content.netlist_document,
-            &project.workspace.content.netlist_descriptor,
-            &project.workspace.content.retained_netlist_decks,
+            &project.file.workspace.netlist_source,
+            &project.file.workspace.netlist_source_path,
+            &project.file.workspace.netlist_document,
+            &project.file.workspace.netlist_descriptor,
+            &project.file.workspace.retained_netlist_decks,
             code_workspace_sources,
         ))?,
     );
 
     let mut references = HashSet::new();
-    for key in project.workspace.content.schematic_buffers.keys() {
+    for key in project.file.workspace.schematic_buffers.keys() {
         if let Some(reference) = reference_from_key(key) {
             references.insert(reference);
         }
     }
-    for key in project.workspace.content.physical_layout_documents().keys() {
+    for key in project.file.workspace.physical_layout_documents().keys() {
         if let Some(reference) = reference_from_key(key) {
             references.insert(reference);
         }
     }
-    for (library_key, library) in project.libraries.libraries_by_key() {
+    for (library_key, library) in project.file.libraries.libraries_by_key() {
         for (cell_key, cell) in &library.cells {
             for view_key in cell.views.keys() {
                 references.insert(CellViewRef::new(library_key, cell_key, view_key));
@@ -185,22 +188,20 @@ fn document_digests_with_results_cache(
     }
     for reference in references {
         let schematic = project
+            .file
             .workspace
-            .content
             .schematic_buffers
             .get(&reference.key())
             .map(|schematic| SchematicDocumentContent::from(schematic.document()));
-        let physical_layout = project
-            .workspace
-            .content
-            .physical_layout_document(&reference);
+        let physical_layout = project.file.workspace.physical_layout_document(&reference);
         let view = project
+            .file
             .libraries
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
             .and_then(|cell| cell.get_view(&reference.view))
             .map(ViewDocumentContent::from);
-        let project_source = project.workspace.content.project_sources.bundle_for_owner(
+        let project_source = project.file.workspace.project_sources.bundle_for_owner(
             &crate::state::ProjectSourceOwner::cell_view(reference.clone()),
         );
         documents.insert(
@@ -400,16 +401,16 @@ mod tests {
         let mut first = super::super::snapshot(&state).expect("first snapshot");
         let mut second = first.clone();
         first
+            .file
             .workspace
-            .content
             .simulation_plan_payloads
             .push(SimulationPlanPayloadRecord {
                 plan_id: crate::product::SimulationPlanId::new(),
                 payload: Default::default(),
             });
-        second.workspace.content.simulation_plan_payloads = first
+        second.file.workspace.simulation_plan_payloads = first
+            .file
             .workspace
-            .content
             .simulation_plan_payloads
             .iter()
             .cloned()
@@ -444,7 +445,7 @@ mod tests {
                 1,
             )
             .expect("report page transaction");
-        edited.workspace.content.report_documents.push(report);
+        edited.file.workspace.report_documents.push(report);
 
         let baseline_digest = document_digests(&baseline)
             .unwrap()
@@ -467,7 +468,7 @@ mod tests {
                     "dataset_id": "b3c6b2be-c997-4f5d-a06e-714071283df5",
                     "source": {"Legacy": 7}
                 });
-                project.result_presentation = serde_json::from_value(serde_json::json!({
+                project.file.result_presentation = serde_json::from_value(serde_json::json!({
                     "result_markers": [{
                         "id": 3, "analysis": key,
                         "anchor": {"analysis": key, "trace": {
@@ -483,12 +484,12 @@ mod tests {
             // empty arrays when annotations are absent. Changing it would also
             // change generated-netlist authority for otherwise unchanged input.
             let legacy = digest(&(
-                &project.simulation_results,
-                &project.workspace.content.report_documents,
-                &project.workspace.content.visualization_documents,
-                &project.result_presentation.markers,
-                &project.result_presentation.log_y_panes,
-                &project.result_presentation.expression_groups,
+                &project.file.simulation_results,
+                &project.file.workspace.report_documents,
+                &project.file.workspace.visualization_documents,
+                &project.file.result_presentation.markers,
+                &project.file.result_presentation.log_y_panes,
+                &project.file.result_presentation.expression_groups,
             ))
             .unwrap();
             assert_eq!(
@@ -496,19 +497,20 @@ mod tests {
                 legacy
             );
             let retained = project
+                .file
                 .result_presentation
                 .markers
                 .iter()
                 .map(|marker| marker.id)
                 .max()
                 .unwrap_or(0);
-            project.result_presentation.marker_id_high_water = Some(retained);
+            project.file.result_presentation.marker_id_high_water = Some(retained);
             assert_eq!(
                 document_digests(&project).unwrap()[&ProjectDocumentId::ResultHistory],
                 legacy,
                 "an explicit, implied allocation limit preserves the legacy digest"
             );
-            project.result_presentation.marker_id_high_water = Some(retained + 1);
+            project.file.result_presentation.marker_id_high_water = Some(retained + 1);
             assert_ne!(
                 document_digests(&project).unwrap()[&ProjectDocumentId::ResultHistory],
                 legacy,

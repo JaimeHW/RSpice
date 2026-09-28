@@ -24,8 +24,24 @@ impl ProjectWorkspace {
         super::design_projection::WorkspaceProjectionSources<'a>,
         WorkspaceSourceFiles,
     > {
+        self.session
+            .project_hierarchy(&self.content, libraries, active_overlay)
+    }
+}
+
+impl super::WorkspaceSession {
+    pub(super) fn project_hierarchy<'a>(
+        &'a self,
+        content: &'a rspice_project::ProjectWorkspace,
+        libraries: &'a LibraryManager,
+        active_overlay: Option<(&'a CellViewRef, SchematicEditorRef<'a>)>,
+    ) -> rspice_project::ProjectHierarchy<
+        'a,
+        super::design_projection::WorkspaceProjectionSources<'a>,
+        WorkspaceSourceFiles,
+    > {
         rspice_project::ProjectHierarchy {
-            workspace: &self.content,
+            workspace: content,
             libraries,
             sources: super::design_projection::WorkspaceProjectionSources(&self.schematic_sessions),
             source_files: WorkspaceSourceFiles,
@@ -46,7 +62,7 @@ impl ProjectWorkspace {
     }
 }
 
-pub(super) struct WorkspaceSourceFiles;
+pub(crate) struct WorkspaceSourceFiles;
 
 impl HierarchySourceFiles for WorkspaceSourceFiles {
     fn source_paths_match(&self, left: &Path, right: &Path) -> bool {
@@ -78,6 +94,6 @@ pub(super) fn find_schematic<'a>(
         .find(|(key, _)| key.eq_ignore_ascii_case(&reference.key()))
         .map(|(key, design)| SchematicEditorRef {
             design,
-            session: workspace.schematic_sessions.get(key),
+            session: workspace.session.schematic_sessions.get(key),
         })
 }

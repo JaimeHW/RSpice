@@ -1611,9 +1611,10 @@ mod tests {
         let snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
             .expect("layout project snapshot validates");
         let encoded = serde_json::to_vec(&snapshot).expect("serialize layout project");
-        let restored: crate::io::ProjectFile =
+        let restored: crate::io::ProjectSnapshot =
             serde_json::from_slice(&encoded).expect("deserialize layout project");
         restored
+            .file
             .validate()
             .expect("restored layout project validates");
 
@@ -1621,9 +1622,9 @@ mod tests {
             serde_json::from_slice(&encoded).expect("decode layout project");
         tampered["workspace"]["physical_layout_documents"][owner.key()]["technology"]["archive_digest"] =
             serde_json::Value::String("00".repeat(32));
-        let tampered: crate::io::ProjectFile =
+        let tampered: crate::io::ProjectSnapshot =
             serde_json::from_value(tampered).expect("deserialize structurally valid tamper");
-        assert!(tampered.validate().is_err());
+        assert!(tampered.file.validate().is_err());
     }
 
     #[test]
