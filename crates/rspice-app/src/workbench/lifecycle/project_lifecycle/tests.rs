@@ -1165,7 +1165,8 @@ fn save_active_design_preserves_unpublished_live_project_descriptor() {
     assert!(
         state
             .project_lifecycle
-            .registry
+            .authority
+            .registry()
             .is_dirty(&ProjectDocumentId::ProjectConfiguration)
     );
     assert!(!active_document_is_dirty(&state));
@@ -1537,13 +1538,15 @@ fn saving_active_cell_never_dirties_project_configuration() {
     assert!(
         !state
             .project_lifecycle
-            .registry
+            .authority
+            .registry()
             .is_dirty(&ProjectDocumentId::CellView(active))
     );
     assert!(
         !state
             .project_lifecycle
-            .registry
+            .authority
+            .registry()
             .is_dirty(&ProjectDocumentId::ProjectConfiguration)
     );
     assert_eq!(

@@ -1,8 +1,14 @@
 //! Project incarnation, accepted-generation and single-operation authority.
 
+mod dirty;
+
 #[cfg(any(test, target_arch = "wasm32"))]
 use crate::persistence::BrowserBindingReceipt;
-use crate::{AcceptedProject, registry::ProjectDocumentId};
+use crate::{
+    AcceptedProject,
+    registry::{DocumentRegistry, ProjectDocumentId, ResultFingerprintCache},
+};
+
 use rspice_app_types::product::{ContentDigest, TransactionId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,6 +110,8 @@ pub struct ProjectLifecycle {
     project_open: bool,
     transaction: Option<LifecycleTransaction>,
     accepted_generation: u64,
+    registry: DocumentRegistry,
+    result_fingerprints: ResultFingerprintCache,
     #[cfg(target_arch = "wasm32")]
     browser_operation_generation: u64,
     #[cfg(target_arch = "wasm32")]
@@ -119,6 +127,8 @@ impl Default for ProjectLifecycle {
             project_open: true,
             transaction: None,
             accepted_generation: 0,
+            registry: DocumentRegistry::default(),
+            result_fingerprints: ResultFingerprintCache::default(),
             #[cfg(target_arch = "wasm32")]
             browser_operation_generation: 1,
             #[cfg(target_arch = "wasm32")]

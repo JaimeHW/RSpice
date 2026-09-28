@@ -35,4 +35,14 @@ impl AcceptedProject {
         candidate.overlay_document(working, id)?;
         Ok(candidate)
     }
+
+    pub fn apply_source_dirty_flags(&self, working: &mut crate::ProjectWorkspace) {
+        let baseline = &self.baseline.workspace;
+        working.netlist_source_dirty = working.netlist_source != baseline.netlist_source
+            || working.netlist_source_path != baseline.netlist_source_path
+            || working.netlist_document != baseline.netlist_document
+            || working.netlist_descriptor != baseline.netlist_descriptor
+            || working.retained_netlist_decks != baseline.retained_netlist_decks;
+        working.project_sources_dirty = working.project_sources != baseline.project_sources;
+    }
 }

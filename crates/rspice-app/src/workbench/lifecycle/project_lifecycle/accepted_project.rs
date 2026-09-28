@@ -9,7 +9,6 @@ use crate::io::ProjectSnapshot;
 use crate::state::{SchematicState, workspace::WorkspaceSession};
 use rspice_project::ProjectFile;
 
-use super::registry::DocumentFingerprints;
 use super::{PersistenceBinding, ProjectDocumentId, ProjectLifecycleError};
 
 #[derive(Debug)]
@@ -48,10 +47,6 @@ impl AcceptedProject {
 
     pub(super) fn baseline(&self) -> &ProjectFile {
         self.content.project.baseline()
-    }
-
-    pub(super) fn fingerprints(&self) -> Result<&DocumentFingerprints, String> {
-        self.content.project.fingerprints()
     }
 
     pub(super) fn clone_snapshot(&self) -> ProjectSnapshot {

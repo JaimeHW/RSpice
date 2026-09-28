@@ -62,10 +62,8 @@ struct BrowserConflict {
 pub(crate) struct ProjectLifecycleState {
     pub(crate) authority: ProjectLifecycle,
     accepted: Option<AcceptedProject>,
-    registry: registry::DocumentRegistry,
     unreadable_native_binding: Option<persistence::UnreadableNativeBinding>,
     result_cache: result_cache::ResultCache,
-    result_fingerprints: registry::ResultFingerprintCache,
     #[cfg(target_arch = "wasm32")]
     browser_reconnect_binding: Option<PersistenceBinding>,
     #[cfg(target_arch = "wasm32")]
@@ -233,19 +231,14 @@ pub(crate) fn generated_netlist_input_digest(
 }
 
 pub(crate) fn has_unsaved_changes(state: &AppState) -> bool {
-    if !state.project_lifecycle.is_open() {
-        return false;
-    }
-    let Some(accepted) = state.project_lifecycle.accepted.as_ref() else {
-        return true;
-    };
-    match working_fingerprints(state).map(|current| current.content_digest()) {
-        Ok(current) => accepted
-            .fingerprints()
-            .map(|baseline| current != baseline.content_digest())
-            .unwrap_or(true),
-        Err(_) => true,
-    }
+    state.project_lifecycle.authority.has_unsaved_changes(
+        state
+            .project_lifecycle
+            .accepted
+            .as_ref()
+            .map(AcceptedProject::content),
+        || capture_snapshot(state, SnapshotContent::Current).map(|snapshot| snapshot.file),
+    )
 }
 
 pub(crate) fn operation_in_progress(state: &AppState) -> bool {
@@ -273,58 +266,43 @@ pub(crate) fn active_document(state: &AppState) -> ProjectDocumentId {
 }
 
 pub(crate) fn active_document_is_dirty(state: &AppState) -> bool {
-    if state.project_lifecycle.accepted.is_none() {
-        return state.project_lifecycle.is_open();
-    }
-    current_registry(state)
-        .map(|registry| registry.is_dirty(&active_document(state)))
-        .unwrap_or(true)
+    state.project_lifecycle.authority.document_is_dirty(
+        state
+            .project_lifecycle
+            .accepted
+            .as_ref()
+            .map(AcceptedProject::content),
+        || active_document(state),
+        || capture_snapshot(state, SnapshotContent::Current).map(|snapshot| snapshot.file),
+    )
 }
 
 pub(crate) fn refresh_registry(state: &mut AppState) -> Result<(), ProjectLifecycleError> {
-    if !state.project_lifecycle.is_open() {
-        state.project_lifecycle.registry = registry::DocumentRegistry::default();
-        return Ok(());
-    }
-    match current_registry(state) {
-        Ok(registry) => state.project_lifecycle.registry = registry,
-        Err(error) => {
-            state.project_lifecycle.registry.invalidate();
-            apply_registry_dirty_flags(state);
-            return Err(error);
-        }
-    }
-    apply_registry_dirty_flags(state);
-    Ok(())
-}
-
-fn working_fingerprints(
-    state: &AppState,
-) -> Result<registry::DocumentFingerprints, ProjectLifecycleError> {
-    let current = capture_snapshot(state, SnapshotContent::Current)?;
-    registry::document_fingerprints_with_results_cache(
-        &current.file,
-        &state.project_lifecycle.result_fingerprints,
-    )
-    .map_err(ProjectLifecycleError::InvalidState)
-}
-
-fn current_registry(state: &AppState) -> Result<registry::DocumentRegistry, ProjectLifecycleError> {
-    let current = working_fingerprints(state)?;
-    let accepted = state
+    let comparison = state.project_lifecycle.authority.prepare_registry_refresh(
+        state
+            .project_lifecycle
+            .accepted
+            .as_ref()
+            .map(AcceptedProject::content),
+        || capture_snapshot(state, SnapshotContent::Current).map(|snapshot| snapshot.file),
+    );
+    let result = state
         .project_lifecycle
-        .accepted
-        .as_ref()
-        .map(AcceptedProject::fingerprints)
-        .transpose()
-        .map_err(ProjectLifecycleError::InvalidState)?;
-    let mut registry = registry::DocumentRegistry::default();
-    registry.rebuild_from_fingerprints(&current, accepted);
-    Ok(registry)
+        .authority
+        .finish_registry_refresh(comparison);
+    if state.project_lifecycle.is_open() {
+        apply_registry_dirty_flags(state);
+    }
+    result
 }
 
 fn apply_registry_dirty_flags(state: &mut AppState) {
-    if state.project_lifecycle.registry.comparison_failed() {
+    if state
+        .project_lifecycle
+        .authority
+        .registry()
+        .comparison_failed()
+    {
         // The working draft could not be compared with accepted content.
         // Preserve its authorship and show pending changes until a successful
         // refresh can establish which documents are actually clean.
@@ -345,7 +323,8 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
     }
     let cell_dirty = state
         .project_lifecycle
-        .registry
+        .authority
+        .registry()
         .records()
         .iter()
         .filter_map(|record| match &record.id {
@@ -385,18 +364,13 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
     // the very edit that lit it.
     state.workspace.content.project_metadata_dirty = state
         .project_lifecycle
-        .registry
+        .authority
+        .registry()
         .is_dirty(&ProjectDocumentId::ProjectConfiguration);
     if let Some(accepted) = state.project_lifecycle.accepted.as_ref() {
-        let baseline = &accepted.baseline().workspace;
-        state.workspace.content.netlist_source_dirty = state.workspace.content.netlist_source
-            != baseline.netlist_source
-            || state.workspace.content.netlist_source_path != baseline.netlist_source_path
-            || state.workspace.content.netlist_document != baseline.netlist_document
-            || state.workspace.content.netlist_descriptor != baseline.netlist_descriptor
-            || state.workspace.content.retained_netlist_decks != baseline.retained_netlist_decks;
-        state.workspace.content.project_sources_dirty =
-            state.workspace.content.project_sources != baseline.project_sources;
+        accepted
+            .content()
+            .apply_source_dirty_flags(&mut state.workspace.content);
     }
 }
 
@@ -1174,8 +1148,7 @@ fn finish_successful_save(
     ) {
         Ok(registry) => registry,
         Err(error) => {
-            let mut registry = state.project_lifecycle.registry.clone();
-            registry.invalidate();
+            let registry = state.project_lifecycle.authority.unverified_registry();
             state.push_user_message(ConsoleMessage::warning(format!(
                 "The saved snapshot was accepted, but the current draft could not be compared with it: {error}. Current edits remain pending; resolve the draft error before saving or closing."
             )));
@@ -1191,33 +1164,13 @@ fn prepare_post_save_registry(
     scope: SaveScope,
     content: SnapshotContent,
 ) -> Result<registry::DocumentRegistry, ProjectLifecycleError> {
-    #[cfg(not(target_arch = "wasm32"))]
-    let mut current = capture_snapshot(state, content)?;
-    #[cfg(target_arch = "wasm32")]
     let current = capture_snapshot(state, content)?;
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        if scope == SaveScope::AllDocuments
-            || active_document(state) == ProjectDocumentId::ProjectConfiguration
-        {
-            current.file.workspace.project = candidate.file.workspace.project.clone();
-        } else {
-            current.file.workspace.project.path = candidate.file.workspace.project.path.clone();
-        }
-    }
-    #[cfg(target_arch = "wasm32")]
-    let _ = scope;
-    let mut post_save_registry = registry::DocumentRegistry::default();
-    let cache = &state.project_lifecycle.result_fingerprints;
-    let candidate_fingerprints =
-        registry::document_fingerprints_with_results_cache(&candidate.file, cache)
-            .map_err(ProjectLifecycleError::InvalidState)?;
-    let current_fingerprints =
-        registry::document_fingerprints_with_results_cache(&current.file, cache)
-            .map_err(ProjectLifecycleError::InvalidState)?;
-    post_save_registry
-        .rebuild_from_fingerprints(&current_fingerprints, Some(&candidate_fingerprints));
-    Ok(post_save_registry)
+    state
+        .project_lifecycle
+        .authority
+        .prepare_post_save_registry(current.file, &candidate.file, scope, || {
+            active_document(state)
+        })
 }
 
 fn rebase_pending_operation_dirty_state(
@@ -1328,7 +1281,10 @@ fn adopt_successful_save(
     // Native publication requires a fully built comparison. A browser write
     // may finish while the newer draft is invalid; its registry then marks
     // comparisons unverified. Neither case can erase pending authored edits.
-    state.project_lifecycle.registry = post_save_registry;
+    state
+        .project_lifecycle
+        .authority
+        .adopt_registry(post_save_registry);
     apply_registry_dirty_flags(state);
     report_design_checks_after_save(state);
 }
@@ -1705,22 +1661,14 @@ fn revert_document_in_place(
 /// nothing to diff against: its configuration stands for the whole unsaved
 /// project, as one document.
 pub(crate) fn dirty_documents(state: &AppState) -> Vec<ProjectDocumentId> {
-    if state.project_lifecycle.accepted.is_none() {
-        return if state.project_lifecycle.is_open() {
-            vec![ProjectDocumentId::ProjectConfiguration]
-        } else {
-            Vec::new()
-        };
-    }
-    let Ok(registry) = current_registry(state) else {
-        return vec![ProjectDocumentId::ProjectConfiguration];
-    };
-    registry
-        .records()
-        .iter()
-        .filter(|record| record.dirty)
-        .map(|record| record.id.clone())
-        .collect()
+    state.project_lifecycle.authority.dirty_documents(
+        state
+            .project_lifecycle
+            .accepted
+            .as_ref()
+            .map(AcceptedProject::content),
+        || capture_snapshot(state, SnapshotContent::Current).map(|snapshot| snapshot.file),
+    )
 }
 
 pub(crate) fn dirty_document_count(state: &AppState) -> usize {

@@ -148,7 +148,7 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
         );
         let accepted = state.project_lifecycle.accepted().unwrap();
         assert_eq!(
-            accepted.fingerprints().unwrap().content_digest(),
+            accepted.content().fingerprints().unwrap().content_digest(),
             candidate_content
         );
         assert_eq!(accepted.binding.as_ref().unwrap().accepted_digest(), digest);
@@ -171,7 +171,8 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
         assert!(
             state
                 .project_lifecycle
-                .registry
+                .authority
+                .registry()
                 .is_dirty(&ProjectDocumentId::SimulationPlan)
         );
         for continuation_scope in [SaveScope::AllDocuments, SaveScope::ActiveDocument] {
@@ -189,7 +190,8 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
         assert!(
             !state
                 .project_lifecycle
-                .registry
+                .authority
+                .registry()
                 .is_dirty(&ProjectDocumentId::SimulationPlan)
         );
         assert!(active_document_is_dirty(&state));
@@ -238,7 +240,8 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
     assert!(
         state
             .project_lifecycle
-            .registry
+            .authority
+            .registry()
             .records()
             .iter()
             .all(|record| record.dirty)
@@ -246,7 +249,8 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
     assert!(
         state
             .project_lifecycle
-            .registry
+            .authority
+            .registry()
             .is_dirty(&ProjectDocumentId::CellView(CellViewRef::new(
                 "new",
                 "uncompared",
@@ -284,7 +288,8 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
     assert!(
         state
             .project_lifecycle
-            .registry
+            .authority
+            .registry()
             .records()
             .iter()
             .all(|record| !record.dirty)

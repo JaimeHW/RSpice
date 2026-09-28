@@ -40,13 +40,13 @@ fn accepted_snapshot_clones_share_content_and_edits_cannot_change_their_fingerpr
         .workbench
         .activate(crate::workbench::state::Workspace::Design);
     let accepted = AcceptedProject::new(snapshot(&state).unwrap(), None);
-    let original_digest = accepted.fingerprints().unwrap().content_digest();
+    let original_digest = accepted.content().fingerprints().unwrap().content_digest();
     registry::FINGERPRINT_PASSES.with(|passes| passes.set(0));
     let retained = accepted.clone();
     assert!(std::ptr::eq(accepted.baseline(), retained.baseline()));
     assert!(std::ptr::eq(
-        accepted.fingerprints().unwrap(),
-        retained.fingerprints().unwrap()
+        accepted.content().fingerprints().unwrap(),
+        retained.content().fingerprints().unwrap()
     ));
     assert_eq!(registry::FINGERPRINT_PASSES.with(std::cell::Cell::get), 0);
     state.project_lifecycle.accepted = Some(accepted);
@@ -58,7 +58,7 @@ fn accepted_snapshot_clones_share_content_and_edits_cannot_change_their_fingerpr
     assert!(active_document_is_dirty(&state));
     assert_eq!(dirty_document_count(&state), 1);
     assert_eq!(
-        retained.fingerprints().unwrap().content_digest(),
+        retained.content().fingerprints().unwrap().content_digest(),
         original_digest
     );
     assert!(state.schematic.undo());
@@ -72,11 +72,11 @@ fn accepted_snapshot_clones_share_content_and_edits_cannot_change_their_fingerpr
     let current = state.project_lifecycle.accepted().unwrap();
     assert!(!std::ptr::eq(current.baseline(), retained.baseline()));
     assert_ne!(
-        current.fingerprints().unwrap().content_digest(),
+        current.content().fingerprints().unwrap().content_digest(),
         original_digest
     );
     assert_eq!(
-        retained.fingerprints().unwrap().content_digest(),
+        retained.content().fingerprints().unwrap().content_digest(),
         original_digest
     );
 }

@@ -50,7 +50,16 @@ fn unchanged_dirty_queries_do_not_rebuild_validate_or_hash_retained_results() {
         let mut oracle = snapshot(&state).unwrap();
         oracle.file.simulation_results = crate::io::capture_simulation_results(&state.simulation);
         assert_eq!(
-            working_fingerprints(&state).unwrap().content_digest(),
+            state
+                .project_lifecycle
+                .authority
+                .working_fingerprints(
+                    &capture_snapshot(&state, SnapshotContent::Current)
+                        .unwrap()
+                        .file
+                )
+                .unwrap()
+                .content_digest(),
             registry::content_digest(&oracle.file).unwrap()
         );
     }
@@ -193,7 +202,16 @@ fn result_fingerprint_cache_preserves_signed_zero_in_annotation_edits() {
     assert!(has_unsaved_changes(&state));
     let current = snapshot(&state).unwrap();
     assert_eq!(
-        working_fingerprints(&state).unwrap().content_digest(),
+        state
+            .project_lifecycle
+            .authority
+            .working_fingerprints(
+                &capture_snapshot(&state, SnapshotContent::Current)
+                    .unwrap()
+                    .file
+            )
+            .unwrap()
+            .content_digest(),
         registry::content_digest(&current.file).unwrap()
     );
     state.ui.results.markers[0].x = 0.0;
