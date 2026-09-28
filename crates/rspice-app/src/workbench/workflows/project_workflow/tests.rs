@@ -1648,7 +1648,7 @@ fn a_disagreeing_legacy_corner_run_space_is_reported_on_load() {
         "the dropped declaration must reach the console the load reports through"
     );
     assert!(
-        state.sim_setup.session.legacy_run_set_notes.is_empty(),
+        state.sim_setup.legacy_run_set_notes.is_empty(),
         "the record is drained once it has been reported"
     );
 }

@@ -10,11 +10,7 @@
 pub(in crate::workbench) mod analysis_drafts;
 pub(in crate::workbench) mod plan_catalog;
 
-use std::collections::HashSet;
-
-pub use rspice_simulation_contract::legacy_plan_migration::NoiseSetup;
-use rspice_simulation_contract::legacy_plan_migration::default_global_run_set;
-use rspice_simulation_contract::run_set::{ReferencePoint, RunSetDimensionKind};
+use rspice_simulation_contract::run_set::ReferencePoint;
 
 /// The nominal/reference operating point selected in the workbench chrome.
 ///
@@ -32,8 +28,6 @@ pub use rspice_simulation_contract::drafts::{AcSetup, DcSetup, TranSetup};
 /// persisted simulation plan.
 #[derive(Debug, Clone, Default)]
 pub struct SimSetupEditorSession {
-    /// One-shot migration evidence shown beside a project load.
-    pub legacy_run_set_notes: Vec<String>,
     /// Draft buffers edited before effective solver options are committed.
     pub options_draft: crate::simulation::dialog::OptionsDialogState,
     /// Add-analysis palette visibility and keyboard interaction state.
@@ -43,192 +37,50 @@ pub struct SimSetupEditorSession {
     pub palette_scroll_to_active: bool,
 }
 
-/// Workbench setup: a portable project document plus transient editor state.
+/// Workbench setup: portable simulation state plus transient editor state.
 #[derive(Debug, Clone, Default)]
 pub struct SimSetupState {
-    document: rspice_simulation_contract::setup_document::SimulationSetupDocument,
-    /// Enabled analysis indices.
-    pub enabled: HashSet<usize>,
-    /// Stable execution order. Enabled analyses absent from this vector are
-    /// appended deterministically; disabled entries are ignored and removed
-    /// from the persisted normalized plan.
-    pub analysis_order: Vec<usize>,
-    /// Transient sweep.
-    pub tran: TranSetup,
-    /// AC sweep.
-    pub ac: AcSetup,
-    /// DISTO secondary tone ratio f2/f1 (empty = single-tone HD).
-    pub disto_f2_over_f1: String,
-    /// DC transfer sweep.
-    pub dc: DcSetup,
-    /// Noise analysis.
-    pub noise: NoiseSetup,
-    /// DC operating point.
-    pub op: rspice_simulation_contract::op_draft::OpDialogState,
-    /// Pole-zero extraction.
-    pub pz: rspice_simulation_contract::pz_draft::PzDialogState,
-    /// Sensitivity.
-    pub sens: rspice_simulation_contract::sens_draft::SensDialogState,
-    /// Monte Carlo.
-    pub mc: rspice_simulation_contract::mc_draft::McDialogState,
-    /// Periodic steady state.
-    pub pss: rspice_simulation_contract::pss_draft::PssDialogState,
-    /// Loop stability.
-    pub stb: rspice_simulation_contract::stb_draft::StbDialogState,
-    /// Temperature sweep.
-    pub temp: rspice_simulation_contract::temp_draft::TempDialogState,
-    /// Harmonic balance.
-    pub hb: rspice_simulation_contract::hb_draft::HbDialogState,
-    /// S-parameters.
-    pub sp: rspice_simulation_contract::sp_draft::SpDialogState,
-    /// Periodic AC.
-    pub pac: rspice_simulation_contract::pac_draft::PacDialogState,
-    /// Periodic noise.
-    pub pnoise: rspice_simulation_contract::pnoise_draft::PnoiseDialogState,
-    /// Periodic transfer.
-    pub pxf: rspice_simulation_contract::pxf_draft::PxfDialogState,
-    /// Periodic stability.
-    pub pstb: rspice_simulation_contract::pstb_draft::PstbDialogState,
-    /// Transfer function.
-    pub xf: rspice_simulation_contract::xf_draft::XfDialogState,
-    /// Process corners.
-    pub corner: rspice_simulation_contract::corner_draft::CornerDialogState,
-    /// Envelope transient.
-    pub envelope: rspice_simulation_contract::envelope_draft::EnvelopeDialogState,
-    /// Fourier.
-    pub fourier: rspice_simulation_contract::fourier_draft::FourierDialogState,
-    /// Optimization.
-    pub optimization: rspice_simulation_contract::optimization_draft::OptimizationDialogState,
-    /// Safe operating area.
-    pub soa: rspice_simulation_contract::soa_draft::SoaDialogState,
-    /// Analyses listed in the run-set card beyond the always-listed core —
-    /// exotics stay listed (dimmed) when unticked, until removed.
-    pub listed: HashSet<usize>,
+    pub(crate) setup: rspice_simulation_contract::setup_state::SimulationSetup,
     pub session: SimSetupEditorSession,
 }
 
 impl std::ops::Deref for SimSetupState {
-    type Target = rspice_simulation_contract::setup_document::SimulationSetupDocument;
+    type Target = rspice_simulation_contract::setup_state::SimulationSetup;
 
     fn deref(&self) -> &Self::Target {
-        &self.document
+        &self.setup
     }
 }
 
 impl std::ops::DerefMut for SimSetupState {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.document
+        &mut self.setup
     }
 }
 
 impl serde::Serialize for SimSetupState {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serde::Serialize::serialize(&self.document, serializer)
+        serde::Serialize::serialize(&self.setup, serializer)
     }
 }
 
 impl<'de> serde::Deserialize<'de> for SimSetupState {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let read = <rspice_simulation_contract::setup_document::legacy_read::LegacySimulationSetupRead as serde::Deserialize>::deserialize(deserializer)?;
-        let rspice_simulation_contract::setup_document::legacy_read::LegacySimulationSetupRead {
-            reference_pvt,
-            run_set,
-            model_bindings,
-            save_policy,
-            active_plan_name,
-            active_plan_lineage,
-            inactive_plans,
-            analysis_plan,
-            options,
-            enabled,
-            analysis_order,
-            tran,
-            ac,
-            disto_f2_over_f1,
-            dc,
-            noise,
-            op,
-            pz,
-            sens,
-            mc,
-            pss,
-            stb,
-            temp,
-            hb,
-            sp,
-            pac,
-            pnoise,
-            pxf,
-            pstb,
-            xf,
-            corner,
-            envelope,
-            fourier,
-            optimization,
-            soa,
-            listed,
-        } = read;
         Ok(Self {
-            document: rspice_simulation_contract::setup_document::SimulationSetupDocument {
-                reference_pvt,
-                run_set,
-                model_bindings,
-                save_policy,
-                active_plan_name,
-                active_plan_lineage,
-                inactive_plans,
-                analysis_plan,
-                options,
-            },
-            enabled,
-            analysis_order,
-            tran,
-            ac,
-            disto_f2_over_f1,
-            dc,
-            noise,
-            op,
-            pz,
-            sens,
-            mc,
-            pss,
-            stb,
-            temp,
-            hb,
-            sp,
-            pac,
-            pnoise,
-            pxf,
-            pstb,
-            xf,
-            corner,
-            envelope,
-            fourier,
-            optimization,
-            soa,
-            listed,
+            setup: serde::Deserialize::deserialize(deserializer)?,
             session: SimSetupEditorSession::default(),
         })
     }
 }
 
 impl SimSetupState {
-    /// Fresh setup with the conventional default run set — a transient —
-    /// so a new project's Run button works out of the box (the engine no
-    /// longer falls back to the selected row on an empty set).
+    /// Fresh setup with the conventional default transient run set.
     pub fn new() -> Self {
-        let mut setup = Self::default();
-        setup.document.analysis_plan = Some(crate::simulation::plan::SimulationPlan::new());
-        setup.document.run_set = default_global_run_set();
-        setup
-            .set_reference_pvt(crate::product::ProcessCorner::TT, 27.0)
-            .expect("the built-in reference PVT point is valid");
-        setup
-            .enabled
-            .insert(crate::workbench::simulation_analysis_tabs::TAB_TRANSIENT);
-        setup
-            .analysis_order
-            .push(crate::workbench::simulation_analysis_tabs::TAB_TRANSIENT);
+        let mut setup = Self {
+            setup: rspice_simulation_contract::setup_state::SimulationSetup::new(),
+            session: SimSetupEditorSession::default(),
+        };
+        setup.session.options_draft.temp = setup.reference_pvt.temperature_celsius.to_string();
         setup
     }
 
@@ -252,90 +104,26 @@ impl SimSetupState {
         setup
     }
 
-    /// Rebuild transient editing state after a persisted plan is restored.
+    /// Rebuild portable setup state and the current editor session after load.
     pub(crate) fn prepare_after_restore(&mut self) {
-        if let Some(plan) = &mut self.analysis_plan {
-            plan.prepare_after_restore();
-        }
-        self.prepare_plan_catalog_after_restore();
-        self.op.initialized = true;
-        self.pz.initialized = true;
-        self.sens.initialized = true;
-        self.mc.initialized = true;
-        self.pss.initialized = true;
-        self.stb.initialized = true;
-        self.temp.initialized = true;
-        self.hb.initialized = true;
-        self.sp.initialized = true;
-        self.pac.initialized = true;
-        self.pnoise.initialized = true;
-        self.pxf.initialized = true;
-        self.pstb.initialized = true;
-        self.xf.prepare_after_restore();
-        self.corner.initialized = true;
-        self.envelope.initialized = true;
-        self.fourier.initialized = true;
-        self.optimization.initialized = true;
-        self.soa.initialized = true;
+        self.setup.prepare_after_restore();
         self.session.options_draft =
             crate::simulation::dialog::OptionsDialogState::from_options(&self.options);
         self.session.palette_open = false;
         self.session.palette_query.clear();
         self.session.palette_active = 0;
         self.session.palette_scroll_to_active = false;
-        self.refresh_legacy_analysis_projections();
     }
 
-    /// Select the nominal/reference PVT point consumed by subsequent runs.
+    /// Select nominal PVT and update the session's numerical-options draft.
     pub fn set_reference_pvt(
         &mut self,
         process: crate::product::ProcessCorner,
         temperature_celsius: f64,
     ) -> Result<(), String> {
-        if !temperature_celsius.is_finite() {
-            return Err("Reference temperature must be finite".to_owned());
-        }
-        if temperature_celsius <= -273.15 {
-            return Err("Reference temperature must be above absolute zero".to_owned());
-        }
-
-        self.reference_pvt = ReferencePvtPoint {
-            process,
-            temperature_celsius,
-        };
-        self.options.temp = temperature_celsius;
+        self.setup.set_reference_pvt(process, temperature_celsius)?;
         self.session.options_draft.temp = temperature_celsius.to_string();
-        self.op.ensure_initialized();
-        self.op.temperature = temperature_celsius.to_string();
         Ok(())
-    }
-
-    /// Every temperature this run set asks the engine for, in °C.
-    ///
-    /// The same rule the corner projection uses: a declared temperature axis
-    /// is the request, and without one the reference point is the request —
-    /// exactly once, because a plan with no axis runs at one temperature. It
-    /// is stated here so a surface asking "is this corner qualified for what
-    /// we are about to run" reads the run set rather than guessing from the
-    /// reference point alone.
-    #[must_use]
-    pub fn requested_temperatures_celsius(&self) -> Vec<f64> {
-        match self
-            .run_set
-            .enabled_dimension_of(RunSetDimensionKind::Temperature)
-        {
-            Some(dimension) => dimension.canonical_values(),
-            None => vec![self.reference_pvt.temperature_celsius],
-        }
-    }
-
-    /// Commit globally validated options while keeping the workbench reference
-    /// point and OP editor aligned with the temperature the solver will use.
-    pub fn commit_options(&mut self, options: &crate::simulation::dialog::SimulationOptions) {
-        self.options = options.clone();
-        self.reference_pvt.temperature_celsius = options.temp;
-        self.op.ensure_initialized();
-        self.op.temperature = options.temp.to_string();
     }
 
     /// One-line mono summary of an analysis configuration, for list rows.

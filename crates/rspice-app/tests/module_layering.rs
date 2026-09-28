@@ -747,7 +747,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // which still lives in the dialogs tree.
     ("app_state", "app", 4),
     ("app_state", "commands", 1),
-    ("app_state", "simulation_analysis_tabs", 2),
     ("app_state", "workflows/file_workflow", 1),
     ("app_state", "workflows/project_workflow", 1),
     // What still reaches the application root rather than the session data.

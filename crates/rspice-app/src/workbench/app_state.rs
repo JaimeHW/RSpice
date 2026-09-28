@@ -51,7 +51,7 @@ pub use sim_setup::plan_catalog::{
     SimulationPlanCloneOptions, SimulationPlanLineage, SimulationPlanName,
 };
 pub use sim_setup::{
-    AcSetup, DcSetup, NoiseSetup, ReferencePvtPoint, SimSetupState, SimulationSavePolicy, TranSetup,
+    AcSetup, DcSetup, ReferencePvtPoint, SimSetupState, SimulationSavePolicy, TranSetup,
 };
 
 /// Exact owner of one mutable specialized-viewer cache.

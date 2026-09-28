@@ -14,9 +14,8 @@ impl SimSetupState {
         &mut self,
         name: impl Into<String>,
     ) -> Result<SimulationPlanId, SimulationPlanCatalogError> {
-        let id = self.document.create_plan(name)?;
+        let id = self.setup.create_plan(name)?;
         self.reset_plan_editor_transients();
-        self.refresh_legacy_analysis_projections();
         Ok(id)
     }
 
@@ -24,9 +23,8 @@ impl SimSetupState {
         &mut self,
         document: SimulationPlanImportDocument,
     ) -> Result<SimulationPlanCloneOutcome, SimulationPlanCatalogError> {
-        let outcome = self.document.import_plan(document)?;
+        let outcome = self.setup.import_plan(document)?;
         self.reset_plan_editor_transients();
-        self.refresh_legacy_analysis_projections();
         Ok(outcome)
     }
 
@@ -35,9 +33,8 @@ impl SimSetupState {
         new_name: impl Into<String>,
         contents: SimulationPlanCloneOptions,
     ) -> Result<SimulationPlanCloneOutcome, SimulationPlanCatalogError> {
-        let outcome = self.document.clone_active_plan(new_name, contents)?;
+        let outcome = self.setup.clone_active_plan(new_name, contents)?;
         self.reset_plan_editor_transients();
-        self.refresh_legacy_analysis_projections();
         Ok(outcome)
     }
 
@@ -45,11 +42,10 @@ impl SimSetupState {
         &mut self,
         id: SimulationPlanId,
     ) -> Result<(), SimulationPlanCatalogError> {
-        let previous = self.document.analysis_plan.as_ref().map(|plan| plan.id());
-        self.document.activate_plan(id)?;
+        let previous = self.setup.analysis_plan.as_ref().map(|plan| plan.id());
+        self.setup.activate_plan(id)?;
         if previous != Some(id) {
             self.reset_plan_editor_transients();
-            self.refresh_legacy_analysis_projections();
         }
         Ok(())
     }

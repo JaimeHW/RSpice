@@ -1,8 +1,8 @@
 //! Stable persisted simulation setup document.
 //!
 //! Only these nine plan fields are written to new projects. Schema-3 singleton
-//! drafts are read by the dedicated legacy adapter and live in the workbench
-//! session until projected into the stable analysis plan.
+//! drafts are read by the dedicated legacy adapter and retained in portable
+//! setup compatibility state until projected into the stable analysis plan.
 
 mod catalog;
 pub mod legacy_read;
