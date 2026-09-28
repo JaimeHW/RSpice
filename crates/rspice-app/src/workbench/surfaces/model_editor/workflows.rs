@@ -46,7 +46,7 @@ pub(super) fn save_revision_workflow(
     app: &mut RSpiceApp,
     request: &super::super::super::commands::ModelEditorWorkflowRequest,
 ) {
-    let writable = app.state.project_lifecycle.project_open
+    let writable = app.state.project_lifecycle.is_open()
         && !app.state.workbench.safe_mode.project_read_only()
         && app
             .state

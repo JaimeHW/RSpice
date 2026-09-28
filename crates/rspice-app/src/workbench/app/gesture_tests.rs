@@ -17,7 +17,7 @@ impl Fixture {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.project_open = true;
+        app.state.project_lifecycle.authority.open_session();
         app.state.workbench.activate(Workspace::Design);
         app.state.schematic = SchematicState::default();
         app.state.schematic.session.needs_fit = false;

@@ -11,9 +11,15 @@ pub(crate) use browser::*;
 use std::path::Path;
 use std::path::PathBuf;
 
-use sha2::{Digest as _, Sha256};
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) use rspice_project::persistence::BrowserBindingBackend;
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_project::persistence::PersistenceError;
+pub(crate) use rspice_project::persistence::{
+    BrowserBindingReceipt, NativeBindingReceipt, digest_bytes, serialized_project,
+};
 
-use crate::io::{ProjectIoError, ProjectSnapshot};
+use crate::io::ProjectSnapshot;
 use crate::product::ContentDigest;
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -24,40 +30,6 @@ const MAX_EXACT_BROWSER_GENERATION: u64 = (1_u64 << 53) - 1;
 const BROWSER_BINDING_DATABASE: &str = "rspice-project-bindings";
 #[cfg(target_arch = "wasm32")]
 const BROWSER_BINDING_STORE: &str = "canonical-file-handles";
-
-/// Storage surface that owns the canonical browser bytes.  The opaque
-/// binding UUID is deliberately independent of the logical project UUID so
-/// forks, duplicate projects, and multiple browser tabs cannot alias one
-/// another's persistence authority.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub(crate) enum BrowserBindingBackend {
-    ExternalFile,
-    Opfs,
-}
-
-/// Durable session receipt for a browser canonical binding.  A restored
-/// IndexedDB/OPFS record must match every field before it may become an
-/// accepted baseline; a different generation or digest is a conflict, not a
-/// silently upgraded baseline.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct BrowserBindingReceipt {
-    pub(crate) binding_id: uuid::Uuid,
-    pub(crate) project_id: String,
-    pub(crate) accepted_generation: u64,
-    pub(crate) accepted_digest: ContentDigest,
-    pub(crate) backend: BrowserBindingBackend,
-}
-
-/// Exact native canonical-file authority persisted with the working session.
-/// A remembered pathname is only a convenience; restart restoration requires
-/// this path, logical project identity, and content digest to match together.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct NativeBindingReceipt {
-    pub(crate) canonical_path: PathBuf,
-    pub(crate) project_id: String,
-    pub(crate) accepted_digest: ContentDigest,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PersistenceBinding {
@@ -187,36 +159,6 @@ impl PersistenceBinding {
             } => *accepted_digest,
         }
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum PersistenceError {
-    #[cfg(not(target_arch = "wasm32"))]
-    #[error(
-        "the project changed outside RSpice; reload it or save a project copy before overwriting external changes"
-    )]
-    ExternalChange,
-    #[cfg(not(target_arch = "wasm32"))]
-    #[error("native canonical binding receipt mismatch: {0}")]
-    NativeReceiptMismatch(String),
-    #[error(transparent)]
-    Project(#[from] ProjectIoError),
-    #[cfg(not(target_arch = "wasm32"))]
-    #[error("{0}")]
-    Platform(String),
-}
-
-pub(crate) fn serialized_project(
-    project: &ProjectSnapshot,
-) -> Result<(Vec<u8>, ContentDigest), PersistenceError> {
-    let contents = crate::io::project_io::serialize_project_file(project)?;
-    let bytes = contents.into_bytes();
-    let digest = digest_bytes(&bytes);
-    Ok((bytes, digest))
-}
-
-pub(crate) fn digest_bytes(bytes: &[u8]) -> ContentDigest {
-    ContentDigest::from_bytes(Sha256::digest(bytes).into())
 }
 
 #[cfg(target_arch = "wasm32")]

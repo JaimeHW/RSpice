@@ -245,7 +245,7 @@ fn prepare_pdk_configuration(
     ),
     Vec<String>,
 > {
-    if state.project_lifecycle.project_open && state.workbench.safe_mode.project_read_only() {
+    if state.project_lifecycle.is_open() && state.workbench.safe_mode.project_read_only() {
         return Err(vec![
             "PDK settings cannot change while the project is read-only.".to_owned(),
         ]);
@@ -310,7 +310,7 @@ fn publish_prepared_pdk_configuration_with_persistence(
         )]
     })?;
 
-    let publication = if state.project_lifecycle.project_open {
+    let publication = if state.project_lifecycle.is_open() {
         publish_model_library_set_candidate(state, candidate, "apply configured PDK model sources")
             .map(|_| ())
     } else {
@@ -631,7 +631,7 @@ impl RSpiceApp {
         ctx: &Context,
         config: crate::state::pdk_config::PdkConfig,
     ) {
-        if self.state.project_lifecycle.project_open
+        if self.state.project_lifecycle.is_open()
             && self.state.workbench.safe_mode.project_read_only()
         {
             emit_pdk_apply_messages(
@@ -892,7 +892,7 @@ fn capture_native_model_import_authority(state: &AppState) -> NativeModelImportA
     NativeModelImportAuthority {
         project_id: state
             .project_lifecycle
-            .project_open
+            .is_open()
             .then(|| state.workspace.content.project.id().to_string()),
         project_revision: state.workspace.content.project.revision().get(),
         catalog_digest: state.model_library_manager.execution_catalog_digest(),
@@ -907,7 +907,7 @@ fn native_model_import_authority_is_current(
     authority.project_id
         == state
             .project_lifecycle
-            .project_open
+            .is_open()
             .then(|| state.workspace.content.project.id().to_string())
         && authority.project_revision == state.workspace.content.project.revision().get()
         && authority.catalog_digest == state.model_library_manager.execution_catalog_digest()
@@ -1036,7 +1036,7 @@ fn publish_native_model_catalog_library(
             ]);
         }
     };
-    let revision = if state.project_lifecycle.project_open {
+    let revision = if state.project_lifecycle.is_open() {
         Some(
             publish_model_library_candidate(state, candidate, library_name, reason)
                 .map_err(|error| vec![error])?,
@@ -1448,7 +1448,7 @@ fn start_browser_model_import(
     let authority = BrowserModelImportAuthority {
         project_id: state
             .project_lifecycle
-            .project_open
+            .is_open()
             .then(|| state.workspace.content.project.id().to_string()),
         project_revision: state.workspace.content.project.revision().get(),
         catalog_digest: state.model_library_manager.execution_catalog_digest(),
@@ -1603,7 +1603,7 @@ impl RSpiceApp {
             project_id: self
                 .state
                 .project_lifecycle
-                .project_open
+                .is_open()
                 .then(|| self.state.workspace.content.project.id().to_string()),
             project_revision: self.state.workspace.content.project.revision().get(),
             catalog_digest: self.state.model_library_manager.execution_catalog_digest(),
@@ -1656,7 +1656,7 @@ fn poll_browser_model_hub_operations(
                 // machine landed regardless of what the project did.
                 let current = state
                     .project_lifecycle
-                    .project_open
+                    .is_open()
                     .then(|| state.workspace.content.project.id().to_string());
                 let authority_current = completion.authority.project_id == current
                     && completion.authority.project_revision
@@ -1703,7 +1703,7 @@ fn poll_browser_model_imports(ctx: &Context, state: &mut AppState) {
         browser_model_import_worker::finish();
         let current_project_id = state
             .project_lifecycle
-            .project_open
+            .is_open()
             .then(|| state.workspace.content.project.id().to_string());
         let authority_current = completion.authority.project_id == current_project_id
             && completion.authority.project_revision
@@ -1784,7 +1784,7 @@ fn poll_browser_model_imports(ctx: &Context, state: &mut AppState) {
             }
             let mut candidate = state.model_library_manager.clone();
             candidate.add_library(parsed.library);
-            if state.project_lifecycle.project_open {
+            if state.project_lifecycle.is_open() {
                 publish_model_library_candidate(
                     state,
                     candidate,
@@ -2257,7 +2257,7 @@ mod tests {
         let alpha_root = configured_root("alpha", "alpha.lib", "alpha_n");
         let beta_root = configured_root("beta", "beta.lib", "beta_n");
         let mut state = AppState::default();
-        state.project_lifecycle.project_open = true;
+        state.project_lifecycle.authority.open_session();
         state.model_library_manager.clear();
         state.pdk_config = PdkConfig::new();
         let initial_revision = state.workspace.content.project.revision();
@@ -2310,7 +2310,7 @@ mod tests {
     fn persistence_failure_leaves_configuration_manager_and_project_unchanged() {
         let root = configured_root("persistence", "persisted.lib", "persisted_n");
         let mut state = AppState::default();
-        state.project_lifecycle.project_open = true;
+        state.project_lifecycle.authority.open_session();
         state.model_library_manager.clear();
         state.pdk_config = PdkConfig::new();
         let revision = state.workspace.content.project.revision();
@@ -2373,7 +2373,7 @@ mod tests {
         let root = configured_root("background", "background.lib", "background_n");
         let path = root.join("background.lib");
         let mut state = AppState::default();
-        state.project_lifecycle.project_open = true;
+        state.project_lifecycle.authority.open_session();
         state.model_library_manager.clear();
         let authority = capture_native_model_import_authority(&state);
         assert!(native_model_import_authority_is_current(&authority, &state));
@@ -2423,11 +2423,11 @@ mod tests {
     #[test]
     fn background_authority_binds_the_exact_project_lifecycle() {
         let mut state = AppState::default();
-        state.project_lifecycle.project_open = true;
+        state.project_lifecycle.authority.open_session();
         let authority = capture_native_model_import_authority(&state);
         assert!(native_model_import_authority_is_current(&authority, &state));
 
-        state.project_lifecycle.project_open = false;
+        state.project_lifecycle.authority.close_project();
         assert!(!native_model_import_authority_is_current(
             &authority, &state
         ));

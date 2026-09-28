@@ -506,7 +506,7 @@ fn render_diagnostics(ui: &mut egui::Ui, app: &RSpiceApp) {
             });
             ui.end_row();
             ui.label("Project");
-            ui.label(if app.state.project_lifecycle.project_open {
+            ui.label(if app.state.project_lifecycle.is_open() {
                 app.state.workspace.content.project.display_name()
             } else {
                 "No project open"
@@ -622,7 +622,7 @@ fn export_support_bundle(app: &mut RSpiceApp, ctx: &Context, include_session_log
             "host": if cfg!(target_arch = "wasm32") { "browser" } else { "desktop" },
         },
         "session": {
-            "project_open": app.state.project_lifecycle.project_open,
+            "project_open": app.state.project_lifecycle.is_open(),
             "workspace": app.state.workbench.workspace.label(),
             "open_documents": documents.iter().filter(|document| document.open).count(),
             "dirty_documents": documents.iter().filter(|document| document.dirty).count(),

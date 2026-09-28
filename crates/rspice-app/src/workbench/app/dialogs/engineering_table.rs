@@ -406,7 +406,7 @@ impl RSpiceApp {
                 dataset,
             ),
             EngineeringViewScope::Project => {
-                if !self.state.project_lifecycle.project_open {
+                if !self.state.project_lifecycle.is_open() {
                     Err("Open a project before saving a project-scoped table view.".to_owned())
                 } else {
                     let result = self.state.workspace.content.engineering_table_views.save(
@@ -851,7 +851,7 @@ impl RSpiceApp {
                 .engineering_table_views
                 .import_view(source, scope, &dataset),
             EngineeringViewScope::Project => {
-                if !self.state.project_lifecycle.project_open {
+                if !self.state.project_lifecycle.is_open() {
                     Err("Open a project before importing a project-scoped view.".to_owned())
                 } else {
                     let result = self
@@ -1683,7 +1683,7 @@ mod tests {
     #[test]
     fn project_scope_is_versioned_while_personal_scope_is_not() {
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.project_open = true;
+        app.state.project_lifecycle.authority.open_session();
         let dataset = active_schematic_dataset(&app.state.schematic);
         app.state.dialogs.engineering_table.open(
             EngineeringTableView::for_dataset(&dataset),

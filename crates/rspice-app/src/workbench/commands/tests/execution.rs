@@ -102,7 +102,7 @@ fn stop_command_follows_the_execution_target_capability() {
 #[test]
 fn run_controls_follow_stable_execution_ownership_through_cancellation() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     let identity = app
         .state
         .simulation

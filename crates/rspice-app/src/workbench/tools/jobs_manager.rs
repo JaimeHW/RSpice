@@ -1780,7 +1780,7 @@ mod tests {
     #[test]
     fn opening_a_history_row_lands_on_that_run_and_refuses_a_pruned_one() {
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.project_open = true;
+        app.state.project_lifecycle.authority.open_session();
         app.state
             .workbench
             .activate(crate::workbench::state::Workspace::Simulate);

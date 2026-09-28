@@ -14,7 +14,7 @@ use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSui
 #[test]
 fn library_transaction_cannot_smuggle_a_provider_ledger_change() {
     let mut state = AppState::default();
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     let approved = state
         .model_library_manager
         .load_library_bytes(
@@ -472,7 +472,7 @@ fn undo_restores_objects_to_the_sheet_they_were_recorded_on() {
     use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 
     let mut state = AppState::default();
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     let parent_ref = state.workspace.content.active_view.clone();
     let kept = state
         .schematic
@@ -587,7 +587,7 @@ fn undo_restores_objects_to_the_sheet_they_were_recorded_on() {
 fn state_with_design_management_record()
 -> (AppState, DesignManagementCatalog, DesignManagementCatalog) {
     let mut state = AppState::default();
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     let owner = state.workspace.content.active_schematic_reference();
     let before = state.workspace.content.design_management.clone();
     let mut candidate = before.clone();
@@ -682,7 +682,7 @@ fn design_management_history_refuses_read_only_project_without_mutation() {
 #[test]
 fn symbol_definition_candidate_is_atomic_and_globally_undoable() {
     let mut state = AppState::default();
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     let library_name = state.workspace.content.active_view.library.clone();
     let mut candidate = state.library_manager.clone();
     let mut cell = Cell::new("imported_symbol");
@@ -755,7 +755,7 @@ fn placed_binding<'a>(
 #[test]
 fn undoing_a_publish_unresolves_the_placements_it_leaves_behind() {
     let mut state = AppState::default();
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     let library_name = state.workspace.content.active_view.library.clone();
     let mut candidate = state.library_manager.clone();
     let mut cell = Cell::new("published_symbol");
@@ -832,7 +832,7 @@ fn owned_model_definition(vth0: f64) -> ProjectModelDefinition {
 #[test]
 fn project_model_publication_is_atomic_dirty_and_globally_undoable() {
     let mut state = AppState::default();
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     state.model_library_manager.filter_text = "nch".to_owned();
     let initial_revision = state.workspace.content.project.revision();
     let initial_epoch = state.design_execution_epoch;
@@ -889,7 +889,7 @@ fn project_model_publication_is_atomic_dirty_and_globally_undoable() {
 #[test]
 fn project_model_correlation_publication_is_history_guarded() {
     let mut state = AppState::default();
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     let mut model_candidate = state.model_library_manager.clone();
     let model_commit = model_candidate
         .create_project_model("history-models", &owned_model_definition(0.48))
@@ -1009,7 +1009,7 @@ fn project_model_correlation_publication_is_history_guarded() {
 #[test]
 fn project_model_publication_rejects_closed_or_read_only_projects_without_mutation() {
     let mut state = AppState::default();
-    state.project_lifecycle.project_open = false;
+    state.project_lifecycle.authority.close_project();
     let mut candidate = state.model_library_manager.clone();
     let commit = candidate
         .create_project_model("history-models", &owned_model_definition(0.48))
@@ -1027,7 +1027,7 @@ fn project_model_publication_rejects_closed_or_read_only_projects_without_mutati
             .is_none()
     );
 
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     state.workbench.safe_mode.activate(
         LocalSafeModeOptions {
             open_project_read_only: true,
@@ -1051,7 +1051,7 @@ fn project_model_publication_rejects_closed_or_read_only_projects_without_mutati
 #[test]
 fn symbol_definition_history_fails_closed_after_external_cell_edit() {
     let mut state = AppState::default();
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     let library_name = state.workspace.content.active_view.library.clone();
     let mut candidate = state.library_manager.clone();
     let mut cell = Cell::new("imported_symbol");
@@ -1092,7 +1092,7 @@ fn symbol_definition_history_fails_closed_after_external_cell_edit() {
 #[test]
 fn symbol_definition_and_generated_fixture_share_one_history_record() {
     let mut state = AppState::default();
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     let library_name = state.workspace.content.active_view.library.clone();
     let fixture_ref = CellViewRef::new(&library_name, "fixture_symbol", "testbench");
     let mut fixture = SchematicState::default();
@@ -1165,7 +1165,7 @@ fn symbol_definition_and_generated_fixture_share_one_history_record() {
 #[test]
 fn symbol_history_refuses_to_remove_an_open_generated_fixture() {
     let mut state = AppState::default();
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     let library_name = state.workspace.content.active_view.library.clone();
     let fixture_ref = CellViewRef::new(&library_name, "existing_symbol", "testbench");
     state
@@ -1226,7 +1226,7 @@ fn symbol_history_refuses_to_remove_an_open_generated_fixture() {
 #[test]
 fn symbol_history_refuses_to_remove_the_active_generated_fixture() {
     let mut state = AppState::default();
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     let library_name = state.workspace.content.active_view.library.clone();
     let fixture_ref = CellViewRef::new(&library_name, "active_fixture", "testbench");
     state

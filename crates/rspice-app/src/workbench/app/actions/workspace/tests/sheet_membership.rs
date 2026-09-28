@@ -26,7 +26,7 @@ struct GovernedCrossing {
 }
 
 fn governed_crossing(state: &mut AppState) -> GovernedCrossing {
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     let owner = state.workspace.content.active_schematic_reference();
     let key = owner.key();
     let stationary = state

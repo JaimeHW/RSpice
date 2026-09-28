@@ -99,7 +99,7 @@ pub(super) fn validate_reference_document(
     source: crate::state::SchematicEditorRef<'_>,
 ) -> Result<(), String> {
     let reference = reference_from_key(key)?;
-    if !state.project_lifecycle.project_open || document_read_only(state, &reference) {
+    if !state.project_lifecycle.is_open() || document_read_only(state, &reference) {
         return Err(format!(
             "Reference editing requires an open, writable schematic '{key}'."
         ));

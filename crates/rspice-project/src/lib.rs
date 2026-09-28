@@ -38,3 +38,6 @@ pub use file::{
     DecodedProject, MAX_PROJECT_FILE_BYTES, ProjectFile, ProjectIoError, ProjectVersion,
     decode_project_text, serialize_project_file,
 };
+
+pub mod lifecycle;
+pub mod persistence;

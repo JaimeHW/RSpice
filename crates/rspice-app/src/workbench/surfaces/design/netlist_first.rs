@@ -797,7 +797,7 @@ mod tests {
     #[test]
     fn netlist_first_empty_state_actions_use_the_canonical_commands() {
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.project_open = true;
+        app.state.project_lifecycle.authority.open_session();
 
         execute_netlist_first_action(&mut app, NetlistFirstAction::OpenNetlistWorkspace);
         assert_eq!(app.state.workbench.workspace, Workspace::Netlist);

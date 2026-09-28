@@ -569,7 +569,7 @@ pub(crate) fn classify_viewer(
     viewer: ResultViewer,
 ) -> ResultOperationalStatus {
     debug_assert_eq!(ResultOperationalState::ALL.len(), 16);
-    if !state.project_lifecycle.project_open {
+    if !state.project_lifecycle.is_open() {
         return ResultOperationalStatus::canonical(ResultOperationalState::NoProject, true);
     }
 

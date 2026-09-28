@@ -7,8 +7,6 @@
 use std::path::Path;
 
 use crate::diagnostics::ConsoleMessage;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::io::ProjectIoError;
 use crate::io::ProjectSnapshot;
 use crate::workbench::app_state::AppState;
 #[cfg(not(target_arch = "wasm32"))]
@@ -17,6 +15,8 @@ use crate::workbench::lifecycle::project_lifecycle::{
     PersistenceBinding, ProjectLifecycleError, SaveScope,
 };
 use crate::workbench::state::ProjectCloseDestination;
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_project::ProjectIoError;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ProjectLoadOrigin<'a> {
@@ -950,7 +950,7 @@ pub(crate) fn close_active_document(state: &mut AppState) -> bool {
 /// clean, idle project closes at once. Either way the close leaves the
 /// application on the no-project landing, not in the project launcher.
 pub(crate) fn request_close_project(state: &mut AppState) -> bool {
-    if !state.project_lifecycle.project_open {
+    if !state.project_lifecycle.is_open() {
         lifecycle_error(
             state,
             ProjectLifecycleError::NoProject,

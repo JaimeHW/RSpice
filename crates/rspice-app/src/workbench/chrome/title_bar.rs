@@ -1813,7 +1813,7 @@ fn paint_title_context(
     );
     ui.ctx().accesskit_node_builder(status.id, |node| {
         node.set_role(egui::accesskit::Role::Status);
-        if app.state.project_lifecycle.project_open {
+        if app.state.project_lifecycle.is_open() {
             node.set_label(format!(
                 "Active project: {}; {}; {}",
                 app.state.workspace.content.project.display_name(),
@@ -1837,7 +1837,7 @@ fn paint_title_context(
 /// against a function the application never called and the shipped title read
 /// "Untitled Project" with nothing open.
 fn title_context_text(app: &RSpiceApp, compact: bool) -> String {
-    if !app.state.project_lifecycle.project_open {
+    if !app.state.project_lifecycle.is_open() {
         return if compact {
             "No project open"
         } else {
@@ -1904,7 +1904,7 @@ fn ellipsize_to_width(
 }
 
 fn active_title_cell(app: &RSpiceApp) -> String {
-    if !app.state.project_lifecycle.project_open {
+    if !app.state.project_lifecycle.is_open() {
         return "No project open".to_owned();
     }
     match app.state.workbench.workspace {

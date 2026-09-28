@@ -101,7 +101,7 @@ impl AppState {
         description: &str,
     ) -> Result<bool, String> {
         let document = self.workspace.content.active_schematic_reference();
-        let writable = self.project_lifecycle.project_open && !document_read_only(self, &document);
+        let writable = self.project_lifecycle.is_open() && !document_read_only(self, &document);
         let prepared = self
             .schematic
             .prepare_component_transaction(expected, candidate.clone())?;
@@ -231,7 +231,7 @@ impl ComponentRenameRecord {
         state: &AppState,
         forward: bool,
     ) -> Result<Option<DesignManagementCatalog>, String> {
-        if !state.project_lifecycle.project_open || document_read_only(state, &self.document) {
+        if !state.project_lifecycle.is_open() || document_read_only(state, &self.document) {
             return Err(
                 "Component rename requires an open, writable project and document.".to_owned(),
             );

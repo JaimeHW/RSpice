@@ -59,7 +59,7 @@ fn netlist_problem_badge_is_owned_only_by_the_canonical_collection() {
 #[test]
 fn netlist_first_results_keep_the_canonical_problem_badge() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     let provenance = crate::state::AnalysisResultProvenance::new_with_source_domain(
         crate::state::AnalysisResultSourceDomain::ManualDeck,
         crate::product::AnalysisInstanceId::new(),

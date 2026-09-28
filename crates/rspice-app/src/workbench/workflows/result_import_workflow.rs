@@ -163,7 +163,7 @@ pub(crate) fn import_result_dataset(state: &mut AppState) -> bool {
 }
 
 fn result_import_block_reason(state: &AppState) -> Option<String> {
-    if !state.project_lifecycle.project_open {
+    if !state.project_lifecycle.is_open() {
         return Some("Open a project before importing a result dataset.".to_owned());
     }
     if state.workbench.safe_mode.project_read_only() {

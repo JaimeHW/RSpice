@@ -499,7 +499,7 @@ impl OverviewSnapshot {
                 },
             )
         } else {
-            let enabled = state.project_lifecycle.project_open;
+            let enabled = state.project_lifecycle.is_open();
             StatusSnapshot {
                 area: "Schematic checks",
                 state: checks.state,

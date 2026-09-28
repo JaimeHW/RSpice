@@ -39,74 +39,6 @@ fn has_ac_analysis(setup: &rspice_simulation_contract::setup_state::SimulationSe
         .any(|instance| instance.kind() == AnalysisKind::Ac)
 }
 
-#[test]
-fn browser_completion_context_rejects_every_authority_change() {
-    let digest = persistence::digest_bytes(b"accepted browser bytes");
-    let receipt = BrowserBindingReceipt {
-        binding_id: uuid::Uuid::from_u128(0xf20c_f308_17a1_4fc4_8b0d_8f09_eab7_35c2),
-        project_id: "logical-project".to_owned(),
-        accepted_generation: 4,
-        accepted_digest: digest,
-        backend: persistence::BrowserBindingBackend::Opfs,
-    };
-    let context = BrowserOperationContext {
-        epoch: 11,
-        operation_generation: 3,
-        project_id: receipt.project_id.clone(),
-        binding_receipt: Some(receipt.clone()),
-        accepted_generation: 9,
-    };
-
-    assert!(operation_context_matches(
-        &context,
-        11,
-        3,
-        "logical-project",
-        Some(&receipt),
-        9,
-    ));
-    assert!(!operation_context_matches(
-        &context,
-        12,
-        3,
-        "logical-project",
-        Some(&receipt),
-        9,
-    ));
-    assert!(!operation_context_matches(
-        &context,
-        11,
-        3,
-        "replacement-project",
-        Some(&receipt),
-        9,
-    ));
-    assert!(!operation_context_matches(
-        &context,
-        11,
-        3,
-        "logical-project",
-        None,
-        9,
-    ));
-    assert!(!operation_context_matches(
-        &context,
-        11,
-        3,
-        "logical-project",
-        Some(&receipt),
-        10,
-    ));
-    assert!(!operation_context_matches(
-        &context,
-        11,
-        4,
-        "logical-project",
-        Some(&receipt),
-        9,
-    ));
-}
-
 #[cfg(target_arch = "wasm32")]
 #[test]
 fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
@@ -115,7 +47,7 @@ fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
         .workbench
         .activate(crate::workbench::state::Workspace::Project);
     let baseline = snapshot(&state).expect("baseline");
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline.clone(), None));
     insert_configuration_root(
         &mut state,
@@ -146,7 +78,7 @@ fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
         state.workspace.content.configuration_sets
     );
 
-    state.project_lifecycle.transaction = None;
+    state.project_lifecycle.authority.cancel_transaction();
     revert_document(&mut state, ProjectDocumentId::ProjectConfiguration).expect("browser revert");
     assert_eq!(
         state.workspace.content.configuration_sets,
@@ -246,7 +178,7 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
     let mut state = AppState::default();
     state.provision_test_project_technology_contract();
     let baseline = snapshot(&state).expect("baseline");
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline.clone(), None));
     let id = insert_configuration_root(
         &mut state,
@@ -338,7 +270,7 @@ fn cell_veriloga_view_and_source_are_one_lifecycle_document() {
         ));
     state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
     let baseline = snapshot(&state).expect("baseline");
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline.clone(), None));
 
     assert_eq!(
@@ -431,7 +363,7 @@ fn project_configuration_never_accepts_or_discards_unsaved_cell_views() {
             .is_none()
     );
 
-    working_state.project_lifecycle.project_open = true;
+    working_state.project_lifecycle.authority.open_session();
     working_state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, None));
     revert_document(&mut working_state, ProjectDocumentId::ProjectConfiguration)
         .expect("revert configuration");
@@ -503,7 +435,7 @@ fn reverting_new_cell_configuration_removes_orphan_sources_and_restores_focus() 
             reference.clone(),
             crate::state::ViewType::VerilogA,
         ));
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, None));
 
     revert_document(&mut state, ProjectDocumentId::ProjectConfiguration)
@@ -555,7 +487,7 @@ fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() 
         "behavior",
         "module behavior(p, n); inout p, n; endmodule",
     );
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline, None));
 
     revert_document(&mut state, ProjectDocumentId::CellView(reference.clone()))
@@ -640,7 +572,7 @@ fn reverting_the_code_document_restores_sources_and_clears_dirty_state() {
     let mut state = AppState::default();
     ensure_veriloga_source(&mut state, "module sensor_bridge; endmodule");
     let baseline = snapshot(&state).unwrap();
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     state.project_lifecycle.accepted = Some(AcceptedProject::new(baseline.clone(), None));
     state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
     state
@@ -672,13 +604,13 @@ fn lifecycle_epoch_advances_across_new_and_close() {
         accepted_digest: crate::product::ContentDigest::from_bytes([0x44; 32]),
     };
     state.native_project_binding_receipt = Some(receipt.clone());
-    let initial = state.project_lifecycle.epoch;
+    let initial = state.project_lifecycle.authority.epoch();
     reset_for_new_project(&mut state);
-    let after_new = state.project_lifecycle.epoch;
+    let after_new = state.project_lifecycle.authority.epoch();
     assert!(state.native_project_binding_receipt.is_none());
     state.native_project_binding_receipt = Some(receipt);
     mark_project_closed(&mut state);
-    let after_close = state.project_lifecycle.epoch;
+    let after_close = state.project_lifecycle.authority.epoch();
 
     assert!(after_new > initial);
     assert!(after_close > after_new);
@@ -902,7 +834,7 @@ fn user_selected_native_publication_rejects_late_create_and_edit() {
             .expect_err("late create must block publication");
     assert!(matches!(
         create_conflict,
-        persistence::PersistenceError::ExternalChange
+        rspice_project::persistence::PersistenceError::ExternalChange
     ));
     assert_eq!(
         std::fs::read(&path).expect("read late create"),
@@ -917,7 +849,7 @@ fn user_selected_native_publication_rejects_late_create_and_edit() {
             .expect_err("late edit must block publication");
     assert!(matches!(
         edit_conflict,
-        persistence::PersistenceError::ExternalChange
+        rspice_project::persistence::PersistenceError::ExternalChange
     ));
     assert_eq!(
         std::fs::read(&path).expect("read late edit"),

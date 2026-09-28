@@ -142,7 +142,7 @@ fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
 
     state.dialogs.project_review_dialog.close();
     assert!(close_project_discard(&mut state));
-    assert!(!state.project_lifecycle.project_open);
+    assert!(!state.project_lifecycle.is_open());
     assert!(!state.workbench.project_launcher_open);
     assert_eq!(
         state.workbench.workspace,
@@ -162,7 +162,7 @@ fn close_to_live_mirror_raises_the_one_shot_engine_entry_request() {
         .begin_project_close(ProjectCloseDestination::LiveMirror);
 
     assert!(close_project_discard(&mut state));
-    assert!(!state.project_lifecycle.project_open);
+    assert!(!state.project_lifecycle.is_open());
     assert!(!state.workbench.project_launcher_open);
     assert_eq!(
         state.workbench.workspace,
@@ -189,7 +189,7 @@ fn live_project_snapshot_applies_wholesale_and_never_keeps_the_host_path() {
         apply_live_project_snapshot(&mut guest, text.as_bytes(), "Jaime"),
         LiveProjectApply::Applied
     ));
-    assert!(guest.project_lifecycle.project_open);
+    assert!(guest.project_lifecycle.is_open());
     assert_eq!(
         guest.workspace.content.project.id(),
         host.workspace.content.project.id()
@@ -573,7 +573,7 @@ fn new_and_closed_projects_restore_configured_sources_without_leaking_project_li
     state
         .model_library_manager
         .add_library(ModelLibrary::new("closing_project_only"));
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     assert!(close_project_discard(&mut state));
     assert!(
         state

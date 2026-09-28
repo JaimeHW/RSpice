@@ -818,7 +818,7 @@ pub(super) fn qualification_action_block_reason(
     let Some(selected) = selected else {
         return Some("Select a model family first".to_owned());
     };
-    if !app.state.project_lifecycle.project_open {
+    if !app.state.project_lifecycle.is_open() {
         return Some("Open a project before using model qualification".to_owned());
     }
     // Asked before the source-owned refusal below, which would otherwise

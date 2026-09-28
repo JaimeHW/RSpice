@@ -65,7 +65,7 @@ pub fn create_editable_project_copy_and_open(
     source_library_name: &str,
     source_model_name: &str,
 ) -> Result<(String, String), String> {
-    if !app.state.project_lifecycle.project_open {
+    if !app.state.project_lifecycle.is_open() {
         return Err("Open a project before creating an editable model copy".to_owned());
     }
     if app.state.workbench.safe_mode.project_read_only() {
@@ -296,7 +296,7 @@ pub(super) fn start_qualification_execution_for(
     app: &mut RSpiceApp,
     selected_suite_id: Option<&str>,
 ) -> Result<(), String> {
-    if !app.state.project_lifecycle.project_open {
+    if !app.state.project_lifecycle.is_open() {
         return Err("Qualification requires an open project".to_owned());
     }
     if app.state.workbench.safe_mode.project_read_only() {
@@ -569,7 +569,7 @@ pub fn cancel_qualification_execution(app: &mut RSpiceApp) -> bool {
 /// remains writable. The subsequent explicit save publishes the immutable
 /// release through the normal project revision history.
 pub fn promote_open_candidate(app: &mut RSpiceApp, candidate_id: &str) -> bool {
-    if !app.state.project_lifecycle.project_open {
+    if !app.state.project_lifecycle.is_open() {
         app.state.workbench.model_editor.promotion_error =
             Some("Model promotion requires an open project".to_owned());
         return false;
@@ -644,7 +644,7 @@ pub const fn qualification_platform_label(platform: QualificationPlatform) -> &'
 /// Publish the open candidate as one guarded project/model revision and then
 /// reopen the committed revision as the new immutable editing base.
 pub fn save_open_candidate(app: &mut RSpiceApp) -> Result<ObjectRevision, String> {
-    if !app.state.project_lifecycle.project_open {
+    if !app.state.project_lifecycle.is_open() {
         return Err("Model revision cannot be saved without an open project".to_owned());
     }
     if app.state.workbench.safe_mode.project_read_only() {

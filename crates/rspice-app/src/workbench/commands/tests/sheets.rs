@@ -38,7 +38,7 @@ fn chord_owners(command: Command) -> Vec<Command> {
 
 fn app_with_sheets(count: usize) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.workbench.activate(Workspace::Design);
     let key = app
         .state
@@ -145,7 +145,7 @@ fn paging_chords_have_exactly_one_owner_on_every_platform() {
 #[test]
 fn sheet_commands_state_why_they_are_unavailable() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.workbench.activate(Workspace::Results);
     assert_eq!(
         Command::NextSheet.availability(&app),
@@ -191,7 +191,7 @@ fn sheet_commands_state_why_they_are_unavailable() {
         );
     }
 
-    app.state.project_lifecycle.project_open = false;
+    app.state.project_lifecycle.authority.close_project();
     for command in SHEET_COMMANDS {
         assert_eq!(
             command.availability(&app),

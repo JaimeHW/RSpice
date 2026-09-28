@@ -33,7 +33,7 @@ fn model_editor_command_has_mockup_identity_and_fail_closed_selection_authority(
     );
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.model_library_manager.selected_library = None;
     app.state.workbench.selected_model = None;
     assert_eq!(
@@ -81,7 +81,7 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
     assert!(Command::ModelCreateProjectCopy.blocked_by_project_operation());
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     let initial_project_revision = app.state.workspace.content.project.revision();
     let mut built_in = ModelLibrary::new("command copy built-in");
     built_in.pdk_name = "Example PDK".to_owned();
@@ -186,7 +186,7 @@ fn editable_project_copy_command_accepts_external_models_and_rejects_owned_or_re
     };
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     let mut external = ModelLibrary::new("external command source");
     external.source_authority = ModelSourceAuthority::External;
     external.add_model(DeviceModel::new("external_nch", ModelType::Nmos));
@@ -249,7 +249,7 @@ fn model_editor_command_accepts_one_coherent_project_owned_definition() {
     use crate::state::model_library::ProjectModelDefinition;
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     let commit = app
         .state
         .model_library_manager
@@ -339,7 +339,7 @@ fn model_editor_command_requires_an_open_project_even_with_a_retained_selection(
         .select_library(&commit.library_name)
         .expect("the fixture library is loaded");
     app.state.workbench.selected_model = Some(commit.model_name);
-    app.state.project_lifecycle.project_open = false;
+    app.state.project_lifecycle.authority.close_project();
 
     assert_eq!(
         Command::ModelEditor.availability(&app),
@@ -359,7 +359,7 @@ fn qualification_command_requires_a_suite_for_the_exact_open_source() {
     use crate::state::model_library::ProjectModelDefinition;
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state
         .model_library_manager
         .create_project_model(
@@ -448,7 +448,7 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
         .expect("write model-library fixture");
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.pdk_config = crate::state::pdk_config::PdkConfig::new();
     app.state
         .pdk_config

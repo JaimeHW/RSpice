@@ -188,7 +188,7 @@ impl ConfigurationSetsDialogState {
 }
 
 pub(crate) fn open_configuration_sets_dialog(state: &mut AppState) {
-    if !state.project_lifecycle.project_open {
+    if !state.project_lifecycle.is_open() {
         state.push_user_message(ConsoleMessage::warning(
             "Configuration sets require an open project.".to_owned(),
         ));

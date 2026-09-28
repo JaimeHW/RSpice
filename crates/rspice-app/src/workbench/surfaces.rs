@@ -93,7 +93,7 @@ fn show_primary(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn split_results_is_visible(app: &RSpiceApp) -> bool {
     app.state.workbench.results_split_visible(
-        app.state.project_lifecycle.project_open,
+        app.state.project_lifecycle.is_open(),
         app.state.simulation.has_retained_result_dataset(),
     )
 }

@@ -90,7 +90,7 @@ fn two_sheet_named_signals() -> RSpiceApp {
     use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     let components = &mut app.state.schematic.document_mut_for_test().components;
     for (id, name) in [(301, "VIN"), (302, "VBIAS")] {
         let mut source = crate::state::Component::new(

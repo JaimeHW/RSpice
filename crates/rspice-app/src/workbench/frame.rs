@@ -47,7 +47,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         app.state.workbench.coarse_pointer,
         chrome::document_bar::is_visible(app),
         chrome::sheet_strip::is_visible(&app.state),
-        app.state.project_lifecycle.project_open,
+        app.state.project_lifecycle.is_open(),
         context_docks_enabled,
         &app.state.workbench,
     );
@@ -355,7 +355,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
         app.state.workbench.coarse_pointer,
         chrome::document_bar::is_visible(app),
         chrome::sheet_strip::is_visible(&app.state),
-        app.state.project_lifecycle.project_open,
+        app.state.project_lifecycle.is_open(),
         context_docks_enabled,
         &app.state.workbench,
     );
@@ -950,7 +950,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.project_open = true;
+        app.state.project_lifecycle.authority.open_session();
         app.state.workbench.workspace = Workspace::Design;
 
         Command::ManageSimulationPlans.execute(&mut app);

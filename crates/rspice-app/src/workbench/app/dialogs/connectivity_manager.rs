@@ -244,7 +244,7 @@ enum ConnectivityBodyAction {
 }
 
 pub(crate) fn open_connectivity_manager(state: &mut AppState) {
-    if !state.project_lifecycle.project_open {
+    if !state.project_lifecycle.is_open() {
         state.push_user_message(ConsoleMessage::warning(
             "Connectivity and bus manager requires an open project.",
         ));

@@ -261,7 +261,7 @@ pub(crate) fn publish_model_definition_candidate(
     commit: ProjectModelCommit,
     description: impl Into<String>,
 ) -> Result<ObjectRevision, String> {
-    if !state.project_lifecycle.project_open {
+    if !state.project_lifecycle.is_open() {
         return Err("Model definitions require an open project.".to_owned());
     }
     if state.workbench.safe_mode.project_read_only() {
@@ -360,7 +360,7 @@ pub(crate) fn publish_model_library_candidate(
     library_name: &str,
     description: impl Into<String>,
 ) -> Result<ObjectRevision, String> {
-    if !state.project_lifecycle.project_open {
+    if !state.project_lifecycle.is_open() {
         return Err("Model libraries require an open project.".to_owned());
     }
     if state.workbench.safe_mode.project_read_only() {
@@ -426,7 +426,7 @@ pub(crate) fn publish_model_library_set_candidate(
     mut candidate: ModelLibraryManager,
     description: impl Into<String>,
 ) -> Result<Option<ObjectRevision>, String> {
-    if !state.project_lifecycle.project_open {
+    if !state.project_lifecycle.is_open() {
         return Err("Model libraries require an open project.".to_owned());
     }
     if state.workbench.safe_mode.project_read_only() {
@@ -471,7 +471,7 @@ pub(crate) fn publish_model_resolution_candidate(
     mut candidate: ModelLibraryManager,
     description: impl Into<String>,
 ) -> Result<ObjectRevision, String> {
-    if !state.project_lifecycle.project_open {
+    if !state.project_lifecycle.is_open() {
         return Err("Model provider decisions require an open project.".to_owned());
     }
     if state.workbench.safe_mode.project_read_only() {
@@ -543,7 +543,7 @@ pub(crate) fn publish_symbol_definition_candidate_with_fixture(
     description: impl Into<String>,
     fixture: Option<SymbolDefinitionFixtureDelta>,
 ) -> Result<ObjectRevision, String> {
-    if !state.project_lifecycle.project_open {
+    if !state.project_lifecycle.is_open() {
         return Err("Symbol definitions require an open project.".to_owned());
     }
     if state.workbench.safe_mode.project_read_only() {
@@ -1273,7 +1273,7 @@ impl ModelLibrariesRecord {
     }
 
     fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
-        if !state.project_lifecycle.project_open {
+        if !state.project_lifecycle.is_open() {
             return Err(format!(
                 "Model libraries cannot be {operation} without an open project."
             ));
@@ -1325,7 +1325,7 @@ impl ModelResolutionRecordsRecord {
     }
 
     fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
-        if !state.project_lifecycle.project_open {
+        if !state.project_lifecycle.is_open() {
             return Err(format!(
                 "Model provider decisions cannot be {operation} without an open project."
             ));
@@ -1381,7 +1381,7 @@ impl ModelDefinitionRecord {
     }
 
     fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
-        if !state.project_lifecycle.project_open {
+        if !state.project_lifecycle.is_open() {
             return Err(format!(
                 "Model definition cannot be {operation} without an open project."
             ));
@@ -1605,7 +1605,7 @@ impl SymbolDefinitionRecord {
     }
 
     fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
-        if !state.project_lifecycle.project_open {
+        if !state.project_lifecycle.is_open() {
             return Err(format!(
                 "Symbol definition cannot be {operation} without an open project."
             ));
@@ -1886,7 +1886,7 @@ impl DesignManagementRecord {
 
     fn validate_authority(&self, state: &AppState, forward: bool) -> Result<(), String> {
         let operation = if forward { "redone" } else { "undone" };
-        if !state.project_lifecycle.project_open {
+        if !state.project_lifecycle.is_open() {
             return Err(format!(
                 "Design management cannot be {operation} without an open project."
             ));
@@ -1993,7 +1993,7 @@ impl InstanceRemovalRecord {
     }
 
     fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
-        if !state.project_lifecycle.project_open {
+        if !state.project_lifecycle.is_open() {
             return Err(format!(
                 "Instance removal cannot be {operation} without an open project."
             ));

@@ -25,7 +25,7 @@ fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() 
                 schematic.document_mut_for_test().components[0].value = "2k".to_owned();
             });
             let candidate = snapshot(&state).unwrap();
-            let (bytes, _) = persistence::serialized_project(&candidate).unwrap();
+            let (bytes, _) = persistence::serialized_project(&candidate.file).unwrap();
             let accepted_digest = state
                 .project_lifecycle
                 .accepted()
@@ -117,7 +117,7 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
         });
         let candidate = snapshot(&state).unwrap();
         let candidate_content = registry::content_digest(&candidate.file).unwrap();
-        let (bytes, staged_digest) = persistence::serialized_project(&candidate).unwrap();
+        let (bytes, staged_digest) = persistence::serialized_project(&candidate.file).unwrap();
 
         // Freeze bytes before the write. Inject a validation failure and a
         // newer authored edit while that write is pending. The browser's

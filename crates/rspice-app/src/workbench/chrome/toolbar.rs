@@ -150,7 +150,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let viewport_width = ctx.content_rect().width();
     let padding = toolbar_horizontal_padding(viewport_width);
     let outer_gap = toolbar_outer_gap(viewport_width);
-    let show_simulation_context = app.state.project_lifecycle.project_open
+    let show_simulation_context = app.state.project_lifecycle.is_open()
         && matches!(
             app.state.workbench.workspace,
             Workspace::Design | Workspace::Simulate
@@ -187,7 +187,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         app.state.workbench.toggle_drawer(Drawer::Navigator);
                     }
                 }
-                if app.state.project_lifecycle.project_open {
+                if app.state.project_lifecycle.is_open() {
                     global_document_tools(ui, app, layout);
                 }
 
@@ -457,7 +457,7 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     ui.data_mut(|data| {
         data.insert_temp(projected_tool_count_id(), 0_usize);
     });
-    if !app.state.project_lifecycle.project_open {
+    if !app.state.project_lifecycle.is_open() {
         no_project_tools(ui, app, layout);
         return;
     }

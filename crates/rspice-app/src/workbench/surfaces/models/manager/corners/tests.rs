@@ -253,7 +253,7 @@ fn a_section_that_parses_but_defines_nothing_is_accepted_by_page_and_run_alike()
 #[test]
 fn corner_lifecycle_publishes_drafts_bindings_defaults_and_deletion() {
     let mut state = AppState::default();
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     let library = state
         .model_library_manager
         .load_library_bytes(
@@ -322,7 +322,7 @@ fn corner_lifecycle_publishes_drafts_bindings_defaults_and_deletion() {
 #[test]
 fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
     let mut state = AppState::default();
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     let library = state
         .model_library_manager
         .load_library_bytes(

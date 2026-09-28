@@ -524,7 +524,7 @@ fn dismiss_launcher(app: &mut RSpiceApp) {
     // With nothing open, every workspace but the no-project landing would
     // present the bootstrap placeholder as the reader's work, so a dismissal
     // never returns to one.
-    let project_open = app.state.project_lifecycle.project_open;
+    let project_open = app.state.project_lifecycle.is_open();
     if project_open
         && app
             .state
@@ -1909,7 +1909,7 @@ mod tests {
             app.state.workbench.take_browser_history_effect(),
             Some(crate::workbench::BrowserHistoryEffect::Push(_))
         ));
-        app.state.project_lifecycle.project_open = false;
+        app.state.project_lifecycle.authority.close_project();
 
         dismiss_launcher(&mut app);
 

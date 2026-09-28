@@ -101,7 +101,7 @@ fn retain_run_for_active_plan(state: &mut AppState, analysis: AnalysisResult) {
 /// nothing in it, so this is the exact shape every plan-scoped run has between
 /// dispatch and the first result landing.
 fn start_prepared_run_for_active_plan(state: &mut AppState, analysis: Option<AnalysisResult>) {
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     let plan = state
         .sim_setup
         .stable_analysis_plan()
@@ -276,7 +276,7 @@ fn the_resolved_point_table_offers_each_point_its_family_member() {
 #[test]
 fn a_point_without_a_retained_family_says_which_kind_of_nothing_it_has() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     assert_eq!(
         super::page_runset::family_target(&app),
         Err("No run has been retained, so there is no family to open a point in.")

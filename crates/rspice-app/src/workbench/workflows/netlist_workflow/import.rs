@@ -55,7 +55,7 @@ pub(super) fn apply_imported_netlist_transaction(
         return false;
     }
 
-    if !state.project_lifecycle.project_open {
+    if !state.project_lifecycle.is_open() {
         state.push_user_message(ConsoleMessage::error(
             "SPICE deck import requires an open project",
         ));
@@ -171,7 +171,7 @@ pub(super) fn netlist_import_start_block_reason(
     if state.simulation.has_active_execution() {
         return Some("a simulation execution still owns the project");
     }
-    if mode == NetlistImportMode::ImportIntoProject && !state.project_lifecycle.project_open {
+    if mode == NetlistImportMode::ImportIntoProject && !state.project_lifecycle.is_open() {
         return Some("no project is open");
     }
     if mode == NetlistImportMode::ImportIntoProject && state.workbench.safe_mode.project_read_only()

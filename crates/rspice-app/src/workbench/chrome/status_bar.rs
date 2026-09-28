@@ -45,7 +45,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             let selection = selection_summary(app);
             let sheet_position = sheet_position_summary(&app.state);
             let revision = revision_status_summary(
-                app.state.project_lifecycle.project_open,
+                app.state.project_lifecycle.is_open(),
                 app.state.schematic.session.is_dirty || app.state.workspace.any_dirty(),
                 app.state.workspace.content.project.revision().get(),
                 app.state.workspace.content.project.display_name(),
@@ -90,7 +90,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             let platform = platform_label();
             let check_mark = StatusMark::Check(check_tone(app, &t));
             let revision_mark =
-                revision_status_mark(app.state.project_lifecycle.project_open, revision.dirty, &t);
+                revision_status_mark(app.state.project_lifecycle.is_open(), revision.dirty, &t);
             let engine_mark = StatusMark::Dot {
                 color: engine_color,
                 wash: engine_wash,
@@ -212,7 +212,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         let can_retry = (availability == EngineAvailability::Restartable || availability.failure_reason().is_some())
                             && !app.state.simulation.has_active_execution();
                         let can_open = availability == EngineAvailability::Ready
-                            && app.state.project_lifecycle.project_open
+                            && app.state.project_lifecycle.is_open()
                             && app
                                 .state
                                 .simulation
@@ -330,7 +330,7 @@ fn check_summary(app: &RSpiceApp) -> String {
     // With nothing open, any retained result describes the bootstrap
     // placeholder rather than the reader's work, and reporting its findings
     // beside "No project loaded" states both at once.
-    if !app.state.project_lifecycle.project_open {
+    if !app.state.project_lifecycle.is_open() {
         return if netlist_diagnostics_own_status(app) {
             "No netlist diagnostics".to_owned()
         } else {
@@ -381,7 +381,7 @@ fn check_summary(app: &RSpiceApp) -> String {
 }
 
 fn check_tone(app: &RSpiceApp, tokens: &Tokens) -> egui::Color32 {
-    if !app.state.project_lifecycle.project_open {
+    if !app.state.project_lifecycle.is_open() {
         return tokens.color.text_faint;
     }
     if netlist_diagnostics_own_status(app) {
@@ -554,7 +554,7 @@ fn engineering_context_summary(
     app: &RSpiceApp,
     results_view: Option<&crate::workbench::documents::result_document::SharedXStatus>,
 ) -> String {
-    if !app.state.project_lifecycle.project_open {
+    if !app.state.project_lifecycle.is_open() {
         return "No project loaded".to_owned();
     }
     match app.state.workbench.workspace {
@@ -667,7 +667,7 @@ fn sheet_position_summary(
 }
 
 fn selection_summary(app: &RSpiceApp) -> String {
-    if !app.state.project_lifecycle.project_open {
+    if !app.state.project_lifecycle.is_open() {
         return "No engineering object selected".to_owned();
     }
     if app.state.workbench.workspace == Workspace::Results {
@@ -997,7 +997,7 @@ mod tests {
     #[test]
     fn netlist_status_projects_canonical_diagnostics_and_never_schematic_drc() {
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.project_open = true;
+        app.state.project_lifecycle.authority.open_session();
         app.state.workbench.activate(Workspace::Netlist);
         app.state.ui.code_workspace.page =
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
@@ -1033,7 +1033,7 @@ mod tests {
     #[test]
     fn netlist_first_results_keep_the_canonical_diagnostic_status() {
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.project_open = true;
+        app.state.project_lifecycle.authority.open_session();
         let provenance = crate::state::AnalysisResultProvenance::new_with_source_domain(
             crate::state::AnalysisResultSourceDomain::ManualDeck,
             crate::product::AnalysisInstanceId::new(),
@@ -1071,7 +1071,7 @@ mod tests {
     fn adjacent_result_segments_never_print_the_same_sentence() {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.activate(Workspace::Results);
-        app.state.project_lifecycle.project_open = true;
+        app.state.project_lifecycle.authority.open_session();
 
         let coordinates = results_view_summary(&app, None);
         let selection = selection_summary(&app);
@@ -1276,7 +1276,7 @@ mod tests {
         use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.project_open = true;
+        app.state.project_lifecycle.authority.open_session();
         let key = app
             .state
             .workspace

@@ -174,7 +174,7 @@ fn header_context(ui: &mut Ui, app: &RSpiceApp, snapshot: CatalogSnapshot, token
         tokens.color.text_dim,
         tokens,
     );
-    let access = if !app.state.project_lifecycle.project_open {
+    let access = if !app.state.project_lifecycle.is_open() {
         ("closed", tokens.color.err)
     } else if app.state.workbench.safe_mode.project_read_only() {
         ("safe-mode read only", tokens.color.warn)
@@ -605,7 +605,7 @@ fn action_buttons(
 }
 
 fn project_write_block_reason(app: &RSpiceApp) -> Option<&'static str> {
-    if !app.state.project_lifecycle.project_open {
+    if !app.state.project_lifecycle.is_open() {
         Some("Open a project before authoring symbols.")
     } else if app.state.workbench.safe_mode.project_read_only() {
         Some("The project is read-only in local safe mode.")

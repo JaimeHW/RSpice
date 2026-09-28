@@ -123,7 +123,7 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
 /// mismatched retained bytes, or a partial source closure must never expose an
 /// editor command that can only fail after navigation.
 fn selected_project_model_for_editor(app: &RSpiceApp) -> Result<(&str, &str), &'static str> {
-    if !app.state.project_lifecycle.project_open {
+    if !app.state.project_lifecycle.is_open() {
         return Err("open a project before editing a device model");
     }
     let library_name = app
@@ -172,7 +172,7 @@ fn selected_project_model_for_editor(app: &RSpiceApp) -> Result<(&str, &str), &'
 /// project-owned revision. Mutation authority and editor lifecycle checks live
 /// here so every command surface exposes the same fail-closed availability.
 fn selected_model_for_project_copy(app: &RSpiceApp) -> Result<(&str, &str), &'static str> {
-    if !app.state.project_lifecycle.project_open {
+    if !app.state.project_lifecycle.is_open() {
         return Err("open a project before creating an editable model copy");
     }
     let library_name = app
@@ -324,21 +324,21 @@ impl Command {
         {
             return false;
         }
-        if self.requires_open_project() && !state.project_lifecycle.project_open {
+        if self.requires_open_project() && !state.project_lifecycle.is_open() {
             return false;
         }
         match self {
             Self::OpenWorkspace(workspace) => {
-                workspace_available(state.project_lifecycle.project_open, workspace)
+                workspace_available(state.project_lifecycle.is_open(), workspace)
             }
             Self::Save => {
-                state.project_lifecycle.project_open
+                state.project_lifecycle.is_open()
                     || state.schematic.session.current_file.is_some()
                     || state.browser_schematic_save_name.is_some()
             }
-            Self::SaveAs => state.project_lifecycle.project_open,
+            Self::SaveAs => state.project_lifecycle.is_open(),
             Self::SaveAll => {
-                state.project_lifecycle.project_open
+                state.project_lifecycle.is_open()
                     && crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
             }
             Self::RevertActiveDocument => {
@@ -349,12 +349,12 @@ impl Command {
             Self::CloseActiveDocument => {
                 crate::workbench::lifecycle::project_lifecycle::can_close_active_document(state)
             }
-            Self::CloseProject => state.project_lifecycle.project_open,
+            Self::CloseProject => state.project_lifecycle.is_open(),
             Self::OpenNetlist => {
                 !state.simulation.has_active_execution()
             }
             Self::ImportNetlist => {
-                state.project_lifecycle.project_open
+                state.project_lifecycle.is_open()
                     && !state.workbench.safe_mode.project_read_only()
                     && !state.simulation.has_active_execution()
             }
@@ -552,21 +552,21 @@ impl Command {
                     && crate::workbench::app::create_hierarchy_available(state)
             }
             Self::ConnectivityManager => {
-                active_schematic_editor(app) && state.project_lifecycle.project_open
+                active_schematic_editor(app) && state.project_lifecycle.is_open()
             }
             Self::DesignManagement => {
                 active_schematic_editor(app)
-                    && state.project_lifecycle.project_open
+                    && state.project_lifecycle.is_open()
                     && !state.schematic_edit_read_only()
             }
             Self::SelectionBulkEdit => {
-                active_schematic_editor(app) && state.project_lifecycle.project_open
+                active_schematic_editor(app) && state.project_lifecycle.is_open()
             }
-            Self::ConfigurationSets => state.project_lifecycle.project_open,
+            Self::ConfigurationSets => state.project_lifecycle.is_open(),
             Self::ReviewComments => {
-                active_schematic_editor(app) && state.project_lifecycle.project_open
+                active_schematic_editor(app) && state.project_lifecycle.is_open()
             }
-            Self::RevisionHistory => state.project_lifecycle.project_open,
+            Self::RevisionHistory => state.project_lifecycle.is_open(),
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
                     let selection = state.ui.symbol.effective_selection();
@@ -631,7 +631,7 @@ impl Command {
                     .is_empty()
             }
             Self::ToggleResultsSplit => {
-                state.project_lifecycle.project_open
+                state.project_lifecycle.is_open()
                     && state.workbench.supports_results_split()
                     && state.simulation.has_retained_result_dataset()
             }
@@ -814,10 +814,10 @@ impl Command {
                 state.workbench.workspace == Workspace::Results && state.simulation.has_results()
             }
             Self::DatasetManifestBrowser => {
-                state.project_lifecycle.project_open && !state.simulation.runs.is_empty()
+                state.project_lifecycle.is_open() && !state.simulation.runs.is_empty()
             }
             Self::CreateResultDocument => {
-                state.project_lifecycle.project_open && state.simulation.has_results()
+                state.project_lifecycle.is_open() && state.simulation.has_results()
             }
             Self::CompareResultDatasets => {
                 crate::workbench::documents::visualization_studio::results_comparison_available(
@@ -837,7 +837,7 @@ impl Command {
                     .is_some_and(|draft| {
                         draft.is_dirty()
                             && !state.workbench.safe_mode.project_read_only()
-                            && state.project_lifecycle.project_open
+                            && state.project_lifecycle.is_open()
                             && state
                                 .workbench
                                 .model_editor
@@ -880,7 +880,7 @@ impl Command {
                 .draft
                 .as_ref()
                 .is_some_and(|draft| {
-                    state.project_lifecycle.project_open
+                    state.project_lifecycle.is_open()
                         && !state.workbench.safe_mode.project_read_only()
                         && !draft.definition_is_dirty()
                         && draft
@@ -927,7 +927,7 @@ impl Command {
                                 .is_none()
                     })
             }
-            Self::VisualizationStudio => state.project_lifecycle.project_open,
+            Self::VisualizationStudio => state.project_lifecycle.is_open(),
             Self::ReportAuthoring => super::surfaces::report_authoring::can_open(state),
             Self::SaveReportDocument => {
                 super::surfaces::report_authoring::can_save_document(state)
@@ -939,7 +939,7 @@ impl Command {
             Self::AddVisualizationPane | Self::ExportVisualizationDocument => {
                 state.workbench.current_route().surface_id()
                     == super::SurfaceId::VisualizationStudio
-                    && state.project_lifecycle.project_open
+                    && state.project_lifecycle.is_open()
                     && state.simulation.has_results()
             }
             Self::VisualizationTraceManager
@@ -950,7 +950,7 @@ impl Command {
                 matches!(
                     state.workbench.current_route().surface_id(),
                     super::SurfaceId::Results | super::SurfaceId::VisualizationStudio
-                ) && state.project_lifecycle.project_open
+                ) && state.project_lifecycle.is_open()
                     && state.simulation.has_results()
             }
             Self::VisualizationDocumentProperties => {
@@ -958,7 +958,7 @@ impl Command {
                 matches!(
                     surface,
                     super::SurfaceId::Results | super::SurfaceId::VisualizationStudio
-                ) && state.project_lifecycle.project_open
+                ) && state.project_lifecycle.is_open()
                     && (surface == super::SurfaceId::VisualizationStudio
                         || state.simulation.has_results())
             }
@@ -966,7 +966,7 @@ impl Command {
             // surface the reader is standing on: they exist precisely to be
             // taken from somewhere else.
             Self::OpenRunInResults => {
-                state.project_lifecycle.project_open
+                state.project_lifecycle.is_open()
                     && state
                         .simulation
                         .active_run()
@@ -1050,7 +1050,7 @@ impl Command {
                 ));
             return;
         }
-        if self.requires_open_project() && !app.state.project_lifecycle.project_open {
+        if self.requires_open_project() && !app.state.project_lifecycle.is_open() {
             app.state
                 .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                     "Open a project before using this command.",
@@ -1069,7 +1069,7 @@ impl Command {
         }
         match self {
             Self::OpenWorkspace(workspace) => {
-                if workspace_available(app.state.project_lifecycle.project_open, workspace) {
+                if workspace_available(app.state.project_lifecycle.is_open(), workspace) {
                     activate_workspace(app, workspace);
                 }
             }

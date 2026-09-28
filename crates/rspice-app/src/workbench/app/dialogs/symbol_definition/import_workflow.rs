@@ -550,7 +550,7 @@ mod tests {
     #[test]
     fn review_only_svg_import_keeps_real_geometry_without_an_executable_contract() {
         let mut app = crate::workbench::app_state::AppState::default();
-        app.project_lifecycle.project_open = true;
+        app.project_lifecycle.authority.open_session();
         app.dialogs.symbol_import.source_name = "review.svg".to_owned();
         app.dialogs.symbol_import.source_text =
             r#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="40" height="20"/></svg>"#
@@ -585,7 +585,7 @@ mod tests {
     #[test]
     fn import_candidate_never_overwrites_an_existing_cell() {
         let mut app = crate::workbench::app_state::AppState::default();
-        app.project_lifecycle.project_open = true;
+        app.project_lifecycle.authority.open_session();
         let library_name = app.workspace.content.active_view.library.clone();
         app.dialogs.symbol_import.source_name = "review.svg".to_owned();
         app.dialogs.symbol_import.source_text =

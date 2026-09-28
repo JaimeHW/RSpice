@@ -36,7 +36,7 @@ fn drawing_sheet_file_commands_keep_the_canonical_palette_identities() {
 #[test]
 fn authored_page_setup_never_falls_back_to_symbol_hardcopy_media() {
     let mut app = app_with_selected_authored_symbol();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state
         .open_workspace_view(crate::state::CellViewRef::new(
             "command_test",
@@ -64,7 +64,7 @@ fn authored_page_setup_never_falls_back_to_symbol_hardcopy_media() {
 #[test]
 fn document_sheet_commands_open_their_real_surfaces_only_in_schematic_context() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.workbench.workspace = Workspace::Design;
     let key = app.state.workspace.content.active_key();
     app.state
@@ -84,7 +84,7 @@ fn document_sheet_commands_open_their_real_surfaces_only_in_schematic_context() 
     assert!(app.state.dialogs.drawing_sheet_presets.any_open());
 
     let mut results = RSpiceApp::test_instance();
-    results.state.project_lifecycle.project_open = true;
+    results.state.project_lifecycle.authority.open_session();
     results.state.workbench.workspace = Workspace::Results;
     assert!(!Command::PageSetup.is_enabled(&results));
     assert!(!Command::SheetFormatManager.is_enabled(&results));
@@ -94,7 +94,7 @@ fn document_sheet_commands_open_their_real_surfaces_only_in_schematic_context() 
 #[test]
 fn sheet_format_manager_requires_live_schematic_edit_authority() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.workbench.workspace = Workspace::Design;
     let key = app.state.workspace.content.active_key();
     app.state

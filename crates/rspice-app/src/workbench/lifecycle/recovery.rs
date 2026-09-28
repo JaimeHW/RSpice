@@ -855,7 +855,7 @@ pub(crate) fn start_local_safe_mode(
     let preserved_session = serde_json::to_string(&app.state)
         .map_err(|error| format!("The current session could not be protected: {error}"))?;
 
-    if options.isolate_prior_documents && app.state.project_lifecycle.project_open {
+    if options.isolate_prior_documents && app.state.project_lifecycle.is_open() {
         app.state
             .workbench
             .begin_project_close(crate::workbench::state::ProjectCloseDestination::EmptyWorkbench);
@@ -959,7 +959,7 @@ pub(crate) fn open_diagnostics_folder(state: &AppState) -> Result<PathBuf, Strin
         writeln!(
             snapshot,
             "project_open={}",
-            state.project_lifecycle.project_open
+            state.project_lifecycle.is_open()
         )
         .expect("String writes cannot fail");
         writeln!(snapshot).expect("String writes cannot fail");

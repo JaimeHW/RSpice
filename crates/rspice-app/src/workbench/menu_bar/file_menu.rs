@@ -74,7 +74,7 @@ pub(crate) fn dispatch_file_menu_action(
             );
         }
         FileMenuAction::Save => {
-            if state.project_lifecycle.project_open {
+            if state.project_lifecycle.is_open() {
                 let _ = crate::workbench::workflows::project_workflow::save_project(state);
             } else {
                 let _ = crate::workbench::workflows::file_actions::action_file_save_with_io(
@@ -268,7 +268,7 @@ mod tests {
         });
         // Keep a regressed dispatch on the injectable standalone-file backend;
         // a failed assertion must never open a native project-save picker.
-        state.project_lifecycle.project_open = false;
+        state.project_lifecycle.authority.close_project();
         dispatch_file_menu_action(&mut state, FileMenuAction::Save, &NoIo, &NoIo);
         assert_eq!(state.schematic.document().components[0].name, "V1");
         assert!(
@@ -282,7 +282,7 @@ mod tests {
         );
         assert!(!state.schematic.can_undo());
         assert!(state.project_undo_sequence().is_none());
-        state.project_lifecycle.project_open = true;
+        state.project_lifecycle.authority.open_session();
         state
             .workbench
             .inline_edit

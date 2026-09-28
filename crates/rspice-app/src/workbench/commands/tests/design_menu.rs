@@ -45,7 +45,7 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
         Command::CreateHierarchy,
     ];
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.workbench.activate(Workspace::Results);
 
     for command in authoring_commands {
@@ -82,7 +82,7 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
         CommandAvailability::Disabled("the active schematic is read-only")
     );
 
-    app.state.project_lifecycle.project_open = false;
+    app.state.project_lifecycle.authority.close_project();
     assert_eq!(
         Command::OpenWorkspace(Workspace::Design).availability(&app),
         CommandAvailability::Disabled("no project is open")
@@ -135,7 +135,7 @@ fn configuration_sets_has_mockup_identity_and_opens_the_owned_workflow() {
     assert!(app.state.dialogs.application_modal_open());
 
     app.state.dialogs.configuration_sets.open = false;
-    app.state.project_lifecycle.project_open = false;
+    app.state.project_lifecycle.authority.close_project();
     assert!(!Command::ConfigurationSets.is_enabled(&app));
 }
 
@@ -183,7 +183,7 @@ fn design_management_has_mockup_identity_authority_and_owned_workflow() {
     assert!(!Command::DesignManagement.is_enabled(&app));
 
     app.state.schematic.session.read_only = false;
-    app.state.project_lifecycle.project_open = false;
+    app.state.project_lifecycle.authority.close_project();
     assert!(!Command::DesignManagement.is_enabled(&app));
 }
 
@@ -226,7 +226,7 @@ fn connectivity_manager_has_mockup_identity_and_supports_read_only_inspection() 
     assert!(app.state.dialogs.application_modal_open());
 
     app.state.dialogs.connectivity_manager.open = false;
-    app.state.project_lifecycle.project_open = false;
+    app.state.project_lifecycle.authority.close_project();
     assert!(!Command::ConnectivityManager.is_enabled(&app));
 }
 
@@ -266,6 +266,6 @@ fn selection_bulk_edit_has_mockup_identity_order_and_read_only_inspection() {
     assert!(app.state.dialogs.application_modal_open());
 
     app.state.dialogs.selection_bulk_edit.open = false;
-    app.state.project_lifecycle.project_open = false;
+    app.state.project_lifecycle.authority.close_project();
     assert!(!Command::SelectionBulkEdit.is_enabled(&app));
 }

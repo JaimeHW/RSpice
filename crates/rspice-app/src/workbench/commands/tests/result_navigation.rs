@@ -47,7 +47,7 @@ enum RunOrigin {
 /// A project with one retained, prepared run sealed against `origin`.
 fn app_with_prepared_run(origin: RunOrigin) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     let (active_plan, analysis_id) = plan_binding(&app);
     let project_revision = app.state.workspace.content.project.revision();
     let (domain, plan_id, source_check) = match origin {
@@ -113,7 +113,7 @@ fn app_with_prepared_run(origin: RunOrigin) -> RSpiceApp {
 #[test]
 fn opening_a_run_in_results_needs_a_dataset_and_lands_on_the_selected_one() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     assert!(
         !Command::OpenRunInResults.is_enabled(&app),
         "with no retained dataset there is nothing for the hop to open"
@@ -173,7 +173,7 @@ fn a_notice_offer_selects_its_run_and_refuses_when_the_run_is_gone() {
 #[test]
 fn the_newest_retained_run_is_what_an_unnamed_results_hop_opens() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     assert!(
         !result_navigation::open_newest_retained_run(&mut app),
         "with no materialized dataset the hop reports that it cannot land"
@@ -259,14 +259,14 @@ fn a_hop_to_a_plan_that_no_longer_owns_the_producer_clears_the_highlight() {
 #[test]
 fn each_reason_a_dataset_cannot_name_its_plan_is_stated_exactly() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     assert_eq!(
         Command::OpenProducingPlan.availability(&app),
         CommandAvailability::Disabled("no retained dataset is selected")
     );
 
     let mut legacy = RSpiceApp::test_instance();
-    legacy.state.project_lifecycle.project_open = true;
+    legacy.state.project_lifecycle.authority.open_session();
     legacy
         .state
         .simulation
@@ -350,7 +350,7 @@ fn the_task_deck_hop_is_refused_by_the_reason_it_would_have_failed() {
     use crate::state::{ExecutedDeck, ExecutedDeckPoint};
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     assert_eq!(
         Command::OpenTaskDeck.availability(&app),
         CommandAvailability::Disabled("no run is selected"),
@@ -421,7 +421,7 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
     };
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     assert_eq!(
         Command::RevealProducerLog.availability(&app),
         CommandAvailability::Disabled("no run is selected"),

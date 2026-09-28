@@ -288,7 +288,7 @@ fn editing_one_model_preserves_a_qualified_sectioned_sibling_revision() {
         .expect("publish sectioned first model");
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.model_library_manager = manager;
     let project_revision = app.state.workspace.content.project.revision();
     app.state
@@ -405,7 +405,7 @@ fn editing_one_model_preserves_a_qualified_sectioned_sibling_revision() {
 #[test]
 fn opening_a_different_model_never_replaces_an_unsaved_candidate() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state
         .model_library_manager
         .create_project_model("first-owned-model", &definition())
@@ -896,7 +896,7 @@ fn new_section_transaction_is_validated_and_rolls_back_on_duplicate_identity() {
 #[test]
 fn save_controller_publishes_once_and_reopens_the_committed_revision() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state
         .model_library_manager
         .create_project_model("owned-models", &definition())
@@ -1009,7 +1009,7 @@ fn sectioned_editor_publishes_metadata_only_revision_without_losing_execution_se
         });
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state
         .model_library_manager
         .create_project_model_revision("sectioned", &revision, &ModelQualificationState::default())
@@ -1224,7 +1224,7 @@ fn advanced_qualification_authoring_builds_executable_analysis_contracts() {
 #[test]
 fn cooperative_qualification_publishes_only_a_complete_platform_run() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state
         .model_library_manager
         .create_project_model("owned-models", &definition())
@@ -1289,7 +1289,7 @@ fn cooperative_qualification_publishes_only_a_complete_platform_run() {
 #[test]
 fn selected_vector_rerun_executes_only_its_complete_suite() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state
         .model_library_manager
         .create_project_model("owned-models", &definition())
@@ -1376,7 +1376,7 @@ fn populate_complete_promotion_candidate(editor: &mut ModelEditorState) {
 #[test]
 fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state
         .model_library_manager
         .create_project_model("owned-models", &definition())

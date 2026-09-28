@@ -1035,7 +1035,7 @@ mod tests {
             let ctx = egui::Context::default();
             crate::ui::Theme::default().apply(&ctx);
             let mut app = RSpiceApp::test_instance();
-            app.state.project_lifecycle.project_open = false;
+            app.state.project_lifecycle.authority.close_project();
             app.state.workbench.project_launcher_recovery = Default::default();
 
             let output = ctx.run_ui(
@@ -1049,7 +1049,7 @@ mod tests {
             );
 
             assert!(!output.shapes.is_empty(), "{}x{}", size.x, size.y);
-            assert!(!app.state.project_lifecycle.project_open);
+            assert!(!app.state.project_lifecycle.is_open());
         }
     }
 

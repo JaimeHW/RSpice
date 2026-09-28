@@ -339,7 +339,7 @@ fn dc_inspector_exposes_exact_secondary_coordinates_and_primary_traversal() {
 
 fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.workbench.split_with_results = split;
     app.state.workbench.activate(Workspace::Results);
     let project_revision = app.state.workspace.content.project.revision();
@@ -532,7 +532,7 @@ fn split_cross_probe_keeps_the_canonical_result_document_beside_design() {
 
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert!(app.state.workbench.results_split_visible(
-        app.state.project_lifecycle.project_open,
+        app.state.project_lifecycle.is_open(),
         app.state.simulation.has_retained_result_dataset(),
     ));
 }

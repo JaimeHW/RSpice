@@ -57,8 +57,7 @@ pub(crate) struct CodeCommandContext {
 
 #[must_use]
 pub(crate) fn resolve(app: &RSpiceApp) -> Option<CodeCommandContext> {
-    if app.state.workbench.workspace != Workspace::Netlist
-        || !app.state.project_lifecycle.project_open
+    if app.state.workbench.workspace != Workspace::Netlist || !app.state.project_lifecycle.is_open()
     {
         return None;
     }

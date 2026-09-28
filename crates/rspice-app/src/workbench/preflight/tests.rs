@@ -1004,7 +1004,7 @@ fn a_model_binding_blocker_remediates_to_corners_and_sections() {
     );
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.workbench.activate(Workspace::Verify);
     apply_remediation(&mut app, binding.remediation.clone());
     assert_eq!(app.state.workbench.workspace, Workspace::Models);
@@ -1049,7 +1049,7 @@ fn a_model_binding_blocker_lands_on_the_only_library_that_declares_the_process()
 
     let mut app = RSpiceApp::test_instance();
     app.state.model_library_manager = state.model_library_manager.clone();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.workbench.activate(Workspace::Verify);
     apply_remediation(&mut app, binding.remediation.clone());
     assert_eq!(app.state.workbench.workspace, Workspace::Models);
@@ -1115,7 +1115,7 @@ fn a_model_binding_blocker_with_no_single_library_names_what_to_select() {
 #[test]
 fn a_models_route_to_a_departed_library_states_its_refusal() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.model_library_manager.clear();
     app.state
         .model_library_manager
@@ -1157,7 +1157,7 @@ fn a_models_route_to_a_departed_library_states_its_refusal() {
 #[test]
 fn a_corner_finding_opens_corners_and_sections_on_the_object_it_named() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.model_library_manager.clear();
     let mut library = crate::state::model_library::ModelLibrary::new("pdk");
     let mut corner = crate::state::model_library::ProcessCorner::new("hot");
@@ -1216,7 +1216,7 @@ fn a_netlist_stage_failure_opens_the_deck_rather_than_re_running_design_checks()
     assert_eq!(remediation_label(&remediation), "Open netlist source");
 
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.workbench.activate(Workspace::Verify);
     app.state.ui.code_workspace.page =
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
@@ -1275,7 +1275,7 @@ fn only_a_blocker_naming_a_line_makes_its_row_a_jump() {
 #[test]
 fn a_named_line_survives_the_parser_to_buffer_conversion() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
 
     apply_remediation(
         &mut app,

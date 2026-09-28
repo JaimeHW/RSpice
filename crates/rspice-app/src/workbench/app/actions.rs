@@ -1207,7 +1207,7 @@ mod shortcut_ownership_tests {
     ) -> crate::state::CellViewRef {
         use crate::workbench::app_state::DesignManagementHistoryEntry;
 
-        state.project_lifecycle.project_open = true;
+        state.project_lifecycle.authority.open_session();
         let owner = state.workspace.content.active_schematic_reference();
         let before = state.workspace.content.design_management.clone();
         let drawn = state

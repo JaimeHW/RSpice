@@ -458,7 +458,7 @@ fn inspector_scroll_identity(app: &RSpiceApp) -> String {
 fn split_selected_trace_is_inspected(app: &RSpiceApp) -> bool {
     app.state.workbench.workspace == Workspace::Design
         && app.state.workbench.results_split_visible(
-            app.state.project_lifecycle.project_open,
+            app.state.project_lifecycle.is_open(),
             app.state.simulation.has_retained_result_dataset(),
         )
         && app

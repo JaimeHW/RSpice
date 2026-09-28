@@ -891,7 +891,7 @@ fn comparison_fails_closed_for_nonmonotonic_source_coordinates() {
 #[test]
 fn results_comparison_handoff_rebinds_a_stale_owner_to_the_active_document() {
     let mut app = app_with_exact_source();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.workbench.workspace = Workspace::Results;
     let candidate_id = app.state.simulation.runs[0].dataset_id;
     app.state
@@ -972,7 +972,7 @@ fn results_comparison_handoff_rebinds_a_stale_owner_to_the_active_document() {
 #[test]
 fn results_comparison_fails_closed_before_navigation_without_a_compatible_baseline() {
     let mut app = app_with_exact_source();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.workbench.workspace = Workspace::Results;
     let candidate_id = app.state.simulation.runs[0].dataset_id;
     app.state

@@ -52,7 +52,7 @@ struct CheckAndSavePreconditions<'a> {
 }
 
 pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
-    if !state.project_lifecycle.project_open {
+    if !state.project_lifecycle.is_open() {
         state.push_user_message(ConsoleMessage::warning(
             "Check and save requires an open project.".to_owned(),
         ));

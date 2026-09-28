@@ -203,7 +203,7 @@ enum HistoryAction {
 }
 
 pub(crate) fn open_project_revision_history(state: &mut AppState) {
-    if !state.project_lifecycle.project_open {
+    if !state.project_lifecycle.is_open() {
         state.push_user_message(ConsoleMessage::warning(
             "Project revision history requires an open project.",
         ));

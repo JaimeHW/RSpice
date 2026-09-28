@@ -87,7 +87,7 @@ impl CheckAndSaveValidationReport {
         let mut findings = BTreeMap::<String, CheckAndSaveFinding>::new();
         let mut dependencies = BTreeMap::<String, ContentDigest>::new();
 
-        if !state.project_lifecycle.project_open {
+        if !state.project_lifecycle.is_open() {
             insert_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Blocker,

@@ -65,7 +65,7 @@ fn rects_overlap(a: egui::accesskit::Rect, b: egui::accesskit::Rect) -> bool {
 
 fn state_with_bound_mos_model() -> AppState {
     let mut state = AppState::default();
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     state.library_manager.clear();
     state
         .library_manager
@@ -266,7 +266,7 @@ fn generated_fixture_is_real_editable_topology_in_the_atomic_publication() {
 #[test]
 fn existing_schematic_source_is_identity_locked_and_preserves_the_master() {
     let mut state = AppState::default();
-    state.project_lifecycle.project_open = true;
+    state.project_lifecycle.authority.open_session();
     let library = state.workspace.content.active_view.library.clone();
     let cell = state.workspace.content.active_view.cell.clone();
     let port_id = state

@@ -139,7 +139,7 @@ enum ReviewAction {
 }
 
 pub(crate) fn open_design_review_comments(state: &mut AppState) {
-    if !state.project_lifecycle.project_open {
+    if !state.project_lifecycle.is_open() {
         state.push_user_message(ConsoleMessage::warning(
             "Design review comments require an open project.",
         ));

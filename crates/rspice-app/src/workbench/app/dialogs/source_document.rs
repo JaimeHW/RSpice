@@ -34,7 +34,7 @@ use crate::workbench::{MessageCatalog, MessageId};
 pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), String> {
     let page = state.ui.code_workspace.page;
     if page == code_workspace::CodeWorkspacePage::Netlist {
-        if !state.project_lifecycle.project_open {
+        if !state.project_lifecycle.is_open() {
             return Err("Open a project before managing its top decks.".to_owned());
         }
         state.ui.code_workspace.source_document_dialog = true;
@@ -62,7 +62,7 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
 /// Whether the lifecycle dialog can be opened for the visible page.
 pub(crate) fn source_document_dialog_is_available(state: &AppState) -> bool {
     if state.ui.code_workspace.page == code_workspace::CodeWorkspacePage::Netlist {
-        return state.project_lifecycle.project_open;
+        return state.project_lifecycle.is_open();
     }
     code_workspace::page_source_language(state.ui.code_workspace.page).is_some_and(|language| {
         let owner = ProjectSourceOwner::code_workspace(language);

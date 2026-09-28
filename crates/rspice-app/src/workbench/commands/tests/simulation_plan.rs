@@ -49,7 +49,7 @@ fn every_simulation_setup_route_has_one_discoverable_command_with_a_stable_ident
 fn simulation_route_commands_activate_the_simulate_workspace_and_exact_route() {
     for page in SimulationPage::NAVIGATION {
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.project_open = true;
+        app.state.project_lifecycle.authority.open_session();
         app.state.workbench.workspace = Workspace::Results;
         app.state.workbench.simulation_page = SimulationPage::Analyses;
 
@@ -66,7 +66,7 @@ fn simulation_route_commands_activate_the_simulate_workspace_and_exact_route() {
 #[test]
 fn managing_simulation_plans_opens_the_plan_manager_on_the_active_plan() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     let plan_id = app
         .state
         .sim_setup
@@ -103,7 +103,7 @@ fn managing_simulation_plans_opens_the_plan_manager_on_the_active_plan() {
 #[test]
 fn managing_simulation_plans_is_disabled_without_a_stable_analysis_plan() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.sim_setup.analysis_plan = None;
 
     assert!(!Command::ManageSimulationPlans.is_enabled(&app));

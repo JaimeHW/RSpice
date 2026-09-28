@@ -73,7 +73,7 @@ pub(crate) fn open_symbol_parameter_form_dialog_for(state: &mut AppState, target
         .library_manager
         .get_library(&target.library)
         .is_some_and(|library| !library.read_only);
-    if !state.project_lifecycle.project_open
+    if !state.project_lifecycle.is_open()
         || state.workbench.safe_mode.project_read_only()
         || !writable
     {
@@ -137,7 +137,7 @@ pub(crate) fn open_symbol_parameter_form_dialog_for(state: &mut AppState, target
 }
 
 fn writable_library_name(state: &AppState) -> Option<String> {
-    if !state.project_lifecycle.project_open || state.workbench.safe_mode.project_read_only() {
+    if !state.project_lifecycle.is_open() || state.workbench.safe_mode.project_read_only() {
         return None;
     }
     state
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn import_action_opens_an_isolated_draft_in_the_writable_project_library() {
         let mut state = AppState::default();
-        state.project_lifecycle.project_open = true;
+        state.project_lifecycle.authority.open_session();
 
         open_symbol_import_dialog(&mut state);
 
@@ -260,7 +260,7 @@ mod tests {
     #[test]
     fn form_action_loads_the_selected_typed_definition_as_the_next_revision() {
         let mut state = AppState::default();
-        state.project_lifecycle.project_open = true;
+        state.project_lifecycle.authority.open_session();
         let library_name = state.workspace.content.active_view.library.clone();
         let cell_name = "review_form";
         let template = ModelBoundSymbolDefinition::review_only(&library_name, cell_name);

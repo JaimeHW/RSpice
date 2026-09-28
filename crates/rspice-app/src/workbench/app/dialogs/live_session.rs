@@ -98,7 +98,7 @@ impl RSpiceApp {
             .project
             .cloud_publication()
             .map(|binding| binding.circuit_id().to_owned());
-        let project_open = self.state.project_lifecycle.project_open;
+        let project_open = self.state.project_lifecycle.is_open();
         let incompatible_peer = self.live_session.incompatible_peer_seen();
         let host_run: Option<String> = self.live_session.guest_run_status().map(describe_run);
         let pending_run_requests = self.live_session.pending_run_requests();

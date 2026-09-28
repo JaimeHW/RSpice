@@ -20,7 +20,7 @@ const VIEWPORT: Vec2 = Vec2::new(1_440.0, 900.0);
 
 fn app_with_sheets(count: usize) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.project_open = true;
+    app.state.project_lifecycle.authority.open_session();
     app.state.workbench.activate(Workspace::Design);
     app.state.schematic.document_mut_for_test().components = vec![Component::new(
         10,

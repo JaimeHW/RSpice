@@ -42,6 +42,10 @@ impl AcceptedProject {
         }
     }
 
+    pub(super) fn content(&self) -> &rspice_project::AcceptedProject {
+        &self.content.project
+    }
+
     pub(super) fn baseline(&self) -> &ProjectFile {
         self.content.project.baseline()
     }

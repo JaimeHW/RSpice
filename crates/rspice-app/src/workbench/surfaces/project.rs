@@ -132,7 +132,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // snapshot.
     // Every section below projects an open project's state, so showing them here
     // would dress the bootstrap placeholder up as the reader's own work.
-    if !app.state.project_lifecycle.project_open {
+    if !app.state.project_lifecycle.is_open() {
         landing::show(ui, app);
         show_technology_attachment_dialog(&ctx, app);
         return;
@@ -924,7 +924,9 @@ mod tests {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.project_open = project_open;
+        if !project_open {
+            app.state.project_lifecycle.authority.close_project();
+        }
         let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -1003,7 +1005,7 @@ mod tests {
         };
 
         let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.project_open = true;
+        app.state.project_lifecycle.authority.open_session();
         let _ = app
             .state
             .workspace
