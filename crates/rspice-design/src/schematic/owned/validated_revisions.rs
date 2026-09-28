@@ -1,6 +1,6 @@
 //! Validated revision records and guarded journal rollback belong to the design.
 use super::super::{document::SchematicDocument, validated_revision::*};
-use super::Schematic;
+use super::{Schematic, SchematicSnapshot};
 use rspice_app_types::product::ContentDigest;
 impl Schematic {
     fn validated_revision_source(&self) -> ValidatedRevisionSource<'_> {
@@ -83,6 +83,43 @@ impl Schematic {
             .validated_revisions
             .remove_unpublished_tail(id)
     }
+    /// Restore a validated drawing while preserving live output probes.
+    /// Returns whether this scope committed an undo entry; nested restores
+    /// leave publication to the pending outer operation.
+    pub fn restore_validated_revision(
+        &mut self,
+        id: ValidatedSchematicRevisionId,
+    ) -> Result<bool, ValidatedRevisionError> {
+        let snapshot = self.document().validated_revisions.revision_source(id)?;
+        let target = SchematicSnapshot {
+            document_policy: snapshot.document_policy,
+            grid_size: snapshot.grid_size,
+            components: snapshot.components.to_vec(),
+            wires: snapshot.wires.to_vec(),
+            buses: snapshot.buses.to_vec(),
+            bus_taps: snapshot.bus_taps.to_vec(),
+            junctions: snapshot.junctions.to_vec(),
+            net_labels: snapshot.net_labels.to_vec(),
+            design_notes: snapshot.design_notes.to_vec(),
+            documentation_shapes: snapshot.documentation_shapes.to_vec(),
+            // Probe flags are simulation-output requests rather than
+            // validated electrical topology. A design revision restore must
+            // therefore preserve the live output markers instead of silently
+            // deleting them.
+            probes: self.document().probes.clone(),
+            connections: snapshot.connections.to_vec(),
+            // A stored revision restores the drawing. Sheet membership belongs
+            // to the project catalog, which still holds the live one.
+            sheet_assignments: std::collections::BTreeMap::new(),
+        };
+        if target.is_equal_document(&self.document) {
+            return Err(ValidatedRevisionError::AlreadyCurrent);
+        }
+        self.begin_operation("restore validated schematic revision");
+        self.apply_snapshot(&target);
+        Ok(self.end_operation())
+    }
+
     pub fn copy_without_validated_revisions(&self) -> Self {
         let mut copy = self.clone();
         copy.document.validated_revisions = ValidatedRevisionJournal::default();
@@ -144,3 +181,6 @@ impl Schematic {
         Ok(current_design_digest != expected_design_digest)
     }
 }
+
+#[cfg(test)]
+mod tests;
