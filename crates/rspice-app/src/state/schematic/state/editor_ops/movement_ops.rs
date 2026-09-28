@@ -14,20 +14,23 @@ impl SchematicState {
         if impact.changed {
             self.is_dirty = true;
         }
-        if impact.topology_changed {
-            self.bump_topology_version();
-        }
     }
 
     /// Whether the current selection still resolves to at least one object
     /// supported by selection movement.
     pub fn has_live_movable_selection(&self) -> bool {
-        movement::has_live_movable_selection(&self.document, movement_selection(&self.selection))
+        movement::has_live_movable_selection(
+            &self.design.document(),
+            movement_selection(&self.selection),
+        )
     }
 
     /// Number of selected movable objects that still exist in this document.
     pub fn live_movable_selection_count(&self) -> usize {
-        movement::live_movable_selection_count(&self.document, movement_selection(&self.selection))
+        movement::live_movable_selection_count(
+            &self.design.document(),
+            movement_selection(&self.selection),
+        )
     }
 
     /// Move a component and update attached wire endpoints using caller-supplied terminal geometry.
@@ -40,8 +43,7 @@ impl SchematicState {
         if self.read_only {
             return;
         }
-        let impact = movement::move_component_with_wires_resolved(
-            &mut self.document,
+        let impact = self.design.move_component_with_wires_resolved(
             component_id,
             delta,
             terminal_points_for,
@@ -71,8 +73,7 @@ impl SchematicState {
         if self.read_only {
             return;
         }
-        let impact = movement::move_selection_with_rubber_band_resolved(
-            &mut self.document,
+        let impact = self.design.move_selection_with_rubber_band_resolved(
             movement_selection(&self.selection),
             delta,
             terminal_points_for,
@@ -104,8 +105,7 @@ impl SchematicState {
         if self.read_only {
             return Ok(false);
         }
-        let impact = movement::move_selection_with_mode_resolved(
-            &mut self.document,
+        let impact = self.design.move_selection_with_mode_resolved(
             movement_selection(&self.selection),
             delta,
             mode,
@@ -120,7 +120,7 @@ impl SchematicState {
         if self.read_only {
             return;
         }
-        let impact = movement::move_wire(&mut self.document, wire_id, delta);
+        let impact = self.design.move_wire(wire_id, delta);
         self.apply_movement_impact(impact);
     }
 
@@ -139,8 +139,7 @@ impl SchematicState {
         if self.read_only {
             return;
         }
-        let impact = movement::move_selection_resolved(
-            &mut self.document,
+        let impact = self.design.move_selection_resolved(
             movement_selection(&self.selection),
             delta,
             terminal_points_for,
@@ -153,7 +152,7 @@ impl SchematicState {
         if self.read_only {
             return;
         }
-        let impact = movement::move_junction(&mut self.document, old_pos, new_pos);
+        let impact = self.design.move_junction(old_pos, new_pos);
         self.apply_movement_impact(impact);
     }
 }

@@ -1,6 +1,5 @@
 //! App coordination for validated-save history, undo and live probe preservation.
 
-use rspice_design::schematic::validated_revision::ValidatedRevisionSource;
 pub use rspice_design::schematic::validated_revision::{
     AdvisoryDisposition, MAX_VALIDATED_REVISION_NOTE_LEN, ValidatedRevisionDependency,
     ValidatedRevisionError, ValidatedRevisionJournal, ValidatedRevisionObjectDelta,
@@ -8,32 +7,15 @@ pub use rspice_design::schematic::validated_revision::{
     ValidatedSchematicRevisionId, ValidationFindingCounts,
 };
 
-use super::document::SchematicDocument;
 use super::{SchematicSnapshot, SchematicState};
 use crate::product::ContentDigest;
 use crate::time_compat::checked_unix_time_ms;
 
 impl SchematicState {
-    fn validated_revision_source(&self) -> ValidatedRevisionSource<'_> {
-        ValidatedRevisionSource {
-            grid_size: self.document.grid_size,
-            document_policy: self.document.document_policy,
-            components: &self.document.components,
-            wires: &self.document.wires,
-            buses: &self.document.buses,
-            bus_taps: &self.document.bus_taps,
-            junctions: &self.document.junctions,
-            net_labels: &self.document.net_labels,
-            design_notes: &self.document.design_notes,
-            documentation_shapes: &self.document.documentation_shapes,
-            connections: &self.document.connections,
-        }
-    }
-
     pub(crate) fn validated_design_content_digest(
         &self,
     ) -> Result<ContentDigest, ValidatedRevisionError> {
-        self.validated_revision_source().design_content_digest()
+        self.design.validated_design_content_digest()
     }
 
     pub fn seed_accepted_revision_baseline(
@@ -43,51 +25,22 @@ impl SchematicState {
         project_revision: u64,
         view_identity: &str,
     ) -> Result<Option<ValidatedSchematicRevisionId>, ValidatedRevisionError> {
-        self.document
-            .validated_revisions
-            .seed_accepted_revision_baseline(
-                accepted.validated_revision_source(),
-                project_id,
-                project_revision,
-                view_identity,
-                checked_unix_time_ms,
-            )
+        self.design.seed_accepted_revision_baseline(
+            &accepted.design,
+            project_id,
+            project_revision,
+            view_identity,
+            checked_unix_time_ms,
+        )
     }
 
     pub fn append_validated_revision(
         &mut self,
         request: ValidatedRevisionRequest,
     ) -> Result<ValidatedSchematicRevisionId, ValidatedRevisionError> {
-        let SchematicDocument {
-            grid_size,
-            document_policy,
-            components,
-            wires,
-            buses,
-            bus_taps,
-            junctions,
-            net_labels,
-            design_notes,
-            documentation_shapes,
-            connections,
-            validated_revisions,
-            ..
-        } = &mut self.document;
-        let source = ValidatedRevisionSource {
-            grid_size: *grid_size,
-            document_policy: *document_policy,
-            components,
-            wires,
-            buses,
-            bus_taps,
-            junctions,
-            net_labels,
-            design_notes,
-            documentation_shapes,
-            connections,
-        };
-        let id =
-            validated_revisions.append_validated_revision(request, source, checked_unix_time_ms)?;
+        let id = self
+            .design
+            .append_validated_revision(request, checked_unix_time_ms)?;
         self.is_dirty = true;
         Ok(id)
     }
@@ -96,9 +49,7 @@ impl SchematicState {
         &mut self,
         id: ValidatedSchematicRevisionId,
     ) -> Result<(), ValidatedRevisionError> {
-        self.document
-            .validated_revisions
-            .remove_unpublished_tail(id)
+        self.design.remove_unpublished_validated_revision(id)
     }
 
     pub fn restore_validated_revision(
@@ -108,7 +59,11 @@ impl SchematicState {
         if self.read_only {
             return Err(ValidatedRevisionError::ReadOnly);
         }
-        let snapshot = self.document.validated_revisions.revision_source(id)?;
+        let snapshot = self
+            .design
+            .document()
+            .validated_revisions
+            .revision_source(id)?;
         let target = SchematicSnapshot {
             document_policy: snapshot.document_policy,
             grid_size: snapshot.grid_size,
@@ -124,13 +79,13 @@ impl SchematicState {
             // validated electrical topology. A design revision restore must
             // therefore preserve the live output markers instead of silently
             // deleting them.
-            probes: self.document.probes.clone(),
+            probes: self.design.document().probes.clone(),
             connections: snapshot.connections.to_vec(),
             // A stored revision restores the drawing. Sheet membership belongs
             // to the project catalog, which still holds the live one.
             sheet_assignments: std::collections::BTreeMap::new(),
         };
-        if target.is_equal_document(&self.document) {
+        if target.is_equal_document(&self.design.document()) {
             return Err(ValidatedRevisionError::AlreadyCurrent);
         }
         let changed = self.with_undo("restore validated schematic revision", move |state| {
@@ -183,7 +138,7 @@ mod tests {
         let mut state = accepted.clone();
         state.add_component(ComponentType::Resistor, Point::new(10, 10));
         let design = state.validated_design_content_digest().unwrap();
-        let journal = state.document.validated_revisions.clone();
+        let journal = state.design.document().validated_revisions.clone();
         let dirty = state.is_dirty;
         for epoch in [
             Err("clock unavailable"),
@@ -205,14 +160,17 @@ mod tests {
                     Err(ValidatedRevisionError::ClockUnavailable(_))
                 ));
             });
-            assert_eq!(state.document.validated_revisions, journal);
+            assert_eq!(state.design.document().validated_revisions, journal);
             assert_eq!(state.is_dirty, dirty);
             assert_eq!(state.validated_design_content_digest().unwrap(), design);
         }
         state
             .append_validated_revision(request(&state, project_id))
             .unwrap();
-        assert_eq!(state.document.validated_revisions.records().len(), 1);
+        assert_eq!(
+            state.design.document().validated_revisions.records().len(),
+            1
+        );
     }
 
     #[test]
@@ -223,22 +181,26 @@ mod tests {
         let first = state
             .append_validated_revision(request(&state, project_id))
             .expect("first revision");
-        state.document.components[0].value = "2k".to_owned();
+        state.design.document_mut_for_test().components[0].value = "2k".to_owned();
         let second = state
             .append_validated_revision(request(&state, project_id))
             .expect("second revision");
 
         state
-            .document
+            .design
+            .document()
             .validated_revisions
             .validate()
             .expect("valid journal");
-        assert_eq!(state.document.validated_revisions.records().len(), 2);
+        assert_eq!(
+            state.design.document().validated_revisions.records().len(),
+            2
+        );
         assert_ne!(first, second);
         state
             .restore_validated_revision(first)
             .expect("restore first");
-        assert_eq!(state.document.components[0].value, "1k");
+        assert_eq!(state.design.document().components[0].value, "1k");
     }
 
     #[test]
@@ -246,21 +208,29 @@ mod tests {
         let project_id = Uuid::new_v4();
         let mut state = SchematicState::default();
         state.add_component(ComponentType::Resistor, Point::new(10, 10));
-        state.document.document_policy.net_naming = NetNamingPolicy::SpiceCompatibleRelaxed;
-        state.document.grid_size = 4;
+        state
+            .design
+            .document_mut_for_test()
+            .document_policy
+            .net_naming = NetNamingPolicy::SpiceCompatibleRelaxed;
+        state.design.document_mut_for_test().grid_size = 4;
         let saved = state
             .append_validated_revision(request(&state, project_id))
             .expect("validated revision");
 
-        state.document.document_policy.net_naming = NetNamingPolicy::StrictCaseSensitive;
-        state.document.grid_size = 10;
+        state
+            .design
+            .document_mut_for_test()
+            .document_policy
+            .net_naming = NetNamingPolicy::StrictCaseSensitive;
+        state.design.document_mut_for_test().grid_size = 10;
         state.restore_validated_revision(saved).expect("restore");
 
         assert_eq!(
-            state.document.document_policy.net_naming,
+            state.design.document().document_policy.net_naming,
             NetNamingPolicy::SpiceCompatibleRelaxed
         );
-        assert_eq!(state.document.grid_size, 4);
+        assert_eq!(state.design.document().grid_size, 4);
     }
 
     #[test]
@@ -276,14 +246,14 @@ mod tests {
             Err(ValidatedRevisionError::AlreadyCurrent)
         );
 
-        state.document.components[0].value = "3k".to_owned();
-        let changed = state.document.components.clone();
+        state.design.document_mut_for_test().components[0].value = "3k".to_owned();
+        let changed = state.design.document().components.clone();
         state.read_only = true;
         assert_eq!(
             state.restore_validated_revision(saved),
             Err(ValidatedRevisionError::ReadOnly)
         );
-        assert_eq!(state.document.components, changed);
+        assert_eq!(state.design.document().components, changed);
     }
 
     #[test]
@@ -294,21 +264,23 @@ mod tests {
         let first = state
             .append_validated_revision(request(&state, project_id))
             .expect("first revision");
-        state.document.components[0].value = "2k".to_owned();
+        state.design.document_mut_for_test().components[0].value = "2k".to_owned();
         state.add_component(ComponentType::Capacitor, Point::new(20, 10));
-        state.document.grid_size = 8;
+        state.design.document_mut_for_test().grid_size = 8;
         let second = state
             .append_validated_revision(request(&state, project_id))
             .expect("second revision");
         let first = state
-            .document
+            .design
+            .document()
             .validated_revisions
             .records()
             .iter()
             .find(|record| record.id() == first)
             .unwrap();
         let second = state
-            .document
+            .design
+            .document()
             .validated_revisions
             .records()
             .iter()
@@ -338,7 +310,10 @@ mod tests {
         state
             .remove_unpublished_validated_revision(second)
             .expect("remove exact tail");
-        assert_eq!(state.document.validated_revisions.records().len(), 1);
+        assert_eq!(
+            state.design.document().validated_revisions.records().len(),
+            1
+        );
     }
 
     #[test]
@@ -347,7 +322,7 @@ mod tests {
         let mut accepted = SchematicState::default();
         accepted.add_component(ComponentType::Capacitor, Point::new(20, 20));
         let mut working = accepted.clone();
-        working.document.components[0].value = "2p".to_owned();
+        working.design.document_mut_for_test().components[0].value = "2p".to_owned();
         let baseline = working
             .seed_accepted_revision_baseline(
                 &accepted,
@@ -363,7 +338,7 @@ mod tests {
         working
             .restore_validated_revision(baseline)
             .expect("restore baseline");
-        assert_eq!(working.document.components[0].value, "1u");
+        assert_eq!(working.design.document().components[0].value, "1u");
     }
 
     #[test]
@@ -390,9 +365,7 @@ mod tests {
 
 impl SchematicState {
     pub(crate) fn copy_without_validated_revisions(&self) -> Self {
-        let mut copy = self.clone();
-        copy.document.validated_revisions = ValidatedRevisionJournal::default();
-        copy
+        self.clone_with_design(self.design.copy_without_validated_revisions())
     }
 
     pub(crate) fn record_validated_save_revision(
@@ -409,31 +382,20 @@ impl SchematicState {
         ),
         String,
     > {
-        let revision_id = match self.append_validated_revision(request) {
-            Ok(id) => id,
-            Err(error) => {
-                self.document.validated_revisions = original_journal;
-                self.is_dirty = original_dirty;
-                return Err(format!("Validated revision could not be recorded: {error}"));
-            }
-        };
-        let expected_journal = self.document.validated_revisions.clone();
-        let expected_design_digest = match self.validated_design_content_digest() {
-            Ok(digest) => digest,
-            Err(error) => {
-                self.document.validated_revisions = original_journal;
-                self.is_dirty = original_dirty;
-                return Err(format!(
-                    "The guarded working-design digest could not be recorded: {error}"
-                ));
-            }
-        };
-        Ok((
-            revision_id,
+        match self.design.record_validated_save_revision(
+            request,
             original_journal,
-            expected_journal,
-            expected_design_digest,
-        ))
+            checked_unix_time_ms,
+        ) {
+            Ok(record) => {
+                self.is_dirty = true;
+                Ok(record)
+            }
+            Err(error) => {
+                self.is_dirty = original_dirty;
+                Err(error)
+            }
+        }
     }
 
     pub(crate) fn rollback_validated_save_journal(
@@ -443,16 +405,12 @@ impl SchematicState {
         expected_design_digest: crate::product::ContentDigest,
         original_dirty: bool,
     ) -> Result<(), String> {
-        if &self.document.validated_revisions != expected_journal {
-            return Err(
-                "its validated revision history changed after publication began".to_owned(),
-            );
-        }
-        let current_design_digest = self
-            .validated_design_content_digest()
-            .map_err(|error| format!("its working-design guard could not be verified: {error}"))?;
-        self.document.validated_revisions = original_journal.clone();
-        self.is_dirty = original_dirty || current_design_digest != expected_design_digest;
+        let changed = self.design.rollback_validated_save_journal(
+            original_journal,
+            expected_journal,
+            expected_design_digest,
+        )?;
+        self.is_dirty = original_dirty || changed;
         Ok(())
     }
 }

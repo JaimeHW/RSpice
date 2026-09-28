@@ -3,7 +3,7 @@
 //! What is selected, and the set operations over it — rubber band, add,
 //! toggle, and select-all-of-kind.
 
-use super::super::deletion::{DeletionSelection, ObjectDeletion};
+use super::super::deletion::DeletionSelection;
 #[cfg(test)]
 use super::super::{BusDeclaration, BusSlice, BusTapOrientation, DesignNoteKind};
 use super::*;
@@ -39,7 +39,7 @@ impl SchematicState {
         let mut count = 0;
 
         // Select components whose center is within the rectangle
-        for comp in &self.document.components {
+        for comp in &self.design.document().components {
             if comp.pos.x >= min_x
                 && comp.pos.x <= max_x
                 && comp.pos.y >= min_y
@@ -52,7 +52,7 @@ impl SchematicState {
         }
 
         // Select wires whose routed polyline intersects the rectangle.
-        for wire in &self.document.wires {
+        for wire in &self.design.document().wires {
             let wire_in_rect = polyline_intersects_rect(&wire.points, min_x, min_y, max_x, max_y);
             if wire_in_rect && !self.selection.has_wire(wire.id) {
                 self.selection.select_wire(wire.id);
@@ -61,7 +61,7 @@ impl SchematicState {
         }
 
         // Select junctions within the rectangle
-        for junction in &self.document.junctions {
+        for junction in &self.design.document().junctions {
             if junction.pos.x >= min_x
                 && junction.pos.x <= max_x
                 && junction.pos.y >= min_y
@@ -75,7 +75,7 @@ impl SchematicState {
 
         // Net labels are complete, stable-ID objects whose attachment anchor
         // determines the named electrical node.
-        for label in &self.document.net_labels {
+        for label in &self.design.document().net_labels {
             if label.pos.x >= min_x
                 && label.pos.x <= max_x
                 && label.pos.y >= min_y
@@ -87,7 +87,7 @@ impl SchematicState {
             }
         }
 
-        for note in &self.document.design_notes {
+        for note in &self.design.document().design_notes {
             if note.pos.x >= min_x
                 && note.pos.x <= max_x
                 && note.pos.y >= min_y
@@ -99,7 +99,7 @@ impl SchematicState {
             }
         }
 
-        for probe in &self.document.probes {
+        for probe in &self.design.document().probes {
             if probe.position.x >= min_x
                 && probe.position.x <= max_x
                 && probe.position.y >= min_y
@@ -113,7 +113,7 @@ impl SchematicState {
 
         // Select buses whose routed polyline intersects the rectangle, even
         // when both segment endpoints are outside it.
-        for bus in &self.document.buses {
+        for bus in &self.design.document().buses {
             let in_rect = polyline_intersects_rect(&bus.points, min_x, min_y, max_x, max_y);
             if in_rect && !self.selection.has_bus(bus.id) {
                 self.selection.select_bus(bus.id);
@@ -122,7 +122,7 @@ impl SchematicState {
         }
 
         // A tap is included when either end of its connection is inside.
-        for tap in &self.document.bus_taps {
+        for tap in &self.design.document().bus_taps {
             let in_rect = segment_intersects_rect(
                 tap.bus_point,
                 tap.connection_point,
@@ -149,7 +149,7 @@ impl SchematicState {
         self.selection.clear();
 
         // Select components whose center is within the rectangle
-        for comp in &self.document.components {
+        for comp in &self.design.document().components {
             if comp.pos.x >= min_x
                 && comp.pos.x <= max_x
                 && comp.pos.y >= min_y
@@ -160,7 +160,7 @@ impl SchematicState {
         }
 
         // Select wires whose routed polyline intersects the rectangle.
-        for wire in &self.document.wires {
+        for wire in &self.design.document().wires {
             let wire_in_rect = polyline_intersects_rect(&wire.points, min_x, min_y, max_x, max_y);
             if wire_in_rect {
                 self.selection.select_wire(wire.id);
@@ -168,7 +168,7 @@ impl SchematicState {
         }
 
         // Select junctions within the rectangle
-        for junction in &self.document.junctions {
+        for junction in &self.design.document().junctions {
             if junction.pos.x >= min_x
                 && junction.pos.x <= max_x
                 && junction.pos.y >= min_y
@@ -178,7 +178,7 @@ impl SchematicState {
             }
         }
 
-        for label in &self.document.net_labels {
+        for label in &self.design.document().net_labels {
             if label.pos.x >= min_x
                 && label.pos.x <= max_x
                 && label.pos.y >= min_y
@@ -188,7 +188,7 @@ impl SchematicState {
             }
         }
 
-        for note in &self.document.design_notes {
+        for note in &self.design.document().design_notes {
             if note.pos.x >= min_x
                 && note.pos.x <= max_x
                 && note.pos.y >= min_y
@@ -198,7 +198,7 @@ impl SchematicState {
             }
         }
 
-        for probe in &self.document.probes {
+        for probe in &self.design.document().probes {
             if probe.position.x >= min_x
                 && probe.position.x <= max_x
                 && probe.position.y >= min_y
@@ -208,13 +208,13 @@ impl SchematicState {
             }
         }
 
-        for bus in &self.document.buses {
+        for bus in &self.design.document().buses {
             if polyline_intersects_rect(&bus.points, min_x, min_y, max_x, max_y) {
                 self.selection.select_bus(bus.id);
             }
         }
 
-        for tap in &self.document.bus_taps {
+        for tap in &self.design.document().bus_taps {
             if segment_intersects_rect(
                 tap.bus_point,
                 tap.connection_point,
@@ -239,66 +239,84 @@ impl SchematicState {
             return false;
         }
 
-        let selection = self.selection.clone();
-        let (document, _, _, mut edit) = self.document_edit_parts();
-        let Some(deletion) = ObjectDeletion::prepare(
-            document,
-            DeletionSelection {
-                components: &selection.components,
-                wires: &selection.wires,
-                junctions: selection.junctions.iter().map(|junction| junction.pos),
-                net_labels: &selection.net_labels,
-                buses: &selection.buses,
-                bus_taps: &selection.bus_taps,
-                design_notes: &selection.design_notes,
-                documentation_shapes: &selection.documentation_shapes,
-                probes: &selection.probes,
-            },
-        ) else {
+        let Some(edit) = self.design.delete_objects(DeletionSelection {
+            components: &self.selection.components,
+            wires: &self.selection.wires,
+            junctions: self.selection.junctions.iter().map(|junction| junction.pos),
+            net_labels: &self.selection.net_labels,
+            buses: &self.selection.buses,
+            bus_taps: &self.selection.bus_taps,
+            design_notes: &self.selection.design_notes,
+            documentation_shapes: &self.selection.documentation_shapes,
+            probes: &self.selection.probes,
+        }) else {
             return false;
         };
-        edit.begin(deletion.document(), "delete selection");
-        let removes_electrical_object = deletion.commit();
-        edit.selection.clear();
-        edit.mark_dirty();
-        if removes_electrical_object {
-            edit.mark_topology_changed();
-        }
-        edit.end(document)
+        self.selection.clear();
+        self.finish_document_edit(edit.committed);
+        edit.committed
     }
 
     /// Select every complete design object in the schematic.
     pub fn select_all_objects(&mut self) {
         self.selection.clear();
         self.selection.components = self
-            .document
+            .design
+            .document()
             .components
             .iter()
             .map(|item| item.id)
             .collect();
-        self.selection.wires = self.document.wires.iter().map(|item| item.id).collect();
-        self.selection.buses = self.document.buses.iter().map(|item| item.id).collect();
-        self.selection.bus_taps = self.document.bus_taps.iter().map(|item| item.id).collect();
+        self.selection.wires = self
+            .design
+            .document()
+            .wires
+            .iter()
+            .map(|item| item.id)
+            .collect();
+        self.selection.buses = self
+            .design
+            .document()
+            .buses
+            .iter()
+            .map(|item| item.id)
+            .collect();
+        self.selection.bus_taps = self
+            .design
+            .document()
+            .bus_taps
+            .iter()
+            .map(|item| item.id)
+            .collect();
         self.selection.net_labels = self
-            .document
+            .design
+            .document()
             .net_labels
             .iter()
             .map(|item| item.id)
             .collect();
         self.selection.design_notes = self
-            .document
+            .design
+            .document()
             .design_notes
             .iter()
             .map(|item| item.id)
             .collect();
         self.selection.documentation_shapes = self
-            .document
+            .design
+            .document()
             .documentation_shapes
             .iter()
             .map(|item| item.id)
             .collect();
-        self.selection.probes = self.document.probes.iter().map(|item| item.id).collect();
-        for position in self.document.junctions.iter().map(|item| item.pos) {
+        self.selection.probes = self
+            .design
+            .document()
+            .probes
+            .iter()
+            .map(|item| item.id)
+            .collect();
+        for position in self.design.document().junctions.iter().map(|item| item.pos) {
             self.selection.select_junction(position);
         }
     }
@@ -369,17 +387,24 @@ mod tests {
     fn junction_deletion_is_one_undoable_transaction() {
         let point = Point::new(12, 8);
         let mut schematic = SchematicState::default();
-        schematic.document.junctions.push(Junction::new(7, point));
+        schematic
+            .design
+            .document_mut_for_test()
+            .junctions
+            .push(Junction::new(7, point));
         schematic.init_undo_history();
         schematic.selection.select_only_junction(point);
 
         assert!(schematic.delete_selection());
-        assert!(schematic.document.junctions.is_empty());
+        assert!(schematic.design.document().junctions.is_empty());
         assert!(schematic.selection.is_empty());
         assert_eq!(schematic.undo_description(), Some("delete selection"));
 
         assert!(schematic.undo());
-        assert_eq!(schematic.document.junctions, vec![Junction::new(7, point)]);
+        assert_eq!(
+            schematic.design.document().junctions,
+            vec![Junction::new(7, point)]
+        );
         assert!(
             !schematic.can_undo(),
             "deletion must create only one undo step"
@@ -400,7 +425,11 @@ mod tests {
     fn deletion_preserves_read_only_state_and_joins_outer_cancellation() {
         let label = NetLabel::new(1, Point::new(2, 2), "remove");
         let mut schematic = SchematicState::default();
-        schematic.document.net_labels.push(label.clone());
+        schematic
+            .design
+            .document_mut_for_test()
+            .net_labels
+            .push(label.clone());
         schematic.selection.select_only_net_label(label.id);
         schematic.is_dirty = false;
         schematic.init_undo_history();
@@ -410,7 +439,7 @@ mod tests {
 
         schematic.read_only = true;
         assert!(!schematic.delete_selection());
-        assert_eq!(schematic.document.net_labels, vec![label.clone()]);
+        assert_eq!(schematic.design.document().net_labels, vec![label.clone()]);
         assert_eq!(schematic.selection, selection);
         assert_eq!(schematic.topology_version(), topology);
         assert_eq!(schematic.content_version(), content);
@@ -421,7 +450,7 @@ mod tests {
         schematic.read_only = false;
         schematic.begin_operation("outer edit");
         assert!(!schematic.delete_selection(), "the outer scope owns commit");
-        assert!(schematic.document.net_labels.is_empty());
+        assert!(schematic.design.document().net_labels.is_empty());
         assert!(schematic.selection.is_empty());
         assert_eq!(schematic.topology_version(), topology + 1);
         assert_eq!(schematic.content_version(), content);
@@ -429,7 +458,7 @@ mod tests {
         assert!(schematic.has_pending_operation());
         assert!(!schematic.can_undo());
         assert!(schematic.cancel_operation());
-        assert_eq!(schematic.document.net_labels, vec![label]);
+        assert_eq!(schematic.design.document().net_labels, vec![label]);
         assert_eq!(schematic.selection, selection);
         assert!(!schematic.is_dirty);
         assert!(!schematic.can_undo());
@@ -440,21 +469,24 @@ mod tests {
     fn wire_deletion_removes_newly_orphaned_junction_in_same_undo_step() {
         let point = Point::new(10, 10);
         let mut schematic = SchematicState::default();
-        schematic.document.wires = vec![
+        schematic.design.document_mut_for_test().wires = vec![
             Wire::new(1, vec![Point::new(0, 10), point]),
             Wire::new(2, vec![point, Point::new(10, 20)]),
         ];
-        schematic.document.junctions = vec![Junction::new(3, point)];
+        schematic.design.document_mut_for_test().junctions = vec![Junction::new(3, point)];
         schematic.init_undo_history();
         schematic.selection.select_only_wire(1);
 
         assert!(schematic.delete_selection());
-        assert_eq!(schematic.document.wires.len(), 1);
-        assert!(schematic.document.junctions.is_empty());
+        assert_eq!(schematic.design.document().wires.len(), 1);
+        assert!(schematic.design.document().junctions.is_empty());
 
         assert!(schematic.undo());
-        assert_eq!(schematic.document.wires.len(), 2);
-        assert_eq!(schematic.document.junctions, vec![Junction::new(3, point)]);
+        assert_eq!(schematic.design.document().wires.len(), 2);
+        assert_eq!(
+            schematic.design.document().junctions,
+            vec![Junction::new(3, point)]
+        );
         assert!(!schematic.can_undo(), "cleanup belongs to the delete step");
     }
 
@@ -474,11 +506,12 @@ mod tests {
         .unwrap();
         let mut schematic = SchematicState::default();
         schematic
-            .document
+            .design
+            .document_mut_for_test()
             .wires
             .push(Wire::segment(13, Point::new(-10, -1), Point::new(10, -1)));
-        schematic.document.buses.push(bus);
-        schematic.document.bus_taps.push(tap);
+        schematic.design.document_mut_for_test().buses.push(bus);
+        schematic.design.document_mut_for_test().bus_taps.push(tap);
         assert_eq!(schematic.select_in_rect(-1, -1, 1, 1, false), 3);
         assert!(schematic.selection.has_wire(13));
         assert!(schematic.selection.has_bus(11));
@@ -507,28 +540,33 @@ mod tests {
         )
         .unwrap();
         let mut schematic = SchematicState::default();
-        schematic.document.buses.push(bus);
-        schematic.document.bus_taps.push(tap);
+        schematic.design.document_mut_for_test().buses.push(bus);
+        schematic.design.document_mut_for_test().bus_taps.push(tap);
         schematic.selection.select_only_bus(21);
         assert!(schematic.delete_selection());
-        assert!(schematic.document.buses.is_empty() && schematic.document.bus_taps.is_empty());
+        assert!(
+            schematic.design.document().buses.is_empty()
+                && schematic.design.document().bus_taps.is_empty()
+        );
         assert!(schematic.undo());
-        assert_eq!(schematic.document.buses.len(), 1);
-        assert_eq!(schematic.document.bus_taps.len(), 1);
+        assert_eq!(schematic.design.document().buses.len(), 1);
+        assert_eq!(schematic.design.document().bus_taps.len(), 1);
     }
 
     #[test]
     fn rectangle_preview_commit_and_select_all_include_label_ids() {
         let mut schematic = SchematicState::default();
         schematic
-            .document
+            .design
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(31, Point::new(5, 6), "inside"));
         schematic
-            .document
+            .design
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(32, Point::new(50, 60), "outside"));
-        schematic.document.design_notes.push(
+        schematic.design.document_mut_for_test().design_notes.push(
             DesignNote::new(
                 33,
                 Point::new(100, 100),
@@ -558,18 +596,25 @@ mod tests {
         let retained = NetLabel::new(40, Point::new(1, 1), "retained");
         let removed = NetLabel::new(41, Point::new(2, 2), "removed");
         let mut schematic = SchematicState::default();
-        schematic.document.net_labels = vec![retained.clone(), removed.clone()];
+        schematic.design.document_mut_for_test().net_labels =
+            vec![retained.clone(), removed.clone()];
         schematic.init_undo_history();
         schematic.selection.select_only_net_label(removed.id);
 
         assert!(schematic.delete_selection());
-        assert_eq!(schematic.document.net_labels, vec![retained.clone()]);
+        assert_eq!(
+            schematic.design.document().net_labels,
+            vec![retained.clone()]
+        );
         assert_eq!(schematic.undo_description(), Some("delete selection"));
         assert!(schematic.undo());
-        assert_eq!(schematic.document.net_labels, vec![retained, removed]);
+        assert_eq!(
+            schematic.design.document().net_labels,
+            vec![retained, removed]
+        );
         assert!(!schematic.can_undo());
         assert!(schematic.redo());
-        assert_eq!(schematic.document.net_labels.len(), 1);
+        assert_eq!(schematic.design.document().net_labels.len(), 1);
     }
 
     #[test]
@@ -583,19 +628,33 @@ mod tests {
         )
         .unwrap();
         let mut schematic = SchematicState::default();
-        schematic.document.junctions.push(Junction::new(7, point));
-        schematic.document.design_notes.push(note.clone());
+        schematic
+            .design
+            .document_mut_for_test()
+            .junctions
+            .push(Junction::new(7, point));
+        schematic
+            .design
+            .document_mut_for_test()
+            .design_notes
+            .push(note.clone());
         schematic.init_undo_history();
         schematic.selection.select_only_design_note(note.id);
         let topology = schematic.topology_version();
 
         assert!(schematic.delete_selection());
-        assert!(schematic.document.design_notes.is_empty());
-        assert_eq!(schematic.document.junctions, vec![Junction::new(7, point)]);
+        assert!(schematic.design.document().design_notes.is_empty());
+        assert_eq!(
+            schematic.design.document().junctions,
+            vec![Junction::new(7, point)]
+        );
         assert_eq!(schematic.topology_version(), topology);
         assert!(schematic.undo());
-        assert_eq!(schematic.document.design_notes, vec![note]);
-        assert_eq!(schematic.document.junctions, vec![Junction::new(7, point)]);
+        assert_eq!(schematic.design.document().design_notes, vec![note]);
+        assert_eq!(
+            schematic.design.document().junctions,
+            vec![Junction::new(7, point)]
+        );
         assert_eq!(schematic.topology_version(), topology);
     }
 
@@ -620,8 +679,15 @@ mod tests {
         .unwrap();
         let marker = Point::new(90, 90);
         let mut schematic = SchematicState::default();
-        schematic.document.documentation_shapes = vec![retained.clone(), removed.clone()];
-        schematic.document.junctions.push(Junction::new(7, marker));
+        schematic
+            .design
+            .document_mut_for_test()
+            .documentation_shapes = vec![retained.clone(), removed.clone()];
+        schematic
+            .design
+            .document_mut_for_test()
+            .junctions
+            .push(Junction::new(7, marker));
 
         schematic.select_all_objects();
         assert!(schematic.selection.has_documentation_shape(retained.id));
@@ -635,19 +701,25 @@ mod tests {
         let topology = schematic.topology_version();
         assert!(schematic.delete_selection());
         assert_eq!(
-            schematic.document.documentation_shapes,
+            schematic.design.document().documentation_shapes,
             vec![retained.clone()]
         );
-        assert_eq!(schematic.document.junctions, vec![Junction::new(7, marker)]);
+        assert_eq!(
+            schematic.design.document().junctions,
+            vec![Junction::new(7, marker)]
+        );
         assert_eq!(schematic.topology_version(), topology);
         assert_eq!(schematic.undo_description(), Some("delete selection"));
 
         assert!(schematic.undo());
         assert_eq!(
-            schematic.document.documentation_shapes,
+            schematic.design.document().documentation_shapes,
             vec![retained, removed]
         );
-        assert_eq!(schematic.document.junctions, vec![Junction::new(7, marker)]);
+        assert_eq!(
+            schematic.design.document().junctions,
+            vec![Junction::new(7, marker)]
+        );
         assert_eq!(schematic.topology_version(), topology);
         assert!(!schematic.can_undo(), "deletion must create one undo step");
     }
@@ -659,8 +731,16 @@ mod tests {
                 .unwrap();
         let marker = Point::new(90, 90);
         let mut schematic = SchematicState::default();
-        schematic.document.probes.push(probe.clone());
-        schematic.document.junctions.push(Junction::new(7, marker));
+        schematic
+            .design
+            .document_mut_for_test()
+            .probes
+            .push(probe.clone());
+        schematic
+            .design
+            .document_mut_for_test()
+            .junctions
+            .push(Junction::new(7, marker));
 
         schematic.select_all_objects();
         assert!(schematic.selection.has_probe(probe.id));
@@ -670,14 +750,20 @@ mod tests {
         schematic.init_undo_history();
         let topology = schematic.topology_version();
         assert!(schematic.delete_selection());
-        assert!(schematic.document.probes.is_empty());
-        assert_eq!(schematic.document.junctions, vec![Junction::new(7, marker)]);
+        assert!(schematic.design.document().probes.is_empty());
+        assert_eq!(
+            schematic.design.document().junctions,
+            vec![Junction::new(7, marker)]
+        );
         assert_eq!(schematic.topology_version(), topology);
         assert_eq!(schematic.undo_description(), Some("delete selection"));
 
         assert!(schematic.undo());
-        assert_eq!(schematic.document.probes, vec![probe]);
-        assert_eq!(schematic.document.junctions, vec![Junction::new(7, marker)]);
+        assert_eq!(schematic.design.document().probes, vec![probe]);
+        assert_eq!(
+            schematic.design.document().junctions,
+            vec![Junction::new(7, marker)]
+        );
         assert_eq!(schematic.topology_version(), topology);
         assert!(!schematic.can_undo());
     }

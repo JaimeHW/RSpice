@@ -5,7 +5,6 @@
 //! or removing either invalidates cached connectivity.
 
 use super::super::*;
-use rspice_design::schematic::junction_edit;
 
 impl SchematicState {
     // =========================================================================
@@ -14,28 +13,26 @@ impl SchematicState {
 
     /// Add an explicit junction at a position
     pub fn add_junction(&mut self, pos: Point) -> u64 {
-        let (id, inserted) =
-            junction_edit::add_junction(&mut self.document, &mut self.identity, pos);
+        let (id, inserted) = self.design.add_junction(pos);
         if inserted {
             self.is_dirty = true;
-            self.bump_topology_version();
         }
         id
     }
 
     /// Remove a junction by ID
     pub fn remove_junction(&mut self, id: u64) -> bool {
-        let removed = junction_edit::remove_junction(&mut self.document, id);
+        let removed = self.design.remove_junction(id);
         if removed {
             self.is_dirty = true;
-            self.bump_topology_version();
         }
         removed
     }
 
     /// Find junction at a position
     pub fn junction_at(&self, pos: Point) -> Option<u64> {
-        self.document
+        self.design
+            .document()
             .junctions
             .iter()
             .find(|j| j.pos == pos)
@@ -44,14 +41,17 @@ impl SchematicState {
 
     /// Check if a junction exists at a position
     pub fn has_junction(&self, pos: Point) -> bool {
-        self.document.junctions.iter().any(|j| j.pos == pos)
+        self.design
+            .document()
+            .junctions
+            .iter()
+            .any(|j| j.pos == pos)
     }
 
     /// Add a net label at the given position
     pub fn add_net_label(&mut self, pos: Point, name: String) -> u64 {
-        let id = junction_edit::add_net_label(&mut self.document, &mut self.identity, pos, name);
+        let id = self.design.add_net_label(pos, name);
         self.is_dirty = true;
-        self.bump_topology_version();
         id
     }
     pub(crate) fn add_net_label_with_kind(
@@ -60,15 +60,8 @@ impl SchematicState {
         name: String,
         kind: crate::state::NetLabelKind,
     ) -> u64 {
-        let id = self.add_net_label(pos, name);
-        if let Some(label) = self
-            .document
-            .net_labels
-            .iter_mut()
-            .find(|label| label.id == id)
-        {
-            label.kind = kind;
-        }
+        let id = self.design.add_net_label_with_kind(pos, name, kind);
+        self.is_dirty = true;
         id
     }
 }
@@ -86,7 +79,7 @@ mod tests {
 
         assert!(schematic.is_dirty);
         assert_eq!(
-            schematic.document.net_labels,
+            schematic.design.document().net_labels,
             vec![NetLabel::new(id, Point::new(2, 3), "sense")]
         );
         assert_ne!(schematic.topology_version(), topology_before);

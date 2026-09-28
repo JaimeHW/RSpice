@@ -1,7 +1,7 @@
 //! Probe edits with the same document-local history and selection semantics.
 
 use crate::product::{SavedOutputId, SimulationPlanId};
-use crate::state::{Point, SchematicProbe, SchematicState};
+use crate::state::{Point, SchematicState};
 
 impl SchematicState {
     pub(crate) fn bind_probe_saved_output(
@@ -9,18 +9,13 @@ impl SchematicState {
         existing_id: u64,
         binding: Option<(SimulationPlanId, SavedOutputId)>,
     ) {
-        self.with_undo("bind schematic probe output", |schematic| {
-            if let Some(probe) = schematic
-                .document
-                .probes
-                .iter_mut()
-                .find(|probe| probe.id == existing_id)
-                && let Some((plan_id, output_id)) = binding
-            {
-                probe.bind_saved_output(plan_id, output_id);
-                schematic.is_dirty = true;
-            }
-        });
+        if self.read_only {
+            return;
+        }
+        let edit = self.design.bind_probe_saved_output(existing_id, binding);
+        if edit.value || edit.committed {
+            self.finish_document_edit(edit.committed);
+        }
     }
 
     pub(crate) fn place_schematic_probe(
@@ -30,26 +25,22 @@ impl SchematicState {
         source_expression: Option<String>,
         binding: Option<(SimulationPlanId, SavedOutputId)>,
     ) -> Result<u64, String> {
-        let mut probe_id = 0;
-        let changed = self.with_undo("place schematic probe", |schematic| {
-            let id = schematic.next_id();
-            let reference = label.clone().unwrap_or_else(|| format!("P{id}"));
-            if let Ok(mut probe) =
-                SchematicProbe::new(id, position, reference, source_expression.clone())
-            {
-                if let Some((plan_id, output_id)) = binding {
-                    probe.bind_saved_output(plan_id, output_id);
-                }
-                schematic.document.probes.push(probe);
-                schematic.selection.select_only_probe(id);
-                schematic.is_dirty = true;
-                probe_id = id;
-            }
-        });
-        if !changed || probe_id == 0 {
+        if self.read_only {
             return Err("the probe marker did not change the active schematic".to_owned());
         }
-        Ok(probe_id)
+        let edit = self
+            .design
+            .place_schematic_probe(position, label, source_expression, binding);
+        if let Some(id) = edit.value {
+            self.selection.select_only_probe(id);
+        }
+        if edit.value.is_some() || edit.committed {
+            self.finish_document_edit(edit.committed);
+        }
+        match edit.value {
+            Some(id) if edit.committed && id != 0 => Ok(id),
+            _ => Err("the probe marker did not change the active schematic".to_owned()),
+        }
     }
 
     pub(crate) fn edit_probe_intent(
@@ -58,17 +49,15 @@ impl SchematicState {
         enabled: bool,
         plot_on_materialization: bool,
     ) -> bool {
-        self.with_undo("edit schematic probe", |schematic| {
-            if let Some(live) = schematic
-                .document
-                .probes
-                .iter_mut()
-                .find(|probe| probe.id == id)
-            {
-                live.enabled = enabled;
-                live.plot_on_materialization = plot_on_materialization;
-                schematic.is_dirty = true;
-            }
-        })
+        if self.read_only {
+            return false;
+        }
+        let edit = self
+            .design
+            .edit_probe_intent(id, enabled, plot_on_materialization);
+        if edit.value || edit.committed {
+            self.finish_document_edit(edit.committed);
+        }
+        edit.committed
     }
 }

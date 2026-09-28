@@ -27,6 +27,7 @@ use rspice_design::schematic::history as committed_history;
 use rspice_design::schematic::junction_candidates;
 mod component;
 mod component_references;
+#[cfg(test)]
 use rspice_design::schematic::component_references as reference_edit;
 use rspice_design::schematic::component_type;
 use rspice_design::schematic::deletion;
@@ -103,9 +104,6 @@ pub use generated_veriloga_catalog::{
     GENERATED_VERILOGA_BINDING_SCHEMA_REVISION, generated_veriloga_devices,
     generated_veriloga_library_binding, validate_generated_veriloga_binding,
 };
-pub(crate) use generated_veriloga_catalog::{
-    GeneratedVerilogABindingMigration, migrate_generated_veriloga_binding,
-};
 pub use ground_names::is_ground_reference;
 pub(crate) use hierarchy::SheetMoveConnectivityPlan;
 pub use hierarchy::{
@@ -122,14 +120,11 @@ pub use port::{
     PendingPortSequence, PortContract, PortDirection, PortDiscipline, PortSignalType, PortSpec,
 };
 pub use probe::SchematicProbe;
+pub(crate) use replacement::parse_replacement_parameters_strict;
 pub use replacement::{
     SchematicReplacementAuthority, SchematicReplacementError, SchematicReplacementParameter,
     SchematicReplacementPreview, SchematicReplacementSourceSpec, SchematicReplacementTargetSpec,
     SchematicReplacementTerminal,
-};
-pub(crate) use replacement::{
-    format_replacement_parameters, parse_replacement_parameters_strict,
-    valid_replacement_parameter_name,
 };
 pub use rotation::Rotation;
 pub use selection::{

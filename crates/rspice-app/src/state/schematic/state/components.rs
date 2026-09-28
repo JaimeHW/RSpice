@@ -21,9 +21,7 @@ impl SchematicState {
                 model: &armed.model,
                 symbol_variant: armed.variant.as_deref(),
             });
-        let id = component_edit::add_component(
-            &mut self.document,
-            &mut self.identity,
+        let id = self.design.add_component(
             kind,
             ComponentPlacement {
                 position: pos,
@@ -33,7 +31,6 @@ impl SchematicState {
             model_override,
         );
         self.is_dirty = true;
-        self.bump_topology_version();
         id
     }
 
@@ -43,9 +40,7 @@ impl SchematicState {
         pos: Point,
         library_cell: LibraryCellInstance,
     ) -> u64 {
-        let id = component_edit::add_library_cell_component(
-            &mut self.document,
-            &mut self.identity,
+        let id = self.design.add_library_cell_component(
             ComponentPlacement {
                 position: pos,
                 rotation: self.preview_rotation,
@@ -54,7 +49,6 @@ impl SchematicState {
             library_cell,
         );
         self.is_dirty = true;
-        self.bump_topology_version();
         id
     }
 
@@ -133,7 +127,8 @@ impl SchematicState {
         let mut ids: Vec<u64> = self.selection.components.iter().copied().collect();
         ids.sort_unstable();
         ids.retain(|id| {
-            self.document
+            self.design
+                .document()
                 .components
                 .iter()
                 .any(|component| component.id == *id)
@@ -142,20 +137,15 @@ impl SchematicState {
             return;
         }
         self.with_undo(description, move |s| {
-            component_edit::transform_components_resolved(
-                &mut s.document,
-                &ids,
-                terminal_points_for,
-                transform,
-            );
+            s.design
+                .transform_components_resolved(&ids, terminal_points_for, transform);
             s.is_dirty = true;
-            s.bump_topology_version();
         });
     }
 
     /// Emitted loop-probe names in the current sheet.
     pub fn placed_loop_probe_names(&self) -> Vec<String> {
-        component_edit::placed_loop_probe_names(&self.document)
+        component_edit::placed_loop_probe_names(&self.design.document())
     }
 }
 
@@ -245,12 +235,13 @@ mod tests {
         ]);
 
         let mut schematic = SchematicState::default();
-        schematic.document.components.push(
+        schematic.design.document_mut_for_test().components.push(
             Component::new(1, ComponentType::CellInstance, Point::new(100, 50))
                 .with_library_cell(binding),
         );
         schematic
-            .document
+            .design
+            .document_mut_for_test()
             .wires
             .push(Wire::segment(2, Point::new(60, 40), Point::new(60, 0)));
         schematic.selection.select_component(1);
@@ -258,9 +249,18 @@ mod tests {
         schematic
             .rotate_selection_resolved(|component| resolved_terminal_points(component, &resolved));
 
-        assert_eq!(schematic.document.components[0].rotation, Rotation::R90);
-        assert_eq!(schematic.document.wires[0].points[0], Point::new(110, 10));
-        assert_eq!(schematic.document.wires[0].points[1], Point::new(60, 0));
+        assert_eq!(
+            schematic.design.document().components[0].rotation,
+            Rotation::R90
+        );
+        assert_eq!(
+            schematic.design.document().wires[0].points[0],
+            Point::new(110, 10)
+        );
+        assert_eq!(
+            schematic.design.document().wires[0].points[1],
+            Point::new(60, 0)
+        );
     }
 
     #[test]
@@ -274,16 +274,17 @@ mod tests {
             port("IN", PortDirection::In),
             port("OUT", PortDirection::Out),
         ]);
-        schematic.document.components.push(
+        schematic.design.document_mut_for_test().components.push(
             Component::new(first_id, ComponentType::CellInstance, Point::new(100, 50))
                 .with_library_cell(binding.clone()),
         );
-        schematic.document.components.push(
+        schematic.design.document_mut_for_test().components.push(
             Component::new(second_id, ComponentType::CellInstance, Point::new(150, 20))
                 .with_library_cell(binding),
         );
         schematic
-            .document
+            .design
+            .document_mut_for_test()
             .wires
             .push(Wire::segment(9, Point::new(60, 40), Point::new(60, 0)));
 
@@ -291,7 +292,7 @@ mod tests {
             .rotate_selection_resolved(|component| resolved_terminal_points(component, &resolved));
 
         assert_eq!(
-            schematic.document.wires[0].points[0],
+            schematic.design.document().wires[0].points[0],
             Point::new(110, 10),
             "wire endpoint should follow the first component's pin once, not then match and follow \
              the second component's old pin"
@@ -308,7 +309,7 @@ mod tests {
 
         assert!(!schematic.is_dirty);
         assert_eq!(schematic.topology_version(), topology_version);
-        assert!(schematic.document.components.is_empty());
+        assert!(schematic.design.document().components.is_empty());
     }
 
     #[test]
@@ -325,7 +326,8 @@ mod tests {
 
         let name = |id| {
             schematic
-                .document
+                .design
+                .document()
                 .components
                 .iter()
                 .find(|component| component.id == id)

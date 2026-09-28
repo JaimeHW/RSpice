@@ -1449,7 +1449,7 @@ mod tests {
         assert!(state.tabbed_property_dialog.open);
         assert_eq!(state.schematic.document().components[0].name, "R99");
         assert_eq!(state.schematic.document().components[0].params, "");
-        assert_eq!(state.schematic.undo_history.committed.undo_count(), 0);
+        assert_eq!(state.schematic.history().undo_count(), 0);
         assert!(state.project_undo_sequence().is_some());
         assert!(component_property_session_error(&state).is_none());
         assert_eq!(
@@ -1483,7 +1483,7 @@ mod tests {
         assert!(!state.tabbed_property_dialog.open);
         assert_eq!(state.schematic.document().components[0].name, "R99");
         assert_eq!(state.schematic.document().components[0].params, "m=2");
-        assert_eq!(state.schematic.undo_history.committed.undo_count(), 1);
+        assert_eq!(state.schematic.history().undo_count(), 1);
 
         assert!(state.schematic.undo());
         assert_eq!(state.schematic.document().components[0].name, "R99");

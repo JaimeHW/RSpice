@@ -5,7 +5,6 @@
 //! the terminals rather than patching individual connections.
 
 use super::super::*;
-use rspice_design::schematic::terminal_connection;
 
 impl SchematicState {
     // =========================================================================
@@ -14,13 +13,13 @@ impl SchematicState {
 
     /// Rebuild all wire connections based on current positions
     pub fn rebuild_connections(&mut self) {
-        terminal_connection::rebuild_connections(&mut self.document);
+        self.design.rebuild_connections();
     }
 
     /// Rebuild the rubber-band cache from authoritative resolved terminal
     /// geometry. Authored library symbols must use this path because their pin
     /// positions can differ from intrinsic fallback geometry.
     pub fn rebuild_connections_from_terminals(&mut self, terminals: &[(u64, String, Point)]) {
-        terminal_connection::rebuild_connections_from_terminals(&mut self.document, terminals);
+        self.design.rebuild_connections_from_terminals(terminals);
     }
 }

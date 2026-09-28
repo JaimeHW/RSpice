@@ -146,7 +146,8 @@ mod tests {
     fn placed_port(state: &mut SchematicState, name: &str, pos: Point) {
         let id = state.add_component(ComponentType::Port, pos);
         state
-            .document
+            .design
+            .document_mut_for_test()
             .components
             .iter_mut()
             .find(|component| component.id == id)
@@ -156,8 +157,8 @@ mod tests {
 
     fn connectivity(state: &SchematicState) -> VectorConnectivity {
         vector_connectivity(
-            &state.document.buses,
-            &state.document.components,
+            &state.design.document().buses,
+            &state.design.document().components,
             |component| component.terminal_positions_resolved(None),
         )
     }
@@ -165,7 +166,7 @@ mod tests {
     #[test]
     fn identical_declarations_that_touch_are_one_vector_net() {
         let mut schematic = SchematicState::default();
-        schematic.document.buses = vec![
+        schematic.design.document_mut_for_test().buses = vec![
             declared(1, "DATA[7:0]", Point::new(0, 0), Point::new(40, 0)),
             declared(2, "DATA[7:0]", Point::new(40, 0), Point::new(40, 40)),
             // Same declaration, nowhere near the other two: a separate net in
@@ -189,12 +190,16 @@ mod tests {
     #[test]
     fn a_vector_port_joins_the_bus_that_declares_the_same_range() {
         let mut schematic = SchematicState::default();
-        schematic.document.buses.push(declared(
-            1,
-            "DATA[3:0]",
-            Point::new(90, 0),
-            Point::new(150, 0),
-        ));
+        schematic
+            .design
+            .document_mut_for_test()
+            .buses
+            .push(declared(
+                1,
+                "DATA[3:0]",
+                Point::new(90, 0),
+                Point::new(150, 0),
+            ));
         placed_port(&mut schematic, "DATA[3:0]", Point::new(100, 0));
 
         let vectors = connectivity(&schematic);
@@ -210,12 +215,16 @@ mod tests {
     #[test]
     fn a_vector_port_on_a_bus_of_another_range_states_both_widths() {
         let mut schematic = SchematicState::default();
-        schematic.document.buses.push(declared(
-            1,
-            "DATA[1:0]",
-            Point::new(90, 0),
-            Point::new(150, 0),
-        ));
+        schematic
+            .design
+            .document_mut_for_test()
+            .buses
+            .push(declared(
+                1,
+                "DATA[1:0]",
+                Point::new(90, 0),
+                Point::new(150, 0),
+            ));
         placed_port(&mut schematic, "DATA[3:0]", Point::new(100, 0));
 
         let vectors = connectivity(&schematic);

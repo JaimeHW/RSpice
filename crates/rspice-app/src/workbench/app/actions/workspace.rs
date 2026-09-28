@@ -599,11 +599,7 @@ impl AppState {
     /// drawing holds it — so losing one is a project transaction of its own,
     /// which restores both the contract and the anchors it names.
     fn reconcile_active_sheet_membership(&mut self, active: &CellViewRef) {
-        let recorded = self
-            .schematic
-            .undo_history
-            .committed
-            .take_restored_sheet_assignments();
+        let recorded = self.schematic.take_restored_sheet_assignments();
         // Only a cell view that already holds contracts can lose one, and only
         // that case needs the retained before-state. Every other document
         // synchronizes without copying its design authority.
@@ -642,10 +638,7 @@ impl AppState {
             .sheet_catalog(&active.key())
             .map(|catalog| catalog.object_assignments().clone())
             .unwrap_or_default();
-        self.schematic
-            .undo_history
-            .committed
-            .set_live_sheet_assignments(assignments);
+        self.schematic.set_live_sheet_assignments(assignments);
         let removed_ports = receipt.map_or(0, |receipt| receipt.removed_cross_sheet_ports);
         let Some((before, before_schematic)) = before.filter(|_| removed_ports > 0) else {
             return;

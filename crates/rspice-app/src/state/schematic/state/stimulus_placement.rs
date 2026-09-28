@@ -63,9 +63,7 @@ impl PendingStimulusPlacement {
     /// instance placed from a definition and one adopted onto afterwards carry
     /// byte-identical cards.
     pub fn stamp_onto(&self, component: &mut Component) {
-        component.value = self.receipt.value.clone();
-        component.params = self.receipt.params.clone();
-        component.stimulus_provenance = Some(self.receipt.clone());
+        self.receipt.stamp_onto(component);
     }
 }
 
@@ -100,14 +98,7 @@ impl SchematicState {
         pos: Point,
     ) -> u64 {
         let id = self.add_component(placement.component_type, pos);
-        if let Some(component) = self
-            .document
-            .components
-            .iter_mut()
-            .find(|component| component.id == id)
-        {
-            placement.stamp_onto(component);
-        }
+        self.design.stamp_placed_stimulus(id, &placement.receipt);
         id
     }
 }
@@ -138,7 +129,8 @@ mod tests {
 
         let id = schematic.add_stimulus_component(&placement, Point::new(10, 20));
         let component = schematic
-            .document
+            .design
+            .document()
             .components
             .iter()
             .find(|component| component.id == id)
@@ -165,15 +157,15 @@ mod tests {
         schematic.with_undo("place a sine source", |schematic| {
             schematic.add_armed_component(ComponentType::VoltageSourceSin, Point::new(4, 4));
         });
-        assert_eq!(schematic.document.components.len(), 1);
+        assert_eq!(schematic.design.document().components.len(), 1);
         assert!(
-            schematic.document.components[0]
+            schematic.design.document().components[0]
                 .stimulus_provenance
                 .is_some(),
             "the armed definition is on the placed instance"
         );
         assert!(schematic.undo());
-        assert!(schematic.document.components.is_empty());
+        assert!(schematic.design.document().components.is_empty());
     }
 
     /// A definition armed for one type says nothing about another: the same
@@ -186,7 +178,8 @@ mod tests {
 
         let id = schematic.add_armed_component(ComponentType::VoltageSourcePulse, Point::new(4, 4));
         let placed = schematic
-            .document
+            .design
+            .document()
             .components
             .iter()
             .find(|component| component.id == id)
@@ -242,19 +235,14 @@ impl PreparedStimulusAdoption {
         schematic: &mut SchematicState,
         description: String,
     ) -> bool {
-        let component_id = self.candidate.id;
-        schematic.with_undo(description, |schematic| {
-            if let Some(held) = schematic
-                .document
-                .components
-                .iter_mut()
-                .find(|component| component.id == component_id)
-            {
-                *held = self.candidate;
-            }
-            schematic.is_dirty = true;
-            schematic.bump_topology_version();
-        })
+        if schematic.read_only {
+            return false;
+        }
+        let committed = schematic
+            .design
+            .replace_stimulus_family(self.candidate, description);
+        schematic.finish_document_edit(committed);
+        committed
     }
 }
 

@@ -75,7 +75,7 @@ impl SchematicState {
         if pending.topology_version != self.topology_version() {
             return Err(DesignNoteError::StaleDocument);
         }
-        if pending.expected_design_notes != self.document.design_notes {
+        if pending.expected_design_notes != self.design.document().design_notes {
             return Err(DesignNoteError::StaleDocument);
         }
         if pending.layer != DesignNoteLayer::DrawingAnnotation {
@@ -96,25 +96,14 @@ impl SchematicState {
         pending: PendingDesignNotePlacement,
     ) -> Result<u64, DesignNoteError> {
         self.validate_pending_design_note(&pending)?;
-        let id = self.next_id();
-        let mut note = DesignNote::new(id, pos, pending.kind, pending.text)?;
-        if pending.kind == DesignNoteKind::ReviewNote {
-            let anchor = self
-                .document
-                .validated_revisions
-                .records()
-                .last()
-                .map(|revision| revision.revision_digest().to_string());
-            note.anchor_review_to_revision(anchor)?;
-        }
-        let changed = self.with_undo("place design note", |schematic| {
-            schematic.document.design_notes.push(note);
-            schematic.selection.clear();
-            schematic.selection.select_design_note(id);
-            schematic.is_dirty = true;
-        });
-        if changed {
-            Ok(id)
+        let edit = self
+            .design
+            .place_design_note(pos, pending.kind, pending.text)?;
+        self.selection.clear();
+        self.selection.select_design_note(edit.value);
+        self.finish_document_edit(edit.committed);
+        if edit.committed {
+            Ok(edit.value)
         } else {
             Err(DesignNoteError::ReadOnly)
         }
@@ -132,24 +121,11 @@ impl SchematicState {
         if self.read_only {
             return Err(DesignNoteError::ReadOnly);
         }
-        if self.document.design_notes != expected_design_notes {
-            return Err(DesignNoteError::StaleDocument);
-        }
-        let index = self
-            .document
-            .design_notes
-            .iter()
-            .position(|note| note.id == note_id)
-            .ok_or(DesignNoteError::ReviewRecordNotFound)?;
-        let mut candidate = self.document.design_notes[index].clone();
-        mutation.clone().apply(&mut candidate)?;
-        candidate.validate()?;
-        let label = mutation.undo_label();
-        let changed = self.with_undo(label, |schematic| {
-            schematic.document.design_notes[index] = candidate;
-            schematic.is_dirty = true;
-        });
-        if changed {
+        let committed =
+            self.design
+                .apply_design_review_mutation(note_id, expected_design_notes, mutation)?;
+        self.finish_document_edit(committed);
+        if committed {
             Ok(())
         } else {
             Err(DesignNoteError::ReadOnly)
@@ -166,7 +142,7 @@ mod tests {
     #[test]
     fn review_mutations_are_atomic_stale_guarded_and_undoable() {
         let mut schematic = SchematicState::default();
-        schematic.document.design_notes.push(
+        schematic.design.document_mut_for_test().design_notes.push(
             DesignNote::new(
                 42,
                 Point::origin(),
@@ -175,7 +151,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let expected = schematic.document.design_notes.clone();
+        let expected = schematic.design.document().design_notes.clone();
         schematic
             .apply_design_review_mutation(
                 42,
@@ -186,7 +162,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            schematic.document.design_notes[0]
+            schematic.design.document().design_notes[0]
                 .review
                 .as_ref()
                 .unwrap()
@@ -196,7 +172,7 @@ mod tests {
         );
         assert!(schematic.undo());
         assert!(
-            schematic.document.design_notes[0]
+            schematic.design.document().design_notes[0]
                 .review
                 .as_ref()
                 .unwrap()
@@ -204,8 +180,9 @@ mod tests {
                 .is_none()
         );
 
-        schematic.document.design_notes[0].text = "Concurrent edit".to_owned();
-        let before = schematic.document.design_notes.clone();
+        schematic.design.document_mut_for_test().design_notes[0].text =
+            "Concurrent edit".to_owned();
+        let before = schematic.design.document().design_notes.clone();
         assert_eq!(
             schematic.apply_design_review_mutation(
                 42,
@@ -218,7 +195,7 @@ mod tests {
             ),
             Err(DesignNoteError::StaleDocument)
         );
-        assert_eq!(schematic.document.design_notes, before);
+        assert_eq!(schematic.design.document().design_notes, before);
     }
 
     #[test]
@@ -228,21 +205,21 @@ mod tests {
             DesignNoteKind::PlainText,
             "Bias network",
             schematic.topology_version(),
-            &schematic.document.design_notes,
+            &schematic.design.document().design_notes,
         )
         .unwrap();
         let topology = schematic.topology_version();
         let id = schematic
             .place_pending_design_note(Point::new(4, 7), pending)
             .unwrap();
-        assert_eq!(schematic.document.design_notes.len(), 1);
-        assert_eq!(schematic.document.design_notes[0].id, id);
-        assert!(schematic.document.components.is_empty());
-        assert!(schematic.document.wires.is_empty());
+        assert_eq!(schematic.design.document().design_notes.len(), 1);
+        assert_eq!(schematic.design.document().design_notes[0].id, id);
+        assert!(schematic.design.document().components.is_empty());
+        assert!(schematic.design.document().wires.is_empty());
         assert_eq!(schematic.topology_version(), topology);
         assert!(schematic.can_undo());
         assert!(schematic.undo());
-        assert!(schematic.document.design_notes.is_empty());
+        assert!(schematic.design.document().design_notes.is_empty());
     }
 
     #[test]
@@ -262,21 +239,21 @@ mod tests {
                 advisory_dispositions: Vec::new(),
             })
             .unwrap();
-        let expected_anchor = schematic.document.validated_revisions.records()[0]
+        let expected_anchor = schematic.design.document().validated_revisions.records()[0]
             .revision_digest()
             .to_string();
         let pending = PendingDesignNotePlacement::new(
             DesignNoteKind::ReviewNote,
             "Confirm the retained model binding",
             schematic.topology_version(),
-            &schematic.document.design_notes,
+            &schematic.design.document().design_notes,
         )
         .unwrap();
         schematic
             .place_pending_design_note(Point::new(4, 7), pending)
             .unwrap();
         assert_eq!(
-            schematic.document.design_notes[0]
+            schematic.design.document().design_notes[0]
                 .review
                 .as_ref()
                 .and_then(|review| review.anchored_revision.as_deref()),
@@ -291,10 +268,10 @@ mod tests {
             DesignNoteKind::PlainText,
             "Bias network",
             schematic.topology_version(),
-            &schematic.document.design_notes,
+            &schematic.design.document().design_notes,
         )
         .unwrap();
-        schematic.document.design_notes.push(
+        schematic.design.document_mut_for_test().design_notes.push(
             DesignNote::new(
                 99,
                 Point::new(1, 1),

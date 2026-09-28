@@ -76,15 +76,19 @@ fn selected_amp_with_wire(resolved_pin: Point) -> SchematicState {
     ]);
 
     let mut schematic = SchematicState::default();
-    schematic.document.components.push(
+    schematic.design.document_mut_for_test().components.push(
         Component::new(1, ComponentType::CellInstance, Point::new(100, 50))
             .with_library_cell(binding),
     );
-    schematic.document.wires.push(Wire::segment(
-        2,
-        resolved_pin,
-        Point::new(resolved_pin.x, 0),
-    ));
+    schematic
+        .design
+        .document_mut_for_test()
+        .wires
+        .push(Wire::segment(
+            2,
+            resolved_pin,
+            Point::new(resolved_pin.x, 0),
+        ));
     schematic.selection.select_component(1);
     schematic
 }
@@ -102,10 +106,11 @@ fn bus_tap_and_scalar_target() -> SchematicState {
     )
     .unwrap();
     let mut state = SchematicState::default();
-    state.document.buses.push(bus);
-    state.document.bus_taps.push(tap);
+    state.design.document_mut_for_test().buses.push(bus);
+    state.design.document_mut_for_test().bus_taps.push(tap);
     state
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(3, Point::new(0, 10), Point::new(10, 10)));
     state
@@ -120,9 +125,18 @@ fn moving_selected_cell_uses_resolved_symbol_terminals_for_wire_updates() {
         resolved_terminal_points(component, &resolved)
     });
 
-    assert_eq!(schematic.document.components[0].pos, Point::new(110, 55));
-    assert_eq!(schematic.document.wires[0].points[0], Point::new(70, 45));
-    assert_eq!(schematic.document.wires[0].points[1], Point::new(60, 0));
+    assert_eq!(
+        schematic.design.document().components[0].pos,
+        Point::new(110, 55)
+    );
+    assert_eq!(
+        schematic.design.document().wires[0].points[0],
+        Point::new(70, 45)
+    );
+    assert_eq!(
+        schematic.design.document().wires[0].points[1],
+        Point::new(60, 0)
+    );
 }
 
 #[test]
@@ -131,20 +145,23 @@ fn source_only_target_only_and_joint_moves_preserve_tap_attachments() {
     source_only.selection.select_only_bus(1);
     source_only.move_selection(Point::new(10, 0));
     assert_eq!(
-        source_only.document.bus_taps[0].bus_point,
+        source_only.design.document().bus_taps[0].bus_point,
         Point::new(15, 0)
     );
     assert_eq!(
-        source_only.document.bus_taps[0].connection_point,
+        source_only.design.document().bus_taps[0].connection_point,
         Point::new(0, 10)
     );
 
     let mut target_only = bus_tap_and_scalar_target();
     target_only.selection.select_only_wire(3);
     target_only.move_selection(Point::new(0, 10));
-    assert_eq!(target_only.document.bus_taps[0].bus_point, Point::new(5, 0));
     assert_eq!(
-        target_only.document.bus_taps[0].connection_point,
+        target_only.design.document().bus_taps[0].bus_point,
+        Point::new(5, 0)
+    );
+    assert_eq!(
+        target_only.design.document().bus_taps[0].connection_point,
         Point::new(0, 20)
     );
 
@@ -152,9 +169,12 @@ fn source_only_target_only_and_joint_moves_preserve_tap_attachments() {
     joint.selection.select_bus(1);
     joint.selection.select_wire(3);
     joint.move_selection(Point::new(4, 6));
-    assert_eq!(joint.document.bus_taps[0].bus_point, Point::new(9, 6));
     assert_eq!(
-        joint.document.bus_taps[0].connection_point,
+        joint.design.document().bus_taps[0].bus_point,
+        Point::new(9, 6)
+    );
+    assert_eq!(
+        joint.design.document().bus_taps[0].connection_point,
         Point::new(4, 16)
     );
 }
@@ -164,35 +184,38 @@ fn component_rubber_band_and_junction_moves_keep_scalar_tap_attached() {
     let delta = Point::new(3, 4);
     let mut direct = bus_tap_and_scalar_target();
     direct
-        .document
+        .design
+        .document_mut_for_test()
         .components
         .push(Component::new(4, ComponentType::Resistor, Point::origin()));
     direct.move_component_with_wires_resolved(4, delta, |_| vec![Point::new(0, 10)]);
     assert_eq!(
-        direct.document.bus_taps[0].connection_point,
+        direct.design.document().bus_taps[0].connection_point,
         Point::new(3, 14)
     );
 
     let mut selected = bus_tap_and_scalar_target();
     selected
-        .document
+        .design
+        .document_mut_for_test()
         .components
         .push(Component::new(4, ComponentType::Resistor, Point::origin()));
     selected.selection.select_only_component(4);
     selected.move_selection_resolved(delta, |_| vec![Point::new(0, 10)]);
     assert_eq!(
-        selected.document.bus_taps[0].connection_point,
+        selected.design.document().bus_taps[0].connection_point,
         Point::new(3, 14)
     );
 
     let mut junction = bus_tap_and_scalar_target();
     junction
-        .document
+        .design
+        .document_mut_for_test()
         .junctions
         .push(Junction::new(5, Point::new(0, 10)));
     junction.move_junction(Point::new(0, 10), Point::new(-2, 12));
     assert_eq!(
-        junction.document.bus_taps[0].connection_point,
+        junction.design.document().bus_taps[0].connection_point,
         Point::new(-2, 12)
     );
 }
@@ -219,15 +242,15 @@ fn extreme_selection_moves_saturate_every_attached_geometry() {
     schematic.move_selection(Point::new(i32::MAX, i32::MAX));
 
     assert_eq!(
-        schematic.document.buses[0].points[1],
+        schematic.design.document().buses[0].points[1],
         Point::new(i32::MAX, i32::MAX)
     );
     assert_eq!(
-        schematic.document.wires[0].points[1],
+        schematic.design.document().wires[0].points[1],
         Point::new(i32::MAX, i32::MAX)
     );
     assert_eq!(
-        schematic.document.bus_taps[0].connection_point,
+        schematic.design.document().bus_taps[0].connection_point,
         Point::new(i32::MAX, i32::MAX)
     );
 }
@@ -236,29 +259,33 @@ fn extreme_selection_moves_saturate_every_attached_geometry() {
 fn bus_and_tap_move_is_one_undoable_redoable_drag_transaction() {
     let mut schematic = bus_tap_and_scalar_target();
     schematic.selection.select_only_bus(1);
-    let original_bus = schematic.document.buses[0].clone();
-    let original_tap = schematic.document.bus_taps[0].clone();
+    let original_bus = schematic.design.document().buses[0].clone();
+    let original_tap = schematic.design.document().bus_taps[0].clone();
 
     schematic.begin_operation("move selection");
     schematic.move_selection(Point::new(3, 4));
     schematic.move_selection(Point::new(2, 1));
     assert!(schematic.end_operation());
-    let moved_bus = schematic.document.buses[0].clone();
-    let moved_tap = schematic.document.bus_taps[0].clone();
+    let moved_bus = schematic.design.document().buses[0].clone();
+    let moved_tap = schematic.design.document().bus_taps[0].clone();
 
     assert!(schematic.undo());
-    assert_eq!(schematic.document.buses[0], original_bus);
-    assert_eq!(schematic.document.bus_taps[0], original_tap);
+    assert_eq!(schematic.design.document().buses[0], original_bus);
+    assert_eq!(schematic.design.document().bus_taps[0], original_tap);
     assert!(schematic.redo());
-    assert_eq!(schematic.document.buses[0], moved_bus);
-    assert_eq!(schematic.document.bus_taps[0], moved_tap);
+    assert_eq!(schematic.design.document().buses[0], moved_bus);
+    assert_eq!(schematic.design.document().bus_taps[0], moved_tap);
 }
 
 #[test]
 fn selected_label_moves_with_saturation_and_one_drag_undo_transaction() {
     let original = NetLabel::new(72, Point::new(i32::MAX - 5, -10), "sense");
     let mut schematic = SchematicState::default();
-    schematic.document.net_labels.push(original.clone());
+    schematic
+        .design
+        .document_mut_for_test()
+        .net_labels
+        .push(original.clone());
     schematic.selection.select_only_net_label(original.id);
     schematic.init_undo_history();
 
@@ -268,16 +295,16 @@ fn selected_label_moves_with_saturation_and_one_drag_undo_transaction() {
     assert!(schematic.end_operation());
 
     assert_eq!(
-        schematic.document.net_labels[0].pos,
+        schematic.design.document().net_labels[0].pos,
         Point::new(i32::MAX, 0)
     );
     assert_eq!(schematic.undo_description(), Some("move selection"));
     assert!(schematic.undo());
-    assert_eq!(schematic.document.net_labels, vec![original]);
+    assert_eq!(schematic.design.document().net_labels, vec![original]);
     assert!(!schematic.can_undo(), "one drag must create one undo step");
     assert!(schematic.redo());
     assert_eq!(
-        schematic.document.net_labels[0].pos,
+        schematic.design.document().net_labels[0].pos,
         Point::new(i32::MAX, 0)
     );
 }
@@ -292,7 +319,11 @@ fn selected_design_note_moves_as_one_non_electrical_drag_transaction() {
     )
     .unwrap();
     let mut schematic = SchematicState::default();
-    schematic.document.design_notes.push(original.clone());
+    schematic
+        .design
+        .document_mut_for_test()
+        .design_notes
+        .push(original.clone());
     schematic.selection.select_only_design_note(original.id);
     schematic.init_undo_history();
     let topology = schematic.topology_version();
@@ -303,12 +334,12 @@ fn selected_design_note_moves_as_one_non_electrical_drag_transaction() {
     assert!(schematic.end_operation());
 
     assert_eq!(
-        schematic.document.design_notes[0].pos,
+        schematic.design.document().design_notes[0].pos,
         Point::new(i32::MAX, 0)
     );
     assert_eq!(schematic.topology_version(), topology);
     assert!(schematic.undo());
-    assert_eq!(schematic.document.design_notes, vec![original]);
+    assert_eq!(schematic.design.document().design_notes, vec![original]);
     assert_eq!(schematic.topology_version(), topology);
 }
 
@@ -317,7 +348,11 @@ fn selected_probe_moves_as_one_non_electrical_drag_transaction() {
     let original =
         SchematicProbe::new(75, Point::new(10, 20), "V(out)", Some("V(out)".to_owned())).unwrap();
     let mut schematic = SchematicState::default();
-    schematic.document.probes.push(original.clone());
+    schematic
+        .design
+        .document_mut_for_test()
+        .probes
+        .push(original.clone());
     schematic.selection.select_only_probe(original.id);
     schematic.init_undo_history();
     let topology = schematic.topology_version();
@@ -327,11 +362,14 @@ fn selected_probe_moves_as_one_non_electrical_drag_transaction() {
     schematic.move_selection(Point::new(7, 6));
     assert!(schematic.end_operation());
 
-    assert_eq!(schematic.document.probes[0].position, Point::new(20, 30));
+    assert_eq!(
+        schematic.design.document().probes[0].position,
+        Point::new(20, 30)
+    );
     assert_eq!(schematic.topology_version(), topology);
     assert_eq!(schematic.undo_description(), Some("move selection"));
     assert!(schematic.undo());
-    assert_eq!(schematic.document.probes, vec![original]);
+    assert_eq!(schematic.design.document().probes, vec![original]);
     assert_eq!(schematic.topology_version(), topology);
     assert!(!schematic.can_undo());
 }
@@ -356,7 +394,10 @@ fn documentation_shape_move_clamps_one_rigid_delta_for_the_entire_selection() {
     .unwrap();
     let original = vec![boundary_shape.clone(), companion_shape.clone()];
     let mut schematic = SchematicState::default();
-    schematic.document.documentation_shapes = original.clone();
+    schematic
+        .design
+        .document_mut_for_test()
+        .documentation_shapes = original.clone();
     schematic
         .selection
         .select_documentation_shape(boundary_shape.id);
@@ -371,14 +412,14 @@ fn documentation_shape_move_clamps_one_rigid_delta_for_the_entire_selection() {
     assert!(schematic.end_operation());
 
     assert_eq!(
-        schematic.document.documentation_shapes[0].geometry,
+        schematic.design.document().documentation_shapes[0].geometry,
         DocumentationShapeGeometry::Rectangle {
             first: Point::new(i32::MAX - 5, i32::MIN),
             opposite: Point::new(i32::MAX, i32::MIN + 10),
         }
     );
     assert_eq!(
-        schematic.document.documentation_shapes[1].geometry,
+        schematic.design.document().documentation_shapes[1].geometry,
         DocumentationShapeGeometry::Line {
             start: Point::new(i32::MAX - 95, i32::MIN + 180),
             end: Point::new(i32::MAX - 85, i32::MIN + 190),
@@ -388,7 +429,7 @@ fn documentation_shape_move_clamps_one_rigid_delta_for_the_entire_selection() {
     assert_eq!(schematic.topology_version(), topology);
     assert_eq!(schematic.undo_description(), Some("move selection"));
     assert!(schematic.undo());
-    assert_eq!(schematic.document.documentation_shapes, original);
+    assert_eq!(schematic.design.document().documentation_shapes, original);
     assert_eq!(schematic.topology_version(), topology);
     assert!(!schematic.can_undo(), "one drag must create one undo step");
 }
@@ -397,14 +438,18 @@ fn documentation_shape_move_clamps_one_rigid_delta_for_the_entire_selection() {
 fn unselected_and_read_only_labels_do_not_move() {
     let label = NetLabel::new(73, Point::new(4, 8), "fixed");
     let mut schematic = SchematicState::default();
-    schematic.document.net_labels.push(label.clone());
+    schematic
+        .design
+        .document_mut_for_test()
+        .net_labels
+        .push(label.clone());
     schematic.move_selection(Point::new(1, 2));
-    assert_eq!(schematic.document.net_labels, vec![label.clone()]);
+    assert_eq!(schematic.design.document().net_labels, vec![label.clone()]);
 
     schematic.selection.select_only_net_label(label.id);
     schematic.read_only = true;
     schematic.move_selection(Point::new(1, 2));
-    assert_eq!(schematic.document.net_labels, vec![label]);
+    assert_eq!(schematic.design.document().net_labels, vec![label]);
 }
 
 #[test]
@@ -443,11 +488,13 @@ fn move_selection_modes_have_stable_dialog_contract() {
 fn connected_mode_builds_a_deterministic_orthogonal_rubber_band() {
     let mut schematic = SchematicState::default();
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .components
         .push(Component::new(1, ComponentType::Resistor, Point::origin()));
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(2, Point::origin(), Point::new(10, 0)));
     schematic.selection.select_only_component(1);
@@ -461,23 +508,28 @@ fn connected_mode_builds_a_deterministic_orthogonal_rubber_band() {
         Ok(true)
     );
 
-    assert_eq!(schematic.document.components[0].pos, Point::new(0, 5));
     assert_eq!(
-        schematic.document.wires[0].points,
+        schematic.design.document().components[0].pos,
+        Point::new(0, 5)
+    );
+    assert_eq!(
+        schematic.design.document().wires[0].points,
         vec![Point::new(0, 5), Point::origin(), Point::new(10, 0)]
     );
-    assert!(schematic.document.wires[0].is_orthogonal());
+    assert!(schematic.design.document().wires[0].is_orthogonal());
 }
 
 #[test]
 fn connected_mode_rejects_an_attached_non_orthogonal_wire_atomically() {
     let mut schematic = SchematicState::default();
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .components
         .push(Component::new(1, ComponentType::Resistor, Point::origin()));
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(2, Point::origin(), Point::new(10, 10)));
     schematic.selection.select_only_component(1);
@@ -492,8 +544,14 @@ fn connected_mode_rejects_an_attached_non_orthogonal_wire_atomically() {
         ),
         Err(MoveSelectionError::NonOrthogonalWire { wire_id: 2 })
     );
-    assert_eq!(schematic.document.components, original.document.components);
-    assert_eq!(schematic.document.wires, original.document.wires);
+    assert_eq!(
+        schematic.design.document().components,
+        original.design.document().components
+    );
+    assert_eq!(
+        schematic.design.document().wires,
+        original.design.document().wires
+    );
     assert!(!schematic.is_dirty);
     assert_eq!(schematic.topology_version(), original.topology_version());
 }
@@ -502,15 +560,18 @@ fn connected_mode_rejects_an_attached_non_orthogonal_wire_atomically() {
 fn break_mode_moves_selected_objects_without_attached_conductors() {
     let mut schematic = SchematicState::default();
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .components
         .push(Component::new(1, ComponentType::Resistor, Point::origin()));
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(2, Point::origin(), Point::new(10, 0)));
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .connections
         .push(WireConnection::new(2, 0, 1, "1"));
     schematic.selection.select_only_component(1);
@@ -524,12 +585,15 @@ fn break_mode_moves_selected_objects_without_attached_conductors() {
         Ok(true)
     );
 
-    assert_eq!(schematic.document.components[0].pos, Point::new(0, 5));
     assert_eq!(
-        schematic.document.wires[0].points,
+        schematic.design.document().components[0].pos,
+        Point::new(0, 5)
+    );
+    assert_eq!(
+        schematic.design.document().wires[0].points,
         vec![Point::origin(), Point::new(10, 0)]
     );
-    assert!(schematic.document.connections.is_empty());
+    assert!(schematic.design.document().connections.is_empty());
 }
 
 #[test]
@@ -542,11 +606,20 @@ fn break_mode_translates_both_endpoints_of_an_explicitly_selected_tap() {
         Ok(true)
     );
 
-    assert_eq!(schematic.document.buses[0].points[0], Point::new(0, 0));
-    assert_eq!(schematic.document.wires[0].points[0], Point::new(0, 10));
-    assert_eq!(schematic.document.bus_taps[0].bus_point, Point::new(6, 0));
     assert_eq!(
-        schematic.document.bus_taps[0].connection_point,
+        schematic.design.document().buses[0].points[0],
+        Point::new(0, 0)
+    );
+    assert_eq!(
+        schematic.design.document().wires[0].points[0],
+        Point::new(0, 10)
+    );
+    assert_eq!(
+        schematic.design.document().bus_taps[0].bus_point,
+        Point::new(6, 0)
+    );
+    assert_eq!(
+        schematic.design.document().bus_taps[0].connection_point,
         Point::new(1, 10)
     );
 }
@@ -556,7 +629,7 @@ fn break_mode_rejects_a_selected_tap_that_would_leave_its_source_bus() {
     let mut schematic = bus_tap_and_scalar_target();
     schematic.selection.select_only_bus_tap(2);
     schematic.is_dirty = false;
-    let taps = schematic.document.bus_taps.clone();
+    let taps = schematic.design.document().bus_taps.clone();
     let topology = schematic.topology_version();
 
     assert_eq!(
@@ -564,7 +637,7 @@ fn break_mode_rejects_a_selected_tap_that_would_leave_its_source_bus() {
         Err(MoveSelectionError::InvalidTapAttachment { tap_id: 2 })
     );
 
-    assert_eq!(schematic.document.bus_taps, taps);
+    assert_eq!(schematic.design.document().bus_taps, taps);
     assert!(!schematic.is_dirty);
     assert_eq!(schematic.topology_version(), topology);
 }
@@ -573,19 +646,23 @@ fn break_mode_rejects_a_selected_tap_that_would_leave_its_source_bus() {
 fn shove_mode_chooses_a_deterministic_clear_orthogonal_route() {
     let mut schematic = SchematicState::default();
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .components
         .push(Component::new(1, ComponentType::Resistor, Point::origin()));
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(2, Point::new(20, 0), Point::new(60, 0)));
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(3, Point::new(22, 5), Point::new(58, 5)));
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .connections
         .push(WireConnection::new(2, 0, 1, "1"));
     schematic.selection.select_only_component(1);
@@ -599,28 +676,34 @@ fn shove_mode_chooses_a_deterministic_clear_orthogonal_route() {
         Ok(true)
     );
 
-    assert_eq!(schematic.document.components[0].pos, Point::new(0, 5));
     assert_eq!(
-        schematic.document.wires[0].points,
+        schematic.design.document().components[0].pos,
+        Point::new(0, 5)
+    );
+    assert_eq!(
+        schematic.design.document().wires[0].points,
         vec![Point::new(20, 5), Point::new(20, 0), Point::new(60, 0)]
     );
-    assert!(schematic.document.wires[0].is_orthogonal());
-    assert_eq!(schematic.document.connections[0].point_index, 0);
+    assert!(schematic.design.document().wires[0].is_orthogonal());
+    assert_eq!(schematic.design.document().connections[0].point_index, 0);
 }
 
 #[test]
 fn shove_keeps_a_selected_wire_attached_to_an_unselected_component() {
     let mut schematic = SchematicState::default();
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .components
         .push(Component::new(1, ComponentType::Resistor, Point::origin()));
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(2, Point::new(20, 0), Point::new(100, 0)));
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .connections
         .push(WireConnection::new(2, 0, 1, "-"));
     schematic.selection.select_only_wire(2);
@@ -634,16 +717,20 @@ fn shove_keeps_a_selected_wire_attached_to_an_unselected_component() {
         Ok(true)
     );
 
-    assert_eq!(schematic.document.wires[0].points[0], Point::new(20, 0));
     assert_eq!(
-        *schematic.document.wires[0].points.last().unwrap(),
+        schematic.design.document().wires[0].points[0],
+        Point::new(20, 0)
+    );
+    assert_eq!(
+        *schematic.design.document().wires[0].points.last().unwrap(),
         Point::new(100, 20)
     );
-    assert!(schematic.document.wires[0].is_orthogonal());
-    assert_eq!(schematic.document.connections[0].point_index, 0);
+    assert!(schematic.design.document().wires[0].is_orthogonal());
+    assert_eq!(schematic.design.document().connections[0].point_index, 0);
     assert!(
-        component_terminal_points(&schematic.document.components[0]).contains(
-            &schematic.document.wires[0].points[schematic.document.connections[0].point_index]
+        component_terminal_points(&schematic.design.document().components[0]).contains(
+            &schematic.design.document().wires[0].points
+                [schematic.design.document().connections[0].point_index]
         )
     );
 }
@@ -651,21 +738,25 @@ fn shove_keeps_a_selected_wire_attached_to_an_unselected_component() {
 #[test]
 fn shove_search_lanes_remain_aligned_to_the_active_grid() {
     let mut schematic = SchematicState::default();
-    schematic.document.grid_size = 10;
+    schematic.design.document_mut_for_test().grid_size = 10;
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .components
         .push(Component::new(1, ComponentType::Resistor, Point::origin()));
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(2, Point::new(20, 0), Point::new(80, 0)));
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(3, Point::new(25, 10), Point::new(75, 10)));
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(4, Point::new(50, -5), Point::new(50, 5)));
     schematic.selection.select_only_component(1);
@@ -680,7 +771,7 @@ fn shove_search_lanes_remain_aligned_to_the_active_grid() {
     );
 
     assert_eq!(
-        schematic.document.wires[0].points,
+        schematic.design.document().wires[0].points,
         vec![
             Point::new(20, 10),
             Point::new(20, -10),
@@ -689,7 +780,7 @@ fn shove_search_lanes_remain_aligned_to_the_active_grid() {
         ]
     );
     assert!(
-        schematic.document.wires[0]
+        schematic.design.document().wires[0]
             .points
             .iter()
             .all(|point| point.x % 10 == 0 && point.y % 10 == 0)
@@ -699,11 +790,15 @@ fn shove_search_lanes_remain_aligned_to_the_active_grid() {
 #[test]
 fn shove_mode_keeps_a_scalar_tap_on_the_rerouted_wire_endpoint() {
     let mut schematic = bus_tap_and_scalar_target();
-    schematic.document.components.push(Component::new(
-        4,
-        ComponentType::Resistor,
-        Point::new(-20, 10),
-    ));
+    schematic
+        .design
+        .document_mut_for_test()
+        .components
+        .push(Component::new(
+            4,
+            ComponentType::Resistor,
+            Point::new(-20, 10),
+        ));
     schematic.selection.select_only_component(4);
 
     assert_eq!(
@@ -716,31 +811,34 @@ fn shove_mode_keeps_a_scalar_tap_on_the_rerouted_wire_endpoint() {
     );
 
     assert_eq!(
-        schematic.document.bus_taps[0].connection_point,
+        schematic.design.document().bus_taps[0].connection_point,
         Point::new(0, 15)
     );
-    assert!(schematic.document.wires[0].contains_point(Point::new(0, 15)));
+    assert!(schematic.design.document().wires[0].contains_point(Point::new(0, 15)));
 }
 
 #[test]
 fn shove_failure_is_atomic_when_the_bounded_search_is_blocked() {
     let mut schematic = SchematicState::default();
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .components
         .push(Component::new(1, ComponentType::Resistor, Point::origin()));
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(2, Point::new(20, 0), Point::new(60, 0)));
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(3, Point::new(40, -100), Point::new(40, 100)));
     schematic.selection.select_only_component(1);
     schematic.is_dirty = false;
-    let components = schematic.document.components.clone();
-    let wires = schematic.document.wires.clone();
+    let components = schematic.design.document().components.clone();
+    let wires = schematic.design.document().wires.clone();
     let topology = schematic.topology_version();
 
     assert_eq!(
@@ -752,8 +850,8 @@ fn shove_failure_is_atomic_when_the_bounded_search_is_blocked() {
         Err(MoveSelectionError::NoLegalShoveRoute { wire_id: 2 })
     );
 
-    assert_eq!(schematic.document.components, components);
-    assert_eq!(schematic.document.wires, wires);
+    assert_eq!(schematic.design.document().components, components);
+    assert_eq!(schematic.design.document().wires, wires);
     assert!(!schematic.is_dirty);
     assert_eq!(schematic.topology_version(), topology);
 }
@@ -762,15 +860,18 @@ fn shove_failure_is_atomic_when_the_bounded_search_is_blocked() {
 fn shove_rejects_an_unrelated_conductor_at_a_moved_endpoint_atomically() {
     let mut schematic = SchematicState::default();
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .components
         .push(Component::new(1, ComponentType::Resistor, Point::origin()));
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(2, Point::new(20, 0), Point::new(100, 0)));
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(3, Point::new(20, 15), Point::new(20, 25)));
     schematic.selection.select_only_component(1);
@@ -786,11 +887,17 @@ fn shove_rejects_an_unrelated_conductor_at_a_moved_endpoint_atomically() {
         Err(MoveSelectionError::NoLegalShoveRoute { wire_id: 2 })
     );
 
-    assert_eq!(schematic.document.components, original.document.components);
-    assert_eq!(schematic.document.wires, original.document.wires);
     assert_eq!(
-        schematic.document.connections,
-        original.document.connections
+        schematic.design.document().components,
+        original.design.document().components
+    );
+    assert_eq!(
+        schematic.design.document().wires,
+        original.design.document().wires
+    );
+    assert_eq!(
+        schematic.design.document().connections,
+        original.design.document().connections
     );
     assert!(!schematic.is_dirty);
     assert_eq!(schematic.topology_version(), original.topology_version());
@@ -800,16 +907,22 @@ fn shove_rejects_an_unrelated_conductor_at_a_moved_endpoint_atomically() {
 fn shove_rejects_an_unrelated_component_terminal_at_a_moved_endpoint_atomically() {
     let mut schematic = SchematicState::default();
     schematic
-        .document
+        .design
+        .document_mut_for_test()
         .components
         .push(Component::new(1, ComponentType::Resistor, Point::origin()));
-    schematic.document.components.push(Component::new(
-        2,
-        ComponentType::Resistor,
-        Point::new(40, 20),
-    ));
     schematic
-        .document
+        .design
+        .document_mut_for_test()
+        .components
+        .push(Component::new(
+            2,
+            ComponentType::Resistor,
+            Point::new(40, 20),
+        ));
+    schematic
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(3, Point::new(20, 0), Point::new(100, 0)));
     schematic.selection.select_only_component(1);
@@ -825,11 +938,17 @@ fn shove_rejects_an_unrelated_component_terminal_at_a_moved_endpoint_atomically(
         Err(MoveSelectionError::NoLegalShoveRoute { wire_id: 3 })
     );
 
-    assert_eq!(schematic.document.components, original.document.components);
-    assert_eq!(schematic.document.wires, original.document.wires);
     assert_eq!(
-        schematic.document.connections,
-        original.document.connections
+        schematic.design.document().components,
+        original.design.document().components
+    );
+    assert_eq!(
+        schematic.design.document().wires,
+        original.design.document().wires
+    );
+    assert_eq!(
+        schematic.design.document().connections,
+        original.design.document().connections
     );
     assert!(!schematic.is_dirty);
     assert_eq!(schematic.topology_version(), original.topology_version());
@@ -839,11 +958,15 @@ fn shove_rejects_an_unrelated_component_terminal_at_a_moved_endpoint_atomically(
 fn guarded_modes_reject_coordinate_overflow_without_mutation() {
     for mode in MoveSelectionMode::ALL {
         let mut schematic = SchematicState::default();
-        schematic.document.components.push(Component::new(
-            1,
-            ComponentType::Resistor,
-            Point::new(i32::MAX, 0),
-        ));
+        schematic
+            .design
+            .document_mut_for_test()
+            .components
+            .push(Component::new(
+                1,
+                ComponentType::Resistor,
+                Point::new(i32::MAX, 0),
+            ));
         schematic.selection.select_only_component(1);
         schematic.is_dirty = false;
         let topology = schematic.topology_version();
@@ -853,7 +976,7 @@ fn guarded_modes_reject_coordinate_overflow_without_mutation() {
             Err(MoveSelectionError::CoordinateOverflow)
         );
         assert_eq!(
-            schematic.document.components[0].pos,
+            schematic.design.document().components[0].pos,
             Point::new(i32::MAX, 0)
         );
         assert!(!schematic.is_dirty);
@@ -864,7 +987,8 @@ fn guarded_modes_reject_coordinate_overflow_without_mutation() {
 #[test]
 fn mode_aware_move_has_clean_zero_stale_and_read_only_noops() {
     let mut zero = SchematicState::default();
-    zero.document
+    zero.design
+        .document_mut_for_test()
         .components
         .push(Component::new(1, ComponentType::Resistor, Point::origin()));
     zero.selection.select_only_component(1);
@@ -888,6 +1012,9 @@ fn mode_aware_move_has_clean_zero_stale_and_read_only_noops() {
         read_only.move_selection_with_mode(Point::new(1, 1), MoveSelectionMode::Connected,),
         Ok(false)
     );
-    assert_eq!(read_only.document.components[0].pos, Point::origin());
+    assert_eq!(
+        read_only.design.document().components[0].pos,
+        Point::origin()
+    );
     assert!(!read_only.is_dirty);
 }

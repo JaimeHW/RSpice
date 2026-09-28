@@ -4,20 +4,15 @@ use super::super::{
         HierarchyExtractionCandidate, HierarchyExtractionPlan, HierarchyExtractionTerminal,
         HierarchyNetConnectivity,
     },
-    hierarchy_edit::{HierarchyDocument, HierarchySource},
+    hierarchy_edit::HierarchySource,
 };
 use super::*;
 use std::collections::HashMap;
 
 impl SchematicState {
     fn hierarchy_source(&self) -> HierarchySource<'_> {
-        HierarchySource {
-            document: &self.document,
-            identity: &self.identity,
-            topology_version: self.topology_version(),
-            selected_components: &self.selection.components,
-            selected_count: self.selection.count(),
-        }
+        self.design
+            .hierarchy_source(&self.selection.components, self.selection.count())
     }
 
     pub fn plan_hierarchy_extraction(
@@ -52,15 +47,16 @@ impl SchematicState {
             self.preview_rotation,
             self.preview_mirror_h,
         )?;
-        let mut parent = self.clone_with_hierarchy_document(candidate.parent);
+        let mut parent =
+            self.clone_with_design(self.design.clone_with_hierarchy_document(candidate.parent));
+        parent.is_dirty = true;
         parent
             .selection
             .select_only_component(candidate.instance_id);
         parent.repair_clipboard_after_load();
         let mut child = Self::default();
-        child.document = candidate.child.document;
-        child.identity = candidate.child.identity;
-        child.topology_version = candidate.child.topology_changes;
+        child.design =
+            rspice_design::schematic::owned::Schematic::from_hierarchy_document(candidate.child);
         child.is_dirty = true;
         Ok(HierarchyExtractionCandidate {
             parent,
@@ -73,9 +69,12 @@ impl SchematicState {
 
     // The document was already cloned by its owner. Clone only editor/session
     // fields here so candidate materialization does not copy that document twice.
-    fn clone_with_hierarchy_document(&self, candidate: HierarchyDocument) -> Self {
+    pub(crate) fn clone_with_design(
+        &self,
+        design: rspice_design::schematic::owned::Schematic,
+    ) -> Self {
         Self {
-            document: candidate.document,
+            design,
             selection: self.selection.clone(),
             tool: self.tool,
             wire_drawing: self.wire_drawing.clone(),
@@ -83,7 +82,6 @@ impl SchematicState {
             zoom: self.zoom,
             pan: self.pan,
             current_file: self.current_file.clone(),
-            identity: candidate.identity,
             clipboard: self.clipboard.clone(),
             preview_rotation: self.preview_rotation,
             preview_mirror_h: self.preview_mirror_h,
@@ -95,20 +93,16 @@ impl SchematicState {
             pending_design_note: self.pending_design_note.clone(),
             pending_documentation_shape: self.pending_documentation_shape.clone(),
             documentation_shape_drawing: self.documentation_shape_drawing.clone(),
-            is_dirty: true,
+            is_dirty: self.is_dirty,
             needs_fit: self.needs_fit,
             needs_drawing_sheet_fit: self.needs_drawing_sheet_fit,
             center_request: self.center_request,
             read_only: self.read_only,
             needs_history_reset: self.needs_history_reset,
-            topology_version: self
-                .topology_version
-                .wrapping_add(candidate.topology_changes),
-            content_version: self.content_version,
             snap_engine: self.snap_engine.clone(),
             selection_rect: self.selection_rect,
             net_highlight: self.net_highlight.clone(),
-            undo_history: self.undo_history.clone(),
+            operation_cancel: self.operation_cancel.clone(),
             canvas_cache: self.canvas_cache.clone(),
         }
     }

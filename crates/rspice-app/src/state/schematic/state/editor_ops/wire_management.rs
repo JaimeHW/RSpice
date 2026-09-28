@@ -14,17 +14,16 @@ impl SchematicState {
 
     /// Add a wire
     pub fn add_wire(&mut self, points: Vec<Point>) -> Option<u64> {
-        let id = wire_edit::add_wire(&mut self.document, &mut self.identity, points);
+        let id = self.design.add_wire(points);
         if id.is_some() {
             self.is_dirty = true;
-            self.bump_topology_version();
         }
         id
     }
 
     /// Find wire at grid position
     pub fn wire_at(&self, pos: Point) -> Option<u64> {
-        for wire in &self.document.wires {
+        for wire in &self.design.document().wires {
             if wire.contains_point(pos) {
                 return Some(wire.id);
             }
@@ -41,7 +40,7 @@ impl SchematicState {
         if let Some(cache) = self.canvas_cache() {
             return cache.wire_vertices.get(&pos).copied();
         }
-        for wire in &self.document.wires {
+        for wire in &self.design.document().wires {
             for (idx, point) in wire.points.iter().enumerate() {
                 if *point == pos {
                     return Some((wire.id, idx));
@@ -63,7 +62,13 @@ impl SchematicState {
         if let Some(cache) = self.canvas_cache() {
             return cache.wire_vertices.contains_key(&pos) || cache.junctions.contains(&pos);
         }
-        self.wire_vertex_at(pos).is_some() || self.document.junctions.iter().any(|j| j.pos == pos)
+        self.wire_vertex_at(pos).is_some()
+            || self
+                .design
+                .document()
+                .junctions
+                .iter()
+                .any(|j| j.pos == pos)
     }
 
     /// Start drawing a wire at position
@@ -180,7 +185,7 @@ impl SchematicState {
     /// share the same endpoint vertex, moving any attached wire keeps the
     /// junction topology intact.
     pub fn split_wires_at_t_junction(&mut self, point: Point) {
-        for wire_id in wire_edit::wires_to_split_at(&self.document, point) {
+        for wire_id in wire_edit::wires_to_split_at(&self.design.document(), point) {
             let _ = self.split_wire(wire_id, point);
         }
     }
@@ -210,21 +215,21 @@ mod tests {
 
         assert!(!schematic.has_pending_operation());
         assert!(schematic.finish_wire().is_some());
-        assert_eq!(schematic.undo_history.committed.undo_count(), 1);
+        assert_eq!(schematic.history().undo_count(), 1);
         assert_eq!(schematic.undo_description(), Some("draw wire"));
-        assert_eq!(schematic.document.wires.len(), 3);
+        assert_eq!(schematic.design.document().wires.len(), 3);
         assert!(!schematic.wire_drawing.active);
         assert!(schematic.is_dirty);
 
         assert!(schematic.undo());
-        assert_eq!(schematic.document.wires.len(), 1);
-        assert_eq!(schematic.document.wires[0].id, retained_wire);
+        assert_eq!(schematic.design.document().wires.len(), 1);
+        assert_eq!(schematic.design.document().wires[0].id, retained_wire);
         assert!(!schematic.can_undo());
         assert!(schematic.can_redo());
 
         assert!(schematic.redo());
-        assert_eq!(schematic.document.wires.len(), 3);
-        assert_eq!(schematic.undo_history.committed.undo_count(), 1);
+        assert_eq!(schematic.design.document().wires.len(), 3);
+        assert_eq!(schematic.history().undo_count(), 1);
     }
 
     #[test]
@@ -241,14 +246,14 @@ mod tests {
         assert!(!schematic.has_pending_operation());
         assert!(!schematic.can_undo());
         assert!(schematic.is_dirty);
-        assert!(schematic.document.wires.is_empty());
+        assert!(schematic.design.document().wires.is_empty());
 
         schematic.start_wire(Point::new(5, 5));
         assert_eq!(schematic.finish_wire(), None);
         assert!(!schematic.has_pending_operation());
         assert!(!schematic.can_undo());
         assert!(schematic.is_dirty);
-        assert!(schematic.document.wires.is_empty());
+        assert!(schematic.design.document().wires.is_empty());
     }
 
     #[test]
@@ -263,7 +268,7 @@ mod tests {
         assert!(!schematic.wire_drawing.active);
         assert_eq!(schematic.finish_wire(), None);
         assert!(!schematic.can_undo());
-        assert!(schematic.document.wires.is_empty());
+        assert!(schematic.design.document().wires.is_empty());
         assert!(!schematic.is_dirty);
     }
 }

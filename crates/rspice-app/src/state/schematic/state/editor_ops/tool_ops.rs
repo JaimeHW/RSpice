@@ -214,7 +214,7 @@ mod tests {
         let placed =
             schematic.add_armed_component(ComponentType::VoltageSourceSin, Point::new(4, 4));
         assert!(
-            schematic.document.components[0]
+            schematic.design.document().components[0]
                 .stimulus_provenance
                 .is_none(),
             "so the next placement is a default instance ({placed})"
@@ -237,10 +237,11 @@ mod tests {
         for at in [Point::new(4, 4), Point::new(40, 4)] {
             schematic.add_armed_component(ComponentType::VoltageSourceSin, at);
         }
-        assert_eq!(schematic.document.components.len(), 2);
+        assert_eq!(schematic.design.document().components.len(), 2);
         assert!(
             schematic
-                .document
+                .design
+                .document()
                 .components
                 .iter()
                 .all(|component| component.stimulus_provenance.is_some()),

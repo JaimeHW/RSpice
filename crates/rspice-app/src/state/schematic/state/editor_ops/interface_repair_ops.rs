@@ -18,7 +18,7 @@ use super::super::super::{
 };
 use super::super::*;
 use crate::state::{LibraryManager, SymbolResolver};
-use rspice_design::schematic::interface_repair::{InstanceInterfaceRepair, interface_is_stale};
+use rspice_design::schematic::interface_repair::interface_is_stale;
 use std::collections::HashMap;
 
 impl SchematicState {
@@ -31,7 +31,8 @@ impl SchematicState {
         let Some((component_id, master_ports)) = selected_master_interface(self, masters) else {
             return false;
         };
-        self.document
+        self.design
+            .document()
             .components
             .iter()
             .find(|component| component.id == component_id)
@@ -45,7 +46,8 @@ impl SchematicState {
     /// A review surface lists these; the repair itself still acts on the
     /// selection, so the two never answer the staleness question differently.
     pub fn stale_instance_interfaces(&self, masters: &HashMap<String, Self>) -> Vec<String> {
-        self.document
+        self.design
+            .document()
             .components
             .iter()
             .filter(|component| component.kind == ComponentType::CellInstance)
@@ -71,19 +73,17 @@ impl SchematicState {
         let (component_id, master_ports) = selected_master_interface(self, masters)
             .ok_or(SchematicReplacementError::SelectExactlyOneInstance)?;
         let resolver = SymbolResolver::new(libraries, masters);
-        let (document, _, _, mut edit) = self.document_edit_parts();
-        let repair =
-            InstanceInterfaceRepair::prepare(document, component_id, &master_ports, |binding| {
-                resolver.resolve_binding(binding)
-            })?;
-        edit.begin(repair.document(), "update instance interface");
-        let repaired = repair.commit();
-        edit.selection.select_only_component(component_id);
-        edit.mark_topology_changed();
-        if !edit.end(document) {
+        let edit =
+            self.design
+                .update_instance_interface(component_id, &master_ports, |binding| {
+                    resolver.resolve_binding(binding)
+                })?;
+        self.selection.select_only_component(component_id);
+        self.finish_document_edit(edit.committed);
+        if !edit.committed {
             return Err(SchematicReplacementError::CommitFailed);
         }
-        Ok(repaired.summary())
+        Ok(edit.value.summary())
     }
 }
 
@@ -96,7 +96,8 @@ fn selected_master_interface(
 ) -> Option<(u64, Vec<PortSpec>)> {
     let component_id = schematic.selection.single_component()?;
     let component = schematic
-        .document
+        .design
+        .document()
         .components
         .iter()
         .find(|component| component.id == component_id)?;

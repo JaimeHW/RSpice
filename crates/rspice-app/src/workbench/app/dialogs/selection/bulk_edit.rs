@@ -35,39 +35,35 @@ const EYEBROW: &str = "SCHEMATIC \u{00b7} FILTERED SELECTION \u{00b7} EXACT DIFF
 const TITLE: &str = "Selection and bulk property editing";
 const PRIMARY: &str = "Commit bulk edit";
 
-impl SelectionBulkProperty {
-    const ALL: [Self; 5] = [
-        Self::ModelSection,
-        Self::Temperature,
-        Self::Tolerance,
-        Self::Display,
-        Self::ParameterOverride,
-    ];
+const BULK_PROPERTIES: [SelectionBulkProperty; 5] = [
+    SelectionBulkProperty::ModelSection,
+    SelectionBulkProperty::Temperature,
+    SelectionBulkProperty::Tolerance,
+    SelectionBulkProperty::Display,
+    SelectionBulkProperty::ParameterOverride,
+];
 
-    const fn label(self) -> &'static str {
-        match self {
-            Self::ModelSection => "Model section",
-            Self::Temperature => "Temperature",
-            Self::Tolerance => "Tolerance",
-            Self::Display => "Display",
-            Self::ParameterOverride => "Parameter override",
-        }
+const fn bulk_property_label(value: SelectionBulkProperty) -> &'static str {
+    match value {
+        SelectionBulkProperty::ModelSection => "Model section",
+        SelectionBulkProperty::Temperature => "Temperature",
+        SelectionBulkProperty::Tolerance => "Tolerance",
+        SelectionBulkProperty::Display => "Display",
+        SelectionBulkProperty::ParameterOverride => "Parameter override",
     }
 }
 
-impl SelectionBulkUnsetBehavior {
-    const ALL: [Self; 3] = [
-        Self::LeaveUnchanged,
-        Self::SetExplicitValue,
-        Self::RestoreInheritedValue,
-    ];
+const BULK_UNSET_BEHAVIORS: [SelectionBulkUnsetBehavior; 3] = [
+    SelectionBulkUnsetBehavior::LeaveUnchanged,
+    SelectionBulkUnsetBehavior::SetExplicitValue,
+    SelectionBulkUnsetBehavior::RestoreInheritedValue,
+];
 
-    const fn label(self) -> &'static str {
-        match self {
-            Self::LeaveUnchanged => "Leave unchanged",
-            Self::SetExplicitValue => "Set explicit value",
-            Self::RestoreInheritedValue => "Restore inherited value",
-        }
+const fn bulk_unset_label(value: SelectionBulkUnsetBehavior) -> &'static str {
+    match value {
+        SelectionBulkUnsetBehavior::LeaveUnchanged => "Leave unchanged",
+        SelectionBulkUnsetBehavior::SetExplicitValue => "Set explicit value",
+        SelectionBulkUnsetBehavior::RestoreInheritedValue => "Restore inherited value",
     }
 }
 
@@ -919,10 +915,14 @@ fn bulk_edit_panel(
         let before = dialog.property;
         ComboBox::from_id_salt("selection-bulk-property")
             .width(columns[0].available_width())
-            .selected_text(dialog.property.label())
+            .selected_text(bulk_property_label(dialog.property))
             .show_ui(&mut columns[0], |ui| {
-                for property in SelectionBulkProperty::ALL {
-                    ui.selectable_value(&mut dialog.property, property, property.label());
+                for property in BULK_PROPERTIES {
+                    ui.selectable_value(
+                        &mut dialog.property,
+                        property,
+                        bulk_property_label(property),
+                    );
                 }
             });
         if before != dialog.property {
@@ -939,10 +939,14 @@ fn bulk_edit_panel(
         columns[0].label("Unset behavior");
         ComboBox::from_id_salt("selection-bulk-unset")
             .width(columns[0].available_width())
-            .selected_text(dialog.unset_behavior.label())
+            .selected_text(bulk_unset_label(dialog.unset_behavior))
             .show_ui(&mut columns[0], |ui| {
-                for behavior in SelectionBulkUnsetBehavior::ALL {
-                    ui.selectable_value(&mut dialog.unset_behavior, behavior, behavior.label());
+                for behavior in BULK_UNSET_BEHAVIORS {
+                    ui.selectable_value(
+                        &mut dialog.unset_behavior,
+                        behavior,
+                        bulk_unset_label(behavior),
+                    );
                 }
             });
     });

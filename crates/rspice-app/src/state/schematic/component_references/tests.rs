@@ -22,13 +22,18 @@ fn coupled_selection() -> SchematicState {
         let id = state.add_component(kind, Point::new(index as i32 * 100, 0));
         state.selection.select_component(id);
     }
-    state.document.components[0].params = "coupled_to=l2 coupling_factor=0.9".to_owned();
-    state.document.components[2].params = "inductors=\"l1, L2\"".to_owned();
-    state.document.components[2].value = "0.9".to_owned();
-    state.document.components[4].params = "vref=v1 m=2".to_owned();
-    state.document.components[5].params = "vref=V_external".to_owned();
+    state.design.document_mut_for_test().components[0].params =
+        "coupled_to=l2 coupling_factor=0.9".to_owned();
+    state.design.document_mut_for_test().components[2].params = "inductors=\"l1, L2\"".to_owned();
+    state.design.document_mut_for_test().components[2].value = "0.9".to_owned();
+    state.design.document_mut_for_test().components[4].params = "vref=v1 m=2".to_owned();
+    state.design.document_mut_for_test().components[5].params = "vref=V_external".to_owned();
     // References precede their targets in the captured document order.
-    state.document.components.rotate_right(4);
+    state
+        .design
+        .document_mut_for_test()
+        .components
+        .rotate_right(4);
     state.clear_undo_history();
     state.is_dirty = false;
     state
@@ -48,9 +53,9 @@ fn parameter(component: &Component, name: &str) -> String {
 #[test]
 fn simultaneous_renames_preserve_swapped_windings_and_reject_collisions_atomically() {
     let state = coupled_selection();
-    let first = component(&state.document.components, "L1").id;
-    let second = component(&state.document.components, "L2").id;
-    let voltage = component(&state.document.components, "V1").id;
+    let first = component(&state.design.document().components, "L1").id;
+    let second = component(&state.design.document().components, "L2").id;
+    let voltage = component(&state.design.document().components, "V1").id;
     let names = std::collections::BTreeMap::from([
         (first, "L2".to_owned()),
         (second, "L1".to_owned()),
@@ -70,8 +75,14 @@ fn simultaneous_renames_preserve_swapped_windings_and_reject_collisions_atomical
             )]))
             .is_err()
     );
-    assert_eq!(component(&state.document.components, "L1").id, first);
-    assert_eq!(component(&state.document.components, "L2").id, second);
+    assert_eq!(
+        component(&state.design.document().components, "L1").id,
+        first
+    );
+    assert_eq!(
+        component(&state.design.document().components, "L2").id,
+        second
+    );
     assert!(!state.is_dirty);
 }
 
@@ -83,7 +94,7 @@ fn rename_preparation_rebinds_only_the_target_and_preserves_the_source() {
         ("L2", "L9", "K1", "inductors", "l1, L9"),
         ("V1", "V9", "F1", "vref", "V9"),
     ] {
-        let original = state.document.components.clone();
+        let original = state.design.document().components.clone();
         let expected_component = component(&original, old);
         let mut candidate = expected_component.clone();
         candidate.name = new.to_owned();
@@ -95,7 +106,7 @@ fn rename_preparation_rebinds_only_the_target_and_preserves_the_source() {
             expected
         );
         assert_eq!(component(&renamed, "H1").params, "vref=V_external");
-        assert_eq!(state.document.components, original);
+        assert_eq!(state.design.document().components, original);
         assert!(!state.can_undo());
     }
 }
@@ -104,13 +115,15 @@ fn rename_preparation_rebinds_only_the_target_and_preserves_the_source() {
 fn property_rename_keeps_edited_parameters_while_remapping_references() {
     let mut state = coupled_selection();
     let index = state
-        .document
+        .design
+        .document()
         .components
         .iter()
         .position(|component| component.name == "L1")
         .unwrap();
-    state.document.components[index].params = "coupled_to=L1 coupling_factor=0.9".to_owned();
-    let expected = state.document.components[index].clone();
+    state.design.document_mut_for_test().components[index].params =
+        "coupled_to=L1 coupling_factor=0.9".to_owned();
+    let expected = state.design.document().components[index].clone();
     let mut candidate = expected.clone();
     candidate.name = "L9".to_owned();
     candidate.value = "8u".to_owned();
@@ -122,7 +135,7 @@ fn property_rename_keeps_edited_parameters_while_remapping_references() {
     assert_eq!(parameter(edited, "coupling_factor"), "0.8");
     assert_eq!(parameter(edited, "temp"), "30");
     assert_eq!(parameter(component(&result, "K1"), "inductors"), "L9, L2");
-    assert_eq!(state.document.components[index], expected);
+    assert_eq!(state.design.document().components[index], expected);
 }
 
 #[test]
@@ -142,9 +155,13 @@ fn unrelated_display_names_cannot_steal_a_physical_reference() {
         .with_name_value("L1", "1k");
     let capacitor = Component::new(101, ComponentType::Capacitor, Point::new(100, 200))
         .with_name_value("V1", "1n");
-    state.document.components.extend([resistor, capacitor]);
-    let prepared = PreparedCopyReferences::new(&state.document.components).unwrap();
-    let mut copies = state.document.components.clone();
+    state
+        .design
+        .document_mut_for_test()
+        .components
+        .extend([resistor, capacitor]);
+    let prepared = PreparedCopyReferences::new(&state.design.document().components).unwrap();
+    let mut copies = state.design.document().components.clone();
     for copy in &mut copies {
         copy.name = format!("{}_copy", copy.emitted_instance_name());
     }
@@ -159,10 +176,10 @@ fn unrelated_display_names_cannot_steal_a_physical_reference() {
 #[test]
 fn paste_rebinds_forward_references_in_one_undo_step() {
     let mut state = coupled_selection();
-    let original = state.document.components.clone();
+    let original = state.design.document().components.clone();
     state.copy_selection();
     assert!(state.paste_at_checked(Point::new(0, 1000)).unwrap());
-    let pasted = state.document.components.clone();
+    let pasted = state.design.document().components.clone();
     assert_eq!(&pasted[..original.len()], original);
     assert_eq!(parameter(component(&pasted, "L3"), "coupled_to"), "L4");
     assert_eq!(parameter(component(&pasted, "K2"), "inductors"), "L3, L4");
@@ -172,10 +189,10 @@ fn paste_rebinds_forward_references_in_one_undo_step() {
 
     assert_eq!(state.undo_description(), Some("paste"));
     assert!(state.undo());
-    assert_eq!(state.document.components, original);
+    assert_eq!(state.design.document().components, original);
     assert!(!state.can_undo());
     assert!(state.redo());
-    assert_eq!(state.document.components, pasted);
+    assert_eq!(state.design.document().components, pasted);
 }
 
 #[test]
@@ -189,9 +206,9 @@ fn array_preview_and_commit_reference_each_members_own_targets() {
         SchematicArrayPlacement::Pitch(Point::new(0, 1000)),
     )
     .unwrap();
-    let original = state.document.components.clone();
+    let original = state.design.document().components.clone();
     let preview = state.preview_array_selection(&plan).unwrap();
-    assert_eq!(state.document.components, original);
+    assert_eq!(state.design.document().components, original);
     for member in 1..3 {
         let named = |source| {
             component(
@@ -218,11 +235,11 @@ fn array_preview_and_commit_reference_each_members_own_targets() {
     }
     state.array_selection(&plan).unwrap();
     assert_eq!(
-        &state.document.components[original.len()..],
+        &state.design.document().components[original.len()..],
         preview.components()
     );
     assert!(state.undo());
-    assert_eq!(state.document.components, original);
+    assert_eq!(state.design.document().components, original);
     assert!(!state.can_undo());
 }
 
@@ -230,22 +247,24 @@ fn array_preview_and_commit_reference_each_members_own_targets() {
 fn only_structural_parameters_change_and_aliases_resolve_case_insensitively() {
     let mut state = coupled_selection();
     state
-        .document
+        .design
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.name == "L1")
         .unwrap()
         .name = "coil".to_owned();
     let coupling = state
-        .document
+        .design
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.name == "K1")
         .unwrap();
     coupling.params =
         r#"l1=coil l2=LCOIL l8=L2 note="coil L2" inductors="coil,L2,L_external""#.to_owned();
-    let prepared = PreparedCopyReferences::new(&state.document.components).unwrap();
-    let mut copies = state.document.components.clone();
+    let prepared = PreparedCopyReferences::new(&state.design.document().components).unwrap();
+    let mut copies = state.design.document().components.clone();
     for copy in &mut copies {
         copy.name = format!("{}_copy", copy.spice_instance_name());
     }
@@ -267,7 +286,8 @@ fn rejected_copy_and_array_leave_the_document_history_and_allocators_unchanged()
         let mut state = coupled_selection();
         if malformed {
             state
-                .document
+                .design
+                .document_mut_for_test()
                 .components
                 .iter_mut()
                 .find(|component| component.name == "K1")
@@ -275,7 +295,8 @@ fn rejected_copy_and_array_leave_the_document_history_and_allocators_unchanged()
                 .params = "inductors=\"L1 L2".to_owned();
         } else {
             state
-                .document
+                .design
+                .document_mut_for_test()
                 .components
                 .iter_mut()
                 .find(|component| component.name == "L2")
@@ -286,7 +307,10 @@ fn rejected_copy_and_array_leave_the_document_history_and_allocators_unchanged()
         let mut before = state.clone();
         let error = state.paste_at_checked(Point::new(0, 1000)).unwrap_err();
         assert!(error.contains("K1"), "{error}");
-        assert_eq!(state.document.components, before.document.components);
+        assert_eq!(
+            state.design.document().components,
+            before.design.document().components
+        );
         assert_eq!(state.selection, before.selection);
         assert_eq!(state.topology_version(), before.topology_version());
         assert_eq!(state.is_dirty, before.is_dirty);
@@ -308,13 +332,19 @@ fn rejected_copy_and_array_leave_the_document_history_and_allocators_unchanged()
                     .contains("K1")
             );
             assert!(state.array_selection(&plan).is_err());
-            assert_eq!(state.document.components, before.document.components);
+            assert_eq!(
+                state.design.document().components,
+                before.design.document().components
+            );
             assert!(!state.can_undo());
         }
         assert_eq!(
             state.add_component(ComponentType::Inductor, Point::new(999, 999)),
             before.add_component(ComponentType::Inductor, Point::new(999, 999))
         );
-        assert_eq!(state.document.components, before.document.components);
+        assert_eq!(
+            state.design.document().components,
+            before.design.document().components
+        );
     }
 }

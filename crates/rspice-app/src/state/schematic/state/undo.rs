@@ -8,83 +8,10 @@ use super::*;
 
 use crate::state::LibraryManager;
 
-/// Editor history and invalidation fields borrowed separately from the document.
-pub(super) struct DocumentEditState<'a> {
-    history: &'a mut super::super::undo_history::UndoHistory,
-    pub(super) selection: &'a mut Selection,
-    is_dirty: &'a mut bool,
-    topology_version: &'a mut u64,
-    content_version: &'a mut u64,
-}
-
-impl DocumentEditState<'_> {
-    pub(super) fn begin(&mut self, document: &SchematicDocument, description: impl Into<String>) {
-        if !self.history.committed.is_initialized() {
-            self.history.initialize();
-        }
-        let snapshot = super::super::undo_history::SchematicSnapshot::capture(document);
-        let cancel_state = super::super::undo_history::OperationCancelState::capture(
-            self.selection,
-            *self.is_dirty,
-        );
-        self.history
-            .begin_operation(snapshot, description, Some(cancel_state));
-    }
-
-    pub(super) fn end(&mut self, document: &SchematicDocument) -> bool {
-        let snapshot = super::super::undo_history::SchematicSnapshot::capture(document);
-        let was_dirty = self.history.pending_was_dirty();
-        let committed = self.history.end_operation(snapshot);
-        if committed {
-            *self.is_dirty = true;
-            *self.content_version = self.content_version.wrapping_add(1);
-        } else if !self.history.has_pending_operation()
-            && let Some(was_dirty) = was_dirty
-        {
-            // A nested scope keeps the outer cancellation baseline.
-            *self.is_dirty = was_dirty;
-        }
-        committed
-    }
-
-    pub(super) fn mark_dirty(&mut self) {
-        *self.is_dirty = true;
-    }
-
-    pub(super) fn mark_topology_changed(&mut self) {
-        *self.is_dirty = true;
-        *self.topology_version = self.topology_version.wrapping_add(1);
-    }
-}
-
 impl SchematicState {
-    pub(super) fn document_edit_parts(
-        &mut self,
-    ) -> (
-        &mut SchematicDocument,
-        &mut SchematicIdentity,
-        &ClipboardData,
-        DocumentEditState<'_>,
-    ) {
-        (
-            &mut self.document,
-            &mut self.identity,
-            &self.clipboard,
-            DocumentEditState {
-                history: &mut self.undo_history,
-                selection: &mut self.selection,
-                is_dirty: &mut self.is_dirty,
-                topology_version: &mut self.topology_version,
-                content_version: &mut self.content_version,
-            },
-        )
-    }
-
     /// Restore document history while updating editor invalidation and selection.
     pub fn apply_snapshot(&mut self, snapshot: &super::super::undo_history::SchematicSnapshot) {
-        if snapshot.apply(&mut self.document) {
-            self.bump_topology_version();
-        }
+        self.design.apply_snapshot(snapshot);
         self.is_dirty = true;
         self.selection.clear();
     }
@@ -98,7 +25,8 @@ impl SchematicState {
     /// This should be called once at startup or after loading a file.
     /// Establishes the baseline for the undo system.
     pub fn init_undo_history(&mut self) {
-        self.undo_history.initialize();
+        self.design.initialize_history();
+        self.operation_cancel = None;
     }
 
     /// Begin an undoable operation
@@ -113,8 +41,19 @@ impl SchematicState {
     /// state.end_operation();
     /// ```
     pub fn begin_operation(&mut self, description: impl Into<String>) {
-        let (document, _, _, mut edit) = self.document_edit_parts();
-        edit.begin(document, description);
+        if !self.design.history().is_initialized() {
+            self.init_undo_history();
+        }
+        let previous = self.design.pending_operation_id();
+        let operation_id = self.design.begin_operation(description);
+        if previous != Some(operation_id) {
+            self.operation_cancel =
+                Some(super::super::undo_history::OperationCancelState::capture(
+                    operation_id,
+                    &self.selection,
+                    self.is_dirty,
+                ));
+        }
     }
 
     /// End an undoable operation
@@ -125,15 +64,36 @@ impl SchematicState {
     /// # Returns
     /// `true` if an undo entry was created, `false` if nothing changed.
     pub fn end_operation(&mut self) -> bool {
-        let (document, _, _, mut edit) = self.document_edit_parts();
-        edit.end(document)
+        let operation_id = self.design.pending_operation_id();
+        let committed = self.design.end_operation();
+        if committed {
+            self.is_dirty = true;
+        }
+        if self.design.pending_operation_id().is_none()
+            && let Some(cancel) = self.operation_cancel.take()
+            && Some(cancel.operation_id()) == operation_id
+            && !committed
+        {
+            self.is_dirty = cancel.was_dirty();
+        }
+        committed
+    }
+
+    /// Reconcile a synchronous design edit with the editor's dirty state.
+    pub(in crate::state::schematic) fn finish_document_edit(&mut self, committed: bool) {
+        if committed || self.design.pending_operation_id().is_some() {
+            self.is_dirty = true;
+        }
+        if self.design.pending_operation_id().is_none() {
+            self.operation_cancel = None;
+        }
     }
 
     /// Monotonic count of committed content changes: every `end_operation`
     /// that created an entry, plus every applied undo or redo. The cheap
     /// "did this document change since I last looked" signal.
     pub fn content_version(&self) -> u64 {
-        self.content_version
+        self.design.content_version()
     }
 
     /// Restore a pending operation's baseline without creating an undo entry.
@@ -141,10 +101,21 @@ impl SchematicState {
     /// Use this if an operation was started but then cancelled (e.g., user
     /// pressed Escape during drag).
     pub fn cancel_operation(&mut self) -> bool {
-        let Some(snapshot) = self.undo_history.cancel_operation() else {
+        let Some(cancelled) = self.design.cancel_operation() else {
             return false;
         };
-        snapshot.restore_cancelled(self);
+        if let Some(repaired) = cancelled.repaired {
+            self.is_dirty = true;
+            self.selection.clear();
+            self.snap_engine.grid_size = self.design.document().grid_size;
+            self.repair_clipboard_after_load();
+            self.remove_stale_runtime_references(&repaired);
+        }
+        if let Some(cancel) = self.operation_cancel.take()
+            && cancel.operation_id() == cancelled.operation_id
+        {
+            cancel.restore(self);
+        }
         true
     }
 
@@ -183,10 +154,10 @@ impl SchematicState {
         before: super::super::undo_history::SchematicSnapshot,
         description: impl Into<String>,
     ) -> bool {
-        if !self.undo_history.committed.is_initialized() {
+        if !self.design.history().is_initialized() {
             self.init_undo_history();
         }
-        self.undo_history.begin_operation(before, description, None);
+        self.design.begin_operation_from(before, description);
         self.end_operation()
     }
 
@@ -194,86 +165,74 @@ impl SchematicState {
     ///
     /// Returns `true` if undo was successful, `false` if nothing to undo.
     pub fn undo(&mut self) -> bool {
-        if !self.undo_history.committed.can_undo() {
+        let Some(repaired) = self.design.undo() else {
             return false;
-        }
-
-        // Capture current state for redo
-        let current = super::super::undo_history::SchematicSnapshot::capture(&self.document);
-
-        if let Some((snapshot, _desc)) = self.undo_history.committed.undo(current) {
-            self.apply_snapshot(&snapshot);
-            self.reconcile_grid_pitch_runtime();
-            self.recalculate_runtime_state();
-            self.content_version = self.content_version.wrapping_add(1);
-            return true;
-        }
-
-        false
+        };
+        self.is_dirty = true;
+        self.selection.clear();
+        self.snap_engine.grid_size = self.design.document().grid_size;
+        self.repair_clipboard_after_load();
+        self.remove_stale_runtime_references(&repaired);
+        true
     }
 
     /// Redo the last undone operation
     ///
     /// Returns `true` if redo was successful, `false` if nothing to redo.
     pub fn redo(&mut self) -> bool {
-        if !self.undo_history.committed.can_redo() {
+        let Some(repaired) = self.design.redo() else {
             return false;
-        }
-
-        // Capture current state for undo
-        let current = super::super::undo_history::SchematicSnapshot::capture(&self.document);
-
-        if let Some((snapshot, _desc)) = self.undo_history.committed.redo(current) {
-            self.apply_snapshot(&snapshot);
-            self.reconcile_grid_pitch_runtime();
-            self.recalculate_runtime_state();
-            self.content_version = self.content_version.wrapping_add(1);
-            return true;
-        }
-
-        false
+        };
+        self.is_dirty = true;
+        self.selection.clear();
+        self.snap_engine.grid_size = self.design.document().grid_size;
+        self.repair_clipboard_after_load();
+        self.remove_stale_runtime_references(&repaired);
+        true
     }
 
     /// Check if undo is available
     pub fn can_undo(&self) -> bool {
-        self.undo_history.committed.can_undo()
+        self.history().can_undo()
     }
 
     /// Check if redo is available
     pub fn can_redo(&self) -> bool {
-        self.undo_history.committed.can_redo()
+        self.history().can_redo()
     }
 
     /// Get description of the next undo operation
     pub fn undo_description(&self) -> Option<&str> {
-        self.undo_history.committed.undo_description()
+        self.history().undo_description()
     }
 
     /// Get description of the next redo operation
     pub fn redo_description(&self) -> Option<&str> {
-        self.undo_history.committed.redo_description()
+        self.history().redo_description()
     }
 
     /// Clear undo history
     pub fn clear_undo_history(&mut self) {
-        self.undo_history.clear();
+        self.design.clear_history();
+        self.operation_cancel = None;
     }
 
     /// Reset undo history with current state as baseline
     ///
     /// Clears all undo/redo. Use after loading a file.
     pub fn reset_undo_history(&mut self) {
-        self.undo_history.clear();
+        self.design.clear_history();
+        self.operation_cancel = None;
         self.init_undo_history();
     }
 
     /// Check if an operation is currently pending
     pub fn has_pending_operation(&self) -> bool {
-        self.undo_history.has_pending_operation()
+        self.design.pending_operation_id().is_some()
     }
 
     pub(crate) fn pending_operation_id(&self) -> Option<u64> {
-        self.undo_history.pending_operation_id()
+        self.design.pending_operation_id()
     }
 
     /// Re-check every hierarchical placement in this document against the
@@ -292,35 +251,8 @@ impl SchematicState {
     /// resolves against the running engine, and a binding into a library this
     /// project does not hold was never answered by the cell catalog at all.
     pub fn revalidate_instance_bindings(&mut self, libraries: &LibraryManager) -> Vec<String> {
-        let mut missing_masters = Vec::new();
-        for component in &mut self.document.components {
-            if component.kind != ComponentType::CellInstance {
-                continue;
-            }
-            let Some(binding) = component.library_cell.as_mut() else {
-                continue;
-            };
-            if binding.is_executable_builtin() {
-                continue;
-            }
-            let Some(library) = libraries.get_library(&binding.library) else {
-                continue;
-            };
-            if library.get_cell(&binding.cell).is_some() {
-                continue;
-            }
-            binding.module_name = None;
-            binding.source_path = None;
-            binding.netlist_template = None;
-            binding.parameter_order.clear();
-            missing_masters.push(format!(
-                "{}/{}/{}",
-                binding.library, binding.cell, binding.view
-            ));
-        }
-        missing_masters.sort_unstable();
-        missing_masters.dedup();
-        missing_masters
+        self.design
+            .revalidate_instance_bindings(libraries.catalog())
     }
 }
 
@@ -331,8 +263,8 @@ mod tests {
 
     fn assert_grid_pitch_contract(state: &SchematicState, pitch: SchematicGridPitch) {
         let expected = pitch.canvas_grid_size();
-        assert_eq!(state.document.document_policy.grid_pitch, pitch);
-        assert_eq!(state.document.grid_size, expected);
+        assert_eq!(state.design.document().document_policy.grid_pitch, pitch);
+        assert_eq!(state.design.document().grid_size, expected);
         assert_eq!(state.snap_engine.grid_size, expected);
     }
 
@@ -343,8 +275,13 @@ mod tests {
         let baseline = state.content_version();
 
         assert!(state.with_undo("change schematic grid pitch", |schematic| {
-            schematic.document.document_policy.grid_pitch = SchematicGridPitch::Mil25;
-            schematic.document.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
+            schematic
+                .design
+                .document_mut_for_test()
+                .document_policy
+                .grid_pitch = SchematicGridPitch::Mil25;
+            schematic.design.document_mut_for_test().grid_size =
+                SchematicGridPitch::Mil25.canvas_grid_size();
             schematic.snap_engine.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
         }));
         assert_eq!(state.content_version(), baseline + 1);
@@ -366,8 +303,13 @@ mod tests {
         assert_grid_pitch_contract(&state, SchematicGridPitch::Mil50);
 
         assert!(state.with_undo("change schematic grid pitch", |schematic| {
-            schematic.document.document_policy.grid_pitch = SchematicGridPitch::Mil25;
-            schematic.document.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
+            schematic
+                .design
+                .document_mut_for_test()
+                .document_policy
+                .grid_pitch = SchematicGridPitch::Mil25;
+            schematic.design.document_mut_for_test().grid_size =
+                SchematicGridPitch::Mil25.canvas_grid_size();
             schematic.snap_engine.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
         }));
         assert_grid_pitch_contract(&state, SchematicGridPitch::Mil25);

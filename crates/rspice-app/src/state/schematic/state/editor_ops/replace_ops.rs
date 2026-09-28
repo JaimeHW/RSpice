@@ -7,7 +7,7 @@
 
 use super::super::*;
 use rspice_design::schematic::replacement::*;
-use rspice_design::schematic::replacement_edit::{self, InstanceReplacement, ReplacementContext};
+use rspice_design::schematic::replacement_edit::{self, ReplacementContext};
 
 impl SchematicState {
     /// Capture immutable authority for the exact selected component using its
@@ -20,7 +20,8 @@ impl SchematicState {
             .single_component()
             .ok_or(SchematicReplacementError::SelectExactlyOneInstance)?;
         let component = self
-            .document
+            .design
+            .document()
             .components
             .iter()
             .find(|component| component.id == component_id)
@@ -46,7 +47,7 @@ impl SchematicState {
             return Err(SchematicReplacementError::ReadOnly);
         }
         replacement_edit::replacement_authority_with_spec(
-            &self.document,
+            &self.design.document(),
             self.replacement_context(),
             source_spec,
         )
@@ -62,7 +63,7 @@ impl SchematicState {
             return Err(SchematicReplacementError::ReadOnly);
         }
         replacement_edit::preview_instance_replacement(
-            &self.document,
+            &self.design.document(),
             self.replacement_context(),
             authority,
             target,
@@ -78,22 +79,16 @@ impl SchematicState {
         if self.read_only {
             return Err(SchematicReplacementError::ReadOnly);
         }
-        let context = self.replacement_context();
-        let (document, identity, _, mut edit) = self.document_edit_parts();
-        let replacement = InstanceReplacement::prepare(document, context, authority, target)?;
-        let impact = replacement.impact();
-        let reference_counter = replacement.reference_counter();
-        edit.begin(replacement.document(), "replace instance");
-        replacement.commit();
-        edit.selection.select_only_component(impact.component_id);
-        if let Some((prefix, number)) = reference_counter {
-            identity.record_component_number(prefix, number);
-        }
-        edit.mark_topology_changed();
-        if !edit.end(document) {
+        let edit =
+            self.design
+                .replace_instance(self.selection.single_component(), authority, target)?;
+        self.selection
+            .select_only_component(edit.value.component_id);
+        self.finish_document_edit(edit.committed);
+        if !edit.committed {
             return Err(SchematicReplacementError::CommitFailed);
         }
-        Ok(impact)
+        Ok(edit.value)
     }
 }
 
@@ -127,7 +122,8 @@ mod tests {
         let mut state = SchematicState::default();
         let id = state.add_library_cell_component(Point::new(100, 100), binding);
         let component = state
-            .document
+            .design
+            .document_mut_for_test()
             .components
             .iter_mut()
             .find(|item| item.id == id)
@@ -159,7 +155,7 @@ mod tests {
     #[test]
     fn mockup_opamp_contract_reports_five_pins_and_six_of_eight_parameters() {
         let state = selected_opamp();
-        let source = state.document.components[0].clone();
+        let source = state.design.document().components[0].clone();
         let source_spec = SchematicReplacementSourceSpec::from_component(&source)
             .unwrap()
             .with_parameter_keys(["gain", "ibias", "vos", "slew", "en", "temp"]);
@@ -189,16 +185,16 @@ mod tests {
         state
             .clipboard
             .components
-            .push(state.document.components[0].clone());
+            .push(state.design.document().components[0].clone());
         let clipboard = serde_json::to_value(&state.clipboard).unwrap();
-        let before = state.document.components[0].clone();
+        let before = state.design.document().components[0].clone();
         let topology = state.topology_version();
 
         let impact = state
             .replace_selected_instance(&authority, &opa188_target())
             .unwrap();
 
-        let after = &state.document.components[0];
+        let after = &state.design.document().components[0];
         assert_eq!(after.id, before.id);
         assert_eq!(after.name, before.name);
         assert_eq!(after.pos, before.pos);
@@ -207,7 +203,7 @@ mod tests {
         assert_eq!(state.topology_version(), topology.wrapping_add(1));
         assert_eq!(state.undo_description(), Some("replace instance"));
         assert!(state.undo());
-        assert_eq!(state.document.components[0], before);
+        assert_eq!(state.design.document().components[0], before);
         assert!(
             !state.can_undo(),
             "replacement must create exactly one undo record"
@@ -237,12 +233,13 @@ mod tests {
                 &SchematicReplacementTargetSpec::primitive(ComponentType::Capacitor),
             )
             .unwrap();
-        assert_eq!(state.document.components[0].id, resistor_id);
-        assert_eq!(state.document.components[0].name, "C2");
+        assert_eq!(state.design.document().components[0].id, resistor_id);
+        assert_eq!(state.design.document().components[0].name, "C2");
         let next = state.add_component(ComponentType::Capacitor, Point::new(200, 0));
         assert_eq!(
             state
-                .document
+                .design
+                .document()
                 .components
                 .iter()
                 .find(|component| component.id == next)
@@ -251,7 +248,7 @@ mod tests {
             "C3"
         );
         assert!(state.undo());
-        assert_eq!(state.document.components[0].name, "R1");
+        assert_eq!(state.design.document().components[0].name, "R1");
     }
 
     #[test]
@@ -259,7 +256,7 @@ mod tests {
         let mut state = SchematicState::default();
         let id = state.add_component(ComponentType::Resistor, Point::new(100, 100));
         state.selection.select_only_component(id);
-        let terminal = state.document.components[0]
+        let terminal = state.design.document().components[0]
             .terminal_positions()
             .into_iter()
             .find(|(name, _)| *name == "+")
@@ -267,11 +264,13 @@ mod tests {
             .1;
         let wire_id = state.next_id();
         state
-            .document
+            .design
+            .document_mut_for_test()
             .wires
             .push(Wire::segment(wire_id, terminal, Point::new(20, 100)));
         state
-            .document
+            .design
+            .document_mut_for_test()
             .connections
             .push(WireConnection::new(wire_id, 0, id, "+"));
         state.recalculate_runtime_state();
@@ -302,8 +301,11 @@ mod tests {
         state
             .replace_selected_instance(&authority, &target)
             .unwrap();
-        assert_eq!(state.document.wires[0].points[0], Point::new(70, 100));
-        assert_eq!(state.document.connections[0].terminal_name, "P");
+        assert_eq!(
+            state.design.document().wires[0].points[0],
+            Point::new(70, 100)
+        );
+        assert_eq!(state.design.document().connections[0].terminal_name, "P");
     }
 
     #[test]
@@ -311,14 +313,16 @@ mod tests {
         let mut state = SchematicState::default();
         let id = state.add_component(ComponentType::Resistor, Point::new(100, 100));
         state.selection.select_only_component(id);
-        let terminal = state.document.components[0].terminal_positions()[0].1;
+        let terminal = state.design.document().components[0].terminal_positions()[0].1;
         let wire_id = state.next_id();
         state
-            .document
+            .design
+            .document_mut_for_test()
             .wires
             .push(Wire::segment(wire_id, terminal, Point::new(20, 100)));
         state
-            .document
+            .design
+            .document_mut_for_test()
             .connections
             .push(WireConnection::new(wire_id, 0, id, "+"));
         state.recalculate_runtime_state();
@@ -342,17 +346,18 @@ mod tests {
         state
             .replace_selected_instance(&authority, &target)
             .unwrap();
-        assert!(state.document.wires[0].is_orthogonal());
+        assert!(state.design.document().wires[0].is_orthogonal());
         assert_eq!(
-            state.document.wires[0].points[state.document.connections[0].point_index],
+            state.design.document().wires[0].points
+                [state.design.document().connections[0].point_index],
             Point::new(70, 90)
         );
         assert!(state.undo());
         assert_eq!(
-            state.document.wires[0].points,
+            state.design.document().wires[0].points,
             [terminal, Point::new(20, 100)]
         );
-        assert_eq!(state.document.connections[0].point_index, 0);
+        assert_eq!(state.design.document().connections[0].point_index, 0);
     }
 
     #[test]
@@ -361,8 +366,8 @@ mod tests {
         let id = state.add_component(ComponentType::Resistor, Point::new(100, 100));
         state.selection.select_only_component(id);
         let authority = state.replacement_authority().unwrap();
-        let before = SchematicSnapshot::capture(&state.document);
-        state.document.components[0].value = "2k".to_owned();
+        let before = SchematicSnapshot::capture(&state.design.document());
+        state.design.document_mut_for_test().components[0].value = "2k".to_owned();
         assert_eq!(
             state.preview_instance_replacement(
                 &authority,
@@ -370,17 +375,19 @@ mod tests {
             ),
             Err(SchematicReplacementError::StaleAuthority)
         );
-        state.document.components[0] = authority.source_component().clone();
-        assert!(before.is_equal_document(&state.document));
+        state.design.document_mut_for_test().components[0] = authority.source_component().clone();
+        assert!(before.is_equal_document(&state.design.document()));
 
-        let terminal = state.document.components[0].terminal_positions()[0].1;
+        let terminal = state.design.document().components[0].terminal_positions()[0].1;
         let wire_id = state.next_id();
         state
-            .document
+            .design
+            .document_mut_for_test()
             .wires
             .push(Wire::segment(wire_id, terminal, Point::new(0, 100)));
         state
-            .document
+            .design
+            .document_mut_for_test()
             .connections
             .push(WireConnection::new(wire_id, 0, id, "+"));
         state.bump_topology_version();
@@ -393,14 +400,14 @@ mod tests {
         let target = SchematicReplacementTargetSpec::library_cell(binding).with_terminals(vec![
             SchematicReplacementTerminal::new("only", Point::new(20, 0)),
         ]);
-        let snapshot = SchematicSnapshot::capture(&state.document);
+        let snapshot = SchematicSnapshot::capture(&state.design.document());
         assert_eq!(
             state.preview_instance_replacement(&authority, &target),
             Err(SchematicReplacementError::UnmappedConnectedTerminal {
                 terminal: "+".to_owned()
             })
         );
-        assert!(snapshot.is_equal_document(&state.document));
+        assert!(snapshot.is_equal_document(&state.design.document()));
         assert!(!state.can_undo());
     }
 
@@ -414,8 +421,8 @@ mod tests {
             Err(SchematicReplacementError::CoordinateOverflow)
         );
 
-        state.document.components[0].pos = Point::origin();
-        state.document.components[0].params = "gain".to_owned();
+        state.design.document_mut_for_test().components[0].pos = Point::origin();
+        state.design.document_mut_for_test().components[0].params = "gain".to_owned();
         assert!(matches!(
             state.replacement_authority(),
             Err(SchematicReplacementError::MalformedParameterString { .. })

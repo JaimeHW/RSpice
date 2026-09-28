@@ -10,7 +10,7 @@ use rspice_design::schematic::stretch;
 impl SchematicState {
     /// Whether the current selection contains at least one live stretch handle.
     pub fn has_live_stretch_selection(&self) -> bool {
-        self.document.wires.iter().any(|wire| {
+        self.design.document().wires.iter().any(|wire| {
             self.selection.has_wire(wire.id) && wire.segment_count() != 0
                 || self.selection.wire_segments.iter().any(|selected| {
                     selected.wire_id == wire.id && selected.segment_index < wire.segment_count()
@@ -21,14 +21,20 @@ impl SchematicState {
                         && wire.segment_count() != 0
                 })
         }) || self
-            .document
+            .design
+            .document()
             .buses
             .iter()
             .any(|bus| self.selection.has_bus(bus.id) && bus.points.len() >= 2)
-            || self.document.documentation_shapes.iter().any(|shape| {
-                self.selection.has_documentation_shape(shape.id)
-                    && stretch::documentation_shape_point_count(&shape.geometry) != 0
-            })
+            || self
+                .design
+                .document()
+                .documentation_shapes
+                .iter()
+                .any(|shape| {
+                    self.selection.has_documentation_shape(shape.id)
+                        && stretch::documentation_shape_point_count(&shape.geometry) != 0
+                })
     }
 
     /// Resolve an unambiguous default handle from the current frozen selection.
@@ -48,7 +54,8 @@ impl SchematicState {
         }
         for selected in &self.selection.wire_vertices {
             let Some(wire) = self
-                .document
+                .design
+                .document()
                 .wires
                 .iter()
                 .find(|wire| wire.id == selected.wire_id)
@@ -107,7 +114,8 @@ impl SchematicState {
 
     /// Prove that an exact live handle belongs to the current frozen selection.
     pub fn is_stretch_target_eligible(&self, target: StretchTarget) -> bool {
-        stretch::target_is_live(&self.document, target) && selection_authorizes_target(self, target)
+        stretch::target_is_live(&self.design.document(), target)
+            && selection_authorizes_target(self, target)
     }
 
     /// Stretch one exact selected segment or typed shape control point.
@@ -171,7 +179,7 @@ impl SchematicState {
         if !self.selection.probes.is_empty() {
             return Err(StretchSelectionError::ProbeSelectionUnsupported);
         }
-        if !stretch::target_is_live(&self.document, target) {
+        if !stretch::target_is_live(&self.design.document(), target) {
             return Err(StretchSelectionError::StaleTarget);
         }
         Ok(selection_authorizes_target(self, target))
@@ -189,8 +197,7 @@ impl SchematicState {
         if !self.stretch_request_is_selected(delta, target)? {
             return Ok(false);
         }
-        let changed = stretch::stretch_target_resolved(
-            &mut self.document,
+        let changed = self.design.stretch_target_resolved(
             delta,
             target,
             policy,
@@ -198,12 +205,6 @@ impl SchematicState {
             component_bounds_for,
         )?;
         if changed {
-            if matches!(
-                target,
-                StretchTarget::WireSegment { .. } | StretchTarget::BusSegment { .. }
-            ) {
-                self.bump_topology_version();
-            }
             self.is_dirty = true;
         }
         Ok(changed)
@@ -222,7 +223,7 @@ impl SchematicState {
             return Ok(None);
         }
         stretch::preview_stretch_target_resolved(
-            &self.document,
+            &self.design.document(),
             delta,
             target,
             policy,
@@ -297,7 +298,7 @@ mod tests {
 
     fn selected_u_wire() -> SchematicState {
         let mut state = SchematicState::default();
-        state.document.wires.push(u_wire(1));
+        state.design.document_mut_for_test().wires.push(u_wire(1));
         state.selection.select_only_wire_segment(1, 1);
         state
     }
@@ -322,7 +323,7 @@ mod tests {
     #[test]
     fn exact_vertex_selection_resolves_an_incident_segment() {
         let mut state = SchematicState::default();
-        state.document.wires.push(u_wire(1));
+        state.design.document_mut_for_test().wires.push(u_wire(1));
         state.selection.select_only_wire_vertex(1, 2);
         assert_eq!(state.default_stretch_target(), Some(wire_target(1, 2)));
         assert!(state.is_stretch_target_eligible(wire_target(1, 1)));
@@ -341,7 +342,7 @@ mod tests {
             Ok(true)
         );
         assert_eq!(
-            state.document.wires[0].points,
+            state.design.document().wires[0].points,
             [
                 Point::new(0, 0),
                 Point::new(0, 15),
@@ -349,13 +350,13 @@ mod tests {
                 Point::new(20, 0),
             ]
         );
-        assert!(state.document.wires[0].is_orthogonal());
+        assert!(state.design.document().wires[0].is_orthogonal());
     }
 
     #[test]
     fn stretches_vertical_interior_segment_orthogonally() {
         let mut state = SchematicState::default();
-        state.document.wires.push(Wire::new(
+        state.design.document_mut_for_test().wires.push(Wire::new(
             1,
             vec![
                 Point::new(0, 0),
@@ -372,10 +373,19 @@ mod tests {
                 StretchOrthogonalPolicy::PreserveOrthogonal,
             )
             .unwrap();
-        assert_eq!(state.document.wires[0].points[1], Point::new(15, 0));
-        assert_eq!(state.document.wires[0].points[2], Point::new(15, 20));
-        assert_eq!(state.document.wires[0].points[0], Point::new(0, 0));
-        assert_eq!(state.document.wires[0].points[3], Point::new(0, 20));
+        assert_eq!(
+            state.design.document().wires[0].points[1],
+            Point::new(15, 0)
+        );
+        assert_eq!(
+            state.design.document().wires[0].points[2],
+            Point::new(15, 20)
+        );
+        assert_eq!(state.design.document().wires[0].points[0], Point::new(0, 0));
+        assert_eq!(
+            state.design.document().wires[0].points[3],
+            Point::new(0, 20)
+        );
     }
 
     #[test]
@@ -418,7 +428,11 @@ mod tests {
         ];
         for (points, segment_index, delta) in cases {
             let mut state = SchematicState::default();
-            state.document.wires.push(Wire::new(1, points));
+            state
+                .design
+                .document_mut_for_test()
+                .wires
+                .push(Wire::new(1, points));
             state.selection.select_only_wire_segment(1, segment_index);
             assert_eq!(
                 state.stretch_target(
@@ -445,7 +459,8 @@ mod tests {
 
         let mut diagonal = SchematicState::default();
         diagonal
-            .document
+            .design
+            .document_mut_for_test()
             .wires
             .push(Wire::new(2, vec![Point::new(0, 0), Point::new(10, 10)]));
         diagonal.selection.select_only_wire(2);
@@ -469,16 +484,22 @@ mod tests {
                 StretchOrthogonalPolicy::AllowDiagonal,
             )
             .unwrap();
-        assert_eq!(state.document.wires[0].points[1], Point::new(5, 15));
-        assert_eq!(state.document.wires[0].points[2], Point::new(25, 15));
-        assert!(!state.document.wires[0].is_orthogonal());
-        assert!(state.document.wires[0].contains_point(Point::new(15, 15)));
+        assert_eq!(
+            state.design.document().wires[0].points[1],
+            Point::new(5, 15)
+        );
+        assert_eq!(
+            state.design.document().wires[0].points[2],
+            Point::new(25, 15)
+        );
+        assert!(!state.design.document().wires[0].is_orthogonal());
+        assert!(state.design.document().wires[0].contains_point(Point::new(15, 15)));
     }
 
     #[test]
     fn preview_is_nonmutating_and_is_the_exact_commit_candidate() {
         let mut state = selected_u_wire();
-        let before = SchematicSnapshot::capture(&state.document);
+        let before = SchematicSnapshot::capture(&state.design.document());
         let preview = state
             .preview_stretch_target(
                 Point::new(0, 5),
@@ -487,7 +508,7 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-        assert!(before.is_equal(&SchematicSnapshot::capture(&state.document)));
+        assert!(before.is_equal(&SchematicSnapshot::capture(&state.design.document())));
         state
             .stretch_target(
                 Point::new(0, 5),
@@ -495,8 +516,11 @@ mod tests {
                 StretchOrthogonalPolicy::PreserveOrthogonal,
             )
             .unwrap();
-        assert_eq!(state.document.wires[0].points, preview.wires[0].points);
-        assert_eq!(state.document.bus_taps, preview.bus_taps);
+        assert_eq!(
+            state.design.document().wires[0].points,
+            preview.wires[0].points
+        );
+        assert_eq!(state.design.document().bus_taps, preview.bus_taps);
     }
 
     #[test]
@@ -514,7 +538,8 @@ mod tests {
     fn component_connection_record_blocks_a_moved_endpoint() {
         let mut state = selected_u_wire();
         state
-            .document
+            .design
+            .document_mut_for_test()
             .connections
             .push(WireConnection::new(1, 1, 44, "OUT"));
         assert!(matches!(
@@ -535,12 +560,20 @@ mod tests {
         let mut state = SchematicState::default();
         let component = Component::new(20, ComponentType::Resistor, Point::origin());
         let terminal = component.terminal_positions()[0].1;
-        state.document.components.push(component);
-        state.document.wires.push(Wire::segment(
-            1,
-            terminal,
-            Point::new(terminal.x, terminal.y + 20),
-        ));
+        state
+            .design
+            .document_mut_for_test()
+            .components
+            .push(component);
+        state
+            .design
+            .document_mut_for_test()
+            .wires
+            .push(Wire::segment(
+                1,
+                terminal,
+                Point::new(terminal.x, terminal.y + 20),
+            ));
         state.selection.select_only_wire(1);
         assert!(matches!(
             state.stretch_target(
@@ -560,17 +593,19 @@ mod tests {
         for kind in 0..3 {
             let mut state = selected_u_wire();
             match kind {
-                0 => state.document.wires.push(Wire::segment(
-                    2,
-                    Point::new(10, 10),
-                    Point::new(10, 30),
-                )),
-                1 => state
-                    .document
-                    .buses
-                    .push(Bus::segment(2, Point::new(10, 10), Point::new(10, 30), None).unwrap()),
+                0 => state
+                    .design
+                    .document_mut_for_test()
+                    .wires
+                    .push(Wire::segment(2, Point::new(10, 10), Point::new(10, 30))),
+                1 => {
+                    state.design.document_mut_for_test().buses.push(
+                        Bus::segment(2, Point::new(10, 10), Point::new(10, 30), None).unwrap(),
+                    )
+                }
                 _ => state
-                    .document
+                    .design
+                    .document_mut_for_test()
                     .junctions
                     .push(Junction::new(2, Point::new(10, 10))),
             }
@@ -589,10 +624,11 @@ mod tests {
     fn existing_and_new_net_label_anchors_are_rejected_atomically() {
         let mut existing = selected_u_wire();
         existing
-            .document
+            .design
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(70, Point::new(10, 10), "SENSE"));
-        let before = SchematicSnapshot::capture(&existing.document);
+        let before = SchematicSnapshot::capture(&existing.design.document());
         assert_eq!(
             existing.stretch_target(
                 Point::new(0, 5),
@@ -604,14 +640,15 @@ mod tests {
                 point: Point::new(10, 10),
             })
         );
-        assert!(before.is_equal(&SchematicSnapshot::capture(&existing.document)));
+        assert!(before.is_equal(&SchematicSnapshot::capture(&existing.design.document())));
 
         let mut new_contact = selected_u_wire();
         new_contact
-            .document
+            .design
+            .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(71, Point::new(10, 15), "OTHER"));
-        let before = SchematicSnapshot::capture(&new_contact.document);
+        let before = SchematicSnapshot::capture(&new_contact.design.document());
         assert_eq!(
             new_contact.stretch_target(
                 Point::new(0, 5),
@@ -623,7 +660,7 @@ mod tests {
                 point: Point::new(10, 15),
             })
         );
-        assert!(before.is_equal(&SchematicSnapshot::capture(&new_contact.document)));
+        assert!(before.is_equal(&SchematicSnapshot::capture(&new_contact.design.document())));
     }
 
     fn declared_bus(id: u64, points: Vec<Point>) -> Bus {
@@ -648,8 +685,8 @@ mod tests {
             BusTapOrientation::Down,
         )
         .unwrap();
-        state.document.buses.push(bus);
-        state.document.bus_taps.push(tap);
+        state.design.document_mut_for_test().buses.push(bus);
+        state.design.document_mut_for_test().bus_taps.push(tap);
         state
             .stretch_target(
                 Point::new(0, 5),
@@ -657,9 +694,12 @@ mod tests {
                 StretchOrthogonalPolicy::PreserveOrthogonal,
             )
             .unwrap();
-        assert_eq!(state.document.bus_taps[0].bus_point, Point::new(10, -10));
         assert_eq!(
-            state.document.bus_taps[0].connection_point,
+            state.design.document().bus_taps[0].bus_point,
+            Point::new(10, -10)
+        );
+        assert_eq!(
+            state.design.document().bus_taps[0].connection_point,
             Point::new(10, 15)
         );
     }
@@ -677,8 +717,8 @@ mod tests {
             BusTapOrientation::Down,
         )
         .unwrap();
-        state.document.buses.push(bus);
-        state.document.bus_taps.push(tap);
+        state.design.document_mut_for_test().buses.push(bus);
+        state.design.document_mut_for_test().bus_taps.push(tap);
         assert_eq!(
             state.stretch_target(
                 Point::new(0, 5),
@@ -711,11 +751,12 @@ mod tests {
         )
         .unwrap();
         state
-            .document
+            .design
+            .document_mut_for_test()
             .wires
             .push(Wire::segment(9, Point::new(0, 30), Point::new(20, 30)));
-        state.document.buses.push(bus);
-        state.document.bus_taps.push(tap);
+        state.design.document_mut_for_test().buses.push(bus);
+        state.design.document_mut_for_test().bus_taps.push(tap);
         state.selection.select_bus(5);
         state
             .stretch_target(
@@ -724,11 +765,20 @@ mod tests {
                 StretchOrthogonalPolicy::PreserveOrthogonal,
             )
             .unwrap();
-        assert_eq!(state.document.buses[0].points[1], Point::new(0, 15));
-        assert_eq!(state.document.buses[0].points[2], Point::new(20, 15));
-        assert_eq!(state.document.bus_taps[0].bus_point, Point::new(10, 15));
         assert_eq!(
-            state.document.bus_taps[0].connection_point,
+            state.design.document().buses[0].points[1],
+            Point::new(0, 15)
+        );
+        assert_eq!(
+            state.design.document().buses[0].points[2],
+            Point::new(20, 15)
+        );
+        assert_eq!(
+            state.design.document().bus_taps[0].bus_point,
+            Point::new(10, 15)
+        );
+        assert_eq!(
+            state.design.document().bus_taps[0].connection_point,
             Point::new(10, 30)
         );
     }
@@ -784,7 +834,8 @@ mod tests {
         for (geometry, point_index, expected) in shape_geometries() {
             let mut state = SchematicState::default();
             state
-                .document
+                .design
+                .document_mut_for_test()
                 .documentation_shapes
                 .push(DocumentationShape::new(7, geometry).unwrap());
             state.selection.select_documentation_shape(7);
@@ -800,7 +851,9 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(
-                state.document.documentation_shapes[0].geometry.points()[point_index],
+                state.design.document().documentation_shapes[0]
+                    .geometry
+                    .points()[point_index],
                 expected
             );
             assert_eq!(state.topology_version(), before_topology);
@@ -811,18 +864,22 @@ mod tests {
     #[test]
     fn invalid_shape_control_point_is_atomic() {
         let mut state = SchematicState::default();
-        state.document.documentation_shapes.push(
-            DocumentationShape::new(
-                7,
-                DocumentationShapeGeometry::Line {
-                    start: Point::new(0, 0),
-                    end: Point::new(10, 0),
-                },
-            )
-            .unwrap(),
-        );
+        state
+            .design
+            .document_mut_for_test()
+            .documentation_shapes
+            .push(
+                DocumentationShape::new(
+                    7,
+                    DocumentationShapeGeometry::Line {
+                        start: Point::new(0, 0),
+                        end: Point::new(10, 0),
+                    },
+                )
+                .unwrap(),
+            );
         state.selection.select_documentation_shape(7);
-        let before = SchematicSnapshot::capture(&state.document);
+        let before = SchematicSnapshot::capture(&state.design.document());
         assert_eq!(
             state.stretch_target(
                 Point::new(10, 0),
@@ -834,13 +891,13 @@ mod tests {
             ),
             Err(StretchSelectionError::InvalidDocumentationGeometry { shape_id: 7 })
         );
-        assert!(before.is_equal(&SchematicSnapshot::capture(&state.document)));
+        assert!(before.is_equal(&SchematicSnapshot::capture(&state.design.document())));
     }
 
     #[test]
     fn stale_target_and_coordinate_overflow_are_rejected_atomically() {
         let mut state = selected_u_wire();
-        let before = SchematicSnapshot::capture(&state.document);
+        let before = SchematicSnapshot::capture(&state.design.document());
         assert_eq!(
             state.stretch_target(
                 Point::new(0, 5),
@@ -849,11 +906,11 @@ mod tests {
             ),
             Err(StretchSelectionError::StaleTarget)
         );
-        assert!(before.is_equal(&SchematicSnapshot::capture(&state.document)));
+        assert!(before.is_equal(&SchematicSnapshot::capture(&state.design.document())));
 
-        state.document.wires[0].points[1].y = i32::MAX;
-        state.document.wires[0].points[2].y = i32::MAX;
-        let before = SchematicSnapshot::capture(&state.document);
+        state.design.document_mut_for_test().wires[0].points[1].y = i32::MAX;
+        state.design.document_mut_for_test().wires[0].points[2].y = i32::MAX;
+        let before = SchematicSnapshot::capture(&state.design.document());
         assert_eq!(
             state.stretch_target(
                 Point::new(0, 1),
@@ -862,13 +919,13 @@ mod tests {
             ),
             Err(StretchSelectionError::CoordinateOverflow)
         );
-        assert!(before.is_equal(&SchematicSnapshot::capture(&state.document)));
+        assert!(before.is_equal(&SchematicSnapshot::capture(&state.design.document())));
     }
 
     #[test]
     fn read_only_zero_delta_and_unselected_target_are_clean_noops() {
         let mut state = selected_u_wire();
-        let baseline = SchematicSnapshot::capture(&state.document);
+        let baseline = SchematicSnapshot::capture(&state.design.document());
         state.read_only = true;
         assert_eq!(
             state.stretch_target(
@@ -896,14 +953,15 @@ mod tests {
             ),
             Ok(false)
         );
-        assert!(baseline.is_equal(&SchematicSnapshot::capture(&state.document)));
+        assert!(baseline.is_equal(&SchematicSnapshot::capture(&state.design.document())));
     }
 
     #[test]
     fn new_overlap_and_endpoint_contact_are_rejected() {
         let mut overlap = selected_u_wire();
         overlap
-            .document
+            .design
+            .document_mut_for_test()
             .wires
             .push(Wire::segment(2, Point::new(5, 15), Point::new(15, 15)));
         assert!(matches!(
@@ -917,7 +975,8 @@ mod tests {
 
         let mut contact = selected_u_wire();
         contact
-            .document
+            .design
+            .document_mut_for_test()
             .wires
             .push(Wire::segment(2, Point::new(10, 15), Point::new(10, 25)));
         assert!(matches!(
@@ -935,8 +994,12 @@ mod tests {
         let component = Component::new(20, ComponentType::Resistor, Point::new(10, 15));
         let terminal = component.terminal_positions()[0].1;
         let mut state = SchematicState::default();
-        state.document.components.push(component);
-        state.document.wires.push(Wire::new(
+        state
+            .design
+            .document_mut_for_test()
+            .components
+            .push(component);
+        state.design.document_mut_for_test().wires.push(Wire::new(
             1,
             vec![
                 Point::new(terminal.x - 5, terminal.y - 10),
@@ -965,11 +1028,15 @@ mod tests {
     #[test]
     fn caller_resolved_authored_terminal_blocks_source_and_new_contacts() {
         let mut source_contact = selected_u_wire();
-        source_contact.document.components.push(Component::new(
-            20,
-            ComponentType::CellInstance,
-            Point::new(100, 100),
-        ));
+        source_contact
+            .design
+            .document_mut_for_test()
+            .components
+            .push(Component::new(
+                20,
+                ComponentType::CellInstance,
+                Point::new(100, 100),
+            ));
         assert!(matches!(
             source_contact.stretch_target_resolved(
                 Point::new(0, 5),
@@ -989,11 +1056,15 @@ mod tests {
         ));
 
         let mut new_contact = selected_u_wire();
-        new_contact.document.components.push(Component::new(
-            20,
-            ComponentType::CellInstance,
-            Point::new(100, 100),
-        ));
+        new_contact
+            .design
+            .document_mut_for_test()
+            .components
+            .push(Component::new(
+                20,
+                ComponentType::CellInstance,
+                Point::new(100, 100),
+            ));
         assert!(matches!(
             new_contact.stretch_target_resolved(
                 Point::new(0, 5),
@@ -1016,11 +1087,15 @@ mod tests {
     #[test]
     fn caller_resolved_authored_body_bounds_block_new_entry() {
         let mut state = selected_u_wire();
-        state.document.components.push(Component::new(
-            20,
-            ComponentType::CellInstance,
-            Point::new(100, 100),
-        ));
+        state
+            .design
+            .document_mut_for_test()
+            .components
+            .push(Component::new(
+                20,
+                ComponentType::CellInstance,
+                Point::new(100, 100),
+            ));
         assert_eq!(
             state.stretch_target_resolved(
                 Point::new(0, 5),
@@ -1046,10 +1121,11 @@ mod tests {
     fn successful_electrical_stretch_bumps_topology_once_and_preserves_connections() {
         let mut state = selected_u_wire();
         state
-            .document
+            .design
+            .document_mut_for_test()
             .connections
             .push(WireConnection::new(1, 0, 50, "IN"));
-        let connections = state.document.connections.clone();
+        let connections = state.design.document().connections.clone();
         let before = state.topology_version();
         state
             .stretch_target(
@@ -1059,7 +1135,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(state.topology_version(), before.wrapping_add(1));
-        assert_eq!(state.document.connections, connections);
+        assert_eq!(state.design.document().connections, connections);
         assert!(state.is_dirty);
     }
 }

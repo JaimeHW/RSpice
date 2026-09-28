@@ -27,7 +27,8 @@ fn amp_master(ports: &[&str]) -> SchematicState {
         let position = Point::new(i32::try_from(index).unwrap_or(0) * 40, 0);
         let id = master.add_component(ComponentType::Port, position);
         master
-            .document
+            .design
+            .document_mut_for_test()
             .components
             .iter_mut()
             .find(|component| component.id == id)
@@ -56,7 +57,8 @@ fn placed_instance(ports: &[&str]) -> Fixture {
 
     let mut top = SchematicState::default();
     let id = top.add_library_cell_component(Point::new(200, 200), binding);
-    top.document
+    top.design
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.id == id)
@@ -73,7 +75,7 @@ fn placed_instance(ports: &[&str]) -> Fixture {
 }
 
 fn terminal_point(fixture: &Fixture, terminal: &str) -> Point {
-    let component = &fixture.top.document.components[0];
+    let component = &fixture.top.design.document().components[0];
     let binding = component
         .library_cell
         .as_ref()
@@ -91,22 +93,24 @@ fn terminal_point(fixture: &Fixture, terminal: &str) -> Point {
 /// cannot pass through a sibling pin and make it look connected too.
 fn wire_terminal(fixture: &mut Fixture, terminal: &str) {
     let point = terminal_point(fixture, terminal);
-    let centre = fixture.top.document.components[0].pos;
+    let centre = fixture.top.design.document().components[0].pos;
     let away = if point.x == centre.x {
         Point::new(point.x, point.y + if point.y < centre.y { -60 } else { 60 })
     } else {
         Point::new(point.x + if point.x < centre.x { -60 } else { 60 }, point.y)
     };
-    let component_id = fixture.top.document.components[0].id;
+    let component_id = fixture.top.design.document().components[0].id;
     let wire_id = fixture.top.next_id();
     fixture
         .top
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(wire_id, point, away));
     fixture
         .top
-        .document
+        .design
+        .document_mut_for_test()
         .connections
         .push(WireConnection::new(wire_id, 0, component_id, terminal));
     fixture.top.recalculate_runtime_state();
@@ -118,7 +122,8 @@ fn rename_master_port(fixture: &mut Fixture, from: &str, to: &str) {
         .masters
         .get_mut(MASTER_KEY)
         .expect("the fixture registers the master")
-        .document
+        .design
+        .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.value == from)
@@ -127,7 +132,7 @@ fn rename_master_port(fixture: &mut Fixture, from: &str, to: &str) {
 }
 
 fn placed_interface(fixture: &Fixture) -> Vec<String> {
-    fixture.top.document.components[0]
+    fixture.top.design.document().components[0]
         .library_cell
         .as_ref()
         .expect("the instance stays bound")
@@ -164,7 +169,8 @@ fn a_renamed_master_port_is_repaired_in_one_undo_step() {
     assert_eq!(
         fixture
             .top
-            .document
+            .design
+            .document()
             .connections
             .iter()
             .map(|connection| connection.terminal_name.clone())
@@ -188,7 +194,7 @@ fn a_renamed_master_port_is_repaired_in_one_undo_step() {
 fn an_unmapped_but_connected_terminal_is_reported_by_name_and_left_disconnected() {
     let mut fixture = placed_instance(&["IN", "OUT"]);
     wire_terminal(&mut fixture, "IN");
-    let drawn = fixture.top.document.wires[0].points.clone();
+    let drawn = fixture.top.design.document().wires[0].points.clone();
     rename_master_port(&mut fixture, "IN", "INP");
 
     let summary = fixture
@@ -203,13 +209,14 @@ fn an_unmapped_but_connected_terminal_is_reported_by_name_and_left_disconnected(
         "the dropped pin is named"
     );
     assert_eq!(
-        fixture.top.document.wires[0].points, drawn,
+        fixture.top.design.document().wires[0].points,
+        drawn,
         "the wire keeps the shape the author drew"
     );
     assert!(
-        fixture.top.document.connections.is_empty(),
+        fixture.top.design.document().connections.is_empty(),
         "the dropped pin's connection is not guessed onto another terminal: {:?}",
-        fixture.top.document.connections
+        fixture.top.design.document().connections
     );
 }
 

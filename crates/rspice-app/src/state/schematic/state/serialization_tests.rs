@@ -8,7 +8,9 @@ fn schematic_wire_layout_and_loaded_runtime_defaults_are_stable() {
     let mut state = SchematicState::default();
     state.zoom = 3.0;
     state.pan = (10.0, 20.0);
-    state.identity = SchematicIdentity::with_cursor(99);
+    state
+        .design
+        .set_identity_for_test(SchematicIdentity::with_cursor(99));
     state.is_dirty = true;
     state.read_only = true;
     let json = serde_json::to_string(&state).unwrap();
@@ -94,18 +96,24 @@ fn schematic_readers_preserve_legacy_fields_and_reject_missing_or_duplicate_data
             serde_json::from_str::<SchematicState>(&json(input)).unwrap(),
             ron::from_str::<SchematicState>(&ron(input)).unwrap(),
         ] {
-            assert_eq!(restored.document.grid_size, 7);
+            assert_eq!(restored.design.document().grid_size, 7);
             assert_eq!(
-                restored.document.document_policy,
+                restored.design.document().document_policy,
                 SchematicDocumentPolicy::default()
             );
-            assert!(restored.document.buses.is_empty() && restored.document.bus_taps.is_empty());
             assert!(
-                restored.document.design_notes.is_empty()
-                    && restored.document.documentation_shapes.is_empty()
+                restored.design.document().buses.is_empty()
+                    && restored.design.document().bus_taps.is_empty()
             );
-            assert!(restored.document.probes.is_empty() && restored.document.net_labels.is_empty());
-            assert!(restored.document.validated_revisions.is_empty());
+            assert!(
+                restored.design.document().design_notes.is_empty()
+                    && restored.design.document().documentation_shapes.is_empty()
+            );
+            assert!(
+                restored.design.document().probes.is_empty()
+                    && restored.design.document().net_labels.is_empty()
+            );
+            assert!(restored.design.document().validated_revisions.is_empty());
             assert_eq!(restored.zoom, 1.0);
             assert_eq!(restored.identity_cursor(), 0);
             assert_eq!(

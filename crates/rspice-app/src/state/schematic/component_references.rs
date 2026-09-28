@@ -3,8 +3,10 @@
 #[cfg(test)]
 use super::ComponentType;
 #[cfg(test)]
+use super::reference_edit;
+#[cfg(test)]
 use super::reference_edit::PreparedCopyReferences;
-use super::{Component, SchematicState, reference_edit};
+use super::{Component, SchematicState};
 
 impl SchematicState {
     #[cfg(test)]
@@ -13,102 +15,61 @@ impl SchematicState {
         expected: &Component,
         candidate: Component,
     ) -> Result<Vec<Component>, String> {
-        reference_edit::prepare_component_edit(&self.document, expected, candidate)
+        reference_edit::prepare_component_edit(self.document(), expected, candidate)
     }
 
+    #[cfg(test)]
     pub(crate) fn prepare_component_renames(
         &self,
         names: &std::collections::BTreeMap<u64, String>,
     ) -> Result<Vec<Component>, String> {
-        reference_edit::prepare_component_renames(&self.document, names)
+        reference_edit::prepare_component_renames(&self.design.document(), names)
     }
 }
 
 #[cfg(test)]
 mod tests;
 
-/// One validated component/reference candidate bound to its current document.
-pub(crate) struct PreparedComponentTransaction<'a> {
-    schematic: &'a mut SchematicState,
-    components: Vec<Component>,
-}
-
-impl PreparedComponentTransaction<'_> {
-    pub(crate) fn changes_document(&self) -> bool {
-        self.schematic.document.components != self.components
-    }
-
-    pub(crate) fn has_pending_operation(&self) -> bool {
-        self.schematic.has_pending_operation()
-    }
-
-    pub(crate) fn commit_local(self, description: &str) {
-        let before = super::SchematicSnapshot::capture(&self.schematic.document);
-        self.schematic.document.components = self.components;
-        self.schematic.is_dirty = true;
-        self.schematic.bump_topology_version();
-        self.schematic.commit_undo_from(before, description);
-    }
-
-    pub(crate) fn into_reference_candidate(self) -> SchematicState {
-        let mut candidate = self.schematic.clone();
-        candidate.document.components = self.components;
-        candidate.is_dirty = true;
-        candidate.bump_topology_version();
-        candidate
-    }
-}
-
-/// Probe values already remapped and validated for an upper reference transaction.
-pub(crate) struct PreparedProbeReferences {
-    probes: Vec<super::SchematicProbe>,
-}
-
+pub(crate) struct PreparedProbeReferences(
+    rspice_design::schematic::owned::references::PreparedProbeReferences,
+);
 impl PreparedProbeReferences {
     pub(crate) fn apply_to(self, candidate: &mut SchematicState) {
-        candidate.document.probes = self.probes;
+        self.0.apply_to(&mut candidate.design);
         candidate.is_dirty = true;
     }
 }
-
 impl SchematicState {
     pub(crate) fn prepare_component_transaction(
         &mut self,
         expected: &Component,
         candidate: Component,
-    ) -> Result<PreparedComponentTransaction<'_>, String> {
-        let components =
-            reference_edit::prepare_component_edit(&self.document, expected, candidate)?;
-        Ok(PreparedComponentTransaction {
-            schematic: self,
-            components,
-        })
+    ) -> Result<rspice_design::schematic::owned::references::PreparedComponentTransaction<'_>, String>
+    {
+        self.design
+            .prepare_component_transaction(expected, candidate)
     }
-
     pub(crate) fn renamed_reference_candidate(
         &self,
         names: &std::collections::BTreeMap<u64, String>,
     ) -> Result<Self, String> {
-        let mut candidate = self.clone();
-        candidate.document.components = self.prepare_component_renames(names)?;
+        let design = self.design.renamed_reference_candidate(names)?;
+        let mut candidate = self.clone_with_design(design);
         candidate.is_dirty = true;
-        candidate.bump_topology_version();
         Ok(candidate)
     }
-
     pub(crate) fn reference_history_candidate(&self, target: &super::SchematicSnapshot) -> Self {
-        let mut candidate = self.clone();
-        candidate.apply_snapshot(target);
-        // A restored edit keeps current probe occurrences until their references are remapped.
-        candidate.document.probes.clone_from(&self.document.probes);
+        let mut candidate = self.clone_with_design(self.design.reference_history_candidate(target));
+        candidate.is_dirty = true;
+        candidate.selection.clear();
         candidate
     }
-
     pub(crate) fn prepare_probe_reference_update(
         &self,
         mappings: &rspice_design::references::PathMappings,
     ) -> Result<Option<PreparedProbeReferences>, String> {
-        rspice_design::references::remap_schematic_probes(&self.document.probes, mappings)
-            .map(|probes| probes.map(|probes| PreparedProbeReferences { probes }))
+        self.design
+            .prepare_probe_reference_update(mappings)
+            .map(|prepared| prepared.map(PreparedProbeReferences))
     }
 }

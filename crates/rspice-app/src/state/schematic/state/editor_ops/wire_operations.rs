@@ -3,7 +3,6 @@
 //! Splitting wires, moving shared vertices, and maintaining conductor topology.
 
 use super::super::*;
-use rspice_design::schematic::wire_edit;
 
 impl SchematicState {
     // =========================================================================
@@ -22,20 +21,17 @@ impl SchematicState {
     /// * `wire_id` - The ID of the wire to split
     /// * `at_point` - The point at which to split (must be on the wire)
     pub fn split_wire(&mut self, wire_id: u64, at_point: Point) -> Option<(u64, u64)> {
-        let split =
-            wire_edit::split_wire(&mut self.document, &mut self.identity, wire_id, at_point);
+        let split = self.design.split_wire(wire_id, at_point);
         if split.is_some() {
             self.is_dirty = true;
-            self.bump_topology_version();
         }
         split
     }
 
     /// Optimize all wires by removing collinear intermediate points
     pub fn optimize_all_wires(&mut self) {
-        if wire_edit::optimize_all_wires(&mut self.document) {
+        if self.design.optimize_all_wires() {
             self.is_dirty = true;
-            self.bump_topology_version();
         }
     }
 
@@ -51,11 +47,9 @@ impl SchematicState {
     /// # Returns
     /// A tuple of (wires_modified, wires_removed) counts
     pub fn remove_degenerate_segments(&mut self) -> (usize, usize) {
-        let (wires_modified, wires_removed) =
-            wire_edit::remove_degenerate_segments(&mut self.document);
+        let (wires_modified, wires_removed) = self.design.remove_degenerate_segments();
         if wires_modified > 0 || wires_removed > 0 {
             self.is_dirty = true;
-            self.bump_topology_version();
         }
         (wires_modified, wires_removed)
     }
@@ -105,16 +99,20 @@ impl SchematicState {
 
         // First, check if this is a junction point where wires might pass through
         // without having a vertex. If so, split those wires first.
-        let is_junction = self.document.junctions.iter().any(|j| j.pos == old_pos);
+        let is_junction = self
+            .design
+            .document()
+            .junctions
+            .iter()
+            .any(|j| j.pos == old_pos);
         if is_junction {
             // Split any wires that pass through this junction point but don't have a vertex there
             self.split_wires_at_t_junction(old_pos);
         }
 
-        let moved = wire_edit::move_vertices_at(&mut self.document, old_pos, new_pos);
+        let moved = self.design.move_vertices_at(old_pos, new_pos);
         if moved {
             self.is_dirty = true;
-            self.bump_topology_version();
         }
         moved
     }

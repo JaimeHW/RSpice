@@ -261,17 +261,18 @@ impl SchematicState {
     /// the interface. Duplicate names collapse to their first occurrence
     /// (several port flags may pin the same net on different sheets/edges).
     pub fn interface_ports(&self) -> Vec<PortSpec> {
-        self.document.interface_ports()
+        self.design.document().interface_ports()
     }
 
     /// `true` when the schematic declares at least one interface port —
     /// i.e. it is a reusable cell rather than a top-level testbench.
     pub fn has_interface(&self) -> bool {
-        self.document.has_interface()
+        self.design.document().has_interface()
     }
 
     pub fn next_interface_order(&self) -> usize {
-        self.document
+        self.design
+            .document()
             .components
             .iter()
             .enumerate()
@@ -292,7 +293,9 @@ impl SchematicState {
     pub fn suggested_port_name(&self, base: &str) -> String {
         let trimmed = base.trim();
         let mut stem = trimmed.chars().take(128).collect::<String>();
-        if validate_port_name_syntax(&stem, self.document.document_policy.net_naming).is_err() {
+        if validate_port_name_syntax(&stem, self.design.document().document_policy.net_naming)
+            .is_err()
+        {
             stem = "PORT".to_owned();
         }
         if self.validate_new_port_name(&stem).is_ok() {
@@ -345,7 +348,7 @@ impl SchematicState {
         excluded_component_id: Option<u64>,
     ) -> Result<(), PortPlacementError> {
         let name = name.trim();
-        validate_port_name_syntax(name, self.document.document_policy.net_naming)?;
+        validate_port_name_syntax(name, self.design.document().document_policy.net_naming)?;
         // A net LABEL may name the ground net; an interface port may not. The
         // port list is the cell's contract, and a formal named `0` is illegal
         // in every dialect while one named `GND` silently shorts to global
@@ -356,7 +359,7 @@ impl SchematicState {
                 reason,
             });
         }
-        if self.document.components.iter().any(|component| {
+        if self.design.document().components.iter().any(|component| {
             Some(component.id) != excluded_component_id
                 && component
                     .port_spec()
@@ -425,7 +428,7 @@ impl SchematicState {
             .ok_or(PortPlacementError::EmptyName)?;
         validate_contract_fields(&contract)?;
         if let Some(order) = contract.netlist_order
-            && self.document.components.iter().any(|component| {
+            && self.design.document().components.iter().any(|component| {
                 component.id != component_id
                     && component
                         .port_contract()
@@ -452,14 +455,9 @@ impl SchematicState {
         let params = pending.contract.encoded_params();
         let changed = self.with_undo("place interface port", |schematic| {
             let id = schematic.add_component(ComponentType::Port, pos);
-            let component = schematic
-                .document
-                .components
-                .iter_mut()
-                .find(|component| component.id == id)
-                .expect("newly allocated port exists");
-            component.value.clone_from(&name);
-            component.params.clone_from(&params);
+            schematic
+                .design
+                .set_placed_port_contract(id, &name, &params);
             placed_id = Some(id);
         });
         if !changed {
@@ -555,7 +553,8 @@ mod tests {
     fn port(state: &mut SchematicState, name: &str, params: &str) -> u64 {
         let id = state.add_component(ComponentType::Port, Point::new(0, 0));
         let component = state
-            .document
+            .design
+            .document_mut_for_test()
             .components
             .iter_mut()
             .find(|c| c.id == id)
@@ -604,7 +603,8 @@ mod tests {
         let mut state = SchematicState::default();
         let id = state.add_component(ComponentType::Port, Point::new(0, 0));
         state
-            .document
+            .design
+            .document_mut_for_test()
             .components
             .iter_mut()
             .find(|c| c.id == id)
@@ -621,7 +621,8 @@ mod tests {
         state.add_component(ComponentType::Port, Point::new(0, 0));
         state.add_component(ComponentType::Port, Point::new(10, 0));
         let names: Vec<String> = state
-            .document
+            .design
+            .document()
             .components
             .iter()
             .map(|c| c.value.clone())
@@ -678,7 +679,7 @@ mod tests {
             state.place_pending_port(Point::origin(), pending),
             Err(PortPlacementError::ReservedGroundName { .. })
         ));
-        assert!(state.document.components.is_empty());
+        assert!(state.design.document().components.is_empty());
 
         let placed_id = port(&mut state, "BIAS", "dir=in");
         assert!(matches!(
@@ -688,8 +689,11 @@ mod tests {
 
         // A net label may still mark the ground net.
         assert!(
-            crate::state::NetLabel::validate_name("0", state.document.document_policy.net_naming)
-                .is_ok()
+            crate::state::NetLabel::validate_name(
+                "0",
+                state.design.document().document_policy.net_naming
+            )
+            .is_ok()
         );
     }
 
@@ -798,7 +802,7 @@ mod tests {
             state.validate_edited_port_name(placed, &too_wide),
             Err(PortPlacementError::DeclaredRange(_))
         ));
-        let baseline = state.document.components.clone();
+        let baseline = state.design.document().components.clone();
         let pending = PendingPortPlacement::new(
             too_wide.as_str(),
             PortDirectionType::InOutPower,
@@ -810,7 +814,7 @@ mod tests {
             state.place_pending_port(Point::origin(), pending),
             Err(PortPlacementError::DeclaredRange(_))
         ));
-        assert_eq!(state.document.components, baseline);
+        assert_eq!(state.design.document().components, baseline);
 
         // A bracketed name that is not a range at all still reads as the pin
         // rule it broke, not as a member-space sentence.
@@ -851,7 +855,8 @@ mod tests {
         let encoded = serde_json::to_string(&state).expect("schematic serializes");
         let restored: SchematicState = serde_json::from_str(&encoded).expect("schematic restores");
         let restored_port = restored
-            .document
+            .design
+            .document()
             .components
             .iter()
             .find(|component| component.id == placed_id)
@@ -893,7 +898,8 @@ mod tests {
                     .place_pending_port(Point::new(10, 20), pending)
                     .expect("valid typed contract places atomically");
                 let placed = state
-                    .document
+                    .design
+                    .document()
                     .components
                     .iter()
                     .find(|component| component.id == stable_id)
@@ -904,7 +910,8 @@ mod tests {
                 let restored: SchematicState =
                     serde_json::from_str(&encoded).expect("schematic restores");
                 let restored_port = restored
-                    .document
+                    .design
+                    .document()
                     .components
                     .iter()
                     .find(|component| component.id == stable_id)
@@ -930,7 +937,7 @@ mod tests {
                 .place_pending_port(Point::origin(), pending)
                 .expect("port places");
         }
-        state.document.components.reverse();
+        state.design.document_mut_for_test().components.reverse();
 
         let names = state
             .interface_ports()
@@ -945,7 +952,7 @@ mod tests {
     fn duplicate_and_stale_pending_ports_make_no_document_change() {
         let mut state = SchematicState::default();
         port(&mut state, "BIAS_EN", "dir=in");
-        let baseline = state.document.components.clone();
+        let baseline = state.design.document().components.clone();
         let duplicate = PendingPortPlacement::new(
             "bias_en",
             PortDirectionType::InputLogic,
@@ -957,7 +964,7 @@ mod tests {
             state.place_pending_port(Point::origin(), duplicate),
             Err(PortPlacementError::DuplicateName(_))
         ));
-        assert_eq!(state.document.components, baseline);
+        assert_eq!(state.design.document().components, baseline);
 
         let stale = PendingPortPlacement::new(
             "UNIQUE",
@@ -971,7 +978,7 @@ mod tests {
             state.place_pending_port(Point::origin(), stale),
             Err(PortPlacementError::StaleTopology)
         );
-        assert_eq!(state.document.components, baseline);
+        assert_eq!(state.design.document().components, baseline);
 
         let mut malformed = PendingPortPlacement::new(
             "UNIQUE",
@@ -987,7 +994,7 @@ mod tests {
             state.place_pending_port(Point::origin(), malformed),
             Err(PortPlacementError::InvalidContract(_))
         ));
-        assert_eq!(state.document.components, baseline);
+        assert_eq!(state.design.document().components, baseline);
     }
 
     /// The matrix a digital block needs. Direction and signal type are
@@ -1142,7 +1149,8 @@ mod tests {
             .place_pending_port(Point::origin(), second)
             .expect("second port places");
         let baseline = state
-            .document
+            .design
+            .document()
             .components
             .iter()
             .find(|component| component.id == second_id)
@@ -1170,7 +1178,8 @@ mod tests {
         ));
 
         let first_order = state
-            .document
+            .design
+            .document()
             .components
             .iter()
             .find(|component| component.id == first_id)
@@ -1218,7 +1227,8 @@ mod tests {
         let mut state = SchematicState::default();
         let id = state.add_library_cell_component(Point::new(100, 100), binding);
         let component = state
-            .document
+            .design
+            .document()
             .components
             .iter()
             .find(|c| c.id == id)

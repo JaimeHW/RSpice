@@ -9,16 +9,13 @@ impl SchematicState {
         reference: &CellViewRef,
         pin_remaps: &HashMap<String, (Point, Point)>,
     ) -> bool {
-        if !rspice_design::symbol::edit::remap_symbol_instance_wires(
-            &mut self.document,
-            reference,
-            pin_remaps,
-        ) {
-            return false;
+        let changed = self
+            .design
+            .remap_symbol_instance_wires(reference, pin_remaps);
+        if changed {
+            self.is_dirty = true;
         }
-        self.is_dirty = true;
-        self.bump_topology_version();
-        true
+        changed
     }
 
     pub(crate) fn rename_instance_terminals(
@@ -26,14 +23,9 @@ impl SchematicState {
         reference: &CellViewRef,
         renames: &BTreeMap<String, String>,
     ) -> usize {
-        let renamed = rspice_design::symbol::edit::rename_instance_terminals(
-            &mut self.document,
-            reference,
-            renames,
-        );
+        let renamed = self.design.rename_instance_terminals(reference, renames);
         if renamed > 0 {
             self.is_dirty = true;
-            self.bump_topology_version();
         }
         renamed
     }

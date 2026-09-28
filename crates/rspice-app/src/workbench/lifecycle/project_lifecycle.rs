@@ -1428,14 +1428,11 @@ fn rebase_pending_operation_dirty_state(
     };
     if state.schematic.has_pending_operation() {
         let was_dirty = dirty(&state.workspace.active_schematic_reference().key());
-        state
-            .schematic
-            .undo_history
-            .set_pending_was_dirty(was_dirty);
+        state.schematic.set_pending_was_dirty(was_dirty);
     }
     for (key, schematic) in &mut state.workspace.schematic_buffers {
         if schematic.has_pending_operation() {
-            schematic.undo_history.set_pending_was_dirty(dirty(key));
+            schematic.set_pending_was_dirty(dirty(key));
         }
     }
 }

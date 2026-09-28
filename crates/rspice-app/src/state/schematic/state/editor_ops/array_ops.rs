@@ -6,7 +6,7 @@ use super::super::super::{
     SchematicArrayCount, SchematicArrayError, SchematicArrayImpact, SchematicArrayNaming,
     SchematicArrayPlan, SchematicArrayPreview,
     array::ArrayObjectIds,
-    array_edit::{ArrayEdit, ArraySelection, ArraySource},
+    array_edit::{ArraySelection, ArraySource},
 };
 use super::super::*;
 use rspice_design::schematic::clipboard_edit::CopySelection;
@@ -54,7 +54,7 @@ fn array_result_selection(objects: ArrayObjectIds) -> Selection {
 impl SchematicState {
     fn array_source(&self) -> ArraySource<'_, impl Iterator<Item = Point> + Clone> {
         ArraySource {
-            document: &self.document,
+            document: &self.design.document(),
             identity_cursor: self.identity_cursor(),
             selection: array_selection_input(&self.selection),
         }
@@ -130,23 +130,16 @@ impl SchematicState {
         if self.read_only {
             return Err(SchematicArrayError::ReadOnly);
         }
-        let (document, identity, _, mut edit) = self.document_edit_parts();
-        let array = ArrayEdit::prepare(
-            document,
-            identity,
-            array_selection_input(edit.selection),
+        let edit = self.design.array_selection_resolved(
+            array_selection_input(&self.selection),
             plan,
             terminal_points_for,
             component_bounds_for,
         )?;
-        let impact = array.impact();
-        edit.begin(array.document(), "create array");
-        *edit.selection = array_result_selection(array.commit());
-        edit.mark_dirty();
-        if impact.electrical {
-            edit.mark_topology_changed();
-        }
-        if !edit.end(document) {
+        let (impact, objects) = edit.value;
+        self.selection = array_result_selection(objects);
+        self.finish_document_edit(edit.committed);
+        if !edit.committed {
             return Err(SchematicArrayError::CommitFailed);
         }
         Ok(impact)

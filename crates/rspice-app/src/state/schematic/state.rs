@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 
+#[cfg(test)]
 use rspice_design::schematic::identity::SchematicIdentity;
 use serde::{Deserialize, Serialize};
 
@@ -84,7 +85,7 @@ pub struct PendingPartModel {
 /// Schematic editor state over one persisted design document.
 #[derive(Debug, Clone)]
 pub struct SchematicState {
-    pub(in crate::state::schematic) document: SchematicDocument,
+    pub(in crate::state::schematic) design: rspice_design::schematic::owned::Schematic,
 
     /// Current selection (runtime state, never part of the design document).
     pub selection: Selection,
@@ -107,9 +108,6 @@ pub struct SchematicState {
 
     /// Current schematic file path (for save without dialog)
     pub current_file: Option<PathBuf>,
-
-    /// Object and reference-designator allocation (runtime only).
-    identity: SchematicIdentity,
 
     /// Clipboard for copy/paste operations.
     ///
@@ -191,18 +189,6 @@ pub struct SchematicState {
     /// Set to true when a file is loaded, cleared after history is reset.
     pub needs_history_reset: bool,
 
-    /// Topology version counter for cache invalidation (runtime state, not persisted)
-    /// Incremented on any structural change (add/remove/move component/wire/junction)
-    /// Used by LabelPositionCache and JunctionCache to detect stale data
-    topology_version: u64,
-
-    /// Content commit counter (runtime state, not persisted). Advances at
-    /// the undo commit boundaries — `end_operation`, `undo`, `redo` — so it
-    /// moves exactly when the persisted document content moves, including
-    /// property edits that `topology_version` deliberately ignores. Live
-    /// sessions use it to decide which buffers need rebroadcasting.
-    content_version: u64,
-
     /// Snap engine configuration (runtime state, not persisted)
     /// Controls cursor snapping behavior during wire drawing
     pub snap_engine: SnapEngine,
@@ -215,9 +201,9 @@ pub struct SchematicState {
     /// Tracks which wires are part of the highlighted net
     pub net_highlight: super::net_highlight::NetHighlightState,
 
-    /// Undo/redo history (runtime state, not persisted)
-    /// Manages snapshots for undo/redo operations
-    pub undo_history: super::undo_history::UndoHistory,
+    /// Editor selection and dirty baseline for the current document transaction.
+    pub(in crate::state::schematic) operation_cancel:
+        Option<super::undo_history::OperationCancelState>,
 
     /// Frame-coherent canvas geometry (culling bounds, hover hit-test index).
     /// Rebuilt when `topology_version` advances; resets on clone.
@@ -233,22 +219,22 @@ impl Default for SchematicState {
 impl SchematicState {
     /// Read-only access to persisted schematic content.
     pub(crate) fn document(&self) -> &SchematicDocument {
-        &self.document
+        self.design.document()
     }
 
     pub(crate) fn document_and_selection(&mut self) -> (&SchematicDocument, &mut Selection) {
-        (&self.document, &mut self.selection)
+        (self.design.document(), &mut self.selection)
     }
 
     pub(crate) fn into_document(self) -> SchematicDocument {
-        self.document
+        self.design.into_document()
     }
 
     /// Fixtures can model invalid or externally changed content without a
     /// mutable document accessor in production.
     #[cfg(test)]
     pub(crate) fn document_mut_for_test(&mut self) -> &mut SchematicDocument {
-        &mut self.document
+        self.design.document_mut_for_test()
     }
 
     /// Create fresh editor state around an owned document. Saved-file loading
@@ -259,7 +245,7 @@ impl SchematicState {
             ..SnapEngine::default()
         };
         Self {
-            document,
+            design: rspice_design::schematic::owned::Schematic::from_document(document),
             selection: Selection::default(),
             tool: Tool::default(),
             wire_drawing: WireDrawing::default(),
@@ -267,7 +253,6 @@ impl SchematicState {
             zoom: 1.0,
             pan: (0.0, 0.0),
             current_file: None,
-            identity: SchematicIdentity::with_cursor(1),
             clipboard: ClipboardData::default(),
             preview_rotation: Rotation::default(),
             preview_mirror_h: false,
@@ -285,12 +270,10 @@ impl SchematicState {
             center_request: None,
             read_only: false,
             needs_history_reset: false,
-            topology_version: 0,
-            content_version: 0,
             snap_engine,
             selection_rect: super::selection::SelectionRect::default(),
             net_highlight: super::net_highlight::NetHighlightState::default(),
-            undo_history: super::undo_history::UndoHistory::default(),
+            operation_cancel: None,
             canvas_cache: super::canvas_cache::CanvasCache::default(),
         }
     }
@@ -300,14 +283,16 @@ impl SchematicState {
 // fields retain their original serde(skip) defaults when loading saved data.
 impl Serialize for SchematicState {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.document.serialize(serializer)
+        self.design.document().serialize(serializer)
     }
 }
 
 impl<'de> Deserialize<'de> for SchematicState {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Ok(Self {
-            document: SchematicDocument::deserialize(deserializer)?,
+            design: rspice_design::schematic::owned::Schematic::from_loaded_document(
+                SchematicDocument::deserialize(deserializer)?,
+            ),
             selection: Default::default(),
             tool: Default::default(),
             wire_drawing: Default::default(),
@@ -315,7 +300,6 @@ impl<'de> Deserialize<'de> for SchematicState {
             zoom: default_zoom(),
             pan: Default::default(),
             current_file: Default::default(),
-            identity: Default::default(),
             clipboard: Default::default(),
             preview_rotation: Default::default(),
             preview_mirror_h: Default::default(),
@@ -333,12 +317,10 @@ impl<'de> Deserialize<'de> for SchematicState {
             center_request: Default::default(),
             read_only: Default::default(),
             needs_history_reset: Default::default(),
-            topology_version: Default::default(),
-            content_version: Default::default(),
             snap_engine: Default::default(),
             selection_rect: Default::default(),
             net_highlight: Default::default(),
-            undo_history: Default::default(),
+            operation_cancel: None,
             canvas_cache: Default::default(),
         })
     }
@@ -351,8 +333,7 @@ impl SchematicState {
     /// Call this after restoring history or installing session-owned snap
     /// target preferences into a newly activated document.
     pub(crate) fn reconcile_grid_pitch_runtime(&mut self) {
-        let grid_size = self.document.document_policy.grid_pitch.canvas_grid_size();
-        self.document.grid_size = grid_size;
+        let grid_size = self.design.reconcile_grid_pitch();
         self.snap_engine.grid_size = grid_size;
     }
 }
@@ -364,7 +345,34 @@ impl SchematicState {
         self.clipboard = Default::default();
         self.preview_rotation = Default::default();
         self.preview_mirror_h = false;
-        self.document.connections.clear();
+        self.design.strip_runtime_connections_for_save();
         self.is_dirty = false;
+    }
+}
+
+impl SchematicState {
+    pub fn history(&self) -> &rspice_design::schematic::history::SchematicHistory {
+        self.design.history()
+    }
+    pub(crate) fn clear_schematic_redo(&mut self) {
+        self.design.clear_redo();
+    }
+    pub(crate) fn set_live_sheet_assignments(
+        &mut self,
+        assignments: std::collections::BTreeMap<u64, crate::state::SheetId>,
+    ) {
+        self.design.set_live_sheet_assignments(assignments);
+    }
+    pub(crate) fn take_restored_sheet_assignments(
+        &mut self,
+    ) -> std::collections::BTreeMap<u64, crate::state::SheetId> {
+        self.design.take_restored_sheet_assignments()
+    }
+    pub(crate) fn set_pending_was_dirty(&mut self, was_dirty: bool) {
+        if let Some(cancel) = &mut self.operation_cancel
+            && Some(cancel.operation_id()) == self.design.pending_operation_id()
+        {
+            cancel.set_was_dirty(was_dirty);
+        }
     }
 }

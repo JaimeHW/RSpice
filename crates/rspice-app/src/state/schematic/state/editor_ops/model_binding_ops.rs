@@ -10,28 +10,11 @@ impl SchematicState {
         candidate_name: String,
         candidate_source: Option<PathBuf>,
     ) -> bool {
-        let before = crate::state::SchematicSnapshot::capture(&self.document);
-        let component = self
-            .document
-            .components
-            .iter_mut()
-            .find(|component| component.id == component_id)
-            .expect("the validated component remains present until mutation");
-        let binding = component
-            .library_cell
-            .as_mut()
-            .expect("the validated library binding remains present until mutation");
-        let mut changed = binding.module_name.as_deref() != Some(candidate_name.as_str());
-        binding.module_name = Some(candidate_name);
-        if candidate_source.is_some() && binding.source_path != candidate_source {
-            binding.source_path = candidate_source;
-            binding.model_section = None;
-            changed = true;
-        }
+        let changed =
+            self.design
+                .select_instance_model(component_id, candidate_name, candidate_source);
         if changed {
             self.is_dirty = true;
-            self.bump_topology_version();
-            self.commit_undo_from(before, "select instance model");
         }
         changed
     }
@@ -41,23 +24,12 @@ impl SchematicState {
         component_id: u64,
         selected: Option<String>,
     ) -> bool {
-        let before = crate::state::SchematicSnapshot::capture(&self.document);
-        let Some(binding) = self
-            .document
-            .components
-            .iter_mut()
-            .find(|component| component.id == component_id)
-            .and_then(|component| component.library_cell.as_mut())
-        else {
-            return false;
-        };
-        if binding.model_section == selected {
-            return false;
+        let changed = self
+            .design
+            .select_instance_model_section(component_id, selected);
+        if changed {
+            self.is_dirty = true;
         }
-        binding.model_section = selected;
-        self.is_dirty = true;
-        self.bump_topology_version();
-        self.commit_undo_from(before, "select instance model section");
-        true
+        changed
     }
 }

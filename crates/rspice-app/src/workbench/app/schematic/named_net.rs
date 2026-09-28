@@ -121,7 +121,7 @@ fn capture_target(
         .and_then(port_terminal)
         .into_iter()
         .collect::<Vec<_>>();
-    let membership = NetMembership::resolve(schematic, &wire_ids, &seeds);
+    let membership = NetMembership::resolve(schematic.document(), &wire_ids, &seeds);
 
     let mut labels = schematic
         .document()

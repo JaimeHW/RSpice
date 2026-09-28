@@ -55,7 +55,10 @@ fn preview_is_exact_and_does_not_mutate_any_live_runtime_state() {
             ("R4".to_owned(), Point::new(300, 0)),
         ]
     );
-    assert_eq!(state.document.components, before.document.components);
+    assert_eq!(
+        state.design.document().components,
+        before.design.document().components
+    );
     assert_eq!(state.selection, before.selection);
     assert_eq!(state.clipboard.count(), before.clipboard.count());
     assert_eq!(state.is_dirty, before.is_dirty);
@@ -83,13 +86,16 @@ fn linear_commit_matches_preview_preserves_clipboard_and_undoes_once() {
     let impact = state.array_selection(&plan).unwrap();
 
     assert_eq!(impact, preview.impact());
-    assert_eq!(&state.document.components[1..], preview.components());
+    assert_eq!(
+        &state.design.document().components[1..],
+        preview.components()
+    );
     assert_eq!(state.clipboard.components, clipboard.components);
     assert_eq!(state.clipboard.net_labels, clipboard.net_labels);
     assert_eq!(state.topology_version(), topology.wrapping_add(1));
     assert_eq!(state.undo_description(), Some("create array"));
     assert!(state.undo());
-    assert_eq!(state.document.components.len(), 1);
+    assert_eq!(state.design.document().components.len(), 1);
     assert!(
         !state.can_undo(),
         "array commit must create exactly one undo step"
@@ -120,7 +126,7 @@ fn rectangular_members_are_row_major_with_independent_axis_pitch() {
         ]
     );
     state.array_selection(&plan).unwrap();
-    assert_eq!(state.document.components.len(), 4);
+    assert_eq!(state.design.document().components.len(), 4);
 }
 
 #[test]
@@ -141,8 +147,12 @@ fn radial_documentation_rotates_exact_geometry_without_topology_change() {
         },
     )
     .unwrap();
-    state.document.design_notes.push(note);
-    state.document.documentation_shapes.push(shape);
+    state.design.document_mut_for_test().design_notes.push(note);
+    state
+        .design
+        .document_mut_for_test()
+        .documentation_shapes
+        .push(shape);
     state.selection.select_design_note(40);
     state.selection.select_documentation_shape(41);
     state.recalculate_runtime_state();
@@ -172,11 +182,11 @@ fn radial_documentation_rotates_exact_geometry_without_topology_change() {
     );
     state.array_selection(&plan).unwrap();
     assert_eq!(state.topology_version(), topology);
-    assert_eq!(state.document.design_notes.len(), 4);
-    assert_eq!(state.document.documentation_shapes.len(), 4);
+    assert_eq!(state.design.document().design_notes.len(), 4);
+    assert_eq!(state.design.document().documentation_shapes.len(), 4);
     assert!(state.undo());
-    assert_eq!(state.document.design_notes.len(), 1);
-    assert_eq!(state.document.documentation_shapes.len(), 1);
+    assert_eq!(state.design.document().design_notes.len(), 1);
+    assert_eq!(state.design.document().documentation_shapes.len(), 1);
 }
 
 #[test]
@@ -203,7 +213,10 @@ fn collision_and_radial_electrical_rejections_are_atomic_true_no_ops() {
         state.array_selection(&radial),
         Err(SchematicArrayError::RadialDocumentationOnly { .. })
     ));
-    assert_eq!(state.document.components, before.document.components);
+    assert_eq!(
+        state.design.document().components,
+        before.design.document().components
+    );
     assert_eq!(state.is_dirty, before.is_dirty);
     assert_eq!(state.topology_version(), before.topology_version());
     assert!(!state.can_undo());
@@ -214,11 +227,12 @@ fn resolved_internal_wire_connections_are_remapped_per_replica() {
     let mut state = SchematicState::default();
     let left = state.add_component(ComponentType::Resistor, Point::new(0, 0));
     let right = state.add_component(ComponentType::Resistor, Point::new(20, 0));
-    state.document.components[0].name = "R1".to_owned();
-    state.document.components[1].name = "R10".to_owned();
+    state.design.document_mut_for_test().components[0].name = "R1".to_owned();
+    state.design.document_mut_for_test().components[1].name = "R10".to_owned();
     let wire_id = state.next_id();
     state
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(wire_id, Point::new(0, 0), Point::new(20, 0)));
     state.selection.select_component(left);
@@ -255,7 +269,7 @@ fn resolved_internal_wire_connections_are_remapped_per_replica() {
     state
         .array_selection_resolved(&plan, terminals, bounds)
         .unwrap();
-    assert_eq!(state.document.connections, preview.connections());
+    assert_eq!(state.design.document().connections, preview.connections());
 }
 
 #[test]
@@ -272,8 +286,8 @@ fn bus_and_tap_ownership_and_scalar_slice_are_remapped_together() {
     )
     .unwrap();
     let mut state = SchematicState::default();
-    state.document.buses.push(bus);
-    state.document.bus_taps.push(tap);
+    state.design.document_mut_for_test().buses.push(bus);
+    state.design.document_mut_for_test().bus_taps.push(tap);
     state.recalculate_runtime_state();
     state.clear_undo_history();
     state.selection.select_only_bus_tap(71);
@@ -317,15 +331,15 @@ fn bus_and_tap_ownership_and_scalar_slice_are_remapped_together() {
     assert_eq!(preview.bus_taps()[0].slice.to_string(), "DATA[0]");
     state.array_selection(&plan).unwrap();
     assert_eq!(
-        state.document.bus_taps.last().unwrap().bus_id,
-        state.document.buses.last().unwrap().id
+        state.design.document().bus_taps.last().unwrap().bus_id,
+        state.design.document().buses.last().unwrap().id
     );
 }
 
 #[test]
 fn naming_collision_partial_stale_read_only_and_overflow_fail_closed() {
     let mut state = selected_resistor();
-    state.document.components.push(
+    state.design.document_mut_for_test().components.push(
         Component::new(900, ComponentType::Capacitor, Point::new(500, 0))
             .with_name_value("R2", "1p"),
     );
@@ -368,7 +382,7 @@ fn naming_collision_partial_stale_read_only_and_overflow_fail_closed() {
         SchematicArrayPlacement::Pitch(Point::new(i32::MAX, 0)),
     );
     let mut overflow_state = selected_resistor();
-    overflow_state.document.components[0].pos = Point::new(1, 0);
+    overflow_state.design.document_mut_for_test().components[0].pos = Point::new(1, 0);
     assert!(matches!(
         overflow_state.preview_array_selection(&overflow),
         Err(SchematicArrayError::CoordinateOverflow)
@@ -394,11 +408,15 @@ fn strict_source_eligibility_rejects_mixed_stale_and_malformed_objects() {
 
     let mut malformed = selected_resistor();
     let malformed_wire_id = malformed.next_id();
-    malformed.document.wires.push(Wire::segment(
-        malformed_wire_id,
-        Point::new(20, 0),
-        Point::new(20, 0),
-    ));
+    malformed
+        .design
+        .document_mut_for_test()
+        .wires
+        .push(Wire::segment(
+            malformed_wire_id,
+            Point::new(20, 0),
+            Point::new(20, 0),
+        ));
     malformed.selection.select_wire(malformed_wire_id);
     assert!(matches!(
         malformed.validate_array_source_selection(),
@@ -406,11 +424,12 @@ fn strict_source_eligibility_rejects_mixed_stale_and_malformed_objects() {
             if object_id == malformed_wire_id
     ));
 
-    malformed.document.wires[0].points[1] = Point::new(30, 0);
-    malformed.document.connections.push(WireConnection::new(
+    malformed.design.document_mut_for_test().wires[0].points[1] = Point::new(30, 0);
+    let document = malformed.design.document_mut_for_test();
+    document.connections.push(WireConnection::new(
         malformed_wire_id,
         99,
-        malformed.document.components[0].id,
+        document.components[0].id,
         "A",
     ));
     assert!(matches!(
@@ -423,17 +442,23 @@ fn strict_source_eligibility_rejects_mixed_stale_and_malformed_objects() {
     let left = implicit.add_component(ComponentType::Resistor, Point::new(0, 0));
     let right = implicit.add_component(ComponentType::Resistor, Point::new(20, 0));
     let implicit_wire_id = implicit.next_id();
-    implicit.document.wires.push(Wire::segment(
-        implicit_wire_id,
-        Point::new(10, 0),
-        Point::new(10, 0),
-    ));
     implicit
-        .document
+        .design
+        .document_mut_for_test()
+        .wires
+        .push(Wire::segment(
+            implicit_wire_id,
+            Point::new(10, 0),
+            Point::new(10, 0),
+        ));
+    implicit
+        .design
+        .document_mut_for_test()
         .connections
         .push(WireConnection::new(implicit_wire_id, 0, left, "A"));
     implicit
-        .document
+        .design
+        .document_mut_for_test()
         .connections
         .push(WireConnection::new(implicit_wire_id, 1, right, "B"));
     implicit.selection.select_component(left);
@@ -475,7 +500,7 @@ fn default_group_naming_interleaves_same_prefix_without_collisions() {
     let mut sparse = SchematicState::default();
     let first = sparse.add_component(ComponentType::Resistor, Point::new(0, 0));
     let second = sparse.add_component(ComponentType::Resistor, Point::new(0, 30));
-    sparse.document.components[1].name = "R5".to_owned();
+    sparse.design.document_mut_for_test().components[1].name = "R5".to_owned();
     sparse.selection.select_component(first);
     sparse.selection.select_component(second);
     let sparse_naming = sparse.default_array_naming(count).unwrap();
@@ -496,7 +521,7 @@ fn default_group_naming_interleaves_same_prefix_without_collisions() {
     assert_eq!(sparse_names.len(), 14);
 
     let mut occupied = selected_resistor();
-    occupied.document.components.push(
+    occupied.design.document_mut_for_test().components.push(
         Component::new(800, ComponentType::Capacitor, Point::new(500, 0))
             .with_name_value("R3", "1p"),
     );
@@ -513,11 +538,13 @@ fn default_group_naming_interleaves_same_prefix_without_collisions() {
 fn default_bus_index_naming_interleaves_selected_scalar_labels() {
     let mut state = SchematicState::default();
     state
-        .document
+        .design
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(60, Point::new(0, 0), "DATA[0]"));
     state
-        .document
+        .design
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(61, Point::new(0, 20), "DATA[1]"));
     state.selection.select_net_label(60);
@@ -548,7 +575,8 @@ fn default_bus_index_naming_interleaves_selected_scalar_labels() {
 fn radial_zero_radius_and_quantized_overlap_are_atomic_rejections() {
     let mut zero_radius = SchematicState::default();
     zero_radius
-        .document
+        .design
+        .document_mut_for_test()
         .design_notes
         .push(DesignNote::new(80, Point::origin(), DesignNoteKind::PlainText, "centered").unwrap());
     zero_radius.selection.select_design_note(80);
@@ -570,14 +598,14 @@ fn radial_zero_radius_and_quantized_overlap_are_atomic_rejections() {
         Err(SchematicArrayError::GeometryCollision { .. })
     ));
     assert_eq!(
-        zero_radius.document.design_notes,
-        zero_before.document.design_notes
+        zero_radius.design.document().design_notes,
+        zero_before.design.document().design_notes
     );
     assert_eq!(zero_radius.is_dirty, zero_before.is_dirty);
     assert!(!zero_radius.can_undo());
 
     let mut quantized = SchematicState::default();
-    quantized.document.design_notes.push(
+    quantized.design.document_mut_for_test().design_notes.push(
         DesignNote::new(
             81,
             Point::new(1, 0),
@@ -605,8 +633,8 @@ fn radial_zero_radius_and_quantized_overlap_are_atomic_rejections() {
         Err(SchematicArrayError::GeometryCollision { .. })
     ));
     assert_eq!(
-        quantized.document.design_notes,
-        quantized_before.document.design_notes
+        quantized.design.document().design_notes,
+        quantized_before.design.document().design_notes
     );
     assert_eq!(quantized.is_dirty, quantized_before.is_dirty);
     assert!(!quantized.can_undo());
@@ -615,16 +643,20 @@ fn radial_zero_radius_and_quantized_overlap_are_atomic_rejections() {
 #[test]
 fn symmetric_radial_shape_overlap_is_rejected_even_when_points_reverse() {
     let mut state = SchematicState::default();
-    state.document.documentation_shapes.push(
-        DocumentationShape::new(
-            90,
-            DocumentationShapeGeometry::Line {
-                start: Point::new(-10, 0),
-                end: Point::new(10, 0),
-            },
-        )
-        .unwrap(),
-    );
+    state
+        .design
+        .document_mut_for_test()
+        .documentation_shapes
+        .push(
+            DocumentationShape::new(
+                90,
+                DocumentationShapeGeometry::Line {
+                    start: Point::new(-10, 0),
+                    end: Point::new(10, 0),
+                },
+            )
+            .unwrap(),
+        );
     state.selection.select_documentation_shape(90);
     state.recalculate_runtime_state();
     state.clear_undo_history();
@@ -644,8 +676,8 @@ fn symmetric_radial_shape_overlap_is_rejected_even_when_points_reverse() {
         Err(SchematicArrayError::GeometryCollision { .. })
     ));
     assert_eq!(
-        state.document.documentation_shapes,
-        before.document.documentation_shapes
+        state.design.document().documentation_shapes,
+        before.design.document().documentation_shapes
     );
     assert_eq!(state.is_dirty, before.is_dirty);
     assert!(!state.can_undo());
@@ -658,15 +690,18 @@ fn snapped_durable_connections_capture_implicit_wire_and_close_selection_symmetr
     let right = state.add_component(ComponentType::Resistor, Point::new(20, 0));
     let wire_id = state.next_id();
     state
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(wire_id, Point::new(1, 0), Point::new(19, 0)));
     state
-        .document
+        .design
+        .document_mut_for_test()
         .connections
         .push(WireConnection::new(wire_id, 0, left, "A"));
     state
-        .document
+        .design
+        .document_mut_for_test()
         .connections
         .push(WireConnection::new(wire_id, 1, right, "B"));
     state.selection.select_component(left);
@@ -702,7 +737,7 @@ fn snapped_durable_connections_capture_implicit_wire_and_close_selection_symmetr
     state
         .array_selection_resolved(&plan, terminals, bounds)
         .unwrap();
-    assert_eq!(state.document.connections.len(), 4);
+    assert_eq!(state.design.document().connections.len(), 4);
     assert!(state.selection.has_wire(wire_id));
     assert!(state.selection.has_wire(preview.wires()[0].id));
 }
@@ -713,15 +748,20 @@ fn explicitly_selected_wire_preserves_durable_terminal_ownership_without_duplica
     let component_id = state.add_component(ComponentType::Resistor, Point::origin());
     let wire_id = state.next_id();
     state
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(wire_id, Point::origin(), Point::new(20, 0)));
-    state.document.connections.push(WireConnection::new(
-        wire_id,
-        0,
-        component_id,
-        "durable-terminal",
-    ));
+    state
+        .design
+        .document_mut_for_test()
+        .connections
+        .push(WireConnection::new(
+            wire_id,
+            0,
+            component_id,
+            "durable-terminal",
+        ));
     state.selection.select_component(component_id);
     state.selection.select_wire(wire_id);
     state.clear_undo_history();
@@ -766,7 +806,8 @@ fn resolved_authored_bounds_enforce_symmetric_body_conductor_and_anchor_collisio
 
     let mut component_case = selected_resistor();
     component_case
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(700, Point::new(90, 0), Point::new(110, 0)));
     let count = SchematicArrayCount::new(2, 1).unwrap();
@@ -784,14 +825,19 @@ fn resolved_authored_bounds_enforce_symmetric_body_conductor_and_anchor_collisio
 
     let mut conductor_case = SchematicState::default();
     conductor_case
-        .document
+        .design
+        .document_mut_for_test()
         .wires
         .push(Wire::segment(710, Point::new(-5, 0), Point::new(5, 0)));
     conductor_case.selection.select_only_wire(710);
-    conductor_case.document.components.push(
-        Component::new(711, ComponentType::Capacitor, Point::new(100, 0))
-            .with_name_value("C1", "1p"),
-    );
+    conductor_case
+        .design
+        .document_mut_for_test()
+        .components
+        .push(
+            Component::new(711, ComponentType::Capacitor, Point::new(100, 0))
+                .with_name_value("C1", "1p"),
+        );
     let conductor_plan = plan(
         SchematicArrayKind::Linear,
         "2 × 1",
@@ -805,11 +851,12 @@ fn resolved_authored_bounds_enforce_symmetric_body_conductor_and_anchor_collisio
 
     let mut anchor_case = SchematicState::default();
     anchor_case
-        .document
+        .design
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(720, Point::origin(), "SIGNAL"));
     anchor_case.selection.select_net_label(720);
-    anchor_case.document.components.push(
+    anchor_case.design.document_mut_for_test().components.push(
         Component::new(721, ComponentType::Capacitor, Point::new(100, 0))
             .with_name_value("C1", "1p"),
     );
@@ -826,7 +873,8 @@ fn resolved_authored_bounds_enforce_symmetric_body_conductor_and_anchor_collisio
 
     let mut body_case = selected_resistor();
     body_case
-        .document
+        .design
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(730, Point::new(100, 0), "SIGNAL"));
     let body_plan = SchematicArrayPlan::new(
@@ -845,11 +893,11 @@ fn resolved_authored_bounds_enforce_symmetric_body_conductor_and_anchor_collisio
 #[test]
 fn typed_reference_defaults_support_suffixes_and_zero_padding() {
     let mut state = SchematicState::default();
-    state.document.components.push(
+    state.design.document_mut_for_test().components.push(
         Component::new(501, ComponentType::CellInstance, Point::new(0, 0))
             .with_name_value("X3A", "cell"),
     );
-    state.document.components.push(
+    state.design.document_mut_for_test().components.push(
         Component::new(502, ComponentType::CellInstance, Point::new(0, 30))
             .with_name_value("X03B", "cell"),
     );
@@ -867,11 +915,13 @@ fn typed_reference_defaults_support_suffixes_and_zero_padding() {
 fn duplicate_scalar_bus_sources_share_one_canonical_naming_range() {
     let mut state = SchematicState::default();
     state
-        .document
+        .design
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(601, Point::new(0, 0), "DATA[0]"));
     state
-        .document
+        .design
+        .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(602, Point::new(0, 20), "data[0]"));
     state.selection.select_net_label(601);
@@ -905,15 +955,19 @@ fn duplicate_scalar_bus_sources_share_one_canonical_naming_range() {
 fn generated_object_and_segment_budgets_reject_before_allocation() {
     let mut object_heavy = SchematicState::default();
     for index in 0..17u64 {
-        object_heavy.document.design_notes.push(
-            DesignNote::new(
-                800 + index,
-                Point::new(index as i32 * 10, 0),
-                DesignNoteKind::PlainText,
-                format!("note {index}"),
-            )
-            .unwrap(),
-        );
+        object_heavy
+            .design
+            .document_mut_for_test()
+            .design_notes
+            .push(
+                DesignNote::new(
+                    800 + index,
+                    Point::new(index as i32 * 10, 0),
+                    DesignNoteKind::PlainText,
+                    format!("note {index}"),
+                )
+                .unwrap(),
+            );
         object_heavy.selection.select_design_note(800 + index);
     }
     object_heavy.recalculate_runtime_state();
@@ -931,10 +985,14 @@ fn generated_object_and_segment_budgets_reject_before_allocation() {
     ));
 
     let mut segment_heavy = SchematicState::default();
-    segment_heavy.document.wires.push(Wire::new(
-        900,
-        (0..35).map(|index| Point::new(index * 10, 0)).collect(),
-    ));
+    segment_heavy
+        .design
+        .document_mut_for_test()
+        .wires
+        .push(Wire::new(
+            900,
+            (0..35).map(|index| Point::new(index * 10, 0)).collect(),
+        ));
     segment_heavy.selection.select_only_wire(900);
     segment_heavy.recalculate_runtime_state();
     assert!(matches!(

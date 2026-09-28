@@ -121,9 +121,12 @@ impl AppState {
         }
         if candidate.name == expected.name || expected.kind.spice_prefix().is_empty() {
             prepared.commit_local(description);
+            self.schematic.is_dirty = true;
             return Ok(true);
         }
-        let after_schematic = prepared.into_reference_candidate();
+        let after_design = prepared.into_reference_candidate();
+        let mut after_schematic = self.schematic.clone_with_design(after_design);
+        after_schematic.is_dirty = true;
         let transaction = self.prepare_schematic_reference_transaction(
             BTreeMap::from([(document.key(), self.schematic.clone())]),
             BTreeMap::from([(document.key(), after_schematic)]),
@@ -173,15 +176,13 @@ impl AppState {
         let record = prepared.publish(self, true)?;
         for key in record.after.keys() {
             if key.eq_ignore_ascii_case(&document.key()) {
-                self.schematic.undo_history.committed.clear_redo();
+                self.schematic.clear_schematic_redo();
             } else {
                 self.workspace
                     .schematic_buffers
                     .get_mut(key)
                     .expect("guarded reference document")
-                    .undo_history
-                    .committed
-                    .clear_redo();
+                    .clear_schematic_redo();
             }
         }
         self.workspace.save_active_schematic(&self.schematic);

@@ -934,7 +934,7 @@ impl RSpiceApp {
         if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol {
             return None;
         }
-        self.state.schematic.undo_history.committed.undo_sequence()
+        self.state.schematic.history().undo_sequence()
     }
 
     /// Where the active document's next redo step sits in the global order.
@@ -942,7 +942,7 @@ impl RSpiceApp {
         if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol {
             return None;
         }
-        self.state.schematic.undo_history.committed.redo_sequence()
+        self.state.schematic.history().redo_sequence()
     }
 
     fn try_active_document_undo(&mut self) -> bool {

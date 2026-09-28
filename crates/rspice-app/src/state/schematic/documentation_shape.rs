@@ -103,7 +103,7 @@ impl SchematicState {
             return Err(DocumentationShapeError::ReadOnly);
         }
         if pending.topology_version != self.topology_version()
-            || pending.expected_shapes != self.document.documentation_shapes
+            || pending.expected_shapes != self.design.document().documentation_shapes
         {
             return Err(DocumentationShapeError::StaleDocument);
         }
@@ -122,16 +122,12 @@ impl SchematicState {
         if geometry.kind() != pending.kind {
             return Err(DocumentationShapeError::DegenerateGeometry);
         }
-        let id = self.next_id();
-        let shape = DocumentationShape::new(id, geometry)?;
-        let changed = self.with_undo("draw documentation shape", |schematic| {
-            schematic.document.documentation_shapes.push(shape);
-            schematic.selection.clear();
-            schematic.selection.select_documentation_shape(id);
-            schematic.is_dirty = true;
-        });
-        if changed {
-            Ok(id)
+        let edit = self.design.place_documentation_shape(geometry)?;
+        self.selection.clear();
+        self.selection.select_documentation_shape(edit.value);
+        self.finish_document_edit(edit.committed);
+        if edit.committed {
+            Ok(edit.value)
         } else {
             Err(DocumentationShapeError::ReadOnly)
         }
@@ -149,7 +145,7 @@ mod tests {
         let pending = PendingDocumentationShapePlacement::new(
             DocumentationShapeKind::Rectangle,
             topology,
-            &schematic.document.documentation_shapes,
+            &schematic.design.document().documentation_shapes,
         );
         let id = schematic
             .commit_documentation_shape(
@@ -160,12 +156,12 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(schematic.document.documentation_shapes[0].id, id);
-        assert!(schematic.document.components.is_empty());
-        assert!(schematic.document.wires.is_empty());
+        assert_eq!(schematic.design.document().documentation_shapes[0].id, id);
+        assert!(schematic.design.document().components.is_empty());
+        assert!(schematic.design.document().wires.is_empty());
         assert_eq!(schematic.topology_version(), topology);
         assert!(schematic.undo());
-        assert!(schematic.document.documentation_shapes.is_empty());
+        assert!(schematic.design.document().documentation_shapes.is_empty());
     }
 
     #[test]
@@ -174,18 +170,22 @@ mod tests {
         let pending = PendingDocumentationShapePlacement::new(
             DocumentationShapeKind::Line,
             schematic.topology_version(),
-            &schematic.document.documentation_shapes,
+            &schematic.design.document().documentation_shapes,
         );
-        schematic.document.documentation_shapes.push(
-            DocumentationShape::new(
-                44,
-                DocumentationShapeGeometry::Line {
-                    start: Point::origin(),
-                    end: Point::new(1, 1),
-                },
-            )
-            .unwrap(),
-        );
+        schematic
+            .design
+            .document_mut_for_test()
+            .documentation_shapes
+            .push(
+                DocumentationShape::new(
+                    44,
+                    DocumentationShapeGeometry::Line {
+                        start: Point::origin(),
+                        end: Point::new(1, 1),
+                    },
+                )
+                .unwrap(),
+            );
         assert_eq!(
             schematic.validate_pending_documentation_shape(&pending),
             Err(DocumentationShapeError::StaleDocument)

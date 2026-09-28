@@ -176,7 +176,11 @@ impl SchematicState {
         if self.canvas_cache.version != Some(version) {
             // Split the borrow: take the cache out, rebuild, put it back.
             let mut cache = std::mem::take(&mut self.canvas_cache);
-            cache.rebuild(&self.document.wires, &self.document.junctions, version);
+            cache.rebuild(
+                &self.design.document().wires,
+                &self.design.document().junctions,
+                version,
+            );
             self.canvas_cache = cache;
         }
     }
@@ -194,7 +198,7 @@ impl SchematicState {
         let candidates = if let Some(cache) = self.canvas_cache() {
             cache.junction_candidates.as_slice()
         } else {
-            fallback = collect_junction_candidates(&self.document.wires);
+            fallback = collect_junction_candidates(&self.design.document().wires);
             fallback.as_slice()
         };
         nearest_junction_candidate(candidates, pos, radius)
@@ -213,11 +217,13 @@ mod tests {
     fn cache_matches_linear_scan_and_invalidates() {
         let mut state = SchematicState::default();
         state
-            .document
+            .design
+            .document_mut_for_test()
             .wires
             .push(Wire::new(1, vec![Point::new(0, 0), Point::new(40, 0)]));
         state
-            .document
+            .design
+            .document_mut_for_test()
             .wires
             .push(Wire::new(2, vec![Point::new(40, 0), Point::new(40, 40)]));
         state.bump_topology_version();
@@ -239,7 +245,7 @@ mod tests {
         );
 
         // A topology bump invalidates; rebuilding picks up the new bounds.
-        state.document.wires[0].points[0] = Point::new(-20, 0);
+        state.design.document_mut_for_test().wires[0].points[0] = Point::new(-20, 0);
         state.bump_topology_version();
         assert!(state.canvas_cache().is_none());
         state.ensure_canvas_cache();
@@ -253,7 +259,7 @@ mod tests {
     #[test]
     fn junction_candidates_are_deduplicated_cached_and_nearest() {
         let mut state = SchematicState::default();
-        state.document.wires = vec![
+        state.design.document_mut_for_test().wires = vec![
             Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
             Wire::new(2, vec![Point::new(20, 0), Point::new(20, 40)]),
             Wire::new(3, vec![Point::new(0, 0), Point::new(40, 40)]),
@@ -280,7 +286,7 @@ mod tests {
     #[test]
     fn endpoint_and_t_contacts_are_not_explicit_junction_targets() {
         let mut state = SchematicState::default();
-        state.document.wires = vec![
+        state.design.document_mut_for_test().wires = vec![
             Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
             Wire::new(2, vec![Point::new(20, 20), Point::new(20, 40)]),
         ];
@@ -303,13 +309,13 @@ mod tests {
     #[test]
     fn large_schematic_viewport_query_stays_spatial_and_keeps_long_wires() {
         let mut state = SchematicState::default();
-        state.document.wires = (0_u64..10_000)
+        state.design.document_mut_for_test().wires = (0_u64..10_000)
             .map(|index| {
                 let x = i32::try_from(index).expect("bounded fixture") * 512;
                 Wire::new(index + 1, vec![Point::new(x, 0), Point::new(x, 40)])
             })
             .collect();
-        state.document.wires.push(Wire::new(
+        state.design.document_mut_for_test().wires.push(Wire::new(
             20_000,
             vec![Point::new(-2_000_000, 20), Point::new(7_000_000, 20)],
         ));
