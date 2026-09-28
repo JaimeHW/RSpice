@@ -51,7 +51,7 @@ pub(super) fn formals_of(name: &str) -> Vec<String> {
 /// vectors unexpanded — because that is what a placement binds to and what a
 /// stale-interface check compares. This is the deck's view of the same
 /// contract, and only the `.SUBCKT` header and instance node lists use it.
-pub(super) fn interface_formals(schematic: &SchematicState) -> Vec<String> {
+pub(super) fn interface_formals(schematic: &SchematicDocument) -> Vec<String> {
     schematic
         .interface_ports()
         .iter()
@@ -74,7 +74,7 @@ impl<'a> NetlistGenerator<'a> {
                 nodes.push(self.get_node_name(*point));
                 continue;
             };
-            let joined = self.schematic.document().buses.iter().any(|bus| {
+            let joined = self.schematic.buses.iter().any(|bus| {
                 bus.declaration.as_ref() == Some(&declaration) && bus.contains_point(*point)
             });
             let base = if joined {

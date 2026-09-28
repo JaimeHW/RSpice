@@ -18,10 +18,10 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use rspice_app::state::schematic::SchematicState;
+//! use rspice_design::schematic::document::SchematicDocument;
 //! use rspice_app::app::simulation::netlist_gen::NetlistGenerator;
 //!
-//! let schematic = SchematicState::default();
+//! let schematic = SchematicDocument::default();
 //! let generator = NetlistGenerator::new(&schematic);
 //! let netlist = generator.generate();
 //! ```
@@ -30,13 +30,14 @@ use std::any::Any;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use rspice_design::schematic::document::SchematicDocument;
+
 use crate::product::AnalysisInstanceId;
-#[cfg(test)]
-use crate::state::Wire;
 use crate::state::{
-    CellViewRef, Component, ComponentType, DesignVariable, DesignVariableScope, InstancePath,
-    Point, SchematicState,
+    CellViewRef, Component, ComponentType, DesignVariable, DesignVariableScope, InstancePath, Point,
 };
+#[cfg(test)]
+use crate::state::{SchematicState, Wire};
 
 mod connectivity;
 pub(crate) mod extraction;
@@ -108,7 +109,8 @@ pub struct NetlistResult {
 /// resolves placed project cells into `.SUBCKT` definitions. This flat form
 /// exists for the tests that exercise the generator without a workspace.
 #[cfg(test)]
-pub fn generate_netlist(schematic: &SchematicState) -> NetlistResult {
+pub fn generate_netlist(schematic: &impl AsRef<SchematicDocument>) -> NetlistResult {
+    let schematic = schematic.as_ref();
     finish_generation(NetlistGenerator::new(schematic), schematic, &[], &[])
 }
 
@@ -116,10 +118,11 @@ pub fn generate_netlist(schematic: &SchematicState) -> NetlistResult {
 /// masters live in the workspace netlist as `.SUBCKT` definitions, so the
 /// emitted deck is self-contained.
 pub fn generate_netlist_hierarchical(
-    schematic: &SchematicState,
+    schematic: &impl AsRef<SchematicDocument>,
     analysis_lines: &[String],
     hierarchy: &HierarchySource<'_>,
 ) -> NetlistResult {
+    let schematic = schematic.as_ref();
     finish_generation(
         NetlistGenerator::with_hierarchy(schematic, hierarchy),
         schematic,
@@ -139,12 +142,13 @@ pub struct DesignVariableNetlistContext<'a> {
 /// Generate a self-contained hierarchical deck with the exact design
 /// variables applicable to this cell/view and run set.
 pub fn generate_netlist_hierarchical_with_variables(
-    schematic: &SchematicState,
+    schematic: &impl AsRef<SchematicDocument>,
     analysis_lines: &[String],
     hierarchy: &HierarchySource<'_>,
     variables: &[DesignVariable],
     context: DesignVariableNetlistContext<'_>,
 ) -> NetlistResult {
+    let schematic = schematic.as_ref();
     let parameter_lines = match design_variable_parameter_lines(variables, context) {
         Ok(lines) => lines,
         Err(errors) => {
@@ -217,7 +221,7 @@ fn design_variable_applies(
 
 fn finish_generation(
     mut generator: NetlistGenerator<'_>,
-    schematic: &SchematicState,
+    schematic: &SchematicDocument,
     analysis_lines: &[String],
     parameter_lines: &[String],
 ) -> NetlistResult {
@@ -239,7 +243,7 @@ fn finish_generation(
     // A wire belongs to exactly one net; index its segments under that
     // net's name so probes between nodes resolve.
     let mut net_segments: HashMap<String, Vec<(Point, Point)>> = HashMap::new();
-    for wire in &schematic.document().wires {
+    for wire in &schematic.wires {
         let Some(name) = wire
             .points
             .first()
@@ -341,16 +345,18 @@ impl DesignNet {
 /// Live net summary: connectivity + ports + labels + ground, no instance
 /// generation. Cheap enough to recompute on topology change; callers cache
 /// by `topology_version`.
-pub fn design_nets(schematic: &SchematicState) -> Vec<DesignNet> {
+pub fn design_nets(schematic: &impl AsRef<SchematicDocument>) -> Vec<DesignNet> {
+    let schematic = schematic.as_ref();
     let mut generator = NetlistGenerator::new(schematic);
     collect_design_nets(schematic, &mut generator)
 }
 
 /// Live net summary with project hierarchy/symbol resolution enabled.
 pub fn design_nets_with_hierarchy(
-    schematic: &SchematicState,
+    schematic: &impl AsRef<SchematicDocument>,
     hierarchy: &HierarchySource<'_>,
 ) -> Vec<DesignNet> {
+    let schematic = schematic.as_ref();
     let mut generator = NetlistGenerator::with_hierarchy(schematic, hierarchy);
     collect_design_nets(schematic, &mut generator)
 }
@@ -395,12 +401,12 @@ pub fn projection_nets(
 /// disconnected pins remain visible without inventing names or falling back
 /// to generic pin numbers when an authored symbol is available.
 pub(crate) fn component_pin_names_with_hierarchy(
-    schematic: &SchematicState,
+    schematic: &impl AsRef<SchematicDocument>,
     hierarchy: &HierarchySource<'_>,
 ) -> HashMap<u64, Vec<String>> {
+    let schematic = schematic.as_ref();
     let generator = NetlistGenerator::with_hierarchy(schematic, hierarchy);
     schematic
-        .document()
         .components
         .iter()
         .map(|component| {
@@ -417,7 +423,7 @@ pub(crate) fn component_pin_names_with_hierarchy(
 }
 
 fn collect_design_nets(
-    schematic: &SchematicState,
+    schematic: &SchematicDocument,
     generator: &mut NetlistGenerator<'_>,
 ) -> Vec<DesignNet> {
     generator.extract_connectivity();
@@ -431,7 +437,7 @@ fn collect_design_nets(
     // Terminals are collected in document order so the inspector's
     // connectivity table reads the same way twice for the same drawing.
     let mut terminals: HashMap<usize, Vec<NetTerminal>> = HashMap::new();
-    for component in &schematic.document().components {
+    for component in &schematic.components {
         for (pin, position) in generator.component_terminal_positions(component) {
             if let Some(net) = generator.net_at(position) {
                 terminals.entry(net.id).or_default().push(NetTerminal {
@@ -444,7 +450,7 @@ fn collect_design_nets(
     }
     // A power label anywhere on the net declares it a supply rail.
     let mut power_labelled: HashSet<usize> = HashSet::new();
-    for label in &schematic.document().net_labels {
+    for label in &schematic.net_labels {
         if label.is_power_net()
             && !label.is_ground()
             && let Some(net) = generator.net_at(label.pos)
@@ -514,7 +520,7 @@ fn collect_design_nets(
 /// Extracts node connectivity from schematic and generates standard SPICE netlist.
 pub struct NetlistGenerator<'a> {
     /// Reference to the schematic
-    schematic: &'a SchematicState,
+    schematic: &'a SchematicDocument,
 
     /// Extracted nets (connected node groups)
     nets: Vec<Net>,
@@ -556,9 +562,9 @@ pub struct NetlistGenerator<'a> {
 
 impl<'a> NetlistGenerator<'a> {
     /// Create a new netlist generator for the given schematic
-    pub fn new(schematic: &'a SchematicState) -> Self {
+    pub fn new(schematic: &'a impl AsRef<SchematicDocument>) -> Self {
         Self {
-            schematic,
+            schematic: schematic.as_ref(),
             nets: Vec::new(),
             point_to_net: HashMap::new(),
             ground_net: None,
@@ -578,7 +584,7 @@ impl<'a> NetlistGenerator<'a> {
     /// Create a generator that resolves placed project cells through the
     /// given hierarchy source.
     pub fn with_hierarchy(
-        schematic: &'a SchematicState,
+        schematic: &'a impl AsRef<SchematicDocument>,
         hierarchy: &'a HierarchySource<'a>,
     ) -> Self {
         let mut generator = Self::new(schematic);
@@ -589,7 +595,7 @@ impl<'a> NetlistGenerator<'a> {
     /// A generator for one master's body, at the occurrence the deck emits it
     /// at, sharing the deck's one master index.
     fn with_master_index(
-        schematic: &'a SchematicState,
+        schematic: &'a SchematicDocument,
         hierarchy: &'a HierarchySource<'a>,
         hierarchy_path: InstancePath,
         masters: std::rc::Rc<MasterIndex<'a>>,
@@ -756,7 +762,7 @@ impl<'a> NetlistGenerator<'a> {
         if let Some(&id) = self.point_to_net.get(&point) {
             return self.net(id);
         }
-        for wire in &self.schematic.document().wires {
+        for wire in &self.schematic.wires {
             if wire.contains_point(point) {
                 let first = wire.points.first()?;
                 let id = *self.point_to_net.get(first)?;

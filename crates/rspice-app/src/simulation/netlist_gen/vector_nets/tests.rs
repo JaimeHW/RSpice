@@ -241,7 +241,7 @@ fn interface_formals_flatten_vectors_from_the_declared_msb_end() {
     place_port(&mut master, "ADDR<0:2>", Point::new(100, 80));
 
     assert_eq!(
-        interface_formals(&master),
+        interface_formals(master.document()),
         [
             "DATA#3", "DATA#2", "DATA#1", "DATA#0", "EN", "ADDR#0", "ADDR#1", "ADDR#2"
         ]

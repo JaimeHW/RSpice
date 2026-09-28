@@ -13,7 +13,9 @@ use crate::state::workspace::{
     ConfigurationExecutionBinding, ConfigurationExecutionPlan, ConfigurationExecutionProjection,
     DesignProjection,
 };
-use crate::state::{LibraryCellInstance, LibraryManager, ResolvedCellSymbol, SymbolResolver};
+use crate::state::{
+    LibraryCellInstance, LibraryManager, ResolvedCellSymbol, SchematicState, SymbolResolver,
+};
 
 /// Read-only access to project cell masters for hierarchical netlisting.
 ///
@@ -21,7 +23,7 @@ use crate::state::{LibraryCellInstance, LibraryManager, ResolvedCellSymbol, Symb
 /// `"library/cell/view"`; this index exposes the schematic views as
 /// netlist masters, case-insensitively.
 pub struct HierarchySource<'a> {
-    masters: HashMap<String, &'a SchematicState>,
+    masters: HashMap<String, &'a SchematicDocument>,
     libraries: Option<&'a LibraryManager>,
     schematic_buffers: Option<&'a HashMap<String, SchematicState>>,
     execution_plan: Option<ConfigurationExecutionPlan>,
@@ -32,7 +34,7 @@ pub struct HierarchySource<'a> {
 
 impl<'a> HierarchySource<'a> {
     /// Index workspace schematic buffers (keys `"library/cell/view"`).
-    pub fn from_buffers(buffers: &'a HashMap<String, SchematicState>) -> Self {
+    pub fn from_buffers<S: AsRef<SchematicDocument>>(buffers: &'a HashMap<String, S>) -> Self {
         let mut masters = HashMap::new();
         for (key, schematic) in buffers {
             let mut parts = key.split('/');
@@ -41,7 +43,7 @@ impl<'a> HierarchySource<'a> {
             else {
                 continue;
             };
-            masters.insert(Self::view_key(library, cell, view), schematic);
+            masters.insert(Self::view_key(library, cell, view), schematic.as_ref());
         }
         Self {
             masters,
@@ -222,13 +224,25 @@ impl<'a> HierarchySource<'a> {
 
     /// Register a master directly (tests, ad-hoc callers).
     #[cfg(test)]
-    pub fn insert(&mut self, library: &str, cell: &str, schematic: &'a SchematicState) {
-        self.masters
-            .insert(Self::view_key(library, cell, "schematic"), schematic);
+    pub fn insert(
+        &mut self,
+        library: &str,
+        cell: &str,
+        schematic: &'a impl AsRef<SchematicDocument>,
+    ) {
+        self.masters.insert(
+            Self::view_key(library, cell, "schematic"),
+            schematic.as_ref(),
+        );
     }
 
     /// Resolve one exact Library/Cell/View schematic master.
-    pub fn master_view(&self, library: &str, cell: &str, view: &str) -> Option<&'a SchematicState> {
+    pub fn master_view(
+        &self,
+        library: &str,
+        cell: &str,
+        view: &str,
+    ) -> Option<&'a SchematicDocument> {
         self.masters
             .get(&Self::view_key(library, cell, view))
             .copied()
@@ -288,7 +302,7 @@ impl<'a> HierarchySource<'a> {
     pub(crate) fn schematic_master_for_binding(
         &self,
         binding: &LibraryCellInstance,
-    ) -> Option<&'a SchematicState> {
+    ) -> Option<&'a SchematicDocument> {
         self.master_view(&binding.library, &binding.cell, &binding.view)
     }
 

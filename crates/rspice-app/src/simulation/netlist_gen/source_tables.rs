@@ -179,7 +179,7 @@ mod tests {
     fn netlist_with_library(library: &StimulusLibrary, source: Component) -> NetlistResult {
         let mut state = SchematicState::default();
         state.document_mut_for_test().components = vec![source];
-        let buffers = HashMap::new();
+        let buffers: HashMap<String, SchematicDocument> = HashMap::new();
         let hierarchy = HierarchySource::from_buffers(&buffers).with_stimulus_library(library);
         generate_netlist_hierarchical(&state, &[], &hierarchy)
     }

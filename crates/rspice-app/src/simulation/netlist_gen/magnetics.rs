@@ -8,7 +8,7 @@ use super::*;
 impl<'a> NetlistGenerator<'a> {
     pub(super) fn collect_transformer_lines(&mut self) -> Vec<String> {
         let mut lines = Vec::new();
-        for component in self.schematic.document().components.clone() {
+        for component in self.schematic.components.clone() {
             if component.kind != ComponentType::Transformer {
                 continue;
             }
@@ -207,7 +207,7 @@ impl<'a> NetlistGenerator<'a> {
         let inductor_lookup = self.build_inductor_lookup();
         let mut emitted: BTreeMap<String, (String, String, String)> = BTreeMap::new();
 
-        for component in &self.schematic.document().components {
+        for component in &self.schematic.components {
             if component.kind == ComponentType::CoupledInductor
                 && let Some((key, coefficient, line, source)) =
                     self.explicit_coupling_line(component, &inductor_lookup)
@@ -216,7 +216,7 @@ impl<'a> NetlistGenerator<'a> {
             }
         }
 
-        for component in &self.schematic.document().components {
+        for component in &self.schematic.components {
             if Self::is_couplable_inductor(component.kind)
                 && let Some((key, coefficient, line, source)) =
                     self.metadata_coupling_line(component, &inductor_lookup)
@@ -234,7 +234,7 @@ impl<'a> NetlistGenerator<'a> {
     fn build_inductor_lookup(&mut self) -> HashMap<String, String> {
         let mut lookup = HashMap::new();
 
-        for component in &self.schematic.document().components {
+        for component in &self.schematic.components {
             if !Self::is_couplable_inductor(component.kind) {
                 continue;
             }
@@ -557,7 +557,7 @@ mod tests {
     }
 
     fn generated(schematic: &SchematicState) -> super::super::NetlistResult {
-        let buffers = HashMap::new();
+        let buffers: HashMap<String, SchematicDocument> = HashMap::new();
         let hierarchy = HierarchySource::from_buffers(&buffers);
         generate_netlist_hierarchical(schematic, &[], &hierarchy)
     }

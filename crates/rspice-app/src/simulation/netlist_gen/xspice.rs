@@ -186,17 +186,13 @@ impl<'a> NetlistGenerator<'a> {
         {
             return true;
         }
-        self.schematic
-            .document()
-            .components
-            .iter()
-            .any(|candidate| {
-                candidate.id != component_id
-                    && self
-                        .component_terminal_positions(candidate)
-                        .iter()
-                        .any(|(_, candidate_point)| *candidate_point == point)
-            })
+        self.schematic.components.iter().any(|candidate| {
+            candidate.id != component_id
+                && self
+                    .component_terminal_positions(candidate)
+                    .iter()
+                    .any(|(_, candidate_point)| *candidate_point == point)
+        })
     }
 
     /// Emit an XSPICE `A` instance plus its `.MODEL` card.

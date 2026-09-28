@@ -209,7 +209,7 @@ pub(super) fn validate_occurrence_interface(
 /// One master the deck declares.
 struct MasterDraft<'a> {
     reference: CellViewRef,
-    schematic: &'a SchematicState,
+    schematic: &'a SchematicDocument,
     /// The occurrence the body is generated at. Every occurrence of one master
     /// resolves identically, so the first one is exact and any other would be.
     representative: InstancePath,
@@ -251,7 +251,7 @@ impl<'a> MasterIndex<'a> {
     /// what each master is called, without emitting anything.
     pub(super) fn build(
         hierarchy: &'a HierarchySource<'a>,
-        root: &'a SchematicState,
+        root: &'a SchematicDocument,
         root_path: &InstancePath,
     ) -> Self {
         let mut walk = MasterWalk {
@@ -352,7 +352,7 @@ impl<'a> MasterIndex<'a> {
             // A port tied to ground inside the cell emits node 0 in the body
             // while the header still declares the port: the pin would float at
             // every instantiation.
-            for component in &draft.schematic.document().components {
+            for component in &draft.schematic.components {
                 let Some(spec) = component.port_spec() else {
                     continue;
                 };
@@ -476,9 +476,13 @@ struct MasterWalk<'a> {
 impl<'a> MasterWalk<'a> {
     /// Resolve every cell instance placed in `schematic`, returning the closure
     /// digests of the masters they bind to.
-    fn visit(&mut self, schematic: &'a SchematicState, path: &InstancePath) -> Vec<ContentDigest> {
+    fn visit(
+        &mut self,
+        schematic: &'a SchematicDocument,
+        path: &InstancePath,
+    ) -> Vec<ContentDigest> {
         let mut digests = Vec::new();
-        for component in &schematic.document().components {
+        for component in &schematic.components {
             if component.kind != ComponentType::CellInstance {
                 continue;
             }
