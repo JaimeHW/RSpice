@@ -276,7 +276,7 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
             ));
         }
         let component = schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == binding.component_id)
@@ -301,7 +301,7 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
             );
             let changed = schematic.with_undo(description, move |schematic| {
                 let index = schematic
-                    .document
+                    .document()
                     .components
                     .iter()
                     .position(|component| component.id == component_id)

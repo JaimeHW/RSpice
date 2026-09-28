@@ -289,8 +289,8 @@ fn discover_candidate(
                     "Checkpoint failed integrity validation: {error}"
                 )),
                 Ok(recovered) => {
-                    let components = recovered.document.components.len();
-                    let wires = recovered.document.wires.len();
+                    let components = recovered.document().components.len();
+                    let wires = recovered.document().wires.len();
                     let baseline =
                         read_source_snapshot(&original, &binding).and_then(|(bytes, relation)| {
                             parse_checkpoint_bytes(&bytes, &original)
@@ -350,28 +350,28 @@ fn parse_checkpoint_bytes(bytes: &[u8], checkpoint: &Path) -> Result<SchematicSt
 #[cfg(not(target_arch = "wasm32"))]
 fn structural_delta(baseline: &SchematicState, recovered: &SchematicState) -> usize {
     changed_objects_by_id(
-        &baseline.document.components,
-        &recovered.document.components,
+        &baseline.document().components,
+        &recovered.document().components,
         |item| item.id,
     ) + changed_objects_by_id(
-        &baseline.document.wires,
-        &recovered.document.wires,
+        &baseline.document().wires,
+        &recovered.document().wires,
         |item| item.id,
     ) + changed_objects_by_id(
-        &baseline.document.net_labels,
-        &recovered.document.net_labels,
+        &baseline.document().net_labels,
+        &recovered.document().net_labels,
         |item| item.id,
     ) + changed_objects_by_id(
-        &baseline.document.junctions,
-        &recovered.document.junctions,
+        &baseline.document().junctions,
+        &recovered.document().junctions,
         |item| item.id,
     ) + changed_objects_by_id(
-        &baseline.document.design_notes,
-        &recovered.document.design_notes,
+        &baseline.document().design_notes,
+        &recovered.document().design_notes,
         |item| item.id,
     ) + changed_objects_by_id(
-        &baseline.document.documentation_shapes,
-        &recovered.document.documentation_shapes,
+        &baseline.document().documentation_shapes,
+        &recovered.document().documentation_shapes,
         |item| item.id,
     )
 }

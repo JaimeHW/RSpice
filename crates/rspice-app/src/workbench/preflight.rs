@@ -286,7 +286,7 @@ fn collect_report(state: &AppState) -> PreflightReport {
         Ok(projection)
             if projection
                 .root_schematic()
-                .is_some_and(|root| root.document.components.is_empty()) =>
+                .is_some_and(|root| root.document().components.is_empty()) =>
         {
             blockers.push(PreflightIssue {
                 check: "Design topology".to_owned(),

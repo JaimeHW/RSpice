@@ -83,7 +83,7 @@ impl RSpiceApp {
         let validation = validate_draft(&self.state);
         let validation_message = validation.message().map(str::to_owned);
         let summary = selection_summary(&self.state);
-        let snap = snap_label(self.state.schematic.document.document_policy.grid_pitch);
+        let snap = snap_label(self.state.schematic.document().document_policy.grid_pitch);
         let discard_confirm = self.state.dialogs.move_selection.discard_confirm;
         let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
             .description(DESCRIPTION)
@@ -118,7 +118,8 @@ impl RSpiceApp {
                     self.state.dialogs.move_selection.arm();
                     self.state.schematic.arm_tool(Tool::MoveSelection);
                     crate::schematic::view::request_schematic_canvas_focus(ctx);
-                    let snap = snap_label(self.state.schematic.document.document_policy.grid_pitch);
+                    let snap =
+                        snap_label(self.state.schematic.document().document_policy.grid_pitch);
                     self.state.push_user_message(ConsoleMessage::info(format!(
                         "Move selection armed in {} mode; choose an anchor and destination on the {snap} grid.",
                         self.state.dialogs.move_selection.mode.label()
@@ -248,7 +249,7 @@ fn selection_summary(state: &AppState) -> String {
     let symbol_context = SchematicSymbolContext::from_state(state);
     let terminals: std::collections::HashSet<Point> = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .filter(|component| selection.has_component(component.id))
@@ -256,7 +257,7 @@ fn selection_summary(state: &AppState) -> String {
         .collect();
     let attached = state
         .schematic
-        .document
+        .document()
         .wires
         .iter()
         .filter(|wire| {
@@ -266,7 +267,7 @@ fn selection_summary(state: &AppState) -> String {
         .count();
     if let Some(component) = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| selection.has_component(component.id))

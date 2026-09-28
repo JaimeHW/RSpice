@@ -150,7 +150,7 @@ impl HierarchyDocuments for WorkspaceHierarchyDocuments<'_> {
                 .map(|(_, schematic)| schematic)
         }?;
         Some(HierarchySchematic {
-            document: &schematic.document,
+            document: &schematic.document(),
             modified: schematic.is_dirty,
         })
     }

@@ -417,7 +417,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
     if let Some(id) = state.schematic.selection.single_probe() {
         return state
             .schematic
-            .document
+            .document()
             .probes
             .iter()
             .any(|probe| probe.id == id);
@@ -428,7 +428,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
     if let Some(id) = state.schematic.selection.single_component() {
         return state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == id)
@@ -443,7 +443,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
     if let Some(id) = state.schematic.selection.single_net_label() {
         return state
             .schematic
-            .document
+            .document()
             .net_labels
             .iter()
             .any(|label| label.id == id);
@@ -451,7 +451,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
     if let Some(id) = state.schematic.selection.single_design_note() {
         return state
             .schematic
-            .document
+            .document()
             .design_notes
             .iter()
             .any(|note| note.id == id);
@@ -459,7 +459,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
     if let Some(id) = state.schematic.selection.single_documentation_shape() {
         return state
             .schematic
-            .document
+            .document()
             .documentation_shapes
             .iter()
             .any(|shape| shape.id == id);
@@ -467,7 +467,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
     if let Some(id) = state.schematic.selection.single_bus_tap() {
         return state
             .schematic
-            .document
+            .document()
             .bus_taps
             .iter()
             .any(|tap| tap.id == id);
@@ -475,7 +475,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
     if let Some(id) = state.schematic.selection.single_bus() {
         return state
             .schematic
-            .document
+            .document()
             .buses
             .iter()
             .any(|bus| bus.id == id);
@@ -504,7 +504,7 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
     }
     let Some(component) = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == component_id)
@@ -619,7 +619,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     if let Some(id) = state.schematic.selection.single_probe() {
         if state
             .schematic
-            .document
+            .document()
             .probes
             .iter()
             .all(|probe| probe.id != id)
@@ -640,7 +640,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     if let Some(label_id) = state.schematic.selection.single_net_label()
         && let Some(label) = state
             .schematic
-            .document
+            .document()
             .net_labels
             .iter()
             .find(|label| label.id == label_id)
@@ -669,7 +669,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     if let Some(note_id) = state.schematic.selection.single_design_note()
         && let Some(note) = state
             .schematic
-            .document
+            .document()
             .design_notes
             .iter()
             .find(|note| note.id == note_id)
@@ -686,7 +686,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     if let Some(shape_id) = state.schematic.selection.single_documentation_shape()
         && let Some(shape) = state
             .schematic
-            .document
+            .document()
             .documentation_shapes
             .iter()
             .find(|shape| shape.id == shape_id)
@@ -703,7 +703,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     if let Some(tap_id) = state.schematic.selection.single_bus_tap()
         && let Some(tap) = state
             .schematic
-            .document
+            .document()
             .bus_taps
             .iter()
             .find(|tap| tap.id == tap_id)
@@ -720,7 +720,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     if let Some(bus_id) = state.schematic.selection.single_bus()
         && let Some(bus) = state
             .schematic
-            .document
+            .document()
             .buses
             .iter()
             .find(|bus| bus.id == bus_id)

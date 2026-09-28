@@ -10,7 +10,7 @@ pub fn extract(
     hierarchy: Option<&HierarchySource<'_>>,
 ) -> ExtractedConnectivity {
     rspice_design::connectivity::extract(
-        &schematic.document,
+        &schematic.document(),
         |binding| hierarchy?.resolved_symbol_for(binding),
         |name| hierarchy?.canonical_global_label(name),
     )

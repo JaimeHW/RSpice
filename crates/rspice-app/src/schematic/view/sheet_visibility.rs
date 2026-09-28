@@ -137,12 +137,12 @@ pub(crate) fn selection_filtered_to_active_sheet(
 ) -> Selection {
     let mut selection = Selection::default();
 
-    for object in &state.schematic.document.components {
+    for object in &state.schematic.document().components {
         if source.has_component(object.id) && object_is_on_active_sheet(state, object.id) {
             selection.select_component(object.id);
         }
     }
-    for object in &state.schematic.document.wires {
+    for object in &state.schematic.document().wires {
         if object_is_on_active_sheet(state, object.id) {
             if source.has_wire(object.id) {
                 selection.select_wire(object.id);
@@ -163,38 +163,38 @@ pub(crate) fn selection_filtered_to_active_sheet(
             );
         }
     }
-    for object in &state.schematic.document.junctions {
+    for object in &state.schematic.document().junctions {
         if source.has_junction(object.pos) && object_is_on_active_sheet(state, object.id) {
             selection.select_junction(object.pos);
         }
     }
-    for object in &state.schematic.document.buses {
+    for object in &state.schematic.document().buses {
         if source.has_bus(object.id) && object_is_on_active_sheet(state, object.id) {
             selection.select_bus(object.id);
         }
     }
-    for object in &state.schematic.document.bus_taps {
+    for object in &state.schematic.document().bus_taps {
         if source.has_bus_tap(object.id) && object_is_on_active_sheet(state, object.id) {
             selection.select_bus_tap(object.id);
         }
     }
-    for object in &state.schematic.document.net_labels {
+    for object in &state.schematic.document().net_labels {
         if source.has_net_label(object.id) && object_is_on_active_sheet(state, object.id) {
             selection.select_net_label(object.id);
         }
     }
-    for object in &state.schematic.document.design_notes {
+    for object in &state.schematic.document().design_notes {
         if source.has_design_note(object.id) && object_is_on_active_sheet(state, object.id) {
             selection.select_design_note(object.id);
         }
     }
-    for object in &state.schematic.document.documentation_shapes {
+    for object in &state.schematic.document().documentation_shapes {
         if source.has_documentation_shape(object.id) && object_is_on_active_sheet(state, object.id)
         {
             selection.select_documentation_shape(object.id);
         }
     }
-    for object in &state.schematic.document.probes {
+    for object in &state.schematic.document().probes {
         if source.has_probe(object.id) && object_is_on_active_sheet(state, object.id) {
             selection.select_probe(object.id);
         }
@@ -217,53 +217,53 @@ pub(crate) fn selectable_objects_on_active_sheet(state: &AppState) -> Selection 
     let filter = state.ui.schematic_selection_filter;
     let mut selection = Selection::default();
     if filter.instances {
-        for object in &state.schematic.document.components {
+        for object in &state.schematic.document().components {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_component(object.id);
             }
         }
     }
     if filter.wires {
-        for object in &state.schematic.document.wires {
+        for object in &state.schematic.document().wires {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_wire(object.id);
             }
         }
-        for object in &state.schematic.document.junctions {
+        for object in &state.schematic.document().junctions {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_junction(object.pos);
             }
         }
-        for object in &state.schematic.document.buses {
+        for object in &state.schematic.document().buses {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_bus(object.id);
             }
         }
-        for object in &state.schematic.document.bus_taps {
+        for object in &state.schematic.document().bus_taps {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_bus_tap(object.id);
             }
         }
     }
     if filter.labels {
-        for object in &state.schematic.document.net_labels {
+        for object in &state.schematic.document().net_labels {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_net_label(object.id);
             }
         }
     }
     if filter.annotations {
-        for object in &state.schematic.document.design_notes {
+        for object in &state.schematic.document().design_notes {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_design_note(object.id);
             }
         }
-        for object in &state.schematic.document.documentation_shapes {
+        for object in &state.schematic.document().documentation_shapes {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_documentation_shape(object.id);
             }
         }
-        for object in &state.schematic.document.probes {
+        for object in &state.schematic.document().probes {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_probe(object.id);
             }
@@ -304,11 +304,11 @@ pub(super) fn active_wire_at(state: &AppState, point: crate::state::Point) -> Op
         return cache
             .wire_indices_at_point(point)
             .into_iter()
-            .filter_map(|index| state.schematic.document.wires.get(index))
+            .filter_map(|index| state.schematic.document().wires.get(index))
             .find(|wire| object_is_on_active_sheet(state, wire.id) && wire.contains_point(point))
             .map(|wire| wire.id);
     }
-    state.schematic.document.wires.iter().find_map(|wire| {
+    state.schematic.document().wires.iter().find_map(|wire| {
         (object_is_on_active_sheet(state, wire.id) && wire.contains_point(point)).then_some(wire.id)
     })
 }
@@ -316,7 +316,7 @@ pub(super) fn active_wire_at(state: &AppState, point: crate::state::Point) -> Op
 pub(super) fn active_junction_at(state: &AppState, point: crate::state::Point) -> Option<u64> {
     state
         .schematic
-        .document
+        .document()
         .junctions
         .iter()
         .find(|junction| junction.pos == point && object_is_on_active_sheet(state, junction.id))
@@ -327,7 +327,7 @@ pub(super) fn active_wire_point_is_draggable(state: &AppState, point: crate::sta
     active_junction_at(state, point).is_some()
         || state
             .schematic
-            .document
+            .document()
             .wires
             .iter()
             .any(|wire| object_is_on_active_sheet(state, wire.id) && wire.points.contains(&point))
@@ -344,7 +344,7 @@ pub(crate) fn with_active_wire_topology<R>(
 ) -> R {
     let hidden_wire_ids = state
         .schematic
-        .document
+        .document()
         .wires
         .iter()
         .filter(|wire| !object_is_on_active_sheet(state, wire.id))
@@ -352,7 +352,7 @@ pub(crate) fn with_active_wire_topology<R>(
         .collect::<std::collections::HashSet<_>>();
     let hidden_junction_ids = state
         .schematic
-        .document
+        .document()
         .junctions
         .iter()
         .filter(|junction| !object_is_on_active_sheet(state, junction.id))
@@ -383,7 +383,7 @@ pub(crate) fn with_hidden_wire_topology_preserved<R>(
 ) -> R {
     let hidden_wires = state
         .schematic
-        .document
+        .document()
         .wires
         .iter()
         .enumerate()
@@ -392,7 +392,7 @@ pub(crate) fn with_hidden_wire_topology_preserved<R>(
         .collect::<Vec<_>>();
     let hidden_junctions = state
         .schematic
-        .document
+        .document()
         .junctions
         .iter()
         .enumerate()
@@ -401,7 +401,7 @@ pub(crate) fn with_hidden_wire_topology_preserved<R>(
         .collect::<Vec<_>>();
     let hidden_bus_taps = state
         .schematic
-        .document
+        .document()
         .bus_taps
         .iter()
         .enumerate()
@@ -468,55 +468,55 @@ fn restore_authored_by_id<T>(
 pub(super) fn active_sheet_has_objects(state: &AppState) -> bool {
     state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .any(|object| object_is_on_active_sheet(state, object.id))
         || state
             .schematic
-            .document
+            .document()
             .wires
             .iter()
             .any(|object| object_is_on_active_sheet(state, object.id))
         || state
             .schematic
-            .document
+            .document()
             .buses
             .iter()
             .any(|object| object_is_on_active_sheet(state, object.id))
         || state
             .schematic
-            .document
+            .document()
             .bus_taps
             .iter()
             .any(|object| object_is_on_active_sheet(state, object.id))
         || state
             .schematic
-            .document
+            .document()
             .junctions
             .iter()
             .any(|object| object_is_on_active_sheet(state, object.id))
         || state
             .schematic
-            .document
+            .document()
             .net_labels
             .iter()
             .any(|object| object_is_on_active_sheet(state, object.id))
         || state
             .schematic
-            .document
+            .document()
             .design_notes
             .iter()
             .any(|object| object_is_on_active_sheet(state, object.id))
         || state
             .schematic
-            .document
+            .document()
             .documentation_shapes
             .iter()
             .any(|object| object_is_on_active_sheet(state, object.id))
         || state
             .schematic
-            .document
+            .document()
             .probes
             .iter()
             .any(|object| object_is_on_active_sheet(state, object.id))

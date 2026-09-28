@@ -28,7 +28,7 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
     }
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let number_locale = state.ui.number_locale;
-    let commit_policy = state.schematic.document.document_policy.property_commit;
+    let commit_policy = state.schematic.document().document_policy.property_commit;
     let editor_context = component_editor_context(state);
     let result = render_tabbed_property_dialog(
         ctx,
@@ -62,7 +62,7 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
         values.extend(committed);
         let Some(component) = state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|c| c.id == comp_id)
@@ -147,7 +147,7 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
         } else if state.tabbed_property_dialog.open {
             let component = state
                 .schematic
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|component| component.id == comp_id)
@@ -327,10 +327,16 @@ fn validate_component_identity(
         candidate
             .validate_reference_designator(candidate.name.trim())
             .map_err(|error| format!("The instance reference was not changed: {error}"))?;
-        if state.schematic.document.components.iter().any(|component| {
-            component.id != component_id
-                && component.name.eq_ignore_ascii_case(candidate.name.trim())
-        }) {
+        if state
+            .schematic
+            .document()
+            .components
+            .iter()
+            .any(|component| {
+                component.id != component_id
+                    && component.name.eq_ignore_ascii_case(candidate.name.trim())
+            })
+        {
             return Err(format!(
                 "The instance reference was not changed: '{}' is already used on this sheet.",
                 candidate.name.trim()
@@ -433,7 +439,7 @@ fn refresh_source_contract_advisories(state: &mut AppState) {
         .and_then(|component_id| {
             state
                 .schematic
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|component| component.id == component_id)
@@ -472,7 +478,7 @@ fn component_editor_context(state: &AppState) -> ComponentEditorContext {
     };
     let Some(component) = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == component_id)
@@ -1000,7 +1006,7 @@ fn component_property_session_error(state: &AppState) -> Option<String> {
     };
     let Some(current) = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == baseline.id)

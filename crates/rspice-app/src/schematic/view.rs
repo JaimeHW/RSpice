@@ -149,7 +149,7 @@ impl SchematicSymbolContext {
         let mut resolved_by_binding = Vec::new();
         for component in state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .filter(|component| component.kind == ComponentType::CellInstance)
@@ -272,15 +272,15 @@ impl SchematicSymbolContext {
         &self,
         schematic: &SchematicState,
     ) -> Option<(i32, i32, i32, i32)> {
-        if schematic.document.components.is_empty()
-            && schematic.document.wires.is_empty()
-            && schematic.document.buses.is_empty()
-            && schematic.document.bus_taps.is_empty()
-            && schematic.document.junctions.is_empty()
-            && schematic.document.net_labels.is_empty()
-            && schematic.document.design_notes.is_empty()
-            && schematic.document.documentation_shapes.is_empty()
-            && schematic.document.probes.is_empty()
+        if schematic.document().components.is_empty()
+            && schematic.document().wires.is_empty()
+            && schematic.document().buses.is_empty()
+            && schematic.document().bus_taps.is_empty()
+            && schematic.document().junctions.is_empty()
+            && schematic.document().net_labels.is_empty()
+            && schematic.document().design_notes.is_empty()
+            && schematic.document().documentation_shapes.is_empty()
+            && schematic.document().probes.is_empty()
         {
             return None;
         }
@@ -296,49 +296,49 @@ impl SchematicSymbolContext {
             max_y = max_y.max(max.y);
         };
 
-        for component in &schematic.document.components {
+        for component in &schematic.document().components {
             let (min, max) = self.component_bounds(component);
             include(min, max);
         }
 
-        for wire in &schematic.document.wires {
+        for wire in &schematic.document().wires {
             for point in &wire.points {
                 include(*point, *point);
             }
         }
 
-        for bus in &schematic.document.buses {
+        for bus in &schematic.document().buses {
             for point in &bus.points {
                 include(*point, *point);
             }
         }
 
-        for tap in &schematic.document.bus_taps {
+        for tap in &schematic.document().bus_taps {
             for point in crate::schematic::bus_geometry::bus_tap_route_points(tap) {
                 include(point, point);
             }
         }
 
-        for junction in &schematic.document.junctions {
+        for junction in &schematic.document().junctions {
             include(junction.pos, junction.pos);
         }
 
-        for label in &schematic.document.net_labels {
+        for label in &schematic.document().net_labels {
             let (min, max) = net_labels::world_bounds(label);
             include(min, max);
         }
 
-        for note in &schematic.document.design_notes {
+        for note in &schematic.document().design_notes {
             let (min, max) = design_notes::conservative_world_bounds(note);
             include(min, max);
         }
 
-        for shape in &schematic.document.documentation_shapes {
+        for shape in &schematic.document().documentation_shapes {
             let (min, max) = documentation_shapes::world_bounds(shape);
             include(min, max);
         }
 
-        for probe in &schematic.document.probes {
+        for probe in &schematic.document().probes {
             let (min, max) = drawing::probe_world_bounds(probe);
             include(min, max);
         }
@@ -667,30 +667,38 @@ fn schematic_accessibility_description(
     format!(
         "{}, {}, {}, {}, {}, {}, {}, {}, {}.{traversal_instruction} Active tool: {}.{shortcuts}",
         counted(
-            schematic.document.components.len(),
+            schematic.document().components.len(),
             "component",
             "components"
         ),
-        counted(schematic.document.wires.len(), "wire", "wires"),
-        counted(schematic.document.buses.len(), "bus", "buses"),
-        counted(schematic.document.bus_taps.len(), "bus tap", "bus taps"),
-        counted(schematic.document.junctions.len(), "junction", "junctions"),
+        counted(schematic.document().wires.len(), "wire", "wires"),
+        counted(schematic.document().buses.len(), "bus", "buses"),
+        counted(schematic.document().bus_taps.len(), "bus tap", "bus taps"),
         counted(
-            schematic.document.net_labels.len(),
+            schematic.document().junctions.len(),
+            "junction",
+            "junctions"
+        ),
+        counted(
+            schematic.document().net_labels.len(),
             "net label",
             "net labels"
         ),
         counted(
-            schematic.document.design_notes.len(),
+            schematic.document().design_notes.len(),
             "design note",
             "design notes"
         ),
         counted(
-            schematic.document.documentation_shapes.len(),
+            schematic.document().documentation_shapes.len(),
             "documentation shape",
             "documentation shapes"
         ),
-        counted(schematic.document.probes.len(), "probe flag", "probe flags"),
+        counted(
+            schematic.document().probes.len(),
+            "probe flag",
+            "probe flags"
+        ),
         tool,
     )
 }
@@ -699,7 +707,7 @@ fn schematic_selection_accessibility_status(state: &AppState) -> String {
     if let Some(component) = state.schematic.selection.single_component().and_then(|id| {
         state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == id)
@@ -741,17 +749,17 @@ fn schematic_selection_accessibility_status(state: &AppState) -> String {
 
 fn schematic_keyboard_navigation_has_objects(state: &AppState) -> bool {
     let filter = state.ui.schematic_selection_filter;
-    (filter.instances && !state.schematic.document.components.is_empty())
+    (filter.instances && !state.schematic.document().components.is_empty())
         || (filter.wires
-            && (!state.schematic.document.wires.is_empty()
-                || !state.schematic.document.buses.is_empty()
-                || !state.schematic.document.bus_taps.is_empty()
-                || !state.schematic.document.junctions.is_empty()))
-        || (filter.labels && !state.schematic.document.net_labels.is_empty())
+            && (!state.schematic.document().wires.is_empty()
+                || !state.schematic.document().buses.is_empty()
+                || !state.schematic.document().bus_taps.is_empty()
+                || !state.schematic.document().junctions.is_empty()))
+        || (filter.labels && !state.schematic.document().net_labels.is_empty())
         || (filter.annotations
-            && (!state.schematic.document.design_notes.is_empty()
-                || !state.schematic.document.documentation_shapes.is_empty()
-                || !state.schematic.document.probes.is_empty()))
+            && (!state.schematic.document().design_notes.is_empty()
+                || !state.schematic.document().documentation_shapes.is_empty()
+                || !state.schematic.document().probes.is_empty()))
 }
 
 fn schematic_keyboard_focus_label(
@@ -778,7 +786,7 @@ fn schematic_keyboard_focus_label(
         SchematicKeyboardFocus::Junction(_) => format!("junction {id}"),
         SchematicKeyboardFocus::NetLabel(_) => state
             .schematic
-            .document
+            .document()
             .net_labels
             .iter()
             .find(|label| label.id == id)
@@ -788,7 +796,7 @@ fn schematic_keyboard_focus_label(
             ),
         SchematicKeyboardFocus::Probe(_) => state
             .schematic
-            .document
+            .document()
             .probes
             .iter()
             .find(|probe| probe.id == id)
@@ -943,7 +951,7 @@ pub(crate) fn drawn_failure_site_count(
         .filter(|device| {
             state
                 .schematic
-                .document
+                .document()
                 .components
                 .iter()
                 .any(|component| component.spice_instance_name().eq_ignore_ascii_case(device))
@@ -964,7 +972,7 @@ fn result_mapping_is_current(state: &AppState) -> bool {
 fn wires_touching(state: &AppState, points: &[crate::state::Point]) -> Vec<u64> {
     state
         .schematic
-        .document
+        .document()
         .wires
         .iter()
         .filter(|wire| points.iter().any(|point| wire.contains_point(*point)))
@@ -1032,7 +1040,7 @@ pub(crate) fn select_failure_sites(
         .filter_map(|device| {
             state
                 .schematic
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|component| component.spice_instance_name().eq_ignore_ascii_case(device))
@@ -1231,7 +1239,7 @@ pub fn render_schematic_view(
     }
     // Report the cursor position in grid units; the workbench status bar shows it.
     let to_grid_units = |pos: egui::Pos2, state: &AppState| {
-        let grid = f64::from(state.schematic.document.grid_size.max(1));
+        let grid = f64::from(state.schematic.document().grid_size.max(1));
         let x = ((f64::from(pos.x - available.min.x)) - state.schematic.pan.0)
             / state.schematic.zoom
             / grid;

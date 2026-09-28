@@ -98,7 +98,7 @@ impl AppState {
                     )
                 })?;
             let component = projected[key]
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|component| component.id == object.object_id())

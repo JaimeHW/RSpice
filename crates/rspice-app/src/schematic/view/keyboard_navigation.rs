@@ -153,7 +153,7 @@ fn traversal_candidates(
     };
 
     if filter.instances {
-        for component in &state.schematic.document.components {
+        for component in &state.schematic.document().components {
             if object_is_on_active_sheet(state, component.id) {
                 let (min, max) = symbol_context.component_bounds(component);
                 push(
@@ -165,21 +165,21 @@ fn traversal_candidates(
     }
 
     if filter.wires {
-        for wire in &state.schematic.document.wires {
+        for wire in &state.schematic.document().wires {
             if object_is_on_active_sheet(state, wire.id)
                 && let Some(center) = points_center(&wire.points)
             {
                 push(SchematicKeyboardFocus::Wire(wire.id), center);
             }
         }
-        for bus in &state.schematic.document.buses {
+        for bus in &state.schematic.document().buses {
             if object_is_on_active_sheet(state, bus.id)
                 && let Some(center) = points_center(&bus.points)
             {
                 push(SchematicKeyboardFocus::Bus(bus.id), center);
             }
         }
-        for tap in &state.schematic.document.bus_taps {
+        for tap in &state.schematic.document().bus_taps {
             if object_is_on_active_sheet(state, tap.id)
                 && let Some(center) =
                     points_center(&crate::schematic::bus_geometry::bus_tap_route_points(tap))
@@ -187,7 +187,7 @@ fn traversal_candidates(
                 push(SchematicKeyboardFocus::BusTap(tap.id), center);
             }
         }
-        for junction in &state.schematic.document.junctions {
+        for junction in &state.schematic.document().junctions {
             if object_is_on_active_sheet(state, junction.id) {
                 push(SchematicKeyboardFocus::Junction(junction.id), junction.pos);
             }
@@ -195,7 +195,7 @@ fn traversal_candidates(
     }
 
     if filter.labels {
-        for label in &state.schematic.document.net_labels {
+        for label in &state.schematic.document().net_labels {
             if object_is_on_active_sheet(state, label.id) {
                 let (min, max) = super::net_labels::world_bounds(label);
                 push(
@@ -204,7 +204,7 @@ fn traversal_candidates(
                 );
             }
         }
-        for probe in &state.schematic.document.probes {
+        for probe in &state.schematic.document().probes {
             if object_is_on_active_sheet(state, probe.id) {
                 push(SchematicKeyboardFocus::Probe(probe.id), probe.position);
             }
@@ -219,7 +219,7 @@ fn traversal_candidates(
                 bounds_center(min, max),
             );
         }
-        for shape in &state.schematic.document.documentation_shapes {
+        for shape in &state.schematic.document().documentation_shapes {
             if object_is_on_active_sheet(state, shape.id) {
                 let (min, max) = super::documentation_shapes::world_bounds(shape);
                 push(
@@ -256,7 +256,7 @@ fn selected_keyboard_object(state: &AppState) -> Option<SchematicKeyboardFocus> 
     if let Some(position) = selection.single_junction()
         && let Some(junction) = state
             .schematic
-            .document
+            .document()
             .junctions
             .iter()
             .find(|junction| junction.pos == position)
@@ -290,7 +290,7 @@ fn focus_keyboard_object(state: &mut AppState, object: SchematicKeyboardFocus) {
         SchematicKeyboardFocus::Junction(id) => {
             if let Some(junction) = state
                 .schematic
-                .document
+                .document()
                 .junctions
                 .iter()
                 .find(|junction| junction.id == id)

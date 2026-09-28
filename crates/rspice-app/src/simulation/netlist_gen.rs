@@ -239,7 +239,7 @@ fn finish_generation(
     // A wire belongs to exactly one net; index its segments under that
     // net's name so probes between nodes resolve.
     let mut net_segments: HashMap<String, Vec<(Point, Point)>> = HashMap::new();
-    for wire in &schematic.document.wires {
+    for wire in &schematic.document().wires {
         let Some(name) = wire
             .points
             .first()
@@ -400,7 +400,7 @@ pub(crate) fn component_pin_names_with_hierarchy(
 ) -> HashMap<u64, Vec<String>> {
     let generator = NetlistGenerator::with_hierarchy(schematic, hierarchy);
     schematic
-        .document
+        .document()
         .components
         .iter()
         .map(|component| {
@@ -431,7 +431,7 @@ fn collect_design_nets(
     // Terminals are collected in document order so the inspector's
     // connectivity table reads the same way twice for the same drawing.
     let mut terminals: HashMap<usize, Vec<NetTerminal>> = HashMap::new();
-    for component in &schematic.document.components {
+    for component in &schematic.document().components {
         for (pin, position) in generator.component_terminal_positions(component) {
             if let Some(net) = generator.net_at(position) {
                 terminals.entry(net.id).or_default().push(NetTerminal {
@@ -444,7 +444,7 @@ fn collect_design_nets(
     }
     // A power label anywhere on the net declares it a supply rail.
     let mut power_labelled: HashSet<usize> = HashSet::new();
-    for label in &schematic.document.net_labels {
+    for label in &schematic.document().net_labels {
         if label.is_power_net()
             && !label.is_ground()
             && let Some(net) = generator.net_at(label.pos)
@@ -756,7 +756,7 @@ impl<'a> NetlistGenerator<'a> {
         if let Some(&id) = self.point_to_net.get(&point) {
             return self.net(id);
         }
-        for wire in &self.schematic.document.wires {
+        for wire in &self.schematic.document().wires {
             if wire.contains_point(point) {
                 let first = wire.points.first()?;
                 let id = *self.point_to_net.get(first)?;

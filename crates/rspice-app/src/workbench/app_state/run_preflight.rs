@@ -50,7 +50,7 @@ pub(crate) fn run_preflight_block_reason(
             configured_root.display_path()
         ));
     };
-    if configured_schematic.document.components.is_empty() {
+    if configured_schematic.document().components.is_empty() {
         return Some(format!(
             "Add a component to the configured simulation root '{}' before running",
             configured_root.display_path()

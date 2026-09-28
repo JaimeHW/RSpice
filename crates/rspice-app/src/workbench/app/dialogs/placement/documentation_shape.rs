@@ -128,7 +128,7 @@ fn validate_draft(state: &AppState) -> DraftValidation {
             "The active cell/view changed. Close and reopen Draw documentation shape.".to_owned(),
         );
     }
-    if draft.expected_shapes != state.schematic.document.documentation_shapes {
+    if draft.expected_shapes != state.schematic.document().documentation_shapes {
         return DraftValidation::Invalid(
             "The schematic graphics changed. Close and reopen Draw documentation shape.".to_owned(),
         );

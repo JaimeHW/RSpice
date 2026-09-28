@@ -140,7 +140,12 @@ impl SelectionBulkEditAuthority {
             .schematic_buffers
             .iter()
             .filter(|(key, _)| !key.eq_ignore_ascii_case(&active_key))
-            .map(|(key, schematic)| (key.clone(), SchematicSnapshot::capture(&schematic.document)))
+            .map(|(key, schematic)| {
+                (
+                    key.clone(),
+                    SchematicSnapshot::capture(&schematic.document()),
+                )
+            })
             .collect::<Vec<_>>();
         project_buffers.sort_by(|(left, _), (right, _)| left.cmp(right));
         Self {
@@ -165,7 +170,7 @@ impl SelectionBulkEditAuthority {
             || !self
                 .active
                 .snapshot
-                .is_equal_document(&state.schematic.document)
+                .is_equal_document(&state.schematic.document())
         {
             return Some(reopen("The active schematic changed"));
         }
@@ -174,8 +179,8 @@ impl SelectionBulkEditAuthority {
         {
             return Some(reopen("The active cell/view changed"));
         }
-        if self.active.grid_size != state.schematic.document.grid_size
-            || self.active.document_policy != state.schematic.document.document_policy
+        if self.active.grid_size != state.schematic.document().grid_size
+            || self.active.document_policy != state.schematic.document().document_policy
         {
             return Some(reopen("The schematic grid or editing policy changed"));
         }
@@ -198,7 +203,7 @@ impl SelectionBulkEditAuthority {
             let Some(live) = state.workspace.schematic_buffers.get(key) else {
                 return Some(reopen("A project schematic was closed"));
             };
-            if !expected.is_equal_document(&live.document) {
+            if !expected.is_equal_document(&live.document()) {
                 return Some(reopen("A project schematic changed"));
             }
         }
@@ -585,7 +590,7 @@ fn preview_impact(
         };
         let mut found = HashSet::new();
         let mut changed = 0;
-        for component in &schematic.document.components {
+        for component in &schematic.document().components {
             if !editable_ids.contains(&component.id) {
                 continue;
             }
@@ -634,7 +639,7 @@ fn apply_bulk_edit(
     };
     let mut replacements = Vec::new();
     let mut found = HashSet::new();
-    for (index, component) in schematic.document.components.iter().enumerate() {
+    for (index, component) in schematic.document().components.iter().enumerate() {
         if !target_ids.contains(&component.id) {
             continue;
         }
@@ -1407,7 +1412,7 @@ fn append_buffer_rows(
     };
     match filter.object_kind {
         SelectionBulkObjectKind::InstancesAndParameters | SelectionBulkObjectKind::PortsAndPins => {
-            for component in &schematic.document.components {
+            for component in &schematic.document().components {
                 let is_port = component.kind == ComponentType::Port;
                 if (filter.object_kind == SelectionBulkObjectKind::InstancesAndParameters
                     && is_port)
@@ -1465,7 +1470,7 @@ fn append_buffer_rows(
             if !filter.model_cell.trim().is_empty() || !filter.current_property.trim().is_empty() {
                 return;
             }
-            for wire in &schematic.document.wires {
+            for wire in &schematic.document().wires {
                 if on_current_sheet(wire.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1478,7 +1483,7 @@ fn append_buffer_rows(
                     ));
                 }
             }
-            for bus in &schematic.document.buses {
+            for bus in &schematic.document().buses {
                 if on_current_sheet(bus.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1494,7 +1499,7 @@ fn append_buffer_rows(
                     ));
                 }
             }
-            for tap in &schematic.document.bus_taps {
+            for tap in &schematic.document().bus_taps {
                 if on_current_sheet(tap.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1507,7 +1512,7 @@ fn append_buffer_rows(
                     ));
                 }
             }
-            for junction in &schematic.document.junctions {
+            for junction in &schematic.document().junctions {
                 if on_current_sheet(junction.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1520,7 +1525,7 @@ fn append_buffer_rows(
                     ));
                 }
             }
-            for label in &schematic.document.net_labels {
+            for label in &schematic.document().net_labels {
                 if on_current_sheet(label.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1538,7 +1543,7 @@ fn append_buffer_rows(
             if !filter.model_cell.trim().is_empty() || !filter.current_property.trim().is_empty() {
                 return;
             }
-            for note in &schematic.document.design_notes {
+            for note in &schematic.document().design_notes {
                 if on_current_sheet(note.id) {
                     rows.push(non_editable_row(
                         view_key,
@@ -1551,7 +1556,7 @@ fn append_buffer_rows(
                     ));
                 }
             }
-            for shape in &schematic.document.documentation_shapes {
+            for shape in &schematic.document().documentation_shapes {
                 if on_current_sheet(shape.id) {
                     rows.push(non_editable_row(
                         view_key,

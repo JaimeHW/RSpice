@@ -260,7 +260,7 @@ fn promote_wire_handles_to_complete_wires(
         .iter()
         .filter_map(|selected| {
             schematic
-                .document
+                .document()
                 .wires
                 .iter()
                 .find(|wire| {
@@ -270,7 +270,7 @@ fn promote_wire_handles_to_complete_wires(
         })
         .chain(selection.wire_vertices.iter().filter_map(|selected| {
             schematic
-                .document
+                .document()
                 .wires
                 .iter()
                 .find(|wire| {
@@ -293,14 +293,14 @@ fn promote_wire_handles_to_complete_wires(
 
 fn complete_selection_count(schematic: &SchematicState, selection: &Selection) -> usize {
     schematic
-        .document
+        .document()
         .components
         .iter()
         .filter(|object| selection.has_component(object.id))
         .count()
         .saturating_add(
             schematic
-                .document
+                .document()
                 .wires
                 .iter()
                 .filter(|object| selection.has_wire(object.id))
@@ -308,7 +308,7 @@ fn complete_selection_count(schematic: &SchematicState, selection: &Selection) -
         )
         .saturating_add(
             schematic
-                .document
+                .document()
                 .junctions
                 .iter()
                 .filter(|object| selection.has_junction(object.pos))
@@ -316,7 +316,7 @@ fn complete_selection_count(schematic: &SchematicState, selection: &Selection) -
         )
         .saturating_add(
             schematic
-                .document
+                .document()
                 .buses
                 .iter()
                 .filter(|object| selection.has_bus(object.id))
@@ -324,7 +324,7 @@ fn complete_selection_count(schematic: &SchematicState, selection: &Selection) -
         )
         .saturating_add(
             schematic
-                .document
+                .document()
                 .bus_taps
                 .iter()
                 .filter(|object| selection.has_bus_tap(object.id))
@@ -332,7 +332,7 @@ fn complete_selection_count(schematic: &SchematicState, selection: &Selection) -
         )
         .saturating_add(
             schematic
-                .document
+                .document()
                 .net_labels
                 .iter()
                 .filter(|object| selection.has_net_label(object.id))
@@ -340,7 +340,7 @@ fn complete_selection_count(schematic: &SchematicState, selection: &Selection) -
         )
         .saturating_add(
             schematic
-                .document
+                .document()
                 .design_notes
                 .iter()
                 .filter(|object| selection.has_design_note(object.id))
@@ -348,7 +348,7 @@ fn complete_selection_count(schematic: &SchematicState, selection: &Selection) -
         )
         .saturating_add(
             schematic
-                .document
+                .document()
                 .documentation_shapes
                 .iter()
                 .filter(|object| selection.has_documentation_shape(object.id))
@@ -356,7 +356,7 @@ fn complete_selection_count(schematic: &SchematicState, selection: &Selection) -
         )
         .saturating_add(
             schematic
-                .document
+                .document()
                 .probes
                 .iter()
                 .filter(|object| selection.has_probe(object.id))
@@ -454,7 +454,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
         .collect::<HashSet<_>>();
     let selected_component_names = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .filter(|component| selection.has_component(component.id))
@@ -462,7 +462,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
         .collect::<BTreeSet<_>>();
     let selected_label_names = state
         .schematic
-        .document
+        .document()
         .net_labels
         .iter()
         .filter(|label| selection.has_net_label(label.id))
@@ -480,7 +480,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
                     .wire_ids
                     .iter()
                     .any(|wire_id| selection.wires.contains(wire_id))
-                || state.schematic.document.wires.iter().any(|wire| {
+                || state.schematic.document().wires.iter().any(|wire| {
                     net.wire_ids.contains(&wire.id)
                         && selected_junctions
                             .iter()
@@ -500,7 +500,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
 
     let selected_bus_names = state
         .schematic
-        .document
+        .document()
         .buses
         .iter()
         .filter(|bus| selection.has_bus(bus.id))
@@ -508,7 +508,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
         .collect::<Vec<_>>();
     let selected_tap_names = state
         .schematic
-        .document
+        .document()
         .bus_taps
         .iter()
         .filter(|tap| selection.has_bus_tap(tap.id))
@@ -529,12 +529,12 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
         .flat_map(|net| net.wire_ids.iter().copied())
         .collect::<HashSet<_>>();
     let mut affected_probes = BTreeSet::new();
-    for probe in &state.schematic.document.probes {
+    for probe in &state.schematic.document().probes {
         let references_symbol = probe
             .source_expression
             .as_deref()
             .is_some_and(|expression| references_any_symbol(expression, &affected_symbols));
-        let lies_on_affected_wire = state.schematic.document.wires.iter().any(|wire| {
+        let lies_on_affected_wire = state.schematic.document().wires.iter().any(|wire| {
             affected_wire_ids.contains(&wire.id) && wire.contains_point(probe.position)
         });
         if references_symbol || lies_on_affected_wire {
@@ -573,7 +573,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
     let mut affected_comments = BTreeSet::new();
     for note in state
         .schematic
-        .document
+        .document()
         .design_notes
         .iter()
         .filter(|note| note.review.is_some())
@@ -677,7 +677,7 @@ fn cut_open_net_count(state: &AppState, selection: &Selection) -> Result<usize, 
                     .wire_ids
                     .iter()
                     .any(|wire_id| selected_wires.contains(wire_id))
-                || state.schematic.document.wires.iter().any(|wire| {
+                || state.schematic.document().wires.iter().any(|wire| {
                     net.wire_ids.contains(&wire.id)
                         && selected_junctions
                             .iter()
@@ -742,7 +742,7 @@ fn named_external_attachments(state: &AppState) -> Result<Vec<(Point, String)>, 
     let symbols = SchematicSymbolContext::from_state(state);
     let terminal_points = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .filter(|component| selected_components.contains(&component.id))
@@ -760,7 +760,7 @@ fn named_external_attachments(state: &AppState) -> Result<Vec<(Point, String)>, 
         if !net.authored_name
             || crate::state::NetLabel::validate_name(
                 &net.name,
-                state.schematic.document.document_policy.net_naming,
+                state.schematic.document().document_policy.net_naming,
             )
             .is_err()
         {

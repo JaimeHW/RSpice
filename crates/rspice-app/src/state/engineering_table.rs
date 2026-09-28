@@ -536,14 +536,14 @@ impl EngineeringDataset {
         })
         .collect::<Vec<_>>();
         let mut rows = Vec::with_capacity(
-            schematic.document.components.len()
-                + schematic.document.net_labels.len()
-                + schematic.document.wires.len()
-                + schematic.document.buses.len()
-                + schematic.document.bus_taps.len()
-                + schematic.document.junctions.len(),
+            schematic.document().components.len()
+                + schematic.document().net_labels.len()
+                + schematic.document().wires.len()
+                + schematic.document().buses.len()
+                + schematic.document().bus_taps.len()
+                + schematic.document().junctions.len(),
         );
-        for component in &schematic.document.components {
+        for component in &schematic.document().components {
             let mut cells = HashMap::new();
             cells.insert(
                 "identifier".to_owned(),
@@ -589,7 +589,7 @@ impl EngineeringDataset {
                 cells,
             });
         }
-        for label in &schematic.document.net_labels {
+        for label in &schematic.document().net_labels {
             let mut cells = HashMap::new();
             cells.insert("identifier".to_owned(), EngineeringCell::text(&label.name));
             cells.insert("object".to_owned(), EngineeringCell::text("Net label"));
@@ -619,7 +619,7 @@ impl EngineeringDataset {
                 cells,
             });
         }
-        for wire in &schematic.document.wires {
+        for wire in &schematic.document().wires {
             let point = wire.start().unwrap_or_default();
             rows.push(object_row(
                 format!("wire-{}", wire.id),
@@ -631,7 +631,7 @@ impl EngineeringDataset {
                 point.y,
             ));
         }
-        for bus in &schematic.document.buses {
+        for bus in &schematic.document().buses {
             let point = bus.points.first().copied().unwrap_or_default();
             rows.push(object_row(
                 format!("bus-{}", bus.id),
@@ -646,7 +646,7 @@ impl EngineeringDataset {
                 point.y,
             ));
         }
-        for tap in &schematic.document.bus_taps {
+        for tap in &schematic.document().bus_taps {
             rows.push(object_row(
                 format!("bus-tap-{}", tap.id),
                 format!("TAP{}", tap.id),
@@ -657,7 +657,7 @@ impl EngineeringDataset {
                 tap.bus_point.y,
             ));
         }
-        for junction in &schematic.document.junctions {
+        for junction in &schematic.document().junctions {
             rows.push(object_row(
                 format!("junction-{}", junction.id),
                 format!("J{}", junction.id),

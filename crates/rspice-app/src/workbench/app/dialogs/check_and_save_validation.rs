@@ -282,7 +282,7 @@ impl CheckAndSaveValidationReport {
                 ),
                 state
                     .schematic
-                    .document
+                    .document()
                     .components
                     .iter()
                     .find(|component| component.name == *instance)
@@ -410,7 +410,7 @@ impl CheckAndSaveValidationReport {
         let root_schematic_key = state.workspace.simulation_root_reference().key();
         let symbol_resolver = SymbolResolver::new(&state.library_manager, &buffers);
         for (key, schematic) in &documents {
-            if let Err(error) = schematic.document.validated_revisions.validate() {
+            if let Err(error) = schematic.document().validated_revisions.validate() {
                 insert_finding(
                     &mut findings,
                     CheckAndSaveFindingLevel::Blocker,
@@ -756,7 +756,7 @@ fn validate_component_contracts(
         })
     };
     let mut designators = BTreeMap::<String, Vec<u64>>::new();
-    for component in &schematic.document.components {
+    for component in &schematic.document().components {
         let component_identity = format!("{document_key}:{}", component.id);
         if !component.kind.spice_prefix().is_empty() {
             if let Err(error) = component.validate_reference_designator(component.name.trim()) {

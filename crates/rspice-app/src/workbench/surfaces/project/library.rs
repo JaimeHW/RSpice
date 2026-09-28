@@ -918,7 +918,7 @@ fn collect_library_view_usage(
     reference: &CellViewRef,
     consumers: &mut Vec<String>,
 ) {
-    for component in &schematic.document.components {
+    for component in &schematic.document().components {
         let Some(binding) = component.library_cell.as_ref() else {
             continue;
         };

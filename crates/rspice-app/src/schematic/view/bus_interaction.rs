@@ -90,7 +90,7 @@ fn resolve_bus_tap_candidate_filtered(
         .as_ref()
         .ok_or(BusTapCandidateError::MissingConfiguration)?;
     let visible_buses = schematic
-        .document
+        .document()
         .buses
         .iter()
         .filter(|bus| object_is_visible(bus.id))
@@ -99,7 +99,7 @@ fn resolve_bus_tap_candidate_filtered(
     let hit = nearest_bus_hit(&visible_buses, requested, source_hit_radius.max(0))
         .ok_or(BusTapCandidateError::NoSourceBus)?;
     let source = schematic
-        .document
+        .document()
         .buses
         .iter()
         .find(|bus| bus.id == hit.bus_id)
@@ -161,7 +161,7 @@ fn resolve_scalar_target(
 ) -> Result<(Point, BusTapOrientation), BusTapCandidateError> {
     for &orientation in directions {
         let mut candidates: Vec<(i64, Point)> = schematic
-            .document
+            .document()
             .wires
             .iter()
             .filter(|wire| object_is_visible(wire.id))
@@ -173,7 +173,7 @@ fn resolve_scalar_target(
         candidates.sort_by_key(|candidate| (candidate.0, candidate.1.x, candidate.1.y));
         if let Some((_, point)) = candidates.into_iter().next() {
             if schematic
-                .document
+                .document()
                 .buses
                 .iter()
                 .any(|bus| object_is_visible(bus.id) && bus.contains_point(point))
@@ -209,7 +209,7 @@ fn resolve_bus_target(
         .map_err(|_| BusTapCandidateError::NoCompatibleBus)?;
     for &orientation in directions {
         let mut candidates: Vec<(i64, Point, &Bus)> = schematic
-            .document
+            .document()
             .buses
             .iter()
             .filter(|bus| bus.id != source_bus_id && object_is_visible(bus.id))
@@ -233,7 +233,7 @@ fn resolve_bus_target(
                 ));
             }
             if schematic
-                .document
+                .document()
                 .wires
                 .iter()
                 .any(|wire| object_is_visible(wire.id) && wire.contains_point(point))
@@ -245,7 +245,7 @@ fn resolve_bus_target(
     }
 
     if directions.iter().any(|&orientation| {
-        schematic.document.wires.iter().any(|wire| {
+        schematic.document().wires.iter().any(|wire| {
             object_is_visible(wire.id)
                 && wire.points.windows(2).any(|segment| {
                     ray_segment_intersection(source, orientation, segment[0], segment[1]).is_some()
@@ -266,7 +266,7 @@ fn ray_hits_other_bus(
     object_is_visible: &impl Fn(u64) -> bool,
 ) -> bool {
     directions.iter().any(|&orientation| {
-        schematic.document.buses.iter().any(|bus| {
+        schematic.document().buses.iter().any(|bus| {
             bus.id != source_bus_id
                 && object_is_visible(bus.id)
                 && bus.points.windows(2).any(|segment| {

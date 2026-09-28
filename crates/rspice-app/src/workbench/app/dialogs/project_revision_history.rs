@@ -209,10 +209,10 @@ pub(crate) fn open_project_revision_history(state: &mut AppState) {
         ));
         return;
     }
-    if let Err(error) = state.schematic.document.validated_revisions.validate() {
+    if let Err(error) = state.schematic.document().validated_revisions.validate() {
         state.dialogs.project_revision_history = ProjectRevisionHistoryDialogState {
             open: true,
-            expected_journal: state.schematic.document.validated_revisions.clone(),
+            expected_journal: state.schematic.document().validated_revisions.clone(),
             authority: Some(SchematicEditAuthority::capture(state)),
             error: Some(format!(
                 "The validated schematic revision journal failed integrity validation: {error}"
@@ -223,7 +223,7 @@ pub(crate) fn open_project_revision_history(state: &mut AppState) {
     }
     let selected = state
         .schematic
-        .document
+        .document()
         .validated_revisions
         .records()
         .last()
@@ -233,7 +233,7 @@ pub(crate) fn open_project_revision_history(state: &mut AppState) {
         open: true,
         selected,
         authority: Some(SchematicEditAuthority::capture(state)),
-        expected_journal: state.schematic.document.validated_revisions.clone(),
+        expected_journal: state.schematic.document().validated_revisions.clone(),
         ..ProjectRevisionHistoryDialogState::default()
     };
 }
@@ -413,7 +413,7 @@ impl RSpiceApp {
                     "Select exactly one validated schematic revision to restore.".to_owned(),
                 );
             }
-            if dialog.expected_journal != self.state.schematic.document.validated_revisions {
+            if dialog.expected_journal != self.state.schematic.document().validated_revisions {
                 return Err(
                     "The validated revision journal changed. Close and reopen revision history."
                         .to_owned(),
@@ -442,7 +442,8 @@ impl RSpiceApp {
                 let authority = SchematicEditAuthority::capture(&self.state);
                 let dialog = &mut self.state.dialogs.project_revision_history;
                 dialog.authority = Some(authority);
-                dialog.expected_journal = self.state.schematic.document.validated_revisions.clone();
+                dialog.expected_journal =
+                    self.state.schematic.document().validated_revisions.clone();
                 dialog.restore_confirmation = false;
                 dialog.error = None;
                 dialog.receipt = Some(
@@ -685,7 +686,7 @@ fn project_audit_rows(state: &AppState) -> Vec<ProjectAuditRow> {
     let mut rows = Vec::new();
     append_schematic_rows(
         &mut rows,
-        &state.schematic.document.validated_revisions,
+        &state.schematic.document().validated_revisions,
         true,
     );
     let active_key = state.workspace.active_view.key();
@@ -697,7 +698,7 @@ fn project_audit_rows(state: &AppState) -> Vec<ProjectAuditRow> {
         .collect::<Vec<_>>();
     retained_schematics.sort_by(|(left, _), (right, _)| left.cmp(right));
     for (_, schematic) in retained_schematics {
-        append_schematic_rows(&mut rows, &schematic.document.validated_revisions, false);
+        append_schematic_rows(&mut rows, &schematic.document().validated_revisions, false);
     }
     append_simulation_plan_rows(&mut rows, state);
     append_model_and_pdk_rows(&mut rows, state);
@@ -711,7 +712,7 @@ fn find_project_schematic_revision(
 ) -> Option<&ValidatedSchematicRevision> {
     state
         .schematic
-        .document
+        .document()
         .validated_revisions
         .records()
         .iter()
@@ -721,7 +722,7 @@ fn find_project_schematic_revision(
                 .workspace
                 .schematic_buffers
                 .values()
-                .flat_map(|schematic| schematic.document.validated_revisions.records())
+                .flat_map(|schematic| schematic.document().validated_revisions.records())
                 .find(|record| record.id() == id)
         })
 }

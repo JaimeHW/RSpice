@@ -72,7 +72,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
     }
     let mut ui = crate::workbench::UiSessionState::new();
     ui.schematic_snap.grid_size = schematic
-        .document
+        .document()
         .document_policy
         .grid_pitch
         .canvas_grid_size();

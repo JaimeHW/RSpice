@@ -72,7 +72,7 @@ impl AppState {
                 };
                 pending.extend(
                     schematic
-                        .document
+                        .document()
                         .components
                         .iter()
                         .filter_map(|component| {

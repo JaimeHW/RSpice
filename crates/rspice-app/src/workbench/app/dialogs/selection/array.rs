@@ -319,12 +319,12 @@ fn validate_draft(state: &AppState) -> DraftValidation {
                 SchematicArrayPlacement::Center(Point::origin())
             }
             SchematicArrayKind::Linear => SchematicArrayPlacement::Pitch(Point::new(
-                state.schematic.document.grid_size.max(1),
-                state.schematic.document.grid_size.max(1),
+                state.schematic.document().grid_size.max(1),
+                state.schematic.document().grid_size.max(1),
             )),
             SchematicArrayKind::Rectangular => SchematicArrayPlacement::Pitch(Point::new(
-                state.schematic.document.grid_size.max(1),
-                state.schematic.document.grid_size.max(1),
+                state.schematic.document().grid_size.max(1),
+                state.schematic.document().grid_size.max(1),
             )),
         };
         if let Err(error) = SchematicArrayPlan::new(draft.kind, count, naming.clone(), placement) {
@@ -493,12 +493,12 @@ fn radial_documentation_center(state: &AppState) -> Option<Point> {
         max_x = max_x.max(point.x);
         max_y = max_y.max(point.y);
     };
-    for note in &state.schematic.document.design_notes {
+    for note in &state.schematic.document().design_notes {
         if selection.has_design_note(note.id) {
             include(note.pos);
         }
     }
-    for shape in &state.schematic.document.documentation_shapes {
+    for shape in &state.schematic.document().documentation_shapes {
         if selection.has_documentation_shape(shape.id) {
             for point in shape.geometry.points() {
                 include(point);

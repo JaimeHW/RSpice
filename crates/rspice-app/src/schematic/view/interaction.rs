@@ -56,7 +56,7 @@ pub(super) fn handle_tool_interactions(
     if primary_pan_gesture_active(ui, response) {
         return;
     }
-    let grid_size = state.schematic.document.grid_size;
+    let grid_size = state.schematic.document().grid_size;
     let current_tool = state.schematic.tool;
     if state.dialogs.move_selection.armed && current_tool != Tool::MoveSelection {
         state.dialogs.move_selection.close();
@@ -556,7 +556,7 @@ fn commit_armed_move_selection(state: &mut AppState, symbol_context: &SchematicS
         Ok(true) => {
             let automatic_junctions = state
                 .schematic
-                .document
+                .document()
                 .document_policy
                 .wire_junctions
                 .automatic_junctions();
@@ -602,7 +602,7 @@ fn commit_armed_move_selection(state: &mut AppState, symbol_context: &SchematicS
 fn activate_requirement_link(state: &mut AppState, note_id: u64, ctx: &egui::Context) -> bool {
     let target = state
         .schematic
-        .document
+        .document()
         .design_notes
         .iter()
         .find(|note| note.id == note_id)
@@ -690,7 +690,7 @@ fn nearest_active_wire_screen_hit(
     viewport: &Viewport,
     pointer: egui::Pos2,
 ) -> Option<WireScreenHit> {
-    let wires = objects_on_active_sheet(state, &state.schematic.document.wires, |item| item.id);
+    let wires = objects_on_active_sheet(state, &state.schematic.document().wires, |item| item.id);
     nearest_wire_screen_hit(
         viewport,
         wires.as_ref(),
@@ -878,7 +878,7 @@ fn handle_select_dragging(
         if state.schematic_drag_owned_by_context(ui.ctx()) {
             let automatic_junctions = state
                 .schematic
-                .document
+                .document()
                 .document_policy
                 .wire_junctions
                 .automatic_junctions();
@@ -900,7 +900,7 @@ fn handle_select_dragging(
                 ui.input(|i| i.modifiers.ctrl || i.modifiers.shift || i.modifiers.command);
             let enclosed_only = state
                 .schematic
-                .document
+                .document()
                 .document_policy
                 .selection_crossing
                 .enclosed_only(left_to_right);
@@ -1233,16 +1233,16 @@ enum JunctionPlacementOutcome {
 }
 
 fn commit_explicit_junction(state: &mut AppState, requested: Point) -> JunctionPlacementOutcome {
-    let grid_size = state.schematic.document.grid_size;
+    let grid_size = state.schematic.document().grid_size;
     let active_wires =
-        objects_on_active_sheet(state, &state.schematic.document.wires, |item| item.id);
+        objects_on_active_sheet(state, &state.schematic.document().wires, |item| item.id);
     let mut hit_schematic = crate::state::SchematicState::default();
     hit_schematic.document.wires = active_wires.into_owned();
     let Some(target) = hit_schematic.nearest_junction_candidate(requested, grid_size) else {
         return JunctionPlacementOutcome::NoIntersection;
     };
 
-    let buses = objects_on_active_sheet(state, &state.schematic.document.buses, |item| item.id);
+    let buses = objects_on_active_sheet(state, &state.schematic.document().buses, |item| item.id);
     if buses.iter().any(|bus| bus.contains_point(target)) {
         return JunctionPlacementOutcome::MixedBus;
     }
@@ -1359,18 +1359,21 @@ fn pointer_target_with_filter(
     filter: crate::state::SchematicSelectionFilter,
 ) -> Option<PointerTarget> {
     let notes = visible_design_notes(state);
-    let labels =
-        objects_on_active_sheet(state, &state.schematic.document.net_labels, |item| item.id);
+    let labels = objects_on_active_sheet(state, &state.schematic.document().net_labels, |item| {
+        item.id
+    });
     let components =
-        objects_on_active_sheet(state, &state.schematic.document.components, |item| item.id);
-    let taps = objects_on_active_sheet(state, &state.schematic.document.bus_taps, |item| item.id);
-    let buses = objects_on_active_sheet(state, &state.schematic.document.buses, |item| item.id);
+        objects_on_active_sheet(state, &state.schematic.document().components, |item| {
+            item.id
+        });
+    let taps = objects_on_active_sheet(state, &state.schematic.document().bus_taps, |item| item.id);
+    let buses = objects_on_active_sheet(state, &state.schematic.document().buses, |item| item.id);
     let shapes = objects_on_active_sheet(
         state,
-        &state.schematic.document.documentation_shapes,
+        &state.schematic.document().documentation_shapes,
         |item| item.id,
     );
-    let probes = objects_on_active_sheet(state, &state.schematic.document.probes, |item| item.id);
+    let probes = objects_on_active_sheet(state, &state.schematic.document().probes, |item| item.id);
     if filter.annotations
         && let Some(id) = probe_at_screen(viewport, probes.as_ref(), pointer_pos)
     {
@@ -2032,7 +2035,7 @@ fn retain_probe_flag(
     let validation_reference = label.as_deref().unwrap_or("P1");
     SchematicProbe::new(1, position, validation_reference, source_expression.clone())?;
     let source_key = source_expression.as_deref().map(raw_output_expression_key);
-    if let Some(existing_id) = state.schematic.document.probes.iter().find_map(|probe| {
+    if let Some(existing_id) = state.schematic.document().probes.iter().find_map(|probe| {
         (probe.position == position
             && probe
                 .source_expression
@@ -2043,7 +2046,7 @@ fn retain_probe_flag(
     }) {
         let needs_binding_refresh = state
             .schematic
-            .document
+            .document()
             .probes
             .iter()
             .find(|probe| probe.id == existing_id)
@@ -2211,7 +2214,7 @@ fn component_probe_expression(
 ) -> Option<(char, String)> {
     let component = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == component_id)?;
@@ -2327,7 +2330,9 @@ fn handle_probe_click(
         }
     } else {
         let components =
-            objects_on_active_sheet(state, &state.schematic.document.components, |item| item.id);
+            objects_on_active_sheet(state, &state.schematic.document().components, |item| {
+                item.id
+            });
         let Some(comp_id) =
             symbol_context.component_at_resolved_symbol(components.as_ref(), grid_pos)
         else {
@@ -2367,7 +2372,7 @@ fn handle_component_probe(
 ) {
     if let Some(component) = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|c| c.id == comp_id)

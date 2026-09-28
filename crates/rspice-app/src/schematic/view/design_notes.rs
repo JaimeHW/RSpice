@@ -29,9 +29,9 @@ fn resolved_text(note: &DesignNote, state: &AppState) -> String {
     let view_path = state.workspace.active_view.display_path();
     note.rendered_text(&DesignNoteRenderContext {
         view_path: &view_path,
-        component_count: state.schematic.document.components.len(),
-        conductor_count: state.schematic.document.wires.len()
-            + state.schematic.document.buses.len(),
+        component_count: state.schematic.document().components.len(),
+        conductor_count: state.schematic.document().wires.len()
+            + state.schematic.document().buses.len(),
     })
 }
 

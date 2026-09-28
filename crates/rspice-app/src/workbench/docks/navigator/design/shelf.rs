@@ -940,7 +940,7 @@ fn observe_placements(ui: &Ui, state: &mut AppState) {
         state.active_schematic_epoch,
         state.workspace.active_view.display_path(),
     );
-    let components = state.schematic.document.components.len();
+    let components = state.schematic.document().components.len();
     let live = armed_shelf_entry(state).or_else(|| dragged_shelf_entry(ui.ctx()));
     // A watch belonging to another design is no watch at all: its objects were
     // placed before this shelf ever looked at them.

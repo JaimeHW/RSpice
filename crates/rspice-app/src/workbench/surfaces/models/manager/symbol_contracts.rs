@@ -839,7 +839,7 @@ pub(super) fn placed_instances(
     row.reference.cell.hash(&mut hasher);
     family.hash(&mut hasher);
     sheet.hash(&mut hasher);
-    for component in &schematic.document.components {
+    for component in &schematic.document().components {
         component.id.hash(&mut hasher);
         component.name.hash(&mut hasher);
         component.value.hash(&mut hasher);
@@ -863,7 +863,7 @@ pub(super) fn placed_instances(
 
     let mut total = 0;
     let mut shown = Vec::new();
-    for component in &schematic.document.components {
+    for component in &schematic.document().components {
         let Some(binding) = instance_binding(component, row, &family) else {
             continue;
         };

@@ -156,7 +156,7 @@ pub(crate) fn open_design_review_comments(state: &mut AppState) {
     }
     let selected_note_id = state
         .schematic
-        .document
+        .document()
         .design_notes
         .iter()
         .find(|note| note.kind == DesignNoteKind::ReviewNote)
@@ -165,7 +165,7 @@ pub(crate) fn open_design_review_comments(state: &mut AppState) {
         open: true,
         selected_note_id,
         authority: Some(SchematicEditAuthority::capture(state)),
-        expected_design_notes: state.schematic.document.design_notes.clone(),
+        expected_design_notes: state.schematic.document().design_notes.clone(),
         ..DesignReviewCommentsDialogState::default()
     };
 }
@@ -182,7 +182,7 @@ impl RSpiceApp {
 
         let current_revision = current_revision_identity(&self.state);
         normalize_selected_thread(
-            &self.state.schematic.document.design_notes,
+            &self.state.schematic.document().design_notes,
             &mut self.state.dialogs.design_review_comments,
             current_revision.as_deref(),
         );
@@ -238,7 +238,7 @@ impl RSpiceApp {
             );
         }
 
-        let notes = self.state.schematic.document.design_notes.clone();
+        let notes = self.state.schematic.document().design_notes.clone();
         let mut action = ReviewAction::None;
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
             action = review_body(
@@ -369,7 +369,7 @@ impl RSpiceApp {
                 let authority = SchematicEditAuthority::capture(&self.state);
                 let dialog = &mut self.state.dialogs.design_review_comments;
                 dialog.authority = Some(authority);
-                dialog.expected_design_notes = self.state.schematic.document.design_notes.clone();
+                dialog.expected_design_notes = self.state.schematic.document().design_notes.clone();
                 dialog.reply.clear();
                 dialog.assignment_editor_open = false;
                 dialog.assignment.clear();
@@ -400,7 +400,7 @@ fn review_authority_error(state: &AppState) -> Option<String> {
 fn current_revision_identity(state: &AppState) -> Option<String> {
     state
         .schematic
-        .document
+        .document()
         .validated_revisions
         .records()
         .last()
@@ -428,7 +428,7 @@ fn selected_review_note(state: &AppState) -> Option<&DesignNote> {
     let id = state.dialogs.design_review_comments.selected_note_id?;
     state
         .schematic
-        .document
+        .document()
         .design_notes
         .iter()
         .find(|note| note.id == id && note.kind == DesignNoteKind::ReviewNote)

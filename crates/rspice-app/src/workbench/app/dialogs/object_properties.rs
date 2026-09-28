@@ -383,7 +383,7 @@ fn draft_resolution_key(
         ObjectPropertiesDraft::Bus(draft) => (
             state
                 .schematic
-                .document
+                .document()
                 .buses
                 .iter()
                 .find(|bus| bus.id == draft.original.id)
@@ -396,7 +396,7 @@ fn draft_resolution_key(
         ObjectPropertiesDraft::BusTap(draft) => (
             state
                 .schematic
-                .document
+                .document()
                 .bus_taps
                 .iter()
                 .find(|tap| tap.id == draft.original.id)
@@ -411,7 +411,7 @@ fn draft_resolution_key(
         ObjectPropertiesDraft::NetLabel(draft) => (
             state
                 .schematic
-                .document
+                .document()
                 .net_labels
                 .iter()
                 .find(|label| label.id == draft.original.id)
@@ -441,7 +441,7 @@ fn draft_resolution_key(
         ObjectPropertiesDraft::DesignNote(draft) => (
             state
                 .schematic
-                .document
+                .document()
                 .design_notes
                 .iter()
                 .find(|note| note.id == draft.original.id)
@@ -456,7 +456,7 @@ fn draft_resolution_key(
         ObjectPropertiesDraft::DocumentationShape(draft) => (
             state
                 .schematic
-                .document
+                .document()
                 .documentation_shapes
                 .iter()
                 .find(|shape| shape.id == draft.original.id)
@@ -535,7 +535,7 @@ fn apply_commit(schematic: &mut SchematicState, commit: PropertyCommit) -> Resul
             position,
         } => {
             let Some(current) = schematic
-                .document
+                .document()
                 .net_labels
                 .iter()
                 .find(|label| label.id == expected.id)
@@ -574,7 +574,7 @@ fn apply_commit(schematic: &mut SchematicState, commit: PropertyCommit) -> Resul
             review_state,
         } => {
             let Some(current) = schematic
-                .document
+                .document()
                 .design_notes
                 .iter()
                 .find(|note| note.id == expected.id)
@@ -612,7 +612,7 @@ fn apply_commit(schematic: &mut SchematicState, commit: PropertyCommit) -> Resul
         }
         PropertyCommit::DocumentationShape { expected, geometry } => {
             let Some(current) = schematic
-                .document
+                .document()
                 .documentation_shapes
                 .iter()
                 .find(|shape| shape.id == expected.id)
@@ -700,7 +700,7 @@ fn validate_documentation_shape_draft(
     draft: &DocumentationShapeObjectPropertiesDraft,
 ) -> DraftValidation {
     let Some(current) = schematic
-        .document
+        .document()
         .documentation_shapes
         .iter()
         .find(|shape| shape.id == draft.original.id)
@@ -754,7 +754,7 @@ fn validate_design_note_draft(
     draft: &DesignNoteObjectPropertiesDraft,
 ) -> DraftValidation {
     let Some(current) = schematic
-        .document
+        .document()
         .design_notes
         .iter()
         .find(|note| note.id == draft.original.id)
@@ -797,7 +797,7 @@ fn validate_bus_draft(
     draft: &BusObjectPropertiesDraft,
 ) -> DraftValidation {
     let Some(current) = schematic
-        .document
+        .document()
         .buses
         .iter()
         .find(|bus| bus.id == draft.original.id)
@@ -861,7 +861,7 @@ fn validate_tap_draft(
     draft: &BusTapObjectPropertiesDraft,
 ) -> DraftValidation {
     let Some(current) = schematic
-        .document
+        .document()
         .bus_taps
         .iter()
         .find(|tap| tap.id == draft.original.id)
@@ -872,7 +872,7 @@ fn validate_tap_draft(
         return stale_validation("The selected bus tap changed while properties were open.");
     }
     if !schematic
-        .document
+        .document()
         .buses
         .iter()
         .any(|bus| bus.id == draft.source_bus_id)
@@ -932,7 +932,7 @@ fn validate_net_label_draft(
     draft: &NetLabelObjectPropertiesDraft,
 ) -> DraftValidation {
     let Some(current) = schematic
-        .document
+        .document()
         .net_labels
         .iter()
         .find(|label| label.id == draft.original.id)
@@ -951,7 +951,7 @@ fn validate_net_label_draft(
         };
     }
     if let Err(reason) =
-        NetLabel::validate_name(name, schematic.document.document_policy.net_naming)
+        NetLabel::validate_name(name, schematic.document().document_policy.net_naming)
     {
         return DraftValidation::Invalid {
             field: Some(LABEL_NAME_FIELD),
@@ -1198,7 +1198,7 @@ fn bus_choices(
     retained_anchor: crate::state::Point,
 ) -> Vec<(u64, String)> {
     let mut choices: Vec<_> = schematic
-        .document
+        .document()
         .buses
         .iter()
         .filter(|bus| bus.contains_point(retained_anchor))

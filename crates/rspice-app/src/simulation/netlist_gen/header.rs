@@ -19,7 +19,7 @@ impl<'a> NetlistGenerator<'a> {
         self.lines.push("* RSpice Netlist".to_string());
         self.lines.push(format!(
             "* Components: {}",
-            self.schematic.document.components.len()
+            self.schematic.document().components.len()
         ));
         self.lines.push(format!("* Nets: {}", self.nets.len()));
         if self.hierarchy_path.is_root()
@@ -41,7 +41,7 @@ impl<'a> NetlistGenerator<'a> {
         let mut includes = std::collections::BTreeMap::<String, Option<String>>::new();
         let mut generic_includes = std::collections::BTreeMap::<String, Option<String>>::new();
 
-        for component in &self.schematic.document.components {
+        for component in &self.schematic.document().components {
             let binding = match self.effective_library_binding(component) {
                 Ok(Some(binding)) => binding.clone(),
                 Ok(None) => continue,

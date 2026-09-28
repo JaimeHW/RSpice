@@ -192,29 +192,41 @@ impl RecordHeader {
 /// sheet reconciliation is measured against.
 fn live_object_ids(schematic: &SchematicState) -> Vec<u64> {
     schematic
-        .document
+        .document()
         .components
         .iter()
         .map(|object| object.id)
-        .chain(schematic.document.wires.iter().map(|object| object.id))
-        .chain(schematic.document.buses.iter().map(|object| object.id))
-        .chain(schematic.document.bus_taps.iter().map(|object| object.id))
-        .chain(schematic.document.junctions.iter().map(|object| object.id))
-        .chain(schematic.document.net_labels.iter().map(|object| object.id))
+        .chain(schematic.document().wires.iter().map(|object| object.id))
+        .chain(schematic.document().buses.iter().map(|object| object.id))
+        .chain(schematic.document().bus_taps.iter().map(|object| object.id))
         .chain(
             schematic
-                .document
+                .document()
+                .junctions
+                .iter()
+                .map(|object| object.id),
+        )
+        .chain(
+            schematic
+                .document()
+                .net_labels
+                .iter()
+                .map(|object| object.id),
+        )
+        .chain(
+            schematic
+                .document()
                 .design_notes
                 .iter()
                 .map(|object| object.id),
         )
         .chain(
             schematic
-                .document
+                .document()
                 .documentation_shapes
                 .iter()
                 .map(|object| object.id),
         )
-        .chain(schematic.document.probes.iter().map(|object| object.id))
+        .chain(schematic.document().probes.iter().map(|object| object.id))
         .collect()
 }

@@ -69,7 +69,7 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
     schematic.recalculate_runtime_state();
     schematic.snap_engine = state.ui.schematic_snap.clone();
     schematic.reconcile_grid_pitch_runtime();
-    state.ui.schematic_snap.grid_size = schematic.document.grid_size;
+    state.ui.schematic_snap.grid_size = schematic.document().grid_size;
     schematic.wire_drawing.routing_mode = state.ui.schematic_routing_mode;
     schematic.bus_drawing.routing_mode = state.ui.schematic_routing_mode;
     // Views from read-only libraries open for inspection, never for edit —
@@ -120,7 +120,7 @@ impl AppState {
         let terminals = {
             let symbols = SchematicSymbolContext::from_state(self);
             self.schematic
-                .document
+                .document()
                 .components
                 .iter()
                 .flat_map(|component| {
@@ -1808,7 +1808,7 @@ impl AppState {
         let owned_prefix = format!("{library}/");
         let count = |schematic: &SchematicState| {
             schematic
-                .document
+                .document()
                 .components
                 .iter()
                 .filter(|component| {
@@ -1954,7 +1954,7 @@ impl AppState {
     ) -> Option<(String, CellViewRef)> {
         let component = self
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == component_id)?;
@@ -1983,7 +1983,7 @@ impl AppState {
     pub(crate) fn veriloga_source_for_component(&self, component_id: u64) -> Option<CellViewRef> {
         let component = self
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == component_id)?;

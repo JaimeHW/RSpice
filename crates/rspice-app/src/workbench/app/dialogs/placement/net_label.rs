@@ -166,8 +166,8 @@ impl RSpiceApp {
         }
 
         let anchor = self.state.dialogs.net_label_placement.anchor;
-        let grid_pitch = self.state.schematic.document.document_policy.grid_pitch;
-        let naming_policy = self.state.schematic.document.document_policy.net_naming;
+        let grid_pitch = self.state.schematic.document().document_policy.grid_pitch;
+        let naming_policy = self.state.schematic.document().document_policy.net_naming;
         let mut response = dialog.show_transaction(ctx, |ui| {
             let (focus, changed) = dialog_body(
                 ui,
@@ -263,7 +263,7 @@ fn validate_draft(state: &AppState) -> DraftValidation {
         return DraftValidation::Incomplete("Enter the electrical net name.");
     }
     if let Err(reason) =
-        NetLabel::validate_name(name, state.schematic.document.document_policy.net_naming)
+        NetLabel::validate_name(name, state.schematic.document().document_policy.net_naming)
     {
         return DraftValidation::Invalid(format!("Net name: {reason}."));
     }
@@ -285,7 +285,7 @@ fn apply_commit(state: &mut AppState, commit: NetLabelPlacementCommit) -> Result
         .validate(state, if off_sheet { CONNECTOR_TITLE } else { TITLE })?;
     NetLabel::validate_name(
         &commit.name,
-        state.schematic.document.document_policy.net_naming,
+        state.schematic.document().document_policy.net_naming,
     )
     .map_err(|reason| format!("Net name: {reason}."))?;
 

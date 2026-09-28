@@ -709,7 +709,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
         DrawingSheetOverflowTarget::Junction(id) => {
             let Some(position) = state
                 .schematic
-                .document
+                .document()
                 .junctions
                 .iter()
                 .find(|junction| junction.id == id)
@@ -834,7 +834,7 @@ fn active_object_bounds<'a>(
     symbol_context: &SchematicSymbolContext,
 ) -> Vec<PrintableObjectBounds<'a>> {
     let mut bounds = Vec::new();
-    for component in &state.schematic.document.components {
+    for component in &state.schematic.document().components {
         if object_is_on_active_sheet(state, component.id) {
             let (min, max) = symbol_context.component_bounds(component);
             // Hardcopy always emits the retained instance name and value at
@@ -866,7 +866,7 @@ fn active_object_bounds<'a>(
             });
         }
     }
-    for wire in &state.schematic.document.wires {
+    for wire in &state.schematic.document().wires {
         if object_is_on_active_sheet(state, wire.id)
             && let Some(rect) = points_bounds(&wire.points)
         {
@@ -879,7 +879,7 @@ fn active_object_bounds<'a>(
             });
         }
     }
-    for bus in &state.schematic.document.buses {
+    for bus in &state.schematic.document().buses {
         if object_is_on_active_sheet(state, bus.id)
             && let Some(rect) = points_bounds(&bus.points)
         {
@@ -895,7 +895,7 @@ fn active_object_bounds<'a>(
             });
         }
     }
-    for tap in &state.schematic.document.bus_taps {
+    for tap in &state.schematic.document().bus_taps {
         if object_is_on_active_sheet(state, tap.id) {
             let route = crate::schematic::bus_geometry::bus_tap_route_points(tap);
             let Some(rect) = points_bounds(&route) else {
@@ -910,7 +910,7 @@ fn active_object_bounds<'a>(
             });
         }
     }
-    for junction in &state.schematic.document.junctions {
+    for junction in &state.schematic.document().junctions {
         if object_is_on_active_sheet(state, junction.id) {
             // Hardcopy renders an exact 900 µm filled junction dot. Include
             // that physical radius rather than treating the junction as a
@@ -930,7 +930,7 @@ fn active_object_bounds<'a>(
             });
         }
     }
-    for label in &state.schematic.document.net_labels {
+    for label in &state.schematic.document().net_labels {
         if object_is_on_active_sheet(state, label.id) {
             let (min, max) = super::net_labels::world_bounds(label);
             bounds.push(PrintableObjectBounds {
@@ -946,7 +946,7 @@ fn active_object_bounds<'a>(
             });
         }
     }
-    for note in &state.schematic.document.design_notes {
+    for note in &state.schematic.document().design_notes {
         if object_is_on_active_sheet(state, note.id) {
             let (min, max) = super::design_notes::conservative_world_bounds(note);
             bounds.push(PrintableObjectBounds {
@@ -958,7 +958,7 @@ fn active_object_bounds<'a>(
             });
         }
     }
-    for shape in &state.schematic.document.documentation_shapes {
+    for shape in &state.schematic.document().documentation_shapes {
         if object_is_on_active_sheet(state, shape.id) {
             let (min, max) = super::documentation_shapes::world_bounds(shape);
             bounds.push(PrintableObjectBounds {

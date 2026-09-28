@@ -102,47 +102,47 @@ pub(super) fn schematic_selection_has_live_object(
 ) -> bool {
     let selection = &schematic.selection;
     schematic
-        .document
+        .document()
         .components
         .iter()
         .any(|component| selection.has_component(component.id))
         || schematic
-            .document
+            .document()
             .wires
             .iter()
             .any(|wire| selection.has_wire(wire.id))
         || schematic
-            .document
+            .document()
             .junctions
             .iter()
             .any(|junction| selection.has_junction(junction.pos))
         || schematic
-            .document
+            .document()
             .net_labels
             .iter()
             .any(|label| selection.has_net_label(label.id))
         || schematic
-            .document
+            .document()
             .buses
             .iter()
             .any(|bus| selection.has_bus(bus.id))
         || schematic
-            .document
+            .document()
             .bus_taps
             .iter()
             .any(|tap| selection.has_bus_tap(tap.id))
         || schematic
-            .document
+            .document()
             .design_notes
             .iter()
             .any(|note| selection.has_design_note(note.id))
         || schematic
-            .document
+            .document()
             .documentation_shapes
             .iter()
             .any(|shape| selection.has_documentation_shape(shape.id))
         || schematic
-            .document
+            .document()
             .probes
             .iter()
             .any(|probe| selection.has_probe(probe.id))
@@ -156,7 +156,7 @@ pub(super) fn schematic_selection_has_deletable_object(
     schematic: &crate::state::SchematicState,
 ) -> bool {
     schematic_selection_has_live_object(schematic)
-        || schematic.document.wires.iter().any(|wire| {
+        || schematic.document().wires.iter().any(|wire| {
             schematic.selection.wire_segments.iter().any(|selected| {
                 selected.wire_id == wire.id && selected.segment_index < wire.segment_count()
             }) || schematic.selection.wire_vertices.iter().any(|selected| {
@@ -172,42 +172,42 @@ pub(super) fn schematic_selection_has_duplicable_object(
     selection.wire_segments.is_empty()
         && selection.wire_vertices.is_empty()
         && (schematic
-            .document
+            .document()
             .components
             .iter()
             .any(|component| selection.has_component(component.id))
             || schematic
-                .document
+                .document()
                 .wires
                 .iter()
                 .any(|wire| selection.has_wire(wire.id))
             || schematic
-                .document
+                .document()
                 .net_labels
                 .iter()
                 .any(|label| selection.has_net_label(label.id))
             || schematic
-                .document
+                .document()
                 .buses
                 .iter()
                 .any(|bus| selection.has_bus(bus.id))
             || schematic
-                .document
+                .document()
                 .bus_taps
                 .iter()
                 .any(|tap| selection.has_bus_tap(tap.id))
             || schematic
-                .document
+                .document()
                 .design_notes
                 .iter()
                 .any(|note| selection.has_design_note(note.id))
             || schematic
-                .document
+                .document()
                 .documentation_shapes
                 .iter()
                 .any(|shape| selection.has_documentation_shape(shape.id))
             || schematic
-                .document
+                .document()
                 .probes
                 .iter()
                 .any(|probe| selection.has_probe(probe.id)))

@@ -272,7 +272,7 @@ impl RSpiceApp {
         let Some(component_id) = self
             .state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.name.eq_ignore_ascii_case(instance))
@@ -351,7 +351,7 @@ impl RSpiceApp {
             return;
         }
 
-        let original_journal = self.state.schematic.document.validated_revisions.clone();
+        let original_journal = self.state.schematic.document().validated_revisions.clone();
         let original_dirty = self.state.schematic.is_dirty;
         let target_view_key = fresh_report.active_view().key();
         if original_journal.is_empty()
@@ -397,7 +397,7 @@ impl RSpiceApp {
                 return;
             }
         };
-        let expected_journal = self.state.schematic.document.validated_revisions.clone();
+        let expected_journal = self.state.schematic.document().validated_revisions.clone();
         let expected_design_digest = match self.state.schematic.validated_design_content_digest() {
             Ok(digest) => digest,
             Err(error) => {
@@ -636,7 +636,7 @@ fn rollback_exact_journal(
     expected_design_digest: crate::product::ContentDigest,
     original_dirty: bool,
 ) -> Result<(), String> {
-    if &schematic.document.validated_revisions != expected_journal {
+    if &schematic.document().validated_revisions != expected_journal {
         return Err("its validated revision history changed after publication began".to_owned());
     }
     let current_design_digest = schematic

@@ -74,7 +74,7 @@ impl<'a> NetlistGenerator<'a> {
                 nodes.push(self.get_node_name(*point));
                 continue;
             };
-            let joined = self.schematic.document.buses.iter().any(|bus| {
+            let joined = self.schematic.document().buses.iter().any(|bus| {
                 bus.declaration.as_ref() == Some(&declaration) && bus.contains_point(*point)
             });
             let base = if joined {

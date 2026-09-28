@@ -365,17 +365,17 @@ impl<'a> From<&'a crate::state::SchematicState> for SchematicDocumentContent<'a>
     fn from(schematic: &'a crate::state::SchematicState) -> Self {
         Self {
             schema_version: 5,
-            grid_size: schematic.document.grid_size,
-            document_policy: schematic.document.document_policy,
-            components: &schematic.document.components,
-            wires: &schematic.document.wires,
-            buses: &schematic.document.buses,
-            bus_taps: &schematic.document.bus_taps,
-            net_labels: &schematic.document.net_labels,
-            design_notes: &schematic.document.design_notes,
-            documentation_shapes: &schematic.document.documentation_shapes,
-            junctions: &schematic.document.junctions,
-            probes: &schematic.document.probes,
+            grid_size: schematic.document().grid_size,
+            document_policy: schematic.document().document_policy,
+            components: &schematic.document().components,
+            wires: &schematic.document().wires,
+            buses: &schematic.document().buses,
+            bus_taps: &schematic.document().bus_taps,
+            net_labels: &schematic.document().net_labels,
+            design_notes: &schematic.document().design_notes,
+            documentation_shapes: &schematic.document().documentation_shapes,
+            junctions: &schematic.document().junctions,
+            probes: &schematic.document().probes,
         }
     }
 }

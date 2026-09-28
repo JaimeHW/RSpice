@@ -321,7 +321,7 @@ fn occurrence_label(occurrence: Option<&InstancePath>) -> String {
 #[must_use]
 pub fn placed_source_count(schematic: &SchematicState) -> usize {
     schematic
-        .document
+        .document()
         .components
         .iter()
         .filter(|component| source_family(component.kind).is_some())
@@ -349,7 +349,7 @@ pub fn placed_sources(
     #[cfg(test)]
     crate::simulation::cost_probe::record(crate::simulation::cost_probe::Derivation::PlacedSources);
     if !schematic
-        .document
+        .document()
         .components
         .iter()
         .any(|component| source_family(component.kind).is_some())
@@ -358,7 +358,7 @@ pub fn placed_sources(
     }
     let nets = net_names_by_terminal(schematic);
     let mut sources: Vec<PlacedSource> = schematic
-        .document
+        .document()
         .components
         .iter()
         .filter_map(|component| {
@@ -663,7 +663,7 @@ fn walk_design(
                 }),
         );
         let occurrence = binding.instance_path().clone();
-        for component in &schematic.document.components {
+        for component in &schematic.document().components {
             if let Some((mut source, drive)) = placed_source(component, &nets, stimulus_library) {
                 source.occurrence = Some(occurrence.clone());
                 sources.push((source, drive));
@@ -692,7 +692,7 @@ fn walk_design(
 /// net summary is resolved, because resolving it is the expensive half and a
 /// master that places no excitation has no use for it.
 fn places_excitation(schematic: &SchematicState) -> bool {
-    schematic.document.components.iter().any(|component| {
+    schematic.document().components.iter().any(|component| {
         source_family(component.kind).is_some() || component.kind == ComponentType::RfPort
     })
 }
@@ -832,7 +832,7 @@ pub fn placed_rf_ports(
     plan: Option<&SimulationPlan>,
 ) -> Vec<PlacedRfPort> {
     if !schematic
-        .document
+        .document()
         .components
         .iter()
         .any(|component| component.kind == ComponentType::RfPort)
@@ -845,7 +845,7 @@ pub fn placed_rf_ports(
     // re-derived per port.
     let consumers = plan.map(port_consumers_for).unwrap_or_default();
     let mut ports: Vec<PlacedRfPort> = schematic
-        .document
+        .document()
         .components
         .iter()
         .filter(|component| component.kind == ComponentType::RfPort)

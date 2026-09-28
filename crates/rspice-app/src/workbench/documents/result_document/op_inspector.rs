@@ -888,7 +888,7 @@ fn device_target(state: &AppState, name: &str) -> Option<u64> {
     }
     state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.spice_instance_name().eq_ignore_ascii_case(name))
@@ -927,7 +927,7 @@ fn apply_action(ui: &Ui, state: &mut AppState, action: OpAction) {
         OpAction::LocateDevice(component_id) => {
             let Some(component) = state
                 .schematic
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|component| component.id == component_id)

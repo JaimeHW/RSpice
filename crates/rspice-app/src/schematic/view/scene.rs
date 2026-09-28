@@ -106,7 +106,7 @@ pub(super) fn draw_scene(
     let cache = state.schematic.canvas_cache();
     let visible_wire_indices = cache
         .map(|cache| cache.wire_indices_in_world_rect(wx0, wy0, wx1, wy1))
-        .unwrap_or_else(|| (0..state.schematic.document.wires.len()).collect());
+        .unwrap_or_else(|| (0..state.schematic.document().wires.len()).collect());
     let net_class_colors = if state.ui.schematic_visibility.net_highlighting
         == SchematicNetHighlighting::NetClassColors
     {
@@ -115,7 +115,7 @@ pub(super) fn draw_scene(
         std::collections::HashMap::new()
     };
 
-    for bus in &state.schematic.document.buses {
+    for bus in &state.schematic.document().buses {
         if !object_is_on_active_sheet(state, bus.id) {
             continue;
         }
@@ -138,7 +138,7 @@ pub(super) fn draw_scene(
     let mut conductor_groups: BTreeMap<ConductorStyle, (Option<egui::Color32>, Vec<&[Point]>)> =
         BTreeMap::new();
     for index in visible_wire_indices {
-        let Some(wire) = state.schematic.document.wires.get(index) else {
+        let Some(wire) = state.schematic.document().wires.get(index) else {
             continue;
         };
         if !object_is_on_active_sheet(state, wire.id) {
@@ -182,7 +182,7 @@ pub(super) fn draw_scene(
         }
     }
 
-    for tap in &state.schematic.document.bus_taps {
+    for tap in &state.schematic.document().bus_taps {
         if !object_is_on_active_sheet(state, tap.id) {
             continue;
         }
@@ -213,7 +213,7 @@ pub(super) fn draw_scene(
         draw_bus_tap(painter, viewport, tap, selected);
     }
 
-    for component in &state.schematic.document.components {
+    for component in &state.schematic.document().components {
         if !object_is_on_active_sheet(state, component.id) {
             continue;
         }
@@ -242,7 +242,7 @@ pub(super) fn draw_scene(
         );
     }
 
-    for junction in &state.schematic.document.junctions {
+    for junction in &state.schematic.document().junctions {
         if !object_is_on_active_sheet(state, junction.id) {
             continue;
         }
@@ -260,7 +260,7 @@ pub(super) fn draw_scene(
     let hovered_shape = if state.schematic.tool == crate::state::Tool::Select {
         let shapes = objects_on_active_sheet(
             state,
-            &state.schematic.document.documentation_shapes,
+            &state.schematic.document().documentation_shapes,
             |item| item.id,
         );
         painter
@@ -271,7 +271,7 @@ pub(super) fn draw_scene(
     } else {
         None
     };
-    for shape in &state.schematic.document.documentation_shapes {
+    for shape in &state.schematic.document().documentation_shapes {
         if !object_is_on_active_sheet(state, shape.id) {
             continue;
         }
@@ -302,7 +302,9 @@ pub(super) fn draw_scene(
     // junction and OP overlays so the source net name always remains legible.
     let hovered_label = if state.schematic.tool == crate::state::Tool::Select {
         let labels =
-            objects_on_active_sheet(state, &state.schematic.document.net_labels, |item| item.id);
+            objects_on_active_sheet(state, &state.schematic.document().net_labels, |item| {
+                item.id
+            });
         painter
             .ctx()
             .pointer_hover_pos()
@@ -311,7 +313,7 @@ pub(super) fn draw_scene(
     } else {
         None
     };
-    for label in &state.schematic.document.net_labels {
+    for label in &state.schematic.document().net_labels {
         if !object_is_on_active_sheet(state, label.id) {
             continue;
         }
@@ -351,7 +353,7 @@ pub(super) fn draw_scene(
     } else {
         None
     };
-    for note in &state.schematic.document.design_notes {
+    for note in &state.schematic.document().design_notes {
         if !object_is_on_active_sheet(state, note.id) {
             continue;
         }
@@ -385,7 +387,7 @@ pub(super) fn draw_scene(
     // when resolved, otherwise the stable unbound P<n> marker identity.
     let hovered_probe = if state.schematic.tool == crate::state::Tool::Select {
         let probes =
-            objects_on_active_sheet(state, &state.schematic.document.probes, |item| item.id);
+            objects_on_active_sheet(state, &state.schematic.document().probes, |item| item.id);
         painter
             .ctx()
             .pointer_hover_pos()
@@ -395,7 +397,7 @@ pub(super) fn draw_scene(
         None
     };
     let probe_statuses = probe_visual_statuses(state);
-    for probe in &state.schematic.document.probes {
+    for probe in &state.schematic.document().probes {
         if !object_is_on_active_sheet(state, probe.id) {
             continue;
         }
@@ -559,7 +561,7 @@ fn draw_parent_context(painter: &Painter, viewport: &Viewport, state: &AppState)
 
     for (key, sheet) in parent_context_sheets(state) {
         let wires = sheet
-            .document
+            .document()
             .wires
             .iter()
             .filter(|wire| {
@@ -577,7 +579,7 @@ fn draw_parent_context(painter: &Painter, viewport: &Viewport, state: &AppState)
                 stroke,
             );
         }
-        for bus in &sheet.document.buses {
+        for bus in &sheet.document().buses {
             if !object_is_on_sheet(state, &key, bus.id)
                 || !polyline_intersects_view(&bus.points, wx0, wy0, wx1, wy1)
             {
@@ -592,7 +594,7 @@ fn draw_parent_context(painter: &Painter, viewport: &Viewport, state: &AppState)
                 stroke,
             );
         }
-        for junction in &sheet.document.junctions {
+        for junction in &sheet.document().junctions {
             let (jx, jy) = (junction.pos.x as f32, junction.pos.y as f32);
             if !object_is_on_sheet(state, &key, junction.id)
                 || jx < wx0
@@ -608,7 +610,7 @@ fn draw_parent_context(painter: &Painter, viewport: &Viewport, state: &AppState)
                 conductor,
             );
         }
-        for component in &sheet.document.components {
+        for component in &sheet.document().components {
             let (min_x, min_y, max_x, max_y) = component.bounding_box();
             if !object_is_on_sheet(state, &key, component.id)
                 || (max_x as f32) < wx0
@@ -800,7 +802,7 @@ pub(super) fn keyboard_focus_matches_selection(
             selection.single_junction().is_some_and(|position| {
                 state
                     .schematic
-                    .document
+                    .document()
                     .junctions
                     .iter()
                     .any(|junction| junction.id == id && junction.pos == position)
@@ -837,28 +839,28 @@ fn keyboard_focus_bounds(
     match focus {
         SchematicKeyboardFocus::Component(id) => state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|object| object.id == id)
             .map(|object| symbol_context.component_bounds(object)),
         SchematicKeyboardFocus::Wire(id) => state
             .schematic
-            .document
+            .document()
             .wires
             .iter()
             .find(|object| object.id == id)
             .and_then(|object| points_bounds(&object.points)),
         SchematicKeyboardFocus::Bus(id) => state
             .schematic
-            .document
+            .document()
             .buses
             .iter()
             .find(|object| object.id == id)
             .and_then(|object| points_bounds(&object.points)),
         SchematicKeyboardFocus::BusTap(id) => state
             .schematic
-            .document
+            .document()
             .bus_taps
             .iter()
             .find(|object| object.id == id)
@@ -869,21 +871,21 @@ fn keyboard_focus_bounds(
             }),
         SchematicKeyboardFocus::Junction(id) => state
             .schematic
-            .document
+            .document()
             .junctions
             .iter()
             .find(|object| object.id == id)
             .map(|object| (object.pos, object.pos)),
         SchematicKeyboardFocus::NetLabel(id) => state
             .schematic
-            .document
+            .document()
             .net_labels
             .iter()
             .find(|object| object.id == id)
             .map(net_label_world_bounds),
         SchematicKeyboardFocus::Probe(id) => state
             .schematic
-            .document
+            .document()
             .probes
             .iter()
             .find(|object| object.id == id)
@@ -894,7 +896,7 @@ fn keyboard_focus_bounds(
             .map(design_note_world_bounds),
         SchematicKeyboardFocus::DocumentationShape(id) => state
             .schematic
-            .document
+            .document()
             .documentation_shapes
             .iter()
             .find(|object| object.id == id)
@@ -915,7 +917,7 @@ fn points_bounds(points: &[Point]) -> Option<(Point, Point)> {
 }
 
 pub(super) fn visible_design_notes(state: &AppState) -> std::borrow::Cow<'_, [DesignNote]> {
-    let active = objects_on_active_sheet(state, &state.schematic.document.design_notes, |note| {
+    let active = objects_on_active_sheet(state, &state.schematic.document().design_notes, |note| {
         note.id
     });
     if state.ui.schematic_visibility.review_markers == SchematicReviewMarkerVisibility::All {
@@ -1177,13 +1179,18 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
                 .filter(|point| {
                     super::sheet_visibility::active_wire_at(state, *point).is_some()
                         || active_junction_at(state, *point).is_some()
-                        || state.schematic.document.components.iter().any(|component| {
-                            object_is_on_active_sheet(state, component.id)
-                                && component
-                                    .terminal_positions()
-                                    .iter()
-                                    .any(|(_, terminal)| terminal == point)
-                        })
+                        || state
+                            .schematic
+                            .document()
+                            .components
+                            .iter()
+                            .any(|component| {
+                                object_is_on_active_sheet(state, component.id)
+                                    && component
+                                        .terminal_positions()
+                                        .iter()
+                                        .any(|(_, terminal)| terminal == point)
+                            })
                 })
                 .min_by_key(|point| (point.y, point.x))
         }) else {
@@ -1207,7 +1214,7 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
     if retained_currents && back_annotation != SchematicBackAnnotationContent::VoltagesOnly {
         for component in state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .filter(|component| {
@@ -1253,7 +1260,7 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
     {
         for component in state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .filter(|component| {
@@ -1290,7 +1297,7 @@ fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnno
     if back_annotation == SchematicBackAnnotationContent::VoltagesCurrentsAndPower {
         for component in state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .filter(|component| {

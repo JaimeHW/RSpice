@@ -102,7 +102,7 @@ pub(super) fn projected_cross_sheet_anchor(
     let authored_point = match &endpoint.anchor {
         crate::state::CrossSheetPortAnchor::WirePoint { wire_id, point } => {
             let wire = source
-                .document
+                .document()
                 .wires
                 .iter()
                 .find(|wire| wire.id == *wire_id)
@@ -123,7 +123,7 @@ pub(super) fn projected_cross_sheet_anchor(
             terminal_name,
         } => {
             let component = source
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|component| component.id == *component_id)
@@ -138,7 +138,7 @@ pub(super) fn projected_cross_sheet_anchor(
                 }
             })?;
             if !source
-                .document
+                .document()
                 .wires
                 .iter()
                 .any(|wire| wire.contains_point(point))
@@ -155,7 +155,7 @@ pub(super) fn projected_cross_sheet_anchor(
     match &endpoint.anchor {
         crate::state::CrossSheetPortAnchor::WirePoint { wire_id, .. } => {
             if !projected
-                .document
+                .document()
                 .wires
                 .iter()
                 .any(|wire| wire.id == *wire_id && wire.contains_point(anchor))
@@ -168,7 +168,7 @@ pub(super) fn projected_cross_sheet_anchor(
         }
         crate::state::CrossSheetPortAnchor::ComponentTerminal { component_id, .. } => {
             if !projected
-                .document
+                .document()
                 .components
                 .iter()
                 .any(|component| component.id == *component_id)

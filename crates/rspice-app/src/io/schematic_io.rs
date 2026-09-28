@@ -397,12 +397,12 @@ fn prepare_loaded_schematic(
 ) -> Result<SchematicState, SchematicIoError> {
     file.validate()?;
 
-    for note in &file.schematic.document.design_notes {
+    for note in &file.schematic.document().design_notes {
         note.validate().map_err(|error| {
             SchematicIoError::ParseError(format!("invalid design note object {}: {error}", note.id))
         })?;
     }
-    for shape in &file.schematic.document.documentation_shapes {
+    for shape in &file.schematic.document().documentation_shapes {
         shape.validate().map_err(|error| {
             SchematicIoError::ParseError(format!(
                 "invalid documentation shape object {}: {error}",
@@ -410,7 +410,7 @@ fn prepare_loaded_schematic(
             ))
         })?;
     }
-    for probe in &file.schematic.document.probes {
+    for probe in &file.schematic.document().probes {
         probe.validate().map_err(|error| {
             SchematicIoError::ParseError(format!(
                 "invalid schematic probe object {}: {error}",

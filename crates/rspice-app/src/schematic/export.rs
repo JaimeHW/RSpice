@@ -104,7 +104,7 @@ pub fn export_to_svg_with_symbol_resolver_and_context(
     context: SvgDesignContext<'_>,
 ) -> String {
     let entries: Vec<ResolvedSymbolExportEntry> = state
-        .document
+        .document()
         .components
         .iter()
         .filter_map(|component| {
@@ -199,26 +199,26 @@ fn export_to_svg_with_resolved_symbol_entries(
     }
 
     // Export wires
-    for wire in &state.document.wires {
+    for wire in &state.document().wires {
         write_wire(&mut svg, wire, config);
     }
 
-    for bus in &state.document.buses {
+    for bus in &state.document().buses {
         write_bus(&mut svg, bus, config);
     }
 
-    for tap in &state.document.bus_taps {
+    for tap in &state.document().bus_taps {
         write_bus_tap(&mut svg, tap, config);
     }
 
     // Junction dots encode explicit connectivity and are document content,
     // not a transient canvas decoration.
-    for junction in &state.document.junctions {
+    for junction in &state.document().junctions {
         write_junction(&mut svg, junction, config);
     }
 
     // Export components
-    for component in &state.document.components {
+    for component in &state.document().components {
         write_component(
             &mut svg,
             component,
@@ -228,11 +228,11 @@ fn export_to_svg_with_resolved_symbol_entries(
         );
     }
 
-    for note in &state.document.design_notes {
+    for note in &state.document().design_notes {
         write_design_note(&mut svg, state, note, config, context.view_path);
     }
 
-    for shape in &state.document.documentation_shapes {
+    for shape in &state.document().documentation_shapes {
         write_documentation_shape(&mut svg, shape, config);
     }
 
@@ -254,7 +254,7 @@ fn calculate_bounds_with_resolved_symbols(
     let mut max_x = f64::MIN;
     let mut max_y = f64::MIN;
 
-    for component in &state.document.components {
+    for component in &state.document().components {
         let (comp_min_x, comp_min_y, comp_max_x, comp_max_y) = component_export_world_bounds(
             component,
             find_resolved_symbol(component, resolved_symbols),
@@ -267,7 +267,7 @@ fn calculate_bounds_with_resolved_symbols(
         max_y = max_y.max(comp_max_y * config.grid_size);
     }
 
-    for wire in &state.document.wires {
+    for wire in &state.document().wires {
         for point in &wire.points {
             let x = point.x as f64 * config.grid_size;
             let y = point.y as f64 * config.grid_size;

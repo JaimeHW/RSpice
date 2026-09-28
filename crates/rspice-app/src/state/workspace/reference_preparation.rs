@@ -99,7 +99,7 @@ impl ProjectWorkspace {
                 )?);
             }
             for (key, source) in &projected {
-                if source.document.probes.is_empty() {
+                if source.document().probes.is_empty() {
                     continue;
                 }
                 let root = reference_document_root(self, key)?;
@@ -143,7 +143,7 @@ impl ProjectWorkspace {
             let Some(mappings) = probe_roots.get(&root.key().to_ascii_lowercase()) else {
                 continue;
             };
-            if let Some(probes) = remap_schematic_probes(&source.document.probes, mappings)? {
+            if let Some(probes) = remap_schematic_probes(&source.document().probes, mappings)? {
                 before
                     .entry(key.clone())
                     .or_insert_with(|| (*source).clone());
@@ -161,8 +161,8 @@ impl ProjectWorkspace {
         for (key, source) in &before {
             references.add_instance_renames(
                 &reference_from_key(key)?,
-                &source.document.components,
-                &after[key].document.components,
+                &source.document().components,
+                &after[key].document().components,
             );
         }
         let prepared_references = references.prepare(self, true)?;
@@ -202,8 +202,8 @@ fn hierarchy_reference_paths(
                 .iter()
                 .find(|(key, _)| key.eq_ignore_ascii_case(&reference.key()))
                 .map(|(key, source)| ReferenceComponents {
-                    before: &source.document.components,
-                    after: &after[key].document.components,
+                    before: &source.document().components,
+                    after: &after[key].document().components,
                 })
         },
         emitted,

@@ -521,7 +521,7 @@ impl ProjectFile {
             .iter()
             .map(|key| {
                 let mut masters = self.workspace.schematic_buffers[key]
-                    .document
+                    .document()
                     .components
                     .iter()
                     .filter_map(|component| component.library_cell.as_ref())
@@ -1315,7 +1315,7 @@ impl ProjectFile {
                     "workspace schematic buffer '{key}' disappeared during validation"
                 )));
             };
-            schematic.document.validated_revisions.validate().map_err(|error| {
+            schematic.document().validated_revisions.validate().map_err(|error| {
                 ProjectIoError::InvalidData(format!(
                     "workspace schematic buffer '{key}' has invalid validated revision history: {error}"
                 ))

@@ -127,7 +127,7 @@ pub(super) fn subject(state: &AppState, nets: &[DesignNet]) -> DesignSubject {
     if let Some(id) = selection.single_component() {
         if let Some(port) = state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == id)
@@ -221,7 +221,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
         }
     };
     // A selected label names its net outright.
-    for label in &state.schematic.document.net_labels {
+    for label in &state.schematic.document().net_labels {
         if state.schematic.selection.net_labels.contains(&label.id) && !accept(&label.name) {
             return None;
         }
@@ -247,7 +247,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
             let Some(extracted) = connectivity.net_at(junction.pos).or_else(|| {
                 state
                     .schematic
-                    .document
+                    .document()
                     .wires
                     .iter()
                     .filter(|wire| wire.contains_point(junction.pos))
@@ -280,7 +280,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             || !app
                 .state
                 .schematic
-                .document
+                .document()
                 .components
                 .contains(&session.expected))
     {
@@ -401,7 +401,7 @@ fn sheet_connectivity(state: &AppState) -> SheetConnectivity {
 
     let terminals = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .map(|component| {
@@ -709,7 +709,7 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
     let child_view_count = app
         .state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .filter(|component| {
@@ -776,7 +776,7 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
         "Grid / snap",
         &format!(
             "{} · snap {}",
-            schematic_grid_label(app.state.schematic.document.document_policy.grid_pitch),
+            schematic_grid_label(app.state.schematic.document().document_policy.grid_pitch),
             if app.state.schematic.snap_engine.enabled {
                 "on"
             } else {
@@ -826,7 +826,7 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
     property_row(
         ui,
         "Instances",
-        &app.state.schematic.document.components.len().to_string(),
+        &app.state.schematic.document().components.len().to_string(),
     );
     property_row(ui, "Nets", &nets.len().to_string());
     property_row(
@@ -837,7 +837,7 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
             count => count.to_string(),
         },
     );
-    let probes = app.state.schematic.document.probes.len();
+    let probes = app.state.schematic.document().probes.len();
     property_row(
         ui,
         "Probes",
@@ -1249,7 +1249,7 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
     let selected: Vec<(u64, String, String)> = app
         .state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .filter(|component| app.state.schematic.selection.has_component(component.id))
@@ -1363,7 +1363,7 @@ fn note_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     let Some(note) = app
         .state
         .schematic
-        .document
+        .document()
         .design_notes
         .iter()
         .find(|note| note.id == id)
@@ -1403,7 +1403,7 @@ fn shape_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     let Some(shape) = app
         .state
         .schematic
-        .document
+        .document()
         .documentation_shapes
         .iter()
         .find(|shape| shape.id == id)
@@ -1449,7 +1449,7 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     let Some(probe) = app
         .state
         .schematic
-        .document
+        .document()
         .probes
         .iter()
         .find(|probe| probe.id == id)

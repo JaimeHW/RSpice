@@ -104,7 +104,7 @@ fn selected_rename_target(state: &AppState) -> Option<RenameSelectionTarget> {
     }
     if let Some(id) = schematic.selection.single_component() {
         return schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == id && !component.kind.spice_prefix().is_empty())
@@ -114,7 +114,7 @@ fn selected_rename_target(state: &AppState) -> Option<RenameSelectionTarget> {
     }
     if let Some(id) = schematic.selection.single_net_label() {
         return schematic
-            .document
+            .document()
             .net_labels
             .iter()
             .find(|label| label.id == id)
@@ -123,7 +123,7 @@ fn selected_rename_target(state: &AppState) -> Option<RenameSelectionTarget> {
     }
     if let Some(id) = schematic.selection.single_bus() {
         return schematic
-            .document
+            .document()
             .buses
             .iter()
             .find(|bus| bus.id == id && bus.declaration.is_some())
@@ -367,7 +367,7 @@ fn reference_summary(schematic: &SchematicState, target: &RenameSelectionTarget)
     match target {
         RenameSelectionTarget::Component(component) => {
             let terminals = schematic
-                .document
+                .document()
                 .connections
                 .iter()
                 .filter(|connection| connection.component_id == component.id)
@@ -378,11 +378,11 @@ fn reference_summary(schematic: &SchematicState, target: &RenameSelectionTarget)
         }
         RenameSelectionTarget::NetLabel(label) => {
             let occurrences = schematic
-                .document
+                .document()
                 .net_labels
                 .iter()
                 .filter(
-                    |candidate| match schematic.document.document_policy.net_naming {
+                    |candidate| match schematic.document().document_policy.net_naming {
                         crate::state::NetNamingPolicy::StrictCaseSensitive => {
                             candidate.name == label.name
                         }
@@ -392,7 +392,7 @@ fn reference_summary(schematic: &SchematicState, target: &RenameSelectionTarget)
                     },
                 )
                 .count();
-            let comparison = match schematic.document.document_policy.net_naming {
+            let comparison = match schematic.document().document_policy.net_naming {
                 crate::state::NetNamingPolicy::StrictCaseSensitive => "exact-case",
                 crate::state::NetNamingPolicy::SpiceCompatibleRelaxed => "case-insensitive",
             };
@@ -408,7 +408,7 @@ fn reference_summary(schematic: &SchematicState, target: &RenameSelectionTarget)
         ),
         RenameSelectionTarget::Bus(bus) => {
             let taps = schematic
-                .document
+                .document()
                 .bus_taps
                 .iter()
                 .filter(|tap| tap.bus_id == bus.id)
@@ -466,7 +466,7 @@ fn validate_draft(
     match target {
         RenameSelectionTarget::Component(expected) => {
             let Some(current) = schematic
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|component| component.id == expected.id)
@@ -482,7 +482,7 @@ fn validate_draft(
             if let Err(error) = expected.validate_reference_designator(candidate) {
                 return RenameValidation::Invalid(error);
             }
-            if schematic.document.components.iter().any(|component| {
+            if schematic.document().components.iter().any(|component| {
                 component.id != expected.id && component.name.eq_ignore_ascii_case(candidate)
             }) {
                 return RenameValidation::Invalid(format!(
@@ -496,7 +496,7 @@ fn validate_draft(
         }
         RenameSelectionTarget::NetLabel(expected) => {
             let Some(current) = schematic
-                .document
+                .document()
                 .net_labels
                 .iter()
                 .find(|label| label.id == expected.id)
@@ -511,7 +511,7 @@ fn validate_draft(
             }
             if let Err(reason) = crate::state::NetLabel::validate_name(
                 candidate,
-                schematic.document.document_policy.net_naming,
+                schematic.document().document_policy.net_naming,
             ) {
                 return RenameValidation::Invalid(format!("Net name: {reason}."));
             }
@@ -537,7 +537,7 @@ fn validate_draft(
         }
         RenameSelectionTarget::Bus(expected) => {
             let Some(current) = schematic
-                .document
+                .document()
                 .buses
                 .iter()
                 .find(|bus| bus.id == expected.id)
@@ -590,7 +590,7 @@ fn apply_commit(state: &mut AppState, commit: RenameCommit) -> Result<bool, Stri
         }
         RenameCommit::NetLabel { expected, name } => {
             let Some(current) = schematic
-                .document
+                .document()
                 .net_labels
                 .iter()
                 .find(|label| label.id == expected.id)

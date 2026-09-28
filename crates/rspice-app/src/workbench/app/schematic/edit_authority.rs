@@ -27,9 +27,9 @@ impl SchematicEditAuthority {
             active_schematic_epoch: state.active_schematic_epoch,
             topology_version: state.schematic.topology_version(),
             view_path: state.workspace.active_view.display_path(),
-            grid_size: state.schematic.document.grid_size,
-            document_policy: state.schematic.document.document_policy,
-            snapshot: SchematicSnapshot::capture(&state.schematic.document),
+            grid_size: state.schematic.document().grid_size,
+            document_policy: state.schematic.document().document_policy,
+            snapshot: SchematicSnapshot::capture(&state.schematic.document()),
             selection: state.schematic.selection.clone(),
         }
     }
@@ -64,15 +64,15 @@ impl SchematicEditAuthority {
         if self.view_path != state.workspace.active_view.display_path() {
             return Err(reopen("The active cell/view changed"));
         }
-        if self.grid_size != state.schematic.document.grid_size
-            || self.document_policy != state.schematic.document.document_policy
+        if self.grid_size != state.schematic.document().grid_size
+            || self.document_policy != state.schematic.document().document_policy
         {
             return Err(reopen("The schematic grid or editing policy changed"));
         }
         if self.selection != state.schematic.selection {
             return Err(reopen("The selected-object set changed"));
         }
-        if !self.snapshot.is_equal_document(&state.schematic.document) {
+        if !self.snapshot.is_equal_document(&state.schematic.document()) {
             return Err(reopen("The schematic geometry changed"));
         }
         Ok(())

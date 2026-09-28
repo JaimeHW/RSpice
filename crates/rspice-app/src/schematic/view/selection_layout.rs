@@ -222,7 +222,7 @@ fn selection_layout_targets(
     for id in &selection.components {
         let component = state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == *id)
@@ -239,7 +239,7 @@ fn selection_layout_targets(
     for id in &selection.design_notes {
         let note = state
             .schematic
-            .document
+            .document()
             .design_notes
             .iter()
             .find(|note| note.id == *id)
@@ -256,7 +256,7 @@ fn selection_layout_targets(
     for id in &selection.documentation_shapes {
         let shape = state
             .schematic
-            .document
+            .document()
             .documentation_shapes
             .iter()
             .find(|shape| shape.id == *id)
@@ -273,7 +273,7 @@ fn selection_layout_targets(
     for id in &selection.probes {
         let probe = state
             .schematic
-            .document
+            .document()
             .probes
             .iter()
             .find(|probe| probe.id == *id)

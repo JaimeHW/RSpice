@@ -525,7 +525,7 @@ fn schematic_cursor_summary(
     grid_x: f64,
     grid_y: f64,
 ) -> String {
-    let grid = f64::from(state.schematic.document.grid_size.max(1));
+    let grid = f64::from(state.schematic.document().grid_size.max(1));
     let sheet = crate::schematic::view::drawing_sheet::ActiveDrawingSheet::resolve(state);
     sheet.cursor_status(grid_x * grid, grid_y * grid)
 }
@@ -569,7 +569,7 @@ fn engineering_context_summary(
                     crate::state::ViewType::Symbol => {
                         format!(
                             "x — · y — · grid {}",
-                            app.state.schematic.document.grid_size.max(1)
+                            app.state.schematic.document().grid_size.max(1)
                         )
                     }
                     _ => format!("revision {}", app.state.workspace.project.revision().get()),
@@ -594,7 +594,7 @@ fn engineering_context_summary(
                     }
                     crate::state::ViewType::Symbol => format!(
                         "x {x:.0} · y {y:.0} · grid {}",
-                        app.state.schematic.document.grid_size.max(1)
+                        app.state.schematic.document().grid_size.max(1)
                     ),
                     _ => format!("revision {}", app.state.workspace.project.revision().get()),
                 },
@@ -690,7 +690,7 @@ fn selection_summary(app: &RSpiceApp) -> String {
     if let Some(id) = selection.single_component() {
         app.state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == id)

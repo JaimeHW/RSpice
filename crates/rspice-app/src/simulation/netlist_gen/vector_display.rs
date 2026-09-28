@@ -62,7 +62,7 @@ impl BusNotations {
         let mut by_bus = HashMap::new();
         for sheet in sheets {
             let buses = sheet
-                .document
+                .document()
                 .buses
                 .iter()
                 .filter_map(|bus| bus.declaration.clone());

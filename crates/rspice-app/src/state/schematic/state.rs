@@ -231,6 +231,11 @@ impl Default for SchematicState {
 }
 
 impl SchematicState {
+    /// Read-only access to persisted schematic content.
+    pub(crate) fn document(&self) -> &SchematicDocument {
+        &self.document
+    }
+
     /// Create fresh editor state around an owned document. Saved-file loading
     /// retains its separate legacy runtime defaults in Deserialize.
     pub(crate) fn from_document(document: SchematicDocument) -> Self {

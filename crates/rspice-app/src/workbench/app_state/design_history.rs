@@ -700,9 +700,9 @@ impl AppState {
                 parent_ref: entry.parent_ref,
                 target_schematic_ref: entry.target_schematic_ref,
                 target_open_ref: entry.target_open_ref,
-                before_parent: SchematicSnapshot::capture(&entry.before_parent.document),
-                after_parent: SchematicSnapshot::capture(&entry.after_parent.document),
-                child: SchematicSnapshot::capture(&entry.child.document),
+                before_parent: SchematicSnapshot::capture(&entry.before_parent.document()),
+                after_parent: SchematicSnapshot::capture(&entry.after_parent.document()),
+                child: SchematicSnapshot::capture(&entry.child.document()),
                 child_template: entry.child,
                 target_cell: entry.target_cell,
                 open_views_before: entry.open_views_before,
@@ -776,8 +776,8 @@ impl AppState {
             .into_iter()
             .map(|(reference, before, after)| InstanceRemovalDocument {
                 reference,
-                before: SchematicSnapshot::capture(&before.document),
-                after: SchematicSnapshot::capture(&after.document),
+                before: SchematicSnapshot::capture(&before.document()),
+                after: SchematicSnapshot::capture(&after.document()),
             })
             .filter(|document| !document.before.is_equal(&document.after))
             .collect::<Vec<_>>();
@@ -1724,7 +1724,7 @@ fn restore_placement_binding(schematic: &mut SchematicState, placement: &Strande
 fn placements_of_masters(state: &AppState, masters: &[(String, String)]) -> Vec<StrandedPlacement> {
     let mut stranded = Vec::new();
     for (document, schematic) in &state.workspace.schematic_buffers {
-        for component in &schematic.document.components {
+        for component in &schematic.document().components {
             if component.kind != ComponentType::CellInstance {
                 continue;
             }
@@ -1785,7 +1785,7 @@ fn schematic_option_matches(
     match (observed, expected) {
         (None, None) => true,
         (Some(observed), Some(expected)) => {
-            SchematicSnapshot::capture(&expected.document).is_equal_document(&observed.document)
+            SchematicSnapshot::capture(&expected.document()).is_equal_document(&observed.document())
         }
         _ => false,
     }
@@ -2039,7 +2039,7 @@ impl InstanceRemovalRecord {
 impl InstanceRemovalDocument {
     fn matches(&self, state: &AppState, expected: &SchematicSnapshot) -> bool {
         schematic_for_reference(state, &self.reference)
-            .is_some_and(|schematic| expected.is_equal_document(&schematic.document))
+            .is_some_and(|schematic| expected.is_equal_document(&schematic.document()))
     }
 
     fn restore(&self, state: &mut AppState, snapshot: &SchematicSnapshot) -> Result<(), String> {
@@ -2068,7 +2068,7 @@ fn capture_schematic_map(
 ) -> BTreeMap<String, SchematicSnapshot> {
     schematics
         .into_iter()
-        .map(|(key, schematic)| (key, SchematicSnapshot::capture(&schematic.document)))
+        .map(|(key, schematic)| (key, SchematicSnapshot::capture(&schematic.document())))
         .collect()
 }
 
@@ -2076,14 +2076,14 @@ fn schematic_map_matches(state: &AppState, expected: &BTreeMap<String, Schematic
     let active_key = state.workspace.active_schematic_reference().key();
     expected.iter().all(|(key, snapshot)| {
         if key.eq_ignore_ascii_case(&active_key) {
-            snapshot.is_equal_document(&state.schematic.document)
+            snapshot.is_equal_document(&state.schematic.document())
         } else {
             state
                 .workspace
                 .schematic_buffers
                 .iter()
                 .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
-                .is_some_and(|(_, schematic)| snapshot.is_equal_document(&schematic.document))
+                .is_some_and(|(_, schematic)| snapshot.is_equal_document(&schematic.document()))
         }
     })
 }
@@ -2328,13 +2328,13 @@ fn schematic_matches(
     expected: &SchematicSnapshot,
 ) -> bool {
     if state.workspace.active_schematic_reference() == *reference {
-        expected.is_equal_document(&state.schematic.document)
+        expected.is_equal_document(&state.schematic.document())
     } else {
         state
             .workspace
             .schematic_buffers
             .get(&reference.key())
-            .is_some_and(|schematic| expected.is_equal_document(&schematic.document))
+            .is_some_and(|schematic| expected.is_equal_document(&schematic.document()))
     }
 }
 
@@ -2478,7 +2478,7 @@ fn schematic_references_master(
     target_library: &str,
     target_cell: &str,
 ) -> bool {
-    schematic.document.components.iter().any(|component| {
+    schematic.document().components.iter().any(|component| {
         component.kind == ComponentType::CellInstance
             && component.library_cell.as_ref().is_some_and(|binding| {
                 binding.library == target_library && binding.cell == target_cell

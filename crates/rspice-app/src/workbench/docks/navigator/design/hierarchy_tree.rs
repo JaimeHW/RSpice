@@ -296,7 +296,7 @@ struct PlacedInstance {
 fn placed_instances(projection: &DesignProjection, master: &CellViewRef) -> Vec<PlacedInstance> {
     materialized(projection, master).map_or_else(Vec::new, |schematic| {
         schematic
-            .document
+            .document()
             .components
             .iter()
             .filter(|component| component.kind == ComponentType::CellInstance)
@@ -318,7 +318,7 @@ fn placed_instances(projection: &DesignProjection, master: &CellViewRef) -> Vec<
 /// show.
 fn places_instances(projection: &DesignProjection, master: &CellViewRef) -> bool {
     materialized(projection, master).is_some_and(|schematic| {
-        schematic.document.components.iter().any(|component| {
+        schematic.document().components.iter().any(|component| {
             component.kind == ComponentType::CellInstance && component.library_cell.is_some()
         })
     })
@@ -925,7 +925,7 @@ fn occurrence_context_menu(response: &Response, app: &mut RSpiceApp, row: &Occur
     let Some(object) = app
         .state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.name.eq_ignore_ascii_case(&row.label))

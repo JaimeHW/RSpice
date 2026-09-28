@@ -511,27 +511,45 @@ fn state_sheet_name(state: &AppState, id: SheetId) -> String {
 fn live_object_ids(state: &AppState) -> Vec<u64> {
     let schematic = &state.schematic;
     let mut ids = std::collections::BTreeSet::new();
-    ids.extend(schematic.document.components.iter().map(|object| object.id));
-    ids.extend(schematic.document.wires.iter().map(|object| object.id));
-    ids.extend(schematic.document.buses.iter().map(|object| object.id));
-    ids.extend(schematic.document.bus_taps.iter().map(|object| object.id));
-    ids.extend(schematic.document.junctions.iter().map(|object| object.id));
-    ids.extend(schematic.document.net_labels.iter().map(|object| object.id));
     ids.extend(
         schematic
-            .document
+            .document()
+            .components
+            .iter()
+            .map(|object| object.id),
+    );
+    ids.extend(schematic.document().wires.iter().map(|object| object.id));
+    ids.extend(schematic.document().buses.iter().map(|object| object.id));
+    ids.extend(schematic.document().bus_taps.iter().map(|object| object.id));
+    ids.extend(
+        schematic
+            .document()
+            .junctions
+            .iter()
+            .map(|object| object.id),
+    );
+    ids.extend(
+        schematic
+            .document()
+            .net_labels
+            .iter()
+            .map(|object| object.id),
+    );
+    ids.extend(
+        schematic
+            .document()
             .design_notes
             .iter()
             .map(|object| object.id),
     );
     ids.extend(
         schematic
-            .document
+            .document()
             .documentation_shapes
             .iter()
             .map(|object| object.id),
     );
-    ids.extend(schematic.document.probes.iter().map(|object| object.id));
+    ids.extend(schematic.document().probes.iter().map(|object| object.id));
     ids.into_iter().collect()
 }
 

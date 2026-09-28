@@ -59,9 +59,14 @@ pub(crate) fn create_hierarchy_available(state: &AppState) -> bool {
         && !state.schematic.selection.components.is_empty()
         && state.schematic.selection.count() == state.schematic.selection.components.len()
         && state.schematic.selection.components.iter().all(|id| {
-            state.schematic.document.components.iter().any(|component| {
-                component.id == *id && component.kind != crate::state::ComponentType::Port
-            })
+            state
+                .schematic
+                .document()
+                .components
+                .iter()
+                .any(|component| {
+                    component.id == *id && component.kind != crate::state::ComponentType::Port
+                })
         })
 }
 
@@ -425,7 +430,7 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
         }
         NetLabel::validate_name(
             draft.name.trim(),
-            state.schematic.document.document_policy.net_naming,
+            state.schematic.document().document_policy.net_naming,
         )
         .map_err(|error| format!("Port '{}': {error}", draft.name.trim()))?;
         if !names.insert(draft.name.trim().to_ascii_lowercase()) {
@@ -490,14 +495,14 @@ fn source_plan(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
     let symbols = SchematicSymbolContext::from_state(state);
     let component_bounds = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .map(|component| (component.id, symbols.component_bounds_tuple(component)))
         .collect::<std::collections::HashMap<_, _>>();
     let terminals = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .flat_map(|component| {
@@ -551,7 +556,7 @@ pub(in crate::workbench) fn selected_component_sheet_move_plan(
     }
     source_plan(state)?
         .sheet_move_connectivity(
-            &state.schematic.document,
+            &state.schematic.document(),
             state.schematic.topology_version(),
         )
         .map_err(|error| error.to_string())
@@ -574,7 +579,7 @@ fn resolved_terminal_contract(
         return fallback;
     };
     master
-        .document
+        .document()
         .components
         .iter()
         .filter_map(|port| port.port_contract().map(|contract| (port, contract)))
@@ -777,7 +782,7 @@ fn source_schematic_with_canonical_connections(state: &AppState) -> crate::state
     let symbols = SchematicSymbolContext::from_state(state);
     let terminals = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .flat_map(|component| {

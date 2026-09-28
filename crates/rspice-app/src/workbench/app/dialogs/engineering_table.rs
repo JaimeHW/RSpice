@@ -651,7 +651,7 @@ impl RSpiceApp {
         let target = parse_id("component-")
             .filter(|id| {
                 schematic
-                    .document
+                    .document()
                     .components
                     .iter()
                     .any(|object| object.id == *id)
@@ -661,7 +661,7 @@ impl RSpiceApp {
                 parse_id("wire-")
                     .filter(|id| {
                         schematic
-                            .document
+                            .document()
                             .wires
                             .iter()
                             .any(|object| object.id == *id)
@@ -672,7 +672,7 @@ impl RSpiceApp {
                 parse_id("net-label-")
                     .filter(|id| {
                         schematic
-                            .document
+                            .document()
                             .net_labels
                             .iter()
                             .any(|object| object.id == *id)
@@ -683,7 +683,7 @@ impl RSpiceApp {
                 parse_id("bus-")
                     .filter(|id| {
                         schematic
-                            .document
+                            .document()
                             .buses
                             .iter()
                             .any(|object| object.id == *id)
@@ -694,7 +694,7 @@ impl RSpiceApp {
                 parse_id("bus-tap-")
                     .filter(|id| {
                         schematic
-                            .document
+                            .document()
                             .bus_taps
                             .iter()
                             .any(|object| object.id == *id)
@@ -704,7 +704,7 @@ impl RSpiceApp {
             .or_else(|| {
                 parse_id("junction-").and_then(|id| {
                     schematic
-                        .document
+                        .document()
                         .junctions
                         .iter()
                         .find(|object| object.id == id)

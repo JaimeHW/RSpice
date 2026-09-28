@@ -34,10 +34,14 @@ impl ProjectWorkspace {
             .schematic_buffers
             .iter()
             .flat_map(|(key, schematic)| {
-                schematic.document.components.iter().map(move |component| {
-                    crate::state::SchematicObjectKey::new(key, component.id)
-                        .map(|object| (object, component.name.as_str()))
-                })
+                schematic
+                    .document()
+                    .components
+                    .iter()
+                    .map(move |component| {
+                        crate::state::SchematicObjectKey::new(key, component.id)
+                            .map(|object| (object, component.name.as_str()))
+                    })
             })
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())?;

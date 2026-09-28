@@ -40,7 +40,7 @@ pub(crate) fn open_grid_snap_routing_dialog(state: &mut AppState) -> bool {
     }
 
     let spacing = if state.schematic.snap_engine.enabled {
-        GridSnapSpacingChoice::from_pitch(state.schematic.document.document_policy.grid_pitch)
+        GridSnapSpacingChoice::from_pitch(state.schematic.document().document_policy.grid_pitch)
     } else {
         GridSnapSpacingChoice::Free
     };
@@ -132,7 +132,7 @@ fn commit_grid_snap_routing(state: &mut AppState) -> Result<(), GridSnapRoutingC
 
     let requested_pitch = transaction.draft.snap_spacing.pitch();
     let pitch_changed = requested_pitch
-        .is_some_and(|pitch| pitch != state.schematic.document.document_policy.grid_pitch);
+        .is_some_and(|pitch| pitch != state.schematic.document().document_policy.grid_pitch);
     if pitch_changed && state.schematic_edit_read_only() {
         return Err(GridSnapRoutingCommitError::new(
             "Snap spacing is project-owned and cannot be changed in this read-only view.",
@@ -151,7 +151,7 @@ fn commit_grid_snap_routing(state: &mut AppState) -> Result<(), GridSnapRoutingC
     let mut snap_engine = transaction.draft.snap_engine.clone();
     snap_engine.enabled = requested_pitch.is_some();
     snap_engine.grid_size = requested_pitch
-        .unwrap_or(state.schematic.document.document_policy.grid_pitch)
+        .unwrap_or(state.schematic.document().document_policy.grid_pitch)
         .canvas_grid_size();
     let routing_mode = canonical_routing_mode(
         transaction.draft.wire_routing,

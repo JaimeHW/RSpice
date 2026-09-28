@@ -12,7 +12,7 @@ pub(super) fn extract_checked_design(
     hierarchy: &HierarchySource<'_>,
 ) -> (Vec<ComponentInfo>, ExtractedConnectivity) {
     let connectivity = super::netlist_gen::extraction::extract(schematic, Some(hierarchy));
-    let components = extract_components(&schematic.document, &connectivity, |comp| {
+    let components = extract_components(&schematic.document(), &connectivity, |comp| {
         if comp.kind != ComponentType::CellInstance {
             return Some(true);
         }
@@ -43,7 +43,7 @@ pub fn run_drc_check_with_hierarchy_and_config(
     hierarchy: &HierarchySource<'_>,
     config: DrcConfig,
 ) -> DrcResult {
-    rspice_design::drc::run_check(&schematic.document, config, || {
+    rspice_design::drc::run_check(&schematic.document(), config, || {
         extract_checked_design(schematic, hierarchy)
     })
 }

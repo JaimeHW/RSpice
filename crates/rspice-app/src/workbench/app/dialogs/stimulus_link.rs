@@ -141,7 +141,7 @@ fn stimulus_link_target(state: &AppState, component_id: u64) -> Option<&Componen
     }
     state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == component_id)
@@ -369,7 +369,7 @@ pub(crate) fn render_stimulus_link_dialog(ctx: &Context, state: &mut AppState) {
     let session = state.dialogs.stimulus_link.clone();
     let Some(component) = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == session.component_id)
@@ -398,7 +398,7 @@ pub(crate) fn commit_adoption(
 ) -> Result<String, String> {
     let expected = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == component_id)
@@ -484,7 +484,7 @@ pub(crate) fn commit_readoption(
         .ok_or_else(|| format!("This project defines no '{definition}' to re-adopt."))?;
     let expected = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == component_id)
@@ -506,7 +506,7 @@ fn commit_extraction(state: &mut AppState, component_id: u64) -> Result<String, 
     let session = state.dialogs.stimulus_link.clone();
     let expected = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == component_id)

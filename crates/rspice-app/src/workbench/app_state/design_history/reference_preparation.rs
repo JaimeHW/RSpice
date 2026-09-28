@@ -62,7 +62,7 @@ impl AppState {
             candidate
                 .document
                 .probes
-                .clone_from(&source.document.probes);
+                .clone_from(&source.document().probes);
             sources.insert(key.clone(), source.clone());
             candidates.insert(key.clone(), candidate);
         }

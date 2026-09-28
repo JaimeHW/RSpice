@@ -339,7 +339,7 @@ pub(super) fn validate_design_management_page(
             }
             let selected_components = state
                 .schematic
-                .document
+                .document()
                 .components
                 .iter()
                 .filter(|component| dialog.selection_object_ids.contains(&component.id))
@@ -378,7 +378,7 @@ pub(super) fn validate_design_management_page(
             }
         }
         DesignManagementPage::RenumberPreview => {
-            if state.schematic.document.components.is_empty() {
+            if state.schematic.document().components.is_empty() {
                 return Err("The active schematic has no instances to annotate.".to_owned());
             }
         }

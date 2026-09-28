@@ -347,14 +347,14 @@ fn build_report(
     // the document the canvas paints: a materialized page carries namespaced
     // coordinates that would scroll the editor off the design.
     let bus_analysis =
-        rspice_design::connectivity::bus::analyze_bus_connectivity(&state.schematic.document);
+        rspice_design::connectivity::bus::analyze_bus_connectivity(&state.schematic.document());
     let nets = design_nets
         .iter()
         .map(|net| build_net_row(net, subject, &drc))
         .collect();
     let buses = state
         .schematic
-        .document
+        .document()
         .buses
         .iter()
         .map(|bus| {
@@ -366,7 +366,7 @@ fn build_report(
                 .collect::<Vec<_>>();
             let taps = state
                 .schematic
-                .document
+                .document()
                 .bus_taps
                 .iter()
                 .filter(|tap| tap.bus_id == bus.id)
@@ -481,7 +481,7 @@ fn endpoint_contract(net: &DesignNet, schematic: &SchematicState) -> (usize, usi
     let mut disciplines = BTreeSet::new();
     for terminal in &net.terminals {
         let Some(component) = schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == terminal.component_id)
@@ -550,7 +550,7 @@ fn build_global_rows(
     for (view_key, schematic) in projection.schematic_buffers() {
         let nets = projection_nets(&state.library_manager, projection, view_key);
         nets_by_view.insert(view_key.clone(), nets);
-        for label in &schematic.document.net_labels {
+        for label in &schematic.document().net_labels {
             let occurrence = LabelOccurrence {
                 view_key: view_key.clone(),
                 id: label.id,
@@ -830,7 +830,7 @@ fn endpoint_choices_for_violation(
     };
     let Some(component) = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == *id)
@@ -847,14 +847,14 @@ fn endpoint_choices_for_violation(
     };
 
     let mut destinations = BTreeMap::<(i32, i32), String>::new();
-    for wire in &state.schematic.document.wires {
+    for wire in &state.schematic.document().wires {
         for point in &wire.points {
             destinations
                 .entry((point.x, point.y))
                 .or_insert_with(|| format!("Wire #{} at {}, {}", wire.id, point.x, point.y));
         }
     }
-    for junction in &state.schematic.document.junctions {
+    for junction in &state.schematic.document().junctions {
         destinations
             .entry((junction.pos.x, junction.pos.y))
             .or_insert_with(|| {
@@ -864,12 +864,12 @@ fn endpoint_choices_for_violation(
                 )
             });
     }
-    for label in &state.schematic.document.net_labels {
+    for label in &state.schematic.document().net_labels {
         destinations
             .entry((label.pos.x, label.pos.y))
             .or_insert_with(|| format!("Net {} at {}, {}", label.name, label.pos.x, label.pos.y));
     }
-    for other in &state.schematic.document.components {
+    for other in &state.schematic.document().components {
         for (name, point) in symbol_context.named_terminal_points(other) {
             if other.id == *id && point == start {
                 continue;
@@ -1158,7 +1158,13 @@ impl RSpiceApp {
                     .highlight_wires(wire_ids.iter().copied().collect::<HashSet<_>>());
                 schematic.center_request = wire_ids
                     .first()
-                    .and_then(|id| schematic.document.wires.iter().find(|wire| wire.id == *id))
+                    .and_then(|id| {
+                        schematic
+                            .document()
+                            .wires
+                            .iter()
+                            .find(|wire| wire.id == *id)
+                    })
                     .and_then(|wire| wire.points.first().copied());
             }
             RevealTarget::Bus { id, point } => {
@@ -1172,7 +1178,7 @@ impl RSpiceApp {
             RevealTarget::Label { view_key: _, id } => {
                 schematic.selection.select_only_net_label(id);
                 schematic.center_request = schematic
-                    .document
+                    .document()
                     .net_labels
                     .iter()
                     .find(|label| label.id == id)
@@ -1217,7 +1223,7 @@ impl RSpiceApp {
         if !selected.is_empty() {
             candidate.recalculate_runtime_state();
             validate_repair_candidate(&self.state, &candidate, &dialog.report.drc)?;
-            let after = SchematicSnapshot::capture(&candidate.document);
+            let after = SchematicSnapshot::capture(&candidate.document());
             let changed = self.state.schematic.with_undo(
                 "apply reviewed connectivity repairs",
                 move |schematic| {
@@ -1337,11 +1343,11 @@ fn connectivity_authority_error(state: &AppState) -> Option<String> {
         || authority.active_schematic_epoch != state.active_schematic_epoch
         || authority.topology_version != state.schematic.topology_version()
         || authority.view_path != state.workspace.active_view.display_path()
-        || authority.grid_size != state.schematic.document.grid_size
-        || authority.document_policy != state.schematic.document.document_policy
+        || authority.grid_size != state.schematic.document().grid_size
+        || authority.document_policy != state.schematic.document().document_policy
         || !authority
             .snapshot
-            .is_equal_document(&state.schematic.document)
+            .is_equal_document(&state.schematic.document())
         || state.dialogs.connectivity_manager.contract_at_open != state.workspace.connectivity;
     stale.then(|| {
         "The design changed after this report was extracted. Refresh the report before applying repairs or creating a bus.".to_owned()
@@ -1378,7 +1384,7 @@ fn apply_repair_to_candidate(
         Some(ConnectivityRepairAction::RenameLabels { canonical, labels }) => {
             crate::state::NetLabel::validate_name(
                 canonical,
-                candidate.document.document_policy.net_naming,
+                candidate.document().document_policy.net_naming,
             )
             .map_err(|error| format!("Canonical global name is invalid: {error}."))?;
             for (id, expected) in labels {
@@ -1432,12 +1438,13 @@ fn validate_repair_candidate(
         }
     }
     let before_bus =
-        rspice_design::connectivity::bus::analyze_bus_connectivity(&state.schematic.document)
+        rspice_design::connectivity::bus::analyze_bus_connectivity(&state.schematic.document())
             .diagnostics
             .len();
-    let after_bus = rspice_design::connectivity::bus::analyze_bus_connectivity(&candidate.document)
-        .diagnostics
-        .len();
+    let after_bus =
+        rspice_design::connectivity::bus::analyze_bus_connectivity(&candidate.document())
+            .diagnostics
+            .len();
     if after_bus > before_bus {
         return Err(
             "Candidate validation introduced a new typed-bus diagnostic; no changes were applied."
@@ -1467,7 +1474,7 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
         DrcLocation::Component { id, .. } => {
             schematic.selection.select_only_component(*id);
             schematic.center_request = schematic
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|component| component.id == *id)
@@ -1476,7 +1483,7 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
         DrcLocation::Wire { id } => {
             schematic.selection.select_only_wire(*id);
             schematic.center_request = schematic
-                .document
+                .document()
                 .wires
                 .iter()
                 .find(|wire| wire.id == *id)
@@ -1485,7 +1492,7 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
         DrcLocation::Bus { id } => {
             schematic.selection.select_only_bus(*id);
             schematic.center_request = schematic
-                .document
+                .document()
                 .buses
                 .iter()
                 .find(|bus| bus.id == *id)
@@ -1494,7 +1501,7 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
         DrcLocation::BusTap { id } => {
             schematic.selection.select_only_bus_tap(*id);
             schematic.center_request = schematic
-                .document
+                .document()
                 .bus_taps
                 .iter()
                 .find(|tap| tap.id == *id)
@@ -1502,7 +1509,7 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
         }
         DrcLocation::NetLabel { name } => {
             if let Some(label) = schematic
-                .document
+                .document()
                 .net_labels
                 .iter()
                 .find(|label| label.name == *name)
@@ -1515,7 +1522,7 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
         }
         DrcLocation::Node { net_name } => {
             if let Some(label) = schematic
-                .document
+                .document()
                 .net_labels
                 .iter()
                 .find(|label| label.name.eq_ignore_ascii_case(net_name))

@@ -285,7 +285,7 @@ impl SimulationController {
         let mut config = op.to_config()?;
         config.selected_devices = state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .filter(|component| state.schematic.selection.has_component(component.id))

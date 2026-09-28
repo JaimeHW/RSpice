@@ -48,7 +48,7 @@ pub(crate) fn independent_source_card(
 
 impl<'a> NetlistGenerator<'a> {
     pub(super) fn validate_instance_parameters(&mut self) -> bool {
-        for component in &self.schematic.document.components {
+        for component in &self.schematic.document().components {
             if let Err(error) =
                 crate::state::params_string::validate_parameter_text(&component.params)
             {
@@ -64,7 +64,7 @@ impl<'a> NetlistGenerator<'a> {
     pub(super) fn generate_instances(&mut self) {
         self.lines.push("* Circuit netlist".to_string());
 
-        for component in &self.schematic.document.components {
+        for component in &self.schematic.document().components {
             if component.kind == ComponentType::Ground
                 || component.kind == ComponentType::CoupledInductor
                 || component.kind == ComponentType::Transformer

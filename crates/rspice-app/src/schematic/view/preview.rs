@@ -156,10 +156,10 @@ fn draw_move_selection_preview(
     };
 
     if valid {
-        for wire in candidate.document.wires.iter().filter(|candidate_wire| {
+        for wire in candidate.document().wires.iter().filter(|candidate_wire| {
             state
                 .schematic
-                .document
+                .document()
                 .wires
                 .iter()
                 .find(|wire| wire.id == candidate_wire.id)
@@ -167,10 +167,10 @@ fn draw_move_selection_preview(
         }) {
             draw_wire(painter, viewport, wire, true, None);
         }
-        for bus in candidate.document.buses.iter().filter(|candidate_bus| {
+        for bus in candidate.document().buses.iter().filter(|candidate_bus| {
             state
                 .schematic
-                .document
+                .document()
                 .buses
                 .iter()
                 .find(|bus| bus.id == candidate_bus.id)
@@ -178,25 +178,30 @@ fn draw_move_selection_preview(
         }) {
             draw_bus(painter, viewport, bus, true);
         }
-        for tap in candidate.document.bus_taps.iter().filter(|candidate_tap| {
-            state
-                .schematic
-                .document
-                .bus_taps
-                .iter()
-                .find(|tap| tap.id == candidate_tap.id)
-                != Some(*candidate_tap)
-        }) {
+        for tap in candidate
+            .document()
+            .bus_taps
+            .iter()
+            .filter(|candidate_tap| {
+                state
+                    .schematic
+                    .document()
+                    .bus_taps
+                    .iter()
+                    .find(|tap| tap.id == candidate_tap.id)
+                    != Some(*candidate_tap)
+            })
+        {
             draw_bus_tap(painter, viewport, tap, true);
         }
         for component in candidate
-            .document
+            .document()
             .components
             .iter()
             .filter(|candidate_component| {
                 state
                     .schematic
-                    .document
+                    .document()
                     .components
                     .iter()
                     .find(|component| component.id == candidate_component.id)
@@ -214,13 +219,13 @@ fn draw_move_selection_preview(
             );
         }
         for junction in candidate
-            .document
+            .document()
             .junctions
             .iter()
             .filter(|candidate_junction| {
                 !state
                     .schematic
-                    .document
+                    .document()
                     .junctions
                     .iter()
                     .any(|junction| junction == *candidate_junction)
@@ -229,13 +234,13 @@ fn draw_move_selection_preview(
             draw_junction(painter, viewport, junction.pos, state);
         }
         for label in candidate
-            .document
+            .document()
             .net_labels
             .iter()
             .filter(|candidate_label| {
                 state
                     .schematic
-                    .document
+                    .document()
                     .net_labels
                     .iter()
                     .find(|label| label.id == candidate_label.id)
@@ -245,13 +250,13 @@ fn draw_move_selection_preview(
             draw_net_label(painter, viewport, label, true, false, true);
         }
         for note in candidate
-            .document
+            .document()
             .design_notes
             .iter()
             .filter(|candidate_note| {
                 state
                     .schematic
-                    .document
+                    .document()
                     .design_notes
                     .iter()
                     .find(|note| note.id == candidate_note.id)
@@ -261,13 +266,13 @@ fn draw_move_selection_preview(
             draw_design_note(painter, viewport, note, state, true, false);
         }
         for shape in candidate
-            .document
+            .document()
             .documentation_shapes
             .iter()
             .filter(|candidate_shape| {
                 state
                     .schematic
-                    .document
+                    .document()
                     .documentation_shapes
                     .iter()
                     .find(|shape| shape.id == candidate_shape.id)
@@ -335,7 +340,7 @@ fn draw_stretch_selection_preview(
     for wire in candidate.wires.iter().filter(|candidate_wire| {
         state
             .schematic
-            .document
+            .document()
             .wires
             .iter()
             .find(|wire| wire.id == candidate_wire.id)
@@ -346,7 +351,7 @@ fn draw_stretch_selection_preview(
     for bus in candidate.buses.iter().filter(|candidate_bus| {
         state
             .schematic
-            .document
+            .document()
             .buses
             .iter()
             .find(|bus| bus.id == candidate_bus.id)
@@ -357,7 +362,7 @@ fn draw_stretch_selection_preview(
     for tap in candidate.bus_taps.iter().filter(|candidate_tap| {
         state
             .schematic
-            .document
+            .document()
             .bus_taps
             .iter()
             .find(|tap| tap.id == candidate_tap.id)
@@ -371,7 +376,7 @@ fn draw_stretch_selection_preview(
         .filter(|candidate_shape| {
             state
                 .schematic
-                .document
+                .document()
                 .documentation_shapes
                 .iter()
                 .find(|shape| shape.id == candidate_shape.id)
@@ -702,18 +707,18 @@ fn draw_junction_preview(
 
     let requested = resolve_grid_pointer(state, viewport, hover_pos).snapped_position;
     let active_wires =
-        objects_on_active_sheet(state, &state.schematic.document.wires, |item| item.id);
+        objects_on_active_sheet(state, &state.schematic.document().wires, |item| item.id);
     let mut hit_schematic = crate::state::SchematicState::default();
     hit_schematic.document.wires = active_wires.into_owned();
     let candidate =
-        hit_schematic.nearest_junction_candidate(requested, state.schematic.document.grid_size);
+        hit_schematic.nearest_junction_candidate(requested, state.schematic.document().grid_size);
     let preview = candidate.unwrap_or(requested);
     let pos = viewport.schematic_to_screen(preview);
     let palette = crate::ui::tokens::active_palette();
     let mixed_bus = candidate.is_some_and(|point| {
         state
             .schematic
-            .document
+            .document()
             .buses
             .iter()
             .any(|bus| object_is_on_active_sheet(state, bus.id) && bus.contains_point(point))
@@ -882,7 +887,7 @@ fn resolve_wire_preview_snap(
         ));
     }
     let active_wires =
-        objects_on_active_sheet(state, &state.schematic.document.wires, |wire| wire.id);
+        objects_on_active_sheet(state, &state.schematic.document().wires, |wire| wire.id);
     let Some(hit) = nearest_wire_screen_hit(
         viewport,
         active_wires.as_ref(),
@@ -1003,7 +1008,7 @@ fn wire_snap_feedback_copy(state: &AppState, result: &SnapResult) -> Option<Stri
         } => {
             let component = state
                 .schematic
-                .document
+                .document()
                 .components
                 .iter()
                 .find(|component| component.id == *component_id);
@@ -1035,7 +1040,7 @@ fn wire_snap_feedback_copy(state: &AppState, result: &SnapResult) -> Option<Stri
 fn net_name_at_snap_target(state: &AppState, target: Point) -> Option<&str> {
     state
         .schematic
-        .document
+        .document()
         .net_labels
         .iter()
         .find(|label| {
@@ -1047,7 +1052,7 @@ fn net_name_at_snap_target(state: &AppState, target: Point) -> Option<&str> {
         .or_else(|| {
             state
                 .schematic
-                .document
+                .document()
                 .wires
                 .iter()
                 .filter(|wire| {
@@ -1056,7 +1061,7 @@ fn net_name_at_snap_target(state: &AppState, target: Point) -> Option<&str> {
                 .find_map(|wire| {
                     state
                         .schematic
-                        .document
+                        .document()
                         .net_labels
                         .iter()
                         .find(|label| {

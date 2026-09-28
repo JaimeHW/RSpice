@@ -201,30 +201,42 @@ impl ProjectWorkspace {
             return Ok(None);
         };
         let live_object_ids = schematic
-            .document
+            .document()
             .components
             .iter()
             .map(|object| object.id)
-            .chain(schematic.document.wires.iter().map(|object| object.id))
-            .chain(schematic.document.buses.iter().map(|object| object.id))
-            .chain(schematic.document.bus_taps.iter().map(|object| object.id))
-            .chain(schematic.document.junctions.iter().map(|object| object.id))
-            .chain(schematic.document.net_labels.iter().map(|object| object.id))
+            .chain(schematic.document().wires.iter().map(|object| object.id))
+            .chain(schematic.document().buses.iter().map(|object| object.id))
+            .chain(schematic.document().bus_taps.iter().map(|object| object.id))
             .chain(
                 schematic
-                    .document
+                    .document()
+                    .junctions
+                    .iter()
+                    .map(|object| object.id),
+            )
+            .chain(
+                schematic
+                    .document()
+                    .net_labels
+                    .iter()
+                    .map(|object| object.id),
+            )
+            .chain(
+                schematic
+                    .document()
                     .design_notes
                     .iter()
                     .map(|object| object.id),
             )
             .chain(
                 schematic
-                    .document
+                    .document()
                     .documentation_shapes
                     .iter()
                     .map(|object| object.id),
             )
-            .chain(schematic.document.probes.iter().map(|object| object.id))
+            .chain(schematic.document().probes.iter().map(|object| object.id))
             .collect::<Vec<_>>();
 
         let mut candidate = self.design_management.clone();
@@ -512,7 +524,7 @@ impl ProjectWorkspace {
             .transpose()?;
         if let Some(resolved) = &active_variant {
             let mut do_not_populate = HashSet::new();
-            for component in &projected.document.components {
+            for component in &projected.document().components {
                 if matches!(
                     resolved.override_for(cell_view_key, component.id)?,
                     Some(crate::state::VariantObjectOverride::DoNotPopulate { .. })
@@ -540,7 +552,7 @@ impl ProjectWorkspace {
             BTreeMap::new()
         } else {
             let sources = projected
-                .document
+                .document()
                 .components
                 .iter()
                 .map(|component| {

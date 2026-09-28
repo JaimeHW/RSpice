@@ -2119,7 +2119,7 @@ fn default_dut_path_for_root(
             .map(|(_, schematic)| schematic)
     }?;
     schematic
-        .document
+        .document()
         .components
         .iter()
         .filter(|component| component.kind == crate::state::ComponentType::CellInstance)

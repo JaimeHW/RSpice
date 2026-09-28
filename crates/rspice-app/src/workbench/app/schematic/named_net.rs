@@ -78,7 +78,7 @@ pub(crate) fn selected_named_net_target(state: &AppState) -> Option<NamedNetTarg
     let selected_port = selection.single_component().and_then(|id| {
         state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == id && component.kind == ComponentType::Port)
@@ -178,7 +178,7 @@ fn capture_target(
     let membership = NetMembership::resolve(schematic, &wire_ids, &seeds);
 
     let mut labels = schematic
-        .document
+        .document()
         .net_labels
         .iter()
         .filter(|label| {
@@ -190,7 +190,7 @@ fn capture_target(
     labels.sort_by_key(|label| label.id);
 
     let mut ports = schematic
-        .document
+        .document()
         .components
         .iter()
         .filter(|component| component.kind == ComponentType::Port)
@@ -215,7 +215,7 @@ fn capture_target(
                 .iter()
                 .find_map(|id| {
                     schematic
-                        .document
+                        .document()
                         .wires
                         .iter()
                         .find(|wire| wire.id == *id)
@@ -266,7 +266,7 @@ pub(crate) fn validate_named_net_rename(
     if candidate.is_empty() {
         return Err("Enter a non-empty net name.".to_owned());
     }
-    NetLabel::validate_name(candidate, schematic.document.document_policy.net_naming)
+    NetLabel::validate_name(candidate, schematic.document().document_policy.net_naming)
         .map_err(|reason| format!("Net name: {reason}."))?;
     reject_external_name_collision(schematic, target, candidate)?;
     Ok(candidate.to_owned())
@@ -288,7 +288,7 @@ fn validate_target_is_current(
         .collect::<HashSet<_>>();
     for expected in &target.labels {
         let Some(current) = schematic
-            .document
+            .document()
             .net_labels
             .iter()
             .find(|label| label.id == expected.id)
@@ -301,7 +301,7 @@ fn validate_target_is_current(
     }
     for expected in &target.ports {
         let Some(current) = schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == expected.id)
@@ -317,7 +317,7 @@ fn validate_target_is_current(
     if target
         .wire_ids
         .iter()
-        .any(|id| !schematic.document.wires.iter().any(|wire| wire.id == *id))
+        .any(|id| !schematic.document().wires.iter().any(|wire| wire.id == *id))
     {
         return Err("The selected conductor geometry changed while editing.".to_owned());
     }
@@ -327,13 +327,13 @@ fn validate_target_is_current(
         .filter_map(port_terminal)
         .collect::<Vec<_>>();
     let membership = NetMembership::resolve(schematic, &target.wire_ids, &seeds);
-    if schematic.document.net_labels.iter().any(|label| {
+    if schematic.document().net_labels.iter().any(|label| {
         !label_ids.contains(&label.id)
             && (net_name_eq(&label.name, &target.name) || membership.contains(label.pos))
     }) {
         return Err("The naming-label set for the selected net changed while editing.".to_owned());
     }
-    if schematic.document.components.iter().any(|component| {
+    if schematic.document().components.iter().any(|component| {
         if component.kind != ComponentType::Port || port_ids.contains(&component.id) {
             return false;
         }
@@ -361,7 +361,7 @@ fn reject_external_name_collision(
         .map(|label| label.id)
         .collect::<HashSet<_>>();
     if schematic
-        .document
+        .document()
         .net_labels
         .iter()
         .any(|label| !label_ids.contains(&label.id) && net_name_eq(&label.name, candidate))
@@ -375,7 +375,7 @@ fn reject_external_name_collision(
         .iter()
         .map(|port| port.id)
         .collect::<HashSet<_>>();
-    if schematic.document.components.iter().any(|component| {
+    if schematic.document().components.iter().any(|component| {
         !port_ids.contains(&component.id)
             && component
                 .port_spec()

@@ -211,7 +211,7 @@ impl<'a> HierarchySource<'a> {
             .schematic_buffers
             .into_iter()
             .flat_map(|buffers| buffers.values())
-            .flat_map(|schematic| schematic.document.net_labels.iter())
+            .flat_map(|schematic| schematic.document().net_labels.iter())
             .filter(|label| label.name.ends_with('!'))
             .map(|label| label.name.clone())
             .collect::<Vec<_>>();

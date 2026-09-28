@@ -265,7 +265,7 @@ fn clicked_source(state: &AppState) -> Option<&crate::state::Component> {
     let id = state.schematic.selection.single_component()?;
     state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.id == id)
@@ -455,7 +455,7 @@ fn capture_pointer_target(
     symbol_context: &SchematicSymbolContext,
 ) -> Option<egui::Pos2> {
     let pos = response.interact_pointer_pos()?;
-    let grid_pos = screen_to_grid(viewport, state.schematic.document.grid_size, pos);
+    let grid_pos = screen_to_grid(viewport, state.schematic.document().grid_size, pos);
     let hit_pos = screen_to_schematic(viewport, pos);
     let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
     let target = select_pointer_target(
@@ -594,7 +594,7 @@ fn keyboard_target(
     if let Some(id) = state.schematic.selection.single_bus_tap()
         && let Some(tap) = state
             .schematic
-            .document
+            .document()
             .bus_taps
             .iter()
             .find(|item| item.id == id)
@@ -604,7 +604,7 @@ fn keyboard_target(
     if let Some(id) = state.schematic.selection.single_net_label()
         && let Some(label) = state
             .schematic
-            .document
+            .document()
             .net_labels
             .iter()
             .find(|item| item.id == id)
@@ -614,7 +614,7 @@ fn keyboard_target(
     if let Some(id) = state.schematic.selection.single_bus()
         && let Some(bus) = state
             .schematic
-            .document
+            .document()
             .buses
             .iter()
             .find(|item| item.id == id)
@@ -625,7 +625,7 @@ fn keyboard_target(
     if let Some(id) = state.schematic.selection.single_component()
         && let Some(component) = state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|item| item.id == id)
@@ -635,7 +635,7 @@ fn keyboard_target(
     if let Some(id) = state.schematic.selection.single_wire()
         && let Some(wire) = state
             .schematic
-            .document
+            .document()
             .wires
             .iter()
             .find(|item| item.id == id)
@@ -649,7 +649,7 @@ fn keyboard_target(
     if let Some(id) = state.schematic.selection.components.iter().copied().min()
         && let Some(component) = state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|item| item.id == id)
@@ -663,7 +663,7 @@ fn keyboard_target(
         ContextTarget::Canvas,
         screen_to_grid(
             viewport,
-            state.schematic.document.grid_size,
+            state.schematic.document().grid_size,
             fallback_screen_pos,
         ),
     )
@@ -753,7 +753,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
     if let Some(id) = selection.single_bus_tap()
         && let Some(tap) = state
             .schematic
-            .document
+            .document()
             .bus_taps
             .iter()
             .find(|tap| tap.id == id)
@@ -763,7 +763,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
     if let Some(id) = selection.single_bus()
         && let Some(bus) = state
             .schematic
-            .document
+            .document()
             .buses
             .iter()
             .find(|bus| bus.id == id)
@@ -778,7 +778,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
     if let Some(id) = selection.single_net_label()
         && let Some(label) = state
             .schematic
-            .document
+            .document()
             .net_labels
             .iter()
             .find(|label| label.id == id)
@@ -795,7 +795,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
     if let Some(id) = selection.single_probe()
         && let Some(probe) = state
             .schematic
-            .document
+            .document()
             .probes
             .iter()
             .find(|probe| probe.id == id)
@@ -805,7 +805,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
     if let Some(id) = selection.single_design_note()
         && let Some(note) = state
             .schematic
-            .document
+            .document()
             .design_notes
             .iter()
             .find(|note| note.id == id)
@@ -815,7 +815,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
     if let Some(id) = selection.single_documentation_shape()
         && let Some(shape) = state
             .schematic
-            .document
+            .document()
             .documentation_shapes
             .iter()
             .find(|shape| shape.id == id)
@@ -833,7 +833,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
     match target {
         ContextTarget::Component(id) => state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == id)
@@ -857,7 +857,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
         ContextTarget::Wire(id) => {
             let net = state
                 .schematic
-                .document
+                .document()
                 .wires
                 .iter()
                 .find(|wire| wire.id == id)
@@ -1094,55 +1094,55 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
     // deletion objects. Wire segments and vertices remain edit handles.
     let has_live_component = state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .any(|component| selection.has_component(component.id));
     let has_live_wire = state
         .schematic
-        .document
+        .document()
         .wires
         .iter()
         .any(|wire| selection.has_wire(wire.id));
     let has_live_junction = state
         .schematic
-        .document
+        .document()
         .junctions
         .iter()
         .any(|junction| selection.has_junction(junction.pos));
     let has_live_bus = state
         .schematic
-        .document
+        .document()
         .buses
         .iter()
         .any(|bus| selection.has_bus(bus.id));
     let has_live_bus_tap = state
         .schematic
-        .document
+        .document()
         .bus_taps
         .iter()
         .any(|tap| selection.has_bus_tap(tap.id));
     let has_live_net_label = state
         .schematic
-        .document
+        .document()
         .net_labels
         .iter()
         .any(|label| selection.has_net_label(label.id));
     let has_live_probe = state
         .schematic
-        .document
+        .document()
         .probes
         .iter()
         .any(|probe| selection.has_probe(probe.id));
     let has_live_design_note = state
         .schematic
-        .document
+        .document()
         .design_notes
         .iter()
         .any(|note| selection.has_design_note(note.id));
     let has_live_documentation_shape = state
         .schematic
-        .document
+        .document()
         .documentation_shapes
         .iter()
         .any(|shape| selection.has_documentation_shape(shape.id));
@@ -1158,56 +1158,56 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
     let all_whole_object_ids_are_live = selection.components.iter().all(|id| {
         state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .any(|component| component.id == *id)
     }) && selection.wires.iter().all(|id| {
         state
             .schematic
-            .document
+            .document()
             .wires
             .iter()
             .any(|wire| wire.id == *id)
     }) && selection.buses.iter().all(|id| {
         state
             .schematic
-            .document
+            .document()
             .buses
             .iter()
             .any(|bus| bus.id == *id)
     }) && selection.bus_taps.iter().all(|id| {
         state
             .schematic
-            .document
+            .document()
             .bus_taps
             .iter()
             .any(|tap| tap.id == *id)
     }) && selection.net_labels.iter().all(|id| {
         state
             .schematic
-            .document
+            .document()
             .net_labels
             .iter()
             .any(|label| label.id == *id)
     }) && selection.probes.iter().all(|id| {
         state
             .schematic
-            .document
+            .document()
             .probes
             .iter()
             .any(|probe| probe.id == *id)
     }) && selection.design_notes.iter().all(|id| {
         state
             .schematic
-            .document
+            .document()
             .design_notes
             .iter()
             .any(|note| note.id == *id)
     }) && selection.documentation_shapes.iter().all(|id| {
         state
             .schematic
-            .document
+            .document()
             .documentation_shapes
             .iter()
             .any(|shape| shape.id == *id)
@@ -1215,7 +1215,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
     let all_junctions_are_live = selection.junctions.iter().all(|selected| {
         state
             .schematic
-            .document
+            .document()
             .junctions
             .iter()
             .any(|junction| junction.pos == selected.pos)
@@ -1441,7 +1441,7 @@ fn clicked_instance_name(state: &AppState) -> Option<String> {
     Some(
         state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == id)?

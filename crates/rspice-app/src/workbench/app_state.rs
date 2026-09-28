@@ -1334,7 +1334,7 @@ impl AppState {
     /// cursor when it hovers the canvas, otherwise the center of the visible
     /// canvas (menu-driven paste), otherwise a sane fixed spot.
     pub(crate) fn schematic_paste_anchor(&self) -> crate::state::Point {
-        let grid = self.schematic.document.grid_size.max(1);
+        let grid = self.schematic.document().grid_size.max(1);
         let (x, y) = self
             .ui
             .canvas_hover
@@ -1345,17 +1345,17 @@ impl AppState {
 }
 
 fn schematic_has_authored_content(schematic: &crate::state::SchematicState) -> bool {
-    !schematic.document.components.is_empty()
-        || !schematic.document.wires.is_empty()
-        || !schematic.document.buses.is_empty()
-        || !schematic.document.bus_taps.is_empty()
-        || !schematic.document.design_notes.is_empty()
-        || !schematic.document.documentation_shapes.is_empty()
-        || !schematic.document.probes.is_empty()
-        || !schematic.document.net_labels.is_empty()
-        || !schematic.document.junctions.is_empty()
-        || !schematic.document.connections.is_empty()
-        || !schematic.document.validated_revisions.is_empty()
+    !schematic.document().components.is_empty()
+        || !schematic.document().wires.is_empty()
+        || !schematic.document().buses.is_empty()
+        || !schematic.document().bus_taps.is_empty()
+        || !schematic.document().design_notes.is_empty()
+        || !schematic.document().documentation_shapes.is_empty()
+        || !schematic.document().probes.is_empty()
+        || !schematic.document().net_labels.is_empty()
+        || !schematic.document().junctions.is_empty()
+        || !schematic.document().connections.is_empty()
+        || !schematic.document().validated_revisions.is_empty()
 }
 
 #[cfg(test)]

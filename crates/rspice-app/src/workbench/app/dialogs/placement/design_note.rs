@@ -135,7 +135,7 @@ fn validate_draft(state: &AppState) -> DraftValidation {
         draft.kind,
         draft.text.clone(),
         draft.topology_version,
-        &state.schematic.document.design_notes,
+        &state.schematic.document().design_notes,
     ) {
         Ok(pending) => DraftValidation::Valid(pending.with_document_authority(
             draft.design_execution_epoch,
@@ -159,9 +159,9 @@ fn design_note_preview_text(state: &AppState) -> String {
     let view_path = state.workspace.active_view.display_path();
     note.rendered_text(&DesignNoteRenderContext {
         view_path: &view_path,
-        component_count: state.schematic.document.components.len(),
-        conductor_count: state.schematic.document.wires.len()
-            + state.schematic.document.buses.len(),
+        component_count: state.schematic.document().components.len(),
+        conductor_count: state.schematic.document().wires.len()
+            + state.schematic.document().buses.len(),
     })
 }
 

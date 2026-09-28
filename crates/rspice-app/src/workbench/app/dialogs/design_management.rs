@@ -497,27 +497,45 @@ pub(crate) fn open_design_management_dialog(state: &mut AppState) {
 
 fn all_stable_object_ids(schematic: &crate::state::SchematicState) -> Vec<u64> {
     let mut ids = BTreeSet::new();
-    ids.extend(schematic.document.components.iter().map(|object| object.id));
-    ids.extend(schematic.document.wires.iter().map(|object| object.id));
-    ids.extend(schematic.document.buses.iter().map(|object| object.id));
-    ids.extend(schematic.document.bus_taps.iter().map(|object| object.id));
-    ids.extend(schematic.document.junctions.iter().map(|object| object.id));
-    ids.extend(schematic.document.net_labels.iter().map(|object| object.id));
     ids.extend(
         schematic
-            .document
+            .document()
+            .components
+            .iter()
+            .map(|object| object.id),
+    );
+    ids.extend(schematic.document().wires.iter().map(|object| object.id));
+    ids.extend(schematic.document().buses.iter().map(|object| object.id));
+    ids.extend(schematic.document().bus_taps.iter().map(|object| object.id));
+    ids.extend(
+        schematic
+            .document()
+            .junctions
+            .iter()
+            .map(|object| object.id),
+    );
+    ids.extend(
+        schematic
+            .document()
+            .net_labels
+            .iter()
+            .map(|object| object.id),
+    );
+    ids.extend(
+        schematic
+            .document()
             .design_notes
             .iter()
             .map(|object| object.id),
     );
     ids.extend(
         schematic
-            .document
+            .document()
             .documentation_shapes
             .iter()
             .map(|object| object.id),
     );
-    ids.extend(schematic.document.probes.iter().map(|object| object.id));
+    ids.extend(schematic.document().probes.iter().map(|object| object.id));
     ids.into_iter().collect()
 }
 
@@ -534,7 +552,7 @@ fn selected_stable_object_ids(schematic: &crate::state::SchematicState) -> Vec<u
     ids.extend(selection.probes.iter().copied());
     ids.extend(selection.junctions.iter().filter_map(|selected| {
         schematic
-            .document
+            .document()
             .junctions
             .iter()
             .find(|junction| junction.pos == selected.pos)
@@ -551,7 +569,7 @@ fn selected_object_summary(
         return "No complete schematic objects selected".to_owned();
     }
     let mut names = schematic
-        .document
+        .document()
         .components
         .iter()
         .filter(|component| selected_ids.binary_search(&component.id).is_ok())

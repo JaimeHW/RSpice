@@ -487,7 +487,7 @@ fn apply_instance_resolution(
         .schematic_buffers
         .iter()
         .filter(|(key, schematic)| {
-            key.as_str() != active_key && schematic.document.components.iter().any(&places_target)
+            key.as_str() != active_key && schematic.document().components.iter().any(&places_target)
         })
         .filter_map(|(key, schematic)| {
             buffer_reference(key).map(|reference| (reference, schematic.clone()))
@@ -495,7 +495,7 @@ fn apply_instance_resolution(
         .collect::<Vec<_>>();
     if state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .any(&places_target)
@@ -637,7 +637,7 @@ fn library_deletion_impact(
 
     let count_references = |schematic: &crate::state::SchematicState| {
         schematic
-            .document
+            .document()
             .components
             .iter()
             .filter(|component| {

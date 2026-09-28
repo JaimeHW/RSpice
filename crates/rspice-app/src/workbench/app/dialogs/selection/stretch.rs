@@ -86,7 +86,7 @@ impl RSpiceApp {
         let validation = validate_draft(&self.state);
         let validation_message = validation.message().map(str::to_owned);
         let selection = target_summary(&self.state);
-        let snap = snap_label(self.state.schematic.document.document_policy.grid_pitch);
+        let snap = snap_label(self.state.schematic.document().document_policy.grid_pitch);
         let discard_confirm = self.state.dialogs.stretch_selection.discard_confirm;
         let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
             .description(DESCRIPTION)
@@ -269,7 +269,7 @@ fn target_summary(state: &AppState) -> String {
         }) => {
             let kind = state
                 .schematic
-                .document
+                .document()
                 .documentation_shapes
                 .iter()
                 .find(|shape| shape.id == shape_id)
@@ -306,7 +306,7 @@ pub(crate) fn stretch_delta_for_policy(
             segment_index,
         } => state
             .schematic
-            .document
+            .document()
             .wires
             .iter()
             .find(|wire| wire.id == wire_id)
@@ -316,7 +316,7 @@ pub(crate) fn stretch_delta_for_policy(
             segment_index,
         } => state
             .schematic
-            .document
+            .document()
             .buses
             .iter()
             .find(|bus| bus.id == bus_id)

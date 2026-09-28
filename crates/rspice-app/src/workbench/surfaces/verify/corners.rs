@@ -652,7 +652,7 @@ pub(super) fn cross_probe_soa_device(app: &mut RSpiceApp, device_id: &str) -> Re
     let component_id = app
         .state
         .schematic
-        .document
+        .document()
         .components
         .iter()
         .find(|component| component.name.eq_ignore_ascii_case(device_id))

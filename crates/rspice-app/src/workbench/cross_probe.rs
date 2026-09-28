@@ -173,7 +173,7 @@ fn selected_target(state: &AppState) -> Option<SchematicCrossProbeTarget> {
     if let Some(component_id) = selection.single_component() {
         let component = state
             .schematic
-            .document
+            .document()
             .components
             .iter()
             .find(|component| component.id == component_id)?;
@@ -303,7 +303,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
             }
         }
     };
-    for label in &state.schematic.document.net_labels {
+    for label in &state.schematic.document().net_labels {
         if selection.net_labels.contains(&label.id) && !accept(&label.name) {
             return None;
         }
@@ -328,7 +328,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
     for junction in &selection.junctions {
         let mut names = state
             .schematic
-            .document
+            .document()
             .wires
             .iter()
             .filter(|wire| wire.contains_point(junction.pos))

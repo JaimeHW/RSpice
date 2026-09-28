@@ -101,7 +101,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
     {
         return;
     }
-    if app.state.schematic.document.components.is_empty() {
+    if app.state.schematic.document().components.is_empty() {
         app.state.ui.netlist.generation_error =
             Some("Add a circuit before generating the primary netlist.".to_owned());
         return;
@@ -466,21 +466,25 @@ fn source_line_component(
         return None;
     }
     let schematic = state.workspace.schematic_buffers.get(&reference.key())?;
-    schematic.document.components.iter().find_map(|component| {
-        let base = component.spice_instance_name();
-        let prefix = component.kind.spice_prefix();
-        let emitted = if prefix.is_empty()
-            || base.is_empty()
-            || (base.len() >= prefix.len() && base[..prefix.len()].eq_ignore_ascii_case(prefix))
-        {
-            base
-        } else {
-            format!("{prefix}{base}")
-        };
-        token.eq_ignore_ascii_case(&emitted).then(|| {
-            let identity =
-                GeneratedSourceMapEntry::component_identity_for(&reference.key(), component.id);
-            (emitted, identity)
+    schematic
+        .document()
+        .components
+        .iter()
+        .find_map(|component| {
+            let base = component.spice_instance_name();
+            let prefix = component.kind.spice_prefix();
+            let emitted = if prefix.is_empty()
+                || base.is_empty()
+                || (base.len() >= prefix.len() && base[..prefix.len()].eq_ignore_ascii_case(prefix))
+            {
+                base
+            } else {
+                format!("{prefix}{base}")
+            };
+            token.eq_ignore_ascii_case(&emitted).then(|| {
+                let identity =
+                    GeneratedSourceMapEntry::component_identity_for(&reference.key(), component.id);
+                (emitted, identity)
+            })
         })
-    })
 }

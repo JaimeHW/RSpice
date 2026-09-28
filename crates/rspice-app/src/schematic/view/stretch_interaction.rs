@@ -203,7 +203,7 @@ fn stretch_target_at(
     let selection = &state.schematic.selection;
     let mut candidates: Vec<(f64, u8, u64, usize, StretchTarget)> = Vec::new();
 
-    for wire in state.schematic.document.wires.iter().filter(|wire| {
+    for wire in state.schematic.document().wires.iter().filter(|wire| {
         object_is_on_active_sheet(state, wire.id)
             && (selection.has_wire(wire.id)
                 || selection
@@ -229,7 +229,7 @@ fn stretch_target_at(
     }
     for bus in state
         .schematic
-        .document
+        .document()
         .buses
         .iter()
         .filter(|bus| selection.has_bus(bus.id) && object_is_on_active_sheet(state, bus.id))
@@ -248,7 +248,7 @@ fn stretch_target_at(
     }
     for shape in state
         .schematic
-        .document
+        .document()
         .documentation_shapes
         .iter()
         .filter(|shape| {

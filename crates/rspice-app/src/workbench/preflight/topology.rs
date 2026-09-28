@@ -219,7 +219,7 @@ fn no_dc_path_issue(
         }
     }
 
-    for component in &schematic.document.components {
+    for component in &schematic.document().components {
         let Some(pins) = terminals.get(&component.id) else {
             continue;
         };
@@ -288,7 +288,7 @@ fn voltage_source_loop_issues(
     let mut placed: Vec<String> = Vec::new();
     let mut issues = Vec::new();
 
-    for component in &schematic.document.components {
+    for component in &schematic.document().components {
         if !is_independent_voltage_source(component.kind) {
             continue;
         }

@@ -675,7 +675,7 @@ fn enabled_schematic_probe_outputs(app: &RSpiceApp) -> usize {
         .simulation_root_schematic(&app.state.workspace.active_view, &app.state.schematic)
         .map_or(0, |schematic| {
             crate::simulation::controller::prepared_run::occurrence_outputs::enabled_probe_output_count(
-                &schematic.document.probes,
+                &schematic.document().probes,
             )
         })
 }
