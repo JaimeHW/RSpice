@@ -263,6 +263,7 @@ fn artifacts_are_deterministic_and_xml_is_escaped() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn summary_is_typed_json_and_pdf_is_parseable() {
     let plan = plan();
     let evidence = evidence(&plan);
@@ -296,6 +297,7 @@ fn summary_is_typed_json_and_pdf_is_parseable() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn pdf_renderer_retains_multipage_evidence() {
     let plan = plan();
     let checks = (0..100)

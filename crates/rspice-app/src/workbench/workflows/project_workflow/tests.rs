@@ -196,6 +196,7 @@ fn live_project_snapshot_applies_wholesale_and_never_keeps_the_host_path() {
     );
     // The host's on-disk location must never become a guest save target.
     assert!(guest.workspace.content.project.path.is_none());
+    #[cfg(not(target_arch = "wasm32"))]
     assert!(
         crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&guest).is_none()
     );

@@ -705,6 +705,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn stored_key_round_trips_through_secure_publication() {
         let root = unique_temp_dir("round-trip");
         let path = root.join("license.key");
@@ -718,6 +719,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn key_publication_rejects_late_external_change() {
         let root = unique_temp_dir("late-change");
         let path = root.join("license.key");
@@ -773,6 +775,7 @@ mod tests {
         std::fs::remove_dir_all(root).expect("remove fixture");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn unique_temp_dir(label: &str) -> std::path::PathBuf {
         let root =
             std::env::temp_dir().join(format!("rspice-license-{label}-{}", uuid::Uuid::new_v4()));
@@ -800,7 +803,9 @@ mod tests {
     // parameters from the environment and are run by hand when the wire
     // format changes or the development key is rotated.
 
-    use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
+    #[cfg(not(target_arch = "wasm32"))]
+    use ed25519_dalek::VerifyingKey;
+    use ed25519_dalek::{Signer, SigningKey, Verifier};
 
     /// Signs a payload into a canonical key, exactly as an issuer must.
     fn issue_key(signing: &SigningKey, payload: &LicensePayload) -> String {
@@ -841,7 +846,7 @@ mod tests {
     /// inject one would put test-only surface in the verifier.
     #[test]
     fn issued_key_round_trips() {
-        let signing = SigningKey::generate(&mut rand::rngs::OsRng);
+        let signing = SigningKey::from_bytes(&[0x4f; 32]);
         let payload = fixture_payload(0x7f);
         let key = issue_key(&signing, &payload);
 
@@ -887,7 +892,7 @@ mod tests {
     /// not verify as a license.
     #[test]
     fn signature_without_the_domain_tag_is_rejected() {
-        let signing = SigningKey::generate(&mut rand::rngs::OsRng);
+        let signing = SigningKey::from_bytes(&[0x4f; 32]);
         let payload_bytes = fixture_payload(0x7f).to_bytes();
         let undomained = signing.sign(&payload_bytes);
 
@@ -907,7 +912,7 @@ mod tests {
     /// stolen key id cannot be paired with an attacker's own keypair.
     #[test]
     fn issued_key_from_an_unknown_signer_is_rejected() {
-        let signing = SigningKey::generate(&mut rand::rngs::OsRng);
+        let signing = SigningKey::from_bytes(&[0x4f; 32]);
         // Key id 0x01 is the development signer's slot; this is not its key.
         let key = issue_key(&signing, &fixture_payload(0x01));
         for policy in [
@@ -969,6 +974,7 @@ mod tests {
     #[test]
     #[allow(clippy::print_stdout)]
     #[ignore = "mints key material; run by hand on a key rotation"]
+    #[cfg(not(target_arch = "wasm32"))]
     fn mint_development_signer() {
         let signing = SigningKey::generate(&mut rand::rngs::OsRng);
         let verifying = signing.verifying_key();
@@ -995,6 +1001,7 @@ mod tests {
     #[test]
     #[allow(clippy::print_stdout)]
     #[ignore = "requires the signing secret; run by hand to regenerate fixtures"]
+    #[cfg(not(target_arch = "wasm32"))]
     fn mint_signed_key() {
         let secret_hex = std::env::var("RSPICE_LICENSE_SECRET")
             .expect("set RSPICE_LICENSE_SECRET to the 64-hex-character signing secret");

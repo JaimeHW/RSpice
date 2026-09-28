@@ -7,13 +7,15 @@
 //! passes has exercised the actual signature, the actual archive container,
 //! and the actual canonical manifest — not a mock of them.
 
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-    sync::Mutex,
-};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
+use std::{collections::BTreeMap, sync::Mutex};
 
+#[cfg(not(target_arch = "wasm32"))]
 mod clock;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::store::FilesystemModelHubStore;
 
 use rspice_pack::{
     License, ManifestTemplate, Part, PartKind, Requires, Revocation, Snapshot, SnapshotPack,
@@ -22,10 +24,15 @@ use rspice_pack::{
 
 use super::{
     ModelHub, ModelHubError,
-    provider::{PartProvenance, PartState},
-    store::{FilesystemModelHubStore, MemoryModelHubStore, ModelHubStore, STAGING_PREFIX},
-    transport::{ArchiveHandoff, CatalogHandoff, ModelHubTransport, OfflineTransport},
+    store::{MemoryModelHubStore, ModelHubStore},
+    transport::{ArchiveHandoff, CatalogHandoff, ModelHubTransport},
     trust::TrustAnchor,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use super::{
+    provider::{PartProvenance, PartState},
+    store::STAGING_PREFIX,
+    transport::OfflineTransport,
 };
 
 /// When the fixture catalogs claim to have been signed, and until when.
@@ -532,10 +539,12 @@ impl ModelHubTransport for StubTransport {
 }
 
 /// A filesystem tree that removes itself.
+#[cfg(not(target_arch = "wasm32"))]
 struct TempTree {
     root: PathBuf,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl TempTree {
     fn new(label: &str) -> Self {
         static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -554,12 +563,14 @@ impl TempTree {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Drop for TempTree {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.root);
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn filesystem_hub(tree: &TempTree, key: &rspice_pack::SigningKey) -> ModelHub {
     ModelHub::open(
         anchor_for(key),
@@ -569,10 +580,12 @@ fn filesystem_hub(tree: &TempTree, key: &rspice_pack::SigningKey) -> ModelHub {
     .expect("the hub opens over an empty tree")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn packs_root(tree: &TempTree) -> PathBuf {
     tree.path().join("packs")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn staging_directories(tree: &TempTree) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(packs_root(tree)) else {
         return Vec::new();
@@ -589,6 +602,7 @@ fn staging_directories(tree: &TempTree) -> Vec<PathBuf> {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn a_signed_release_installs_and_its_part_solves_through_the_retained_path() {
     let key = hub_signing_key();
     let archive = signed_archive(&key, &["subckt", "resistor"]);
@@ -646,6 +660,7 @@ fn a_signed_release_installs_and_its_part_solves_through_the_retained_path() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn a_tampered_archive_a_foreign_key_and_a_lying_handoff_are_all_refused() {
     let key = hub_signing_key();
     let archive = signed_archive(&key, &["subckt", "resistor"]);
@@ -714,6 +729,7 @@ fn a_tampered_archive_a_foreign_key_and_a_lying_handoff_are_all_refused() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn a_kill_between_staging_and_rename_leaves_only_staging_for_the_sweep() {
     let key = hub_signing_key();
     let archive = signed_archive(&key, &["subckt", "resistor"]);
@@ -757,6 +773,7 @@ fn a_kill_between_staging_and_rename_leaves_only_staging_for_the_sweep() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn a_cached_catalog_and_an_installed_pack_serve_the_shelf_with_no_network() {
     let key = hub_signing_key();
     let archive = signed_archive(&key, &["subckt", "resistor"]);
@@ -794,6 +811,7 @@ fn a_cached_catalog_and_an_installed_pack_serve_the_shelf_with_no_network() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn a_pack_requiring_an_unknown_capability_is_incompatible_and_refused() {
     let key = hub_signing_key();
     let capabilities = ["subckt", "nonexistent-capability"];
@@ -844,6 +862,7 @@ fn a_pack_requiring_an_unknown_capability_is_incompatible_and_refused() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn a_newer_listed_release_marks_an_installed_pack_as_updatable() {
     let key = hub_signing_key();
     let archive = signed_archive(&key, &["subckt", "resistor"]);
@@ -904,6 +923,7 @@ fn a_newer_listed_release_marks_an_installed_pack_as_updatable() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn uninstalling_removes_the_hub_copy_and_nothing_a_project_retained() {
     let key = hub_signing_key();
     let archive = signed_archive(&key, &["subckt", "resistor"]);
@@ -1103,6 +1123,7 @@ fn the_memory_store_runs_the_same_pipeline_the_browser_build_uses() {
 /// design and is fixed here before the comparison; everything else, including
 /// every retained path, digest, and edge, must agree byte for byte.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn both_stores_retain_the_same_project_document_for_the_same_release() {
     let key = hub_signing_key();
     let capabilities = ["subckt", "resistor"];
@@ -1211,6 +1232,7 @@ fn fix_retained_source_ids(
 /// The anti-rollback floor is a property of the *store*: a test that could only
 /// reach it through the hub that wrote it could not tell a durable floor from a
 /// field in memory.
+#[cfg(not(target_arch = "wasm32"))]
 fn filesystem_store(tree: &TempTree) -> FilesystemModelHubStore {
     FilesystemModelHubStore::new(tree.path())
 }
@@ -1225,6 +1247,7 @@ fn catalog_at(key: &rspice_pack::SigningKey, archive: &[u8], serial: u64) -> Vec
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn a_catalog_serial_below_the_one_already_accepted_is_refused_and_changes_nothing() {
     let key = hub_signing_key();
     let archive = signed_archive(&key, &["subckt", "resistor"]);
@@ -1279,6 +1302,7 @@ fn a_catalog_serial_below_the_one_already_accepted_is_refused_and_changes_nothin
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn an_equal_serial_is_a_re_fetch_and_a_later_one_supersedes_it() {
     let key = hub_signing_key();
     let archive = signed_archive(&key, &["subckt", "resistor"]);
@@ -1306,6 +1330,7 @@ fn an_equal_serial_is_a_re_fetch_and_a_later_one_supersedes_it() {
 /// catalog being replaced wholesale with an older one, which reading the floor
 /// out of the cache would not.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn the_accepted_serial_survives_a_reopen_and_a_wholesale_catalog_replacement() {
     let key = hub_signing_key();
     let archive = signed_archive(&key, &["subckt", "resistor"]);
@@ -1368,6 +1393,7 @@ fn the_accepted_serial_survives_a_reopen_and_a_wholesale_catalog_replacement() {
 /// packs, and *solve*. Proving that with a real engine run rather than with a
 /// row count is the difference between a claim and evidence.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn an_expired_catalog_withholds_every_offer_and_blocks_no_local_work() {
     let key = hub_signing_key();
     let archive = signed_archive(&key, &["subckt", "resistor"]);
@@ -1450,6 +1476,7 @@ fn an_expired_catalog_withholds_every_offer_and_blocks_no_local_work() {
 /// something new from it, and the bytes a project already retained keep solving
 /// to the same answer they always did.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn a_recalled_release_is_withheld_and_refused_everywhere_it_is_named() {
     const REASON: &str = "the divider ratio was published against the wrong reference.";
 
@@ -1588,6 +1615,7 @@ fn a_recalled_release_is_withheld_and_refused_everywhere_it_is_named() {
 
 /// The pin key is content, so no project can present one it did not earn.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn the_pack_pin_key_moves_with_every_commitment_it_names() {
     let key = hub_signing_key();
     let archive = signed_archive(&key, &["subckt", "resistor"]);
@@ -1641,6 +1669,7 @@ fn the_pack_pin_key_moves_with_every_commitment_it_names() {
 
 /// The presentation schema 2 added survives a real signed round trip.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn a_schema_two_snapshot_round_trips_its_description_and_specifications() {
     let key = hub_signing_key();
     let archive = signed_archive(&key, &["subckt", "resistor"]);

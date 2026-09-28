@@ -996,6 +996,7 @@ fn failed_section_refresh_is_transactional() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn explicit_refresh_atomically_accepts_new_source_closure() {
     let (directory, path) = model_fixture();
     let mut manager = ModelLibraryManager::new();

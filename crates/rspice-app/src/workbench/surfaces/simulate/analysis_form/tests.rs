@@ -19,12 +19,14 @@ use super::operating_point::{
 };
 use super::pss::{PSS_ENGINE_DEFAULT_METHOD, PSS_FIELD_LABELS, pss_integration_method_choices};
 use super::transfer_function::{
-    XF_ACCURACY_CHOICES, XF_FIELD_LABELS, XF_INFER_LABEL, XF_NORMALIZATION_CHOICES, XF_SOLVE_POINT,
-    xf_output_presets,
+    XF_ACCURACY_CHOICES, XF_FIELD_LABELS, XF_NORMALIZATION_CHOICES, XF_SOLVE_POINT,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use super::transfer_function::{XF_INFER_LABEL, xf_output_presets};
 use super::*;
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn hbnoise_form_exposes_source_reference_when_noise_figure_is_enabled() {
     let mut setup = crate::simulation::plan::HbNoiseDraft::default();
     for enabled in [false, true] {
@@ -42,10 +44,16 @@ fn hbnoise_form_exposes_source_reference_when_noise_figure_is_enabled() {
         }
     }
 }
-use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
+use crate::simulation::config::NoiseSweepType;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::simulation::dialog::hb::HbConfig;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::simulation::dialog::{HbDialogState, PssConfig, PssDialogState};
-use crate::simulation::plan::{AnalysisKind, NoiseDraft};
+use crate::simulation::plan::AnalysisKind;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::simulation::plan::NoiseDraft;
 
 #[test]
 fn operating_point_startup_choices_match_the_execution_contract() {

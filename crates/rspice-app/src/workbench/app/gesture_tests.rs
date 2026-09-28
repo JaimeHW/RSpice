@@ -322,6 +322,7 @@ fn gesture_project_and_session_snapshots_preserve_committed_geometry() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn gesture_native_save_acceptance_rebases_cancel_and_release_dirty_state() {
     use crate::workbench::lifecycle::project_lifecycle::{
         DestinationAuthority, SaveScope, has_unsaved_changes, save_native,

@@ -519,6 +519,7 @@ mod tests {
     /// cancellation, which is the answer that leaves no trace for a caller to
     /// act on.
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn an_unscripted_picker_answers_with_a_cancellation_and_does_not_block() {
         let ctx = Context::default();
         let id = Id::new("io.file_exchange.tests.unscripted");
@@ -550,6 +551,7 @@ mod tests {
     /// A scripted path is read through the production path — the ceiling, the
     /// decode and the name the picker's answer is called by.
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn a_scripted_path_is_read_the_way_a_picked_one_is() {
         let directory = scratch_directory("read");
         let path = directory.join("loads.csv");
@@ -579,6 +581,7 @@ mod tests {
     /// mis-picked file produces, which is how a test reaches the error arm
     /// without a dialog that has no error to give.
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn a_scripted_path_that_cannot_be_read_refuses_the_way_a_picked_one_does() {
         let ctx = Context::default();
         let id = Id::new("io.file_exchange.tests.unreadable");
@@ -599,6 +602,7 @@ mod tests {
     /// The queue is consumed in order, and an explicit cancellation is one of
     /// its answers rather than only the default.
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn scripted_answers_are_taken_in_the_order_they_were_written() {
         let directory = scratch_directory("ordered");
         let path = directory.join("second.csv");
@@ -635,6 +639,7 @@ mod tests {
 
     /// A scratch directory of this test's own, so parallel tests never share a
     /// path.
+    #[cfg(not(target_arch = "wasm32"))]
     fn scratch_directory(purpose: &str) -> std::path::PathBuf {
         let directory = std::env::temp_dir().join(format!(
             "rspice-file-exchange-{purpose}-{}",

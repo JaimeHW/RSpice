@@ -561,6 +561,7 @@ fn embedding_fonts_puts_the_typeface_in_the_artifact() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn preserving_searchable_text_leaves_text_a_reader_can_extract() {
     let mut searchable = draft();
     searchable.format = OutputFormat::PdfVector;

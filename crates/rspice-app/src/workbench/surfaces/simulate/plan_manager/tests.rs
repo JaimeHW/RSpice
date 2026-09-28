@@ -5,7 +5,9 @@
 //! larger half of the text. Splitting them keeps the shipped half reviewable
 //! and is the convention the rest of the crate already uses.
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::*;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::product::ProcessCorner;
 
 /// James's real viewport. Display scaling makes the usable area smaller than
@@ -788,6 +790,7 @@ fn every_row_announces_the_facts_its_cells_paint() {
 /// view hides retired plans without also hiding the plan being worked on,
 /// and no plan is reachable only by widening to every record.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn the_narrowing_scopes_partition_the_catalog() {
     let (app, active, available, retired) = app_with_every_lifecycle_state();
     let records = plan_catalog_records(&app);
@@ -834,6 +837,7 @@ fn the_narrowing_scopes_partition_the_catalog() {
 /// It matched name and identity only, so a plan was unfindable by two facts
 /// its own row paints: the revision and the declared run-set size.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn the_filter_matches_the_four_fields_its_placeholder_names() {
     let (app, _, _, _) = app_with_every_lifecycle_state();
     let records = plan_catalog_records(&app);
@@ -871,6 +875,7 @@ fn the_filter_matches_the_four_fields_its_placeholder_names() {
 
 /// Three states, three words, three tones, all from their one owner.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn the_lifecycle_tone_follows_the_word_its_owner_publishes() {
     let (app, active, available, retired) = app_with_every_lifecycle_state();
     let records = plan_catalog_records(&app);

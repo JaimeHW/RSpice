@@ -1120,6 +1120,7 @@ fn every_destructive_press_is_reviewed_or_receipted() {
 /// what says the seam is the whole path, and not a stub that swallows the
 /// press.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn the_sweep_press_that_starts_a_picker_answers_without_a_dialog() {
     use crate::io::file_exchange::{
         ScriptedChoice, script_next_choice, scripted_choices_remaining, take_pickers_opened,

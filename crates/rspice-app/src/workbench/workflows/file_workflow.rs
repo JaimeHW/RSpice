@@ -466,7 +466,10 @@ mod tests {
         }
 
         fn load_schematic(&self, _path: &Path) -> Result<SchematicState, SchematicIoError> {
-            Err(SchematicIoError::Cancelled)
+            #[cfg(not(target_arch = "wasm32"))]
+            return Err(SchematicIoError::Cancelled);
+            #[cfg(target_arch = "wasm32")]
+            Err(SchematicIoError::NotFound(_path.to_owned()))
         }
 
         fn save_schematic(

@@ -350,6 +350,7 @@ fn renaming_a_parent_updates_descended_probes_and_their_occurrence() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
     use crate::workbench::lifecycle::project_lifecycle::{self, DestinationAuthority, SaveScope};
 

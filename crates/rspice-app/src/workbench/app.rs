@@ -370,19 +370,23 @@ impl RSpiceApp {
         None
     }
 
-    #[cfg(all(test, not(target_arch = "wasm32")))]
+    #[cfg(test)]
     pub(crate) fn test_instance() -> Self {
         let state = AppState::default();
         let automation_runtime_project_id = state.workspace.content.project.id();
         Self {
             state,
             first_frame: false,
+            #[cfg(not(target_arch = "wasm32"))]
             autosave_last: None,
             applied_theme: None,
             last_window_title: String::new(),
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
+            #[cfg(not(target_arch = "wasm32"))]
             automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
+            #[cfg(target_arch = "wasm32")]
+            automation_runtime: crate::automation_runtime::BrowserAutomationRuntime::discover(),
             automation_runtime_project_id,
             cloud_account: crate::services::cloud_account::CloudAccountService::unconfigured(),
             // A test opens no real pack store: doing so would make every test

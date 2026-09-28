@@ -5,6 +5,7 @@ mod vendor_profiles;
 
 use super::bundle::*;
 use super::compose::*;
+#[cfg(not(target_arch = "wasm32"))]
 use super::external_change::*;
 
 #[test]
@@ -368,6 +369,7 @@ fn generated_bundle_import_rejects_tampered_member_bytes() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn three_way_merge_combines_independent_lines_and_marks_overlaps() {
     let base = ".param a=1\n.param b=2\n.op\n";
     let local = ".param a=10\n.param b=2\n.op\n";

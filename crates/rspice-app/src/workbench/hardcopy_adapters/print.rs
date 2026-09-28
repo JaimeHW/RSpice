@@ -1721,7 +1721,9 @@ mod browser_backend {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(target_arch = "wasm32"))]
     use std::cell::RefCell;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::rc::Rc;
 
     use uuid::Uuid;
@@ -1735,6 +1737,7 @@ mod tests {
         TilingMode, TilingSetup, Watermark,
     };
     use crate::product::ObjectRevision;
+    #[cfg(not(target_arch = "wasm32"))]
     use crate::workbench::hardcopy_adapters::render::{
         HardcopyRenderer, HardcopyScene, HardcopySceneMetadata,
     };
@@ -1879,14 +1882,14 @@ mod tests {
         )
         .unwrap()
     }
-
+    #[cfg(not(target_arch = "wasm32"))]
     fn rendered_pages(plan: &HardcopyPlan, dpi: u16) -> RenderedPrinterPages {
         let metadata = HardcopySceneMetadata::try_new("test", "RSpice").unwrap();
         let scene = HardcopyScene::try_new(plan.content_extent(), metadata, Vec::new(), Vec::new())
             .unwrap();
         HardcopyRenderer::render_printer_pages(plan, &scene, dpi).unwrap()
     }
-
+    #[cfg(not(target_arch = "wasm32"))]
     fn browser_print_plan_and_publication() -> (HardcopyPlan, RenderedHardcopyPublication) {
         let extent = ContentExtent::try_new(
             Length::from_micrometres(100_000),
@@ -1929,11 +1932,13 @@ mod tests {
         (plan, publication)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     struct FakeDesktopLauncher {
         observed: Rc<RefCell<Vec<std::path::PathBuf>>>,
         fail: bool,
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     impl DesktopPrintLauncher for FakeDesktopLauncher {
         fn launch(&self, document: &std::path::Path) -> Result<(), HardcopyPrintError> {
             self.observed.borrow_mut().push(document.to_owned());
@@ -1949,6 +1954,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn desktop_print_handoff_is_authenticated_private_and_not_spool_acceptance() {
         let (plan, publication) = browser_print_plan_and_publication();
         let root = std::env::temp_dir().join(format!(
@@ -1984,6 +1990,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn rejected_desktop_handoff_removes_the_unclaimed_document() {
         let (plan, publication) = browser_print_plan_and_publication();
         let root = std::env::temp_dir().join(format!(
@@ -2195,6 +2202,7 @@ mod tests {
     }
 
     #[derive(Default)]
+    #[cfg(not(target_arch = "wasm32"))]
     struct FakeSpoolState {
         events: Vec<&'static str>,
         pages_written: u32,
@@ -2203,11 +2211,13 @@ mod tests {
         abort_fails: bool,
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     struct FakeSpoolBackend {
         state: Rc<RefCell<FakeSpoolState>>,
         cancellation: HardcopyCancellationToken,
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     impl NativeSpoolBackend for FakeSpoolBackend {
         fn start_job(&mut self) -> Result<String, HardcopyPrintError> {
             self.state.borrow_mut().events.push("start-job");
@@ -2262,6 +2272,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn spool_transaction_reports_acceptance_only_after_complete_commit() {
         let capabilities =
             PrinterCapabilitySnapshot::try_from_descriptor(capability_descriptor()).unwrap();
@@ -2299,6 +2310,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn spool_transaction_aborts_on_write_failure_and_cancellation() {
         let capabilities =
             PrinterCapabilitySnapshot::try_from_descriptor(capability_descriptor()).unwrap();
@@ -2419,6 +2431,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn publication_preflight_rejects_plan_dpi_mismatch() {
         let capabilities =
             PrinterCapabilitySnapshot::try_from_descriptor(capability_descriptor()).unwrap();

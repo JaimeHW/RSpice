@@ -169,14 +169,9 @@ pub use transient::run_transient_analysis_with_source_path_and_abort;
 // =============================================================================
 
 /// Get current time in milliseconds (for performance measurement)
-#[cfg(not(target_arch = "wasm32"))]
 #[cfg(test)]
 fn now_ms() -> f64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs_f64() * 1000.0)
-        .unwrap_or(0.0)
+    crate::time_compat::unix_epoch().as_secs_f64() * 1000.0
 }
 
 #[allow(dead_code, reason = "retained by Monte Carlo compatibility runners")]

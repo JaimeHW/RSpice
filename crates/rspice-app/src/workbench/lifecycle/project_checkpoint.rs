@@ -897,9 +897,15 @@ mod tests {
             created_unix_ms: 1,
             snapshot_digest: digest(&bytes),
             snapshot_byte_len: bytes.len() as u64,
+            #[cfg(not(target_arch = "wasm32"))]
             locator: ProjectCheckpointLocator::Native {
                 manifest: PathBuf::from("manifest"),
                 snapshot: PathBuf::from("snapshot"),
+            },
+            #[cfg(target_arch = "wasm32")]
+            locator: ProjectCheckpointLocator::Browser {
+                manifest_key: "manifest".to_owned(),
+                snapshot_key: "snapshot".to_owned(),
             },
         };
         validate_snapshot_bytes(&summary, &bytes).expect("exact bytes restore");
@@ -1091,6 +1097,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn native_checkpoint_roundtrip_and_recovery_copy_are_non_destructive() {
         let directory =
             std::env::temp_dir().join(format!("rspice-project-checkpoint-{}", Uuid::new_v4()));
@@ -1154,6 +1161,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn owned_corrupt_checkpoint_is_exposed_as_quarantine() {
         let directory =
             std::env::temp_dir().join(format!("rspice-project-quarantine-{}", Uuid::new_v4()));

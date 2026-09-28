@@ -1470,7 +1470,7 @@ impl HardcopyRenderer {
     /// selected device resolution. This uses the same canonical SVG scene and
     /// pagination as file publication; platform code never has to parse PDF or
     /// duplicate layout logic.
-    #[cfg(test)]
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) fn render_printer_pages(
         plan: &HardcopyPlan,
         scene: &HardcopyScene,

@@ -160,7 +160,7 @@ pub enum ShortcutProfileLibraryRestore {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(test, not(target_arch = "wasm32")))]
 pub enum ShortcutProfileLibraryStartup {
     Ready {
         persisted: Box<PersistedShortcutProfileLibrary>,

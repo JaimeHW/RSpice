@@ -1176,6 +1176,7 @@ mod tests {
 
     /// The Recovery page over a catalog this test controls, rather than
     /// whatever the machine's recovery directory happens to hold.
+    #[cfg(not(target_arch = "wasm32"))]
     fn recovery_project_app(checkpoints: usize, set_aside: bool, error: bool) -> RSpiceApp {
         use crate::workbench::lifecycle::project_checkpoint::{
             ProjectCheckpointReason, fixture_quarantine, fixture_summary,
@@ -1229,6 +1230,7 @@ mod tests {
     /// actions in plain words at every supported width, and none of the
     /// retired policy ledger survives.
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn the_recovery_page_lists_checkpoints_and_where_they_are_kept() {
         for size in [
             egui::vec2(1440.0, 900.0),
@@ -1285,6 +1287,7 @@ mod tests {
     /// buttons' bottom edge, so every row began 12 points inside the one
     /// above: its highlight and rule landed on the next row's text.
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn checkpoint_rows_follow_one_another_without_overlapping() {
         for size in [
             egui::vec2(1440.0, 900.0),
@@ -1346,6 +1349,7 @@ mod tests {
     /// An empty catalog says so once, a damaged artifact gets its own card,
     /// and an unreadable directory offers a retry instead of an empty list.
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn the_recovery_page_states_empty_damaged_and_unreadable_catalogs() {
         let size = egui::vec2(1440.0, 900.0);
         let mut empty = recovery_project_app(0, false, false);
@@ -1385,6 +1389,7 @@ mod tests {
 
     #[test]
     #[ignore = "writes PNGs for a human to look at; run with --ignored"]
+    #[cfg(not(target_arch = "wasm32"))]
     fn render_the_project_workspace_for_review() {
         use std::io::Write as _;
 

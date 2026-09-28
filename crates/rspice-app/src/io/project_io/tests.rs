@@ -695,6 +695,7 @@ fn project_validation_requires_cell_source_owner_to_be_an_exact_veriloga_view() 
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn expected_digest_gate_rejects_replaced_bytes_before_parsing() {
     let path = std::env::temp_dir().join(format!(
         "rspice-expected-project-digest-{}-{}.rspiceproj",

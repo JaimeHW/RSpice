@@ -1036,13 +1036,15 @@ fn reveal_directory(directory: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationRunProvenance};
+    #[cfg(not(target_arch = "wasm32"))]
     use crate::state::{
-        AnalysisResult, AnalysisType, Component, ComponentType, DocumentationShape,
-        DocumentationShapeGeometry, Junction, NetLabel, Point, SimulationRun,
-        SimulationRunProvenance, Wire,
+        Component, ComponentType, DocumentationShape, DocumentationShapeGeometry, Junction,
+        NetLabel, Point, Wire,
     };
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn comparison_workspace_keeps_recovery_editable_and_baseline_read_only() {
         let mut baseline = SchematicState::default();
         baseline.session.is_dirty = false;
@@ -1065,6 +1067,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn comparison_without_a_saved_baseline_still_preserves_an_unsaved_candidate() {
         let comparison = build_comparison_workspace("orphan", None, SchematicState::default())
             .expect("checkpoint-only comparison builds");
@@ -1090,6 +1093,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn structural_delta_detects_equal_count_object_edits() {
         let mut baseline = SchematicState::default();
         baseline.document_mut_for_test().components.push(

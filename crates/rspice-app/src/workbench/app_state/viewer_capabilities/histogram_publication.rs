@@ -1,22 +1,29 @@
 //! Distribution selection and publication through the actual worker and renderer.
 
 use super::AppState;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::analysis::HistogramDisplayMode;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::hardcopy::HardcopyPlan;
 use crate::hardcopy::{
-    BackgroundMode, ColorMapping, FontPolicy, HardcopyPlan, HardcopyScope, HardcopySetup,
-    OutputFormat, RenderSetup, RenderTarget,
+    BackgroundMode, ColorMapping, FontPolicy, HardcopyScope, HardcopySetup, OutputFormat,
+    RenderSetup, RenderTarget,
 };
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, MonteCarloVariableMetadata,
     SimulationRunLifecycle, SimulationRunProvenance,
 };
 use crate::workbench::ResultViewer;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::hardcopy_adapters::render::{
     HardcopyPublicationTimestamp, HardcopyRenderer, HardcopySceneMetadata,
 };
 use crate::workbench::hardcopy_adapters::sources::{
-    HardcopySemanticDocument, PreparedRetainedHardcopyResolution, SemanticAxisKind,
-    prepare_retained_hardcopy_resolution,
+    HardcopySemanticDocument, prepare_retained_hardcopy_resolution,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::workbench::hardcopy_adapters::sources::{
+    PreparedRetainedHardcopyResolution, SemanticAxisKind,
 };
 use crate::workbench::state::WorkspaceDocumentId;
 
@@ -104,6 +111,7 @@ fn setup(format: OutputFormat, mapping: &crate::hardcopy::PrintMappingTable) -> 
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn histogram_publication_renders_every_mode_after_worker_transfer() {
     let (mut state, key) = distribution();
     for mode in HistogramDisplayMode::ALL {

@@ -559,6 +559,7 @@ pub fn cancel_browser_shortcut_artifact_import() -> BrowserShortcutArtifactImpor
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(target_arch = "wasm32"))]
     use std::cell::Cell;
 
     use super::*;
@@ -570,6 +571,7 @@ mod tests {
     }"#;
 
     #[derive(Clone)]
+    #[cfg(not(target_arch = "wasm32"))]
     struct FakeIo {
         platform: Result<VscodeHostPlatform, ShortcutArtifactImportError>,
         selected: Result<Option<PathBuf>, String>,
@@ -578,6 +580,7 @@ mod tests {
         picks: Cell<usize>,
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     impl FakeIo {
         fn ready(bytes: Vec<u8>) -> Self {
             Self {
@@ -590,6 +593,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     impl ShortcutArtifactImportIo for FakeIo {
         fn host_platform(&self) -> Result<VscodeHostPlatform, ShortcutArtifactImportError> {
             self.platform.clone()
@@ -627,6 +631,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn native_cancel_is_explicit_and_does_not_read_or_claim_success() {
         let io = FakeIo {
             selected: Ok(None),
@@ -641,6 +646,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn native_jsonc_retains_exact_bytes_digest_and_stable_filename() {
         let io = FakeIo::ready(NATIVE_JSONC.to_vec());
 
@@ -657,6 +663,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn native_boundary_classifies_picker_read_limit_utf8_and_detection_errors() {
         let picker = FakeIo {
             selected: Err("dialog unavailable".to_owned()),
@@ -708,6 +715,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn unsupported_platform_fails_before_picker_or_read() {
         let io = FakeIo {
             platform: Err(ShortcutArtifactImportError::new(
@@ -752,6 +760,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn detection_is_deterministic_and_does_not_mutate_live_shortcuts() {
         let live = crate::workbench::shortcuts::ShortcutProfileLibrary::default();
         let before = serde_json::to_value(&live).expect("live library serializes");

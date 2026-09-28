@@ -699,6 +699,7 @@ fn the_summary_band_states_its_verdict_head_first_inside_its_pane() {
 /// the table fits in at all up to the widest window, so no measurement of what
 /// the rails take can go stale here.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn every_column_is_inside_the_pane_the_document_is_drawn_in() {
     for pane in drawn_pane_widths() {
         let widths = super::spec_columns(pane);

@@ -769,7 +769,7 @@ const fn status_label(status: ShortcutReferenceStatus) -> &'static str {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use egui::os::OperatingSystem;
     use lopdf::{Document as ParsedPdf, Object};
