@@ -1,9 +1,9 @@
 //! Exact live-reference deltas shared by component and annotation transactions.
 
-use super::design_reference_changes::DesignReferenceChanges;
 use super::{DocumentOccurrence, ProjectWorkspace};
 use crate::product::{SavedOutputId, SimulationPlanId};
 use crate::state::{CellViewRef, Component, ConfigurationSetCatalog, SavedOutput};
+use rspice_design::references::DesignReferenceChanges;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ReferenceChanges {

@@ -12,10 +12,8 @@ mod annotation_restore;
 mod capture_group;
 mod design_intent;
 mod design_projection;
-mod document_occurrence;
 mod hierarchy;
 use rspice_design::hierarchy as hierarchy_resolver;
-mod design_reference_changes;
 mod materialize;
 mod netlist_profile;
 #[cfg(test)]
@@ -38,7 +36,6 @@ pub use capture_group::{
 };
 pub use design_intent::*;
 pub use design_projection::*;
-pub use document_occurrence::*;
 pub use hierarchy::*;
 pub use netlist_profile::NetlistExecutionProfile;
 pub use owned_netlist_validation::validate_owned_netlist_artifact_path;
@@ -48,6 +45,7 @@ pub use project_library_publication::*;
 pub(crate) use reference_changes::{PreparedReferences, ReferenceChanges};
 pub(crate) use reference_preparation::{SchematicReferenceTransaction, reference_from_key};
 pub use rspice_design::library::ProjectLibraryMutation;
+pub use rspice_design::occurrence::{DocumentOccurrence, OccurrencePrune};
 pub(crate) use rspice_simulation_contract::saved_output::{
     device_current_probe, saved_output_references,
 };

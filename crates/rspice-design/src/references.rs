@@ -8,6 +8,9 @@ use rspice_app_types::hierarchy_path::{InstancePath, ProbeTarget};
 use rspice_design_model::cell_view::CellViewRef;
 use std::collections::BTreeMap;
 
+mod changes;
+pub use changes::{CheckedConfigurationReferences, DesignReferenceChanges};
+
 mod probe_rewrite;
 pub use probe_rewrite::remap_instance_probes_many;
 

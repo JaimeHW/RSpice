@@ -1,16 +1,16 @@
 //! Reversible configuration definitions and instance names for reference edits.
 
-use super::document_occurrence::DocumentOccurrence;
-use rspice_app_types::hierarchy_path::InstancePath;
-use rspice_design::configuration_set::{
+use crate::configuration_set::{
     ConfigurationSetCatalog, ConfigurationSetDefinition, ConfigurationSetId,
 };
-use rspice_design::schematic::{component::Component, component_type::ComponentType};
+use crate::occurrence::DocumentOccurrence;
+use crate::schematic::{component::Component, component_type::ComponentType};
+use rspice_app_types::hierarchy_path::InstancePath;
 use rspice_design_model::cell_view::CellViewRef;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct DesignReferenceChanges {
+pub struct DesignReferenceChanges {
     configurations: Vec<ConfigurationChange>,
     instances: Vec<InstanceNameChange>,
 }
@@ -31,14 +31,14 @@ struct ConfigurationChange {
 
 /// A matched catalog borrowed until candidate preparation. This is not
 /// authority to publish into a project or a different catalog.
-pub(crate) struct CheckedConfigurationReferences<'a> {
+pub struct CheckedConfigurationReferences<'a> {
     changes: &'a [ConfigurationChange],
     current: &'a ConfigurationSetCatalog,
     forward: bool,
 }
 
 impl DesignReferenceChanges {
-    pub(crate) fn reversed(mut self) -> Self {
+    pub fn reversed(mut self) -> Self {
         for change in &mut self.configurations {
             std::mem::swap(&mut change.before, &mut change.after);
         }
@@ -48,7 +48,7 @@ impl DesignReferenceChanges {
         self
     }
 
-    pub(crate) fn between(
+    pub fn between(
         before: &ConfigurationSetCatalog,
         configurations: &ConfigurationSetCatalog,
     ) -> Self {
@@ -69,7 +69,7 @@ impl DesignReferenceChanges {
         }
     }
 
-    pub(crate) fn add_instance_renames(
+    pub fn add_instance_renames(
         &mut self,
         document: &CellViewRef,
         before: &[Component],
@@ -95,7 +95,7 @@ impl DesignReferenceChanges {
         }
     }
 
-    pub(crate) fn prepare_occurrences<'a>(
+    pub fn prepare_occurrences<'a>(
         &self,
         occurrences: impl IntoIterator<Item = (&'a CellViewRef, &'a DocumentOccurrence)>,
         forward: bool,
@@ -149,7 +149,7 @@ impl DesignReferenceChanges {
     }
 
     /// Borrow the exact catalog whose definitions match this history direction.
-    pub(crate) fn checked_configurations<'a>(
+    pub fn checked_configurations<'a>(
         &'a self,
         current: &'a ConfigurationSetCatalog,
         forward: bool,
@@ -176,7 +176,7 @@ impl DesignReferenceChanges {
 
 impl CheckedConfigurationReferences<'_> {
     /// Prepare from the matched source, advancing its current revisions.
-    pub(crate) fn prepare(self) -> Result<ConfigurationSetCatalog, String> {
+    pub fn prepare(self) -> Result<ConfigurationSetCatalog, String> {
         let mut configurations = self.current.clone();
         for change in self.changes {
             let revision = configurations

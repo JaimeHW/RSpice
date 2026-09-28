@@ -1,24 +1,13 @@
-//! The exact occurrence each open document is editing.
+//! A rooted chain of design instances and the master reached at each step.
 //!
-//! A document is not just a master: it is that master reached through a
-//! definite chain of instances. Two tabs on two masters reached through
-//! different parents are two different occurrences, so the chain belongs to
-//! the tab and not to the session. Switching tabs then restores the
-//! occurrence the tab was opened at instead of whatever the last navigation
-//! happened to leave behind.
-//!
-//! One invariant holds the model together: [`DocumentOccurrence::terminal_master`]
-//! is always the `reference` of the open document that owns the occurrence.
-//! Every mutation here restates it with a debug assertion, and
-//! [`DocumentOccurrence::debug_assert_opens`] states it at the owning tab.
-//!
-//! Nothing in this module invents a step. An occurrence that can no longer be
-//! spelled truncates to the deepest prefix that can, because a fabricated
-//! instance name addresses a different instance than the one on screen.
+//! Project documents retain this identity independently of active navigation.
+//! The terminal master identifies the document; pruning preserves the deepest
+//! resolvable prefix without inventing instance names.
 
 use serde::{Deserialize, Serialize};
 
-use crate::state::{CellViewRef, InstancePath};
+use rspice_app_types::hierarchy_path::InstancePath;
+use rspice_design_model::cell_view::CellViewRef;
 
 /// One descent: the instance stepped through, and the master it opened.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
