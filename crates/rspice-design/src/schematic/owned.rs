@@ -41,6 +41,20 @@ pub struct Schematic {
     history: EditHistory,
 }
 
+impl serde::Serialize for Schematic {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serde::Serialize::serialize(self.document(), serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Schematic {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self::from_loaded_document(serde::Deserialize::deserialize(
+            deserializer,
+        )?))
+    }
+}
+
 impl Default for Schematic {
     fn default() -> Self {
         Self::from_document(SchematicDocument::default())

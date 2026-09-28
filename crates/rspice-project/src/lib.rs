@@ -14,3 +14,8 @@ pub use library_publication::*;
 pub mod results;
 
 pub mod registry;
+
+mod libraries;
+mod open_view;
+pub use libraries::ProjectLibraries;
+pub use open_view::OpenCellView;

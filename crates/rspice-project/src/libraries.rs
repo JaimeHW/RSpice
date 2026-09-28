@@ -1,17 +1,18 @@
-//! Browser selection and filtering over the governed library catalog.
+//! Project library catalog and its persisted selection and presentation fields.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use std::collections::HashMap;
 
-use super::{Cell, Library, View};
-use rspice_design::library::LibraryCatalog;
+use rspice_design::library::{Cell, Library, LibraryCatalog, View};
+
+mod bootstrap;
 
 #[cfg(test)]
 mod tests;
 
-/// Browser session and its single library catalog.
+/// The project format's library record over one governed catalog.
 #[derive(Debug, Clone, Default)]
-pub struct LibraryManager {
+pub struct ProjectLibraries {
     catalog: LibraryCatalog,
     pub selected_library: Option<String>,
     pub selected_cell: Option<String>,
@@ -22,7 +23,7 @@ pub struct LibraryManager {
 
 // Preserve the existing project JSON and session RON layout and field order.
 // Serialization borrows the catalog; it does not clone engineering content.
-impl Serialize for LibraryManager {
+impl Serialize for ProjectLibraries {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut record = serializer.serialize_struct("LibraryManager", 7)?;
         record.serialize_field("libraries", self.catalog.libraries())?;
@@ -36,7 +37,7 @@ impl Serialize for LibraryManager {
     }
 }
 
-impl<'de> Deserialize<'de> for LibraryManager {
+impl<'de> Deserialize<'de> for ProjectLibraries {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
         #[serde(rename = "LibraryManager")]
@@ -62,8 +63,8 @@ impl<'de> Deserialize<'de> for LibraryManager {
     }
 }
 
-impl LibraryManager {
-    pub(crate) fn catalog(&self) -> &LibraryCatalog {
+impl ProjectLibraries {
+    pub fn catalog(&self) -> &LibraryCatalog {
         &self.catalog
     }
 
@@ -100,14 +101,11 @@ impl LibraryManager {
         self.catalog.libraries_by_key()
     }
 
-    pub(crate) fn edit_library(
-        &mut self,
-        name: &str,
-    ) -> Option<rspice_design::library::LibraryEdit<'_>> {
+    pub fn edit_library(&mut self, name: &str) -> Option<rspice_design::library::LibraryEdit<'_>> {
         self.catalog.edit_library(name)
     }
 
-    #[cfg(test)]
+    #[cfg(feature = "library-test-fixtures")]
     pub fn get_library_mut(&mut self, name: &str) -> Option<&mut Library> {
         self.catalog.library_mut_for_test(name)
     }
@@ -218,7 +216,7 @@ impl LibraryManager {
     /// Replace the complete governed library catalog from a validated
     /// publication snapshot while retaining this session's presentation
     /// preferences and advancing, never rewinding, its content revision.
-    pub(crate) fn replace_catalog_from_snapshot(&mut self, snapshot: &Self) -> Result<u64, String> {
+    pub fn replace_catalog_from_snapshot(&mut self, snapshot: &Self) -> Result<u64, String> {
         let revision = self
             .catalog
             .replace_catalog_from_snapshot(&snapshot.catalog)?;
@@ -231,31 +229,26 @@ impl LibraryManager {
     /// Clear runtime dirty markers without claiming an engineering catalog
     /// mutation. Save acceptance must not advance the persisted content
     /// revision merely because editor presentation state became clean.
-    pub(crate) fn mark_all_views_clean_runtime(&mut self) {
+    pub fn mark_all_views_clean_runtime(&mut self) {
         self.catalog.mark_all_views_clean_runtime();
     }
 
     /// Project a known-clean or unverified registry into runtime markers
     /// without changing the engineering catalog revision.
-    pub(crate) fn set_all_views_modified_runtime(&mut self, modified: bool) {
+    pub fn set_all_views_modified_runtime(&mut self, modified: bool) {
         self.catalog.set_all_views_modified_runtime(modified);
     }
 
     /// Clear one view's runtime dirty marker without advancing the governed
     /// library revision.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn mark_view_clean_runtime(
-        &mut self,
-        library: &str,
-        cell: &str,
-        view: &str,
-    ) -> bool {
+    pub fn mark_view_clean_runtime(&mut self, library: &str, cell: &str, view: &str) -> bool {
         self.catalog.mark_view_clean_runtime(library, cell, view)
     }
 
     /// Project one document-registry dirty bit into presentation state
     /// without claiming a library content mutation.
-    pub(crate) fn set_view_modified_runtime(
+    pub fn set_view_modified_runtime(
         &mut self,
         library: &str,
         cell: &str,
@@ -268,7 +261,7 @@ impl LibraryManager {
 
     /// Strip runtime-only view presentation from a serialization clone while
     /// preserving the exact governed catalog revision.
-    pub(crate) fn sanitize_views_for_persistence(&mut self) {
+    pub fn sanitize_views_for_persistence(&mut self) {
         self.catalog.sanitize_views_for_persistence();
     }
 
@@ -280,7 +273,7 @@ impl LibraryManager {
     /// library/cell records are copied only when the document does not yet
     /// exist in the accepted target. A generated symbol owned by a schematic
     /// document is synchronized as part of the same atomic overlay.
-    pub(crate) fn overlay_cell_view_document_from_snapshot(
+    pub fn overlay_cell_view_document_from_snapshot(
         &mut self,
         source: &Self,
         library_name: &str,

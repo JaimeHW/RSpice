@@ -279,20 +279,18 @@ impl SchematicState {
     }
 }
 
-// Delegate the unchanged wire layout without copying the document. Runtime
+// Delegate the design owner's wire layout without copying content. Runtime
 // fields retain their original serde(skip) defaults when loading saved data.
 impl Serialize for SchematicState {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.design.document().serialize(serializer)
+        self.design.serialize(serializer)
     }
 }
 
 impl<'de> Deserialize<'de> for SchematicState {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Ok(Self {
-            design: rspice_design::schematic::owned::Schematic::from_loaded_document(
-                SchematicDocument::deserialize(deserializer)?,
-            ),
+            design: rspice_design::schematic::owned::Schematic::deserialize(deserializer)?,
             selection: Default::default(),
             tool: Default::default(),
             wire_drawing: Default::default(),

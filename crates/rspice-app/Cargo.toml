@@ -113,7 +113,7 @@ rfd = { version = "0.17", features = ["file-handle-inner"] }
 dirs = "6.0"
 
 [dev-dependencies]
-rspice-project = { workspace = true, features = ["result-validation-observation", "document-fingerprint-observation"] }
+rspice-project = { workspace = true, features = ["result-validation-observation", "document-fingerprint-observation", "library-test-fixtures"] }
 rspice-model-library = { workspace = true, features = ["catalog-test-observation"] }
 rspice-design = { workspace = true, features = ["symbol-test-observation", "schematic-test-fixtures"] }
 zip = { version = "7.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }

@@ -12,6 +12,8 @@ rust-version.workspace = true
 workspace = true
 
 [features]
+# Existing application fixtures may model invalid external catalog edits.
+library-test-fixtures = ["rspice-design/schematic-test-fixtures"]
 result-validation-observation = []
 document-fingerprint-observation = []
 

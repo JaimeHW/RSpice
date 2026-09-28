@@ -1,6 +1,6 @@
 //! Persisted catalog compatibility and revision boundaries used by project saves.
 
-use super::LibraryManager;
+use super::ProjectLibraries as LibraryManager;
 
 const JSON: &str = concat!(
     r#"{"libraries":{"work":{"name":"work","path":null,"cells":{"amp":{"name":"amp","views":{"schematic":{"name":"schematic","view_type":"Schematic","file_path":"model.sp","modified_time":42,"modified":true,"is_open":true,"metadata":{"k":"v"}}},"description":"amplifier","category":"analog","expanded":true,"metadata":{}}},"technology":"pdk","read_only":false,"expanded":true,"metadata":{}}},"#,
