@@ -1,9 +1,9 @@
 //! Resolve authored or generated symbols from borrowed design documents.
 
-use rspice_design::library::{Cell, LibraryCatalog, View, ViewType};
-use rspice_design::resolved_symbol::ResolvedCellSymbol;
-use rspice_design::schematic::{component::LibraryCellInstance, document::SchematicDocument};
-use rspice_design::symbol::{SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument};
+use crate::library::{Cell, LibraryCatalog, View, ViewType};
+use crate::resolved_symbol::ResolvedCellSymbol;
+use crate::schematic::{component::LibraryCellInstance, document::SchematicDocument};
+use crate::symbol::{SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument};
 use rspice_design_model::{
     cell_view::CellViewRef,
     port::{PortDirection, PortSpec},
@@ -26,7 +26,7 @@ impl<'a, S: AsRef<SchematicDocument>> SymbolResolver<'a, S> {
     }
 
     /// Overlay an unsaved editor buffer without cloning the workspace.
-    pub(crate) fn with_active_schematic(
+    pub fn with_active_schematic(
         mut self,
         reference: &'a CellViewRef,
         schematic: &'a SchematicDocument,
@@ -227,3 +227,6 @@ fn legacy_ports_from_view(view: &View) -> Option<Vec<PortSpec>> {
             .collect()
     })
 }
+
+#[cfg(test)]
+mod tests;

@@ -18,3 +18,4 @@ pub mod resolved_symbol;
 pub mod schematic;
 pub mod symbol;
 pub mod symbol_generation;
+pub mod symbol_resolver;
