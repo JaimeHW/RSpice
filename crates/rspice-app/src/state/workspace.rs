@@ -14,6 +14,7 @@ mod design_intent;
 mod design_projection;
 mod document_occurrence;
 mod hierarchy;
+mod hierarchy_resolver;
 mod materialize;
 mod netlist_profile;
 #[cfg(test)]
@@ -70,8 +71,7 @@ use crate::product::{
 };
 use crate::state::{
     Cell, ComponentType, InstancePath, Library, LibraryCellInstance, LibraryManager,
-    SchematicState, View, ViewType, validate_builtin_xspice_binding,
-    validate_generated_veriloga_binding,
+    SchematicState, View, ViewType,
 };
 
 pub use rspice_design_model::cell_view::{
@@ -84,17 +84,9 @@ pub const PROJECT_DESCRIPTOR_SCHEMA_VERSION: u16 = 1;
 /// Persisted schema for an exact project-owned technology binding.
 pub const PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION: u16 = 1;
 
-/// Maximum legal hierarchy depth. This is deliberately generous for real
-/// designs while placing a deterministic bound on corrupt or hostile project
-/// data before it reaches netlisting.
-const MAX_HIERARCHY_RESOLUTION_DEPTH: usize = 128;
 /// Defensive bound on project-owned result documents. Documents themselves
 /// carry independent limits for panes, traces, retained samples, and history.
 pub const MAX_PROJECT_VISUALIZATION_DOCUMENTS: usize = 1_024;
-/// Maximum number of expanded instances accepted by the configuration
-/// resolver. The table remains grouped by master, but the receipt count is an
-/// exact expanded-instance count up to this defensive product limit.
-const MAX_HIERARCHY_RESOLUTION_INSTANCES: usize = 1_000_000;
 
 /// Versioned identity domain for legacy session descriptors that predate a
 /// persisted [`ProjectId`]. Project-file migration derives its ID from the
@@ -158,98 +150,6 @@ impl<'de> Deserialize<'de> for DeserializedProjectId {
                 .map(Self::Value)
                 .map_err(D::Error::custom)
         }
-    }
-}
-
-/// One immutable, exact-path executable binding consumed by hierarchical
-/// netlist generation.  The placed schematic binding is deliberately not
-/// retained as execution authority: `materialized_binding` is rebuilt from
-/// the resolved Library/Cell/View and its authoritative view metadata.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConfigurationExecutionBinding {
-    instance_path: InstancePath,
-    resolved_reference: CellViewRef,
-    resolved_view_type: ViewType,
-    materialized_binding: Option<LibraryCellInstance>,
-    model_section: Option<String>,
-    stop_boundary: bool,
-    project_veriloga: Option<ConfigurationVerilogABinding>,
-    /// Digest over everything this occurrence and its whole descendant subtree
-    /// resolve to. Two occurrences whose subtrees resolve identically carry
-    /// equal digests and therefore share one emitted master; two that differ
-    /// anywhere below them do not.
-    binding_closure_digest: ContentDigest,
-}
-
-/// Exact project-owned behavioral source selected for one configuration
-/// binding. This is derived from the active configuration and source registry;
-/// it is never accepted from placed-instance or filesystem metadata.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConfigurationVerilogABinding {
-    source_bundle_id: ProjectSourceId,
-    source_closure_digest: ContentDigest,
-    selected_module: String,
-    source_key: String,
-    netlist_alias: String,
-}
-
-impl ConfigurationVerilogABinding {
-    pub const fn source_bundle_id(&self) -> ProjectSourceId {
-        self.source_bundle_id
-    }
-
-    pub const fn source_closure_digest(&self) -> ContentDigest {
-        self.source_closure_digest
-    }
-
-    pub fn selected_module(&self) -> &str {
-        &self.selected_module
-    }
-
-    pub fn source_key(&self) -> &str {
-        &self.source_key
-    }
-
-    pub fn netlist_alias(&self) -> &str {
-        &self.netlist_alias
-    }
-}
-
-impl ConfigurationExecutionBinding {
-    pub const fn instance_path(&self) -> &InstancePath {
-        &self.instance_path
-    }
-
-    pub const fn resolved_reference(&self) -> &CellViewRef {
-        &self.resolved_reference
-    }
-
-    pub const fn resolved_view_type(&self) -> ViewType {
-        self.resolved_view_type
-    }
-
-    pub const fn materialized_binding(&self) -> Option<&LibraryCellInstance> {
-        self.materialized_binding.as_ref()
-    }
-
-    pub fn model_section(&self) -> Option<&str> {
-        self.model_section.as_deref()
-    }
-
-    pub const fn stop_boundary(&self) -> bool {
-        self.stop_boundary
-    }
-
-    pub const fn project_veriloga(&self) -> Option<&ConfigurationVerilogABinding> {
-        self.project_veriloga.as_ref()
-    }
-
-    /// Digest over this occurrence's whole resolved subtree. Two occurrences
-    /// carry the same digest exactly when they instantiate the same master —
-    /// which is what [`ConfigurationExecutionPlan::occurrence_master`] answers
-    /// without re-deriving it.
-    pub const fn binding_closure_digest(&self) -> ContentDigest {
-        self.binding_closure_digest
     }
 }
 
@@ -987,8 +887,8 @@ impl OwnedNetlistDescriptor {
 #[cfg(test)]
 pub use super::project_sources::{MAX_PROJECT_CODE_SOURCE_BYTES, ProjectSourceBundle};
 pub use super::project_sources::{
-    ProjectSourceDocument, ProjectSourceError, ProjectSourceId, ProjectSourceLanguage,
-    ProjectSourceOwner, ProjectSourceRegistry, ProjectSourceValidationIdentity,
+    ProjectSourceDocument, ProjectSourceError, ProjectSourceLanguage, ProjectSourceRegistry,
+    ProjectSourceValidationIdentity,
 };
 
 /// Project-level workspace state.

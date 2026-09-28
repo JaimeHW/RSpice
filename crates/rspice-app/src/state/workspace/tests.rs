@@ -6,7 +6,10 @@
 
 use super::*;
 use crate::product::RunId;
-use crate::state::{AnalysisResultPvtPoint, AnalysisResultSourceDomain, Point, ProjectSourceRole};
+use crate::state::{
+    AnalysisResultPvtPoint, AnalysisResultSourceDomain, Point, ProjectSourceOwner,
+    ProjectSourceRole,
+};
 
 fn reference(cell: &str) -> CellViewRef {
     CellViewRef::new("work", cell, "schematic")
@@ -39,32 +42,6 @@ fn model_bound_source_validation_resolves_the_selected_lib_section() {
     assert!(validate_source_file(&path, ViewType::Spice, &binding).is_err());
 
     std::fs::remove_file(path).expect("remove sectioned model fixture");
-}
-
-#[test]
-fn configuration_override_patterns_use_most_specific_segment_match() {
-    let overrides = vec![
-        crate::state::ConfigurationSetOverride {
-            instance_path: "/top/*".to_owned(),
-            executable_views: vec!["spice".to_owned()],
-            stop_view: Some("spice".to_owned()),
-            model_section: None,
-            eligible_platforms: crate::state::ConfigurationPlatform::ALL.to_vec(),
-        },
-        crate::state::ConfigurationSetOverride {
-            instance_path: "/top/Xcritical".to_owned(),
-            executable_views: vec!["schematic".to_owned()],
-            stop_view: None,
-            model_section: None,
-            eligible_platforms: crate::state::ConfigurationPlatform::ALL.to_vec(),
-        },
-    ];
-    let selected = selected_configuration_override(&overrides, "/top/xCRITICAL")
-        .expect("specific override matches");
-    assert_eq!(selected.instance_path, "/top/Xcritical");
-    let wildcard = selected_configuration_override(&overrides, "/top/Xother")
-        .expect("wildcard override matches");
-    assert_eq!(wildcard.instance_path, "/top/*");
 }
 
 fn resistance_variable(name: &str, expression: &str, scope: DesignVariableScope) -> DesignVariable {

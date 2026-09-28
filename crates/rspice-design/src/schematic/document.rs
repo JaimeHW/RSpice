@@ -8,6 +8,7 @@ use super::design_note::DesignNote;
 use super::document_policy::SchematicDocumentPolicy;
 use super::documentation_shape::DocumentationShape;
 use super::net_label::{Junction, NetLabel};
+use super::port::PortSpec;
 use super::probe::SchematicProbe;
 use super::validated_revision::ValidatedRevisionJournal;
 use super::wire::{Wire, WireConnection};
@@ -88,5 +89,41 @@ impl Default for SchematicDocument {
             connections: Vec::new(),
             validated_revisions: ValidatedRevisionJournal::default(),
         }
+    }
+}
+
+impl SchematicDocument {
+    /// The cell's interface: named ports in document order.
+    ///
+    /// Document order is the contract — it defines `.SUBCKT` port order and
+    /// the node order of every instance, so reordering components reorders
+    /// the interface. Duplicate names collapse to their first occurrence
+    /// (several port flags may pin the same net on different sheets/edges).
+    pub fn interface_ports(&self) -> Vec<PortSpec> {
+        let mut seen = std::collections::HashSet::new();
+        let mut ports = self
+            .components
+            .iter()
+            .enumerate()
+            .filter_map(|(document_index, component)| {
+                let spec = component.port_spec()?;
+                let order = component
+                    .port_contract()
+                    .and_then(|contract| contract.netlist_order)
+                    .unwrap_or(document_index + 1);
+                Some((order, document_index, spec))
+            })
+            .filter(|(_, _, spec)| seen.insert(spec.name.to_ascii_lowercase()))
+            .collect::<Vec<_>>();
+        ports.sort_by_key(|(order, document_index, _)| (*order, *document_index));
+        ports.into_iter().map(|(_, _, spec)| spec).collect()
+    }
+
+    /// `true` when the schematic declares at least one interface port —
+    /// i.e. it is a reusable cell rather than a top-level testbench.
+    pub fn has_interface(&self) -> bool {
+        self.components
+            .iter()
+            .any(|component| component.port_spec().is_some())
     }
 }

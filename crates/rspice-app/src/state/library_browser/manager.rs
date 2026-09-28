@@ -63,6 +63,10 @@ impl<'de> Deserialize<'de> for LibraryManager {
 }
 
 impl LibraryManager {
+    pub(crate) fn catalog(&self) -> &LibraryCatalog {
+        &self.catalog
+    }
+
     /// Create a new library manager
     pub fn new() -> Self {
         Self {
