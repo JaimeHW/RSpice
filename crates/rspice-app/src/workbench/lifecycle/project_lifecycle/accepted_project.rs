@@ -1,4 +1,4 @@
-//! Immutable accepted content and the fingerprints of that exact content.
+//! Pair immutable accepted content with editor state and its platform binding.
 //!
 //! This owner stays on the UI thread. Binding/permission changes do not alter
 //! accepted content; an acknowledged save or load constructs a new owner.
@@ -6,41 +6,60 @@
 use std::rc::Rc;
 
 use crate::io::ProjectSnapshot;
+use crate::state::{SchematicState, workspace::WorkspaceSession};
+use rspice_project::ProjectFile;
 
 use super::PersistenceBinding;
 use super::registry::DocumentFingerprints;
 
 #[derive(Debug)]
 struct AcceptedContent {
-    baseline: ProjectSnapshot,
-    fingerprints: Result<DocumentFingerprints, String>,
+    project: rspice_project::AcceptedProject,
+    workspace_session: WorkspaceSession,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct AcceptedProject {
-    // There is intentionally no mutable accessor. Drafts and save candidates
-    // get an explicit copy, so neither can invalidate cached accepted content.
+    // Canonical content, fingerprints and the matching editor session share
+    // one allocation. Drafts and save candidates receive explicit copies.
     content: Rc<AcceptedContent>,
     pub(crate) binding: Option<PersistenceBinding>,
 }
 
 impl AcceptedProject {
     pub(super) fn new(baseline: ProjectSnapshot, binding: Option<PersistenceBinding>) -> Self {
-        let fingerprints = super::registry::document_fingerprints(&baseline.file);
+        let ProjectSnapshot {
+            file,
+            workspace_session,
+        } = baseline;
+        let project = rspice_project::AcceptedProject::new(file);
         Self {
             content: Rc::new(AcceptedContent {
-                baseline,
-                fingerprints,
+                project,
+                workspace_session,
             }),
             binding,
         }
     }
 
-    pub(super) fn baseline(&self) -> &ProjectSnapshot {
-        &self.content.baseline
+    pub(super) fn baseline(&self) -> &ProjectFile {
+        self.content.project.baseline()
     }
 
     pub(super) fn fingerprints(&self) -> Result<&DocumentFingerprints, String> {
-        self.content.fingerprints.as_ref().map_err(Clone::clone)
+        self.content.project.fingerprints()
+    }
+
+    pub(super) fn clone_snapshot(&self) -> ProjectSnapshot {
+        ProjectSnapshot {
+            file: self.baseline().clone(),
+            workspace_session: self.content.workspace_session.clone(),
+        }
+    }
+
+    pub(super) fn clone_schematic_editor(&self, key: &str) -> Option<SchematicState> {
+        self.content
+            .workspace_session
+            .clone_schematic_editor(&self.baseline().workspace, key)
     }
 }

@@ -7,12 +7,12 @@ pub(super) use rspice_project::registry::FINGERPRINT_PASSES;
 #[cfg(test)]
 pub(super) use rspice_project::registry::result_fingerprint::RESULT_FINGERPRINT_PASSES;
 pub(super) use rspice_project::registry::{
-    DocumentFingerprints, ResultFingerprintCache, content_digest, document_fingerprints,
+    DocumentFingerprints, ResultFingerprintCache, content_digest,
     document_fingerprints_with_results_cache,
 };
 pub(crate) use rspice_project::registry::{DocumentRegistry, ProjectDocumentId};
 #[cfg(test)]
-use rspice_project::registry::{digest, document_digests};
+use rspice_project::registry::{digest, document_digests, document_fingerprints};
 
 pub(crate) fn active_document(
     workspace: Workspace,

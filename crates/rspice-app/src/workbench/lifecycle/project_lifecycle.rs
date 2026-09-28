@@ -181,9 +181,7 @@ pub(crate) fn effective_save_scope(state: &AppState, requested: SaveScope) -> Sa
 pub(crate) fn accepted_active_schematic(state: &AppState) -> Option<crate::state::SchematicState> {
     let accepted = state.project_lifecycle.accepted.as_ref()?;
     accepted.binding.as_ref()?;
-    accepted
-        .baseline()
-        .clone_schematic_editor(&state.workspace.content.active_view.key())
+    accepted.clone_schematic_editor(&state.workspace.content.active_view.key())
 }
 
 /// Monotonic identity of the accepted canonical baseline. Validation receipts
@@ -502,7 +500,7 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
         .registry
         .is_dirty(&ProjectDocumentId::ProjectConfiguration);
     if let Some(accepted) = state.project_lifecycle.accepted.as_ref() {
-        let baseline = &accepted.baseline().file.workspace;
+        let baseline = &accepted.baseline().workspace;
         state.workspace.content.netlist_source_dirty = state.workspace.content.netlist_source
             != baseline.netlist_source
             || state.workspace.content.netlist_source_path != baseline.netlist_source_path
@@ -946,8 +944,7 @@ pub(crate) fn save_native(
                     .accepted
                     .as_ref()
                     .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?
-                    .baseline()
-                    .clone();
+                    .clone_snapshot();
                 overlay_document(&mut baseline, &working, &active_document(state))?;
                 baseline
             }
@@ -1076,8 +1073,7 @@ pub(crate) fn prepare_browser_save(
                 .accepted
                 .as_ref()
                 .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?
-                .baseline()
-                .clone();
+                .clone_snapshot();
             overlay_document(&mut baseline, &working, &saved_document)?;
             baseline
         };
@@ -1763,8 +1759,7 @@ fn revert_document_in_place(
         .accepted
         .as_ref()
         .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?
-        .baseline()
-        .clone();
+        .clone_snapshot();
     let baseline_project_id = baseline.file.workspace.project.id();
 
     match id {

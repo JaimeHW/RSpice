@@ -1,4 +1,7 @@
-//! Project identity, execution context, metadata and revision receipts.
+//! Canonical project documents, accepted content and persistence contracts.
+
+mod accepted;
+pub use accepted::AcceptedProject;
 
 mod descriptor;
 mod execution_context;

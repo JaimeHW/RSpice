@@ -1115,7 +1115,6 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
             .as_ref()
             .expect("accepted save")
             .baseline()
-            .file
             .workspace
             .configuration_sets,
         state.workspace.content.configuration_sets
@@ -1127,7 +1126,6 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
             .as_ref()
             .expect("accepted save")
             .baseline()
-            .file
             .workspace
             .design_management,
         state.workspace.content.design_management
@@ -1618,7 +1616,6 @@ fn saving_active_cell_never_dirties_project_configuration() {
             .as_ref()
             .expect("accepted save")
             .baseline()
-            .file
             .libraries
             .revision(),
         governed_revision,
