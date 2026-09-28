@@ -31,7 +31,7 @@ pub(crate) use registry::ProjectDocumentId;
 use transaction::{LifecycleTransaction, TransactionKind};
 
 use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
-use crate::io::{ProjectExecutionContext, ProjectSimulationResults, ProjectSnapshot};
+use crate::io::{ProjectSimulationResults, ProjectSnapshot};
 #[cfg(target_arch = "wasm32")]
 use crate::product::ContentDigest;
 use crate::state::{CellViewRef, ViewType};
@@ -938,16 +938,12 @@ pub(crate) fn save_native(
         let working = snapshot(state)?;
         let mut candidate = match scope {
             SaveScope::AllDocuments => working.clone(),
-            SaveScope::ActiveDocument => {
-                let mut baseline = state
-                    .project_lifecycle
-                    .accepted
-                    .as_ref()
-                    .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?
-                    .clone_snapshot();
-                overlay_document(&mut baseline, &working, &active_document(state))?;
-                baseline
-            }
+            SaveScope::ActiveDocument => state
+                .project_lifecycle
+                .accepted
+                .as_ref()
+                .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?
+                .document_candidate(&working, &active_document(state))?,
         };
         candidate.file.workspace.project.set_path(path.clone());
         // Build every fallible post-save document digest before publishing.
@@ -1068,14 +1064,12 @@ pub(crate) fn prepare_browser_save(
         let mut candidate = if project_copy || scope == SaveScope::AllDocuments {
             working
         } else {
-            let mut baseline = state
+            state
                 .project_lifecycle
                 .accepted
                 .as_ref()
                 .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?
-                .clone_snapshot();
-            overlay_document(&mut baseline, &working, &saved_document)?;
-            baseline
+                .document_candidate(&working, &saved_document)?
         };
         if project_copy {
             candidate.file.workspace.project = candidate
@@ -2030,170 +2024,6 @@ fn advance_accepted_generation(lifecycle: &mut ProjectLifecycleState) {
     lifecycle.accepted_generation = lifecycle.accepted_generation.wrapping_add(1).max(1);
 }
 
-fn overlay_document(
-    target: &mut ProjectSnapshot,
-    working: &ProjectSnapshot,
-    id: &ProjectDocumentId,
-) -> Result<(), ProjectLifecycleError> {
-    match id {
-        ProjectDocumentId::ProjectConfiguration => {
-            target.file.workspace.project = working.file.workspace.project.clone();
-            target.file.workspace.configuration_sets =
-                working.file.workspace.configuration_sets.clone();
-            target.file.workspace.design_management =
-                working.file.workspace.design_management.clone();
-            target
-                .file
-                .workspace
-                .replace_pdk_callback_receipts_for_lifecycle(
-                    working.file.workspace.pdk_callback_receipts().to_vec(),
-                )
-                .map_err(ProjectLifecycleError::InvalidState)?;
-            target.file.libraries = merge_project_structure_with_document_content(
-                &working.file.libraries,
-                &target.file.libraries,
-            );
-        }
-        ProjectDocumentId::CellView(reference) => overlay_cell_view(target, working, reference)?,
-        ProjectDocumentId::SimulationPlan => {
-            ensure_execution_context(target, working)?.simulation_plan = working
-                .file
-                .execution_context
-                .as_ref()
-                .ok_or_else(|| {
-                    ProjectLifecycleError::InvalidState(
-                        "working project has no simulation plan".to_owned(),
-                    )
-                })?
-                .simulation_plan
-                .clone();
-            target.file.workspace.simulation_plan_payloads =
-                working.file.workspace.simulation_plan_payloads.clone();
-            if let Some(plan_id) = target
-                .file
-                .execution_context
-                .as_ref()
-                .and_then(|context| context.simulation_plan.analysis_plan.as_ref())
-                .map(crate::simulation::plan::SimulationPlan::id)
-            {
-                target.file.workspace.sync_legacy_specs_projection(plan_id);
-            }
-        }
-        ProjectDocumentId::ModelCatalog => {
-            let source = working.file.execution_context.as_ref().ok_or_else(|| {
-                ProjectLifecycleError::InvalidState(
-                    "working project has no model catalog".to_owned(),
-                )
-            })?;
-            let destination = ensure_execution_context(target, working)?;
-            destination
-                .model_libraries
-                .clone_from(&source.model_libraries);
-            destination
-                .model_resolution_records
-                .clone_from(&source.model_resolution_records);
-            destination
-                .model_validation_receipt
-                .clone_from(&source.model_validation_receipt);
-        }
-        ProjectDocumentId::ResultHistory => {
-            target.file.simulation_results = working.file.simulation_results.clone();
-            target.file.result_presentation = working.file.result_presentation.clone();
-            target.file.workspace.report_documents =
-                working.file.workspace.report_documents.clone();
-            target.file.workspace.visualization_documents =
-                working.file.workspace.visualization_documents.clone();
-        }
-        ProjectDocumentId::VerificationSpecifications => {
-            target.file.workspace.specs = working.file.workspace.specs.clone();
-        }
-        ProjectDocumentId::StimulusLibrary => {
-            target.file.workspace.stimulus_library =
-                working.file.workspace.stimulus_library.clone();
-        }
-        ProjectDocumentId::NetlistSource => {
-            target.file.workspace.netlist_source = working.file.workspace.netlist_source.clone();
-            target.file.workspace.netlist_source_path =
-                working.file.workspace.netlist_source_path.clone();
-            target.file.workspace.netlist_document =
-                working.file.workspace.netlist_document.clone();
-            target.file.workspace.netlist_descriptor =
-                working.file.workspace.netlist_descriptor.clone();
-            target.file.workspace.retained_netlist_decks =
-                working.file.workspace.retained_netlist_decks.clone();
-            target
-                .file
-                .workspace
-                .project_sources
-                .synchronize_code_workspace_bundles_from(&working.file.workspace.project_sources)
-                .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
-        }
-    }
-    target
-        .file
-        .validate()
-        .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))
-}
-
-fn ensure_execution_context<'a>(
-    target: &'a mut ProjectSnapshot,
-    working: &ProjectSnapshot,
-) -> Result<&'a mut ProjectExecutionContext, ProjectLifecycleError> {
-    if target.file.execution_context.is_none() {
-        target.file.execution_context = working.file.execution_context.clone();
-    }
-    target.file.execution_context.as_mut().ok_or_else(|| {
-        ProjectLifecycleError::InvalidState("project has no execution context".to_owned())
-    })
-}
-
-fn overlay_cell_view(
-    target: &mut ProjectSnapshot,
-    working: &ProjectSnapshot,
-    reference: &CellViewRef,
-) -> Result<(), ProjectLifecycleError> {
-    target
-        .file
-        .libraries
-        .overlay_cell_view_document_from_snapshot(
-            &working.file.libraries,
-            &reference.library,
-            &reference.cell,
-            &reference.view,
-        )
-        .map_err(ProjectLifecycleError::InvalidState)?;
-
-    let key = reference.key();
-    match working.clone_schematic_editor(&key) {
-        Some(buffer) => {
-            target.insert_schematic_editor(key, buffer);
-        }
-        None => {
-            target.remove_schematic_editor(&key);
-        }
-    }
-    target
-        .file
-        .workspace
-        .synchronize_physical_layout_document_from(reference, &working.file.workspace)
-        .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
-    // Sheets are part of the drawing, not of project setup: a cell view that
-    // is saved on its own carries its own sheet catalog, and leaves every
-    // other cell view's sheets unpublished.
-    target
-        .file
-        .workspace
-        .overlay_sheet_catalog_from(reference, &working.file.workspace)
-        .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
-    target
-        .file
-        .workspace
-        .project_sources
-        .synchronize_cell_view_bundle_from(reference, &working.file.workspace.project_sources)
-        .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
-    Ok(())
-}
-
 fn revert_cell_view(
     state: &mut AppState,
     baseline: &ProjectSnapshot,
@@ -2282,8 +2112,7 @@ fn restore_project_structure_preserving_documents(
             })
         })
         .collect::<Vec<_>>();
-    state.library_manager =
-        merge_project_structure_with_document_content(&baseline, &state.library_manager);
+    state.library_manager = baseline.with_document_content_from(&state.library_manager);
     let removed_references = previous_references
         .into_iter()
         .filter(|reference| {
@@ -2338,51 +2167,6 @@ fn restore_project_structure_preserving_documents(
     state
         .workspace
         .ensure_library_model(&mut state.library_manager);
-}
-
-fn merge_project_structure_with_document_content(
-    structure: &crate::state::LibraryManager,
-    content: &crate::state::LibraryManager,
-) -> crate::state::LibraryManager {
-    let mut merged = structure.clone();
-    let cells = merged
-        .libraries_by_key()
-        .flat_map(|(library_key, library)| {
-            library
-                .cells
-                .keys()
-                .map(move |cell_key| (library_key.to_owned(), cell_key.to_owned()))
-        })
-        .collect::<Vec<_>>();
-    for (library, cell) in cells {
-        if let Some(mut library) = merged.edit_library(&library) {
-            library.clear_views(&cell);
-        }
-    }
-    let references = content
-        .libraries_by_key()
-        .flat_map(|(library_key, library)| {
-            library.cells.iter().flat_map(move |(cell_key, cell)| {
-                cell.views
-                    .keys()
-                    .map(move |view_key| CellViewRef::new(library_key, cell_key, view_key))
-            })
-        })
-        .collect::<Vec<_>>();
-    for reference in references {
-        let Some(view) = content
-            .get_library(&reference.library)
-            .and_then(|library| library.get_cell(&reference.cell))
-            .and_then(|cell| cell.get_view(&reference.view))
-            .cloned()
-        else {
-            continue;
-        };
-        if let Some(mut library) = merged.edit_library(&reference.library) {
-            library.add_view(&reference.cell, view);
-        }
-    }
-    merged
 }
 
 #[cfg(not(target_arch = "wasm32"))]

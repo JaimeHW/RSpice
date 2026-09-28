@@ -4,6 +4,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStru
 use std::collections::HashMap;
 
 use rspice_design::library::{Cell, Library, LibraryCatalog, View};
+use rspice_design_model::cell_view::CellViewRef;
 
 mod bootstrap;
 
@@ -286,5 +287,49 @@ impl ProjectLibraries {
             cell_name,
             view_name,
         )
+    }
+
+    /// Copy this library/cell structure while retaining matching view documents
+    /// from the supplied content, so project setup does not publish view drafts.
+    pub fn with_document_content_from(&self, content: &Self) -> Self {
+        let mut merged = self.clone();
+        let cells = merged
+            .libraries_by_key()
+            .flat_map(|(library_key, library)| {
+                library
+                    .cells
+                    .keys()
+                    .map(move |cell_key| (library_key.to_owned(), cell_key.to_owned()))
+            })
+            .collect::<Vec<_>>();
+        for (library, cell) in cells {
+            if let Some(mut library) = merged.edit_library(&library) {
+                library.clear_views(&cell);
+            }
+        }
+        let references = content
+            .libraries_by_key()
+            .flat_map(|(library_key, library)| {
+                library.cells.iter().flat_map(move |(cell_key, cell)| {
+                    cell.views
+                        .keys()
+                        .map(move |view_key| CellViewRef::new(library_key, cell_key, view_key))
+                })
+            })
+            .collect::<Vec<_>>();
+        for reference in references {
+            let Some(view) = content
+                .get_library(&reference.library)
+                .and_then(|library| library.get_cell(&reference.cell))
+                .and_then(|cell| cell.get_view(&reference.view))
+                .cloned()
+            else {
+                continue;
+            };
+            if let Some(mut library) = merged.edit_library(&reference.library) {
+                library.add_view(&reference.cell, view);
+            }
+        }
+        merged
     }
 }

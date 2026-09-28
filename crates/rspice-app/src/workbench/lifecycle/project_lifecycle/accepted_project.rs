@@ -9,8 +9,8 @@ use crate::io::ProjectSnapshot;
 use crate::state::{SchematicState, workspace::WorkspaceSession};
 use rspice_project::ProjectFile;
 
-use super::PersistenceBinding;
 use super::registry::DocumentFingerprints;
+use super::{PersistenceBinding, ProjectDocumentId, ProjectLifecycleError};
 
 #[derive(Debug)]
 struct AcceptedContent {
@@ -61,5 +61,36 @@ impl AcceptedProject {
         self.content
             .workspace_session
             .clone_schematic_editor(&self.baseline().workspace, key)
+    }
+
+    pub(super) fn document_candidate(
+        &self,
+        working: &ProjectSnapshot,
+        id: &ProjectDocumentId,
+    ) -> Result<ProjectSnapshot, ProjectLifecycleError> {
+        let file = self
+            .content
+            .project
+            .document_candidate(&working.file, id)
+            .map_err(ProjectLifecycleError::InvalidState)?;
+        let mut workspace_session = self.content.workspace_session.clone();
+        if let ProjectDocumentId::CellView(reference) = id {
+            let key = reference.key();
+            if working.file.workspace.schematic_buffers.contains_key(&key) {
+                let session = working
+                    .workspace_session
+                    .schematic_sessions
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or_default();
+                workspace_session.schematic_sessions.insert(key, session);
+            } else {
+                workspace_session.schematic_sessions.remove(&key);
+            }
+        }
+        Ok(ProjectSnapshot {
+            file,
+            workspace_session,
+        })
     }
 }

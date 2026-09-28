@@ -1,6 +1,7 @@
 //! Canonical project documents, accepted content and persistence contracts.
 
 mod accepted;
+mod candidate;
 pub use accepted::AcceptedProject;
 
 mod descriptor;

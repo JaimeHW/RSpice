@@ -96,6 +96,7 @@ impl ProjectSnapshot {
         self.workspace_session
             .schematic_editor_mut(&mut self.file.workspace, key)
     }
+    #[cfg(test)]
     pub(crate) fn insert_schematic_editor(
         &mut self,
         key: String,
@@ -104,6 +105,7 @@ impl ProjectSnapshot {
         self.workspace_session
             .insert_schematic_editor(&mut self.file.workspace, key, editor)
     }
+    #[cfg(test)]
     pub(crate) fn remove_schematic_editor(&mut self, key: &str) -> Option<SchematicState> {
         self.workspace_session
             .remove_schematic_editor(&mut self.file.workspace, key)

@@ -135,22 +135,22 @@ fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
         ProjectDocumentId::ProjectConfiguration
     );
     assert_eq!(
-        prepared.candidate.workspace.configuration_sets,
-        state.workspace.configuration_sets
+        prepared.candidate.file.workspace.configuration_sets,
+        state.workspace.content.configuration_sets
     );
     let staged_text = std::str::from_utf8(&prepared.bytes).expect("UTF-8 project bytes");
     let decoded = crate::io::project_io::load_project_text(staged_text, None)
         .expect("decode staged browser project");
     assert_eq!(
-        decoded.workspace.configuration_sets,
-        state.workspace.configuration_sets
+        decoded.file.workspace.configuration_sets,
+        state.workspace.content.configuration_sets
     );
 
     state.project_lifecycle.transaction = None;
     revert_document(&mut state, ProjectDocumentId::ProjectConfiguration).expect("browser revert");
     assert_eq!(
-        state.workspace.configuration_sets,
-        baseline.workspace.configuration_sets
+        state.workspace.content.configuration_sets,
+        baseline.file.workspace.configuration_sets
     );
 }
 
@@ -273,12 +273,10 @@ fn project_configuration_overlay_and_revert_own_exact_configuration_catalog() {
     let edited = snapshot(&state).expect("edited");
     let mut accepted = baseline.clone();
 
-    overlay_document(
-        &mut accepted,
-        &edited,
-        &ProjectDocumentId::ProjectConfiguration,
-    )
-    .expect("overlay project configuration");
+    accepted
+        .file
+        .overlay_document(&edited.file, &ProjectDocumentId::ProjectConfiguration)
+        .expect("overlay project configuration");
     assert_eq!(
         accepted.file.workspace.configuration_sets,
         edited.file.workspace.configuration_sets
@@ -360,12 +358,13 @@ fn cell_veriloga_view_and_source_are_one_lifecycle_document() {
     let edited = snapshot(&state).expect("edited");
     let mut target = baseline.clone();
 
-    overlay_document(
-        &mut target,
-        &edited,
-        &ProjectDocumentId::CellView(reference.clone()),
-    )
-    .expect("overlay cell view");
+    target
+        .file
+        .overlay_document(
+            &edited.file,
+            &ProjectDocumentId::CellView(reference.clone()),
+        )
+        .expect("overlay cell view");
     assert_eq!(
         target.file.workspace.project_sources.get_bundle(source_id),
         edited.file.workspace.project_sources.get_bundle(source_id)
@@ -408,12 +407,10 @@ fn project_configuration_never_accepts_or_discards_unsaved_cell_views() {
     let working = snapshot(&working_state).expect("working");
     let mut target = baseline.clone();
 
-    overlay_document(
-        &mut target,
-        &working,
-        &ProjectDocumentId::ProjectConfiguration,
-    )
-    .expect("overlay configuration");
+    target
+        .file
+        .overlay_document(&working.file, &ProjectDocumentId::ProjectConfiguration)
+        .expect("overlay configuration");
 
     assert!(
         target
@@ -605,7 +602,10 @@ fn code_document_overlay_copies_project_sources_atomically() {
         .unwrap();
     let working = snapshot(&state).unwrap();
 
-    overlay_document(&mut target, &working, &ProjectDocumentId::NetlistSource).unwrap();
+    target
+        .file
+        .overlay_document(&working.file, &ProjectDocumentId::NetlistSource)
+        .unwrap();
 
     assert_eq!(
         target.file.workspace.project_sources,
@@ -1009,6 +1009,7 @@ fn design_checks_on_save_are_off_by_default_and_never_refuse_the_save() {
 fn save_active_overlays_only_active_document_on_accepted_baseline() {
     let path = unique_path("active-overlay");
     let mut state = AppState::default();
+    state.schematic.session.zoom = 1.25;
     save_native(
         &mut state,
         SaveScope::AllDocuments,
@@ -1021,6 +1022,7 @@ fn save_active_overlays_only_active_document_on_accepted_baseline() {
         .schematic
         .add_component(ComponentType::Resistor, Point::new(4, 8));
     let ac_id = insert_ac_analysis(&mut state);
+    state.schematic.session.zoom = 1.75;
     assert!(
         save_native(
             &mut state,
@@ -1031,6 +1033,14 @@ fn save_active_overlays_only_active_document_on_accepted_baseline() {
         .is_ok()
     );
 
+    assert_eq!(
+        accepted_active_schematic(&state)
+            .expect("accepted active design")
+            .session
+            .zoom,
+        1.75,
+        "an active-design save retains the editor session paired with that design"
+    );
     let persisted = crate::io::load_project_file(&path).expect("reload saved project");
     let persisted_context = persisted.file.execution_context.expect("execution context");
     assert_eq!(
