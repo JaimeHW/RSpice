@@ -1,9 +1,9 @@
 //! Prepare component references independently of editor history and permissions.
 
-use super::reference_paths::{
+use super::*;
+use rspice_design::references::{
     PathMappings, ReferenceComponents, remap_instance_probes_many, remap_schematic_probes,
 };
-use super::*;
 
 pub(crate) struct SchematicReferenceTransaction {
     pub(crate) before: BTreeMap<String, SchematicState>,
@@ -194,7 +194,7 @@ fn hierarchy_reference_paths(
     after: &BTreeMap<String, SchematicState>,
     emitted: bool,
 ) -> Result<PathMappings, String> {
-    super::reference_paths::hierarchy_reference_paths(
+    rspice_design::references::hierarchy_reference_paths(
         root,
         resolution,
         &|reference| {

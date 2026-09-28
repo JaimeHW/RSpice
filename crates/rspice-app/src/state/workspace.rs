@@ -25,7 +25,6 @@ mod plan_data;
 mod project_descriptor;
 mod project_library_publication;
 mod reference_changes;
-mod reference_paths;
 mod reference_preparation;
 
 // The two functions are renamed on export: bare `normalize` and

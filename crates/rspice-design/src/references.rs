@@ -1,23 +1,23 @@
 //! Hierarchy reference renames and lossless probe-expression updates.
 
-use rspice_app_types::hierarchy_path::{InstancePath, ProbeTarget};
-use rspice_design::hierarchy::HierarchyResolution;
-use rspice_design::schematic::{
+use crate::hierarchy::HierarchyResolution;
+use crate::schematic::{
     component::Component, component_type::ComponentType, probe::SchematicProbe,
 };
+use rspice_app_types::hierarchy_path::{InstancePath, ProbeTarget};
 use rspice_design_model::cell_view::CellViewRef;
 use std::collections::BTreeMap;
 
 mod probe_rewrite;
-pub(crate) use probe_rewrite::remap_instance_probes_many;
+pub use probe_rewrite::remap_instance_probes_many;
 
-pub(crate) type PathMappings = Vec<(InstancePath, InstancePath)>;
+pub type PathMappings = Vec<(InstancePath, InstancePath)>;
 
 /// Before/after components for a validated reference edit. Every original
 /// component identity must be present in the replacement slice.
-pub(crate) struct ReferenceComponents<'a> {
-    pub(crate) before: &'a [Component],
-    pub(crate) after: &'a [Component],
+pub struct ReferenceComponents<'a> {
+    pub before: &'a [Component],
+    pub after: &'a [Component],
 }
 
 fn local_reference_paths<'a>(
@@ -72,7 +72,7 @@ fn append_document_paths<'a>(
 }
 
 /// Compose simultaneous renames in the resolved hierarchy's original namespace.
-pub(crate) fn hierarchy_reference_paths<'a>(
+pub fn hierarchy_reference_paths<'a>(
     root: &CellViewRef,
     resolution: &HierarchyResolution,
     components: &impl Fn(&CellViewRef) -> Option<ReferenceComponents<'a>>,
@@ -122,7 +122,7 @@ pub(crate) fn hierarchy_reference_paths<'a>(
 }
 
 /// Prepare rewritten flags without changing the source document.
-pub(crate) fn remap_schematic_probes(
+pub fn remap_schematic_probes(
     source: &[SchematicProbe],
     mappings: &[(InstancePath, InstancePath)],
 ) -> Result<Option<Vec<SchematicProbe>>, String> {

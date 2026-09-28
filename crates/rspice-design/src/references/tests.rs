@@ -1,5 +1,5 @@
 use super::*;
-use rspice_design::hierarchy::{HierarchyBindingStatus, ResolvedHierarchyBinding};
+use crate::hierarchy::{HierarchyBindingStatus, ResolvedHierarchyBinding};
 use rspice_design_model::Point;
 
 #[test]

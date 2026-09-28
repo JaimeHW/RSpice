@@ -6,7 +6,7 @@ use super::{InstancePath, ProbeTarget};
 /// Apply a simultaneous identity map once to each original probe argument.
 /// Destinations already include ancestor edits; longest-prefix matching keeps
 /// a child rename from being lost when its parent is renamed in the same edit.
-pub(crate) fn remap_instance_probes_many(
+pub fn remap_instance_probes_many(
     expression: &str,
     mappings: &[(InstancePath, InstancePath)],
 ) -> Result<Option<String>, String> {
