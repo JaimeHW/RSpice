@@ -3,6 +3,10 @@
 use rspice_app_types::product::ContentDigest;
 use serde::{Deserialize, Serialize};
 
+mod records;
+
+pub use records::ModelResolutionRecords;
+
 pub const MODEL_RESOLUTION_RECORD_SCHEMA_VERSION: u16 = 1;
 
 /// Consumer namespace governed by one explicit provider decision.

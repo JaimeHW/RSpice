@@ -11,6 +11,9 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+catalog-test-observation = []
+
 [dependencies]
 base64.workspace = true
 csv.workspace = true

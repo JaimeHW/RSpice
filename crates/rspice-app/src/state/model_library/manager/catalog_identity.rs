@@ -19,24 +19,6 @@ use std::hash::{Hash as _, Hasher as _};
 
 use super::*;
 
-/// The canonical SHA-256 identity of one library's accepted source.
-///
-/// A content-pinned library answers from its root pin. Serializing the whole
-/// library is the fallback for one that was never pinned, and it is as
-/// expensive as it sounds — see [`crate::state::CATALOG_LIBRARY_SERIALIZATIONS`],
-/// which counts it, and the scale gate that holds the count at zero per frame.
-pub(crate) fn model_library_source_digest(library: &ModelLibrary) -> ContentDigest {
-    if let Some(digest) = library.pinned_root_digest() {
-        return digest;
-    }
-    #[cfg(test)]
-    crate::state::CATALOG_LIBRARY_SERIALIZATIONS.with(|count| count.set(count.get() + 1));
-    let bytes = serde_json::to_value(library)
-        .and_then(|canonical| serde_json::to_vec(&canonical))
-        .unwrap_or_else(|error| format!("serialization-error:{error}").into_bytes());
-    ContentDigest::from_bytes(Sha256::digest(bytes).into())
-}
-
 impl ModelLibraryManager {
     /// Stable identity of the persisted model catalogue relevant to source
     /// preparation. Browser filters, selection, shipped-pack indexes, and
@@ -49,33 +31,8 @@ impl ModelLibraryManager {
     /// [`Self::design_inspection_catalog_key`] for the answer that can be
     /// asked per frame.
     pub(crate) fn execution_catalog_digest(&self) -> ContentDigest {
-        let mut libraries = self.catalog.libraries().collect::<Vec<_>>();
-        libraries.sort_by(|left, right| left.name.cmp(&right.name));
-        let mut hasher = Sha256::new();
-        hasher.update(b"rspice.model-execution-catalog/v4\0");
-        for library in libraries {
-            // A library owns several `HashMap` fields, so serializing it
-            // directly emits their entries in per-instance iteration order and
-            // yields a different digest for identical content. Route through
-            // `serde_json::Value`, whose objects are key-sorted maps, so the
-            // catalogue identity depends only on the content itself. A prepared
-            // run compares this digest before dispatch; an order-dependent one
-            // expires authorized runs at random.
-            #[cfg(test)]
-            crate::state::CATALOG_LIBRARY_SERIALIZATIONS.with(|count| count.set(count.get() + 1));
-            let bytes = serde_json::to_value(library)
-                .and_then(|canonical| serde_json::to_vec(&canonical))
-                .unwrap_or_else(|error| format!("serialization-error:{error}").into_bytes());
-            hasher.update((bytes.len() as u64).to_le_bytes());
-            hasher.update(bytes);
-        }
-        for record in self.resolution_records.values() {
-            let bytes = serde_json::to_vec(record)
-                .unwrap_or_else(|error| format!("serialization-error:{error}").into_bytes());
-            hasher.update((bytes.len() as u64).to_le_bytes());
-            hasher.update(bytes);
-        }
-        ContentDigest::from_bytes(hasher.finalize().into())
+        self.catalog
+            .execution_catalog_digest(&self.resolution_records)
     }
 
     /// Cheap identity of everything the analysis-independent design inspection

@@ -10,24 +10,26 @@ mod project_models;
 mod sealing;
 mod source_bundle;
 
-pub(crate) use catalog_identity::model_library_source_digest;
 use rspice_model_library::source_paths::portable_path_key;
+pub(crate) use rspice_model_library::{ModelDefinitionProvider, model_library_source_digest};
 pub use rspice_simulation::model_sources::SealedModelExecutionSources;
 pub(crate) use rspice_simulation::model_sources::SealedModelLibraryVerilogAAuthority;
 
 use serde::{Deserialize, Serialize};
+#[cfg(any(test, not(target_arch = "wasm32")))]
 use sha2::{Digest as _, Sha256};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rspice_core::library::SpiceLibraryIndex;
 #[cfg(test)]
-use rspice_model_library::ModelValidationFindingSeverity;
 use rspice_model_library::{
-    MODEL_RESOLUTION_RECORD_SCHEMA_VERSION, ModelConsumerScope, ModelResolutionRecord,
-    ModelValidationFinding, ModelValidationReceipt, ModelValidationReceiptInput,
-    SimulationPlanModelBinding,
+    MODEL_RESOLUTION_RECORD_SCHEMA_VERSION, ModelValidationFindingSeverity,
+};
+use rspice_model_library::{
+    ModelConsumerScope, ModelResolutionRecord, ModelResolutionRecords, ModelValidationFinding,
+    ModelValidationReceipt, ModelValidationReceiptInput, SimulationPlanModelBinding,
 };
 
 use super::{
@@ -46,13 +48,6 @@ use rspice_model_library::CornerModelBinding;
 
 pub use rspice_model_library::ProjectModelCommit;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ModelDefinitionProvider {
-    pub library: String,
-    pub definition: String,
-    pub source_digest: ContentDigest,
-}
-
 const fn model_validation_platform() -> &'static str {
     if cfg!(target_arch = "wasm32") {
         "browser-wasm32"
@@ -65,11 +60,6 @@ const fn model_validation_platform() -> &'static str {
     } else {
         "desktop-unsupported"
     }
-}
-
-fn hash_validation_source_field(hasher: &mut Sha256, value: &[u8]) {
-    hasher.update((value.len() as u64).to_le_bytes());
-    hasher.update(value);
 }
 
 /// Manager for all model libraries
@@ -87,7 +77,7 @@ pub struct ModelLibraryManager {
     /// Durable project decisions for contested executable definitions. The
     /// map key is the canonical `scope:name` identity repeated by each value.
     #[serde(default)]
-    resolution_records: BTreeMap<String, ModelResolutionRecord>,
+    resolution_records: ModelResolutionRecords,
     #[serde(default)]
     validation_receipt: Option<ModelValidationReceipt>,
     /// Index over the shipped model packs, when one was found on disk.
@@ -232,28 +222,7 @@ impl ModelLibraryManager {
     }
 
     fn model_validation_source_identity(&self) -> (u64, ContentDigest) {
-        let mut identities = self
-            .libraries_sorted()
-            .into_iter()
-            .flat_map(|library| {
-                library
-                    .source_closure
-                    .iter()
-                    .map(move |source| (library.name.clone(), source.digest.to_string()))
-            })
-            .collect::<Vec<_>>();
-        identities.sort();
-        let source_count = identities.len() as u64;
-        let mut hasher = Sha256::new();
-        hasher.update(b"rspice.model-validation-source-closure/v1\0");
-        for (library, digest) in identities {
-            hash_validation_source_field(&mut hasher, library.as_bytes());
-            hash_validation_source_field(&mut hasher, digest.as_bytes());
-        }
-        (
-            source_count,
-            ContentDigest::from_bytes(hasher.finalize().into()),
-        )
+        self.catalog.model_validation_source_identity()
     }
 
     #[must_use]
@@ -262,29 +231,19 @@ impl ModelLibraryManager {
         scope: ModelConsumerScope,
         definition: &str,
     ) -> Option<&ModelResolutionRecord> {
-        let normalized = definition.trim().to_ascii_lowercase();
-        self.resolution_records.get(&scope.record_key(&normalized))
+        self.resolution_records.record(scope, definition)
     }
 
     pub(crate) fn restore_model_resolution_records(
         &mut self,
         records: Vec<ModelResolutionRecord>,
     ) -> Result<(), String> {
-        let mut restored = BTreeMap::new();
-        for record in records {
-            record.validate()?;
-            let key = record.key();
-            if restored.insert(key.clone(), record).is_some() {
-                return Err(format!("model-resolution record '{key}' is repeated"));
-            }
-        }
-        self.resolution_records = restored;
-        self.validate_model_resolution_records_against_catalog()
+        self.resolution_records.restore(records, &self.catalog)
     }
 
     #[must_use]
     pub(crate) fn owned_model_resolution_records(&self) -> Vec<ModelResolutionRecord> {
-        self.resolution_records.values().cloned().collect()
+        self.resolution_records.owned_records()
     }
 
     pub(crate) fn definition_providers(
@@ -292,51 +251,7 @@ impl ModelLibraryManager {
         scope: ModelConsumerScope,
         definition: &str,
     ) -> Vec<ModelDefinitionProvider> {
-        let normalized = definition.trim().to_ascii_lowercase();
-        let mut providers = Vec::new();
-        for library in self.libraries_sorted() {
-            let active_sections = library.active_section_names();
-            let names = match scope {
-                ModelConsumerScope::PrimitiveModel => library
-                    .models
-                    .values()
-                    .map(|model| model.name.as_str())
-                    .collect::<Vec<_>>(),
-                ModelConsumerScope::Subcircuit => library
-                    .subcircuits
-                    .values()
-                    .filter(|subcircuit| {
-                        subcircuit.section.as_deref().is_none_or(|section| {
-                            active_sections
-                                .iter()
-                                .any(|active| active.eq_ignore_ascii_case(section))
-                        })
-                    })
-                    .map(|subcircuit| subcircuit.name.as_str())
-                    .collect::<Vec<_>>(),
-            };
-            for exact_name in names
-                .into_iter()
-                .filter(|name| name.to_ascii_lowercase() == normalized)
-            {
-                providers.push(ModelDefinitionProvider {
-                    library: library.name.clone(),
-                    definition: exact_name.to_owned(),
-                    source_digest: model_library_source_digest(library),
-                });
-            }
-        }
-        providers.sort_by(|left, right| {
-            left.library
-                .cmp(&right.library)
-                .then_with(|| left.definition.cmp(&right.definition))
-                .then_with(|| {
-                    left.source_digest
-                        .to_string()
-                        .cmp(&right.source_digest.to_string())
-                })
-        });
-        providers
+        self.catalog.definition_providers(scope, definition)
     }
 
     /// Resolve the one provider the flat executable SPICE namespace will use.
@@ -350,49 +265,8 @@ impl ModelLibraryManager {
         scope: ModelConsumerScope,
         definition: &str,
     ) -> Result<Option<ModelDefinitionProvider>, String> {
-        let providers = self.definition_providers(scope, definition);
-        match providers.as_slice() {
-            [] => Ok(None),
-            [provider] => Ok(Some(provider.clone())),
-            _ => {
-                let normalized_name = definition.trim().to_ascii_lowercase();
-                let Some(record) = self.model_resolution_record(scope, &normalized_name) else {
-                    return Err(format!(
-                        "{} '{}' has {} executable providers ({}); resolve the project-global provider before binding or editing an instance",
-                        scope.label(),
-                        definition.trim(),
-                        providers.len(),
-                        providers
-                            .iter()
-                            .map(|provider| provider.library.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ));
-                };
-                let winners = providers
-                    .into_iter()
-                    .filter(|provider| {
-                        provider.library == record.provider_library
-                            && provider.definition == record.provider_definition
-                            && provider.source_digest == record.provider_source_digest
-                    })
-                    .collect::<Vec<_>>();
-                match winners.as_slice() {
-                    [provider] => Ok(Some(provider.clone())),
-                    [] => Err(format!(
-                        "project-global provider decision for {} '{}' no longer matches an authenticated catalog definition",
-                        scope.label(),
-                        definition.trim()
-                    )),
-                    _ => Err(format!(
-                        "{} '{}' is repeated inside resolved provider '{}'; repair that source before binding an instance",
-                        scope.label(),
-                        definition.trim(),
-                        record.provider_library
-                    )),
-                }
-            }
-        }
+        self.resolution_records
+            .effective_definition_provider(&self.catalog, scope, definition)
     }
 
     pub fn resolve_definition_provider(
@@ -402,52 +276,18 @@ impl ModelLibraryManager {
         provider_library: &str,
         audit_reason: &str,
     ) -> Result<ModelResolutionRecord, String> {
-        let normalized_name = definition.trim().to_ascii_lowercase();
-        let providers = self.definition_providers(scope, &normalized_name);
-        if providers.len() < 2 {
-            return Err(format!(
-                "{} definition '{}' is not contested by multiple authenticated providers",
-                scope.label(),
-                definition.trim()
-            ));
-        }
-        let provider = providers
-            .iter()
-            .find(|provider| provider.library == provider_library)
-            .ok_or_else(|| {
-                format!(
-                    "'{provider_library}' is not an exact provider of contested {} '{}'",
-                    scope.label(),
-                    normalized_name
-                )
-            })?;
-        if providers.iter().any(|candidate| {
-            candidate != provider
-                && candidate.library.eq_ignore_ascii_case(&provider.library)
-                && candidate.source_digest == provider.source_digest
-        }) {
-            return Err(format!(
-                "{} '{}' is defined more than once inside provider '{}'; repair the source because a provider decision cannot distinguish same-source duplicates",
-                scope.label(),
-                normalized_name,
-                provider.library
-            ));
-        }
-        let created_at_unix_ms = crate::time_compat::checked_unix_time_ms()
-            .map_err(|error| format!("system clock cannot timestamp provider decision: {error}"))?;
-        let record = ModelResolutionRecord {
-            schema_version: MODEL_RESOLUTION_RECORD_SCHEMA_VERSION,
-            consumer_scope: scope,
-            normalized_name,
-            provider_library: provider.library.clone(),
-            provider_definition: provider.definition.clone(),
-            provider_source_digest: provider.source_digest,
-            audit_reason: audit_reason.to_owned(),
-            created_at_unix_ms,
-        };
-        record.validate()?;
-        self.resolution_records.insert(record.key(), record.clone());
-        Ok(record)
+        self.resolution_records.resolve_definition_provider(
+            &self.catalog,
+            scope,
+            definition,
+            provider_library,
+            audit_reason,
+            || {
+                crate::time_compat::checked_unix_time_ms().map_err(|error| {
+                    format!("system clock cannot timestamp provider decision: {error}")
+                })
+            },
+        )
     }
 
     pub fn clear_definition_provider(
@@ -455,56 +295,13 @@ impl ModelLibraryManager {
         scope: ModelConsumerScope,
         definition: &str,
     ) -> bool {
-        let normalized = definition.trim().to_ascii_lowercase();
         self.resolution_records
-            .remove(&scope.record_key(&normalized))
-            .is_some()
+            .clear_definition_provider(scope, definition)
     }
 
     fn validate_model_resolution_records_against_catalog(&self) -> Result<(), String> {
-        for (key, record) in &self.resolution_records {
-            record.validate()?;
-            if record.key() != *key {
-                return Err(format!(
-                    "model-resolution map key '{key}' does not match its record identity '{}'",
-                    record.key()
-                ));
-            }
-            let provider = self.get_library(&record.provider_library).ok_or_else(|| {
-                format!(
-                    "provider decision for {} '{}' is stale because library '{}' was removed",
-                    record.consumer_scope.label(),
-                    record.normalized_name,
-                    record.provider_library
-                )
-            })?;
-            if model_library_source_digest(provider) != record.provider_source_digest {
-                return Err(format!(
-                    "provider decision for {} '{}' is stale because source '{}' changed digest",
-                    record.consumer_scope.label(),
-                    record.normalized_name,
-                    record.provider_library
-                ));
-            }
-            let exact_provider_exists = self
-                .definition_providers(record.consumer_scope, &record.normalized_name)
-                .into_iter()
-                .any(|candidate| {
-                    candidate.library == record.provider_library
-                        && candidate.definition == record.provider_definition
-                        && candidate.source_digest == record.provider_source_digest
-                });
-            if !exact_provider_exists {
-                return Err(format!(
-                    "provider decision for {} '{}' is stale because exact definition '{}/{}' is no longer available",
-                    record.consumer_scope.label(),
-                    record.normalized_name,
-                    record.provider_library,
-                    record.provider_definition
-                ));
-            }
-        }
-        Ok(())
+        self.resolution_records
+            .validate_against_catalog(&self.catalog)
     }
 
     /// Create a new manager
@@ -1008,7 +805,7 @@ impl ModelLibraryManager {
     #[cfg(test)]
     pub fn clear(&mut self) {
         self.catalog.clear();
-        self.resolution_records.clear();
+        self.resolution_records = ModelResolutionRecords::default();
         self.selected_library = None;
     }
 

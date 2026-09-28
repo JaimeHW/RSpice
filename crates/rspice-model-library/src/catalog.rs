@@ -12,13 +12,20 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, HashMap};
 
+mod bindings;
 mod external_import;
+mod identity;
 mod project_models;
+mod providers;
 #[cfg(test)]
 mod tests;
 
 pub use external_import::CapturedHdlSources;
+#[cfg(any(test, feature = "catalog-test-observation"))]
+pub use identity::CATALOG_LIBRARY_SERIALIZATIONS;
+pub use identity::model_library_source_digest;
 pub use project_models::{ProjectModelCommit, ProjectModelTarget};
+pub use providers::ModelDefinitionProvider;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(transparent)]

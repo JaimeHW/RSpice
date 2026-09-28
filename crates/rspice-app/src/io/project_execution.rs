@@ -8,6 +8,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
+use rspice_model_library::{ModelCatalog, ModelResolutionRecords};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
@@ -519,11 +520,11 @@ impl ProjectExecutionContext {
                 // in the project-global manager. Preserve that exact former
                 // behavior explicitly in every plan; future changes then
                 // diverge independently.
-                let mut manager = ModelLibraryManager::new();
+                let mut catalog = ModelCatalog::default();
                 for library in self.model_libraries.clone() {
-                    manager.add_library(library.into_model_library());
+                    catalog.add_library(library.into_model_library());
                 }
-                let bindings = manager.default_simulation_plan_bindings();
+                let bindings = catalog.default_simulation_plan_bindings();
                 self.simulation_plan
                     .migrate_legacy_model_bindings(&bindings);
                 self.schema_version = EXPLICIT_SIMULATION_PLAN_MODEL_BINDINGS_SCHEMA_VERSION;
@@ -563,13 +564,16 @@ impl ProjectExecutionContext {
         }
         validate_simulation_plan(&self.simulation_plan)?;
         validate_model_libraries(&self.model_libraries)?;
-        let mut manager = ModelLibraryManager::new();
+        let mut catalog = ModelCatalog::default();
         for library in self.model_libraries.clone() {
-            manager.add_library(library.into_model_library());
+            catalog.add_library(library.into_model_library());
         }
-        manager.restore_model_resolution_records(self.model_resolution_records.clone())?;
-        manager.restore_model_validation_receipt(self.model_validation_receipt.clone())?;
-        validate_simulation_plan_model_bindings(&self.simulation_plan, &manager)
+        ModelResolutionRecords::default()
+            .restore(self.model_resolution_records.clone(), &catalog)?;
+        if let Some(receipt) = self.model_validation_receipt.as_ref() {
+            receipt.verify()?;
+        }
+        validate_simulation_plan_model_bindings(&self.simulation_plan, &catalog)
     }
 
     /// Bind project technology metadata to the exact execution library it
@@ -623,13 +627,13 @@ impl ProjectExecutionContext {
 
 fn validate_simulation_plan_model_bindings(
     plan: &SimSetupState,
-    manager: &ModelLibraryManager,
+    catalog: &ModelCatalog,
 ) -> Result<(), String> {
-    manager
+    catalog
         .validate_simulation_plan_bindings(&plan.model_bindings)
         .map_err(|error| format!("active simulation-plan model bindings are invalid: {error}"))?;
     for stored in plan.inactive_plans() {
-        manager
+        catalog
             .validate_simulation_plan_bindings(stored.model_bindings())
             .map_err(|error| {
                 format!(

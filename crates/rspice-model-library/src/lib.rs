@@ -27,7 +27,12 @@ mod validation;
 
 pub use authoring::*;
 pub use binding::CornerModelBinding;
-pub use catalog::{CapturedHdlSources, ModelCatalog, ProjectModelCommit, ProjectModelTarget};
+#[cfg(any(test, feature = "catalog-test-observation"))]
+pub use catalog::CATALOG_LIBRARY_SERIALIZATIONS;
+pub use catalog::{
+    CapturedHdlSources, ModelCatalog, ModelDefinitionProvider, ProjectModelCommit,
+    ProjectModelTarget, model_library_source_digest,
+};
 pub use corner::*;
 pub use definition_metadata::*;
 pub use model::*;

@@ -33,7 +33,7 @@ fn extracted_catalog_preserves_the_manager_wire_format_and_digest() {
         selected_library: &manager.selected_library,
         filter_text: &manager.filter_text,
         filter_type: manager.filter_type,
-        resolution_records: &manager.resolution_records,
+        resolution_records: manager.resolution_records.as_map(),
         validation_receipt: &manager.validation_receipt,
     };
     let previous_bytes = serde_json::to_vec(&previous).unwrap();
@@ -270,7 +270,10 @@ fn design_inspection_catalog_key_moves_with_every_catalogue_input_the_deck_reads
                     audit_reason: "directed test".to_owned(),
                     created_at_unix_ms: 1,
                 };
-                manager.resolution_records.insert(record.key(), record);
+                let mut records = manager.resolution_records.as_map().clone();
+                records.insert(record.key(), record);
+                manager.resolution_records =
+                    serde_json::from_value(serde_json::to_value(records).unwrap()).unwrap();
             }),
         ),
     ];
