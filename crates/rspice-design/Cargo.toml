@@ -22,7 +22,7 @@ schematic-test-fixtures = []
 log.workspace = true
 regex.workspace = true
 rspice-app-types.workspace = true
-# Authored parameter names retain the engine lexer's exact identifier grammar.
+# Authored source contracts reuse the engine's canonical lexer, AST and dialect rules.
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false }
 rspice-design-model.workspace = true
 rspice-model-library.workspace = true

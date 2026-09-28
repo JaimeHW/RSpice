@@ -142,7 +142,7 @@ impl NetlistExecutionProfile {
     }
 
     /// Diagnostics that make a reviewed source semantically incomplete.
-    pub(crate) fn diagnostic_is_semantic_loss(code: &str) -> bool {
+    pub fn diagnostic_is_semantic_loss(code: &str) -> bool {
         matches!(
             code,
             "unknown-option"
@@ -184,7 +184,7 @@ impl NetlistExecutionProfile {
     /// Includes may change the root's presentation receipts. Its provenance
     /// was checked before expansion; the resolved body must still obey the
     /// profile's executable-command restrictions.
-    pub(crate) fn validate_resolved_source(self, source: &str) -> Result<(), String> {
+    pub fn validate_resolved_source(self, source: &str) -> Result<(), String> {
         if self == Self::Spice3NgspiceV2 {
             return visit_ngspice_v2_source(source, |_, _, _, _| {});
         }

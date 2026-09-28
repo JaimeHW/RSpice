@@ -10,7 +10,7 @@ use super::{
 
 impl OwnedNetlistRevisionSnapshot {
     pub fn from_document(
-        document: &crate::state::NetlistDocument,
+        document: &crate::netlist_document::NetlistDocument,
         message: impl Into<String>,
         source_encoding: NetlistTextEncoding,
         source_line_ending: NetlistLineEnding,
@@ -33,7 +33,7 @@ impl OwnedNetlistRevisionSnapshot {
         if self.document_revision == 0 {
             return Err("owned netlist history revision must be non-zero".to_owned());
         }
-        if self.content_digest != crate::state::content_digest(&self.source) {
+        if self.content_digest != crate::netlist_document::content_digest(&self.source) {
             return Err("owned netlist history digest does not identify its source".to_owned());
         }
         if self.message.trim().is_empty()
@@ -70,7 +70,7 @@ impl OwnedNetlistRevisionSnapshot {
                     include.logical_identity
                 )
             })?;
-            if include.content_digest != crate::state::content_digest(source) {
+            if include.content_digest != crate::netlist_document::content_digest(source) {
                 return Err(format!(
                     "owned netlist history include '{}' digest does not identify its retained source",
                     include.logical_identity
@@ -87,7 +87,7 @@ impl OwnedNetlistRevisionSnapshot {
             + self
                 .dependencies
                 .iter()
-                .filter_map(crate::state::DependencyMetadata::source_bytes)
+                .filter_map(crate::netlist_document::DependencyMetadata::source_bytes)
                 .map(<[u8]>::len)
                 .sum::<usize>()
             + self
@@ -121,8 +121,8 @@ pub fn validate_owned_netlist_artifact_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn validate_owned_netlist_projection(
-    document: &crate::state::NetlistDocument,
+pub fn validate_owned_netlist_projection(
+    document: &crate::netlist_document::NetlistDocument,
     descriptor: &OwnedNetlistDescriptor,
     source: &str,
 ) -> Result<(), String> {
@@ -130,7 +130,7 @@ pub(super) fn validate_owned_netlist_projection(
         return Err("owned top-deck identity cannot be nil".to_owned());
     }
     validate_owned_netlist_artifact_path(&descriptor.artifact_name)?;
-    if document.ownership() == crate::state::DocumentOwnership::Generated {
+    if document.ownership() == crate::netlist_document::DocumentOwnership::Generated {
         return Err("project-owned netlist document cannot have generated ownership".to_owned());
     }
     if document.source() != source {
@@ -199,7 +199,7 @@ pub(super) fn validate_owned_netlist_projection(
     if retained_bytes > MAX_OWNED_NETLIST_HISTORY_BYTES {
         return Err("owned source revision history exceeds its bounded byte limit".to_owned());
     }
-    if descriptor.owned_includes.len() > crate::state::MAX_PROJECT_SOURCE_FILES {
+    if descriptor.owned_includes.len() > crate::project_sources::MAX_PROJECT_SOURCE_FILES {
         return Err("owned include catalog exceeds the project file limit".to_owned());
     }
     let mut include_ids = HashSet::new();
@@ -227,7 +227,7 @@ pub(super) fn validate_owned_netlist_projection(
                 include.logical_identity
             )
         })?;
-        if include.content_digest != crate::state::content_digest(dependency_source) {
+        if include.content_digest != crate::netlist_document::content_digest(dependency_source) {
             return Err(format!(
                 "owned include '{}' digest does not identify its retained bytes",
                 include.logical_identity
