@@ -370,10 +370,10 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
     run.finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
         .unwrap();
     state.simulation.complete_run();
-    state.simulation =
-        crate::io::project_io::ProjectSimulationResults::from_state(&state.simulation)
-            .into_simulation_state()
-            .unwrap();
+    state.simulation = crate::io::simulation_state_from_results(
+        crate::io::capture_simulation_results(&state.simulation),
+    )
+    .unwrap();
     state.ui.results.viewer = crate::workbench::ResultViewer::Hist;
     let io = MockExportWorkflowIo::default();
 

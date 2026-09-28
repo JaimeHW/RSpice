@@ -59,11 +59,11 @@ fn monte_carlo_checkpoint_file_round_trip_rejects_corruption_and_bounds() {
     // Imported inputs survive project result persistence without native runs.
     let mut simulation = crate::state::SimulationState::default();
     simulation.imported_monte_carlo_checkpoints = frozen;
-    let results = crate::io::ProjectSimulationResults::from_state(&simulation);
+    let results = crate::io::capture_simulation_results(&simulation);
     assert!(!results.is_empty());
     let restored: crate::io::ProjectSimulationResults =
         serde_json::from_str(&serde_json::to_string(&results).unwrap()).unwrap();
-    let restored = restored.into_simulation_state().unwrap();
+    let restored = crate::io::simulation_state_from_results(restored).unwrap();
     assert!(restored.runs.is_empty());
     assert_eq!(
         restored

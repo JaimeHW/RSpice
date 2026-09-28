@@ -11,7 +11,11 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+result-validation-observation = []
+
 [dependencies]
+rspice-results = { workspace = true, features = ["engine-evidence"] }
 ron = { version = "0.12.2", features = ["integer128"] }
 rspice-app-types.workspace = true
 rspice-design.workspace = true

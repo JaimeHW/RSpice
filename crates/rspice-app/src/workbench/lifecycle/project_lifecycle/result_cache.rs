@@ -73,7 +73,7 @@ impl ResultCache {
         if let Some(held) = cached.as_ref().filter(|held| held.matches(state)) {
             return held.snapshot.clone();
         }
-        let snapshot = ProjectSimulationResults::from_state(state);
+        let snapshot = crate::io::capture_simulation_results(state);
         *cached = Some(CachedResults {
             history: state.runs.revision(),
             decks: state.executed_decks.clone(),

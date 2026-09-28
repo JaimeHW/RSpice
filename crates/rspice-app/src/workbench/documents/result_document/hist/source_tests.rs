@@ -78,12 +78,12 @@ fn paint(state: &mut AppState, panel: bool) -> String {
 
 #[test]
 fn hist_source_restoration_opens_the_current_population_without_cached_bins() {
-    use crate::io::project_io::ProjectSimulationResults;
     let original = state_with(super::tests::mc_variable("gain"));
     let mut state = AppState::default();
-    state.simulation = ProjectSimulationResults::from_state(&original.simulation)
-        .into_simulation_state()
-        .unwrap();
+    state.simulation = crate::io::simulation_state_from_results(
+        crate::io::capture_simulation_results(&original.simulation),
+    )
+    .unwrap();
     assert!(state.viewer_capability(ActiveViewer::Histogram).available);
     assert!(paint(&mut state, false).contains("gain"));
     assert!(paint(&mut state, true).contains("Exact samples"));

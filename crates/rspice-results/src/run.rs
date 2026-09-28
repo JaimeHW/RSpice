@@ -276,6 +276,35 @@ impl<A> AsMut<SimulationRun<A>> for SimulationRun<A> {
 }
 
 impl<A> SimulationRun<A> {
+    /// Create an unsealed run from persisted identity without a host clock or target.
+    pub fn from_persisted_identity(
+        run_number: u64,
+        label: String,
+        timestamp: f64,
+        run_id: RunId,
+        dataset_id: DatasetId,
+        job_id: Option<JobId>,
+        execution_target: Option<ExecutionTarget>,
+    ) -> Self {
+        Self {
+            job_id,
+            run_id,
+            dataset_id,
+            execution_target,
+            lifecycle: SimulationRunLifecycle::Preparing,
+            id: run_number,
+            label,
+            timestamp,
+            analyses: Vec::new(),
+            provenance: None,
+            retention: RunRetention::Pruneable,
+            elapsed_time: 0.0,
+            success: true,
+            specification_verdicts: None,
+            campaign_membership: None,
+        }
+    }
+
     /// Digest the ordered retained analyses with the selected canonical encoding.
     /// Run addresses, timestamps and waveform presentation do not enter this identity.
     #[must_use]

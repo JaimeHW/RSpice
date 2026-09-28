@@ -9,7 +9,7 @@
 
 use super::*;
 
-use crate::state::{HierarchyMapRow, PreparedModelQualification};
+use rspice_results::run_receipt::{HierarchyMapRow, PreparedModelQualification};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -111,7 +111,7 @@ pub struct ProjectPreparedRunTaskReceipt {
 }
 
 impl ProjectPreparedRunTaskReceipt {
-    pub(in crate::io::project_io) fn into_receipt(self) -> Result<PreparedRunTaskReceipt, String> {
+    pub(super) fn into_receipt(self) -> Result<PreparedRunTaskReceipt, String> {
         let Some(derived) = self.derived_from else {
             return PreparedRunTaskReceipt::new(
                 self.source_instance_id,
@@ -313,7 +313,7 @@ pub struct ProjectPreparedRunReceipt {
 }
 
 impl ProjectPreparedRunReceipt {
-    pub(in crate::io::project_io) fn into_receipt(self) -> Result<PreparedRunReceipt, String> {
+    pub fn into_receipt(self) -> Result<PreparedRunReceipt, String> {
         let project_model_sources = self
             .project_model_sources
             .into_iter()
@@ -365,7 +365,7 @@ impl ProjectPreparedRunReceipt {
                 return Err("prepared-run receipt specification_policy cannot be null".to_owned());
             }
         };
-        PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        PreparedRunReceipt::new(rspice_results::run_receipt::PreparedRunReceiptInput {
             source_domain: self.source_domain,
             simulation_plan_id: self.simulation_plan_id,
             project_revision: self.project_revision,

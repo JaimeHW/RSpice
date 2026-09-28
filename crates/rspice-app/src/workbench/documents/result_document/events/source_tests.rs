@@ -1,7 +1,7 @@
 //! Event readers must resolve current evidence without losing an unchanged selection.
 
 use super::*;
-use crate::io::project_io::ProjectSimulationResults;
+
 use crate::state::{SimulationRunLifecycle, SimulationRunProvenance};
 
 fn state_with(analysis: AnalysisResult) -> AppState {
@@ -94,9 +94,10 @@ fn event_source_import_readout_survives_restoration_and_source_changes() {
             source_name: "renamed.capture".to_owned(),
             format,
         });
-        let restored = ProjectSimulationResults::from_state(&state.simulation)
-            .into_simulation_state()
-            .unwrap();
+        let restored = crate::io::simulation_state_from_results(
+            crate::io::capture_simulation_results(&state.simulation),
+        )
+        .unwrap();
         state.simulation = restored;
         let text = panel_text(&mut state);
         assert!(text.contains(format.canonical_id()), "{text}");
@@ -231,9 +232,10 @@ fn event_source_restoration_refreshes_bus_order_and_raw_codes() {
     };
     digital_traces[1].points.pop();
     digital_traces[1].points[1].value_code = 4;
-    state.simulation = ProjectSimulationResults::from_state(&replacement)
-        .into_simulation_state()
-        .unwrap();
+    state.simulation = crate::io::simulation_state_from_results(
+        crate::io::capture_simulation_results(&replacement),
+    )
+    .unwrap();
     assert_eq!(state.simulation.data_version, version);
     paint(&mut state, false);
     let cache = state.ui.results.event_order_cache.as_ref().unwrap();
@@ -595,9 +597,10 @@ fn event_source_large_history_reuses_clones_and_survives_unchanged_restoration()
     assert!(Arc::ptr_eq(&original, &event_order(&mut state).unwrap()));
 
     let version = state.simulation.data_version;
-    state.simulation = ProjectSimulationResults::from_state(&state.simulation)
-        .into_simulation_state()
-        .unwrap();
+    state.simulation = crate::io::simulation_state_from_results(
+        crate::io::capture_simulation_results(&state.simulation),
+    )
+    .unwrap();
     assert_eq!(state.simulation.data_version, version);
     assert!(event_selection_block(&mut state, &selection).is_none());
     assert!(!Arc::ptr_eq(&original, &event_order(&mut state).unwrap()));
@@ -685,9 +688,10 @@ fn event_source_real_projection_rejects_nan_and_preserves_a_late_initial_value()
     assert!(!active_analysis_is_renderable(&state));
     assert!(event_order(&mut state).is_none());
     assert!(
-        ProjectSimulationResults::from_state(&state.simulation)
-            .into_simulation_state()
-            .is_err()
+        crate::io::simulation_state_from_results(crate::io::capture_simulation_results(
+            &state.simulation
+        ))
+        .is_err()
     );
     state.simulation.runs[0].analyses[0].waveforms = vec![WaveformData::new(
         "E(level)",

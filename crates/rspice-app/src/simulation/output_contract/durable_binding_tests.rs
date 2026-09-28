@@ -20,7 +20,7 @@ fn stored(run: SimulationRun) -> ProjectSimulationResults {
     let mut state = SimulationState::default();
     state.next_run_id = run.id;
     state.runs = vec![run].into();
-    let stored = ProjectSimulationResults::from_state(&state);
+    let stored = crate::io::capture_simulation_results(&state);
     stored.validate().unwrap();
     stored
 }
@@ -49,7 +49,7 @@ fn task_ground_and_formal_port_bindings_survive_reload_without_deck_history() {
                 assert!(persisted.executed_decks.is_empty());
                 let loaded: ProjectSimulationResults =
                     serde_json::from_slice(&serde_json::to_vec(&persisted).unwrap()).unwrap();
-                let mut state = loaded.into_simulation_state().unwrap();
+                let mut state = crate::io::simulation_state_from_results(loaded).unwrap();
                 let analysis = &mut state.runs[0].analyses[0];
                 for index in 0..outputs.len() {
                     if deferred {
@@ -145,17 +145,18 @@ fn authored_transient_and_ac_labels_cannot_invent_deferred_physical_sources() {
                     for reload in [false, true] {
                         let persisted = stored(executed.clone());
                         let mut state = if reload {
-                            serde_json::from_slice::<ProjectSimulationResults>(
-                                &serde_json::to_vec(&persisted).unwrap(),
+                            crate::io::simulation_state_from_results(
+                                serde_json::from_slice::<ProjectSimulationResults>(
+                                    &serde_json::to_vec(&persisted).unwrap(),
+                                )
+                                .unwrap(),
                             )
                             .unwrap()
-                            .into_simulation_state()
-                            .unwrap()
                         } else {
-                            persisted.into_simulation_state().unwrap()
+                            crate::io::simulation_state_from_results(persisted).unwrap()
                         };
                         let before =
-                            serde_json::to_vec(&ProjectSimulationResults::from_state(&state))
+                            serde_json::to_vec(&crate::io::capture_simulation_results(&state))
                                 .unwrap();
                         let version = state.data_version;
                         assert!(
@@ -169,7 +170,7 @@ fn authored_transient_and_ac_labels_cannot_invent_deferred_physical_sources() {
                         );
                         assert_eq!(state.data_version, version);
                         assert_eq!(
-                            serde_json::to_vec(&ProjectSimulationResults::from_state(&state))
+                            serde_json::to_vec(&crate::io::capture_simulation_results(&state))
                                 .unwrap(),
                             before
                         );
@@ -244,8 +245,12 @@ fn schema_21_through_23_authenticate_original_digests_without_inventing_bindings
             output.save_policy = SavedOutputPolicy::OnDemandFromRetainedState;
             let mut executed = execute(HIERARCHY, spec, &[output]);
             executed.analyses[0].saved_output_receipts[0].source_bindings = None;
-            let original = executed.analyses[0].legacy_v12_result_data_digest();
-            let dataset = executed.legacy_v12_dataset_content_digest();
+            let original = executed.analyses[0]
+                .result_data_ref()
+                .digest(rspice_results::result_digest::ResultDigestEncoding::V12);
+            let dataset = executed.data.dataset_content_digest_with_encoding(
+                rspice_results::result_digest::ResultDigestEncoding::V12,
+            );
             let mut old = stored(executed);
             old.schema_version = schema;
             old.runs[0].analyses[0].result_data_digest = PersistedField::Value(original);
@@ -273,7 +278,7 @@ fn schema_21_through_23_authenticate_original_digests_without_inventing_bindings
                 old.schema_version,
                 crate::io::project_io::ProjectSimulationResults::default().schema_version
             );
-            let mut state = old.into_simulation_state().unwrap();
+            let mut state = crate::io::simulation_state_from_results(old).unwrap();
             let analysis = &mut state.runs[0].analyses[0];
             assert!(analysis.saved_output_receipts[0].source_bindings.is_none());
             assert_ne!(analysis.result_data_digest(), original);

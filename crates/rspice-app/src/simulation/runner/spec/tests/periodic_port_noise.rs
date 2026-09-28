@@ -164,13 +164,12 @@ fn periodic_port_noise_survives_execution_worker_and_project_round_trip() {
         state.next_run_id = 1;
         state.active_run_idx = Some(0);
         state.active_analysis_idx = Some(0);
-        let snapshot = crate::io::project_io::ProjectSimulationResults::from_state(&state);
+        let snapshot = crate::io::capture_simulation_results(&state);
         let json = serde_json::to_string(&snapshot).unwrap();
-        let restored =
-            serde_json::from_str::<crate::io::project_io::ProjectSimulationResults>(&json)
-                .unwrap()
-                .into_simulation_state()
-                .unwrap();
+        let restored = crate::io::simulation_state_from_results(
+            serde_json::from_str::<crate::io::project_io::ProjectSimulationResults>(&json).unwrap(),
+        )
+        .unwrap();
         let result = &restored.runs[0].analyses[0];
         assert_eq!(result.validate_retained_evidence(), Ok(()));
         assert_eq!(result.result_data_digest(), original_digest);

@@ -246,8 +246,6 @@ fn corner_run() -> crate::state::SimulationRun {
 /// refused to reopen.
 #[test]
 fn a_corner_run_is_an_authentic_prefix_of_its_receipt_and_survives_a_project_round_trip() {
-    use crate::io::project_io::ProjectSimulationResults;
-
     let run = corner_run();
     run.validate_provenance()
         .expect("every retained result answers for an authenticated task");
@@ -274,12 +272,11 @@ fn a_corner_run_is_an_authentic_prefix_of_its_receipt_and_survives_a_project_rou
     simulation.next_run_id = run.id;
     simulation.runs = vec![run].into();
 
-    let persisted = ProjectSimulationResults::from_state(&simulation);
+    let persisted = crate::io::capture_simulation_results(&simulation);
     persisted.validate().expect("a corner run is persistable");
 
     let mut reloaded = crate::state::SimulationState::default();
-    persisted
-        .apply_to_state(&mut reloaded)
+    crate::io::restore_simulation_results(persisted, &mut reloaded)
         .expect("a saved corner run reopens");
 
     let restored = reloaded.runs.first().expect("the run survives the reload");

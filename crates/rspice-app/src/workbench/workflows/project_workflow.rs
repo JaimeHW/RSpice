@@ -1186,7 +1186,8 @@ fn apply_loaded_project_authorized(
             "Project opened with simulation execution blocked: {error}. Review Project \u{00b7} Dependencies and attach an exact trusted signed PDK revision before running or governed saving"
         )));
     }
-    if let Err(error) = simulation_results.apply_to_state(&mut state.simulation)
+    if let Err(error) =
+        crate::io::restore_simulation_results(simulation_results, &mut state.simulation)
         && simulation_results_warning.is_none()
     {
         simulation_results_warning = Some(format!(

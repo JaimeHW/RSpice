@@ -1806,9 +1806,7 @@ fn revert_document_in_place(
         }
         ProjectDocumentId::ResultHistory => {
             let mut simulation = crate::state::SimulationState::default();
-            baseline
-                .simulation_results
-                .apply_to_state(&mut simulation)
+            crate::io::restore_simulation_results(baseline.simulation_results, &mut simulation)
                 .map_err(ProjectLifecycleError::InvalidState)?;
             state.simulation = simulation;
             state.workspace.report_documents = baseline.workspace.report_documents;

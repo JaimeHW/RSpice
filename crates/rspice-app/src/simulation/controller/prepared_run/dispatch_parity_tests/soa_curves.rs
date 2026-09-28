@@ -133,11 +133,15 @@ fn soa_current_envelope_studio_dispatch_retains_limits_and_saved_configuration()
         simulation.next_run_id = 2;
         simulation.active_run_idx = Some(0);
         simulation.active_analysis_idx = Some(0);
-        let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+        let saved = crate::io::capture_simulation_results(&simulation);
         let saved: crate::io::project_io::ProjectSimulationResults =
             serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
         assert_eq!(
-            saved.into_simulation_state().unwrap().runs[0].analyses[0].result_payload,
+            crate::io::simulation_state_from_results(saved)
+                .unwrap()
+                .runs[0]
+                .analyses[0]
+                .result_payload,
             retained.result_payload
         );
     }

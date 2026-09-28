@@ -215,7 +215,7 @@ pub(crate) fn history(analysis: crate::state::AnalysisResult) -> crate::state::S
 fn stored(
     analysis: crate::state::AnalysisResult,
 ) -> crate::io::project_io::ProjectSimulationResults {
-    crate::io::project_io::ProjectSimulationResults::from_state(&history(analysis))
+    crate::io::capture_simulation_results(&history(analysis))
 }
 
 #[test]
@@ -242,7 +242,7 @@ fn dc_project_round_trip_preserves_coordinates_units_selection_and_immutable_own
     let serialized = serde_json::to_value(&snapshot).unwrap();
     let restored: ProjectSimulationResults = serde_json::from_value(serialized.clone()).unwrap();
     let mut state = crate::state::SimulationState::default();
-    restored.apply_to_state(&mut state).unwrap();
+    crate::io::restore_simulation_results(restored, &mut state).unwrap();
     let analysis = &state.runs[0].analyses[0];
     assert_eq!(evidence(analysis), &original);
     assert_eq!(analysis.result_data_digest(), digest);
@@ -285,10 +285,14 @@ fn schema_21_dc_history_authenticates_without_inventing_traversal() {
     let mut legacy = retain(solve(nested_config()));
     legacy.result_payload = None;
     let digest = legacy.result_data_digest();
-    let old_digest = legacy.legacy_v12_result_data_digest();
+    let old_digest = legacy
+        .result_data_ref()
+        .digest(rspice_results::result_digest::ResultDigestEncoding::V12);
     let history = history(legacy);
-    let old_dataset_digest = history.runs[0].legacy_v12_dataset_content_digest();
-    let mut snapshot = crate::io::project_io::ProjectSimulationResults::from_state(&history);
+    let old_dataset_digest = history.runs[0].data.dataset_content_digest_with_encoding(
+        rspice_results::result_digest::ResultDigestEncoding::V12,
+    );
+    let mut snapshot = crate::io::capture_simulation_results(&history);
     snapshot.schema_version = 21;
     snapshot.runs[0].analyses[0].result_data_digest =
         crate::io::project_io::PersistedField::Value(old_digest);
@@ -308,7 +312,7 @@ fn schema_21_dc_history_authenticates_without_inventing_traversal() {
         .migrate_to_current(crate::product::ProjectId::new())
         .unwrap();
     let mut restored = crate::state::SimulationState::default();
-    snapshot.apply_to_state(&mut restored).unwrap();
+    crate::io::restore_simulation_results(snapshot, &mut restored).unwrap();
     assert!(restored.runs[0].analyses[0].result_payload.is_none());
     assert_eq!(restored.runs[0].analyses[0].result_data_digest(), digest);
 }

@@ -37,6 +37,13 @@ impl AsMut<RetainedRun<AnalysisResult>> for SimulationRun {
 }
 
 impl SimulationRun {
+    pub(crate) fn from_restored(data: RetainedRun<AnalysisResult>) -> Self {
+        Self {
+            data,
+            elapsed_started_at: None,
+        }
+    }
+
     /// Create current run evidence and start its live monotonic clock.
     pub fn new(run_number: u64) -> Self {
         Self {
@@ -88,10 +95,6 @@ impl SimulationRun {
         self.data.restore_lifecycle(lifecycle, elapsed)?;
         self.elapsed_started_at = None;
         Ok(())
-    }
-
-    pub(crate) fn validate_elapsed_time(elapsed: f64) -> Result<(), String> {
-        RetainedRun::<AnalysisResult>::validate_elapsed_time(elapsed)
     }
 
     #[must_use]

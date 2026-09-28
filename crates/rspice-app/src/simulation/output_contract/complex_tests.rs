@@ -101,7 +101,7 @@ fn history(policy: ComplexExpressionPolicy, deferred: bool) -> ProjectSimulation
     let mut state = SimulationState::default();
     state.next_run_id = run.id;
     state.runs = vec![run].into();
-    ProjectSimulationResults::from_state(&state)
+    crate::io::capture_simulation_results(&state)
 }
 
 #[test]
@@ -112,7 +112,7 @@ fn complex_saved_outputs_keep_policy_and_components_after_reload_and_deferred_ev
             stored.validate().unwrap();
             let json = serde_json::to_vec(&stored).unwrap();
             let reopened: ProjectSimulationResults = serde_json::from_slice(&json).unwrap();
-            let mut state = reopened.into_simulation_state().unwrap();
+            let mut state = crate::io::simulation_state_from_results(reopened).unwrap();
             let analysis = &mut state.runs[0].analyses[0];
             assert_eq!(analysis.saved_output_receipts[0].complex_policy, policy);
             if deferred {
@@ -140,7 +140,7 @@ fn complex_saved_outputs_keep_policy_and_components_after_reload_and_deferred_ev
                 0,
                 if policy.is_legacy() { 0.0 } else { 2.0 },
             );
-            let restorable = ProjectSimulationResults::from_state(&state);
+            let restorable = crate::io::capture_simulation_results(&state);
             restorable.validate().unwrap();
         }
     }
@@ -179,10 +179,14 @@ fn complex_policy_is_bound_to_prepared_contract_and_retained_digest() {
 #[test]
 fn complex_schema_24_migration_authenticates_before_preserving_legacy_arithmetic() {
     let current = history(ComplexExpressionPolicy::LegacyMagnitude, true);
-    let state = current.clone().into_simulation_state().unwrap();
+    let state = crate::io::simulation_state_from_results(current.clone()).unwrap();
     let run = &state.runs[0];
-    let analysis_digest = run.analyses[0].legacy_v13_result_data_digest();
-    let dataset_digest = run.legacy_v13_dataset_content_digest();
+    let analysis_digest = run.analyses[0]
+        .result_data_ref()
+        .digest(rspice_results::result_digest::ResultDigestEncoding::V13);
+    let dataset_digest = run.data.dataset_content_digest_with_encoding(
+        rspice_results::result_digest::ResultDigestEncoding::V13,
+    );
     let mut historical = current;
     historical.schema_version = 24;
     historical.runs[0].analyses[0].result_data_digest = PersistedField::Value(analysis_digest);
@@ -223,7 +227,7 @@ fn complex_schema_24_migration_authenticates_before_preserving_legacy_arithmetic
         historical.schema_version,
         crate::io::project_io::ProjectSimulationResults::default().schema_version
     );
-    let mut state = historical.into_simulation_state().unwrap();
+    let mut state = crate::io::simulation_state_from_results(historical).unwrap();
     let analysis = &mut state.runs[0].analyses[0];
     assert_eq!(
         analysis.saved_output_receipts[0].complex_policy,

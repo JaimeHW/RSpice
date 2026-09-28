@@ -85,7 +85,7 @@ impl serde::Serialize for AppState {
         // flags stay out of the session; only user-visible result history is
         // persisted through the project-file DTO.
         use serde::ser::SerializeStruct;
-        let mut simulation_results = ProjectSimulationResults::from_state(&self.simulation);
+        let mut simulation_results = crate::io::capture_simulation_results(&self.simulation);
         if simulation_results.validate().is_err() {
             simulation_results = ProjectSimulationResults::default();
         }
@@ -376,7 +376,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
                     state.workspace.project.revision(),
                 )
             })
-            .and_then(|()| simulation_results.apply_to_state(&mut state.simulation))
+            .and_then(|()| crate::io::restore_simulation_results(simulation_results, &mut state.simulation))
             .err()
             .map(|error| {
                 format!(

@@ -12,11 +12,39 @@
 //! accept a tampered one. The version-specific validators are what let both
 //! be true at once.
 
-use super::*;
+use rspice_app_types::product::{
+    AnalysisInstanceId, ContentDigest, DatasetId, DerivedAnalysisIdentity, JobId, ModelSourceId,
+    ObjectRevision, ProjectId, RunId, SimulationPlanId,
+};
+use rspice_design_model::cell_view::CellViewRef;
+use rspice_results::analysis_payload::AnalysisResultPayload;
+use rspice_results::analysis_result::AnalysisResult;
+use rspice_results::analysis_type::AnalysisType;
+use rspice_results::family_metadata::AnalysisResultFamilyMetadata;
+use rspice_results::noise::{NoiseContributorRow, NoiseSummary};
+use rspice_results::operating_point::{DcOpResult, OperatingPointValue};
+use rspice_results::provenance::{
+    AnalysisResultProvenance, AnalysisResultPvtPoint, AnalysisResultSourceDomain,
+};
+use rspice_results::result_digest::ResultDigestEncoding;
+use rspice_results::run::{ExecutionTarget, RunRetention, SimulationRun, SimulationRunLifecycle};
+use rspice_results::run_receipt::{
+    PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
+    PreparedSourceCheckReceipt, SimulationRunProvenance,
+};
+use rspice_results::saved_output::{SavedOutputMaterializationStatus, SavedOutputReceipt};
+use rspice_results::specification::{
+    PreparedSpecification, PreparedSpecificationPolicy, SpecEntry, SpecificationDefinition,
+    SpecificationPolicy,
+};
+use rspice_results::specification_verdict::SpecificationVerdict;
+use rspice_results::waveform::RetainedWaveform;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::collections::HashSet;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "result-validation-observation"))]
 thread_local! {
-    pub(super) static RESULT_VALIDATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub static RESULT_VALIDATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 mod codec;
@@ -27,7 +55,7 @@ mod snapshot;
 pub use snapshot::ProjectSimulationResults;
 mod legacy_digests;
 mod legacy_evidence;
-pub(super) use legacy_evidence::validate_result_fields_for_source_schema;
+pub use legacy_evidence::validate_result_fields_for_source_schema;
 use legacy_evidence::{
     reject_dc_mismatch_payload_before_schema_v27, reject_digital_buses_before_schema_v19,
     reject_legacy_operating_point_evidence, reject_legacy_waveform_units,
@@ -42,7 +70,6 @@ pub use executed_deck::ProjectExecutedDecks;
 // The rows inside are named only where a file is written by hand: production
 // code builds them from the session archive and reads them back through it.
 use executed_deck::reject_executed_decks_before_schema_v15;
-#[cfg(test)]
 pub use executed_deck::{ProjectExecutedDeck, ProjectExecutedDeckPoint};
 use legacy_digests::{
     validate_v8_result_digests, validate_v9_result_digests, validate_v10_result_digests,
@@ -69,9 +96,10 @@ pub struct ProjectSimulationResultsData {
     pub runs: Vec<ProjectSimulationRun>,
     #[serde(
         default,
-        skip_serializing_if = "crate::state::MonteCarloCheckpointLibrary::is_empty"
+        skip_serializing_if = "rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary::is_empty"
     )]
-    pub imported_monte_carlo_checkpoints: crate::state::MonteCarloCheckpointLibrary,
+    pub imported_monte_carlo_checkpoints:
+        rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary,
     /// Last allocated display sequence, retained even after all runs are cleared.
     #[serde(default)]
     pub next_run_id: u64,
@@ -141,40 +169,9 @@ impl ProjectSimulationResultsData {
             && self.retained_dataset_limit.is_none()
     }
 
-    pub fn from_state(state: &SimulationState) -> Self {
-        if state.runs.is_empty() {
-            // Clearing datasets preserves both their allocation history and
-            // the project's retention decision across save and session restore.
-            return Self {
-                imported_monte_carlo_checkpoints: state.imported_monte_carlo_checkpoints.clone(),
-                next_run_id: state.next_run_id,
-                retained_dataset_limit: state.retained_dataset_limit,
-                ..Self::default()
-            };
-        }
-
-        let runs: Vec<_> = state.runs.iter().map(ProjectSimulationRun::from).collect();
-        let max_run_id = state.runs.iter().map(|run| run.id).max().unwrap_or(0);
-        Self {
-            schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
-            runs,
-            imported_monte_carlo_checkpoints: state.imported_monte_carlo_checkpoints.clone(),
-            next_run_id: state.next_run_id.max(max_run_id),
-            retained_dataset_limit: state.retained_dataset_limit,
-            active_run_stable_id: state.active_run().map(|run| run.run_id),
-            active_dataset_id: state.active_run().map(|run| run.dataset_id),
-            active_analysis_sequence: state.active_analysis().map(|analysis| analysis.id),
-            overlay_dataset_ids: state.overlay_dataset_ids.clone(),
-            executed_decks: ProjectExecutedDecks::from_state(state),
-            active_run_id: None,
-            active_analysis_id: None,
-            overlay_run_ids: Vec::new(),
-        }
-    }
-
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
-        if source_schema < SAMPLED_NOISE_RESULTS_SCHEMA_VERSION && self.runs.iter().flat_map(|run| &run.analyses).any(|analysis| analysis.noise_summary.as_ref().and_then(|summary| summary.conversion.as_ref()).is_some_and(|conversion| conversion.sampling.is_some()) || matches!(analysis.family_metadata, Some(AnalysisResultFamilyMetadata::PeriodicNoise { output_quantity: crate::state::PeriodicNoiseOutputQuantity::TimingNoisePowerSpectralDensity, .. }))) {
+        if source_schema < SAMPLED_NOISE_RESULTS_SCHEMA_VERSION && self.runs.iter().flat_map(|run| &run.analyses).any(|analysis| analysis.noise_summary.as_ref().and_then(|summary| summary.conversion.as_ref()).is_some_and(|conversion| conversion.sampling.is_some()) || matches!(analysis.family_metadata, Some(AnalysisResultFamilyMetadata::PeriodicNoise { output_quantity: rspice_results::family_metadata::PeriodicNoiseOutputQuantity::TimingNoisePowerSpectralDensity, .. }))) {
             return Err("result schemas before v40 cannot contain sampled periodic-noise evidence".into());
         }
         if source_schema == OPTIMIZATION_UNIT_RESULTS_SCHEMA_VERSION {
@@ -323,7 +320,7 @@ impl ProjectSimulationResultsData {
                 .any(|member| {
                     matches!(
                         member.member,
-                        crate::state::FamilyMemberId::MonteCarloSequenceTrial { .. }
+                        rspice_results::family_measurements::FamilyMemberId::MonteCarloSequenceTrial { .. }
                     )
                 })
         {
@@ -1049,7 +1046,7 @@ impl ProjectSimulationResultsData {
     }
 
     fn validate(&self) -> Result<(), String> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "result-validation-observation"))]
         RESULT_VALIDATIONS.with(|passes| passes.set(passes.get() + 1));
         if self.schema_version != PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION {
             return Err(format!(
@@ -1172,12 +1169,19 @@ impl ProjectSimulationResultsData {
     }
 }
 
-pub(super) fn seal_project_result_digests(run: &mut ProjectSimulationRun) -> Result<(), String> {
+pub fn seal_project_result_digests(run: &mut ProjectSimulationRun) -> Result<(), String> {
     for analysis in &mut run.analyses {
-        let digest = analysis.clone().into_analysis()?.result_data_digest();
+        let digest = analysis
+            .clone()
+            .into_analysis()?
+            .result_data_ref()
+            .digest(ResultDigestEncoding::CURRENT);
         analysis.result_data_digest = PersistedField::Value(digest);
     }
-    let digest = run.clone().into_run()?.dataset_content_digest();
+    let digest = run
+        .clone()
+        .into_run()?
+        .dataset_content_digest_with_encoding(ResultDigestEncoding::CURRENT);
     run.dataset_content_digest = PersistedField::Value(digest);
     Ok(())
 }
@@ -1218,7 +1222,7 @@ pub struct ProjectSimulationRun {
     /// Optional immutable grouping identity for a multi-plan campaign. The
     /// member run remains independently authenticated by `prepared_receipt`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub campaign_membership: Option<crate::state::SimulationCampaignMembership>,
+    pub campaign_membership: Option<rspice_results::run::SimulationCampaignMembership>,
     /// Retention classification. Absent is `Pruneable`, which is what every
     /// project written before baselines existed was already under; it is a
     /// user policy over the run rather than sealed result content, so it is
@@ -1237,11 +1241,28 @@ pub struct ProjectSimulationRun {
 }
 
 impl ProjectSimulationRun {
-    pub(super) fn into_run(self) -> Result<SimulationRun, String> {
-        self.into_run_with_partial_restore(true)
+    pub fn into_run(self) -> Result<SimulationRun, String> {
+        self.into_run_with_partial_restore(true, ProjectAnalysisResult::into_analysis)
     }
 
-    fn into_run_with_partial_restore(self, normalize_live: bool) -> Result<SimulationRun, String> {
+    pub fn into_run_with<A, W: AsRef<RetainedWaveform>>(
+        self,
+        restore_analysis: impl FnMut(ProjectAnalysisResult) -> Result<A, String>,
+    ) -> Result<SimulationRun<A>, String>
+    where
+        A: AsRef<AnalysisResult<W>> + AsMut<AnalysisResult<W>>,
+    {
+        self.into_run_with_partial_restore(true, restore_analysis)
+    }
+
+    fn into_run_with_partial_restore<A, W: AsRef<RetainedWaveform>>(
+        self,
+        normalize_live: bool,
+        restore_analysis: impl FnMut(ProjectAnalysisResult) -> Result<A, String>,
+    ) -> Result<SimulationRun<A>, String>
+    where
+        A: AsRef<AnalysisResult<W>> + AsMut<AnalysisResult<W>>,
+    {
         let campaign_membership = self.campaign_membership.clone();
         let specification_verdicts = self.specification_verdicts.clone();
         let run_id = self
@@ -1253,7 +1274,7 @@ impl ProjectSimulationRun {
         let mut analyses = self
             .analyses
             .into_iter()
-            .map(ProjectAnalysisResult::into_analysis)
+            .map(restore_analysis)
             .collect::<Result<Vec<_>, _>>()?;
         if self.dataset_content_digest.is_null() {
             return Err(format!(
@@ -1312,11 +1333,15 @@ impl ProjectSimulationRun {
                 ));
             }
         };
-        let mut run = SimulationRun::new(self.id);
-        run.job_id = self.job_id;
-        run.run_id = run_id;
-        run.dataset_id = dataset_id;
-        run.execution_target = self.execution_target;
+        let mut run = SimulationRun::from_persisted_identity(
+            self.id,
+            self.label,
+            self.timestamp,
+            run_id,
+            dataset_id,
+            self.job_id,
+            self.execution_target,
+        );
         let restored_lifecycle = self
             .lifecycle
             .unwrap_or(SimulationRunLifecycle::LegacyUnknown);
@@ -1328,6 +1353,7 @@ impl ProjectSimulationRun {
         );
         if was_active && normalize_live {
             for analysis in &mut analyses {
+                let analysis = analysis.as_mut();
                 if analysis.is_live_partial() {
                     analysis.error_message = Some(if analysis.monte_carlo_checkpoint.is_some() {
                         "Monte Carlo was interrupted; committed trials are retained in its checkpoint"
@@ -1338,8 +1364,6 @@ impl ProjectSimulationRun {
             }
         }
         run.restore_lifecycle(restored_lifecycle, self.elapsed_time)?;
-        run.label = self.label;
-        run.timestamp = self.timestamp;
         run.analyses = analyses;
         run.set_retention(self.retention);
         run.success = !was_active && self.success;
@@ -1360,7 +1384,7 @@ impl ProjectSimulationRun {
                 .map_err(|error| format!("runs[{run_idx}].campaign_membership: {error}"))?;
         }
         require_finite(self.timestamp, &format!("runs[{run_idx}].timestamp"))?;
-        SimulationRun::validate_elapsed_time(self.elapsed_time)
+        SimulationRun::<AnalysisResult>::validate_elapsed_time(self.elapsed_time)
             .map_err(|error| format!("runs[{run_idx}].elapsed_time: {error}"))?;
         let lifecycle = self.lifecycle.ok_or_else(|| {
             format!("runs[{run_idx}].lifecycle is required by simulation results schema v6")
@@ -1571,7 +1595,7 @@ impl ProjectSimulationRun {
                 .cloned()
                 .map(ProjectAnalysisResult::into_analysis)
                 .collect::<Result<Vec<_>, _>>()?;
-            receipt.validate_result_prefix((analyses).iter().map(|analysis| &analysis.data))?;
+            receipt.validate_result_prefix(analyses.iter())?;
         }
         let retained_digest = self.dataset_content_digest.as_ref().copied().ok_or_else(|| {
             format!("runs[{run_idx}].dataset_content_digest is required by simulation results schema v12")
@@ -1580,11 +1604,11 @@ impl ProjectSimulationRun {
             .clone()
             // Authenticate the bytes that were written before restoration
             // replaces any live status with an interrupted status.
-            .into_run_with_partial_restore(false)
+            .into_run_with_partial_restore(false, ProjectAnalysisResult::into_analysis)
             .map_err(|error| {
                 format!("runs[{run_idx}] cannot compute its dataset content digest: {error}")
             })?
-            .dataset_content_digest();
+            .dataset_content_digest_with_encoding(ResultDigestEncoding::CURRENT);
         if retained_digest != computed_digest {
             return Err(format!(
                 "runs[{run_idx}].dataset_content_digest does not match retained analysis content"
@@ -1594,8 +1618,14 @@ impl ProjectSimulationRun {
     }
 }
 
-impl From<&SimulationRun> for ProjectSimulationRun {
-    fn from(run: &SimulationRun) -> Self {
+impl ProjectSimulationRun {
+    pub fn from_run<A, W: AsRef<RetainedWaveform>>(
+        run: &SimulationRun<A>,
+        mut waveform: impl FnMut(&W) -> ProjectWaveformData,
+    ) -> Self
+    where
+        A: AsRef<AnalysisResult<W>>,
+    {
         let (provenance_mode, prepared_receipt) = match run.provenance() {
             None => (PersistedField::Missing, PersistedField::Missing),
             Some(SimulationRunProvenance::LegacyUnattributed) => (
@@ -1633,9 +1663,13 @@ impl From<&SimulationRun> for ProjectSimulationRun {
             analyses: run
                 .analyses
                 .iter()
-                .map(ProjectAnalysisResult::from)
+                .map(|analysis| {
+                    ProjectAnalysisResult::from_analysis(analysis.as_ref(), &mut waveform)
+                })
                 .collect(),
-            dataset_content_digest: PersistedField::Value(run.dataset_content_digest()),
+            dataset_content_digest: PersistedField::Value(
+                run.dataset_content_digest_with_encoding(ResultDigestEncoding::CURRENT),
+            ),
             provenance_mode,
             prepared_receipt,
             campaign_membership: run.campaign_membership().cloned(),
@@ -1681,7 +1715,8 @@ pub struct ProjectAnalysisResult {
         PersistedField<std::collections::BTreeMap<String, rspice_core::analysis::MeasurementUnit>>,
     /// Exact portable trial journal, introduced in result schema v35.
     #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
-    pub monte_carlo_checkpoint: PersistedField<crate::state::MonteCarloCheckpointEvidence>,
+    pub monte_carlo_checkpoint:
+        PersistedField<rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointEvidence>,
     #[serde(default)]
     pub measurements: Vec<ProjectMeasurement>,
     /// Authenticated outcomes for the immutable saved-output contracts that
@@ -1696,10 +1731,12 @@ pub struct ProjectAnalysisResult {
     /// written before the engine could name them omits the field, which
     /// reads back as the honest "it named none".
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure_attribution: Option<crate::state::ConvergenceAttribution>,
+    pub failure_attribution:
+        Option<rspice_results::convergence_attribution::ConvergenceAttribution>,
     /// Numerical quality introduced by result schema v21. Missing stays unknown.
     #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
-    pub convergence: PersistedField<crate::state::TransientConvergenceEvidence>,
+    pub convergence:
+        PersistedField<rspice_results::convergence_quality::TransientConvergenceEvidence>,
     /// Complete source identity for prepared-task results. `None` is retained only
     /// when loading result history written by v1/v2 projects.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1707,7 +1744,7 @@ pub struct ProjectAnalysisResult {
     /// Detected external file attribution, introduced in result schema v20.
     /// Missing means unknown; explicit null is invalid current evidence.
     #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
-    pub import_source: PersistedField<crate::state::ResultImportSource>,
+    pub import_source: PersistedField<rspice_results::result_import::ResultImportSource>,
 }
 
 /// Project-file representation of one frozen prepared analysis task.
@@ -1842,7 +1879,14 @@ impl From<&AnalysisResultProvenance> for ProjectAnalysisResultProvenance {
 }
 
 impl ProjectAnalysisResult {
-    pub(super) fn into_analysis(self) -> Result<AnalysisResult, String> {
+    pub fn into_analysis(self) -> Result<AnalysisResult, String> {
+        self.into_analysis_with_waveforms(ProjectWaveformData::into_waveform)
+    }
+
+    pub fn into_analysis_with_waveforms<W: AsRef<RetainedWaveform>>(
+        self,
+        waveform: impl FnMut(ProjectWaveformData) -> W,
+    ) -> Result<AnalysisResult<W>, String> {
         if self.native_scalar_units.is_null() {
             return Err(format!(
                 "analysis sequence {} has explicitly null native scalar units",
@@ -1888,66 +1932,34 @@ impl ProjectAnalysisResult {
             .provenance
             .map(ProjectAnalysisResultProvenance::into_provenance)
             .transpose()?;
-        let mut analysis = AnalysisResult {
-            data: rspice_results::analysis_result::AnalysisResult {
-                id: self.id,
-                analysis_type,
-                label: self.label,
-                timestamp: self.timestamp,
-                waveforms: self
-                    .waveforms
-                    .into_iter()
-                    .map(ProjectWaveformData::into_waveform)
-                    .collect(),
-                dc_op: self.dc_op.map(ProjectDcOpResult::into_dc_op),
-                device_op: self.device_op.map(ProjectDeviceOpReport::into_report),
-                noise_summary: self
-                    .noise_summary
-                    .map(ProjectNoiseSummary::into_noise_summary),
-                family_metadata: self.family_metadata,
-                result_payload: self.result_payload.into_value(),
-                native_scalar_units: self.native_scalar_units.into_value(),
-                monte_carlo_checkpoint: self.monte_carlo_checkpoint.into_value(),
-                measurements: self
-                    .measurements
-                    .into_iter()
-                    .map(ProjectMeasurement::into_measurement)
-                    .collect(),
-                saved_output_receipts: self.saved_output_receipts,
-                success: self.success,
-                error_message: self.error_message,
-                failure_attribution: self.failure_attribution,
-                convergence: self.convergence.into_value().map(std::sync::Arc::new),
-                provenance,
-                import_source: self.import_source.into_value(),
-            },
+        let analysis = AnalysisResult {
+            id: self.id,
+            analysis_type,
+            label: self.label,
+            timestamp: self.timestamp,
+            waveforms: self.waveforms.into_iter().map(waveform).collect(),
+            dc_op: self.dc_op.map(ProjectDcOpResult::into_dc_op),
+            device_op: self.device_op.map(ProjectDeviceOpReport::into_report),
+            noise_summary: self
+                .noise_summary
+                .map(ProjectNoiseSummary::into_noise_summary),
+            family_metadata: self.family_metadata,
+            result_payload: self.result_payload.into_value(),
+            native_scalar_units: self.native_scalar_units.into_value(),
+            monte_carlo_checkpoint: self.monte_carlo_checkpoint.into_value(),
+            measurements: self
+                .measurements
+                .into_iter()
+                .map(ProjectMeasurement::into_measurement)
+                .collect(),
+            saved_output_receipts: self.saved_output_receipts,
+            success: self.success,
+            error_message: self.error_message,
+            failure_attribution: self.failure_attribution,
+            convergence: self.convergence.into_value().map(std::sync::Arc::new),
+            provenance,
+            import_source: self.import_source.into_value(),
         };
-        let cached_names = analysis
-            .data
-            .saved_output_receipts
-            .iter()
-            .filter(|receipt| {
-                receipt.stored_precision
-                    == crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
-                    || receipt.streaming
-                        == crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
-            })
-            .flat_map(|receipt| {
-                receipt
-                    .status
-                    .materialized_waveforms()
-                    .map(|(name, _)| name)
-            })
-            .collect::<HashSet<_>>();
-        if !cached_names.is_empty() {
-            for waveform in &mut analysis.data.waveforms {
-                if cached_names.contains(waveform.name.as_str()) {
-                    waveform.rebuild_display_cache(
-                        crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
-                    );
-                }
-            }
-        }
         Ok(analysis)
     }
 
@@ -2008,7 +2020,7 @@ impl ProjectAnalysisResult {
             if let AnalysisResultPayload::DcSweep { evidence } = payload {
                 evidence
                     .validate_retained_traces(self.waveforms.iter().map(|trace| {
-                        crate::state::DcTraceView {
+                        rspice_results::dc_sweep::DcTraceView {
                             name: &trace.name,
                             unit: trace.unit.as_deref(),
                             x: &trace.x,
@@ -2066,7 +2078,9 @@ impl ProjectAnalysisResult {
         analysis
             .validate_retained_evidence()
             .map_err(|error| format!("{prefix} retained evidence is inconsistent: {error}"))?;
-        let computed_digest = analysis.result_data_digest();
+        let computed_digest = analysis
+            .result_data_ref()
+            .digest(ResultDigestEncoding::CURRENT);
         if retained_digest != computed_digest {
             return Err(format!(
                 "{prefix}.result_data_digest does not match retained analysis content"
@@ -2076,19 +2090,22 @@ impl ProjectAnalysisResult {
     }
 }
 
-impl From<&AnalysisResult> for ProjectAnalysisResult {
-    fn from(analysis: &AnalysisResult) -> Self {
+impl ProjectAnalysisResult {
+    pub fn from_analysis<W: AsRef<RetainedWaveform>>(
+        analysis: &AnalysisResult<W>,
+        waveform: impl FnMut(&W) -> ProjectWaveformData,
+    ) -> Self {
         Self {
             id: analysis.id,
             analysis_type: analysis_type_key(analysis.analysis_type).to_string(),
             label: analysis.label.clone(),
             timestamp: analysis.timestamp,
-            result_data_digest: PersistedField::Value(analysis.result_data_digest()),
-            waveforms: analysis
-                .waveforms
-                .iter()
-                .map(ProjectWaveformData::from)
-                .collect(),
+            result_data_digest: PersistedField::Value(
+                analysis
+                    .result_data_ref()
+                    .digest(ResultDigestEncoding::CURRENT),
+            ),
+            waveforms: analysis.waveforms.iter().map(waveform).collect(),
             dc_op: analysis.dc_op.as_ref().map(ProjectDcOpResult::from),
             device_op: analysis.device_op.as_ref().map(ProjectDeviceOpReport::from),
             noise_summary: analysis
@@ -2133,3 +2150,312 @@ impl From<&AnalysisResult> for ProjectAnalysisResult {
         }
     }
 }
+
+/// Presence-aware persisted field used at schema-era boundaries.
+///
+/// Serde's `Option<T>` intentionally treats an explicit JSON `null` exactly
+/// like an absent field. That is unsafe for fields introduced by a later
+/// schema because a caller could otherwise add the field as `null`, relabel
+/// the container as an older schema, and have migration accept it as genuine
+/// absence. This representation keeps all three wire states distinct.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum PersistedField<T> {
+    #[default]
+    Missing,
+    Null,
+    Value(T),
+}
+
+impl<T> PersistedField<T> {
+    #[must_use]
+    pub const fn is_missing(&self) -> bool {
+        matches!(self, Self::Missing)
+    }
+
+    #[must_use]
+    pub const fn is_null(&self) -> bool {
+        matches!(self, Self::Null)
+    }
+
+    #[must_use]
+    pub const fn is_present(&self) -> bool {
+        !self.is_missing()
+    }
+
+    #[must_use]
+    pub const fn as_ref(&self) -> Option<&T> {
+        match self {
+            Self::Value(value) => Some(value),
+            Self::Missing | Self::Null => None,
+        }
+    }
+
+    #[must_use]
+    pub fn as_mut(&mut self) -> Option<&mut T> {
+        match self {
+            Self::Value(value) => Some(value),
+            Self::Missing | Self::Null => None,
+        }
+    }
+
+    #[must_use]
+    pub fn into_value(self) -> Option<T> {
+        match self {
+            Self::Value(value) => Some(value),
+            Self::Missing | Self::Null => None,
+        }
+    }
+}
+
+impl<T: Serialize> Serialize for PersistedField<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Value(value) => value.serialize(serializer),
+            Self::Missing | Self::Null => serializer.serialize_none(),
+        }
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for PersistedField<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Option::<T>::deserialize(deserializer).map(|value| match value {
+            Some(value) => Self::Value(value),
+            None => Self::Null,
+        })
+    }
+}
+
+const LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 1;
+const STABLE_DATASET_RESULTS_SCHEMA_VERSION: u32 = 2;
+const PREPARED_PROVENANCE_RESULTS_SCHEMA_VERSION: u32 = 3;
+const EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION: u32 = 4;
+const SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION: u32 = 5;
+const EXECUTION_IDENTITY_RESULTS_SCHEMA_VERSION: u32 = 6;
+const FAMILY_METADATA_RESULTS_SCHEMA_VERSION: u32 = 7;
+const CONTENT_DIGEST_RESULTS_SCHEMA_VERSION: u32 = 8;
+const TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION: u32 = 9;
+const SOA_RESULTS_SCHEMA_VERSION: u32 = 10;
+
+const TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION: u32 = 11;
+const OPERATING_POINT_RESULTS_SCHEMA_VERSION: u32 = 12;
+const WAVEFORM_UNIT_RESULTS_SCHEMA_VERSION: u32 = 13;
+const GOVERNED_SPECIFICATION_RESULTS_SCHEMA_VERSION: u32 = 14;
+const EXECUTED_DECK_RESULTS_SCHEMA_VERSION: u32 = 15;
+const POLE_ZERO_EVIDENCE_RESULTS_SCHEMA_VERSION: u32 = 16;
+const PERIODIC_STABILITY_RESULTS_SCHEMA_VERSION: u32 = 17;
+const MEASUREMENT_VERIFICATION_RESULTS_SCHEMA_VERSION: u32 = 18;
+const DIGITAL_BUS_RESULTS_SCHEMA_VERSION: u32 = 19;
+const IMPORT_SOURCE_RESULTS_SCHEMA_VERSION: u32 = 20;
+const CONVERGENCE_RESULTS_SCHEMA_VERSION: u32 = 21;
+const DC_SWEEP_RESULTS_SCHEMA_VERSION: u32 = 22;
+const DC_FAMILY_OUTPUT_RESULTS_SCHEMA_VERSION: u32 = 23;
+const BOUND_OUTPUT_RESULTS_SCHEMA_VERSION: u32 = 24;
+const COMPLEX_EXPRESSION_RESULTS_SCHEMA_VERSION: u32 = 25;
+const SENSITIVITY_AVAILABILITY_RESULTS_SCHEMA_VERSION: u32 = 26;
+const CURRENT_IMPULSE_RESULTS_SCHEMA_VERSION: u32 = 27;
+/// The era DC mismatch evidence became writable. Named separately from the
+/// current version even though it shares the number: the guard says "no build
+/// before v27 wrote one", which stays true when the schema next moves.
+const DC_MISMATCH_RESULTS_SCHEMA_VERSION: u32 = 27;
+const RECORDED_FFT_RESULTS_SCHEMA_VERSION: u32 = 28;
+const SENSITIVITY_STUDY_RESULTS_SCHEMA_VERSION: u32 = 29;
+const MONTE_CARLO_CONFIDENCE_RESULTS_SCHEMA_VERSION: u32 = 30;
+const MONTE_CARLO_TRIAL_RESULTS_SCHEMA_VERSION: u32 = 31;
+const NOISE_FIGURE_RESULTS_SCHEMA_VERSION: u32 = 32;
+const NOISE_CONVERSION_RESULTS_SCHEMA_VERSION: u32 = 33;
+const NOISE_INPUT_QUANTITY_RESULTS_SCHEMA_VERSION: u32 = 34;
+const MONTE_CARLO_CHECKPOINT_RESULTS_SCHEMA_VERSION: u32 = 35;
+const IMPORTED_MONTE_CARLO_CHECKPOINTS_SCHEMA_VERSION: u32 = 36;
+const MEASUREMENT_UNIT_RESULTS_SCHEMA_VERSION: u32 = 37;
+const NATIVE_SCALAR_UNIT_RESULTS_SCHEMA_VERSION: u32 = 38;
+const OPTIMIZATION_UNIT_RESULTS_SCHEMA_VERSION: u32 = 39;
+const SAMPLED_NOISE_RESULTS_SCHEMA_VERSION: u32 = 40;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = SAMPLED_NOISE_RESULTS_SCHEMA_VERSION;
+
+const LEGACY_RESULT_RUN_ID_NAMESPACE: uuid::Uuid =
+    uuid::Uuid::from_u128(0xe515_12ea_10c0_58c8_8bd7_ea31_003f_f6cf);
+const LEGACY_RESULT_DATASET_ID_NAMESPACE: uuid::Uuid =
+    uuid::Uuid::from_u128(0xa697_7219_0a25_536d_8dde_4319_08e4_d0c7);
+
+fn default_simulation_results_schema_version() -> u32 {
+    // A present result-history object without a version predates the stable-ID
+    // schema. New objects set the current version explicitly through
+    // `Default`/`from_state`.
+    LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION
+}
+
+fn analysis_type_key(analysis_type: AnalysisType) -> &'static str {
+    match analysis_type {
+        AnalysisType::DcOp => "DcOp",
+        AnalysisType::DcSweep => "DcSweep",
+        AnalysisType::Ac => "Ac",
+        AnalysisType::Disto => "Disto",
+        AnalysisType::Transient => "Transient",
+        AnalysisType::Noise => "Noise",
+        AnalysisType::PoleZero => "PoleZero",
+        AnalysisType::Tf => "Tf",
+        AnalysisType::Sensitivity => "Sensitivity",
+        AnalysisType::Pac => "Pac",
+        AnalysisType::Pnoise => "Pnoise",
+        AnalysisType::Pxf => "Pxf",
+        AnalysisType::Pstb => "Pstb",
+        AnalysisType::Stb => "Stb",
+        AnalysisType::MonteCarlo => "MonteCarlo",
+        AnalysisType::Parametric => "Parametric",
+        AnalysisType::Corner => "Corner",
+        AnalysisType::Optimization => "Optimization",
+        AnalysisType::Soa => "Soa",
+        AnalysisType::SParameter => "SParameter",
+        AnalysisType::Envelope => "Envelope",
+        AnalysisType::Fourier => "Fourier",
+        AnalysisType::HarmonicBalance => "HarmonicBalance",
+        AnalysisType::Pss => "Pss",
+        AnalysisType::Qpss => "Qpss",
+        AnalysisType::Hbsp => "Hbsp",
+        AnalysisType::Hbnoise => "Hbnoise",
+        AnalysisType::Psp => "Psp",
+        AnalysisType::Qpac => "Qpac",
+        AnalysisType::Qpnoise => "Qpnoise",
+        AnalysisType::Qpxf => "Qpxf",
+        AnalysisType::TransientNoise => "TransientNoise",
+        AnalysisType::DcMismatch => "DcMismatch",
+    }
+}
+
+fn analysis_type_from_key(key: &str) -> Option<AnalysisType> {
+    match key {
+        "DcOp" | ".op" => Some(AnalysisType::DcOp),
+        "DcSweep" | ".dc" => Some(AnalysisType::DcSweep),
+        "Ac" | ".ac" => Some(AnalysisType::Ac),
+        "Disto" | ".disto" => Some(AnalysisType::Disto),
+        "Transient" | ".tran" => Some(AnalysisType::Transient),
+        "Noise" | ".noise" => Some(AnalysisType::Noise),
+        "PoleZero" | ".pz" => Some(AnalysisType::PoleZero),
+        "Tf" | ".tf" => Some(AnalysisType::Tf),
+        "Sensitivity" | ".sens" => Some(AnalysisType::Sensitivity),
+        "Pac" | ".pac" => Some(AnalysisType::Pac),
+        "Pnoise" | ".pnoise" => Some(AnalysisType::Pnoise),
+        "Pxf" | ".pxf" => Some(AnalysisType::Pxf),
+        "Pstb" | ".pstb" => Some(AnalysisType::Pstb),
+        "Stb" | ".stb" => Some(AnalysisType::Stb),
+        "MonteCarlo" | ".mc" => Some(AnalysisType::MonteCarlo),
+        "Parametric" | ".step" => Some(AnalysisType::Parametric),
+        "Corner" => Some(AnalysisType::Corner),
+        "Optimization" | ".opt" => Some(AnalysisType::Optimization),
+        "Soa" | ".soa" => Some(AnalysisType::Soa),
+        "SParameter" | ".sp" => Some(AnalysisType::SParameter),
+        "Envelope" | ".envlp" => Some(AnalysisType::Envelope),
+        "Fourier" | ".four" => Some(AnalysisType::Fourier),
+        "HarmonicBalance" | ".hb" => Some(AnalysisType::HarmonicBalance),
+        "Pss" | ".pss" => Some(AnalysisType::Pss),
+        "Qpss" | ".qpss" => Some(AnalysisType::Qpss),
+        "Hbsp" | ".hbsp" => Some(AnalysisType::Hbsp),
+        "Hbnoise" | ".hbnoise" => Some(AnalysisType::Hbnoise),
+        "Psp" | ".psp" => Some(AnalysisType::Psp),
+        "Qpac" | ".qpac" => Some(AnalysisType::Qpac),
+        "Qpnoise" | ".qpnoise" => Some(AnalysisType::Qpnoise),
+        "Qpxf" | ".qpxf" => Some(AnalysisType::Qpxf),
+        "TransientNoise" | ".tnoise" => Some(AnalysisType::TransientNoise),
+        "DcMismatch" | ".dcmatch" => Some(AnalysisType::DcMismatch),
+        _ => None,
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn require_finite(value: f64, field: &str) -> Result<(), String> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(format!("{field} is not finite"))
+    }
+}
+
+fn require_optional_finite(value: Option<f64>, field: &str) -> Result<(), String> {
+    if let Some(value) = value {
+        require_finite(value, field)?;
+    }
+    Ok(())
+}
+
+fn require_finite_values(values: &[f64], field: &str) -> Result<(), String> {
+    for (idx, value) in values.iter().enumerate() {
+        if !value.is_finite() {
+            return Err(format!("{field}[{idx}] is not finite"));
+        }
+    }
+    Ok(())
+}
+
+fn require_monotonic_non_decreasing(values: &[f64], field: &str) -> Result<(), String> {
+    for (idx, pair) in values.windows(2).enumerate() {
+        if pair[1] < pair[0] {
+            return Err(format!(
+                "{field} must be monotonic non-decreasing; sample {} ({}) is less than sample {} ({})",
+                idx + 1,
+                pair[1],
+                idx,
+                pair[0]
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn require_static_label(value: &str, field: &str) -> Result<(), String> {
+    if known_static_label(value).is_some() {
+        Ok(())
+    } else {
+        Err(format!("{field} has unknown static label '{value}'"))
+    }
+}
+
+/// A noise mechanism is checked for shape rather than membership.
+///
+/// It is not a static label: the summary keeps it as owned text on both sides
+/// of the file, so nothing is interned and no vocabulary has to cover it. Nor
+/// could one — half the mechanisms are composed by the Verilog-A code
+/// generator out of a model's own node and label names, and no build can list
+/// what a future catalog will contain. The engine owns the shape those names
+/// keep, so it is asked.
+fn require_noise_mechanism(value: &str, field: &str) -> Result<(), String> {
+    if rspice_core::analysis::is_persistable_noise_mechanism(value) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{field} is not a noise mechanism: '{}'",
+            value.chars().take(64).collect::<String>()
+        ))
+    }
+}
+
+/// Intern a persisted label for restoration.
+///
+/// Restoration is only ever reached through a document that already validated,
+/// and validation rejects a label this predicate cannot resolve, so the
+/// placeholder is what makes the function total rather than a decision to
+/// accept unrecognized text.
+fn intern_static_label(value: String) -> &'static str {
+    known_static_label(&value).unwrap_or("unknown")
+}
+
+/// Labels a persisted result may carry, interned back to the `&'static str`
+/// the running build uses.
+///
+/// The vocabulary belongs to the engine, which is the only thing that knows
+/// what its device families report; asking it keeps the reader in step with
+/// the emitter instead of restating its list here.
+fn known_static_label(value: &str) -> Option<&'static str> {
+    rspice_core::circuit::resolve_op_label(value)
+}
+
+#[cfg(test)]
+mod tests;

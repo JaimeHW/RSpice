@@ -43,7 +43,7 @@ fn exhausted_run_sequence_blocks_dispatch_without_starting_a_batch() {
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.netlist_source = Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     state.simulation.next_run_id = u64::MAX;
-    let baseline = crate::io::project_io::ProjectSimulationResults::from_state(&state.simulation);
+    let baseline = crate::io::capture_simulation_results(&state.simulation);
     let mut controller = SimulationController::new();
     let snapshot = controller
         .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
@@ -62,7 +62,7 @@ fn exhausted_run_sequence_blocks_dispatch_without_starting_a_batch() {
     assert!(state.ui.netlist.pending_manual_run_id.is_none());
     assert_eq!(state.simulation.next_run_id, u64::MAX);
     assert_eq!(
-        crate::io::project_io::ProjectSimulationResults::from_state(&state.simulation),
+        crate::io::capture_simulation_results(&state.simulation),
         baseline
     );
     assert!(
@@ -1028,9 +1028,7 @@ fn campaign_freezes_distinct_plan_members_without_switching_the_live_editor() {
         .expect("campaign member serializes");
     let loaded =
         crate::io::project_io::load_project_text(&json, None).expect("campaign member reloads");
-    let restored = loaded
-        .simulation_results
-        .into_simulation_state()
+    let restored = crate::io::simulation_state_from_results(loaded.simulation_results)
         .expect("campaign result history restores");
     let restored_membership = restored.runs[0]
         .campaign_membership()

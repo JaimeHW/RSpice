@@ -123,7 +123,7 @@ pub use rspice_results::saved_output::{
     SavedOutputReceipt, SavedOutputSourceBindings,
 };
 pub use rspice_results::specification::{PreparedSpecification, PreparedSpecificationPolicy};
-pub use rspice_results::specification_verdict::{SpecificationVerdict, SpecificationVerdictStatus};
+pub use rspice_results::specification_verdict::SpecificationVerdictStatus;
 pub use rspice_results::waveform::SharedWaveformValues;
 pub use run::SimulationRun;
 pub type RunHistory = rspice_results::run_history::RunHistory<SimulationRun>;

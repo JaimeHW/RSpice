@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use super::super::*;
-use crate::io::project_io::ProjectSimulationResults;
+
 use crate::state::{AnalysisType, SimulationRunLifecycle, SimulationRunProvenance, WaveformData};
 
 fn analysis(kind: AnalysisType, id: u64, samples: usize) -> AnalysisResult {
@@ -32,9 +32,10 @@ fn retained_state(kind: AnalysisType, samples: usize) -> AppState {
     run.finish_lifecycle(SimulationRunLifecycle::Completed)
         .unwrap();
     state.simulation.complete_run();
-    state.simulation = ProjectSimulationResults::from_state(&state.simulation)
-        .into_simulation_state()
-        .unwrap();
+    state.simulation = crate::io::simulation_state_from_results(
+        crate::io::capture_simulation_results(&state.simulation),
+    )
+    .unwrap();
     state.ui.results.viewer = ResultViewer::Waves;
     state
         .workbench
@@ -131,9 +132,9 @@ fn retained_memo_restored_history_invalidates_an_older_resolved_view() {
     assert!(old.run(&state).is_some());
     let mut incoming = state.simulation.clone();
     Arc::make_mut(&mut incoming.runs[0].analyses[0].waveforms[0].y).fill(2.0);
-    let restored = ProjectSimulationResults::from_state(&incoming)
-        .into_simulation_state()
-        .unwrap();
+    let restored =
+        crate::io::simulation_state_from_results(crate::io::capture_simulation_results(&incoming))
+            .unwrap();
     assert_eq!(state.simulation.data_version, restored.data_version);
     assert_eq!(
         state.simulation.runs[0].dataset_id,

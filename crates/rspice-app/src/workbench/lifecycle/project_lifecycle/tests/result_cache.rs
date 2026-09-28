@@ -48,7 +48,7 @@ fn unchanged_dirty_queries_do_not_rebuild_validate_or_hash_retained_results() {
             "{samples} samples: unchanged queries serialized and hashed retained results"
         );
         let mut oracle = snapshot(&state).unwrap();
-        oracle.simulation_results = ProjectSimulationResults::from_state(&state.simulation);
+        oracle.simulation_results = crate::io::capture_simulation_results(&state.simulation);
         assert_eq!(
             working_fingerprints(&state).unwrap().content_digest(),
             registry::content_digest(&oracle).unwrap()
@@ -97,7 +97,7 @@ fn every_persisted_result_input_invalidates_the_snapshot_and_matches_fresh_captu
             .project_lifecycle
             .result_cache
             .capture(&state.simulation);
-        let fresh = ProjectSimulationResults::from_state(&state.simulation);
+        let fresh = crate::io::capture_simulation_results(&state.simulation);
         assert!(
             !cached.shares_content_with(&before),
             "edit {index} reused an old snapshot"

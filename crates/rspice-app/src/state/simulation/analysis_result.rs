@@ -9,10 +9,9 @@ use rspice_results::analysis_result::AnalysisResult as RetainedAnalysisResult;
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 
-const LIVE_TRANSIENT_PARTIAL_MESSAGE: &str =
-    "Transient analysis is running; displayed samples are provisional";
-const LIVE_MONTE_CARLO_PARTIAL_MESSAGE: &str =
-    "Monte Carlo analysis is running; committed trials are checkpointed";
+use rspice_results::analysis_result::{
+    LIVE_MONTE_CARLO_PARTIAL_MESSAGE, LIVE_TRANSIENT_PARTIAL_MESSAGE,
+};
 
 /// A retained analysis whose waveforms include application display choices.
 #[derive(Debug, Clone)]
@@ -62,15 +61,6 @@ impl AnalysisResult {
         label: impl Into<String>,
     ) -> Self {
         Self::failed(id, analysis_type, label, LIVE_TRANSIENT_PARTIAL_MESSAGE)
-    }
-
-    #[must_use]
-    pub fn is_live_partial(&self) -> bool {
-        !self.success
-            && matches!(
-                self.error_message.as_deref(),
-                Some(LIVE_TRANSIENT_PARTIAL_MESSAGE | LIVE_MONTE_CARLO_PARTIAL_MESSAGE)
-            )
     }
 
     pub(crate) fn live_monte_carlo_partial(

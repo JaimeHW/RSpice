@@ -75,7 +75,6 @@ fn key() -> AnalysisPresentationKey {
 }
 
 fn retained_population(count: usize) -> crate::state::SimulationState {
-    use crate::io::project_io::ProjectSimulationResults;
     use crate::state::{SimulationRunLifecycle, SimulationRunProvenance, SimulationState};
 
     let mut simulation = SimulationState::default();
@@ -90,8 +89,7 @@ fn retained_population(count: usize) -> crate::state::SimulationState {
     run.finish_lifecycle(SimulationRunLifecycle::Completed)
         .unwrap();
     simulation.complete_run();
-    ProjectSimulationResults::from_state(&simulation)
-        .into_simulation_state()
+    crate::io::simulation_state_from_results(crate::io::capture_simulation_results(&simulation))
         .unwrap()
 }
 
@@ -183,8 +181,6 @@ fn population_cache_distinguishes_an_absent_bound_from_zero() {
 
 #[test]
 fn population_cache_refreshes_restored_same_identity_content() {
-    use crate::io::project_io::ProjectSimulationResults;
-
     let mut simulation = retained_population(3);
     let workspace = workspace_with_limit(Some(1.0), None);
     let mut results = super::super::ResultsState::default();
@@ -193,9 +189,10 @@ fn population_cache_refreshes_restored_same_identity_content() {
     let mut replacement = simulation.clone();
     replacement.runs[0].analyses[0] =
         monte_carlo(vec![trial(0, 10.0), trial(1, 20.0)], vec![10.0, 20.0]);
-    simulation = ProjectSimulationResults::from_state(&replacement)
-        .into_simulation_state()
-        .unwrap();
+    simulation = crate::io::simulation_state_from_results(crate::io::capture_simulation_results(
+        &replacement,
+    ))
+    .unwrap();
     assert_eq!(simulation.data_version, version);
     let restored = cached_population(&simulation, &workspace, &mut results).unwrap();
     assert_eq!(restored.analysis, original.analysis);
@@ -414,7 +411,7 @@ fn population_contract_uses_the_frozen_requirement_and_ignores_later_drafts() {
         Some(-0.25)
     );
     let run = simulation.active_run().unwrap();
-    let verdict = crate::state::SpecificationVerdict::evaluate(
+    let verdict = rspice_results::specification_verdict::SpecificationVerdict::evaluate(
         run.prepared_receipt().unwrap().specifications(),
         run.analyses.iter().map(|analysis| &analysis.data),
     );
@@ -440,9 +437,10 @@ fn population_contract_uses_the_frozen_requirement_and_ignores_later_drafts() {
     simulation.complete_run();
     let sealed = simulation.runs[0].specification_verdicts().unwrap();
     assert_eq!(sealed[0].passing_evidence_count(), 1);
-    simulation = crate::io::project_io::ProjectSimulationResults::from_state(&simulation)
-        .into_simulation_state()
-        .unwrap();
+    simulation = crate::io::simulation_state_from_results(crate::io::capture_simulation_results(
+        &simulation,
+    ))
+    .unwrap();
     let restored = cached_population(&simulation, &workspace, &mut results).unwrap();
     assert_eq!(restored.status, plan.status);
     assert_eq!(

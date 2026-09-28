@@ -18,6 +18,7 @@ pub(crate) mod generated_bundle;
 pub(crate) mod netlist_export;
 mod project_execution;
 pub(crate) mod project_io;
+mod project_results;
 pub(crate) mod schematic_io;
 
 pub(crate) mod waveform_io;
@@ -28,6 +29,9 @@ pub use netlist_export::NetlistFormat;
 pub(crate) use project_execution::{capture_execution_context, restore_execution_context};
 #[allow(deprecated)]
 pub use project_io::{ProjectFile, ProjectIoError, ProjectSimulationResults, load_project_file};
+pub(crate) use project_results::{
+    capture_simulation_results, restore_simulation_results, simulation_state_from_results,
+};
 pub use rspice_project::{PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION, ProjectExecutionContext};
 // The run's own corner-expansion entry point, so the Corners page's tests can
 // assert that the page and the run reach the same verdict rather than that

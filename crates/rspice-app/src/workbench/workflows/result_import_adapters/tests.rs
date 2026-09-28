@@ -448,7 +448,7 @@ fn event_source_fst_import_keeps_detected_format_through_project_reload() {
     let text = crate::io::project_io::serialize_project_file(&project).unwrap();
     let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
     assert!(restored.simulation_results_warning.is_none());
-    let restored = restored.simulation_results.into_simulation_state().unwrap();
+    let restored = crate::io::simulation_state_from_results(restored.simulation_results).unwrap();
     let analysis = restored.active_analysis().unwrap();
     assert_eq!(
         analysis.import_source.as_ref().unwrap().format,

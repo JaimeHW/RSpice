@@ -27,7 +27,7 @@ fn sensitivity_history(
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run.clone()].into();
     simulation.next_run_id = 1;
-    (run, ProjectSimulationResults::from_state(&simulation))
+    (run, crate::io::capture_simulation_results(&simulation))
 }
 
 #[test]
@@ -42,7 +42,7 @@ fn sensitivity_availability_survives_project_results_serialization_and_authentic
     let text = serialize_project_file(&project).unwrap();
     let loaded = load_project_text(&text, None).unwrap();
     assert!(loaded.simulation_results_warning.is_none());
-    let restored = loaded.simulation_results.into_simulation_state().unwrap();
+    let restored = crate::io::simulation_state_from_results(loaded.simulation_results).unwrap();
     assert_eq!(
         restored.runs[0].analyses[0].result_payload,
         run.analyses[0].result_payload
@@ -69,19 +69,21 @@ fn sensitivity_availability_survives_project_results_serialization_and_authentic
 fn sensitivity_v25_migration_authenticates_numeric_evidence_before_resealing() {
     use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
     let (run, mut legacy) = sensitivity_history(0.0.into());
-    legacy.schema_version = COMPLEX_EXPRESSION_RESULTS_SCHEMA_VERSION;
-    legacy.runs[0].analyses[0].result_data_digest =
-        PersistedField::Value(run.analyses[0].legacy_v14_result_data_digest());
+    legacy.schema_version = 25;
+    legacy.runs[0].analyses[0].result_data_digest = PersistedField::Value(
+        run.analyses[0]
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V14),
+    );
     legacy.runs[0].dataset_content_digest =
-        PersistedField::Value(run.legacy_v14_dataset_content_digest());
+        PersistedField::Value(run.dataset_content_digest_with_encoding(
+            rspice_results::result_digest::ResultDigestEncoding::V14,
+        ));
     let mut migrated: ProjectSimulationResults =
         serde_json::from_str(&serde_json::to_string(&legacy).unwrap()).unwrap();
     migrated.migrate_to_current(ProjectId::new()).unwrap();
     migrated.validate().unwrap();
-    assert_eq!(
-        migrated.schema_version,
-        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
-    );
+    assert_eq!(migrated.schema_version, 40);
     assert_eq!(
         migrated.runs[0].analyses[0].result_payload,
         legacy.runs[0].analyses[0].result_payload
@@ -128,13 +130,13 @@ fn current_impulse_project_history_round_trips_and_authenticates_charge() {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run.clone()].into();
     simulation.next_run_id = 1;
-    let saved = ProjectSimulationResults::from_state(&simulation);
+    let saved = crate::io::capture_simulation_results(&simulation);
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     let project = ProjectFile::new_with_simulation_results(workspace, libraries, saved.clone());
     let loaded = load_project_text(&serialize_project_file(&project).unwrap(), None).unwrap();
     assert!(loaded.simulation_results_warning.is_none());
-    let restored = loaded.simulation_results.into_simulation_state().unwrap();
+    let restored = crate::io::simulation_state_from_results(loaded.simulation_results).unwrap();
     assert_eq!(
         restored.runs[0].analyses[0].result_payload,
         run.analyses[0].result_payload
@@ -150,26 +152,28 @@ fn current_impulse_project_history_round_trips_and_authenticates_charge() {
     history.traces[0].points[0].charge_coulombs *= -1.0;
     assert!(tampered.validate().is_err());
     let mut disguised = saved;
-    disguised.schema_version = SENSITIVITY_AVAILABILITY_RESULTS_SCHEMA_VERSION;
+    disguised.schema_version = 26;
     assert!(disguised.migrate_to_current(ProjectId::new()).is_err());
 }
 
 #[test]
 fn current_impulse_schema_migration_authenticates_v26_before_resealing() {
     let (run, mut legacy) = sensitivity_history(0.0.into());
-    legacy.schema_version = SENSITIVITY_AVAILABILITY_RESULTS_SCHEMA_VERSION;
-    legacy.runs[0].analyses[0].result_data_digest =
-        PersistedField::Value(run.analyses[0].legacy_v15_result_data_digest());
+    legacy.schema_version = 26;
+    legacy.runs[0].analyses[0].result_data_digest = PersistedField::Value(
+        run.analyses[0]
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V15),
+    );
     legacy.runs[0].dataset_content_digest =
-        PersistedField::Value(run.legacy_v15_dataset_content_digest());
+        PersistedField::Value(run.dataset_content_digest_with_encoding(
+            rspice_results::result_digest::ResultDigestEncoding::V15,
+        ));
     let mut migrated: ProjectSimulationResults =
         serde_json::from_str(&serde_json::to_string(&legacy).unwrap()).unwrap();
     migrated.migrate_to_current(ProjectId::new()).unwrap();
     migrated.validate().unwrap();
-    assert_eq!(
-        migrated.schema_version,
-        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
-    );
+    assert_eq!(migrated.schema_version, 40);
     assert_ne!(
         migrated.runs[0].dataset_content_digest,
         legacy.runs[0].dataset_content_digest
@@ -195,13 +199,14 @@ fn cleared_run_sequence_survives_project_round_trip() {
         let project = ProjectFile::new_with_simulation_results(
             workspace,
             libraries,
-            ProjectSimulationResults::from_state(&simulation),
+            crate::io::capture_simulation_results(&simulation),
         );
         let text = serialize_project_file(&project).expect("cleared history publishes");
         let loaded = load_project_text(&text, None).expect("cleared history reopens");
         assert!(loaded.simulation_results_warning.is_none());
         assert_eq!(loaded.simulation_results.next_run_id, last_sequence);
-        let mut restored = loaded.simulation_results.into_simulation_state().unwrap();
+        let mut restored =
+            crate::io::simulation_state_from_results(loaded.simulation_results).unwrap();
         assert!(restored.runs.is_empty());
         assert_eq!(restored.next_run_id, last_sequence);
         if last_sequence < u64::MAX {
@@ -224,7 +229,7 @@ fn project_text_load_drops_invalid_simulation_results_without_rejecting_workspac
     let project = ProjectFile::new_with_simulation_results(
         workspace,
         libraries,
-        ProjectSimulationResults::from_state(&simulation),
+        crate::io::capture_simulation_results(&simulation),
     );
     let mut value = serde_json::to_value(project).expect("project converts to JSON");
     value["simulation_results"]["schema_version"] = serde_json::Value::from(999);
@@ -260,7 +265,7 @@ fn project_load_clears_legacy_regression_baseline_after_result_migration() {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 71;
-    project.simulation_results = ProjectSimulationResults::from_state(&simulation);
+    project.simulation_results = crate::io::capture_simulation_results(&simulation);
     project
         .workspace
         .plan_data_mut(plan_id)
@@ -353,15 +358,19 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
         &[analysis_kind_tag_for_plan_kind(AnalysisKind::Noise)],
     );
     let baseline_id = run.run_id;
-    let legacy_analysis_digest = run.analyses[0].legacy_v4_result_data_digest();
-    let legacy_dataset_digest = run.legacy_v4_dataset_content_digest();
+    let legacy_analysis_digest = run.analyses[0]
+        .result_data_ref()
+        .digest(rspice_results::result_digest::ResultDigestEncoding::V4);
+    let legacy_dataset_digest = run.dataset_content_digest_with_encoding(
+        rspice_results::result_digest::ResultDigestEncoding::V4,
+    );
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 72;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
     assert!(simulation.set_run_retention(baseline_id, RunRetention::GoldenBaseline));
-    project.simulation_results = ProjectSimulationResults::from_state(&simulation);
+    project.simulation_results = crate::io::capture_simulation_results(&simulation);
     assert_eq!(
         project.simulation_results.runs[0].retention,
         RunRetention::GoldenBaseline,
@@ -375,8 +384,7 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
 
     let current_json = serialize_project_file(&project).expect("current project serializes");
     let mut v11: serde_json::Value = serde_json::from_str(&current_json).expect("project JSON");
-    v11["simulation_results"]["schema_version"] =
-        serde_json::json!(TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION);
+    v11["simulation_results"]["schema_version"] = serde_json::json!(11);
     v11["simulation_results"]["runs"][0]["analyses"][0]["result_data_digest"] =
         serde_json::to_value(legacy_analysis_digest).expect("legacy analysis digest");
     v11["simulation_results"]["runs"][0]["dataset_content_digest"] =
@@ -394,10 +402,7 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
     let loaded = load_project_text(&v11.to_string(), None)
         .expect("authentic schema-v11 project remains loadable");
 
-    assert_eq!(
-        loaded.simulation_results.schema_version,
-        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
-    );
+    assert_eq!(loaded.simulation_results.schema_version, 40);
     assert_eq!(loaded.simulation_results.runs.len(), 1);
     assert!(loaded.simulation_results_warning.is_none());
     assert_eq!(
@@ -418,7 +423,9 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
     );
     assert_eq!(restored.analyses[0].noise_summary, Some(summary));
     assert_ne!(
-        restored.analyses[0].result_data_digest(),
+        restored.analyses[0]
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::CURRENT),
         legacy_analysis_digest,
         "v11 evidence must be resealed in the current digest domain"
     );
@@ -501,7 +508,7 @@ fn project_text_load_drops_unknown_analysis_type_results_without_parse_failure()
     let project = ProjectFile::new_with_simulation_results(
         workspace,
         libraries,
-        ProjectSimulationResults::from_state(&simulation),
+        crate::io::capture_simulation_results(&simulation),
     );
     let json = serialize_project_file(&project)
         .expect("project serializes")
@@ -530,7 +537,7 @@ fn project_results_restore_rejects_invalid_overlay_references() {
     seal_legacy_unattributed(&mut run_two);
     let results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
-        schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
+        schema_version: 40,
         runs: vec![
             ProjectSimulationRun::from(&run_one),
             ProjectSimulationRun::from(&run_two),
@@ -549,8 +556,7 @@ fn project_results_restore_rejects_invalid_overlay_references() {
     }
     .into();
 
-    let error = results
-        .into_simulation_state()
+    let error = crate::io::simulation_state_from_results(results)
         .expect_err("invalid overlay references fail closed");
 
     assert!(error.contains("duplicate overlay dataset id"));
@@ -564,7 +570,7 @@ fn project_results_validation_rejects_duplicate_run_ids() {
     seal_legacy_unattributed(&mut run_duplicate);
     let results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
-        schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
+        schema_version: 40,
         runs: vec![
             ProjectSimulationRun::from(&run_one),
             ProjectSimulationRun::from(&run_duplicate),
@@ -595,7 +601,7 @@ fn project_results_v2_requires_unique_stable_run_and_dataset_ids() {
     simulation.runs = vec![run_one, run_two].into();
     simulation.next_run_id = 2;
 
-    let baseline = ProjectSimulationResults::from_state(&simulation);
+    let baseline = crate::io::capture_simulation_results(&simulation);
 
     let mut missing_run_identity = baseline.clone();
     missing_run_identity.runs[0].run_id = None;
@@ -639,16 +645,17 @@ fn projects_written_before_golden_baselines_restore_every_run_pruneable() {
     simulation.runs = vec![run_two, run_one].into();
     simulation.next_run_id = 2;
 
-    let historical = serde_json::to_string(&ProjectSimulationResults::from_state(&simulation))
+    let historical = serde_json::to_string(&crate::io::capture_simulation_results(&simulation))
         .expect("results serialize");
     assert!(
         !historical.contains("retention"),
         "a project with no baselines writes exactly what it wrote before they existed"
     );
-    let restored = serde_json::from_str::<ProjectSimulationResults>(&historical)
-        .expect("historical results decode")
-        .into_simulation_state()
-        .expect("historical results restore");
+    let restored = crate::io::simulation_state_from_results(
+        serde_json::from_str::<ProjectSimulationResults>(&historical)
+            .expect("historical results decode"),
+    )
+    .expect("historical results restore");
     assert_eq!(restored.pinned_run_count(), 0);
     assert!(
         restored
@@ -658,12 +665,13 @@ fn projects_written_before_golden_baselines_restore_every_run_pruneable() {
     );
 
     assert!(simulation.set_run_retention(baseline_run_id, RunRetention::GoldenBaseline));
-    let current = serde_json::to_string(&ProjectSimulationResults::from_state(&simulation))
+    let current = serde_json::to_string(&crate::io::capture_simulation_results(&simulation))
         .expect("results with a baseline serialize");
-    let reloaded = serde_json::from_str::<ProjectSimulationResults>(&current)
-        .expect("results with a baseline decode")
-        .into_simulation_state()
-        .expect("results with a baseline restore");
+    let reloaded = crate::io::simulation_state_from_results(
+        serde_json::from_str::<ProjectSimulationResults>(&current)
+            .expect("results with a baseline decode"),
+    )
+    .expect("results with a baseline restore");
     assert_eq!(reloaded.pinned_run_count(), 1);
     assert!(
         reloaded
@@ -689,7 +697,7 @@ fn project_results_v2_rejects_cross_bound_selection_and_active_overlay() {
     simulation.next_run_id = 2;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
-    let baseline = ProjectSimulationResults::from_state(&simulation);
+    let baseline = crate::io::capture_simulation_results(&simulation);
 
     let mut cross_bound = baseline.clone();
     cross_bound.active_dataset_id = Some(run_two_dataset_id);
@@ -725,7 +733,7 @@ fn project_text_migrates_v1_result_sequences_once_to_stable_identities() {
     // hand-maintained subset: that silently leaves newly introduced evidence
     // (for example measurement-verification fields) in an anachronistic file.
     let versioned_v1_results = serde_json::json!({
-        "schema_version": LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION,
+        "schema_version": 1,
         "runs": [
             {
                 "id": 1,
@@ -802,10 +810,7 @@ fn project_text_migrates_v1_result_sequences_once_to_stable_identities() {
     let migrated = &migrated_matrix[0];
 
     assert!(migrated.simulation_results_warning.is_none());
-    assert_eq!(
-        migrated.simulation_results.schema_version,
-        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
-    );
+    assert_eq!(migrated.simulation_results.schema_version, 40);
     assert!(
         migrated
             .simulation_results
@@ -868,7 +873,7 @@ fn project_results_validation_rejects_duplicate_waveform_names_in_analysis() {
     let dataset_id = DatasetId::new();
     let results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
-        schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
+        schema_version: 40,
         runs: vec![ProjectSimulationRun {
             job_id: None,
             run_id: Some(run_id),
@@ -952,7 +957,7 @@ fn project_results_validation_rejects_non_monotonic_waveform_x() {
     let dataset_id = DatasetId::new();
     let results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
-        schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
+        schema_version: 40,
         runs: vec![ProjectSimulationRun {
             job_id: None,
             run_id: Some(run_id),
@@ -1035,7 +1040,7 @@ fn project_results_preserve_core_noise_mechanism_labels() {
     let dataset_id = DatasetId::new();
     let mut results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
-        schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
+        schema_version: 40,
         runs: vec![ProjectSimulationRun {
             job_id: None,
             run_id: Some(run_id),
@@ -1111,9 +1116,8 @@ fn project_results_preserve_core_noise_mechanism_labels() {
 
     results.validate().expect("core noise labels are valid");
 
-    let restored = results
-        .into_simulation_state()
-        .expect("valid result history restores");
+    let restored =
+        crate::io::simulation_state_from_results(results).expect("valid result history restores");
     let summary = restored
         .active_analysis()
         .and_then(|analysis| analysis.noise_summary.as_ref())
@@ -1702,8 +1706,8 @@ fn results_written_before_point_attribution_load_as_unattributed() {
     simulation.runs = vec![run].into();
     simulation.next_run_id = 41;
 
-    let mut v5 = ProjectSimulationResults::from_state(&simulation);
-    v5.schema_version = SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION;
+    let mut v5 = crate::io::capture_simulation_results(&simulation);
+    v5.schema_version = 5;
     clear_v6_execution_fields(&mut v5);
     clear_v14_specification_fields(&mut v5);
     assert_eq!(
@@ -1718,9 +1722,7 @@ fn results_written_before_point_attribution_load_as_unattributed() {
 
     v5.migrate_to_current(ProjectId::new())
         .expect("a project without point attribution migrates");
-    let restored = v5
-        .into_simulation_state()
-        .expect("migrated results restore");
+    let restored = crate::io::simulation_state_from_results(v5).expect("migrated results restore");
     let provenance = restored.runs[0].analyses[0]
         .provenance
         .as_ref()
@@ -1776,13 +1778,12 @@ fn point_attribution_round_trips_and_cannot_masquerade_as_a_legacy_schema() {
     simulation.runs = vec![run].into();
     simulation.next_run_id = 42;
 
-    let current = ProjectSimulationResults::from_state(&simulation);
+    let current = crate::io::capture_simulation_results(&simulation);
     let json = serde_json::to_string(&current).expect("serialize attributed results");
     let reloaded: ProjectSimulationResults =
         serde_json::from_str(&json).expect("attributed results restore");
-    let restored = reloaded
-        .into_simulation_state()
-        .expect("attributed results apply");
+    let restored =
+        crate::io::simulation_state_from_results(reloaded).expect("attributed results apply");
     assert_eq!(
         restored.runs[0].analyses[0]
             .provenance
@@ -1793,7 +1794,7 @@ fn point_attribution_round_trips_and_cannot_masquerade_as_a_legacy_schema() {
     );
 
     let mut smuggled = current;
-    smuggled.schema_version = SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION;
+    smuggled.schema_version = 5;
     clear_v6_execution_fields(&mut smuggled);
     clear_v14_specification_fields(&mut smuggled);
     assert!(
@@ -1827,22 +1828,19 @@ fn a_results_history_saved_at_schema_27_restores_with_its_digests_unchanged() {
     simulation.runs = vec![run].into();
     simulation.next_run_id = 42;
 
-    let current = ProjectSimulationResults::from_state(&simulation);
+    let current = crate::io::capture_simulation_results(&simulation);
     let digests = current.runs[0]
         .analyses
         .iter()
         .map(|analysis| analysis.result_data_digest.clone())
         .collect::<Vec<_>>();
     let mut at_v27 = current;
-    at_v27.schema_version = CURRENT_IMPULSE_RESULTS_SCHEMA_VERSION;
+    at_v27.schema_version = 27;
 
     at_v27
         .migrate_to_current(ProjectId::new())
         .expect("a v27 history migrates");
-    assert_eq!(
-        at_v27.schema_version,
-        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
-    );
+    assert_eq!(at_v27.schema_version, 40);
     let after = at_v27.runs[0]
         .analyses
         .iter()
@@ -1892,8 +1890,8 @@ fn a_result_schema_before_28_cannot_carry_a_recorded_fft() {
     simulation.runs = vec![run].into();
     simulation.next_run_id = 43;
 
-    let mut smuggled = ProjectSimulationResults::from_state(&simulation);
-    smuggled.schema_version = CURRENT_IMPULSE_RESULTS_SCHEMA_VERSION;
+    let mut smuggled = crate::io::capture_simulation_results(&simulation);
+    smuggled.schema_version = 27;
     assert!(
         smuggled
             .migrate_to_current(ProjectId::new())
@@ -1942,22 +1940,19 @@ fn a_results_history_saved_before_the_study_restores_with_its_digests_unchanged(
     simulation.runs = vec![run].into();
     simulation.next_run_id = 44;
 
-    let current = ProjectSimulationResults::from_state(&simulation);
+    let current = crate::io::capture_simulation_results(&simulation);
     let digests = current.runs[0]
         .analyses
         .iter()
         .map(|analysis| analysis.result_data_digest.clone())
         .collect::<Vec<_>>();
     let mut at_v28 = current;
-    at_v28.schema_version = RECORDED_FFT_RESULTS_SCHEMA_VERSION;
+    at_v28.schema_version = 28;
 
     at_v28
         .migrate_to_current(ProjectId::new())
         .expect("a v28 history migrates");
-    assert_eq!(
-        at_v28.schema_version,
-        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
-    );
+    assert_eq!(at_v28.schema_version, 40);
     let after = at_v28.runs[0]
         .analyses
         .iter()
@@ -2002,8 +1997,8 @@ fn a_result_schema_before_the_study_cannot_carry_one() {
     simulation.runs = vec![run].into();
     simulation.next_run_id = 45;
 
-    let mut smuggled = ProjectSimulationResults::from_state(&simulation);
-    smuggled.schema_version = RECORDED_FFT_RESULTS_SCHEMA_VERSION;
+    let mut smuggled = crate::io::capture_simulation_results(&simulation);
+    smuggled.schema_version = 28;
     assert!(
         smuggled
             .migrate_to_current(ProjectId::new())

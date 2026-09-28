@@ -23,6 +23,11 @@ mod quasi_periodic;
 mod saved_output;
 mod validation;
 
+pub const LIVE_TRANSIENT_PARTIAL_MESSAGE: &str =
+    "Transient analysis is running; displayed samples are provisional";
+pub const LIVE_MONTE_CARLO_PARTIAL_MESSAGE: &str =
+    "Monte Carlo analysis is running; committed trials are checkpointed";
+
 /// Retained analysis evidence with exact waveform storage supplied by its owner.
 /// The default stores plain source data. Presentation owners may decorate a
 /// waveform while exposing the same canonical samples through `AsRef`.
@@ -110,6 +115,15 @@ impl<'a, W> From<&'a AnalysisResult<W>>
 }
 
 impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
+    #[must_use]
+    pub fn is_live_partial(&self) -> bool {
+        !self.success
+            && matches!(
+                self.error_message.as_deref(),
+                Some(LIVE_TRANSIENT_PARTIAL_MESSAGE | LIVE_MONTE_CARLO_PARTIAL_MESSAGE)
+            )
+    }
+
     /// Exact prepared-task provenance for current retained results.
     #[must_use]
     pub fn provenance(&self) -> Option<&AnalysisResultProvenance> {

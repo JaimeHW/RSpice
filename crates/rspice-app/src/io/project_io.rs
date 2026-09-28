@@ -6,119 +6,28 @@
 //! schematic export remains available through `.rsch`; project files are the
 //! native professional workflow container.
 
-mod results;
-
-pub use results::*;
+pub use rspice_project::results::*;
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
 use crate::product::{
-    AnalysisInstanceId, ContentDigest, DatasetId, DerivedAnalysisIdentity, JobId, ModelSourceId,
-    ObjectRevision, ProjectId, RunId, SimulationPlanId,
+    AnalysisInstanceId, ContentDigest, DerivedAnalysisIdentity, ObjectRevision, ProjectId,
+    SimulationPlanId,
 };
 use crate::state::workspace::validate_cell_view_name_segment;
 use crate::state::{
-    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
-    AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType, CanonicalCellViewOwnerKey,
-    CellViewRef, ConfigurationSet, DcOpResult, ExecutionTarget,
+    AnalysisResultSourceDomain, CanonicalCellViewOwnerKey, CellViewRef, ConfigurationSet,
     GENERATED_VERILOGA_BINDING_SCHEMA_REVISION, InstancePath, InstancePathPattern, LibraryManager,
-    NoiseContributorRow, NoiseSummary, OperatingPointValue, PatternSegment,
-    PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunTaskReceipt,
-    PreparedSourceCheckReceipt, PreparedSpecification, PreparedSpecificationPolicy,
-    ProjectWorkspace, RunRetention, SavedOutputMaterializationStatus, SavedOutputReceipt,
-    SimulationRun, SimulationRunLifecycle, SimulationRunProvenance, SimulationState, SpecEntry,
-    SpecificationDefinition, SpecificationPolicy, SpecificationVerdict, ViewType, WaveformData,
-    canonical_cell_view_owner_key,
+    PatternSegment, ProjectWorkspace, ViewType, canonical_cell_view_owner_key,
 };
 use rspice_project::ProjectExecutionContext;
 use rspice_simulation_contract::analysis_kind::AnalysisKind;
-
-/// Presence-aware persisted field used at schema-era boundaries.
-///
-/// Serde's `Option<T>` intentionally treats an explicit JSON `null` exactly
-/// like an absent field. That is unsafe for fields introduced by a later
-/// schema because a caller could otherwise add the field as `null`, relabel
-/// the container as an older schema, and have migration accept it as genuine
-/// absence. This representation keeps all three wire states distinct.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum PersistedField<T> {
-    #[default]
-    Missing,
-    Null,
-    Value(T),
-}
-
-impl<T> PersistedField<T> {
-    #[must_use]
-    pub const fn is_missing(&self) -> bool {
-        matches!(self, Self::Missing)
-    }
-
-    #[must_use]
-    pub const fn is_null(&self) -> bool {
-        matches!(self, Self::Null)
-    }
-
-    #[must_use]
-    pub const fn is_present(&self) -> bool {
-        !self.is_missing()
-    }
-
-    #[must_use]
-    pub const fn as_ref(&self) -> Option<&T> {
-        match self {
-            Self::Value(value) => Some(value),
-            Self::Missing | Self::Null => None,
-        }
-    }
-
-    #[must_use]
-    #[cfg(test)]
-    pub fn as_mut(&mut self) -> Option<&mut T> {
-        match self {
-            Self::Value(value) => Some(value),
-            Self::Missing | Self::Null => None,
-        }
-    }
-
-    #[must_use]
-    pub fn into_value(self) -> Option<T> {
-        match self {
-            Self::Value(value) => Some(value),
-            Self::Missing | Self::Null => None,
-        }
-    }
-}
-
-impl<T: Serialize> Serialize for PersistedField<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self {
-            Self::Value(value) => value.serialize(serializer),
-            Self::Missing | Self::Null => serializer.serialize_none(),
-        }
-    }
-}
-
-impl<'de, T: Deserialize<'de>> Deserialize<'de> for PersistedField<T> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Option::<T>::deserialize(deserializer).map(|value| match value {
-            Some(value) => Self::Value(value),
-            None => Self::Null,
-        })
-    }
-}
 
 #[derive(Debug)]
 struct ValidatedLibraryView {
@@ -1493,143 +1402,8 @@ fn project_view_requires_schematic_buffer(view_type: ViewType) -> bool {
     matches!(view_type, ViewType::Schematic | ViewType::Testbench)
 }
 
-const LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 1;
-const STABLE_DATASET_RESULTS_SCHEMA_VERSION: u32 = 2;
-const PREPARED_PROVENANCE_RESULTS_SCHEMA_VERSION: u32 = 3;
-const EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION: u32 = 4;
-const SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION: u32 = 5;
-const EXECUTION_IDENTITY_RESULTS_SCHEMA_VERSION: u32 = 6;
-const FAMILY_METADATA_RESULTS_SCHEMA_VERSION: u32 = 7;
-const CONTENT_DIGEST_RESULTS_SCHEMA_VERSION: u32 = 8;
-const TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION: u32 = 9;
-const SOA_RESULTS_SCHEMA_VERSION: u32 = 10;
-
-const TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION: u32 = 11;
-const OPERATING_POINT_RESULTS_SCHEMA_VERSION: u32 = 12;
-const WAVEFORM_UNIT_RESULTS_SCHEMA_VERSION: u32 = 13;
-const GOVERNED_SPECIFICATION_RESULTS_SCHEMA_VERSION: u32 = 14;
-const EXECUTED_DECK_RESULTS_SCHEMA_VERSION: u32 = 15;
-const POLE_ZERO_EVIDENCE_RESULTS_SCHEMA_VERSION: u32 = 16;
-const PERIODIC_STABILITY_RESULTS_SCHEMA_VERSION: u32 = 17;
-const MEASUREMENT_VERIFICATION_RESULTS_SCHEMA_VERSION: u32 = 18;
-const DIGITAL_BUS_RESULTS_SCHEMA_VERSION: u32 = 19;
-const IMPORT_SOURCE_RESULTS_SCHEMA_VERSION: u32 = 20;
-const CONVERGENCE_RESULTS_SCHEMA_VERSION: u32 = 21;
-const DC_SWEEP_RESULTS_SCHEMA_VERSION: u32 = 22;
-const DC_FAMILY_OUTPUT_RESULTS_SCHEMA_VERSION: u32 = 23;
-const BOUND_OUTPUT_RESULTS_SCHEMA_VERSION: u32 = 24;
-const COMPLEX_EXPRESSION_RESULTS_SCHEMA_VERSION: u32 = 25;
-const SENSITIVITY_AVAILABILITY_RESULTS_SCHEMA_VERSION: u32 = 26;
-const CURRENT_IMPULSE_RESULTS_SCHEMA_VERSION: u32 = 27;
-/// The era DC mismatch evidence became writable. Named separately from the
-/// current version even though it shares the number: the guard says "no build
-/// before v27 wrote one", which stays true when the schema next moves.
-const DC_MISMATCH_RESULTS_SCHEMA_VERSION: u32 = 27;
-const RECORDED_FFT_RESULTS_SCHEMA_VERSION: u32 = 28;
-const SENSITIVITY_STUDY_RESULTS_SCHEMA_VERSION: u32 = 29;
-const MONTE_CARLO_CONFIDENCE_RESULTS_SCHEMA_VERSION: u32 = 30;
-const MONTE_CARLO_TRIAL_RESULTS_SCHEMA_VERSION: u32 = 31;
-const NOISE_FIGURE_RESULTS_SCHEMA_VERSION: u32 = 32;
-const NOISE_CONVERSION_RESULTS_SCHEMA_VERSION: u32 = 33;
-const NOISE_INPUT_QUANTITY_RESULTS_SCHEMA_VERSION: u32 = 34;
-const MONTE_CARLO_CHECKPOINT_RESULTS_SCHEMA_VERSION: u32 = 35;
-const IMPORTED_MONTE_CARLO_CHECKPOINTS_SCHEMA_VERSION: u32 = 36;
-const MEASUREMENT_UNIT_RESULTS_SCHEMA_VERSION: u32 = 37;
-const NATIVE_SCALAR_UNIT_RESULTS_SCHEMA_VERSION: u32 = 38;
-const OPTIMIZATION_UNIT_RESULTS_SCHEMA_VERSION: u32 = 39;
-const SAMPLED_NOISE_RESULTS_SCHEMA_VERSION: u32 = 40;
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = SAMPLED_NOISE_RESULTS_SCHEMA_VERSION;
-
 const LEGACY_PROJECT_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0x63a2_4271_a7cb_5a5e_b8bb_e783_e768_daf0);
-const LEGACY_RESULT_RUN_ID_NAMESPACE: uuid::Uuid =
-    uuid::Uuid::from_u128(0xe515_12ea_10c0_58c8_8bd7_ea31_003f_f6cf);
-const LEGACY_RESULT_DATASET_ID_NAMESPACE: uuid::Uuid =
-    uuid::Uuid::from_u128(0xa697_7219_0a25_536d_8dde_4319_08e4_d0c7);
-
-fn default_simulation_results_schema_version() -> u32 {
-    // A present result-history object without a version predates the stable-ID
-    // schema. New objects set the current version explicitly through
-    // `Default`/`from_state`.
-    LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION
-}
-
-fn analysis_type_key(analysis_type: AnalysisType) -> &'static str {
-    match analysis_type {
-        AnalysisType::DcOp => "DcOp",
-        AnalysisType::DcSweep => "DcSweep",
-        AnalysisType::Ac => "Ac",
-        AnalysisType::Disto => "Disto",
-        AnalysisType::Transient => "Transient",
-        AnalysisType::Noise => "Noise",
-        AnalysisType::PoleZero => "PoleZero",
-        AnalysisType::Tf => "Tf",
-        AnalysisType::Sensitivity => "Sensitivity",
-        AnalysisType::Pac => "Pac",
-        AnalysisType::Pnoise => "Pnoise",
-        AnalysisType::Pxf => "Pxf",
-        AnalysisType::Pstb => "Pstb",
-        AnalysisType::Stb => "Stb",
-        AnalysisType::MonteCarlo => "MonteCarlo",
-        AnalysisType::Parametric => "Parametric",
-        AnalysisType::Corner => "Corner",
-        AnalysisType::Optimization => "Optimization",
-        AnalysisType::Soa => "Soa",
-        AnalysisType::SParameter => "SParameter",
-        AnalysisType::Envelope => "Envelope",
-        AnalysisType::Fourier => "Fourier",
-        AnalysisType::HarmonicBalance => "HarmonicBalance",
-        AnalysisType::Pss => "Pss",
-        AnalysisType::Qpss => "Qpss",
-        AnalysisType::Hbsp => "Hbsp",
-        AnalysisType::Hbnoise => "Hbnoise",
-        AnalysisType::Psp => "Psp",
-        AnalysisType::Qpac => "Qpac",
-        AnalysisType::Qpnoise => "Qpnoise",
-        AnalysisType::Qpxf => "Qpxf",
-        AnalysisType::TransientNoise => "TransientNoise",
-        AnalysisType::DcMismatch => "DcMismatch",
-    }
-}
-
-fn analysis_type_from_key(key: &str) -> Option<AnalysisType> {
-    match key {
-        "DcOp" | ".op" => Some(AnalysisType::DcOp),
-        "DcSweep" | ".dc" => Some(AnalysisType::DcSweep),
-        "Ac" | ".ac" => Some(AnalysisType::Ac),
-        "Disto" | ".disto" => Some(AnalysisType::Disto),
-        "Transient" | ".tran" => Some(AnalysisType::Transient),
-        "Noise" | ".noise" => Some(AnalysisType::Noise),
-        "PoleZero" | ".pz" => Some(AnalysisType::PoleZero),
-        "Tf" | ".tf" => Some(AnalysisType::Tf),
-        "Sensitivity" | ".sens" => Some(AnalysisType::Sensitivity),
-        "Pac" | ".pac" => Some(AnalysisType::Pac),
-        "Pnoise" | ".pnoise" => Some(AnalysisType::Pnoise),
-        "Pxf" | ".pxf" => Some(AnalysisType::Pxf),
-        "Pstb" | ".pstb" => Some(AnalysisType::Pstb),
-        "Stb" | ".stb" => Some(AnalysisType::Stb),
-        "MonteCarlo" | ".mc" => Some(AnalysisType::MonteCarlo),
-        "Parametric" | ".step" => Some(AnalysisType::Parametric),
-        "Corner" => Some(AnalysisType::Corner),
-        "Optimization" | ".opt" => Some(AnalysisType::Optimization),
-        "Soa" | ".soa" => Some(AnalysisType::Soa),
-        "SParameter" | ".sp" => Some(AnalysisType::SParameter),
-        "Envelope" | ".envlp" => Some(AnalysisType::Envelope),
-        "Fourier" | ".four" => Some(AnalysisType::Fourier),
-        "HarmonicBalance" | ".hb" => Some(AnalysisType::HarmonicBalance),
-        "Pss" | ".pss" => Some(AnalysisType::Pss),
-        "Qpss" | ".qpss" => Some(AnalysisType::Qpss),
-        "Hbsp" | ".hbsp" => Some(AnalysisType::Hbsp),
-        "Hbnoise" | ".hbnoise" => Some(AnalysisType::Hbnoise),
-        "Psp" | ".psp" => Some(AnalysisType::Psp),
-        "Qpac" | ".qpac" => Some(AnalysisType::Qpac),
-        "Qpnoise" | ".qpnoise" => Some(AnalysisType::Qpnoise),
-        "Qpxf" | ".qpxf" => Some(AnalysisType::Qpxf),
-        "TransientNoise" | ".tnoise" => Some(AnalysisType::TransientNoise),
-        "DcMismatch" | ".dcmatch" => Some(AnalysisType::DcMismatch),
-        _ => None,
-    }
-}
 
 /// The tag a persisted receipt task must carry for a plan analysis of `kind`.
 ///
@@ -1673,96 +1447,6 @@ fn authored_instance_for_task(
         ));
     }
     Ok(derived.authored_instance_id)
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn require_finite(value: f64, field: &str) -> Result<(), String> {
-    if value.is_finite() {
-        Ok(())
-    } else {
-        Err(format!("{field} is not finite"))
-    }
-}
-
-fn require_optional_finite(value: Option<f64>, field: &str) -> Result<(), String> {
-    if let Some(value) = value {
-        require_finite(value, field)?;
-    }
-    Ok(())
-}
-
-fn require_finite_values(values: &[f64], field: &str) -> Result<(), String> {
-    for (idx, value) in values.iter().enumerate() {
-        if !value.is_finite() {
-            return Err(format!("{field}[{idx}] is not finite"));
-        }
-    }
-    Ok(())
-}
-
-fn require_monotonic_non_decreasing(values: &[f64], field: &str) -> Result<(), String> {
-    for (idx, pair) in values.windows(2).enumerate() {
-        if pair[1] < pair[0] {
-            return Err(format!(
-                "{field} must be monotonic non-decreasing; sample {} ({}) is less than sample {} ({})",
-                idx + 1,
-                pair[1],
-                idx,
-                pair[0]
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn require_static_label(value: &str, field: &str) -> Result<(), String> {
-    if known_static_label(value).is_some() {
-        Ok(())
-    } else {
-        Err(format!("{field} has unknown static label '{value}'"))
-    }
-}
-
-/// A noise mechanism is checked for shape rather than membership.
-///
-/// It is not a static label: the summary keeps it as owned text on both sides
-/// of the file, so nothing is interned and no vocabulary has to cover it. Nor
-/// could one — half the mechanisms are composed by the Verilog-A code
-/// generator out of a model's own node and label names, and no build can list
-/// what a future catalog will contain. The engine owns the shape those names
-/// keep, so it is asked.
-fn require_noise_mechanism(value: &str, field: &str) -> Result<(), String> {
-    if rspice_core::analysis::is_persistable_noise_mechanism(value) {
-        Ok(())
-    } else {
-        Err(format!(
-            "{field} is not a noise mechanism: '{}'",
-            value.chars().take(64).collect::<String>()
-        ))
-    }
-}
-
-/// Intern a persisted label for restoration.
-///
-/// Restoration is only ever reached through a document that already validated,
-/// and validation rejects a label this predicate cannot resolve, so the
-/// placeholder is what makes the function total rather than a decision to
-/// accept unrecognized text.
-fn intern_static_label(value: String) -> &'static str {
-    known_static_label(&value).unwrap_or("unknown")
-}
-
-/// Labels a persisted result may carry, interned back to the `&'static str`
-/// the running build uses.
-///
-/// The vocabulary belongs to the engine, which is the only thing that knows
-/// what its device families report; asking it keeps the reader in step with
-/// the emitter instead of restating its list here.
-fn known_static_label(value: &str) -> Option<&'static str> {
-    rspice_core::circuit::resolve_op_label(value)
 }
 
 #[derive(Debug, Clone)]

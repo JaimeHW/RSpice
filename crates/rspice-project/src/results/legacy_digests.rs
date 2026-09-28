@@ -38,7 +38,8 @@ pub(super) fn validate_v8_result_digests(run: &ProjectSimulationRun) -> Result<(
         let computed = analysis
             .clone()
             .into_analysis()?
-            .legacy_v1_result_data_digest();
+            .result_data_ref()
+            .digest(ResultDigestEncoding::V1);
         if retained != computed {
             return Err(format!(
                 "schema-v8 analysis {} result data digest does not match retained content",
@@ -57,7 +58,10 @@ pub(super) fn validate_v8_result_digests(run: &ProjectSimulationRun) -> Result<(
                 run.id
             )
         })?;
-    let computed = run.clone().into_run()?.legacy_v1_dataset_content_digest();
+    let computed = run
+        .clone()
+        .into_run()?
+        .dataset_content_digest_with_encoding(ResultDigestEncoding::V1);
     if retained != computed {
         return Err(format!(
             "schema-v8 simulation run {} dataset content digest does not match retained content",
@@ -105,7 +109,8 @@ pub(super) fn validate_v9_result_digests(run: &ProjectSimulationRun) -> Result<(
         let computed = analysis
             .clone()
             .into_analysis()?
-            .legacy_v2_result_data_digest();
+            .result_data_ref()
+            .digest(ResultDigestEncoding::V2);
         if retained != computed {
             return Err(format!(
                 "schema-v9 analysis {} result data digest does not match retained content",
@@ -124,7 +129,10 @@ pub(super) fn validate_v9_result_digests(run: &ProjectSimulationRun) -> Result<(
                 run.id
             )
         })?;
-    let computed = run.clone().into_run()?.legacy_v2_dataset_content_digest();
+    let computed = run
+        .clone()
+        .into_run()?
+        .dataset_content_digest_with_encoding(ResultDigestEncoding::V2);
     if retained != computed {
         return Err(format!(
             "schema-v9 simulation run {} dataset content digest does not match retained content",
@@ -164,7 +172,8 @@ pub(super) fn validate_v10_result_digests(run: &ProjectSimulationRun) -> Result<
         let computed = analysis
             .clone()
             .into_analysis()?
-            .legacy_v3_result_data_digest();
+            .result_data_ref()
+            .digest(ResultDigestEncoding::V3);
         if retained != computed {
             return Err(format!(
                 "schema-v10 analysis {} result data digest does not match retained content",
@@ -183,7 +192,10 @@ pub(super) fn validate_v10_result_digests(run: &ProjectSimulationRun) -> Result<
                 run.id
             )
         })?;
-    let computed = run.clone().into_run()?.legacy_v3_dataset_content_digest();
+    let computed = run
+        .clone()
+        .into_run()?
+        .dataset_content_digest_with_encoding(ResultDigestEncoding::V3);
     if retained != computed {
         return Err(format!(
             "schema-v10 simulation run {} dataset content digest does not match retained content",
@@ -213,7 +225,8 @@ pub(super) fn validate_v11_result_digests(run: &ProjectSimulationRun) -> Result<
         let computed = analysis
             .clone()
             .into_analysis()?
-            .legacy_v4_result_data_digest();
+            .result_data_ref()
+            .digest(ResultDigestEncoding::V4);
         if retained != computed {
             return Err(format!(
                 "schema-v11 analysis {} result data digest does not match retained content",
@@ -232,7 +245,10 @@ pub(super) fn validate_v11_result_digests(run: &ProjectSimulationRun) -> Result<
                 run.id
             )
         })?;
-    let computed = run.clone().into_run()?.legacy_v4_dataset_content_digest();
+    let computed = run
+        .clone()
+        .into_run()?
+        .dataset_content_digest_with_encoding(ResultDigestEncoding::V4);
     if retained != computed {
         return Err(format!(
             "schema-v11 simulation run {} dataset content digest does not match retained content",
@@ -260,7 +276,8 @@ pub(super) fn validate_v12_result_digests(run: &ProjectSimulationRun) -> Result<
         let computed = analysis
             .clone()
             .into_analysis()?
-            .legacy_v5_result_data_digest();
+            .result_data_ref()
+            .digest(ResultDigestEncoding::V5);
         if retained != computed {
             return Err(format!(
                 "schema-v12 analysis {} result data digest does not match retained content",
@@ -279,7 +296,10 @@ pub(super) fn validate_v12_result_digests(run: &ProjectSimulationRun) -> Result<
                 run.id
             )
         })?;
-    let computed = run.clone().into_run()?.legacy_v5_dataset_content_digest();
+    let computed = run
+        .clone()
+        .into_run()?
+        .dataset_content_digest_with_encoding(ResultDigestEncoding::V5);
     if retained != computed {
         return Err(format!(
             "schema-v12 simulation run {} dataset content digest does not match retained content",
@@ -314,7 +334,8 @@ pub(super) fn validate_v13_to_v15_result_digests(
         let computed = analysis
             .clone()
             .into_analysis()?
-            .legacy_v6_result_data_digest();
+            .result_data_ref()
+            .digest(ResultDigestEncoding::V6);
         if retained != computed {
             return Err(format!(
                 "schema-v{source_schema} analysis {} result data digest does not match retained content",
@@ -333,7 +354,10 @@ pub(super) fn validate_v13_to_v15_result_digests(
                 run.id
             )
         })?;
-    let computed = run.clone().into_run()?.legacy_v6_dataset_content_digest();
+    let computed = run
+        .clone()
+        .into_run()?
+        .dataset_content_digest_with_encoding(ResultDigestEncoding::V6);
     if retained != computed {
         return Err(format!(
             "schema-v{source_schema} simulation run {} dataset content digest does not match retained content",
@@ -360,7 +384,8 @@ pub(super) fn validate_v16_result_digests(run: &ProjectSimulationRun) -> Result<
         let computed = analysis
             .clone()
             .into_analysis()?
-            .legacy_v7_result_data_digest();
+            .result_data_ref()
+            .digest(ResultDigestEncoding::V7);
         if retained != computed {
             return Err(format!(
                 "schema-v16 analysis {} result data digest does not match retained content",
@@ -379,7 +404,10 @@ pub(super) fn validate_v16_result_digests(run: &ProjectSimulationRun) -> Result<
                 run.id
             )
         })?;
-    let computed = run.clone().into_run()?.legacy_v7_dataset_content_digest();
+    let computed = run
+        .clone()
+        .into_run()?
+        .dataset_content_digest_with_encoding(ResultDigestEncoding::V7);
     if retained != computed {
         return Err(format!(
             "schema-v16 simulation run {} dataset content digest does not match retained content",
@@ -407,7 +435,8 @@ pub(super) fn validate_v17_result_digests(run: &ProjectSimulationRun) -> Result<
         let computed = analysis
             .clone()
             .into_analysis()?
-            .legacy_v8_result_data_digest();
+            .result_data_ref()
+            .digest(ResultDigestEncoding::V8);
         if retained != computed {
             return Err(format!(
                 "schema-v17 analysis {} result data digest does not match retained content",
@@ -426,7 +455,10 @@ pub(super) fn validate_v17_result_digests(run: &ProjectSimulationRun) -> Result<
                 run.id
             )
         })?;
-    let computed = run.clone().into_run()?.legacy_v8_dataset_content_digest();
+    let computed = run
+        .clone()
+        .into_run()?
+        .dataset_content_digest_with_encoding(ResultDigestEncoding::V8);
     if retained != computed {
         return Err(format!(
             "schema-v17 simulation run {} dataset content digest does not match retained content",
@@ -453,7 +485,8 @@ pub(super) fn validate_v18_result_digests(run: &ProjectSimulationRun) -> Result<
         let computed = analysis
             .clone()
             .into_analysis()?
-            .legacy_v9_result_data_digest();
+            .result_data_ref()
+            .digest(ResultDigestEncoding::V9);
         if retained != computed {
             return Err(format!(
                 "schema-v18 analysis {} result data digest does not match retained content",
@@ -472,7 +505,10 @@ pub(super) fn validate_v18_result_digests(run: &ProjectSimulationRun) -> Result<
                 run.id
             )
         })?;
-    let computed = run.clone().into_run()?.legacy_v9_dataset_content_digest();
+    let computed = run
+        .clone()
+        .into_run()?
+        .dataset_content_digest_with_encoding(ResultDigestEncoding::V9);
     if retained != computed {
         return Err(format!(
             "schema-v18 simulation run {} dataset content digest does not match retained content",
@@ -488,8 +524,8 @@ pub(super) fn validate_v19_result_digests(run: &ProjectSimulationRun) -> Result<
     validate_versioned_result_digests(
         run,
         19,
-        AnalysisResult::legacy_v10_result_data_digest,
-        SimulationRun::legacy_v10_dataset_content_digest,
+        |analysis| analysis.result_data_ref().digest(ResultDigestEncoding::V10),
+        |run| run.dataset_content_digest_with_encoding(ResultDigestEncoding::V10),
     )
 }
 
@@ -497,8 +533,8 @@ pub(super) fn validate_v20_result_digests(run: &ProjectSimulationRun) -> Result<
     validate_versioned_result_digests(
         run,
         20,
-        AnalysisResult::legacy_v11_result_data_digest,
-        SimulationRun::legacy_v11_dataset_content_digest,
+        |analysis| analysis.result_data_ref().digest(ResultDigestEncoding::V11),
+        |run| run.dataset_content_digest_with_encoding(ResultDigestEncoding::V11),
     )
 }
 
@@ -509,8 +545,8 @@ pub(super) fn validate_v21_to_v23_result_digests(
     validate_versioned_result_digests(
         run,
         schema,
-        AnalysisResult::legacy_v12_result_data_digest,
-        SimulationRun::legacy_v12_dataset_content_digest,
+        |analysis| analysis.result_data_ref().digest(ResultDigestEncoding::V12),
+        |run| run.dataset_content_digest_with_encoding(ResultDigestEncoding::V12),
     )
 }
 
@@ -518,8 +554,8 @@ pub(super) fn validate_v24_result_digests(run: &ProjectSimulationRun) -> Result<
     validate_versioned_result_digests(
         run,
         24,
-        AnalysisResult::legacy_v13_result_data_digest,
-        SimulationRun::legacy_v13_dataset_content_digest,
+        |analysis| analysis.result_data_ref().digest(ResultDigestEncoding::V13),
+        |run| run.dataset_content_digest_with_encoding(ResultDigestEncoding::V13),
     )
 }
 
@@ -527,8 +563,8 @@ pub(super) fn validate_v25_result_digests(run: &ProjectSimulationRun) -> Result<
     validate_versioned_result_digests(
         run,
         25,
-        AnalysisResult::legacy_v14_result_data_digest,
-        SimulationRun::legacy_v14_dataset_content_digest,
+        |analysis| analysis.result_data_ref().digest(ResultDigestEncoding::V14),
+        |run| run.dataset_content_digest_with_encoding(ResultDigestEncoding::V14),
     )
 }
 
@@ -536,8 +572,8 @@ pub(super) fn validate_v26_result_digests(run: &ProjectSimulationRun) -> Result<
     validate_versioned_result_digests(
         run,
         26,
-        AnalysisResult::legacy_v15_result_data_digest,
-        SimulationRun::legacy_v15_dataset_content_digest,
+        |analysis| analysis.result_data_ref().digest(ResultDigestEncoding::V15),
+        |run| run.dataset_content_digest_with_encoding(ResultDigestEncoding::V15),
     )
 }
 

@@ -697,10 +697,10 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
     simulation.next_run_id = 2;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
-    let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+    let saved = crate::io::capture_simulation_results(&simulation);
     let decoded: crate::io::project_io::ProjectSimulationResults =
         serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
-    let reloaded = decoded.into_simulation_state().unwrap();
+    let reloaded = crate::io::simulation_state_from_results(decoded).unwrap();
     assert_eq!(
         reloaded.runs[0].analyses[0].result_payload,
         retained.result_payload
@@ -792,10 +792,10 @@ fn soa_temperature_limits_survive_studio_worker_execution_and_saved_results() {
     simulation.next_run_id = 2;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
-    let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+    let saved = crate::io::capture_simulation_results(&simulation);
     let decoded: crate::io::project_io::ProjectSimulationResults =
         serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
-    let reloaded = decoded.into_simulation_state().unwrap();
+    let reloaded = crate::io::simulation_state_from_results(decoded).unwrap();
     assert_eq!(
         reloaded.runs[0].analyses[0].result_payload,
         retained.result_payload
@@ -954,11 +954,15 @@ fn soa_body_and_backgate_limits_follow_model_pins_through_studio_and_saved_resul
         simulation.next_run_id = 2;
         simulation.active_run_idx = Some(0);
         simulation.active_analysis_idx = Some(0);
-        let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+        let saved = crate::io::capture_simulation_results(&simulation);
         let decoded: crate::io::project_io::ProjectSimulationResults =
             serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
         assert_eq!(
-            decoded.into_simulation_state().unwrap().runs[0].analyses[0].result_payload,
+            crate::io::simulation_state_from_results(decoded)
+                .unwrap()
+                .runs[0]
+                .analyses[0]
+                .result_payload,
             retained.result_payload
         );
     }
@@ -1130,11 +1134,15 @@ fn soa_diode_and_bjt_substrate_limits_survive_studio_worker_and_saved_results() 
     simulation.next_run_id = 2;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
-    let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+    let saved = crate::io::capture_simulation_results(&simulation);
     let decoded: crate::io::project_io::ProjectSimulationResults =
         serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
     assert_eq!(
-        decoded.into_simulation_state().unwrap().runs[0].analyses[0].result_payload,
+        crate::io::simulation_state_from_results(decoded)
+            .unwrap()
+            .runs[0]
+            .analyses[0]
+            .result_payload,
         retained.result_payload
     );
 }
@@ -1285,11 +1293,15 @@ fn soa_intrinsic_voltage_rules_survive_studio_worker_and_saved_results() {
     simulation.next_run_id = 2;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
-    let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+    let saved = crate::io::capture_simulation_results(&simulation);
     let decoded: crate::io::project_io::ProjectSimulationResults =
         serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
     assert_eq!(
-        decoded.into_simulation_state().unwrap().runs[0].analyses[0].result_payload,
+        crate::io::simulation_state_from_results(decoded)
+            .unwrap()
+            .runs[0]
+            .analyses[0]
+            .result_payload,
         retained.result_payload
     );
 }
@@ -1454,11 +1466,15 @@ fn soa_model_voltage_ratings_survive_studio_worker_and_saved_results() {
     simulation.next_run_id = 2;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
-    let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+    let saved = crate::io::capture_simulation_results(&simulation);
     let decoded: crate::io::project_io::ProjectSimulationResults =
         serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
     assert_eq!(
-        decoded.into_simulation_state().unwrap().runs[0].analyses[0].result_payload,
+        crate::io::simulation_state_from_results(decoded)
+            .unwrap()
+            .runs[0]
+            .analyses[0]
+            .result_payload,
         retained.result_payload
     );
 }
@@ -1594,11 +1610,15 @@ fn soa_derating_survives_studio_worker_thermal_transient_and_saved_results() {
     simulation.next_run_id = 2;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
-    let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+    let saved = crate::io::capture_simulation_results(&simulation);
     let decoded: crate::io::project_io::ProjectSimulationResults =
         serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
     assert_eq!(
-        decoded.into_simulation_state().unwrap().runs[0].analyses[0].result_payload,
+        crate::io::simulation_state_from_results(decoded)
+            .unwrap()
+            .runs[0]
+            .analyses[0]
+            .result_payload,
         retained.result_payload
     );
 }
@@ -1708,11 +1728,15 @@ fn soa_vbic_model_ratings_survive_studio_worker_and_saved_results() {
     simulation.next_run_id = 2;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
-    let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+    let saved = crate::io::capture_simulation_results(&simulation);
     let decoded: crate::io::project_io::ProjectSimulationResults =
         serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
     assert_eq!(
-        decoded.into_simulation_state().unwrap().runs[0].analyses[0].result_payload,
+        crate::io::simulation_state_from_results(decoded)
+            .unwrap()
+            .runs[0]
+            .analyses[0]
+            .result_payload,
         retained.result_payload
     );
 }
@@ -1832,11 +1856,15 @@ fn soa_thresholds_survive_studio_worker_execution_and_saved_results() {
         simulation.next_run_id = 2;
         simulation.active_run_idx = Some(0);
         simulation.active_analysis_idx = Some(0);
-        let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+        let saved = crate::io::capture_simulation_results(&simulation);
         let decoded: crate::io::project_io::ProjectSimulationResults =
             serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
         assert_eq!(
-            decoded.into_simulation_state().unwrap().runs[0].analyses[0].result_payload,
+            crate::io::simulation_state_from_results(decoded)
+                .unwrap()
+                .runs[0]
+                .analyses[0]
+                .result_payload,
             retained.result_payload
         );
     }
@@ -2039,11 +2067,15 @@ fn check_soa_duration_round_trip(
     simulation.next_run_id = 2;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
-    let saved = crate::io::project_io::ProjectSimulationResults::from_state(&simulation);
+    let saved = crate::io::capture_simulation_results(&simulation);
     let decoded: crate::io::project_io::ProjectSimulationResults =
         serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
     assert_eq!(
-        decoded.into_simulation_state().unwrap().runs[0].analyses[0].result_payload,
+        crate::io::simulation_state_from_results(decoded)
+            .unwrap()
+            .runs[0]
+            .analyses[0]
+            .result_payload,
         retained.result_payload
     );
 }

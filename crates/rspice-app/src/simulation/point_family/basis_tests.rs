@@ -171,7 +171,7 @@ fn pvt_family_uses_the_solved_basis_before_authored_aliases_filter_point_outputs
             let mut state = SimulationState::default();
             state.next_run_id = run.id;
             state.runs = vec![run].into();
-            let stored = crate::io::project_io::ProjectSimulationResults::from_state(&state);
+            let stored = crate::io::capture_simulation_results(&state);
             stored.validate().unwrap();
             let json = serde_json::to_vec(&stored).unwrap();
             let restored: crate::io::project_io::ProjectSimulationResults =
@@ -315,12 +315,12 @@ fn assert_basis_failure(temperatures: [f64; 2]) {
             let mut state = SimulationState::default();
             state.next_run_id = run.id;
             state.runs = vec![run].into();
-            let persisted = crate::io::project_io::ProjectSimulationResults::from_state(&state);
+            let persisted = crate::io::capture_simulation_results(&state);
             persisted
                 .validate()
                 .expect("valid individual points remain saveable");
             let mut restored = SimulationState::default();
-            persisted.apply_to_state(&mut restored).unwrap();
+            crate::io::restore_simulation_results(persisted, &mut restored).unwrap();
             let restored = &restored.runs[0];
             assert_eq!(restored.analyses.len(), 3);
             assert!(restored.analyses[..2].iter().all(|point| point.success));

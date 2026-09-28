@@ -23,7 +23,7 @@ pub(super) fn complex_history() -> SimulationState {
 fn waveform_storage_is_shared_by_capture_clone_and_restore() {
     let state = complex_history();
     let source = &state.runs[0].analyses[0].waveforms[0];
-    let snapshot = ProjectSimulationResults::from_state(&state);
+    let snapshot = crate::io::capture_simulation_results(&state);
     let captured = &snapshot.runs[0].analyses[0].waveforms[0];
     assert_eq!(
         source.x.as_ptr(),
@@ -51,7 +51,7 @@ fn waveform_storage_is_shared_by_capture_clone_and_restore() {
         copied.complex.as_ref().unwrap().imag.as_ptr(),
         captured_complex.imag.as_ptr()
     );
-    let restored = candidate.into_simulation_state().unwrap();
+    let restored = crate::io::simulation_state_from_results(candidate).unwrap();
     let restored = &restored.runs[0].analyses[0].waveforms[0];
     assert_eq!(restored.x.as_ptr(), source.x.as_ptr());
     assert_eq!(restored.y.as_ptr(), source.y.as_ptr());
@@ -68,7 +68,7 @@ fn waveform_storage_is_shared_by_capture_clone_and_restore() {
 #[test]
 fn waveform_storage_detaches_edits_without_changing_accepted_samples_or_wire_format() {
     let mut state = complex_history();
-    let accepted = ProjectSimulationResults::from_state(&state);
+    let accepted = crate::io::capture_simulation_results(&state);
     let frozen = serde_json::to_vec(&accepted).unwrap();
     let mut candidate = accepted.clone();
     assert_eq!(
@@ -103,7 +103,7 @@ fn waveform_storage_detaches_edits_without_changing_accepted_samples_or_wire_for
         candidate.validate().is_err(),
         "editing samples must invalidate their sealed digest"
     );
-    let current = ProjectSimulationResults::from_state(&state);
+    let current = crate::io::capture_simulation_results(&state);
     current.validate().unwrap();
     assert_ne!(serde_json::to_vec(&current).unwrap(), frozen);
     accepted.validate().unwrap();

@@ -1234,7 +1234,7 @@ mod tests {
     #[test]
     fn retained_view_source_artifact_tracks_restoration_errors_and_repair() {
         use super::super::ResultArtifactPresentationKey;
-        use crate::io::project_io::ProjectSimulationResults;
+
         use crate::state::{SimulationRunLifecycle, SimulationRunProvenance};
 
         let mut state = AppState::default();
@@ -1276,9 +1276,10 @@ mod tests {
                     ("peak".to_owned(), 42.0),
                 ]),
             });
-        state.simulation = ProjectSimulationResults::from_state(&replacement)
-            .into_simulation_state()
-            .unwrap();
+        state.simulation = crate::io::simulation_state_from_results(
+            crate::io::capture_simulation_results(&replacement),
+        )
+        .unwrap();
         let restored = artifact_text(&mut state, &key).unwrap();
         assert_eq!(
             restored.text,

@@ -1,7 +1,7 @@
 //! Restored history and nested source edits cannot reuse older plot evidence.
 
 use super::*;
-use crate::io::project_io::ProjectSimulationResults;
+
 use crate::workbench::documents::result_document::frame_work::WorkCounts;
 
 fn restored_spectrum(value: f64, samples: usize) -> SimulationState {
@@ -23,8 +23,7 @@ fn restored_spectrum(value: f64, samples: usize) -> SimulationState {
     run.finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
         .unwrap();
     simulation.complete_run();
-    ProjectSimulationResults::from_state(&simulation)
-        .into_simulation_state()
+    crate::io::simulation_state_from_results(crate::io::capture_simulation_results(&simulation))
         .unwrap()
 }
 

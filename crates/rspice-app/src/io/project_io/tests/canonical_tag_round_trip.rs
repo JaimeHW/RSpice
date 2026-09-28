@@ -96,7 +96,7 @@ fn sealed_rf_results(retained: usize) -> ProjectSimulationResults {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 77;
-    ProjectSimulationResults::from_state(&simulation)
+    crate::io::capture_simulation_results(&simulation)
 }
 
 #[test]
@@ -110,8 +110,7 @@ fn a_run_using_the_whole_tag_protocol_survives_write_validate_and_restore() {
         .expect("a run using tags above the retired cap must still validate");
 
     let mut restored = SimulationState::default();
-    decoded
-        .apply_to_state(&mut restored)
+    crate::io::restore_simulation_results(decoded, &mut restored)
         .expect("the written run restores into a session");
 
     let run = restored.runs.first().expect("one restored run");

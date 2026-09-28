@@ -93,7 +93,7 @@ fn round_trip(written: &ProjectSimulationResults) -> ProjectSimulationResults {
 
 #[test]
 fn a_runs_executed_decks_round_trip_and_stay_shared_between_its_points() {
-    let written = ProjectSimulationResults::from_state(&swept_state());
+    let written = crate::io::capture_simulation_results(&swept_state());
     assert_eq!(
         written.executed_decks.sources.len(),
         2,
@@ -102,8 +102,7 @@ fn a_runs_executed_decks_round_trip_and_stay_shared_between_its_points() {
 
     let decoded = round_trip(&written);
     let mut reloaded = SimulationState::default();
-    decoded
-        .apply_to_state(&mut reloaded)
+    crate::io::restore_simulation_results(decoded, &mut reloaded)
         .expect("the persisted results restore");
 
     let record = reloaded
@@ -145,7 +144,7 @@ fn a_runs_executed_decks_round_trip_and_stay_shared_between_its_points() {
 /// field, which is a different question.
 #[test]
 fn a_project_stating_no_executed_decks_loads_with_none() {
-    let written = ProjectSimulationResults::from_state(&swept_state());
+    let written = crate::io::capture_simulation_results(&swept_state());
     let mut document: serde_json::Value =
         serde_json::to_value(&written).expect("results serialize");
     let object = document
@@ -181,7 +180,7 @@ fn a_run_the_history_no_longer_holds_writes_no_deck() {
         points: vec![point("TT 27C", &orphan)],
     });
 
-    let written = ProjectSimulationResults::from_state(&simulation);
+    let written = crate::io::capture_simulation_results(&simulation);
     assert_eq!(
         written
             .executed_decks
@@ -201,7 +200,7 @@ fn a_run_the_history_no_longer_holds_writes_no_deck() {
 
 #[test]
 fn a_persisted_deck_naming_no_retained_run_is_refused() {
-    let mut written = ProjectSimulationResults::from_state(&swept_state());
+    let mut written = crate::io::capture_simulation_results(&swept_state());
     written.executed_decks.runs[0].run_id = 8;
 
     let error = written
@@ -212,7 +211,7 @@ fn a_persisted_deck_naming_no_retained_run_is_refused() {
 
 #[test]
 fn a_deck_source_no_retained_point_references_is_refused() {
-    let mut written = ProjectSimulationResults::from_state(&swept_state());
+    let mut written = crate::io::capture_simulation_results(&swept_state());
     written
         .executed_decks
         .sources
@@ -226,7 +225,7 @@ fn a_deck_source_no_retained_point_references_is_refused() {
 
 #[test]
 fn a_point_referencing_a_source_the_file_does_not_carry_is_refused() {
-    let mut written = ProjectSimulationResults::from_state(&swept_state());
+    let mut written = crate::io::capture_simulation_results(&swept_state());
     written.executed_decks.runs[0].points[0].source = 9;
 
     let error = written
@@ -242,7 +241,7 @@ fn more_retained_decks_than_a_session_could_hold_fails_closed_on_load() {
         .map(|sequence| sealed_run(sequence, 0x10 * sequence as u8))
         .collect();
     simulation.next_run_id = 5;
-    let mut written = ProjectSimulationResults::from_state(&simulation);
+    let mut written = crate::io::capture_simulation_results(&simulation);
     // Written by hand rather than by the archive, which would have evicted
     // the oldest before a fifth could be retained. This is the shape of the
     // file a tamperer produces, not one a session can.
@@ -263,8 +262,7 @@ fn more_retained_decks_than_a_session_could_hold_fails_closed_on_load() {
         .expect("every deck is internally well formed");
 
     let mut reloaded = SimulationState::default();
-    let error = written
-        .apply_to_state(&mut reloaded)
+    let error = crate::io::restore_simulation_results(written, &mut reloaded)
         .expect_err("a file over the archive's ceiling was not written by a session");
     assert!(error.contains("exceed the archive limit of 4"), "{error}");
     assert!(
@@ -275,8 +273,8 @@ fn more_retained_decks_than_a_session_could_hold_fails_closed_on_load() {
 
 #[test]
 fn executed_decks_on_a_file_claiming_an_older_schema_are_refused() {
-    let mut written = ProjectSimulationResults::from_state(&swept_state());
-    written.schema_version = GOVERNED_SPECIFICATION_RESULTS_SCHEMA_VERSION;
+    let mut written = crate::io::capture_simulation_results(&swept_state());
+    written.schema_version = 14;
 
     let error = written
         .migrate_to_current(ProjectId::new())

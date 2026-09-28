@@ -3,13 +3,13 @@
 use super::*;
 
 fn validation_passes() -> usize {
-    super::super::results::RESULT_VALIDATIONS.with(std::cell::Cell::get)
+    rspice_project::results::RESULT_VALIDATIONS.with(std::cell::Cell::get)
 }
 
 #[test]
 fn result_snapshot_clones_share_complete_history_records() {
     let state = super::waveform_storage::complex_history();
-    let snapshot = ProjectSimulationResults::from_state(&state);
+    let snapshot = crate::io::capture_simulation_results(&state);
     let candidate = snapshot.clone();
     assert_eq!(
         snapshot.runs.as_ptr(),
@@ -36,7 +36,7 @@ fn immutable_result_validation_is_shared_and_mutation_invalidates_both_verdicts(
             vec![1.0; samples],
             "#ffffff",
         )];
-        let accepted = ProjectSimulationResults::from_state(&state);
+        let accepted = crate::io::capture_simulation_results(&state);
         let mut candidate = accepted.clone();
         let frozen = serde_json::to_vec(&accepted).unwrap();
         let before = validation_passes();

@@ -17,8 +17,8 @@ fn schema_v5_migrates_to_explicit_legacy_execution_state() {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 14;
-    let mut persisted = ProjectSimulationResults::from_state(&simulation);
-    persisted.schema_version = SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION;
+    let mut persisted = crate::io::capture_simulation_results(&simulation);
+    persisted.schema_version = 5;
     clear_v6_execution_fields(&mut persisted);
 
     persisted
@@ -26,10 +26,7 @@ fn schema_v5_migrates_to_explicit_legacy_execution_state() {
         .expect("schema v5 migrates without inventing execution evidence");
     persisted.validate().expect("migrated schema validates");
 
-    assert_eq!(
-        persisted.schema_version,
-        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
-    );
+    assert_eq!(persisted.schema_version, 40);
     let migrated = &persisted.runs[0];
     assert_eq!(
         migrated.lifecycle,
@@ -54,8 +51,8 @@ fn persisted_measurement_at_schema_v17() -> ProjectSimulationResults {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 18;
-    let mut persisted = ProjectSimulationResults::from_state(&simulation);
-    persisted.schema_version = PERIODIC_STABILITY_RESULTS_SCHEMA_VERSION;
+    let mut persisted = crate::io::capture_simulation_results(&simulation);
+    persisted.schema_version = 17;
     let measurement = &mut persisted.runs[0].analyses[0].measurements[0];
     measurement.raw_value = None;
     measurement.failure_limit = None;
@@ -77,10 +74,7 @@ fn schema_v17_is_authenticated_then_restores_measurement_verification_defaults()
         .migrate_to_current(ProjectId::new())
         .expect("authentic schema-v17 measurement history migrates");
 
-    assert_eq!(
-        persisted.schema_version,
-        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
-    );
+    assert_eq!(persisted.schema_version, 40);
     let measurement = &persisted.runs[0].analyses[0].measurements[0];
     assert_eq!(measurement.raw_value, measurement.value);
     assert_eq!(measurement.failure_limit, None);
@@ -220,7 +214,7 @@ fn current_projected_failvalue_results() -> ProjectSimulationResults {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 19;
-    ProjectSimulationResults::from_state(&simulation)
+    crate::io::capture_simulation_results(&simulation)
 }
 
 #[test]
@@ -230,8 +224,7 @@ fn current_project_results_preserve_projected_failvalue_evidence_without_synthes
         .validate()
         .expect("distinct projected and raw values are valid current evidence");
 
-    let restored = persisted
-        .into_simulation_state()
+    let restored = crate::io::simulation_state_from_results(persisted)
         .expect("current result restores after validation");
     let measurement = &restored.runs[0].analyses[0].measurements[0];
     assert_eq!(measurement.value, Some(20.0));
@@ -254,8 +247,7 @@ fn current_project_results_preserve_unevaluated_failvalue_metadata_without_raw_s
     persisted
         .validate()
         .expect("an early failure retains the authored limit without raw evidence");
-    let restored = persisted
-        .into_simulation_state()
+    let restored = crate::io::simulation_state_from_results(persisted)
         .expect("unevaluated FAILVALUE metadata restores");
     let measurement = &restored.runs[0].analyses[0].measurements[0];
     assert_eq!(measurement.value, None);
@@ -333,12 +325,17 @@ fn persisted_at_schema_v12(run: &SimulationRun) -> ProjectSimulationResults {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run.clone()].into();
     simulation.next_run_id = run.id;
-    let mut persisted = ProjectSimulationResults::from_state(&simulation);
-    persisted.schema_version = OPERATING_POINT_RESULTS_SCHEMA_VERSION;
-    persisted.runs[0].analyses[0].result_data_digest =
-        PersistedField::Value(run.analyses[0].legacy_v5_result_data_digest());
+    let mut persisted = crate::io::capture_simulation_results(&simulation);
+    persisted.schema_version = 12;
+    persisted.runs[0].analyses[0].result_data_digest = PersistedField::Value(
+        run.analyses[0]
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V5),
+    );
     persisted.runs[0].dataset_content_digest =
-        PersistedField::Value(run.legacy_v5_dataset_content_digest());
+        PersistedField::Value(run.dataset_content_digest_with_encoding(
+            rspice_results::result_digest::ResultDigestEncoding::V5,
+        ));
     persisted
 }
 
@@ -351,10 +348,7 @@ fn schema_v12_is_authenticated_with_its_unit_free_encoding_then_resealed() {
         .migrate_to_current(ProjectId::new())
         .expect("an authentic schema-v12 result history migrates");
 
-    assert_eq!(
-        persisted.schema_version,
-        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
-    );
+    assert_eq!(persisted.schema_version, 40);
     let migrated = persisted.runs[0]
         .clone()
         .into_run()
@@ -365,12 +359,20 @@ fn schema_v12_is_authenticated_with_its_unit_free_encoding_then_resealed() {
     );
     assert_eq!(
         persisted.runs[0].analyses[0].result_data_digest.as_ref(),
-        Some(&migrated.analyses[0].result_data_digest()),
+        Some(
+            &migrated.analyses[0]
+                .result_data_ref()
+                .digest(rspice_results::result_digest::ResultDigestEncoding::CURRENT)
+        ),
         "migrated results are resealed in the current digest domain"
     );
     assert_ne!(
-        migrated.analyses[0].result_data_digest(),
-        run.analyses[0].legacy_v5_result_data_digest()
+        migrated.analyses[0]
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::CURRENT),
+        run.analyses[0]
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V5)
     );
 }
 
@@ -412,13 +414,9 @@ fn a_retained_waveform_unit_survives_the_current_schema_round_trip() {
     simulation.runs = vec![run].into();
     simulation.next_run_id = 34;
 
-    let persisted = ProjectSimulationResults::from_state(&simulation);
-    assert_eq!(
-        persisted.schema_version,
-        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
-    );
-    let restored = persisted
-        .into_simulation_state()
+    let persisted = crate::io::capture_simulation_results(&simulation);
+    assert_eq!(persisted.schema_version, 40);
+    let restored = crate::io::simulation_state_from_results(persisted)
         .expect("current result history restores");
 
     assert_eq!(
@@ -450,8 +448,8 @@ fn persisted_pole_zero_at_schema_v15() -> ProjectSimulationResults {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 35;
-    let mut persisted = ProjectSimulationResults::from_state(&simulation);
-    persisted.schema_version = EXECUTED_DECK_RESULTS_SCHEMA_VERSION;
+    let mut persisted = crate::io::capture_simulation_results(&simulation);
+    persisted.schema_version = 15;
     downgrade_result_digests_to_v6(&mut persisted);
     persisted
 }
@@ -537,8 +535,8 @@ fn persisted_periodic_at_schema_v16(analysis_type: AnalysisType) -> ProjectSimul
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 351;
-    let mut persisted = ProjectSimulationResults::from_state(&simulation);
-    persisted.schema_version = POLE_ZERO_EVIDENCE_RESULTS_SCHEMA_VERSION;
+    let mut persisted = crate::io::capture_simulation_results(&simulation);
+    persisted.schema_version = 16;
     downgrade_result_digests_to_v7(&mut persisted);
     persisted
 }
@@ -551,10 +549,7 @@ fn schema_v16_periodic_results_migrate_to_explicit_unknown_without_inference() {
         persisted
             .migrate_to_current(ProjectId::new())
             .expect("authentic zero-waveform schema-v16 periodic result migrates");
-        assert_eq!(
-            persisted.schema_version,
-            PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
-        );
+        assert_eq!(persisted.schema_version, 40);
         let payload = persisted.runs[0].analyses[0]
             .result_payload
             .as_ref()
@@ -608,7 +603,7 @@ fn schema_v16_cannot_inject_periodic_evidence_or_overwrite_an_existing_payload()
 fn current_schema_rejects_successful_periodic_results_without_the_typed_payload() {
     for analysis_type in [AnalysisType::Pss, AnalysisType::Pstb] {
         let mut current = persisted_periodic_at_schema_v16(analysis_type);
-        current.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+        current.schema_version = 40;
         let error = current
             .validate()
             .expect_err("current periodic success cannot omit its typed evidence");
@@ -647,8 +642,8 @@ fn schema_v13_migrates_prepared_receipts_to_an_explicit_default_specification_po
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 35;
-    let mut persisted = ProjectSimulationResults::from_state(&simulation);
-    persisted.schema_version = WAVEFORM_UNIT_RESULTS_SCHEMA_VERSION;
+    let mut persisted = crate::io::capture_simulation_results(&simulation);
+    persisted.schema_version = 13;
     downgrade_result_digests_to_v6(&mut persisted);
     let PersistedField::Value(receipt) = &mut persisted.runs[0].prepared_receipt else {
         panic!("prepared fixture has a receipt");
@@ -659,10 +654,7 @@ fn schema_v13_migrates_prepared_receipts_to_an_explicit_default_specification_po
         .migrate_to_current(ProjectId::new())
         .expect("an authentic schema-v13 prepared receipt migrates");
 
-    assert_eq!(
-        persisted.schema_version,
-        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
-    );
+    assert_eq!(persisted.schema_version, 40);
     let PersistedField::Value(receipt) = &persisted.runs[0].prepared_receipt else {
         panic!("migrated prepared receipt remains present");
     };
@@ -699,8 +691,8 @@ fn schema_v13_rejects_governed_specification_fields_from_a_later_schema() {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 36;
-    let mut smuggled = ProjectSimulationResults::from_state(&simulation);
-    smuggled.schema_version = WAVEFORM_UNIT_RESULTS_SCHEMA_VERSION;
+    let mut smuggled = crate::io::capture_simulation_results(&simulation);
+    smuggled.schema_version = 13;
 
     let error = smuggled
         .migrate_to_current(ProjectId::new())
@@ -718,7 +710,7 @@ fn current_schema_requires_coherent_lifecycle_and_execution_identity() {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 15;
-    let current = ProjectSimulationResults::from_state(&simulation);
+    let current = crate::io::capture_simulation_results(&simulation);
     current
         .validate()
         .expect("current preparing snapshot is explicit");
@@ -775,13 +767,12 @@ fn persisted_running_and_cancelling_runs_restore_as_interrupted() {
         simulation.runs = vec![run].into();
         simulation.next_run_id = sequence;
 
-        let persisted = ProjectSimulationResults::from_state(&simulation);
+        let persisted = crate::io::capture_simulation_results(&simulation);
         assert!(!persisted.runs[0].success);
         persisted
             .validate()
             .expect("nonterminal snapshot validates");
-        let restored = persisted
-            .into_simulation_state()
+        let restored = crate::io::simulation_state_from_results(persisted)
             .expect("nonterminal snapshot restores fail-closed");
         let restored = &restored.runs[0];
 
@@ -824,12 +815,11 @@ fn prepared_result_provenance_round_trips_two_same_kind_analyses_exactly() {
     simulation.runs = vec![run].into();
     simulation.next_run_id = 21;
 
-    let persisted = ProjectSimulationResults::from_state(&simulation);
+    let persisted = crate::io::capture_simulation_results(&simulation);
     let json = serde_json::to_string(&persisted).expect("results serialize");
     let decoded: ProjectSimulationResults =
         serde_json::from_str(&json).expect("results deserialize");
-    let restored = decoded
-        .into_simulation_state()
+    let restored = crate::io::simulation_state_from_results(decoded)
         .expect("provenance validates and restores");
     let restored_run = &restored.runs[0];
 
@@ -888,15 +878,13 @@ fn manual_deck_result_provenance_round_trips_without_a_simulation_plan() {
     let project = ProjectFile::new_with_simulation_results(
         workspace,
         libraries,
-        ProjectSimulationResults::from_state(&simulation),
+        crate::io::capture_simulation_results(&simulation),
     );
 
     let json = serialize_project_file(&project)
         .expect("manual-deck result does not require a simulation-plan owner");
     let loaded = load_project_text(&json, None).expect("manual-deck project reloads");
-    let restored = loaded
-        .simulation_results
-        .into_simulation_state()
+    let restored = crate::io::simulation_state_from_results(loaded.simulation_results)
         .expect("manual-deck result history restores");
     let provenance = restored.runs[0].analyses[0]
         .provenance
@@ -938,8 +926,8 @@ fn schema_v4_provenance_migrates_without_guessing_its_source_domain() {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 30;
-    let mut persisted = ProjectSimulationResults::from_state(&simulation);
-    persisted.schema_version = EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION;
+    let mut persisted = crate::io::capture_simulation_results(&simulation);
+    persisted.schema_version = 4;
     clear_v6_execution_fields(&mut persisted);
     persisted.runs[0].prepared_receipt = PersistedField::Missing;
     for provenance in persisted.runs[0]
@@ -1000,8 +988,8 @@ fn legacy_result_schema_truth_cannot_be_repaired_or_downgraded() {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 33;
-    let mut v4 = ProjectSimulationResults::from_state(&simulation);
-    v4.schema_version = EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION;
+    let mut v4 = crate::io::capture_simulation_results(&simulation);
+    v4.schema_version = 4;
     clear_v6_execution_fields(&mut v4);
     v4.runs[0].prepared_receipt = PersistedField::Missing;
     v4.runs[0].provenance_mode = PersistedField::Value(ProjectRunProvenanceMode::PreparedTaskBound);
@@ -1040,7 +1028,7 @@ fn legacy_result_schema_truth_cannot_be_repaired_or_downgraded() {
     );
 
     let mut downgraded = v4.clone();
-    downgraded.schema_version = PREPARED_PROVENANCE_RESULTS_SCHEMA_VERSION;
+    downgraded.schema_version = 3;
     downgraded.runs[0].provenance_mode = PersistedField::Missing;
     downgraded.runs[0].analyses[0]
         .provenance
@@ -1054,10 +1042,7 @@ fn legacy_result_schema_truth_cannot_be_repaired_or_downgraded() {
             .contains("introduced after schema v3")
     );
 
-    for schema_version in [
-        LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION,
-        STABLE_DATASET_RESULTS_SCHEMA_VERSION,
-    ] {
+    for schema_version in [1, 2] {
         let mut impossible = v4.clone();
         impossible.schema_version = schema_version;
         impossible.runs[0].provenance_mode = PersistedField::Missing;
@@ -1066,7 +1051,7 @@ fn legacy_result_schema_truth_cannot_be_repaired_or_downgraded() {
             .as_mut()
             .expect("provenance")
             .source_domain = PersistedField::Missing;
-        if schema_version == LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION {
+        if schema_version == 1 {
             impossible.runs[0].run_id = None;
             impossible.runs[0].dataset_id = None;
             impossible.active_run_stable_id = None;
@@ -1108,14 +1093,9 @@ fn legacy_result_schema_rejects_present_or_null_later_era_fields() {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 34;
-    let current = ProjectSimulationResults::from_state(&simulation);
+    let current = crate::io::capture_simulation_results(&simulation);
 
-    for schema_version in [
-        LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION,
-        STABLE_DATASET_RESULTS_SCHEMA_VERSION,
-        PREPARED_PROVENANCE_RESULTS_SCHEMA_VERSION,
-        EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION,
-    ] {
+    for schema_version in [1, 2, 3, 4] {
         let mut with_receipt = current.clone();
         with_receipt.schema_version = schema_version;
         clear_v6_execution_fields(&mut with_receipt);
@@ -1146,8 +1126,7 @@ fn legacy_result_schema_rejects_present_or_null_later_era_fields() {
 
     let mut null_v3_mode_json =
         serde_json::to_value(&current).expect("current result document serializes");
-    null_v3_mode_json["schema_version"] =
-        serde_json::json!(PREPARED_PROVENANCE_RESULTS_SCHEMA_VERSION);
+    null_v3_mode_json["schema_version"] = serde_json::json!(3);
     clear_v6_execution_fields_json(&mut null_v3_mode_json);
     null_v3_mode_json["runs"][0]["provenance_mode"] = serde_json::Value::Null;
     let mut null_v3_mode: ProjectSimulationResults =
@@ -1167,7 +1146,7 @@ fn legacy_result_schema_rejects_present_or_null_later_era_fields() {
     );
 
     let mut null_v4_mode = current.clone();
-    null_v4_mode.schema_version = EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION;
+    null_v4_mode.schema_version = 4;
     clear_v6_execution_fields(&mut null_v4_mode);
     null_v4_mode.runs[0].prepared_receipt = PersistedField::Missing;
     null_v4_mode.runs[0].provenance_mode = PersistedField::Null;
@@ -1185,8 +1164,7 @@ fn legacy_result_schema_rejects_present_or_null_later_era_fields() {
 
     let mut null_v4_source_json =
         serde_json::to_value(&current).expect("current result document serializes");
-    null_v4_source_json["schema_version"] =
-        serde_json::json!(EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION);
+    null_v4_source_json["schema_version"] = serde_json::json!(4);
     clear_v6_execution_fields_json(&mut null_v4_source_json);
     null_v4_source_json["runs"][0]["analyses"][0]["provenance"]["source_domain"] =
         serde_json::Value::Null;
@@ -1222,8 +1200,8 @@ fn failed_legacy_result_migration_is_transactional() {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 35;
-    let mut legacy = ProjectSimulationResults::from_state(&simulation);
-    legacy.schema_version = LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION;
+    let mut legacy = crate::io::capture_simulation_results(&simulation);
+    legacy.schema_version = 1;
     clear_v6_execution_fields(&mut legacy);
     legacy.runs[0].run_id = None;
     legacy.runs[0].dataset_id = None;
@@ -1255,8 +1233,8 @@ fn schema_v1_result_identity_migration_is_reproducible() {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 18;
-    let mut first = ProjectSimulationResults::from_state(&simulation);
-    first.schema_version = LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION;
+    let mut first = crate::io::capture_simulation_results(&simulation);
+    first.schema_version = 1;
     clear_v6_execution_fields(&mut first);
     first.runs[0].provenance_mode = PersistedField::Missing;
     first.runs[0].run_id = None;
@@ -1327,7 +1305,7 @@ fn project_save_requires_result_provenance_to_be_closed_over_plan_or_tombstones(
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 31;
-    project.simulation_results = ProjectSimulationResults::from_state(&simulation);
+    project.simulation_results = crate::io::capture_simulation_results(&simulation);
 
     serialize_project_file(&project).expect("current plan owns result source");
 
@@ -1473,7 +1451,7 @@ fn project_save_rejects_result_revision_before_source_creation() {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 36;
-    project.simulation_results = ProjectSimulationResults::from_state(&simulation);
+    project.simulation_results = crate::io::capture_simulation_results(&simulation);
 
     let error = serialize_project_file(&project)
         .expect_err("source cannot own results from before it existed")
@@ -1493,8 +1471,8 @@ fn v2_same_kind_results_migrate_without_guessing_source_identity() {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 22;
-    let mut persisted = ProjectSimulationResults::from_state(&simulation);
-    persisted.schema_version = STABLE_DATASET_RESULTS_SCHEMA_VERSION;
+    let mut persisted = crate::io::capture_simulation_results(&simulation);
+    persisted.schema_version = 2;
     clear_v6_execution_fields(&mut persisted);
     persisted.runs[0].provenance_mode = PersistedField::Missing;
 
@@ -1502,19 +1480,15 @@ fn v2_same_kind_results_migrate_without_guessing_source_identity() {
         .migrate_to_current(ProjectId::new())
         .expect("v2 migrates");
 
-    assert_eq!(
-        persisted.schema_version,
-        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
-    );
+    assert_eq!(persisted.schema_version, 40);
     assert!(
         persisted.runs[0]
             .analyses
             .iter()
             .all(|analysis| analysis.provenance.is_none())
     );
-    let restored = persisted
-        .into_simulation_state()
-        .expect("legacy absence remains valid");
+    let restored =
+        crate::io::simulation_state_from_results(persisted).expect("legacy absence remains valid");
     assert!(
         restored.runs[0]
             .analyses
@@ -1554,7 +1528,7 @@ fn prepared_result_provenance_validation_rejects_aliases_and_partial_history() {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 23;
-    let baseline = ProjectSimulationResults::from_state(&simulation);
+    let baseline = crate::io::capture_simulation_results(&simulation);
 
     let mut aliased = baseline.clone();
     aliased.runs[0].analyses[1]
@@ -1642,8 +1616,8 @@ fn persisted_events_at_schema_v18() -> ProjectSimulationResults {
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 19;
-    let mut persisted = ProjectSimulationResults::from_state(&simulation);
-    persisted.schema_version = MEASUREMENT_VERIFICATION_RESULTS_SCHEMA_VERSION;
+    let mut persisted = crate::io::capture_simulation_results(&simulation);
+    persisted.schema_version = 18;
     for persisted_run in &mut persisted.runs {
         let restored = persisted_run
             .clone()
@@ -1652,11 +1626,16 @@ fn persisted_events_at_schema_v18() -> ProjectSimulationResults {
         for (persisted_analysis, analysis) in
             persisted_run.analyses.iter_mut().zip(&restored.analyses)
         {
-            persisted_analysis.result_data_digest =
-                PersistedField::Value(analysis.legacy_v9_result_data_digest());
+            persisted_analysis.result_data_digest = PersistedField::Value(
+                analysis
+                    .result_data_ref()
+                    .digest(rspice_results::result_digest::ResultDigestEncoding::V9),
+            );
         }
         persisted_run.dataset_content_digest =
-            PersistedField::Value(restored.legacy_v9_dataset_content_digest());
+            PersistedField::Value(restored.dataset_content_digest_with_encoding(
+                rspice_results::result_digest::ResultDigestEncoding::V9,
+            ));
     }
     persisted
 }
@@ -1674,10 +1653,7 @@ fn schema_v18_is_authenticated_then_resealed_with_an_empty_bus_table() {
         .migrate_to_current(ProjectId::new())
         .expect("an authentic schema-v18 event history migrates");
 
-    assert_eq!(
-        persisted.schema_version,
-        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
-    );
+    assert_eq!(persisted.schema_version, 40);
     let Some(AnalysisResultPayload::TransientEvents { digital_buses, .. }) =
         persisted.runs[0].analyses[0].result_payload.as_ref()
     else {
@@ -1740,14 +1716,14 @@ fn schema_v18_rejects_tampering_and_a_smuggled_bus_table() {
 #[test]
 fn a_results_schema_from_the_future_is_refused_by_number() {
     let mut ahead = persisted_events_at_schema_v18();
-    ahead.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION + 1;
+    ahead.schema_version = 40 + 1;
     let error = ahead
         .migrate_to_current(ProjectId::new())
         .expect_err("a forward schema version is not migrated");
     assert!(
         error.contains(&format!(
             "unsupported simulation results schema version {}",
-            PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION + 1
+            40 + 1
         )),
         "{error}"
     );
@@ -1755,30 +1731,40 @@ fn a_results_schema_from_the_future_is_refused_by_number() {
 
 fn event_source_schema_v19() -> ProjectSimulationResults {
     let mut persisted = persisted_events_at_schema_v18();
-    persisted.schema_version = DIGITAL_BUS_RESULTS_SCHEMA_VERSION;
+    persisted.schema_version = 19;
     for run in &mut persisted.runs {
         let restored = run.clone().into_run().unwrap();
         for (stored, analysis) in run.analyses.iter_mut().zip(&restored.analyses) {
-            stored.result_data_digest =
-                PersistedField::Value(analysis.legacy_v10_result_data_digest());
+            stored.result_data_digest = PersistedField::Value(
+                analysis
+                    .result_data_ref()
+                    .digest(rspice_results::result_digest::ResultDigestEncoding::V10),
+            );
         }
         run.dataset_content_digest =
-            PersistedField::Value(restored.legacy_v10_dataset_content_digest());
+            PersistedField::Value(restored.dataset_content_digest_with_encoding(
+                rspice_results::result_digest::ResultDigestEncoding::V10,
+            ));
     }
     persisted
 }
 
 fn convergence_schema_v20() -> ProjectSimulationResults {
     let mut persisted = event_source_schema_v19();
-    persisted.schema_version = IMPORT_SOURCE_RESULTS_SCHEMA_VERSION;
+    persisted.schema_version = 20;
     for run in &mut persisted.runs {
         let restored = run.clone().into_run().unwrap();
         for (stored, analysis) in run.analyses.iter_mut().zip(&restored.analyses) {
-            stored.result_data_digest =
-                PersistedField::Value(analysis.legacy_v11_result_data_digest());
+            stored.result_data_digest = PersistedField::Value(
+                analysis
+                    .result_data_ref()
+                    .digest(rspice_results::result_digest::ResultDigestEncoding::V11),
+            );
         }
         run.dataset_content_digest =
-            PersistedField::Value(restored.legacy_v11_dataset_content_digest());
+            PersistedField::Value(restored.dataset_content_digest_with_encoding(
+                rspice_results::result_digest::ResultDigestEncoding::V11,
+            ));
     }
     persisted
 }
@@ -1804,14 +1790,14 @@ fn convergence_schema_v20_authenticates_before_migrating_unknown_quality() {
     let old_digest = stored.runs[0].dataset_content_digest.clone();
     stored.migrate_to_current(ProjectId::new()).unwrap();
     stored.validate().unwrap();
-    assert_eq!(
-        stored.schema_version,
-        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
-    );
+    assert_eq!(stored.schema_version, 40);
     assert_ne!(stored.runs[0].dataset_content_digest, old_digest);
     assert!(stored.runs[0].analyses[0].convergence.is_missing());
     assert!(
-        stored.into_simulation_state().unwrap().runs[0].analyses[0]
+        crate::io::simulation_state_from_results(stored)
+            .unwrap()
+            .runs[0]
+            .analyses[0]
             .convergence
             .is_none()
     );
@@ -1834,7 +1820,7 @@ fn convergence_schema_v20_authenticates_before_migrating_unknown_quality() {
 
 #[test]
 fn convergence_evidence_cannot_be_injected_into_historical_schemas() {
-    for schema in 1..CONVERGENCE_RESULTS_SCHEMA_VERSION {
+    for schema in 1..21 {
         for field in [
             PersistedField::Null,
             PersistedField::Value(convergence_fixture()),
@@ -1856,15 +1842,15 @@ fn convergence_evidence_cannot_be_injected_into_historical_schemas() {
 fn convergence_project_round_trip_preserves_quality_and_rejects_tampering() {
     let mut stored = convergence_schema_v20();
     stored.migrate_to_current(ProjectId::new()).unwrap();
-    let mut simulation = stored.into_simulation_state().unwrap();
+    let mut simulation = crate::io::simulation_state_from_results(stored).unwrap();
     let quality = convergence_fixture();
     simulation.runs[0].analyses[0].convergence = Some(std::sync::Arc::new(quality.clone()));
-    let stored = ProjectSimulationResults::from_state(&simulation);
+    let stored = crate::io::capture_simulation_results(&simulation);
     stored.validate().unwrap();
     let json = serde_json::to_string(&stored).unwrap();
     let restored: ProjectSimulationResults = serde_json::from_str(&json).unwrap();
     restored.validate().unwrap();
-    let restored = restored.into_simulation_state().unwrap();
+    let restored = crate::io::simulation_state_from_results(restored).unwrap();
     assert_eq!(
         restored.runs[0].analyses[0].convergence.as_deref(),
         Some(&quality)
@@ -1901,13 +1887,10 @@ fn event_source_schema_v19_migrates_without_inventing_import_attribution() {
     let evidence = persisted.runs[0].analyses[0].result_payload.clone();
     persisted.migrate_to_current(ProjectId::new()).unwrap();
     persisted.validate().unwrap();
-    assert_eq!(
-        persisted.schema_version,
-        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
-    );
+    assert_eq!(persisted.schema_version, 40);
     assert!(persisted.runs[0].analyses[0].import_source.is_missing());
     assert_eq!(persisted.runs[0].analyses[0].result_payload, evidence);
-    let restored = persisted.into_simulation_state().unwrap();
+    let restored = crate::io::simulation_state_from_results(persisted).unwrap();
     assert!(restored.runs[0].analyses[0].import_source.is_none());
 }
 
@@ -1922,7 +1905,7 @@ fn event_source_old_schema_rejects_changed_samples_and_smuggled_attribution() {
             .unwrap_err()
             .contains("digest")
     );
-    for schema in 1..IMPORT_SOURCE_RESULTS_SCHEMA_VERSION {
+    for schema in 1..20 {
         let mut altered = event_source_schema_v19();
         altered.schema_version = schema;
         altered.runs[0].analyses[0].import_source = PersistedField::Value(ResultImportSource {
@@ -1943,12 +1926,12 @@ fn event_source_current_schema_seals_name_format_and_presence() {
     use crate::state::{ResultImportFormat, ResultImportSource};
     let mut persisted = event_source_schema_v19();
     persisted.migrate_to_current(ProjectId::new()).unwrap();
-    let mut simulation = persisted.into_simulation_state().unwrap();
+    let mut simulation = crate::io::simulation_state_from_results(persisted).unwrap();
     simulation.runs[0].analyses[0].import_source = Some(ResultImportSource {
         source_name: "capture.vcd".to_owned(),
         format: ResultImportFormat::Vcd,
     });
-    let persisted = ProjectSimulationResults::from_state(&simulation);
+    let persisted = crate::io::capture_simulation_results(&simulation);
     persisted.validate().unwrap();
     for source in [
         PersistedField::Missing,
@@ -2020,8 +2003,7 @@ fn a_result_schema_before_v27_cannot_carry_dc_mismatch_evidence() {
     };
 
     let mut persisted = persisted_periodic_at_schema_v16(AnalysisType::Pss);
-    persisted.runs[0].analyses[0].analysis_type =
-        analysis_type_key(AnalysisType::DcMismatch).to_owned();
+    persisted.runs[0].analyses[0].analysis_type = "DcMismatch".to_owned();
     persisted.runs[0].analyses[0].result_payload =
         PersistedField::Value(AnalysisResultPayload::DcMismatch {
             evidence: std::sync::Arc::new(evidence),
@@ -2040,9 +2022,9 @@ fn measurement_units_are_persisted_authenticated_and_absent_in_legacy_history() 
     use rspice_core::analysis::{MeasurementUnit, MeasurementUnits};
     let legacy = current_projected_failvalue_results();
     let mut old_label = legacy.clone();
-    old_label.schema_version = IMPORTED_MONTE_CARLO_CHECKPOINTS_SCHEMA_VERSION;
+    old_label.schema_version = 36;
     old_label.migrate_to_current(ProjectId::new()).unwrap();
-    let mut state = old_label.into_simulation_state().unwrap();
+    let mut state = crate::io::simulation_state_from_results(old_label).unwrap();
     assert!(state.runs[0].analyses[0].measurements[0].units.is_none());
     state.runs[0].analyses[0].measurements[0].units = Some(MeasurementUnits {
         value: MeasurementUnit::Known("s".into()),
@@ -2060,11 +2042,11 @@ fn measurement_units_are_persisted_authenticated_and_absent_in_legacy_history() 
     seal_legacy_unattributed(&mut run);
     state.runs = vec![run].into();
     state.next_run_id = 20;
-    let current = ProjectSimulationResults::from_state(&state);
+    let current = crate::io::capture_simulation_results(&state);
     current.validate().unwrap();
     let json = serde_json::to_string(&current).unwrap();
     let decoded: ProjectSimulationResults = serde_json::from_str(&json).unwrap();
-    let restored = decoded.into_simulation_state().unwrap();
+    let restored = crate::io::simulation_state_from_results(decoded).unwrap();
     assert_eq!(
         restored.runs[0].analyses[0].measurements[0].units,
         state.runs[0].analyses[0].measurements[0].units
@@ -2077,7 +2059,7 @@ fn measurement_units_are_persisted_authenticated_and_absent_in_legacy_history() 
         .value = MeasurementUnit::Known("ms".into());
     assert!(tampered.validate().is_err());
     let mut downgraded = current;
-    downgraded.schema_version = IMPORTED_MONTE_CARLO_CHECKPOINTS_SCHEMA_VERSION;
+    downgraded.schema_version = 36;
     assert!(downgraded.migrate_to_current(ProjectId::new()).is_err());
 }
 
@@ -2111,12 +2093,12 @@ fn native_scalar_units_persist_authenticate_and_preserve_schema_37_history() {
         let mut state = SimulationState::default();
         state.runs = vec![run].into();
         state.next_run_id = 1;
-        ProjectSimulationResults::from_state(&state)
+        crate::io::capture_simulation_results(&state)
     };
     let mut old = stored(historical.clone());
-    old.schema_version = MEASUREMENT_UNIT_RESULTS_SCHEMA_VERSION;
+    old.schema_version = 37;
     old.migrate_to_current(ProjectId::new()).unwrap();
-    let restored = old.into_simulation_state().unwrap();
+    let restored = crate::io::simulation_state_from_results(old).unwrap();
     let old = &restored.runs[0].analyses[0];
     assert_eq!(old.result_data_digest(), historical_digest);
     assert!(old.native_scalar_units.is_none());
@@ -2136,7 +2118,7 @@ fn native_scalar_units_persist_authenticate_and_preserve_schema_37_history() {
     let current = stored(typed);
     let json = serde_json::to_string(&current).unwrap();
     let loaded: ProjectSimulationResults = serde_json::from_str(&json).unwrap();
-    let loaded = loaded.into_simulation_state().unwrap();
+    let loaded = crate::io::simulation_state_from_results(loaded).unwrap();
     let scalar = &loaded.runs[0].analyses[0];
     assert_eq!(scalar.result_data_digest(), digest);
     assert_eq!(
@@ -2171,7 +2153,7 @@ fn native_scalar_units_persist_authenticate_and_preserve_schema_37_history() {
         let mut invalid = current.clone();
         invalid.runs[0].analyses[0].native_scalar_units = field;
         assert!(invalid.validate().is_err());
-        invalid.schema_version = MEASUREMENT_UNIT_RESULTS_SCHEMA_VERSION;
+        invalid.schema_version = 37;
         assert!(
             invalid
                 .migrate_to_current(ProjectId::new())
@@ -2180,7 +2162,7 @@ fn native_scalar_units_persist_authenticate_and_preserve_schema_37_history() {
         );
     }
     let mut downgraded = current;
-    downgraded.schema_version = MEASUREMENT_UNIT_RESULTS_SCHEMA_VERSION;
+    downgraded.schema_version = 37;
     assert!(
         downgraded
             .migrate_to_current(ProjectId::new())
@@ -2236,14 +2218,15 @@ fn optimization_units_persist_authenticate_and_preserve_schema_38_history() {
         let mut state = SimulationState::default();
         state.runs = vec![run].into();
         state.next_run_id = 1;
-        ProjectSimulationResults::from_state(&state)
+        crate::io::capture_simulation_results(&state)
     };
     let historic_digest = historical.result_data_digest();
     let mut old = stored(historical.clone());
-    old.schema_version = NATIVE_SCALAR_UNIT_RESULTS_SCHEMA_VERSION;
+    old.schema_version = 38;
     old.migrate_to_current(ProjectId::new()).unwrap();
     assert_eq!(
-        old.into_simulation_state().unwrap().runs[0].analyses[0].result_data_digest(),
+        crate::io::simulation_state_from_results(old).unwrap().runs[0].analyses[0]
+            .result_data_digest(),
         historic_digest
     );
     let mut typed = historical;
@@ -2262,7 +2245,11 @@ fn optimization_units_persist_authenticate_and_preserve_schema_38_history() {
     let loaded: ProjectSimulationResults =
         serde_json::from_str(&serde_json::to_string(&current).unwrap()).unwrap();
     assert_eq!(
-        loaded.into_simulation_state().unwrap().runs[0].analyses[0].result_data_digest(),
+        crate::io::simulation_state_from_results(loaded)
+            .unwrap()
+            .runs[0]
+            .analyses[0]
+            .result_data_digest(),
         digest
     );
     let mut changed = current.clone();
@@ -2274,7 +2261,7 @@ fn optimization_units_persist_authenticate_and_preserve_schema_38_history() {
     }
     assert!(changed.validate().unwrap_err().contains("digest"));
     let mut downgraded = current;
-    downgraded.schema_version = NATIVE_SCALAR_UNIT_RESULTS_SCHEMA_VERSION;
+    downgraded.schema_version = 38;
     assert!(
         downgraded
             .migrate_to_current(ProjectId::new())

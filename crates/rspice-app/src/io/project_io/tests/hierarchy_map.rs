@@ -74,7 +74,7 @@ fn sealed_results(hierarchy_map: Vec<HierarchyMapRow>) -> ProjectSimulationResul
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = 41;
-    ProjectSimulationResults::from_state(&simulation)
+    crate::io::capture_simulation_results(&simulation)
 }
 
 fn restored_receipt(results: &ProjectSimulationResults) -> PreparedRunReceipt {
@@ -145,7 +145,7 @@ fn a_persisted_engine_prefix_that_does_not_name_its_occurrence_is_refused() {
 #[test]
 fn results_written_before_the_hierarchy_map_load_and_reserialize_without_one() {
     let mut older = sealed_results(Vec::new());
-    older.schema_version = GOVERNED_SPECIFICATION_RESULTS_SCHEMA_VERSION;
+    older.schema_version = 14;
     downgrade_result_digests_to_v6(&mut older);
     let document = serde_json::to_value(older).expect("results serialize");
     assert!(
@@ -158,10 +158,7 @@ fn results_written_before_the_hierarchy_map_load_and_reserialize_without_one() {
         .migrate_to_current(ProjectId::new())
         .expect("an authentic schema-v14 document migrates");
 
-    assert_eq!(
-        persisted.schema_version,
-        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
-    );
+    assert_eq!(persisted.schema_version, 40);
     assert!(
         restored_receipt(&persisted).hierarchy_map().is_empty(),
         "migration never invents an occurrence the run did not emit"
@@ -176,7 +173,7 @@ fn results_written_before_the_hierarchy_map_load_and_reserialize_without_one() {
 #[test]
 fn a_schema_v14_document_cannot_smuggle_a_hierarchy_map() {
     let mut smuggled = sealed_results(reference_map());
-    smuggled.schema_version = GOVERNED_SPECIFICATION_RESULTS_SCHEMA_VERSION;
+    smuggled.schema_version = 14;
 
     let error = smuggled
         .migrate_to_current(ProjectId::new())

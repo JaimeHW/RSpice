@@ -1100,12 +1100,11 @@ impl RSpiceApp {
         candidate.model_library_manager = model_library_manager;
         candidate.restore_active_schematic_from_workspace();
         candidate.simulation = crate::state::SimulationState::default();
-        artifact
-            .simulation_results
-            .apply_to_state(&mut candidate.simulation)
-            .map_err(|error| {
-                format!("project library rollback result history is invalid: {error}")
-            })?;
+        crate::io::restore_simulation_results(
+            artifact.simulation_results,
+            &mut candidate.simulation,
+        )
+        .map_err(|error| format!("project library rollback result history is invalid: {error}"))?;
         candidate.publish_project_library_mutation(prepared);
         candidate
             .workspace

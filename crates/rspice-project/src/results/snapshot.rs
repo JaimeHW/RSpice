@@ -68,59 +68,27 @@ impl<'de> Deserialize<'de> for ProjectSimulationResults {
 }
 
 impl ProjectSimulationResults {
-    pub fn from_state(state: &SimulationState) -> Self {
-        ProjectSimulationResultsData::from_state(state).into()
-    }
-
     pub fn is_empty(&self) -> bool {
         self.content.data.is_empty()
     }
 
-    pub(crate) fn shares_content_with(&self, other: &Self) -> bool {
+    pub fn shares_content_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.content, &other.content)
     }
 
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), String> {
         self.content
             .validation
             .get_or_init(|| self.content.data.validate())
             .clone()
     }
 
-    pub fn into_simulation_state(self) -> Result<SimulationState, String> {
-        let mut state = SimulationState::default();
-        self.apply_to_state(&mut state)?;
-        Ok(state)
-    }
-
-    /// Apply an already-current, validated result document. Legacy migration
+    /// Consume an already-current, validated result document. Legacy migration
     /// requires the owning [`ProjectId`] and must be completed explicitly at
     /// the project/session boundary before this method is called.
-    pub fn apply_to_state(self, state: &mut SimulationState) -> Result<(), String> {
+    pub fn into_validated_data(self) -> Result<ProjectSimulationResultsData, String> {
         self.validate()?;
-        let data = Arc::unwrap_or_clone(self.content).data;
-        let executed_decks = data.executed_decks.into_archive()?;
-        let runs = data
-            .runs
-            .into_iter()
-            .map(ProjectSimulationRun::into_run)
-            .collect::<Result<Vec<_>, _>>()?;
-        // Restored before the history, so the project's own limit is the one
-        // that prunes it rather than the built-in default.
-        state.retained_dataset_limit = data.retained_dataset_limit;
-        state.restore_run_history(
-            runs,
-            data.next_run_id,
-            data.active_run_stable_id,
-            data.active_dataset_id,
-            data.active_analysis_sequence,
-            data.overlay_dataset_ids,
-        );
-        // After the history, because restoring it drops whatever decks this
-        // session was holding for a different project.
-        state.executed_decks = executed_decks;
-        state.imported_monte_carlo_checkpoints = data.imported_monte_carlo_checkpoints;
-        Ok(())
+        Ok(Arc::unwrap_or_clone(self.content).data)
     }
 
     /// Upgrade historical result schemas without fabricating analysis-source
@@ -157,7 +125,7 @@ impl ProjectSimulationResults {
     /// record, and inventing rows for it would forge the provenance the map
     /// exists to carry. Each migrated result is then resealed with the current
     /// encoding.
-    pub(crate) fn migrate_to_current(&mut self, project_id: ProjectId) -> Result<(), String> {
+    pub fn migrate_to_current(&mut self, project_id: ProjectId) -> Result<(), String> {
         if self.schema_version == PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION {
             return Ok(());
         }

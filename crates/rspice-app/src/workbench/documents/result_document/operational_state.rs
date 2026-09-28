@@ -629,7 +629,11 @@ pub(crate) fn classify_viewer(
         }
         SimulationRunLifecycle::Running => {
             return ResultOperationalStatus::canonical(
-                if run.analyses.iter().any(AnalysisResult::is_live_partial) {
+                if run
+                    .analyses
+                    .iter()
+                    .any(|analysis| analysis.is_live_partial())
+                {
                     ResultOperationalState::Streaming
                 } else {
                     ResultOperationalState::Loading

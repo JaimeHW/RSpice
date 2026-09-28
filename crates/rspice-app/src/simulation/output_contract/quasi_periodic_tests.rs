@@ -15,10 +15,14 @@ fn prepared(
 }
 fn reload(analysis: AnalysisResult) -> AnalysisResult {
     let state = crate::simulation::engine_bridge::nested_dc_tests::history(analysis);
-    let persisted = crate::io::project_io::ProjectSimulationResults::from_state(&state);
+    let persisted = crate::io::capture_simulation_results(&state);
     let loaded: crate::io::project_io::ProjectSimulationResults =
         serde_json::from_slice(&serde_json::to_vec(&persisted).unwrap()).unwrap();
-    loaded.into_simulation_state().unwrap().runs[0].analyses[0].clone()
+    crate::io::simulation_state_from_results(loaded)
+        .unwrap()
+        .runs[0]
+        .analyses[0]
+        .clone()
 }
 fn policy(mode: OutputSelectionMode) -> SavePolicy {
     SavePolicy::PlanOwned {

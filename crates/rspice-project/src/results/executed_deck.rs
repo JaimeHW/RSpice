@@ -66,11 +66,14 @@ impl ProjectExecutedDecks {
     /// Only runs still in the history contribute: retention discards a dataset
     /// and its deck together, and a deck written for a run the file does not
     /// contain would reload as an artifact nothing can open.
-    pub(super) fn from_state(state: &SimulationState) -> Self {
+    pub fn from_archive(
+        archive: &rspice_results::executed_deck::ExecutedDeckArchive,
+        retained_runs: impl Iterator<Item = u64> + Clone,
+    ) -> Self {
         let mut sources: Vec<String> = Vec::new();
         let mut runs: Vec<ProjectExecutedDeck> = Vec::new();
-        for record in state.executed_decks.iter() {
-            if !state.runs.iter().any(|run| run.id == record.run_id) {
+        for record in archive.iter() {
+            if !retained_runs.clone().any(|id| id == record.run_id) {
                 continue;
             }
             let points = record
@@ -107,7 +110,9 @@ impl ProjectExecutedDecks {
     ///
     /// The caps are re-applied by [`ExecutedDeckArchive::restore`]: a file
     /// carrying more than a session could have held is refused, not trimmed.
-    pub(super) fn into_archive(self) -> Result<crate::state::ExecutedDeckArchive, String> {
+    pub fn into_archive(
+        self,
+    ) -> Result<rspice_results::executed_deck::ExecutedDeckArchive, String> {
         let shared: Vec<std::sync::Arc<str>> = self
             .sources
             .iter()
@@ -129,20 +134,20 @@ impl ProjectExecutedDecks {
                                 shared.len()
                             )
                         })?;
-                        Ok(crate::state::ExecutedDeckPoint {
+                        Ok(rspice_results::executed_deck::ExecutedDeckPoint {
                             label: point.label.clone(),
-                            model_sources: crate::state::sealed_model_sources(source),
+                            model_sources: rspice_model_library::sealed_model_sources(source),
                             deck: std::sync::Arc::clone(source),
                         })
                     })
                     .collect::<Result<Vec<_>, String>>()?;
-                Ok(crate::state::ExecutedDeck {
+                Ok(rspice_results::executed_deck::ExecutedDeck {
                     run_id: deck.run_id,
                     points,
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
-        crate::state::ExecutedDeckArchive::restore(records)
+        rspice_results::executed_deck::ExecutedDeckArchive::restore(records)
     }
 
     /// What a persisted executed-deck set has to be before it is installed.

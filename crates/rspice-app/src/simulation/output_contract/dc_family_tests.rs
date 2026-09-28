@@ -391,7 +391,7 @@ fn stored(run: SimulationRun) -> crate::io::project_io::ProjectSimulationResults
     let mut state = crate::state::SimulationState::default();
     state.next_run_id = run.id;
     state.runs = vec![run].into();
-    crate::io::project_io::ProjectSimulationResults::from_state(&state)
+    crate::io::capture_simulation_results(&state)
 }
 
 #[test]
@@ -409,7 +409,7 @@ fn dc_family_receipts_round_trip_every_member_and_reject_schema_downgrades() {
     let restored: crate::io::project_io::ProjectSimulationResults =
         serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
     let mut state = crate::state::SimulationState::default();
-    restored.apply_to_state(&mut state).unwrap();
+    crate::io::restore_simulation_results(restored, &mut state).unwrap();
     let analysis = &state.runs[0].analyses[0];
     assert_eq!(analysis.result_data_digest(), digest);
     assert_eq!(analysis.waveforms.len(), 3);
@@ -448,8 +448,12 @@ fn schema_22_saved_outputs_authenticate_and_reseal_their_result_digests() {
         }
         let mut run = run(spec(nested, false), &[output]);
         run.analyses[0].saved_output_receipts[0].source_bindings = None;
-        let digest = run.analyses[0].legacy_v12_result_data_digest();
-        let dataset_digest = run.legacy_v12_dataset_content_digest();
+        let digest = run.analyses[0]
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V12);
+        let dataset_digest = run.data.dataset_content_digest_with_encoding(
+            rspice_results::result_digest::ResultDigestEncoding::V12,
+        );
         let mut snapshot = stored(run);
         snapshot.schema_version = 22;
         snapshot.runs[0].analyses[0].result_data_digest =
@@ -472,7 +476,7 @@ fn schema_22_saved_outputs_authenticate_and_reseal_their_result_digests() {
             crate::io::project_io::ProjectSimulationResults::default().schema_version
         );
         let mut state = crate::state::SimulationState::default();
-        snapshot.apply_to_state(&mut state).unwrap();
+        crate::io::restore_simulation_results(snapshot, &mut state).unwrap();
         assert_ne!(state.runs[0].analyses[0].result_data_digest(), digest);
     }
 }

@@ -557,7 +557,7 @@ fn project_owned_differences(state: &AppState) -> Result<ProjectOwnedDifferences
             .map_err(|error| format!("current simulation/model state is invalid: {error}"))?;
     let current_execution = canonical_execution_context(&current_execution)?;
 
-    let current_results = ProjectSimulationResults::from_state(&state.simulation);
+    let current_results = crate::io::capture_simulation_results(&state.simulation);
     current_results
         .validate()
         .map_err(|error| format!("current simulation results are invalid: {error}"))?;

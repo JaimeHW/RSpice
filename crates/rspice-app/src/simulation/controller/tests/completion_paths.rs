@@ -974,9 +974,7 @@ fn controller_manual_run_receipt_survives_production_project_round_trip() {
         loaded.execution_context.is_some(),
         "manual receipt must remain independent of the unrelated retained plan"
     );
-    let restored = loaded
-        .simulation_results
-        .into_simulation_state()
+    let restored = crate::io::simulation_state_from_results(loaded.simulation_results)
         .expect("controller manual history restores");
     let run = &restored.runs[0];
     let receipt = run.prepared_receipt().expect("manual receipt retained");

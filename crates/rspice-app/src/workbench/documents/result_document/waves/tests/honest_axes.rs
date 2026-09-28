@@ -135,8 +135,8 @@ fn a_solved_current_source_sweep_keeps_amperes_without_an_executed_deck() {
     state.simulation = crate::simulation::engine_bridge::nested_dc_tests::history(analysis);
     state.ui.results.viewer = super::super::super::ResultViewer::DcSweep;
     assert_eq!(model_axis(&mut state), ("IBIAS".to_owned(), "A".to_owned()));
-    let stored = crate::io::project_io::ProjectSimulationResults::from_state(&state.simulation);
-    stored.apply_to_state(&mut state.simulation).unwrap();
+    let stored = crate::io::capture_simulation_results(&state.simulation);
+    crate::io::restore_simulation_results(stored, &mut state.simulation).unwrap();
     assert_eq!(model_axis(&mut state), ("IBIAS".to_owned(), "A".to_owned()));
 }
 

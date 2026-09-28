@@ -271,7 +271,7 @@ fn project_named_with_results(path: &str) -> ProjectFile {
     ProjectFile::new_with_simulation_results(
         workspace,
         libraries,
-        crate::io::project_io::ProjectSimulationResults::from_state(&simulation),
+        crate::io::capture_simulation_results(&simulation),
     )
 }
 

@@ -175,7 +175,6 @@ fn soa_source_nested_edits_refresh_facts_without_a_version_bump() {
 
 #[test]
 fn soa_source_restoration_refreshes_the_actual_plot_before_a_frame() {
-    use crate::io::project_io::ProjectSimulationResults;
     use crate::state::{SimulationRunLifecycle, SimulationRunProvenance};
 
     let mut state = soa_state(1, 64, 3.0);
@@ -190,9 +189,10 @@ fn soa_source_restoration_refreshes_the_actual_plot_before_a_frame() {
     let version = state.simulation.data_version;
     let key = active_key(&state);
     replace_stress(&mut state, 64, 3.2);
-    let restored = ProjectSimulationResults::from_state(&state.simulation)
-        .into_simulation_state()
-        .unwrap();
+    let restored = crate::io::simulation_state_from_results(crate::io::capture_simulation_results(
+        &state.simulation,
+    ))
+    .unwrap();
     state.simulation = restored;
     state.simulation.data_version = version;
     assert_eq!(active_key(&state), key);

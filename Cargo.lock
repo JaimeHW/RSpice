@@ -5629,6 +5629,7 @@ dependencies = [
  "rspice-design",
  "rspice-design-model",
  "rspice-model-library",
+ "rspice-results",
  "rspice-simulation-contract",
  "serde",
  "serde_json",

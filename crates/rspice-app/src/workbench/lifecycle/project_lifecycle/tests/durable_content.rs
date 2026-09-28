@@ -43,7 +43,8 @@ fn cleared_run_sequence_is_dirty_and_survives_scoped_and_all_saves() {
         );
         let saved = crate::io::load_project_file(&path).unwrap();
         assert_eq!(saved.simulation_results.next_run_id, 1);
-        let mut restored = saved.simulation_results.into_simulation_state().unwrap();
+        let mut restored =
+            crate::io::simulation_state_from_results(saved.simulation_results).unwrap();
         assert!(restored.runs.is_empty());
         assert_eq!(restored.start_run().id, 2);
         remove_project_artifacts(&path);

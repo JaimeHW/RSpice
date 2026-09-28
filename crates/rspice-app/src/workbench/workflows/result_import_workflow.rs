@@ -1441,7 +1441,8 @@ mod tests {
         let text = crate::io::project_io::serialize_project_file(&project).unwrap();
         let project = crate::io::project_io::load_project_text(&text, None).unwrap();
         assert!(project.simulation_results_warning.is_none());
-        let simulation = project.simulation_results.into_simulation_state().unwrap();
+        let simulation =
+            crate::io::simulation_state_from_results(project.simulation_results).unwrap();
         let restored = &simulation.active_run().unwrap().analyses[0];
         restored.validate_retained_evidence().unwrap();
         for (before, after) in parsed.waveforms.iter().zip(&restored.waveforms) {
@@ -1608,7 +1609,8 @@ mod tests {
         let text = crate::io::project_io::serialize_project_file(&project).unwrap();
         let project = crate::io::project_io::load_project_text(&text, None).unwrap();
         assert!(project.simulation_results_warning.is_none());
-        let simulation = project.simulation_results.into_simulation_state().unwrap();
+        let simulation =
+            crate::io::simulation_state_from_results(project.simulation_results).unwrap();
         let restored = &simulation.active_run().unwrap().analyses[0];
         restored.validate_retained_evidence().unwrap();
         assert_eq!(
@@ -1810,7 +1812,8 @@ mod tests {
         let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
         assert!(restored.simulation_results_warning.is_none());
         assert_eq!(restored.simulation_results, project.simulation_results);
-        let restored = restored.simulation_results.into_simulation_state().unwrap();
+        let restored =
+            crate::io::simulation_state_from_results(restored.simulation_results).unwrap();
         let run = restored.active_run().unwrap();
         assert_eq!(run.lifecycle, SimulationRunLifecycle::LegacyUnknown);
         assert_eq!(run.elapsed_time, 0.0);

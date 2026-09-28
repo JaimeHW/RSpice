@@ -746,7 +746,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     project_id,
                     simulation_results: CanonicalHardcopyOwner::capture(
                         "prepared result history",
-                        &ProjectSimulationResults::from_state(&simulation),
+                        &crate::io::capture_simulation_results(&simulation),
                     )?,
                     presentation: PreparedResultsPresentation::capture(presentation)?,
                     scope,
@@ -766,7 +766,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 studio: CanonicalHardcopyOwner::capture("prepared visualization studio", &studio)?,
                 simulation_results: CanonicalHardcopyOwner::capture(
                     "prepared studio result history",
-                    &ProjectSimulationResults::from_state(&simulation),
+                    &crate::io::capture_simulation_results(&simulation),
                 )?,
                 pane_id,
                 all_panes,
@@ -1088,8 +1088,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
             } => {
                 let simulation_results = simulation_results
                     .restore::<ProjectSimulationResults>("prepared result history")?;
-                let simulation = simulation_results
-                    .into_simulation_state()
+                let simulation = crate::io::simulation_state_from_results(simulation_results)
                     .map_err(HardcopySourceError::InvalidPreparedWorkerSnapshot)?;
                 let presentation = presentation.restore()?;
                 let analysis_count = simulation.runs.first().map_or(0, |run| run.analyses.len());
@@ -1144,10 +1143,11 @@ impl PreparedRetainedHardcopyWorkerPayload {
             } => {
                 let studio =
                     studio.restore::<VisualizationStudioState>("prepared visualization studio")?;
-                let simulation = simulation_results
-                    .restore::<ProjectSimulationResults>("prepared studio result history")?
-                    .into_simulation_state()
-                    .map_err(HardcopySourceError::InvalidPreparedWorkerSnapshot)?;
+                let simulation = crate::io::simulation_state_from_results(
+                    simulation_results
+                        .restore::<ProjectSimulationResults>("prepared studio result history")?,
+                )
+                .map_err(HardcopySourceError::InvalidPreparedWorkerSnapshot)?;
                 validate_prepared_studio_snapshot(
                     project_id,
                     &source_key,

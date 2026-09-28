@@ -171,7 +171,7 @@ fn attach_run(
     let mut simulation = SimulationState::default();
     simulation.runs = vec![run].into();
     simulation.next_run_id = RUN_ID + 1;
-    project.simulation_results = ProjectSimulationResults::from_state(&simulation);
+    project.simulation_results = crate::io::capture_simulation_results(&simulation);
 }
 
 /// Save, reload, and answer with the restored task identities. Panics with the
@@ -550,8 +550,7 @@ fn an_older_schema_carrying_a_derivation_record_is_refused() {
     let json = serialize_project_file(&project).expect("the current-schema project serializes");
 
     let mut relabelled: serde_json::Value = serde_json::from_str(&json).expect("project parses");
-    relabelled["simulation_results"]["schema_version"] =
-        serde_json::json!(GOVERNED_SPECIFICATION_RESULTS_SCHEMA_VERSION);
+    relabelled["simulation_results"]["schema_version"] = serde_json::json!(14);
     let relabelled = serde_json::to_string(&relabelled).expect("relabelled project re-encodes");
 
     let restored = load_project_text(&relabelled, None).expect("the project still opens");

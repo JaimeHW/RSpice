@@ -91,14 +91,19 @@ fn periodic_payload_fields_are_v8_identity_while_v7_stays_legacy() {
     multipliers[0].multiplier.real = 0.25;
     assert_ne!(pss.result_data_digest(), changed_pss.result_data_digest());
     assert_eq!(
-        pss.legacy_v7_result_data_digest(),
-        changed_pss.legacy_v7_result_data_digest()
+        pss.result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V7),
+        changed_pss
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V7)
     );
 
     let source = stable_pstb_result();
     assert!(source.validate_retained_evidence().is_ok());
     let baseline = source.result_data_digest();
-    let legacy = source.legacy_v7_result_data_digest();
+    let legacy = source
+        .result_data_ref()
+        .digest(rspice_results::result_digest::ResultDigestEncoding::V7);
 
     macro_rules! assert_mutation_is_identity {
         ($pattern:pat, $mutation:expr) => {{
@@ -110,7 +115,9 @@ fn periodic_payload_fields_are_v8_identity_while_v7_stays_legacy() {
             assert_ne!(baseline, changed.result_data_digest());
             assert_eq!(
                 legacy,
-                changed.legacy_v7_result_data_digest(),
+                changed
+                    .result_data_ref()
+                    .digest(rspice_results::result_digest::ResultDigestEncoding::V7),
                 "schema-v16 encoded no periodic payload semantics"
             );
         }};
@@ -169,8 +176,12 @@ fn periodic_payload_fields_are_v8_identity_while_v7_stays_legacy() {
         "a full mode hidden from presentation remains dataset identity"
     );
     assert_eq!(
-        first_run.legacy_v7_dataset_content_digest(),
-        second_run.legacy_v7_dataset_content_digest()
+        first_run.data.dataset_content_digest_with_encoding(
+            rspice_results::result_digest::ResultDigestEncoding::V7
+        ),
+        second_run.data.dataset_content_digest_with_encoding(
+            rspice_results::result_digest::ResultDigestEncoding::V7
+        )
     );
 }
 
@@ -184,22 +195,39 @@ fn measurement_verification_fields_are_v9_identity_while_v8_stays_legacy() {
     let source = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
         .with_measurements(vec![measurement]);
     let current = source.result_data_digest();
-    let legacy = source.legacy_v8_result_data_digest();
+    let legacy = source
+        .result_data_ref()
+        .digest(rspice_results::result_digest::ResultDigestEncoding::V8);
 
     let mut raw_changed = source.clone();
     raw_changed.measurements[0].raw_value = Some(13.0);
     assert_ne!(current, raw_changed.result_data_digest());
-    assert_eq!(legacy, raw_changed.legacy_v8_result_data_digest());
+    assert_eq!(
+        legacy,
+        raw_changed
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V8)
+    );
 
     let mut limit_changed = source.clone();
     limit_changed.measurements[0].failure_limit = Some(11.0);
     assert_ne!(current, limit_changed.result_data_digest());
-    assert_eq!(legacy, limit_changed.legacy_v8_result_data_digest());
+    assert_eq!(
+        legacy,
+        limit_changed
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V8)
+    );
 
     let mut verdict_changed = source.clone();
     verdict_changed.measurements[0].failure_limit_exceeded = false;
     assert_ne!(current, verdict_changed.result_data_digest());
-    assert_eq!(legacy, verdict_changed.legacy_v8_result_data_digest());
+    assert_eq!(
+        legacy,
+        verdict_changed
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V8)
+    );
 
     let mut first_run = SimulationRun::new(1);
     first_run.analyses = vec![source];
@@ -210,8 +238,12 @@ fn measurement_verification_fields_are_v9_identity_while_v8_stays_legacy() {
         second_run.dataset_content_digest()
     );
     assert_eq!(
-        first_run.legacy_v8_dataset_content_digest(),
-        second_run.legacy_v8_dataset_content_digest()
+        first_run.data.dataset_content_digest_with_encoding(
+            rspice_results::result_digest::ResultDigestEncoding::V8
+        ),
+        second_run.data.dataset_content_digest_with_encoding(
+            rspice_results::result_digest::ResultDigestEncoding::V8
+        )
     );
 }
 
@@ -424,8 +456,11 @@ fn retained_waveform_unit_is_content_identity_without_rewriting_v12_history() {
     assert_ne!(unstated.result_data_digest(), volts.result_data_digest());
     assert_ne!(volts.result_data_digest(), amps.result_data_digest());
     assert_eq!(
-        volts.legacy_v5_result_data_digest(),
-        amps.legacy_v5_result_data_digest(),
+        volts
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V5),
+        amps.result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V5),
         "schema-v12 never contained waveform unit bytes"
     );
 
@@ -438,8 +473,12 @@ fn retained_waveform_unit_is_content_identity_without_rewriting_v12_history() {
         restated_run.dataset_content_digest()
     );
     assert_eq!(
-        stated_run.legacy_v5_dataset_content_digest(),
-        restated_run.legacy_v5_dataset_content_digest()
+        stated_run.data.dataset_content_digest_with_encoding(
+            rspice_results::result_digest::ResultDigestEncoding::V5
+        ),
+        restated_run.data.dataset_content_digest_with_encoding(
+            rspice_results::result_digest::ResultDigestEncoding::V5
+        )
     );
 }
 
@@ -640,8 +679,12 @@ fn typed_payload_is_current_content_identity_without_rewriting_v1_history() {
         "root-set qualification is authenticated result evidence"
     );
     assert_eq!(
-        pole_zero.legacy_v1_result_data_digest(),
-        changed_root.legacy_v1_result_data_digest(),
+        pole_zero
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V1),
+        changed_root
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V1),
         "schema-v8 never contained typed payload bytes"
     );
 
@@ -654,8 +697,12 @@ fn typed_payload_is_current_content_identity_without_rewriting_v1_history() {
         second_run.dataset_content_digest()
     );
     assert_eq!(
-        first_run.legacy_v1_dataset_content_digest(),
-        second_run.legacy_v1_dataset_content_digest()
+        first_run.data.dataset_content_digest_with_encoding(
+            rspice_results::result_digest::ResultDigestEncoding::V1
+        ),
+        second_run.data.dataset_content_digest_with_encoding(
+            rspice_results::result_digest::ResultDigestEncoding::V1
+        )
     );
 }
 
@@ -848,7 +895,9 @@ fn transfer_function_evidence_is_field_sensitive_v4_content_identity() {
 
     assert_ne!(
         source.result_data_digest(),
-        source.legacy_v3_result_data_digest(),
+        source
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V3),
         "current results must be sealed in the v6 domain"
     );
 }
@@ -1066,11 +1115,17 @@ fn declaring_a_bus_over_the_same_traces_is_a_different_result() {
 fn the_schema_v18_encoding_cannot_see_a_bus_table() {
     let (plain, bussed) = events_with_and_without_a_bus();
     assert_eq!(
-        plain.legacy_v9_result_data_digest(),
-        bussed.legacy_v9_result_data_digest()
+        plain
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V9),
+        bussed
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V9)
     );
     assert_ne!(
-        plain.legacy_v9_result_data_digest(),
+        plain
+            .result_data_ref()
+            .digest(rspice_results::result_digest::ResultDigestEncoding::V9),
         plain.result_data_digest(),
         "V10 states the table, even an empty one, so it is a different domain"
     );

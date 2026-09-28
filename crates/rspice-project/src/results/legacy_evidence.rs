@@ -25,10 +25,10 @@ pub(super) fn reject_pole_zero_evidence_before_schema_v16(
             };
             if !matches!(
                 pole_evidence,
-                crate::state::PoleZeroRootSetEvidence::LegacyUnknown
+                rspice_results::pole_zero::PoleZeroRootSetEvidence::LegacyUnknown
             ) || !matches!(
                 zero_evidence,
-                crate::state::PoleZeroRootSetEvidence::LegacyUnknown
+                rspice_results::pole_zero::PoleZeroRootSetEvidence::LegacyUnknown
             ) {
                 return Err(format!(
                     "schema-v{source_schema} analysis {} contains pole-zero root evidence introduced by schema v16",
@@ -144,7 +144,7 @@ pub(super) fn reject_optimization_units_before_schema_v39(
     source_schema: u32,
 ) -> Result<(), String> {
     if source_schema < OPTIMIZATION_UNIT_RESULTS_SCHEMA_VERSION && run.analyses.iter().any(|analysis| {
-        matches!(&analysis.family_metadata, Some(crate::state::AnalysisResultFamilyMetadata::Optimization { best_objectives, best_constraints, .. })
+        matches!(&analysis.family_metadata, Some(rspice_results::family_metadata::AnalysisResultFamilyMetadata::Optimization { best_objectives, best_constraints, .. })
             if best_objectives.iter().any(|row| !row.objective.unit.is_empty())
                 || best_constraints.iter().any(|row| !row.constraint.unit.is_empty()))
     }) {
@@ -153,7 +153,7 @@ pub(super) fn reject_optimization_units_before_schema_v39(
     Ok(())
 }
 
-pub(in crate::io::project_io) fn validate_result_fields_for_source_schema(
+pub fn validate_result_fields_for_source_schema(
     run: &ProjectSimulationRun,
     source_schema: u32,
 ) -> Result<(), String> {

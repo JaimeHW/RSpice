@@ -366,11 +366,11 @@ fn scoped_deferred_probes_resolve_after_project_reload() {
         let mut state = crate::state::SimulationState::default();
         state.next_run_id = run.id;
         state.runs = vec![run].into();
-        let snapshot = crate::io::project_io::ProjectSimulationResults::from_state(&state);
+        let snapshot = crate::io::capture_simulation_results(&state);
         snapshot.validate().unwrap();
         let restored: crate::io::project_io::ProjectSimulationResults =
             serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
-        restored.apply_to_state(&mut state).unwrap();
+        crate::io::restore_simulation_results(restored, &mut state).unwrap();
         let mut analysis = state.runs[0].analyses[0].clone();
         for index in 0..outputs.len() {
             assert_eq!(
@@ -479,16 +479,16 @@ fn deferred_op_outputs_use_physical_tables_after_renaming_and_project_reload() {
                     state.next_run_id = run.id;
                     state.runs = vec![run.clone()].into();
                     if reload {
-                        let snapshot = ProjectSimulationResults::from_state(&state);
+                        let snapshot = crate::io::capture_simulation_results(&state);
                         snapshot.validate().unwrap();
                         let restored: ProjectSimulationResults =
                             serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap())
                                 .unwrap();
-                        restored.apply_to_state(&mut state).unwrap();
+                        crate::io::restore_simulation_results(restored, &mut state).unwrap();
                     }
                     assert!(state.select_run(0));
                     let before =
-                        serde_json::to_vec(&ProjectSimulationResults::from_state(&state)).unwrap();
+                        serde_json::to_vec(&crate::io::capture_simulation_results(&state)).unwrap();
                     let visible_before = state.waveforms.clone();
                     let version_before = state.data_version;
                     let result =
@@ -507,13 +507,13 @@ fn deferred_op_outputs_use_physical_tables_after_renaming_and_project_reload() {
                         assert_eq!(state.data_version, version_before);
                         assert_eq!(state.waveforms, visible_before);
                         assert_eq!(
-                            serde_json::to_vec(&ProjectSimulationResults::from_state(&state))
+                            serde_json::to_vec(&crate::io::capture_simulation_results(&state))
                                 .unwrap(),
                             before
                         );
                     }
                     state.runs[0].validate_provenance().unwrap();
-                    ProjectSimulationResults::from_state(&state)
+                    crate::io::capture_simulation_results(&state)
                         .validate()
                         .unwrap();
                 }

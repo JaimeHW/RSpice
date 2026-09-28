@@ -61,14 +61,13 @@ fn sampled_pnoise_studio_results_round_trip_and_reject_changed_geometry() {
     let project = ProjectFile::new_with_simulation_results(
         workspace,
         libraries,
-        ProjectSimulationResults::from_state(&simulation),
+        crate::io::capture_simulation_results(&simulation),
     );
     let json = serialize_project_file(&project).unwrap();
-    let restored = load_project_text(&json, None)
-        .unwrap()
-        .simulation_results
-        .into_simulation_state()
-        .unwrap();
+    let restored = crate::io::simulation_state_from_results(
+        load_project_text(&json, None).unwrap().simulation_results,
+    )
+    .unwrap();
     assert_eq!(
         restored
             .active_analysis()
@@ -163,14 +162,13 @@ fn hbnoise_reference_results_survive_project_load_and_reject_tampering_and_old_s
         let project = ProjectFile::new_with_simulation_results(
             workspace,
             libraries,
-            ProjectSimulationResults::from_state(&simulation),
+            crate::io::capture_simulation_results(&simulation),
         );
         let json = serialize_project_file(&project).unwrap();
-        let restored = load_project_text(&json, None)
-            .unwrap()
-            .simulation_results
-            .into_simulation_state()
-            .unwrap();
+        let restored = crate::io::simulation_state_from_results(
+            load_project_text(&json, None).unwrap().simulation_results,
+        )
+        .unwrap();
         assert_eq!(
             restored
                 .active_analysis()
@@ -280,14 +278,13 @@ fn noise_input_units_survive_projects_and_reject_unit_tampering() {
         let project = ProjectFile::new_with_simulation_results(
             workspace,
             libraries,
-            ProjectSimulationResults::from_state(&simulation),
+            crate::io::capture_simulation_results(&simulation),
         );
         let json = serialize_project_file(&project).unwrap();
-        let restored = load_project_text(&json, None)
-            .unwrap()
-            .simulation_results
-            .into_simulation_state()
-            .unwrap();
+        let restored = crate::io::simulation_state_from_results(
+            load_project_text(&json, None).unwrap().simulation_results,
+        )
+        .unwrap();
         assert_eq!(
             restored.active_analysis().unwrap().noise_summary.as_ref(),
             Some(&summary)
@@ -305,9 +302,7 @@ fn noise_input_units_survive_projects_and_reject_unit_tampering() {
         );
         if quantity.is_none() {
             assert_eq!(
-                migrated
-                    .simulation_results
-                    .into_simulation_state()
+                crate::io::simulation_state_from_results(migrated.simulation_results)
                     .unwrap()
                     .active_analysis()
                     .unwrap()

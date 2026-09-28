@@ -8,8 +8,7 @@ use egui::{Ui, WidgetInfo, WidgetType};
 use rspice_results::manifest::{ManifestRow, ManifestViewModel};
 
 use crate::state::{
-    AnalysisResult, RunHistoryRevision, SavedOutputMaterializationStatus, SavedOutputReceipt,
-    SimulationRun,
+    RunHistoryRevision, SavedOutputMaterializationStatus, SavedOutputReceipt, SimulationRun,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -40,7 +39,7 @@ const COLUMN_TITLES: [&str; 7] = [
 pub(crate) fn manifest_for_run(run: &SimulationRun) -> ManifestViewModel {
     frame_work::note(DatasetWalk::ManifestViewModel);
     frame_work::note(DatasetWalk::DatasetDigest);
-    ManifestViewModel::from_run(run, AnalysisResult::is_live_partial)
+    ManifestViewModel::from_run(run, |analysis| analysis.is_live_partial())
 }
 
 /// The manifest projection for one run, and the run generation it describes.
@@ -901,8 +900,6 @@ mod tests {
 
     #[test]
     fn retained_view_source_manifest_tracks_restoration_and_nested_edits() {
-        use crate::io::project_io::ProjectSimulationResults;
-
         let mut state = AppState::default();
         let run = state.simulation.start_run();
         run.add_analysis(
@@ -920,9 +917,10 @@ mod tests {
         let version = state.simulation.data_version;
         let mut replacement = state.simulation.clone();
         replacement.runs[0].analyses[0].waveforms[0].y = Arc::new(vec![0.0, 9.0]);
-        state.simulation = ProjectSimulationResults::from_state(&replacement)
-            .into_simulation_state()
-            .unwrap();
+        state.simulation = crate::io::simulation_state_from_results(
+            crate::io::capture_simulation_results(&replacement),
+        )
+        .unwrap();
         assert_eq!(state.simulation.data_version, version);
         let restored = active_manifest(&mut state).unwrap();
         assert_eq!(restored.model.dataset_id, original.model.dataset_id);

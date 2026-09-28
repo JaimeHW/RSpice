@@ -7,8 +7,8 @@ pub struct ProjectWaveformData {
     pub name: String,
     /// Exact samples share storage with immutable snapshots. A writer must
     /// detach through copy-on-write before changing a draft's samples.
-    pub x: crate::state::SharedWaveformValues,
-    pub y: crate::state::SharedWaveformValues,
+    pub x: rspice_results::waveform::SharedWaveformValues,
+    pub y: rspice_results::waveform::SharedWaveformValues,
     pub color: String,
     #[serde(default = "default_true")]
     pub visible: bool,
@@ -23,9 +23,8 @@ pub struct ProjectWaveformData {
 }
 
 impl ProjectWaveformData {
-    pub(super) fn into_waveform(self) -> WaveformData {
-        let mut waveform = WaveformData::new(self.name, self.x, self.y, self.color);
-        waveform.visible = self.visible;
+    pub fn into_waveform(self) -> RetainedWaveform {
+        let mut waveform = RetainedWaveform::new(self.name, self.x, self.y);
         waveform.unit = self.unit;
         if let Some(complex) = self.complex {
             waveform =
@@ -52,32 +51,11 @@ impl ProjectWaveformData {
     }
 }
 
-impl From<&WaveformData> for ProjectWaveformData {
-    fn from(waveform: &WaveformData) -> Self {
-        Self {
-            name: waveform.name.clone(),
-            x: waveform.x.clone(),
-            y: waveform.y.clone(),
-            color: waveform.color.clone(),
-            visible: waveform.visible,
-            unit: waveform.unit.clone(),
-            complex: waveform
-                .complex
-                .as_ref()
-                .map(|complex| ProjectComplexWaveformComponents {
-                    source_name: complex.source_name.clone(),
-                    real: complex.real.clone(),
-                    imag: complex.imag.clone(),
-                }),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectComplexWaveformComponents {
     pub source_name: String,
-    pub real: crate::state::SharedWaveformValues,
-    pub imag: crate::state::SharedWaveformValues,
+    pub real: rspice_results::waveform::SharedWaveformValues,
+    pub imag: rspice_results::waveform::SharedWaveformValues,
 }
 
 impl ProjectComplexWaveformComponents {
@@ -196,9 +174,9 @@ pub struct ProjectNoiseSummary {
     #[serde(default)]
     pub input_quantity: Option<rspice_core::analysis::noise::NoiseInputQuantity>,
     #[serde(default)]
-    pub conversion: Option<crate::state::PeriodicNoiseConversionEvidence>,
+    pub conversion: Option<rspice_results::noise::PeriodicNoiseConversionEvidence>,
     #[serde(default)]
-    pub noise_figure: Option<std::sync::Arc<crate::state::NoiseFigureEvidence>>,
+    pub noise_figure: Option<std::sync::Arc<rspice_results::noise::NoiseFigureEvidence>>,
     #[serde(default)]
     pub rows: Vec<ProjectNoiseContributorRow>,
     #[serde(default)]
@@ -209,7 +187,7 @@ pub struct ProjectNoiseSummary {
 }
 
 impl ProjectNoiseSummary {
-    pub(in crate::io::project_io) fn into_noise_summary(self) -> NoiseSummary {
+    pub fn into_noise_summary(self) -> NoiseSummary {
         NoiseSummary {
             input_quantity: self.input_quantity,
             conversion: self.conversion,
