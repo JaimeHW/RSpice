@@ -15,6 +15,7 @@ mod design_projection;
 mod document_occurrence;
 mod hierarchy;
 use rspice_design::hierarchy as hierarchy_resolver;
+mod design_reference_changes;
 mod materialize;
 mod netlist_profile;
 #[cfg(test)]
@@ -70,11 +71,12 @@ use crate::product::{
     ResultDocumentId, RevisionError, SavedOutputId, SimulationPlanId, SpecificationId,
 };
 use crate::state::{
-    Cell, ComponentType, Library, LibraryCellInstance, LibraryManager, SchematicState, View,
-    ViewType,
+    Cell, Library, LibraryCellInstance, LibraryManager, SchematicState, View, ViewType,
 };
 #[cfg(test)]
 use rspice_app_types::hierarchy_path::InstancePath;
+#[cfg(test)]
+use rspice_design::schematic::component_type::ComponentType;
 
 pub use rspice_design_model::cell_view::{
     CellViewRef, DEFAULT_PROJECT_LIBRARY, DEFAULT_SCHEMATIC_VIEW, DEFAULT_TOP_CELL,

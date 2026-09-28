@@ -1,32 +1,14 @@
 //! Exact live-reference deltas shared by component and annotation transactions.
 
-use super::*;
+use super::design_reference_changes::DesignReferenceChanges;
+use super::{DocumentOccurrence, ProjectWorkspace};
 use crate::product::{SavedOutputId, SimulationPlanId};
-use crate::state::workspace::DocumentOccurrence;
-use crate::state::{
-    Component, ConfigurationSetCatalog, ConfigurationSetDefinition, ConfigurationSetId,
-    InstancePath, SavedOutput,
-};
+use crate::state::{CellViewRef, Component, ConfigurationSetCatalog, SavedOutput};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ReferenceChanges {
-    configurations: Vec<ConfigurationChange>,
+    design: DesignReferenceChanges,
     outputs: Vec<OutputChange>,
-    instances: Vec<InstanceNameChange>,
-}
-
-#[derive(Debug, Clone)]
-struct InstanceNameChange {
-    document: CellViewRef,
-    before: String,
-    after: String,
-}
-
-#[derive(Debug, Clone)]
-struct ConfigurationChange {
-    id: ConfigurationSetId,
-    before: ConfigurationSetDefinition,
-    after: ConfigurationSetDefinition,
 }
 
 #[derive(Debug, Clone)]
@@ -46,13 +28,8 @@ pub(crate) struct PreparedReferences {
 
 impl ReferenceChanges {
     pub(crate) fn reversed(mut self) -> Self {
-        for change in &mut self.configurations {
-            std::mem::swap(&mut change.before, &mut change.after);
-        }
+        self.design = self.design.reversed();
         for change in &mut self.outputs {
-            std::mem::swap(&mut change.before, &mut change.after);
-        }
-        for change in &mut self.instances {
             std::mem::swap(&mut change.before, &mut change.after);
         }
         self
@@ -64,19 +41,7 @@ impl ReferenceChanges {
         outputs: Vec<(SimulationPlanId, SavedOutput)>,
     ) -> Self {
         Self {
-            instances: Vec::new(),
-            configurations: configurations
-                .configurations()
-                .iter()
-                .filter_map(|after| {
-                    let before = workspace.configuration_sets.find(after.id())?;
-                    (before.definition() != after.definition()).then(|| ConfigurationChange {
-                        id: after.id(),
-                        before: before.definition().clone(),
-                        after: after.definition().clone(),
-                    })
-                })
-                .collect(),
+            design: DesignReferenceChanges::between(&workspace.configuration_sets, configurations),
             outputs: outputs
                 .into_iter()
                 .map(|(plan, output)| {
@@ -104,93 +69,18 @@ impl ReferenceChanges {
         before: &[Component],
         after: &[Component],
     ) {
-        let candidates: BTreeMap<_, _> = after
-            .iter()
-            .map(|component| (component.id, component))
-            .collect();
-        for component in before {
-            if component.kind != ComponentType::CellInstance {
-                continue;
-            }
-            if let Some(candidate) = candidates.get(&component.id)
-                && component.name != candidate.name
-            {
-                self.instances.push(InstanceNameChange {
-                    document: document.clone(),
-                    before: component.name.clone(),
-                    after: candidate.name.clone(),
-                });
-            }
-        }
-    }
-
-    fn prepare_occurrences(
-        &self,
-        workspace: &ProjectWorkspace,
-        forward: bool,
-    ) -> Result<Vec<(CellViewRef, DocumentOccurrence)>, String> {
-        let mut names = BTreeMap::new();
-        for change in &self.instances {
-            let (from, to) = if forward {
-                (&change.before, &change.after)
-            } else {
-                (&change.after, &change.before)
-            };
-            let key = (
-                change.document.key().to_ascii_lowercase(),
-                from.to_ascii_lowercase(),
-            );
-            if let Some(previous) = names.insert(key, to)
-                && previous != to
-            {
-                return Err("The renamed instance has ambiguous hierarchy occurrences.".to_owned());
-            }
-        }
-        if names.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut updates = Vec::new();
-        for open in &workspace.open_views {
-            let mut occurrence = open.occurrence.clone();
-            let mut parent = occurrence.root.clone();
-            let mut changed = false;
-            for step in &mut occurrence.steps {
-                if let Some(name) = names.get(&(
-                    parent.key().to_ascii_lowercase(),
-                    step.instance_name.to_ascii_lowercase(),
-                )) {
-                    changed |= step.instance_name != **name;
-                    step.instance_name.clone_from(name);
-                }
-                parent.clone_from(&step.master);
-            }
-            if changed {
-                let mut path = InstancePath::root();
-                for step in &occurrence.steps {
-                    path = path
-                        .child(&step.instance_name)
-                        .map_err(|error| error.to_string())?;
-                }
-                updates.push((open.reference.clone(), occurrence));
-            }
-        }
-        Ok(updates)
+        self.design.add_instance_renames(document, before, after);
     }
 
     pub(crate) fn matches(&self, workspace: &ProjectWorkspace, forward: bool) -> bool {
-        self.configurations.iter().all(|change| {
-            workspace
-                .configuration_sets
-                .find(change.id)
-                .is_some_and(|current| {
-                    current.definition()
-                        == if forward {
-                            &change.before
-                        } else {
-                            &change.after
-                        }
-                })
-        }) && self.outputs.iter().all(|change| {
+        self.design
+            .checked_configurations(&workspace.configuration_sets, forward)
+            .is_some()
+            && self.outputs_match(workspace, forward)
+    }
+
+    fn outputs_match(&self, workspace: &ProjectWorkspace, forward: bool) -> bool {
+        self.outputs.iter().all(|change| {
             workspace
                 .plan_data(change.plan)
                 .and_then(|payload| {
@@ -216,30 +106,16 @@ impl ReferenceChanges {
         workspace: &ProjectWorkspace,
         forward: bool,
     ) -> Result<PreparedReferences, String> {
-        if !self.matches(workspace, forward) {
+        let Some(configurations) = self
+            .design
+            .checked_configurations(&workspace.configuration_sets, forward)
+            .filter(|_| self.outputs_match(workspace, forward))
+        else {
             return Err(
                 "The configuration or saved-output references changed before commit.".to_owned(),
             );
-        }
-        let mut configurations = workspace.configuration_sets.clone();
-        for change in &self.configurations {
-            let revision = configurations
-                .find(change.id)
-                .expect("guarded configuration")
-                .revision();
-            configurations
-                .update(
-                    change.id,
-                    revision,
-                    if forward {
-                        &change.after
-                    } else {
-                        &change.before
-                    }
-                    .clone(),
-                )
-                .map_err(|error| error.to_string())?;
-        }
+        };
+        let configurations = configurations.prepare()?;
         let mut outputs = Vec::with_capacity(self.outputs.len());
         for change in &self.outputs {
             let mut output = workspace
@@ -263,7 +139,13 @@ impl ReferenceChanges {
         Ok(PreparedReferences {
             configurations,
             outputs,
-            occurrences: self.prepare_occurrences(workspace, forward)?,
+            occurrences: self.design.prepare_occurrences(
+                workspace
+                    .open_views
+                    .iter()
+                    .map(|open| (&open.reference, &open.occurrence)),
+                forward,
+            )?,
         })
     }
 }
