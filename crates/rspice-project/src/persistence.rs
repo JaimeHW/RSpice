@@ -92,6 +92,20 @@ pub enum PersistenceError {
     #[cfg(not(target_arch = "wasm32"))]
     #[error("native canonical binding receipt mismatch: {0}")]
     NativeReceiptMismatch(String),
+    #[cfg(not(target_arch = "wasm32"))]
+    #[error(
+        "project publication outcome is uncertain: {message}; preserved recovery files: {recovery_paths:?}"
+    )]
+    PublicationUncertain {
+        message: String,
+        recovery_paths: Vec<PathBuf>,
+    },
+    #[cfg(not(target_arch = "wasm32"))]
+    #[error("another RSpice writer owns the destination lease: {0}")]
+    LeaseBusy(PathBuf),
+    #[cfg(not(target_arch = "wasm32"))]
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
     #[error(transparent)]
     Project(#[from] ProjectIoError),
     #[cfg(not(target_arch = "wasm32"))]

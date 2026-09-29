@@ -2,6 +2,7 @@
 
 use super::PersistenceBinding;
 use crate::io::ProjectSnapshot;
+use crate::io::durable_file::CompareExchangeError;
 use crate::product::ContentDigest;
 use rspice_project::ProjectIoError;
 use rspice_project::persistence::native::NativeProjectStorage;
@@ -12,6 +13,25 @@ use std::path::{Path, PathBuf};
 
 pub(crate) struct NativeStorage;
 
+fn native_storage_error(error: CompareExchangeError) -> PersistenceError {
+    match error {
+        CompareExchangeError::PublicationUncertain {
+            message,
+            recovery_paths,
+        } => PersistenceError::PublicationUncertain {
+            message,
+            recovery_paths,
+        },
+        CompareExchangeError::LeaseBusy(path) => PersistenceError::LeaseBusy(path),
+        CompareExchangeError::Io(error) => PersistenceError::Io(error),
+        // Publication maps this to ExternalChange at its call site. Retain
+        // the existing diagnostic if another storage operation reports it.
+        error @ CompareExchangeError::Conflict { .. } => {
+            PersistenceError::Platform(error.to_string())
+        }
+    }
+}
+
 impl NativeProjectStorage for NativeStorage {
     type ExpectedContent = crate::io::durable_file::ExpectedContent;
 
@@ -20,8 +40,7 @@ impl NativeProjectStorage for NativeStorage {
     }
 
     fn reconcile_publication(&self, path: &Path) -> Result<(), PersistenceError> {
-        crate::io::durable_file::reconcile_publication(path)
-            .map_err(|error| PersistenceError::Platform(error.to_string()))
+        crate::io::durable_file::reconcile_publication(path).map_err(native_storage_error)
     }
 
     fn read_project(&self, path: &Path) -> Result<ProjectBytes, ProjectIoError> {
@@ -36,8 +55,7 @@ impl NativeProjectStorage for NativeStorage {
         &self,
         path: &Path,
     ) -> Result<crate::io::durable_file::ExpectedContent, PersistenceError> {
-        crate::io::durable_file::observe_expected_content(path)
-            .map_err(|error| PersistenceError::Platform(error.to_string()))
+        crate::io::durable_file::observe_expected_content(path).map_err(native_storage_error)
     }
 
     fn publish(
@@ -48,13 +66,8 @@ impl NativeProjectStorage for NativeStorage {
     ) -> Result<ContentDigest, PersistenceError> {
         match crate::io::durable_file::compare_exchange_bytes(path, expected, bytes) {
             Ok(()) => Ok(digest_bytes(bytes)),
-            Err(crate::io::durable_file::CompareExchangeError::Conflict { .. }) => {
-                Err(PersistenceError::ExternalChange)
-            }
-            Err(crate::io::durable_file::CompareExchangeError::Io(error)) => {
-                Err(PersistenceError::Platform(error.to_string()))
-            }
-            Err(error) => Err(PersistenceError::Platform(error.to_string())),
+            Err(CompareExchangeError::Conflict { .. }) => Err(PersistenceError::ExternalChange),
+            Err(error) => Err(native_storage_error(error)),
         }
     }
 
@@ -75,10 +88,8 @@ impl NativeProjectStorage for NativeStorage {
         {
             let left_path = left;
             let right_path = right;
-            let left = std::fs::metadata(left_path)
-                .map_err(|error| PersistenceError::Platform(error.to_string()))?;
-            let right = std::fs::metadata(right_path)
-                .map_err(|error| PersistenceError::Platform(error.to_string()))?;
+            let left = std::fs::metadata(left_path).map_err(PersistenceError::Io)?;
+            let right = std::fs::metadata(right_path).map_err(PersistenceError::Io)?;
 
             #[cfg(unix)]
             {
@@ -122,15 +133,13 @@ pub(crate) fn restore_native_binding(
 
 pub(crate) fn normalize_native_path(path: &Path) -> Result<PathBuf, PersistenceError> {
     if path.exists() {
-        return std::fs::canonicalize(path)
-            .map_err(|error| PersistenceError::Platform(error.to_string()));
+        return std::fs::canonicalize(path).map_err(PersistenceError::Io);
     }
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    let parent = std::fs::canonicalize(parent)
-        .map_err(|error| PersistenceError::Platform(error.to_string()))?;
+    let parent = std::fs::canonicalize(parent).map_err(PersistenceError::Io)?;
     let name = path.file_name().ok_or_else(|| {
         PersistenceError::Platform(format!("'{}' has no project filename", path.display()))
     })?;
@@ -144,16 +153,16 @@ fn windows_file_identity(path: &Path) -> Result<(u32, u64), PersistenceError> {
         BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
     };
 
-    let file =
-        std::fs::File::open(path).map_err(|error| PersistenceError::Platform(error.to_string()))?;
+    let file = std::fs::File::open(path).map_err(PersistenceError::Io)?;
     let mut information = unsafe { std::mem::zeroed::<BY_HANDLE_FILE_INFORMATION>() };
     let succeeded =
         unsafe { GetFileInformationByHandle(file.as_raw_handle() as *mut _, &mut information) };
     if succeeded == 0 {
-        return Err(PersistenceError::Platform(
-            std::io::Error::last_os_error().to_string(),
-        ));
+        return Err(PersistenceError::Io(std::io::Error::last_os_error()));
     }
     let file_index = ((information.nFileIndexHigh as u64) << 32) | information.nFileIndexLow as u64;
     Ok((information.dwVolumeSerialNumber, file_index))
 }
+
+#[cfg(test)]
+mod tests;

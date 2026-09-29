@@ -13,7 +13,10 @@ struct Storage {
     alias: Cell<bool>,
     steps: RefCell<Vec<&'static str>>,
     recovered_bytes: RefCell<Option<Vec<u8>>>,
-    recovery_error: RefCell<Option<String>>,
+    recovery_error: RefCell<Option<PersistenceError>>,
+    observation_error: RefCell<Option<PersistenceError>>,
+    publication_error: RefCell<Option<PersistenceError>>,
+    publish_before_error: bool,
 }
 
 impl NativeProjectStorage for Storage {
@@ -25,8 +28,8 @@ impl NativeProjectStorage for Storage {
     }
     fn reconcile_publication(&self, _: &Path) -> Result<(), PersistenceError> {
         self.steps.borrow_mut().push("reconcile");
-        if let Some(error) = self.recovery_error.borrow().as_ref() {
-            return Err(PersistenceError::Platform(error.clone()));
+        if let Some(error) = self.recovery_error.borrow_mut().take() {
+            return Err(error);
         }
         if let Some(recovered) = self.recovered_bytes.borrow_mut().take() {
             *self.bytes.borrow_mut() = Some(recovered);
@@ -46,6 +49,9 @@ impl NativeProjectStorage for Storage {
     }
     fn observe_destination(&self, _: &Path) -> Result<Self::ExpectedContent, PersistenceError> {
         self.observations.set(self.observations.get() + 1);
+        if let Some(error) = self.observation_error.borrow_mut().take() {
+            return Err(error);
+        }
         Ok(self.bytes.borrow().as_deref().map(digest_bytes))
     }
     fn accepted_content(&self, digest: ContentDigest) -> Self::ExpectedContent {
@@ -58,6 +64,12 @@ impl NativeProjectStorage for Storage {
         bytes: &[u8],
     ) -> Result<ContentDigest, PersistenceError> {
         self.publications.set(self.publications.get() + 1);
+        if let Some(error) = self.publication_error.borrow_mut().take() {
+            if self.publish_before_error {
+                *self.bytes.borrow_mut() = Some(bytes.to_vec());
+            }
+            return Err(error);
+        }
         let mut current = self.bytes.borrow_mut();
         if current.as_deref().map(digest_bytes) != expected {
             return Err(PersistenceError::ExternalChange);
@@ -350,7 +362,8 @@ fn native_restore_checks_receipt_recovery_bytes_and_decoded_identity_in_order() 
     ));
     assert_eq!(storage.steps.take(), ["normalize"]);
 
-    *storage.recovery_error.borrow_mut() = Some("recovery unresolved".to_owned());
+    *storage.recovery_error.borrow_mut() =
+        Some(PersistenceError::Platform("recovery unresolved".to_owned()));
     assert!(
         matches!(NativeBinding::restore(&storage, path, &project_id, &receipt, NoSourceFiles),
         Err(PersistenceError::Platform(message)) if message == "recovery unresolved")
@@ -396,4 +409,154 @@ fn native_restore_checks_receipt_recovery_bytes_and_decoded_identity_in_order() 
     assert_eq!(storage.steps.take(), ["normalize", "reconcile", "read"]);
     assert_eq!(storage.bytes.borrow().as_deref(), Some(bytes.as_slice()));
     assert_eq!(storage.publications.get(), 0);
+}
+
+fn uncertain() -> PersistenceError {
+    PersistenceError::PublicationUncertain {
+        message: "unresolved publication".to_owned(),
+        recovery_paths: vec![
+            PathBuf::from("recovery slot.a"),
+            PathBuf::from("predecessor.bak"),
+        ],
+    }
+}
+
+fn lease_busy() -> PersistenceError {
+    PersistenceError::LeaseBusy(PathBuf::from("owned.lock"))
+}
+
+fn os_failure() -> PersistenceError {
+    PersistenceError::Io(std::io::Error::from_raw_os_error(5))
+}
+
+fn assert_storage_error(actual: PersistenceError, expected: PersistenceError) {
+    assert_eq!(actual.to_string(), expected.to_string());
+    match (actual, expected) {
+        (
+            PersistenceError::PublicationUncertain {
+                message,
+                recovery_paths,
+            },
+            PersistenceError::PublicationUncertain {
+                message: expected,
+                recovery_paths: paths,
+            },
+        ) => {
+            assert_eq!(message, expected);
+            assert_eq!(recovery_paths, paths);
+        }
+        (PersistenceError::LeaseBusy(path), PersistenceError::LeaseBusy(expected)) => {
+            assert_eq!(path, expected)
+        }
+        (PersistenceError::Io(error), PersistenceError::Io(expected)) => {
+            assert_eq!(error.kind(), expected.kind());
+            assert_eq!(error.raw_os_error(), expected.raw_os_error());
+        }
+        (actual, expected) => panic!("storage failure changed: {actual:?}, expected {expected:?}"),
+    }
+}
+
+#[test]
+fn native_recovery_and_observation_faults_precede_content_and_publication() {
+    let path = Path::new("canonical.rspiceproj");
+    let file = project();
+    let project_id = file.workspace.project.id().to_string();
+    let (bytes, accepted_digest) = serialized_project(&file).unwrap();
+    let receipt = NativeBindingReceipt {
+        canonical_path: path.to_path_buf(),
+        project_id: project_id.clone(),
+        accepted_digest,
+    };
+    for fault in [
+        uncertain as fn() -> PersistenceError,
+        lease_busy,
+        os_failure,
+    ] {
+        let storage = Storage {
+            bytes: RefCell::new(Some(bytes.clone())),
+            recovery_error: RefCell::new(Some(fault())),
+            ..Storage::default()
+        };
+        assert_storage_error(
+            NativeBinding::open(&storage, path, NoSourceFiles)
+                .err()
+                .unwrap(),
+            fault(),
+        );
+        assert_eq!(storage.steps.take(), ["normalize", "reconcile"]);
+        *storage.recovery_error.borrow_mut() = Some(fault());
+        assert_storage_error(
+            NativeBinding::restore(&storage, path, &project_id, &receipt, NoSourceFiles)
+                .err()
+                .unwrap(),
+            fault(),
+        );
+        assert_eq!(storage.steps.take(), ["normalize", "reconcile"]);
+        assert_eq!(storage.bytes.borrow().as_deref(), Some(bytes.as_slice()));
+
+        *storage.observation_error.borrow_mut() = Some(fault());
+        let error = NativeSaveDestination::new(
+            &storage,
+            path,
+            DestinationAuthority::UserSelected,
+            None,
+            None,
+        )
+        .err()
+        .unwrap();
+        let ProjectLifecycleError::Persistence(error) = error else {
+            panic!("storage error was lost")
+        };
+        assert_storage_error(error, fault());
+        *storage.observation_error.borrow_mut() = Some(fault());
+        let error = NativeCopyDestination::new(&storage, path, None, None)
+            .err()
+            .unwrap();
+        let ProjectLifecycleError::Persistence(error) = error else {
+            panic!("storage error was lost")
+        };
+        assert_storage_error(error, fault());
+        assert_eq!(storage.observations.get(), 2);
+        assert_eq!(storage.publications.get(), 0);
+    }
+}
+
+#[test]
+fn uncertain_native_publication_never_returns_save_or_copy_acceptance() {
+    for publish_before_error in [false, true] {
+        for copy in [false, true] {
+            let storage = Storage {
+                bytes: RefCell::new(Some(b"accepted bytes".to_vec())),
+                publication_error: RefCell::new(Some(uncertain())),
+                publish_before_error,
+                ..Storage::default()
+            };
+            let result = if copy {
+                NativeCopyDestination::new(&storage, Path::new("copy.rspiceproj"), None, None)
+                    .unwrap()
+                    .publish(&storage, project())
+            } else {
+                selected(&storage)
+                    .publish(&storage, project(), |_| Ok(DocumentRegistry::default()))
+                    .map(|_| ())
+            };
+            let ProjectLifecycleError::Persistence(error) = result.unwrap_err() else {
+                panic!("storage error was lost")
+            };
+            assert_storage_error(error, uncertain());
+            assert_eq!(storage.publications.get(), 1);
+            assert_eq!(storage.observations.get(), 1);
+            if publish_before_error {
+                assert_ne!(
+                    storage.bytes.borrow().as_deref(),
+                    Some(b"accepted bytes".as_slice())
+                );
+            } else {
+                assert_eq!(
+                    storage.bytes.borrow().as_deref(),
+                    Some(b"accepted bytes".as_slice())
+                );
+            }
+        }
+    }
 }
