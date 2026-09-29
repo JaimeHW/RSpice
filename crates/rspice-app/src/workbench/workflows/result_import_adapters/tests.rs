@@ -554,7 +554,7 @@ fn fst_with_packed_signal(pack_type: u8, expanded_size: u64) -> Vec<u8> {
 #[test]
 fn fst_reader_imports_a_real_generated_container_and_rejects_truncation() {
     let bytes = generated_fst();
-    assert!(looks_like_fst(&bytes));
+    assert!(rspice_formats::fst::looks_like_fst(&bytes));
     preflight_fst(&bytes, ResultImportFormat::Fst).expect("ordinary FST preflight");
     assert_basic(
         parse_fst(&bytes, ResultImportFormat::Fst).expect("FST import"),

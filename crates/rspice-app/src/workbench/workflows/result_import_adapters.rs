@@ -305,7 +305,6 @@ pub(super) fn parse_psf_ascii(
 mod digital;
 
 pub(super) use digital::{parse_fst, parse_vcd};
-pub(super) use rspice_formats::fst::looks_like_fst;
 
 #[cfg(test)]
 use digital::preflight_fst_for_test as preflight_fst;

@@ -19,6 +19,8 @@ pub mod numpy;
 pub mod psf;
 #[cfg(feature = "result-csv")]
 pub mod result_csv;
+#[cfg(all(feature = "result-waveform", feature = "fst"))]
+pub mod result_import;
 #[cfg(feature = "spice-raw")]
 pub mod spice_raw;
 pub mod table;
