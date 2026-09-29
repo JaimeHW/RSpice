@@ -135,7 +135,7 @@ fn tapped_bus_schematic() -> SchematicState {
 #[test]
 fn hierarchy_extraction_uses_authored_symbol_pin_coordinates() {
     let (libraries, buffers) = library_with_authored_amp_symbol();
-    let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
+    let hierarchy = HierarchySource::from_workspace(libraries.catalog(), &buffers);
     let mut schematic = SchematicState::default();
     schematic
         .document_mut_for_test()
@@ -156,7 +156,7 @@ fn hierarchy_extraction_uses_authored_symbol_pin_coordinates() {
 #[test]
 fn hierarchy_resolved_unconnected_pin_check_uses_authored_terminal_geometry() {
     let (libraries, buffers) = library_with_authored_amp_symbol();
-    let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
+    let hierarchy = HierarchySource::from_workspace(libraries.catalog(), &buffers);
     let mut instance = authored_amp_instance();
     instance.name = "X1".to_owned();
     let mut schematic = SchematicState::default();
@@ -288,7 +288,7 @@ fn typed_bus_member_conflict_is_reported_by_drc_and_honors_severity_policy() {
 #[test]
 fn duplicate_authored_cell_outputs_on_bus_member_are_reported_with_policy_severity() {
     let (libraries, buffers) = library_with_authored_amp_symbol();
-    let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
+    let hierarchy = HierarchySource::from_workspace(libraries.catalog(), &buffers);
     let mut first = authored_amp_instance();
     first.id = 10;
     first.name = "X1".to_owned();
@@ -632,7 +632,7 @@ fn erc_and_netlist_agree_on_nets() {
     }
 
     let (libraries, buffers) = library_with_authored_amp_symbol();
-    let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
+    let hierarchy = HierarchySource::from_workspace(libraries.catalog(), &buffers);
     let mut placed = SchematicState::default();
     let mut instance = authored_amp_instance();
     instance.name = "X1".to_owned();

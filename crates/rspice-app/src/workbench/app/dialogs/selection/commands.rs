@@ -436,7 +436,7 @@ fn design_nets(state: &AppState) -> Result<std::sync::Arc<Vec<DesignNet>>, Strin
         )
         .map_err(|error| error.to_string())?;
     Ok(projection_nets(
-        &state.library_manager,
+        state.library_manager.catalog(),
         &projection,
         &state.workspace.content.active_view.key(),
     ))
@@ -660,14 +660,15 @@ fn cut_open_net_count(state: &AppState, selection: &Selection) -> Result<usize, 
         )
         .map_err(|error| error.to_string())?;
     let before = projection_nets(
-        &state.library_manager,
+        state.library_manager.catalog(),
         &projection,
         &state.workspace.content.active_view.key(),
     );
     let mut after_schematic = state.schematic.clone();
     after_schematic.session.selection = selection.clone();
     let _ = after_schematic.delete_selection();
-    let hierarchy = HierarchySource::from_design_projection(&state.library_manager, &projection);
+    let hierarchy =
+        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
     let after = design_nets_with_hierarchy(&after_schematic, &hierarchy);
 
     Ok(before

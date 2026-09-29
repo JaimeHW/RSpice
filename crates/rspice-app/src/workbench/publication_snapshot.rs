@@ -347,7 +347,8 @@ fn engineering_publication(
             source: state.workspace.content.active_view.display_path(),
             reason: error.to_string(),
         })?;
-    let hierarchy = HierarchySource::from_design_projection(&state.library_manager, &projection);
+    let hierarchy =
+        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
     let subject = projection
         .schematic_buffers()
         .iter()

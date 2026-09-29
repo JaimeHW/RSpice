@@ -357,7 +357,7 @@ fn collect_report(state: &AppState) -> PreflightReport {
             .expect("a successful execution projection has a materialized root");
         let hierarchy_source =
             crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
-                &state.library_manager,
+                state.library_manager.catalog(),
                 execution_projection,
             );
         let result = crate::services::drc::run_drc_check_with_hierarchy_and_config(

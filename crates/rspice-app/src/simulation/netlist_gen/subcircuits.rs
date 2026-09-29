@@ -1,7 +1,7 @@
 //! Read-only access to the design a deck is generated from.
 //!
 //! This is the generator's whole view of the project: which schematic buffer
-//! holds each Library/Cell/View master, which libraries authorize their
+//! holds each Library/Cell/View master, which catalog authorizes their
 //! symbols and parameter contracts, which connectivity contract promotes a
 //! label to a global, and which frozen execution plan resolved the hierarchy.
 //! Deciding what each master is called and emitting its body belongs to
@@ -9,17 +9,16 @@
 //! design.
 
 use super::*;
-use crate::state::workspace::{
-    ConfigurationExecutionBinding, ConfigurationExecutionPlan, ConfigurationExecutionProjection,
-    DesignProjection,
-};
-use crate::state::{LibraryCellInstance, LibraryManager, ResolvedCellSymbol};
+use crate::state::{LibraryCellInstance, ResolvedCellSymbol};
+use rspice_design::hierarchy::{ConfigurationExecutionBinding, ConfigurationExecutionPlan};
+use rspice_design::library::LibraryCatalog;
+use rspice_design::projection::{ConfigurationExecutionProjection, DesignProjection};
 
 /// Borrow the source map's symbol and global declarations without copying it.
 trait SchematicBuffers {
     fn resolve_symbol(
         &self,
-        libraries: &LibraryManager,
+        libraries: &LibraryCatalog,
         binding: &LibraryCellInstance,
     ) -> Option<ResolvedCellSymbol>;
     fn explicit_global_declarations(&self) -> Vec<String>;
@@ -28,10 +27,10 @@ trait SchematicBuffers {
 impl<S: AsRef<SchematicDocument>> SchematicBuffers for HashMap<String, S> {
     fn resolve_symbol(
         &self,
-        libraries: &LibraryManager,
+        libraries: &LibraryCatalog,
         binding: &LibraryCellInstance,
     ) -> Option<ResolvedCellSymbol> {
-        rspice_design::symbol_resolver::SymbolResolver::new(libraries.catalog(), self)
+        rspice_design::symbol_resolver::SymbolResolver::new(libraries, self)
             .resolve_binding(binding)
     }
     fn explicit_global_declarations(&self) -> Vec<String> {
@@ -54,7 +53,7 @@ impl<S: AsRef<SchematicDocument>> SchematicBuffers for HashMap<String, S> {
 /// netlist masters, case-insensitively.
 pub struct HierarchySource<'a> {
     masters: HashMap<String, &'a SchematicDocument>,
-    libraries: Option<&'a LibraryManager>,
+    libraries: Option<&'a LibraryCatalog>,
     schematic_buffers: Option<&'a dyn SchematicBuffers>,
     execution_plan: Option<ConfigurationExecutionPlan>,
     connectivity: Option<&'a crate::state::ConnectivityContract>,
@@ -122,10 +121,10 @@ impl<'a> HierarchySource<'a> {
         self.data_root.as_deref()
     }
 
-    /// Index workspace schematic buffers and library symbol metadata so placed
+    /// Index schematic buffers and governed library symbol metadata so placed
     /// cell instances can use the same authored terminal geometry as the UI.
     pub fn from_workspace<S: AsRef<SchematicDocument>>(
-        libraries: &'a LibraryManager,
+        libraries: &'a LibraryCatalog,
         buffers: &'a HashMap<String, S>,
     ) -> Self {
         let mut source = Self::from_buffers(buffers);
@@ -150,7 +149,7 @@ impl<'a> HierarchySource<'a> {
     /// into this read-only source so later workspace edits cannot change a
     /// deck that is already being prepared.
     pub fn from_design_projection(
-        libraries: &'a LibraryManager,
+        libraries: &'a LibraryCatalog,
         projection: &'a DesignProjection,
     ) -> Self {
         let mut source = Self::from_workspace(libraries, projection.schematic_buffers())
@@ -161,7 +160,7 @@ impl<'a> HierarchySource<'a> {
 
     /// The same binding for a caller holding the shared execution handle.
     pub fn from_execution_projection(
-        libraries: &'a LibraryManager,
+        libraries: &'a LibraryCatalog,
         projection: &'a ConfigurationExecutionProjection,
     ) -> Self {
         Self::from_design_projection(libraries, projection)

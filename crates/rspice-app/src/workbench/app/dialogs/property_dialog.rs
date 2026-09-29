@@ -886,9 +886,10 @@ fn component_terminal_context(
                 .collect();
         }
     };
-    let hierarchy = HierarchySource::from_design_projection(&state.library_manager, &projection);
+    let hierarchy =
+        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
     let nets = projection_nets(
-        &state.library_manager,
+        state.library_manager.catalog(),
         &projection,
         &state.workspace.content.active_view.key(),
     );

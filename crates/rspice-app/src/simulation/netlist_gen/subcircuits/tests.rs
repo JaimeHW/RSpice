@@ -66,14 +66,17 @@ fn projection_nets_extract_the_root_once_and_stay_with_the_projection() {
         .expect("a legacy workspace projects without a configuration");
     let root_key = projection.root().key();
 
-    let nets = projection_nets(&libraries, &projection, &root_key);
+    let nets = projection_nets(libraries.catalog(), &projection, &root_key);
     assert!(!nets.is_empty(), "the fixture root resolves nets");
     assert!(
-        std::sync::Arc::ptr_eq(&nets, &projection_nets(&libraries, &projection, &root_key)),
+        std::sync::Arc::ptr_eq(
+            &nets,
+            &projection_nets(libraries.catalog(), &projection, &root_key)
+        ),
         "a second request must reuse the projection's retained extraction"
     );
     assert!(
-        projection_nets(&libraries, &projection, "user/absent/schematic").is_empty(),
+        projection_nets(libraries.catalog(), &projection, "user/absent/schematic").is_empty(),
         "a cell view the projection does not carry has no nets"
     );
 }

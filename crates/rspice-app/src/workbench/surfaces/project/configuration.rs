@@ -333,7 +333,7 @@ fn validate_candidate_configuration(
         "Configuration cannot be activated without its exact root schematic.".to_owned()
     })?;
     let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
-        &app.state.library_manager,
+        app.state.library_manager.catalog(),
         &projection,
     );
     let generated =

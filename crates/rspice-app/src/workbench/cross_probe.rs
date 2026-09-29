@@ -289,7 +289,7 @@ fn active_design_nets(state: &AppState) -> std::sync::Arc<Vec<DesignNet>> {
         &state.schematic,
     ) {
         Ok(projection) => projection_nets(
-            &state.library_manager,
+            state.library_manager.catalog(),
             &projection,
             &state.workspace.content.active_view.key(),
         ),

@@ -593,7 +593,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     };
     let nets = crate::simulation::netlist_gen::projection_nets(
-        &app.state.library_manager,
+        app.state.library_manager.catalog(),
         &projection,
         &app.state.workspace.content.active_view.key(),
     )
@@ -1595,7 +1595,7 @@ fn reveal_probe_expression(state: &mut AppState, expression: &str) {
                 }
             };
             let nets = crate::simulation::netlist_gen::projection_nets(
-                &state.library_manager,
+                state.library_manager.catalog(),
                 &projection,
                 &state.workspace.content.active_view.key(),
             );

@@ -615,7 +615,7 @@ pub(super) fn variant_connectivity_signature(
         )
         .map_err(|error| error.to_string())?;
     let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_design_projection(
-        &state.library_manager,
+        state.library_manager.catalog(),
         &projection,
     );
     let mut groups = BTreeMap::<(String, String), Vec<String>>::new();

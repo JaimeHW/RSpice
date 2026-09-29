@@ -985,7 +985,7 @@ fn net_class_colors(state: &AppState) -> std::collections::HashMap<u64, egui::Co
         return colors;
     };
     let nets = projection_nets(
-        &state.library_manager,
+        state.library_manager.catalog(),
         &projection,
         &state.workspace.content.active_view.key(),
     );

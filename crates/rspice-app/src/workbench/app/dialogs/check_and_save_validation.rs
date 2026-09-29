@@ -269,7 +269,7 @@ impl CheckAndSaveValidationReport {
         // same checks from the live editor buffers would seal a receipt for a
         // design the project does not have.
         let configured_hierarchy = execution_projection.as_ref().ok().map(|projection| {
-            HierarchySource::from_execution_projection(&state.library_manager, projection)
+            HierarchySource::from_execution_projection(state.library_manager.catalog(), projection)
         });
 
         // A stale instance is the one netlist blocker with a one-click remedy,

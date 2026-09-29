@@ -407,7 +407,7 @@ pub(crate) fn build_menu_netlist(
         .root_schematic()
         .expect("a successful execution projection has a materialized root");
     let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
-        &state.library_manager,
+        state.library_manager.catalog(),
         &execution_projection,
     );
     let analysis_instances = state

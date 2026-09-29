@@ -351,7 +351,7 @@ fn authored_symbol_pin_positions_define_cell_instance_connectivity() {
         .net_labels
         .push(NetLabel::new(2, Point::new(170, 70), "vout"));
 
-    let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
+    let hierarchy = HierarchySource::from_workspace(libraries.catalog(), &buffers);
     let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
@@ -579,7 +579,7 @@ fn declared_parameters_reach_the_subckt_header_and_the_deck_parses() {
     let (libraries, buffers) = libraries_with_parameter_contract(
         r#"[{"name":"rload","default":"1k"},{"name":"gain","default":"2"}]"#,
     );
-    let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
+    let hierarchy = HierarchySource::from_workspace(libraries.catalog(), &buffers);
 
     let mut top = SchematicState::default();
     top.add_library_cell_component(Point::new(100, 0), binding("div", &["a", "b"]));
@@ -611,7 +611,7 @@ fn declared_parameters_reach_the_subckt_header_and_the_deck_parses() {
 fn required_parameter_without_default_is_a_defect() {
     let (libraries, buffers) =
         libraries_with_parameter_contract(r#"[{"name":"rload","required":true}]"#);
-    let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
+    let hierarchy = HierarchySource::from_workspace(libraries.catalog(), &buffers);
 
     let mut top = SchematicState::default();
     top.add_library_cell_component(Point::new(100, 0), binding("div", &["a", "b"]));
@@ -782,7 +782,7 @@ fn configured_exact_paths_materialize_distinct_schematic_and_source_views() {
         "a source-backed view is an engine module, not a generated master"
     );
 
-    let hierarchy = HierarchySource::from_execution_projection(&libraries, &projection);
+    let hierarchy = HierarchySource::from_execution_projection(libraries.catalog(), &projection);
     let result = generate_netlist_hierarchical(
         projection.root_schematic().expect("root schematic"),
         &[],
@@ -923,7 +923,7 @@ fn two_instances_with_different_descendant_bindings_emit_v2() {
     let projection = workspace
         .configuration_execution_projection(&libraries, &active, &top)
         .expect("configuration resolves into an execution plan");
-    let hierarchy = HierarchySource::from_execution_projection(&libraries, &projection);
+    let hierarchy = HierarchySource::from_execution_projection(libraries.catalog(), &projection);
     let result = generate_netlist_hierarchical(
         projection.root_schematic().expect("root schematic"),
         &[],
@@ -1005,7 +1005,7 @@ fn configured_builtin_xspice_is_a_valid_executable_leaf() {
     assert_eq!(execution.materialized_binding(), Some(&binding));
     assert!(execution.stop_boundary());
 
-    let hierarchy = HierarchySource::from_execution_projection(&libraries, &projection);
+    let hierarchy = HierarchySource::from_execution_projection(libraries.catalog(), &projection);
     let result = generate_netlist_hierarchical(
         projection.root_schematic().expect("root schematic"),
         &[],

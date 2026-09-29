@@ -110,7 +110,7 @@ impl AppState {
                 )
             })?;
         let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_design_projection(
-            &self.library_manager,
+            self.library_manager.catalog(),
             &projection,
         );
         let result = crate::services::drc::run_drc_check_with_hierarchy_and_config(
@@ -581,7 +581,7 @@ mod tests {
             .expect("the fixture configuration resolves");
         assert_eq!(
             crate::simulation::netlist_gen::projection_nets(
-                &state.library_manager,
+                state.library_manager.catalog(),
                 &projection,
                 &state.workspace.content.active_view.key(),
             )

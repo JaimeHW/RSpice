@@ -333,9 +333,10 @@ fn build_report(
 ) -> Result<ConnectivityReport, String> {
     let projection = preview_projection(state, policy)?;
     let subject = projected_open_view(state, &projection)?;
-    let hierarchy = HierarchySource::from_design_projection(&state.library_manager, &projection);
+    let hierarchy =
+        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
     let design_nets = projection_nets(
-        &state.library_manager,
+        state.library_manager.catalog(),
         &projection,
         &state.workspace.content.active_view.key(),
     );
@@ -552,7 +553,7 @@ fn build_global_rows(
     let mut locals = Vec::<LabelOccurrence>::new();
     let mut nets_by_view = HashMap::<String, std::sync::Arc<Vec<DesignNet>>>::new();
     for (view_key, schematic) in projection.schematic_buffers() {
-        let nets = projection_nets(&state.library_manager, projection, view_key);
+        let nets = projection_nets(state.library_manager.catalog(), projection, view_key);
         nets_by_view.insert(view_key.clone(), nets);
         for label in &schematic.document().net_labels {
             let occurrence = LabelOccurrence {
@@ -1413,7 +1414,8 @@ fn validate_repair_candidate(
             &state.schematic,
         )
         .map_err(|error| error.to_string())?;
-    let hierarchy = HierarchySource::from_design_projection(&state.library_manager, &projection);
+    let hierarchy =
+        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
     let candidate_drc = run_drc_check_with_hierarchy_and_config(
         candidate,
         &hierarchy,

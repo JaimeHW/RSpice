@@ -160,7 +160,8 @@ fn the_reference_project_netlists_through_the_configured_execution_projection() 
         "one cell name in two libraries is two masters"
     );
 
-    let hierarchy = HierarchySource::from_execution_projection(&state.library_manager, &projection);
+    let hierarchy =
+        HierarchySource::from_execution_projection(state.library_manager.catalog(), &projection);
     let result = generate_netlist_hierarchical(
         projection
             .root_schematic()

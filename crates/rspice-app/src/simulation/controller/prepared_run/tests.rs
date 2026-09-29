@@ -1509,7 +1509,7 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
         .expect("compile exact configured source closure");
 
     let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
-        &state.library_manager,
+        state.library_manager.catalog(),
         &projection,
     );
     let generated = crate::simulation::netlist_gen::generate_netlist_hierarchical(
@@ -2370,7 +2370,7 @@ fn the_prepared_snapshot_carries_the_decks_emission_map() {
         )
         .expect("the authored hierarchy projects");
     let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
-        &state.library_manager,
+        state.library_manager.catalog(),
         &projection,
     );
     let generated = crate::simulation::netlist_gen::generate_netlist_hierarchical(

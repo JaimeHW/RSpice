@@ -1411,7 +1411,7 @@ fn projection_terminal_nets(
     cell_view_key: &str,
 ) -> HashMap<(u64, String), String> {
     keyed_by_terminal(
-        projection_nets(libraries, projection, cell_view_key)
+        projection_nets(libraries.catalog(), projection, cell_view_key)
             .iter()
             .cloned(),
     )

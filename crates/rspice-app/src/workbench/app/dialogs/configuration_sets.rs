@@ -579,7 +579,7 @@ impl RSpiceApp {
             "Configuration cannot be published without its root schematic.".to_owned()
         })?;
         let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
-            &self.state.library_manager,
+            self.state.library_manager.catalog(),
             &projection,
         );
         let generated =
@@ -1174,7 +1174,8 @@ fn configuration_netlist_digest(
         .root_schematic()
         .ok_or_else(|| "configuration root schematic is unavailable".to_owned())?;
     let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_design_projection(
-        libraries, projection,
+        libraries.catalog(),
+        projection,
     );
     let generated =
         crate::simulation::netlist_gen::generate_netlist_hierarchical(root, &[], &hierarchy);

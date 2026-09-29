@@ -258,7 +258,7 @@ impl SimulationController {
         // Net names carry no data-file references, so the projection's own
         // extraction is the same answer as a data-root-bound generator.
         let nets = crate::simulation::netlist_gen::projection_nets(
-            &state.library_manager,
+            state.library_manager.catalog(),
             &projection,
             &projection.root().key(),
         );
@@ -307,7 +307,7 @@ impl SimulationController {
         validate_projected_model_binding_authority(state, &projection)?;
         let hierarchy = bind_project_data(
             crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
-                &state.library_manager,
+                state.library_manager.catalog(),
                 &projection,
             ),
             state,
@@ -818,7 +818,7 @@ impl SimulationController {
         }
         let hierarchy = bind_project_data(
             crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
-                &state.library_manager,
+                state.library_manager.catalog(),
                 &execution_projection,
             ),
             state,

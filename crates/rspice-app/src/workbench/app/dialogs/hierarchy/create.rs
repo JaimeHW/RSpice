@@ -812,7 +812,7 @@ fn generated_for(
     buffers: &std::collections::HashMap<String, rspice_design::schematic::owned::Schematic>,
     libraries: &crate::state::LibraryManager,
 ) -> crate::simulation::netlist_gen::NetlistResult {
-    let hierarchy = HierarchySource::from_workspace(libraries, buffers);
+    let hierarchy = HierarchySource::from_workspace(libraries.catalog(), buffers);
     generate_netlist_hierarchical(schematic, &[], &hierarchy)
 }
 
@@ -901,9 +901,10 @@ fn validate_candidate_drc(
         check_missing_ground: false,
         ..DrcConfig::default()
     };
-    let baseline_hierarchy = HierarchySource::from_workspace(baseline_libraries, baseline_buffers);
+    let baseline_hierarchy =
+        HierarchySource::from_workspace(baseline_libraries.catalog(), baseline_buffers);
     let candidate_hierarchy =
-        HierarchySource::from_workspace(candidate_libraries, candidate_buffers);
+        HierarchySource::from_workspace(candidate_libraries.catalog(), candidate_buffers);
     let baseline_result =
         run_drc_check_with_hierarchy_and_config(baseline, &baseline_hierarchy, config.clone());
     let parent_result =

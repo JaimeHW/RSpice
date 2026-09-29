@@ -55,7 +55,7 @@ pub(crate) fn selected_named_net_target(state: &AppState) -> Option<NamedNetTarg
         )
         .ok()?;
     let nets = crate::simulation::netlist_gen::projection_nets(
-        &state.library_manager,
+        state.library_manager.catalog(),
         &projection,
         &state.workspace.content.active_view.key(),
     );

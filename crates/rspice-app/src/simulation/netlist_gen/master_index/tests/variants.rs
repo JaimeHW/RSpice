@@ -181,7 +181,8 @@ fn source_replacement_uses_the_requested_corner(
             .unwrap();
         if matches!(selected, "MISSING" | "NO_MASTER") {
             assert!(!projection.hierarchy_resolution().is_valid());
-            let hierarchy = HierarchySource::from_design_projection(&libraries, &projection);
+            let hierarchy =
+                HierarchySource::from_design_projection(libraries.catalog(), &projection);
             let generated = generate_netlist_hierarchical(
                 projection.root_schematic().unwrap(),
                 &[],
@@ -235,7 +236,7 @@ fn source_replacement_uses_the_requested_corner(
             binding.netlist_template.as_deref(),
             Some("{ref} {nodes} {model} {params}")
         );
-        let hierarchy = HierarchySource::from_design_projection(&libraries, &projection);
+        let hierarchy = HierarchySource::from_design_projection(libraries.catalog(), &projection);
         let generated =
             generate_netlist_hierarchical(projection.root_schematic().unwrap(), &[], &hierarchy);
         assert!(
@@ -346,7 +347,7 @@ fn source_current(
     projection: &crate::state::workspace::DesignProjection,
     libraries: &LibraryManager,
 ) -> f64 {
-    let hierarchy = HierarchySource::from_design_projection(libraries, projection);
+    let hierarchy = HierarchySource::from_design_projection(libraries.catalog(), projection);
     let generated =
         generate_netlist_hierarchical(projection.root_schematic().unwrap(), &[], &hierarchy);
     assert!(
@@ -531,7 +532,7 @@ fn named_replacement_terminals_keep_their_nets_when_the_master_order_changes() {
         let projection = workspace
             .design_projection(&libraries, &active, &top)
             .unwrap();
-        let hierarchy = HierarchySource::from_design_projection(&libraries, &projection);
+        let hierarchy = HierarchySource::from_design_projection(libraries.catalog(), &projection);
         let deck =
             generate_netlist_hierarchical(projection.root_schematic().unwrap(), &[], &hierarchy);
         assert!(deck.errors.is_empty(), "{:?}", deck.errors);
@@ -918,7 +919,7 @@ fn a_variant_replacement_owns_the_plan_and_emitted_master() {
         assert!(!std::sync::Arc::ptr_eq(&original, &projection));
         let placed = projection.plan().binding(&instance_path("/X1")).unwrap();
         assert_eq!(placed.resolved_reference().cell, "alternate");
-        let hierarchy = HierarchySource::from_design_projection(&libraries, &projection);
+        let hierarchy = HierarchySource::from_design_projection(libraries.catalog(), &projection);
         let result =
             generate_netlist_hierarchical(projection.root_schematic().unwrap(), &[], &hierarchy);
         assert!(result.errors.is_empty(), "{:?}", result.errors);
@@ -984,7 +985,7 @@ fn a_primitive_substitution_inside_a_buffered_master_enters_the_hierarchy() {
             .binding(&instance_path("/X1/R1"))
             .expect("the replacement introduces a child instance");
         assert_eq!(nested.resolved_reference().cell, "alternate");
-        let hierarchy = HierarchySource::from_design_projection(&libraries, &projection);
+        let hierarchy = HierarchySource::from_design_projection(libraries.catalog(), &projection);
         let result =
             generate_netlist_hierarchical(projection.root_schematic().unwrap(), &[], &hierarchy);
         assert!(result.errors.is_empty(), "{:?}", result.errors);
@@ -1027,7 +1028,7 @@ fn omitted_instances_do_not_require_or_emit_their_missing_master() {
             .design_projection(&libraries, &active, &top)
             .expect("an omitted instance cannot block the populated circuit");
         assert!(projection.plan().binding(&instance_path("/X2")).is_none());
-        let hierarchy = HierarchySource::from_design_projection(&libraries, &projection);
+        let hierarchy = HierarchySource::from_design_projection(libraries.catalog(), &projection);
         let result =
             generate_netlist_hierarchical(projection.root_schematic().unwrap(), &[], &hierarchy);
         assert!(result.errors.is_empty(), "{:?}", result.errors);

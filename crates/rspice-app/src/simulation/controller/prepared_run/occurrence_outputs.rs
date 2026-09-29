@@ -57,7 +57,11 @@ pub(super) fn projection_occurrence_nets(
         })
         .map(|binding| OccurrenceNets {
             occurrence: binding.instance_path().clone(),
-            nets: projection_nets(libraries, projection, &binding.resolved_reference().key()),
+            nets: projection_nets(
+                libraries.catalog(),
+                projection,
+                &binding.resolved_reference().key(),
+            ),
         })
         .collect::<Vec<_>>();
     below.sort_by_key(|entry| (entry.occurrence.depth(), entry.occurrence.fold_key()));

@@ -369,8 +369,8 @@ pub fn design_nets_with_hierarchy(
 /// the type is owned. A cell view the projection does not carry has no nets
 /// rather than an error: the projection is the authority on which views exist.
 pub fn projection_nets(
-    libraries: &crate::state::LibraryManager,
-    projection: &crate::state::workspace::DesignProjection,
+    catalog: &rspice_design::library::LibraryCatalog,
+    projection: &rspice_design::projection::DesignProjection,
     cell_view_key: &str,
 ) -> Arc<Vec<DesignNet>> {
     let extract = || -> Arc<Vec<DesignNet>> {
@@ -382,7 +382,7 @@ pub fn projection_nets(
                 .map(|(_, schematic)| {
                     design_nets_with_hierarchy(
                         schematic,
-                        &HierarchySource::from_design_projection(libraries, projection),
+                        &HierarchySource::from_design_projection(catalog, projection),
                     )
                 })
                 .unwrap_or_default(),
@@ -903,7 +903,7 @@ mod tests {
     #[test]
     fn design_nets_with_hierarchy_counts_authored_symbol_pin_positions() {
         let (libraries, buffers) = library_with_authored_amp_symbol();
-        let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
+        let hierarchy = HierarchySource::from_workspace(libraries.catalog(), &buffers);
         let mut schematic = SchematicState::default();
         schematic
             .document_mut_for_test()
@@ -2294,8 +2294,8 @@ mod tests {
             ..ConnectivityContract::default()
         };
         contract.validate().unwrap();
-        let hierarchy =
-            HierarchySource::from_workspace(&libraries, &buffers).with_connectivity(&contract);
+        let hierarchy = HierarchySource::from_workspace(libraries.catalog(), &buffers)
+            .with_connectivity(&contract);
 
         let result = generate_netlist_hierarchical(&schematic, &[], &hierarchy);
 
@@ -2344,8 +2344,8 @@ mod tests {
             ..ConnectivityContract::default()
         };
         contract.validate().unwrap();
-        let hierarchy =
-            HierarchySource::from_workspace(&libraries, &buffers).with_connectivity(&contract);
+        let hierarchy = HierarchySource::from_workspace(libraries.catalog(), &buffers)
+            .with_connectivity(&contract);
 
         let result = generate_netlist_hierarchical(&schematic, &[], &hierarchy);
 

@@ -973,7 +973,8 @@ fn generate_candidate_netlist(
             &state.schematic,
         )
         .map_err(|error| error.to_string())?;
-    let hierarchy = HierarchySource::from_design_projection(&state.library_manager, &projection);
+    let hierarchy =
+        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
     Ok(generate_netlist_hierarchical(schematic, &[], &hierarchy))
 }
 
