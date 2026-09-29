@@ -51,7 +51,9 @@ impl SimulationController {
         };
 
         let writer = WaveformWriter::new(WaveformFormat::Touchstone);
-        let contents = writer.write_text(&dataset)?;
+        let contents = writer
+            .write_text(&dataset)
+            .map_err(|error| error.to_string())?;
         Ok(Some(PreparedTouchstoneExport { path, contents }))
     }
 

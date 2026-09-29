@@ -2,11 +2,11 @@
 //! network format, and normalizes Rn only in v1 (IBIS Touchstone 2.0,
 //! "Noise Parameters"). Conventional noise figures refer to a 290 K source.
 
-use super::{SignalType, WaveformDataset, WaveformSignal};
+use super::{SignalType, TouchstoneError, WaveformDataset, WaveformSignal};
 
 pub(super) const REFERENCE_TEMPERATURE: f64 = 290.0;
 
-pub(super) fn validate_frequencies(frequencies: &[f64]) -> Result<(), String> {
+pub(super) fn validate_frequencies(frequencies: &[f64]) -> Result<(), TouchstoneError> {
     if frequencies.is_empty()
         || frequencies.iter().any(|f| !f.is_finite() || *f <= 0.0)
         || frequencies.windows(2).any(|pair| pair[0] >= pair[1])
@@ -26,7 +26,7 @@ pub(super) fn noise_records_for_write(
     ports: usize,
     reference: f64,
     version: u32,
-) -> Result<Vec<[f64; 5]>, String> {
+) -> Result<Vec<[f64; 5]>, TouchstoneError> {
     let mut components: [Option<&WaveformSignal>; 4] = [None; 4];
     for signal in &dataset.signals {
         let name = signal.name.trim().to_ascii_lowercase();
@@ -46,10 +46,7 @@ pub(super) fn noise_records_for_write(
             _ => continue,
         };
         if components[slot].replace(signal).is_some() {
-            return Err(format!(
-                "Duplicate Touchstone noise component '{}'",
-                signal.name
-            ));
+            return Err(format!("Duplicate Touchstone noise component '{}'", signal.name).into());
         }
     }
     if components.iter().all(Option::is_none) {
@@ -72,7 +69,8 @@ pub(super) fn noise_records_for_write(
             return Err(format!(
                 "Touchstone noise component '{}' requires linear dimensionless values, not '{}'",
                 signal.name, signal.unit
-            ));
+            )
+            .into());
         }
     }
     let unit = rn.unit.trim();
@@ -83,7 +81,8 @@ pub(super) fn noise_records_for_write(
         return Err(format!(
             "Touchstone Rn requires resistance in ohms, not '{}'",
             rn.unit
-        ));
+        )
+        .into());
     }
     let frequencies = fmin.x_values.as_deref().unwrap_or(network_frequencies);
     validate_frequencies(frequencies)?;
@@ -99,7 +98,8 @@ pub(super) fn noise_records_for_write(
             return Err(format!(
                 "Touchstone noise component '{}' does not match its frequency grid",
                 signal.name
-            ));
+            )
+            .into());
         }
     }
     let temperature = dataset
@@ -108,7 +108,10 @@ pub(super) fn noise_records_for_write(
         .map(|value| {
             value
                 .parse::<f64>()
-                .map_err(|_| "Invalid noise reference temperature".to_owned())
+                .map_err(|source| TouchstoneError::InvalidFloat {
+                    detail: "Invalid noise reference temperature".to_owned(),
+                    source,
+                })
         })
         .transpose()?
         .unwrap_or(REFERENCE_TEMPERATURE);
@@ -156,7 +159,12 @@ pub(super) fn noise_records_for_write(
         .collect()
 }
 
-fn validate_parameters(factor: f64, resistance: f64, re: f64, im: f64) -> Result<(), String> {
+fn validate_parameters(
+    factor: f64,
+    resistance: f64,
+    re: f64,
+    im: f64,
+) -> Result<(), TouchstoneError> {
     if !factor.is_finite()
         || factor < 1.0
         || !resistance.is_finite()
@@ -182,7 +190,7 @@ pub(super) fn append_noise_signals(
     option_reference: f64,
     network_reference: f64,
     version: u32,
-) -> Result<(), String> {
+) -> Result<(), TouchstoneError> {
     if records.is_empty() {
         return Ok(());
     }
@@ -313,6 +321,7 @@ mod tests {
                 WaveformWriter::new(WaveformFormat::Csv)
                     .write_text(&dataset)
                     .unwrap_err()
+                    .to_string()
                     .contains("identical coordinates")
             );
         }
@@ -406,6 +415,7 @@ mod tests {
         assert!(
             read_touchstone_bytes("underflow.s2p", underflow.as_bytes())
                 .unwrap_err()
+                .to_string()
                 .contains("underflows")
         );
         let valid = fixture(2, "", "1.5 3 0.5 -90 15\n2 0 1 0 15\n4 6 0 0 15\n");
@@ -444,11 +454,17 @@ mod tests {
                 "noise_reference_temperature_kelvin".into(),
                 temperature.into(),
             );
-            assert!(
-                WaveformWriter::new(WaveformFormat::Touchstone)
-                    .write_text(&bad)
-                    .is_err()
-            );
+            let error = WaveformWriter::new(WaveformFormat::Touchstone)
+                .write_text(&bad)
+                .expect_err("invalid noise reference temperature");
+            if temperature == "bad" {
+                use std::error::Error as _;
+                let crate::waveform_io::WaveformWriteError::Touchstone(source) = &error else {
+                    panic!("{error}")
+                };
+                assert!(source.source().unwrap().is::<std::num::ParseFloatError>());
+                assert_eq!(error.to_string(), "Invalid noise reference temperature");
+            }
         }
         for (name, unit) in [("Rn", "mΩ"), ("Fmin", "dB"), ("Sopt_RE", "V")] {
             let mut bad = dataset.clone();

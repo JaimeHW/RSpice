@@ -2,6 +2,32 @@
 
 use super::*;
 
+#[derive(Debug)]
+pub enum WaveformWriteError {
+    UnsupportedFormat(WaveformFormat),
+    CoordinatesDiffer,
+    Touchstone(TouchstoneError),
+}
+
+impl std::fmt::Display for WaveformWriteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedFormat(format) => write!(f, "Format {format:?} is read-only or unsupported for export; writable waveform formats are Csv, Tsv, and Touchstone"),
+            Self::CoordinatesDiffer => f.write_str("Delimited export requires identical coordinates; export the separately sampled traces individually or use a result bundle"),
+            Self::Touchstone(source) => source.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for WaveformWriteError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Touchstone(source) => Some(source),
+            Self::UnsupportedFormat(_) | Self::CoordinatesDiffer => None,
+        }
+    }
+}
+
 // =============================================================================
 // Waveform Writer
 // =============================================================================
@@ -18,15 +44,14 @@ impl WaveformWriter {
     }
 
     /// Serialize dataset to a text-based waveform format.
-    pub fn write_text(&self, dataset: &WaveformDataset) -> Result<String, String> {
+    pub fn write_text(&self, dataset: &WaveformDataset) -> Result<String, WaveformWriteError> {
         match self.format {
             WaveformFormat::Csv => Self::delimited_text(dataset, ','),
             WaveformFormat::Tsv => Self::delimited_text(dataset, '\t'),
-            WaveformFormat::Touchstone => Self::touchstone_text(dataset),
-            _ => Err(format!(
-                "Format {:?} is read-only or unsupported for export; writable waveform formats are Csv, Tsv, and Touchstone",
-                self.format
-            )),
+            WaveformFormat::Touchstone => {
+                Self::touchstone_text(dataset).map_err(WaveformWriteError::Touchstone)
+            }
+            _ => Err(WaveformWriteError::UnsupportedFormat(self.format)),
         }
     }
 
@@ -43,7 +68,7 @@ impl WaveformWriter {
             .max()
     }
 
-    fn touchstone_text(dataset: &WaveformDataset) -> Result<String, String> {
+    fn touchstone_text(dataset: &WaveformDataset) -> Result<String, TouchstoneError> {
         let (frequencies, matrix) = Self::extract_touchstone_matrix(dataset)?;
         let num_ports = matrix.len();
         let z0_by_port = Self::touchstone_reference_values_for_write(dataset, num_ports)?;
@@ -56,12 +81,13 @@ impl WaveformWriter {
         {
             None | Some("1" | "1.0") => 1,
             Some("2" | "2.0") => 2,
-            Some(value) => return Err(format!("Unsupported Touchstone export version '{value}'")),
+            Some(value) => {
+                return Err(format!("Unsupported Touchstone export version '{value}'").into());
+            }
         };
         if version < 2 && !uniform_reference {
             return Err(
-                "Touchstone v1 does not support per-port reference impedance; use version 2"
-                    .to_string(),
+                "Touchstone v1 does not support per-port reference impedance; use version 2".into(),
             );
         }
         let noise = super::touchstone_noise::noise_records_for_write(
@@ -189,7 +215,7 @@ impl WaveformWriter {
     fn touchstone_reference_values_for_write(
         dataset: &WaveformDataset,
         num_ports: usize,
-    ) -> Result<Vec<f64>, String> {
+    ) -> Result<Vec<f64>, TouchstoneError> {
         let default_z0 = dataset
             .metadata
             .get("z0")
@@ -203,8 +229,14 @@ impl WaveformWriter {
                     .split(|ch: char| ch == ',' || ch.is_whitespace())
                     .filter(|token| !token.trim().is_empty())
                     .map(|token| {
-                        token.trim().parse::<f64>().map_err(|_| {
-                            format!("Invalid Touchstone z0_ports entry '{}'", token.trim())
+                        token.trim().parse::<f64>().map_err(|source| {
+                            TouchstoneError::InvalidFloat {
+                                detail: format!(
+                                    "Invalid Touchstone z0_ports entry '{}'",
+                                    token.trim()
+                                ),
+                                source,
+                            }
                         })
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -219,7 +251,8 @@ impl WaveformWriter {
                         "Touchstone z0_ports count {} does not match {} ports",
                         parsed.len(),
                         num_ports
-                    ));
+                    )
+                    .into());
                 }
             }
             None => vec![default_z0; num_ports],
@@ -230,7 +263,8 @@ impl WaveformWriter {
                 return Err(format!(
                     "Touchstone reference impedance for port {} must be positive",
                     idx + 1
-                ));
+                )
+                .into());
             }
         }
 
@@ -239,13 +273,13 @@ impl WaveformWriter {
 
     fn extract_touchstone_matrix(
         dataset: &WaveformDataset,
-    ) -> Result<(Vec<f64>, Vec<Vec<Vec<(f64, f64)>>>), String> {
+    ) -> Result<(Vec<f64>, Vec<Vec<Vec<(f64, f64)>>>), TouchstoneError> {
         let x = dataset
             .x_signal
             .as_ref()
             .ok_or_else(|| "Touchstone export requires an X-axis frequency signal".to_string())?;
         if x.data.is_empty() {
-            return Err("Touchstone export requires at least one frequency point".to_string());
+            return Err("Touchstone export requires at least one frequency point".into());
         }
         let expected_len = x.data.len();
         super::touchstone_noise::validate_frequencies(&x.data)?;
@@ -262,28 +296,24 @@ impl WaveformWriter {
             let key = (row, col);
             if is_imag {
                 if imag_signals.insert(key, signal).is_some() {
-                    return Err(format!(
-                        "Duplicate Touchstone imag component for S{}{}",
-                        row, col
-                    ));
+                    return Err(
+                        format!("Duplicate Touchstone imag component for S{}{}", row, col).into(),
+                    );
                 }
             } else if real_signals.insert(key, signal).is_some() {
-                return Err(format!(
-                    "Duplicate Touchstone real component for S{}{}",
-                    row, col
-                ));
+                return Err(
+                    format!("Duplicate Touchstone real component for S{}{}", row, col).into(),
+                );
             }
         }
 
         if max_port > MAX_TOUCHSTONE_PORTS {
             return Err(format!(
                 "Touchstone port count {max_port} exceeds the supported limit {MAX_TOUCHSTONE_PORTS}"
-            ));
+            ).into());
         }
         if max_port == 0 {
-            return Err(
-                "Touchstone export requires at least a 1-port S-parameter matrix".to_string(),
-            );
+            return Err("Touchstone export requires at least a 1-port S-parameter matrix".into());
         }
 
         let mut matrix = vec![vec![Vec::new(); max_port]; max_port];
@@ -308,7 +338,8 @@ impl WaveformWriter {
                         expected_len,
                         real.data.len(),
                         imag.data.len()
-                    ));
+                    )
+                    .into());
                 }
                 let mut samples = Vec::with_capacity(expected_len);
                 for (idx, (re, im)) in real.data.iter().zip(imag.data.iter()).enumerate() {
@@ -316,7 +347,8 @@ impl WaveformWriter {
                         return Err(format!(
                             "Touchstone S{}{} sample {} must be finite (real={}, imag={})",
                             row, col, idx, re, im
-                        ));
+                        )
+                        .into());
                     }
                     samples.push((*re, *im));
                 }
@@ -389,7 +421,10 @@ impl WaveformWriter {
         None
     }
 
-    fn delimited_text(dataset: &WaveformDataset, delimiter: char) -> Result<String, String> {
+    fn delimited_text(
+        dataset: &WaveformDataset,
+        delimiter: char,
+    ) -> Result<String, WaveformWriteError> {
         let axis = dataset
             .x_signal
             .as_ref()
@@ -399,7 +434,7 @@ impl WaveformWriter {
             .iter()
             .any(|signal| signal.x_values.as_deref().is_some_and(|x| Some(x) != axis))
         {
-            return Err("Delimited export requires identical coordinates; export the separately sampled traces individually or use a result bundle".into());
+            return Err(WaveformWriteError::CoordinatesDiffer);
         }
         let separator = delimiter.to_string();
         let mut contents = String::new();
@@ -648,9 +683,16 @@ mod tests {
             let error = WaveformWriter::new(format)
                 .write_text(&sample_dataset())
                 .expect_err("non-writable formats must reject export");
-            assert!(error.contains("read-only or unsupported for export"));
-            assert!(error.contains("Csv, Tsv, and Touchstone"));
-            assert!(!error.contains("not implemented"));
+            assert!(
+                matches!(error, WaveformWriteError::UnsupportedFormat(actual) if actual == format)
+            );
+            assert!(
+                error
+                    .to_string()
+                    .contains("read-only or unsupported for export")
+            );
+            assert!(error.to_string().contains("Csv, Tsv, and Touchstone"));
+            assert!(!error.to_string().contains("not implemented"));
         }
     }
 
@@ -753,7 +795,7 @@ mod tests {
             .expect_err("Touchstone export must reject non-positive frequencies");
 
         assert!(
-            err.contains("frequency") && err.contains("positive"),
+            err.to_string().contains("frequency") && err.to_string().contains("positive"),
             "unexpected error: {err}"
         );
     }
@@ -766,6 +808,7 @@ mod tests {
             WaveformWriter::new(WaveformFormat::Touchstone)
                 .write_text(&dataset)
                 .unwrap_err()
+                .to_string()
                 .contains("supported limit")
         );
         let mut dataset = sample_touchstone_dataset();
@@ -774,6 +817,7 @@ mod tests {
             WaveformWriter::new(WaveformFormat::Touchstone)
                 .write_text(&dataset)
                 .unwrap_err()
+                .to_string()
                 .contains("strictly increasing")
         );
         for version in ["0", "3", "unknown"] {
@@ -785,6 +829,7 @@ mod tests {
                 WaveformWriter::new(WaveformFormat::Touchstone)
                     .write_text(&dataset)
                     .unwrap_err()
+                    .to_string()
                     .contains("version")
             );
         }
@@ -800,7 +845,7 @@ mod tests {
             .expect_err("Touchstone export must reject non-finite S-parameters");
 
         assert!(
-            err.contains("S11") && err.contains("finite"),
+            err.to_string().contains("S11") && err.to_string().contains("finite"),
             "unexpected error: {err}"
         );
     }

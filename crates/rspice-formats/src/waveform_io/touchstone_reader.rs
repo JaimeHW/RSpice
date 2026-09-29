@@ -4,7 +4,7 @@
 //! data and independent two-port noise sweeps. Unsupported mixed-mode data
 //! is rejected explicitly so it cannot be mistaken for single-ended records.
 
-use super::{MAX_TOUCHSTONE_PORTS, SignalType, WaveformDataset, WaveformSignal};
+use super::{MAX_TOUCHSTONE_PORTS, SignalType, TouchstoneError, WaveformDataset, WaveformSignal};
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy)]
@@ -35,9 +35,11 @@ struct Options {
 }
 
 /// Parse one selected Touchstone artifact without touching project state.
-pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<WaveformDataset, String> {
-    let text = std::str::from_utf8(bytes)
-        .map_err(|error| format!("Touchstone source is not valid UTF-8: {error}"))?;
+pub fn read_touchstone_bytes(
+    source_name: &str,
+    bytes: &[u8],
+) -> Result<WaveformDataset, TouchstoneError> {
+    let text = std::str::from_utf8(bytes).map_err(TouchstoneError::Encoding)?;
     let mut options = Options {
         // Touchstone v1 defaults.
         frequency_scale_hz: 1.0e9,
@@ -74,7 +76,8 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
         if saw_end {
             return Err(format!(
                 "Touchstone line {line_number}: content after [End] is not allowed"
-            ));
+            )
+            .into());
         }
         if in_information {
             if trimmed.eq_ignore_ascii_case("[End Information]") {
@@ -104,7 +107,8 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
             if saw_network_data || !numeric_tokens.is_empty() {
                 return Err(format!(
                     "Touchstone line {line_number}: option line follows network data"
-                ));
+                )
+                .into());
             }
             options = parse_option_line(trimmed, line_number)?;
             continue;
@@ -114,17 +118,25 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
             if saw_network_data && !matches!(section.as_str(), "noise data" | "end") {
                 return Err(format!(
                     "Touchstone line {line_number}: [{section}] must precede network data"
-                ));
+                )
+                .into());
             }
             match section.as_str() {
                 "version" => {
-                    let parsed = value.parse::<f64>().map_err(|_| {
-                        format!("Touchstone line {line_number}: invalid [Version] '{value}'")
-                    })?;
+                    let parsed =
+                        value
+                            .parse::<f64>()
+                            .map_err(|source| TouchstoneError::InvalidFloat {
+                                detail: format!(
+                                    "Touchstone line {line_number}: invalid [Version] '{value}'"
+                                ),
+                                source,
+                            })?;
                     if !matches!(parsed, 1.0 | 2.0 | 2.1) {
                         return Err(format!(
                             "Touchstone line {line_number}: unsupported [Version] '{value}'"
-                        ));
+                        )
+                        .into());
                     }
                     version = parsed.floor() as u32;
                 }
@@ -150,7 +162,7 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
                         _ => {
                             return Err(format!(
                                 "Touchstone line {line_number}: unsupported [Matrix Format] '{value}'"
-                            ));
+                            ).into());
                         }
                     };
                 }
@@ -158,7 +170,7 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
                     if declared_two_port_order.is_some() {
                         return Err(format!(
                             "Touchstone line {line_number}: [Two-Port Data Order] may appear only once"
-                        ));
+                        ).into());
                     }
                     declared_two_port_order = Some(match value.to_ascii_lowercase().as_str() {
                         "21_12" => TwoPortOrder::TwentyOneTwelve,
@@ -166,7 +178,7 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
                         _ => {
                             return Err(format!(
                                 "Touchstone line {line_number}: unsupported [Two-Port Data Order] '{value}'"
-                            ));
+                            ).into());
                         }
                     });
                 }
@@ -174,7 +186,8 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
                     if reference_values.is_some() {
                         return Err(format!(
                             "Touchstone line {line_number}: [Reference] may appear only once"
-                        ));
+                        )
+                        .into());
                     }
                     // The specification places [Reference] after [Number of
                     // Ports] precisely so the argument count is known here.
@@ -200,18 +213,18 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
                 "end information" => {
                     return Err(format!(
                         "Touchstone line {line_number}: [End Information] has no matching [Begin Information]"
-                    ));
+                    ).into());
                 }
                 "mixed-mode order" => {
                     return Err(format!(
                         "Touchstone line {line_number}: mixed-mode Touchstone import is not available in this build"
-                    ));
+                    ).into());
                 }
                 "number of noise frequencies" => {
                     if version < 2 || declared_noise_frequencies.is_some() {
                         return Err(format!(
                             "Touchstone line {line_number}: [Number of Noise Frequencies] requires v2 and may appear only once"
-                        ));
+                        ).into());
                     }
                     declared_noise_frequencies = Some(parse_positive_usize(
                         value,
@@ -229,7 +242,7 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
                     {
                         return Err(format!(
                             "Touchstone line {line_number}: [Noise Data] requires a preceding network sweep and noise frequency count, and may appear only once without arguments"
-                        ));
+                        ).into());
                     }
                     in_noise = true;
                 }
@@ -237,14 +250,16 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
                     if !value.is_empty() {
                         return Err(format!(
                             "Touchstone line {line_number}: [End] must not have trailing content"
-                        ));
+                        )
+                        .into());
                     }
                     saw_end = true;
                 }
                 _ => {
                     return Err(format!(
                         "Touchstone line {line_number}: unsupported section '[{section}]'"
-                    ));
+                    )
+                    .into());
                 }
             }
             continue;
@@ -253,13 +268,14 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
         if version >= 2 && !saw_network_data {
             return Err(format!(
                 "Touchstone line {line_number}: numeric data precedes [Network Data]"
-            ));
+            )
+            .into());
         }
         let values = trimmed
             .split_whitespace()
             .filter(|token| *token != "+")
             .map(|token| {
-                parse_numeric_token(token).ok_or_else(|| {
+                parse_numeric_token(token, || {
                     format!("Touchstone line {line_number}: expected a finite numeric token, got '{token}'")
                 })
             })
@@ -289,10 +305,10 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
         reference_values = Some(values);
     }
     if in_information {
-        return Err("Touchstone [Begin Information] block is not terminated".to_owned());
+        return Err("Touchstone [Begin Information] block is not terminated".into());
     }
     if version >= 2 && !saw_end {
-        return Err("Touchstone v2 source is missing the required [End] section".to_owned());
+        return Err("Touchstone v2 source is missing the required [End] section".into());
     }
 
     let num_ports = match declared_ports {
@@ -303,7 +319,7 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
     if num_ports == 0 || num_ports > MAX_TOUCHSTONE_PORTS {
         return Err(format!(
             "Touchstone port count {num_ports} is outside the supported range 1..={MAX_TOUCHSTONE_PORTS}"
-        ));
+        ).into());
     }
     if declared_noise_frequencies.is_some() && noise_records.is_empty() {
         return Err(
@@ -319,20 +335,21 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
         return Err(format!(
             "Touchstone [Number of Noise Frequencies]={expected} but parsed {} records",
             noise_records.len()
-        ));
+        )
+        .into());
     }
     // The keyword is required of a two-port file and permitted of no other
     // (Touchstone 2.0 specification, "[Two-Port Data Order]").
     if declared_two_port_order.is_some() && num_ports != 2 {
         return Err(format!(
             "[Two-Port Data Order] is permitted only where the file declares two ports, not {num_ports}"
-        ));
+        ).into());
     }
     let two_port_order = declared_two_port_order.unwrap_or(TwoPortOrder::TwentyOneTwelve);
     if !matches!(two_port_order, TwoPortOrder::TwentyOneTwelve)
         && matrix_format != MatrixFormat::Full
     {
-        return Err("[Two-Port Data Order] 12_21 requires a full two-port matrix".to_owned());
+        return Err("[Two-Port Data Order] 12_21 requires a full two-port matrix".into());
     }
 
     let record_width = values_per_frequency(num_ports, matrix_format)
@@ -341,7 +358,8 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
         return Err(format!(
             "Touchstone numeric data length {} is not divisible by record width {record_width}",
             numeric_tokens.len()
-        ));
+        )
+        .into());
     }
     let frequency_count = numeric_tokens.len() / record_width;
     if let Some(expected) = declared_frequencies
@@ -349,7 +367,8 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
     {
         return Err(format!(
             "Touchstone [Number of Frequencies]={expected} but parsed {frequency_count} records"
-        ));
+        )
+        .into());
     }
     let reference_by_port = resolve_reference_values(
         num_ports,
@@ -367,7 +386,8 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
         if !frequency_hz.is_finite() || frequency_hz <= 0.0 {
             return Err(format!(
                 "Touchstone frequency point {frequency_index} must be finite and positive"
-            ));
+            )
+            .into());
         }
         if frequencies
             .last()
@@ -375,7 +395,8 @@ pub fn read_touchstone_bytes(source_name: &str, bytes: &[u8]) -> Result<Waveform
         {
             return Err(format!(
                 "Touchstone frequency point {frequency_index} is not strictly increasing"
-            ));
+            )
+            .into());
         }
         frequencies.push(frequency_hz);
 
@@ -478,12 +499,15 @@ fn ports_from_extension(source_name: &str) -> Option<usize> {
     .flatten()
 }
 
-fn parse_positive_usize(value: &str, line: usize, field: &str) -> Result<usize, String> {
+fn parse_positive_usize(value: &str, line: usize, field: &str) -> Result<usize, TouchstoneError> {
     let parsed = value
         .parse::<usize>()
-        .map_err(|_| format!("Touchstone line {line}: invalid {field} '{value}'"))?;
+        .map_err(|source| TouchstoneError::InvalidInteger {
+            detail: format!("Touchstone line {line}: invalid {field} '{value}'"),
+            source,
+        })?;
     if parsed == 0 {
-        Err(format!("Touchstone line {line}: {field} must be positive"))
+        Err(format!("Touchstone line {line}: {field} must be positive").into())
     } else {
         Ok(parsed)
     }
@@ -499,7 +523,7 @@ fn values_per_frequency(ports: usize, matrix: MatrixFormat) -> Option<usize> {
     pairs.checked_mul(2)?.checked_add(1)
 }
 
-fn infer_ports(tokens: &[f64], matrix: MatrixFormat) -> Result<Option<usize>, String> {
+fn infer_ports(tokens: &[f64], matrix: MatrixFormat) -> Result<Option<usize>, TouchstoneError> {
     let candidates = (1..=MAX_TOUCHSTONE_PORTS)
         .filter(|ports| {
             values_per_frequency(*ports, matrix).is_some_and(|width| {
@@ -514,7 +538,7 @@ fn infer_ports(tokens: &[f64], matrix: MatrixFormat) -> Result<Option<usize>, St
         [ports] => Ok(Some(*ports)),
         _ => Err(format!(
             "Touchstone port count is ambiguous ({candidates:?}); use an .sNp extension or [Number of Ports]"
-        )),
+        ).into()),
     }
 }
 
@@ -550,12 +574,12 @@ fn matrix_positions(
     positions
 }
 
-fn parse_option_line(line: &str, line_number: usize) -> Result<Options, String> {
+fn parse_option_line(line: &str, line_number: usize) -> Result<Options, TouchstoneError> {
     let fields = line[1..].split_whitespace().collect::<Vec<_>>();
     if fields.len() < 3 {
         return Err(format!(
             "Touchstone line {line_number}: option line requires frequency unit, parameter type, and data format"
-        ));
+        ).into());
     }
     let frequency_scale_hz = match fields[0].to_ascii_lowercase().as_str() {
         "hz" => 1.0,
@@ -565,14 +589,16 @@ fn parse_option_line(line: &str, line_number: usize) -> Result<Options, String> 
         other => {
             return Err(format!(
                 "Touchstone line {line_number}: unsupported frequency unit '{other}'"
-            ));
+            )
+            .into());
         }
     };
     if !fields[1].eq_ignore_ascii_case("s") {
         return Err(format!(
             "Touchstone line {line_number}: only S-parameter data is supported (found '{}')",
             fields[1]
-        ));
+        )
+        .into());
     }
     let data_format = match fields[2].to_ascii_lowercase().as_str() {
         "ri" => DataFormat::Ri,
@@ -581,25 +607,27 @@ fn parse_option_line(line: &str, line_number: usize) -> Result<Options, String> 
         other => {
             return Err(format!(
                 "Touchstone line {line_number}: unsupported data format '{other}'"
-            ));
+            )
+            .into());
         }
     };
     let reference_ohms = match fields.get(3..) {
         Some([]) | None => 50.0,
-        Some([marker, value]) if marker.eq_ignore_ascii_case("r") => parse_numeric_token(value)
-            .ok_or_else(|| {
+        Some([marker, value]) if marker.eq_ignore_ascii_case("r") => {
+            parse_numeric_token(value, || {
                 format!("Touchstone line {line_number}: invalid reference impedance '{value}'")
-            })?,
+            })?
+        }
         _ => {
-            return Err(format!(
-                "Touchstone line {line_number}: unexpected tokens in option line"
-            ));
+            return Err(
+                format!("Touchstone line {line_number}: unexpected tokens in option line").into(),
+            );
         }
     };
     if reference_ohms <= 0.0 {
-        return Err(format!(
-            "Touchstone line {line_number}: reference impedance must be positive"
-        ));
+        return Err(
+            format!("Touchstone line {line_number}: reference impedance must be positive").into(),
+        );
     }
     Ok(Options {
         frequency_scale_hz,
@@ -608,48 +636,56 @@ fn parse_option_line(line: &str, line_number: usize) -> Result<Options, String> 
     })
 }
 
-fn parse_section_line(line: &str, line_number: usize) -> Result<(String, &str), String> {
+fn parse_section_line(line: &str, line_number: usize) -> Result<(String, &str), TouchstoneError> {
     let end = line.find(']').ok_or_else(|| {
         format!("Touchstone line {line_number}: malformed section header '{line}'")
     })?;
     let section = line[1..end].trim().to_ascii_lowercase();
     if section.is_empty() {
-        return Err(format!(
-            "Touchstone line {line_number}: empty section header"
-        ));
+        return Err(format!("Touchstone line {line_number}: empty section header").into());
     }
     Ok((section, line[end + 1..].trim()))
 }
 
-fn parse_numeric_values(value: &str, line_number: usize) -> Result<Vec<f64>, String> {
+fn parse_numeric_values(value: &str, line_number: usize) -> Result<Vec<f64>, TouchstoneError> {
     let values = value
         .split(|character: char| character.is_whitespace() || character == ',')
         .filter(|token| !token.is_empty())
         .map(|token| {
-            parse_numeric_token(token).ok_or_else(|| {
+            parse_numeric_token(token, || {
                 format!("Touchstone line {line_number}: invalid numeric value '{token}'")
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
     if values.is_empty() {
-        Err(format!(
-            "Touchstone line {line_number}: [Reference] requires at least one value"
-        ))
+        Err(
+            format!("Touchstone line {line_number}: [Reference] requires at least one value")
+                .into(),
+        )
     } else {
         Ok(values)
     }
 }
 
-fn parse_numeric_token(token: &str) -> Option<f64> {
-    let parsed = token.replace(['D', 'd'], "e").parse::<f64>().ok()?;
-    parsed.is_finite().then_some(parsed)
+fn parse_numeric_token(
+    token: &str,
+    detail: impl FnOnce() -> String,
+) -> Result<f64, TouchstoneError> {
+    match token.replace(['D', 'd'], "e").parse::<f64>() {
+        Ok(parsed) if parsed.is_finite() => Ok(parsed),
+        Ok(_) => Err(TouchstoneError::InvalidData(detail())),
+        Err(source) => Err(TouchstoneError::InvalidFloat {
+            detail: detail(),
+            source,
+        }),
+    }
 }
 
 fn resolve_reference_values(
     ports: usize,
     default: f64,
     declared: Option<&[f64]>,
-) -> Result<Vec<f64>, String> {
+) -> Result<Vec<f64>, TouchstoneError> {
     let values = match declared {
         Some([one]) => vec![*one; ports],
         Some(values) if values.len() == ports => values.to_vec(),
@@ -657,7 +693,8 @@ fn resolve_reference_values(
             return Err(format!(
                 "Touchstone [Reference] count {} does not match port count {ports}",
                 values.len()
-            ));
+            )
+            .into());
         }
         None => vec![default; ports],
     };
@@ -665,19 +702,24 @@ fn resolve_reference_values(
         .iter()
         .any(|value| !value.is_finite() || *value <= 0.0)
     {
-        return Err("Touchstone reference impedances must be finite and positive".to_owned());
+        return Err("Touchstone reference impedances must be finite and positive".into());
     }
     Ok(values)
 }
 
-fn pair_to_complex(first: f64, second: f64, format: DataFormat) -> Result<(f64, f64), String> {
+fn pair_to_complex(
+    first: f64,
+    second: f64,
+    format: DataFormat,
+) -> Result<(f64, f64), TouchstoneError> {
     let pair = match format {
         DataFormat::Ri => (first, second),
         DataFormat::Ma => {
             if first < 0.0 {
                 return Err(format!(
                     "negative MA magnitude {first} is invalid; magnitude must be non-negative"
-                ));
+                )
+                .into());
             }
             let angle = second.to_radians();
             (first * angle.cos(), first * angle.sin())
@@ -691,7 +733,7 @@ fn pair_to_complex(first: f64, second: f64, format: DataFormat) -> Result<(f64, 
     if pair.0.is_finite() && pair.1.is_finite() {
         Ok(pair)
     } else {
-        Err("S-parameter conversion produced a non-finite value".to_owned())
+        Err("S-parameter conversion produced a non-finite value".into())
     }
 }
 
@@ -962,7 +1004,7 @@ mod tests {
         )
         .expect_err("[Two-Port Data Order] is not permitted on a 3-port file");
 
-        assert!(error.contains("Two-Port Data Order"), "{error}");
+        assert!(error.to_string().contains("Two-Port Data Order"), "{error}");
     }
 
     /// A passive reciprocal 3-port measures the same power from port *i* to
@@ -1028,7 +1070,60 @@ mod tests {
             ),
         ] {
             let error = read_touchstone_bytes(name, source.as_bytes()).expect_err("must reject");
-            assert!(error.contains(expected), "{error}");
+            assert!(error.to_string().contains(expected), "{error}");
         }
+    }
+
+    #[test]
+    fn decoding_failures_retain_parser_causes_and_diagnostics() {
+        use std::error::Error as _;
+        let error = read_touchstone_bytes("bad.s1p", &[0xff]).unwrap_err();
+        let TouchstoneError::Encoding(source) = &error else {
+            panic!("{error}")
+        };
+        assert!(error.source().unwrap().is::<std::str::Utf8Error>());
+        assert_eq!(
+            error.to_string(),
+            format!("Touchstone source is not valid UTF-8: {source}")
+        );
+
+        for (bytes, expected) in [
+            (
+                "[Version] bad",
+                "Touchstone line 1: invalid [Version] 'bad'",
+            ),
+            (
+                "# Hz S RI R bad",
+                "Touchstone line 1: invalid reference impedance 'bad'",
+            ),
+            (
+                "# Hz S RI R 50\n1 bad 0",
+                "Touchstone line 2: expected a finite numeric token, got 'bad'",
+            ),
+            (
+                "[Number of Ports] 1\n[Reference] bad",
+                "Touchstone line 2: invalid numeric value 'bad'",
+            ),
+        ] {
+            let error = read_touchstone_bytes("bad.s1p", bytes.as_bytes()).unwrap_err();
+            assert!(matches!(error, TouchstoneError::InvalidFloat { .. }));
+            assert!(error.source().unwrap().is::<std::num::ParseFloatError>());
+            assert_eq!(error.to_string(), expected);
+        }
+        let error = read_touchstone_bytes("bad.s1p", b"[Number of Ports] bad").unwrap_err();
+        assert!(matches!(error, TouchstoneError::InvalidInteger { .. }));
+        assert!(error.source().unwrap().is::<std::num::ParseIntError>());
+        assert_eq!(
+            error.to_string(),
+            "Touchstone line 1: invalid [Number of Ports] 'bad'"
+        );
+
+        let error = read_touchstone_bytes("bad.s1p", b"# Hz S RI R 50\n1 NaN 0").unwrap_err();
+        assert!(matches!(error, TouchstoneError::InvalidData(_)));
+        assert!(error.source().is_none());
+        assert_eq!(
+            error.to_string(),
+            "Touchstone line 2: expected a finite numeric token, got 'NaN'"
+        );
     }
 }

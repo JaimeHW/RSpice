@@ -1039,7 +1039,8 @@ fn parse_touchstone_result_dataset(
     bytes: &[u8],
     identified_format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
-    let dataset = crate::io::waveform_io::read_touchstone_bytes(source_name, bytes)?;
+    let dataset = crate::io::waveform_io::read_touchstone_bytes(source_name, bytes)
+        .map_err(|error| error.to_string())?;
     let version = dataset
         .metadata
         .get("touchstone_version")

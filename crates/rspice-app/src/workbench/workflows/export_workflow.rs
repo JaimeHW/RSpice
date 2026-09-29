@@ -269,8 +269,9 @@ impl ExportWorkflowIo for NativeExportWorkflowIo {
         dataset: &crate::io::WaveformDataset,
         destination: &ObservedExportDestination,
     ) -> Result<(), String> {
-        let contents =
-            crate::io::WaveformWriter::new(crate::io::WaveformFormat::Csv).write_text(dataset)?;
+        let contents = crate::io::WaveformWriter::new(crate::io::WaveformFormat::Csv)
+            .write_text(dataset)
+            .map_err(|error| error.to_string())?;
         publish_observed_bytes(destination, contents.as_bytes())
     }
 
@@ -280,8 +281,9 @@ impl ExportWorkflowIo for NativeExportWorkflowIo {
         dataset: &crate::io::WaveformDataset,
         path: &Path,
     ) -> Result<(), String> {
-        let contents =
-            crate::io::WaveformWriter::new(crate::io::WaveformFormat::Csv).write_text(dataset)?;
+        let contents = crate::io::WaveformWriter::new(crate::io::WaveformFormat::Csv)
+            .write_text(dataset)
+            .map_err(|error| error.to_string())?;
         crate::workbench::browser::download::download_text_file(path, &contents)
     }
 

@@ -52,5 +52,8 @@ fn periodic_port_noise_export_preserves_spectra_and_reference_context() {
     let error = crate::io::WaveformWriter::new(crate::io::WaveformFormat::Touchstone)
         .write_text(&dataset)
         .unwrap_err();
-    assert!(error.contains("periodic cross-frequency noise"), "{error}");
+    assert!(
+        error.to_string().contains("periodic cross-frequency noise"),
+        "{error}"
+    );
 }
