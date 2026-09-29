@@ -23,6 +23,7 @@ pub(in crate::workbench::workflows) fn parse_vcd(
 ) -> Result<ParsedResultDataset, String> {
     rspice_formats::digital::decode_vcd(bytes, format, digital_import_limits())
         .map(|decoded| present_digital(format, decoded))
+        .map_err(|error| error.to_string())
 }
 
 pub(in crate::workbench::workflows) fn parse_fst(
@@ -31,6 +32,7 @@ pub(in crate::workbench::workflows) fn parse_fst(
 ) -> Result<ParsedResultDataset, String> {
     rspice_formats::digital::decode_fst(bytes, format, digital_import_limits())
         .map(|decoded| present_digital(format, decoded))
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -50,4 +52,5 @@ pub(super) fn preflight_fst_for_test(
         format.canonical_id(),
     )
     .map(drop)
+    .map_err(|error| error.to_string())
 }

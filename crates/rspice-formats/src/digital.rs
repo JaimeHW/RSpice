@@ -29,8 +29,84 @@ pub struct DecodedDigital {
     pub event_payload: Option<AnalysisResultPayload>,
 }
 
-fn adapter_error(format: ResultImportFormat, detail: impl std::fmt::Display) -> String {
-    format!("{} import: {detail}", format.canonical_id())
+#[derive(Debug)]
+pub enum DigitalReadError {
+    InvalidData {
+        format: ResultImportFormat,
+        detail: String,
+    },
+    Vcd {
+        format: ResultImportFormat,
+        source: rspice_core::io::VcdError,
+    },
+    EventProjection {
+        format: ResultImportFormat,
+        source: rspice_core::execution::EventProjectionError,
+    },
+    EventTimeCount {
+        format: ResultImportFormat,
+        count: usize,
+        min: usize,
+        max: usize,
+    },
+    InexactTimestamp {
+        format: ResultImportFormat,
+        tick: u64,
+    },
+    #[cfg(feature = "fst")]
+    Fst(crate::fst::FstReadError),
+    ResultData(String),
+}
+
+impl std::fmt::Display for DigitalReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidData { format, detail } => {
+                write!(f, "{} import: {detail}", format.canonical_id())
+            }
+            Self::Vcd { format, source } => write!(f, "{} import: {source}", format.canonical_id()),
+            Self::EventProjection { format, source } => {
+                write!(f, "{} import: {source}", format.canonical_id())
+            }
+            Self::EventTimeCount {
+                format,
+                count,
+                min,
+                max,
+            } => write!(
+                f,
+                "{} import: digital trace has {count} distinct event times; expected {min}..={max}",
+                format.canonical_id()
+            ),
+            Self::InexactTimestamp { format, tick } => write!(
+                f,
+                "{} import: digital timestamp tick {tick} cannot be represented exactly as f64",
+                format.canonical_id()
+            ),
+            #[cfg(feature = "fst")]
+            Self::Fst(source) => source.fmt(f),
+            Self::ResultData(detail) => f.write_str(detail),
+        }
+    }
+}
+
+impl std::error::Error for DigitalReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Vcd { source, .. } => Some(source),
+            Self::EventProjection { source, .. } => Some(source),
+            #[cfg(feature = "fst")]
+            Self::Fst(source) => Some(source),
+            _ => None,
+        }
+    }
+}
+
+fn adapter_error(format: ResultImportFormat, detail: impl std::fmt::Display) -> DigitalReadError {
+    DigitalReadError::InvalidData {
+        format,
+        detail: detail.to_string(),
+    }
 }
 
 #[derive(Debug)]
@@ -92,20 +168,20 @@ pub fn decode_vcd(
     bytes: &[u8],
     format: ResultImportFormat,
     policy: DigitalImportLimits,
-) -> Result<DecodedDigital, String> {
+) -> Result<DecodedDigital, DigitalReadError> {
     let mut limits = rspice_core::ResourceLimits::default();
     limits.max_external_data_bytes = usize::try_from(policy.max_bytes).unwrap_or(usize::MAX);
     limits.max_external_data_values = policy.samples.max_values;
     limits.max_result_values = policy.samples.max_values;
     let document = rspice_core::io::parse_vcd_reader_with_limits(Cursor::new(bytes), limits)
-        .map_err(|error| adapter_error(format, error))?;
+        .map_err(|source| DigitalReadError::Vcd { format, source })?;
 
     // The evidence first, and from the whole document: every refusal a bus
     // can earn — a width past the engine's ceiling, a declared range that
     // disagrees with the variable's width, two variables that reduce to one
     // name — is the codec's, in the codec's words.
     let histories = rspice_core::execution::vcd_event_histories(&document)
-        .map_err(|error| adapter_error(format, error))?;
+        .map_err(|source| DigitalReadError::EventProjection { format, source })?;
     let event_payload = imported_event_payload(&histories);
 
     let mut signals: Vec<DigitalSignal> = Vec::new();
@@ -302,7 +378,7 @@ pub fn decode_fst(
     bytes: &[u8],
     format: ResultImportFormat,
     policy: DigitalImportLimits,
-) -> Result<DecodedDigital, String> {
+) -> Result<DecodedDigital, DigitalReadError> {
     let mut events = Vec::new();
     let mut recorded: Vec<Vec<rspice_core::io::VcdChange>> = Vec::new();
     let decoded =
@@ -325,7 +401,8 @@ pub fn decode_fst(
                 signal: event.signal,
                 value: event.sample,
             });
-        })?;
+        })
+        .map_err(DigitalReadError::Fst)?;
     recorded.resize_with(decoded.signals.len(), Vec::new);
     let signals = decoded
         .signals
@@ -390,7 +467,7 @@ fn fst_event_payload(
     recorded: Vec<Vec<rspice_core::io::VcdChange>>,
     timescale_seconds: f64,
     format: ResultImportFormat,
-) -> Result<Option<AnalysisResultPayload>, String> {
+) -> Result<Option<AnalysisResultPayload>, DigitalReadError> {
     let Some(timescale) = rspice_core::io::VcdTimescale::ALL
         .into_iter()
         .find(|scale| scale.seconds() == timescale_seconds)
@@ -419,7 +496,7 @@ fn fst_event_payload(
         });
     }
     let histories = rspice_core::execution::vcd_event_histories(&document)
-        .map_err(|error| adapter_error(format, error))?;
+        .map_err(|source| DigitalReadError::EventProjection { format, source })?;
     Ok(imported_event_payload(&histories))
 }
 
@@ -429,7 +506,7 @@ fn digital_events_to_dataset(
     signals: Vec<DigitalSignal>,
     mut events: Vec<DigitalEvent>,
     limits: WaveformImportLimits,
-) -> Result<DecodedDigital, String> {
+) -> Result<DecodedDigital, DigitalReadError> {
     let min_rows = limits.min_rows;
     let max_rows = limits.max_rows;
     if !timescale_seconds.is_finite() || timescale_seconds <= 0.0 {
@@ -442,7 +519,8 @@ fn digital_events_to_dataset(
         return Err(adapter_error(format, "digital source declares no signals"));
     }
     for signal in &signals {
-        validate_name(format, "signal", &signal.name, limits.max_signal_name_bytes)?;
+        validate_name(format, "signal", &signal.name, limits.max_signal_name_bytes)
+            .map_err(DigitalReadError::ResultData)?;
         if let Some(width) = signal.width
             && (width == 0 || width > MAX_EXACT_VECTOR_BITS as usize)
         {
@@ -461,13 +539,12 @@ fn digital_events_to_dataset(
         .map(|event| event.tick)
         .collect::<BTreeSet<_>>();
     if ticks.len() < min_rows || ticks.len() > max_rows {
-        return Err(adapter_error(
+        return Err(DigitalReadError::EventTimeCount {
             format,
-            format_args!(
-                "digital trace has {} distinct event times; expected {min_rows}..={max_rows}",
-                ticks.len()
-            ),
-        ));
+            count: ticks.len(),
+            min: min_rows,
+            max: max_rows,
+        });
     }
     let mut states = vec![None; signals.len()];
     let mut values = vec![Vec::with_capacity(ticks.len()); signals.len()];
@@ -475,10 +552,7 @@ fn digital_events_to_dataset(
     let mut events = events.into_iter().peekable();
     for tick in ticks {
         if tick > MAX_EXACT_F64_INTEGER {
-            return Err(adapter_error(
-                format,
-                format_args!("digital timestamp tick {tick} cannot be represented exactly as f64"),
-            ));
+            return Err(DigitalReadError::InexactTimestamp { format, tick });
         }
         while events.peek().is_some_and(|event| event.tick == tick) {
             let event = events.next().expect("peeked event exists");
@@ -528,7 +602,8 @@ fn digital_events_to_dataset(
             coordinate,
             signals,
             limits,
-        )?,
+        )
+        .map_err(DigitalReadError::ResultData)?,
         notes: Vec::new(),
         event_payload: None,
     })
@@ -539,7 +614,7 @@ fn append_digital_aliases(
     parsed: &mut ImportedWaveforms,
     aliases: Vec<(usize, String)>,
     limits: WaveformImportLimits,
-) -> Result<(), String> {
+) -> Result<(), DigitalReadError> {
     if parsed.waveforms.len().saturating_add(aliases.len()) > limits.max_columns.saturating_sub(1) {
         return Err(adapter_error(
             format,
@@ -553,7 +628,8 @@ fn append_digital_aliases(
         .collect::<HashSet<_>>();
     let mut alias_waveforms = Vec::with_capacity(aliases.len());
     for (canonical_index, name) in aliases {
-        validate_name(format, "signal", &name, limits.max_signal_name_bytes)?;
+        validate_name(format, "signal", &name, limits.max_signal_name_bytes)
+            .map_err(DigitalReadError::ResultData)?;
         if !known.insert(name.to_ascii_lowercase()) {
             return Err(adapter_error(
                 format,
@@ -659,6 +735,7 @@ mod tests {
             assert!(
                 decode_vcd(vcd, ResultImportFormat::Vcd, policy)
                     .unwrap_err()
+                    .to_string()
                     .contains("signal-count limit exceeded")
             );
         }
@@ -667,7 +744,21 @@ mod tests {
         assert!(
             decode_vcd(vcd, ResultImportFormat::Vcd, policy)
                 .unwrap_err()
+                .to_string()
                 .contains("2 distinct event times; expected 1..=1")
         );
+    }
+
+    #[test]
+    fn vcd_encoding_failure_retains_the_core_parser_cause() {
+        use std::error::Error as _;
+        let error = decode_vcd(&[0xff], ResultImportFormat::Vcd, limits()).unwrap_err();
+        let DigitalReadError::Vcd { format, source } = &error else {
+            panic!("expected parser failure: {error}");
+        };
+        assert_eq!(*format, ResultImportFormat::Vcd);
+        assert!(matches!(source, rspice_core::io::VcdError::Encoding(_)));
+        assert!(error.source().unwrap().is::<rspice_core::io::VcdError>());
+        assert_eq!(error.to_string(), format!("vcd import: {source}"));
     }
 }

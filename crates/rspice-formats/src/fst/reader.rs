@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::{BufReader, Cursor};
 
 use super::{
-    DecodedFst, FstEvent, FstLimits, FstRawValue, FstSignal, adapter_error, preflight_fst,
+    DecodedFst, FstEvent, FstLimits, FstRawValue, FstReadError, FstReadFailure, FstSignal,
+    adapter_error, preflight_fst, read_error,
 };
 
 /// Decode a preflighted FST stream, delivering each bounded event before the
@@ -14,11 +15,11 @@ pub fn decode_fst(
     limits: FstLimits,
     format: &str,
     mut on_event: impl FnMut(FstEvent<'_>),
-) -> Result<DecodedFst, String> {
+) -> Result<DecodedFst, FstReadError> {
     let geometry = preflight_fst(bytes, limits, format)?;
     let cursor = Cursor::new(bytes);
     let mut reader = fst_reader::FstReader::open(BufReader::new(cursor))
-        .map_err(|error| adapter_error(format, format_args!("invalid FST container: {error}")))?;
+        .map_err(|error| read_error(format, FstReadFailure::Container(error)))?;
     let header = reader.get_header();
     if header.var_count as usize > limits.max_columns.saturating_sub(1) {
         return Err(adapter_error(format, "FST signal-count limit exceeded"));
@@ -142,12 +143,7 @@ pub fn decode_fst(
                 _ => {}
             }
         })
-        .map_err(|error| {
-            adapter_error(
-                format,
-                format_args!("could not read FST hierarchy: {error}"),
-            )
-        })?;
+        .map_err(|error| read_error(format, FstReadFailure::Hierarchy(error)))?;
     if let Some(error) = hierarchy_error {
         return Err(adapter_error(format, error));
     }
@@ -195,9 +191,10 @@ pub fn decode_fst(
                 .get(&handle.get_index())
                 .ok_or_else(|| "FST returned an undeclared signal handle".to_owned())?;
             let (sample, raw) = match value {
-                fst_reader::FstSignalValue::String(bits) => {
-                    (logic_bits_to_f64(bits, format)?, FstRawValue::Logic(bits))
-                }
+                fst_reader::FstSignalValue::String(bits) => (
+                    logic_bits_to_f64(bits, format).map_err(|error| error.to_string())?,
+                    FstRawValue::Logic(bits),
+                ),
                 fst_reader::FstSignalValue::Real(value) if value.is_finite() => {
                     (value, FstRawValue::Real(value))
                 }
@@ -215,9 +212,7 @@ pub fn decode_fst(
             Ok(())
         },
     );
-    callback_result.map_err(|error| {
-        adapter_error(format, format_args!("could not read FST events: {error:?}"))
-    })?;
+    callback_result.map_err(|error| read_error(format, FstReadFailure::Events(error)))?;
     let mut aliases = Vec::new();
     for (canonical_index, handle) in handle_order.iter().enumerate() {
         for alias in by_handle[handle].iter().skip(1) {
@@ -231,7 +226,7 @@ pub fn decode_fst(
     })
 }
 
-fn logic_bits_to_f64(bits: &[u8], format: &str) -> Result<f64, String> {
+fn logic_bits_to_f64(bits: &[u8], format: &str) -> Result<f64, FstReadError> {
     if bits.is_empty() || bits.len() > 53 {
         return Err(adapter_error(
             format,
@@ -269,8 +264,7 @@ mod tests {
         FstFileType, FstInfo, FstScopeType, FstSignalType, FstVarDirection, FstVarType,
     };
 
-    #[test]
-    fn reader_streams_real_generated_events_without_a_result_owner() {
+    fn fst_bytes(last_bit: &[u8]) -> Vec<u8> {
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")
@@ -301,13 +295,19 @@ mod tests {
             .expect("FST signal");
         header.up_scope().expect("FST upscope");
         let mut body = header.finish().expect("FST header");
-        for (tick, bit) in [(0, b"0".as_slice()), (1, b"1".as_slice())] {
+        for (tick, bit) in [(0, b"0".as_slice()), (1, last_bit)] {
             body.time_change(tick).expect("FST time change");
             body.signal_change(clock, bit).expect("FST signal change");
         }
         body.finish().expect("FST finish");
         let bytes = std::fs::read(&path).expect("read FST fixture");
         std::fs::remove_file(&path).expect("remove FST fixture");
+        bytes
+    }
+
+    #[test]
+    fn reader_streams_real_generated_events_without_a_result_owner() {
+        let bytes = fst_bytes(b"1");
         assert!(looks_like_fst(&bytes));
 
         let mut events = Vec::new();
@@ -337,6 +337,46 @@ mod tests {
         assert_eq!(
             events,
             [(0, 0, 0.0, b"0".to_vec()), (1, 0, 1.0, b"1".to_vec())]
+        );
+    }
+
+    #[test]
+    fn event_callback_failure_keeps_its_source_and_original_debug_diagnostic() {
+        use std::error::Error as _;
+        let bytes = fst_bytes(b"x");
+        let error = decode_fst(
+            &bytes,
+            FstLimits {
+                max_bytes: 1024 * 1024,
+                max_columns: 16,
+                max_rows: 16,
+                max_values: 64,
+                max_signal_name_bytes: 1024,
+            },
+            "fst",
+            |_| {},
+        )
+        .unwrap_err();
+        let super::FstReadFailure::Events(source) = &error.reason else {
+            panic!("expected callback refusal: {error}");
+        };
+        let fst_reader::ReadSignalsError::CallbackError(detail) = source else {
+            panic!("expected the vector callback refusal: {error}");
+        };
+        assert_eq!(
+            detail,
+            "fst import: digital vector contains X/Z/U/W/- state that cannot be losslessly mapped to an analog trace"
+        );
+        assert_eq!(
+            error.to_string(),
+            format!("fst import: could not read FST events: {source:?}")
+        );
+        assert!(
+            error
+                .reason
+                .source()
+                .unwrap()
+                .is::<fst_reader::ReadSignalsError<String>>()
         );
     }
 }

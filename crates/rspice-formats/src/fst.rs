@@ -17,8 +17,101 @@ pub struct FstLimits {
     pub max_signal_name_bytes: usize,
 }
 
-fn adapter_error(format: &str, detail: impl std::fmt::Display) -> String {
-    format!("{format} import: {detail}")
+#[derive(Debug)]
+pub struct FstReadError {
+    pub format: String,
+    pub reason: FstReadFailure,
+}
+
+#[derive(Debug)]
+pub enum FstReadFailure {
+    InvalidData(String),
+    InputBytes {
+        bytes: u64,
+        limit: u64,
+    },
+    DeclaredBytes {
+        field: String,
+        bytes: u64,
+        limit: u64,
+    },
+    CountLimit {
+        field: String,
+        count: usize,
+        limit: usize,
+    },
+    #[cfg(feature = "fst")]
+    Container(fst_reader::ReaderError),
+    #[cfg(feature = "fst")]
+    Hierarchy(fst_reader::ReaderError),
+    #[cfg(feature = "fst")]
+    Events(fst_reader::ReadSignalsError<String>),
+}
+
+impl std::fmt::Display for FstReadFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidData(detail) => f.write_str(detail),
+            Self::InputBytes { .. } => f.write_str("FST input exceeds the byte limit"),
+            Self::DeclaredBytes {
+                field,
+                bytes,
+                limit,
+            } => write!(
+                f,
+                "FST {field} declares {bytes} bytes; the limit is {limit}"
+            ),
+            Self::CountLimit {
+                field,
+                count,
+                limit,
+            } => write!(f, "FST {field} count {count} exceeds the limit {limit}"),
+            #[cfg(feature = "fst")]
+            Self::Container(source) => write!(f, "invalid FST container: {source}"),
+            #[cfg(feature = "fst")]
+            Self::Hierarchy(source) => write!(f, "could not read FST hierarchy: {source}"),
+            #[cfg(feature = "fst")]
+            Self::Events(source) => write!(f, "could not read FST events: {source:?}"),
+        }
+    }
+}
+
+impl std::error::Error for FstReadFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            #[cfg(feature = "fst")]
+            Self::Container(source) | Self::Hierarchy(source) => Some(source),
+            #[cfg(feature = "fst")]
+            Self::Events(source) => Some(source),
+            Self::InvalidData(_)
+            | Self::InputBytes { .. }
+            | Self::DeclaredBytes { .. }
+            | Self::CountLimit { .. } => None,
+        }
+    }
+}
+
+impl std::fmt::Display for FstReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} import: {}", self.format, self.reason)
+    }
+}
+
+impl std::error::Error for FstReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.reason)
+    }
+}
+
+fn read_error(format: &str, reason: FstReadFailure) -> FstReadError {
+    FstReadError {
+        format: format.to_owned(),
+        reason,
+    }
+}
+
+fn adapter_error(format: &str, detail: impl std::fmt::Display) -> FstReadError {
+    read_error(format, FstReadFailure::InvalidData(detail.to_string()))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -81,9 +174,15 @@ pub fn preflight_fst(
     bytes: &[u8],
     limits: FstLimits,
     format: &str,
-) -> Result<FstGeometryPreflight, String> {
+) -> Result<FstGeometryPreflight, FstReadError> {
     if bytes.len() as u64 > limits.max_bytes {
-        return Err(adapter_error(format, "FST input exceeds the byte limit"));
+        return Err(read_error(
+            format,
+            FstReadFailure::InputBytes {
+                bytes: bytes.len() as u64,
+                limit: limits.max_bytes,
+            },
+        ));
     }
     let mut cursor = 0_usize;
     let mut block_count = 0_usize;
@@ -356,7 +455,7 @@ fn fst_be_u64(
     offset: usize,
     format: &str,
     field: impl std::fmt::Display,
-) -> Result<u64, String> {
+) -> Result<u64, FstReadError> {
     let end = offset
         .checked_add(8)
         .ok_or_else(|| adapter_error(format, format_args!("{field} offset overflow")))?;
@@ -374,14 +473,15 @@ impl FstLimits {
         value: u64,
         format: &str,
         field: impl std::fmt::Display,
-    ) -> Result<usize, String> {
+    ) -> Result<usize, FstReadError> {
         if value > self.max_bytes {
-            return Err(adapter_error(
+            return Err(read_error(
                 format,
-                format_args!(
-                    "FST {field} declares {value} bytes; the limit is {}",
-                    self.max_bytes
-                ),
+                FstReadFailure::DeclaredBytes {
+                    field: field.to_string(),
+                    bytes: value,
+                    limit: self.max_bytes,
+                },
             ));
         }
         usize::try_from(value).map_err(|_| {
@@ -390,13 +490,17 @@ impl FstLimits {
     }
 }
 
-fn fst_count(value: u64, maximum: usize, format: &str, field: &str) -> Result<usize, String> {
+fn fst_count(value: u64, maximum: usize, format: &str, field: &str) -> Result<usize, FstReadError> {
     let value = usize::try_from(value)
         .map_err(|_| adapter_error(format, format_args!("FST {field} count overflow")))?;
     if value > maximum {
-        Err(adapter_error(
+        Err(read_error(
             format,
-            format_args!("FST {field} count {value} exceeds the limit {maximum}"),
+            FstReadFailure::CountLimit {
+                field: field.to_owned(),
+                count: value,
+                limit: maximum,
+            },
         ))
     } else {
         Ok(value)
@@ -410,7 +514,7 @@ fn fst_uleb(
     maximum_bits: u32,
     format: &str,
     field: &str,
-) -> Result<(u64, usize), String> {
+) -> Result<(u64, usize), FstReadError> {
     let start = *cursor;
     let max_bytes = maximum_bits.div_ceil(7) as usize;
     let mut value = 0_u128;
@@ -445,7 +549,7 @@ fn fst_sleb_i64(
     limit: usize,
     format: &str,
     field: &str,
-) -> Result<i64, String> {
+) -> Result<i64, FstReadError> {
     let mut value = 0_i128;
     for index in 0..10_usize {
         if *cursor >= limit {
@@ -475,7 +579,7 @@ fn preflight_fst_blackout(
     section_end: usize,
     limits: FstLimits,
     format: &str,
-) -> Result<(), String> {
+) -> Result<(), FstReadError> {
     let mut cursor = section_start + 8;
     let (count, _) = fst_uleb(
         bytes,
@@ -520,7 +624,7 @@ fn preflight_fst_geometry(
     section_length: usize,
     limits: FstLimits,
     format: &str,
-) -> Result<FstGeometryPreflight, String> {
+) -> Result<FstGeometryPreflight, FstReadError> {
     if section_length < 24 {
         return Err(adapter_error(format, "truncated FST geometry block"));
     }
@@ -606,7 +710,7 @@ fn preflight_fst_hierarchy(
     section_length: usize,
     limits: FstLimits,
     format: &str,
-) -> Result<(), String> {
+) -> Result<(), FstReadError> {
     if section_length < 16 {
         return Err(adapter_error(format, "truncated FST hierarchy block"));
     }
@@ -665,7 +769,7 @@ fn preflight_fst_data_section(
     widths: &[usize],
     limits: FstLimits,
     format: &str,
-) -> Result<(), String> {
+) -> Result<(), FstReadError> {
     let mut cursor = section.section_start + 32;
     let (frame_expanded, _) = fst_uleb(
         bytes,
@@ -966,7 +1070,7 @@ fn preflight_fst_offset_table(
     signal_count: usize,
     payload_end_offset: usize,
     format: &str,
-) -> Result<Vec<(usize, usize)>, String> {
+) -> Result<Vec<(usize, usize)>, FstReadError> {
     let mut cursor = table_start;
     let mut signal_index = 0_usize;
     let mut offsets = Vec::with_capacity(signal_count);
