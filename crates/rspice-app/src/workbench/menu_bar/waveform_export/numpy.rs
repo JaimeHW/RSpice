@@ -35,14 +35,7 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
-use rspice_formats::numpy::NamedArray;
-
-/// `result_import_workflow::MAX_RESULT_COLUMNS`, and
-/// `result_import_adapters::MAX_ARCHIVE_MEMBERS`, which are the same number.
-/// Both are private to their modules; an export above either is a file this
-/// product refuses to read, so the ceiling is enforced here rather than
-/// discovered on re-import.
-const MAX_COLUMNS: usize = rspice_formats::numpy::MAX_COLUMNS;
+use rspice_formats::numpy::result::{NumpyExport, encode_npy, encode_npz, prepare_numpy};
 
 /// NumPy has no registered media type. `application/octet-stream` is what the
 /// bytes are; `.npz` is genuinely a ZIP and says so.
@@ -98,159 +91,22 @@ impl NumpyKind {
     }
 }
 
-#[derive(Debug)]
-struct NumpySignal {
-    name: String,
-    real: Vec<f64>,
-    imag: Option<Vec<f64>>,
-}
-
-/// One rectangular table, with the complex signals still complex.
-#[derive(Debug)]
-pub(super) struct NumpyExport {
-    coordinate_name: &'static str,
-    coordinate: Vec<f64>,
-    signals: Vec<NumpySignal>,
-}
-
-impl NumpyExport {
-    fn is_complex(&self) -> bool {
-        self.signals.iter().any(|signal| signal.imag.is_some())
+/// The sentence an `.npy` reader needs, because the file itself cannot
+/// carry it.
+fn column_order(export: &NumpyExport) -> String {
+    let mut order = String::from("column order = ");
+    order.push_str(export.coordinate_name);
+    for signal in export.signals.iter().take(MAX_STATED_COLUMNS) {
+        order.push_str(", ");
+        order.push_str(&signal.name);
     }
-
-    fn columns(&self) -> usize {
-        self.signals.len() + 1
-    }
-
-    /// The sentence an `.npy` reader needs, because the file itself cannot
-    /// carry it.
-    fn column_order(&self) -> String {
-        let mut order = String::from("column order = ");
-        order.push_str(self.coordinate_name);
-        for signal in self.signals.iter().take(MAX_STATED_COLUMNS) {
-            order.push_str(", ");
-            order.push_str(&signal.name);
-        }
-        if self.signals.len() > MAX_STATED_COLUMNS {
-            order.push_str(&format!(
-                ", and {} further signals in the dataset's order",
-                self.signals.len() - MAX_STATED_COLUMNS
-            ));
-        }
-        order
-    }
-}
-
-/// The coordinate name each analysis domain publishes under.
-///
-/// These three are exactly the spellings RSpice's own NPZ reader recognises as
-/// a coordinate, and the ones it maps back onto an analysis domain. Publishing
-/// any other name would produce an archive this product could not reopen.
-fn coordinate_name(analysis_type: crate::state::AnalysisType) -> &'static str {
-    match analysis_type {
-        crate::state::AnalysisType::Transient => "time",
-        crate::state::AnalysisType::Ac => "frequency",
-        _ => "sweep",
-    }
-}
-
-pub(super) fn prepare_numpy(
-    analysis: &crate::state::AnalysisResult,
-    waveforms: &[&crate::state::WaveformData],
-) -> Result<NumpyExport, String> {
-    let reference = waveforms
-        .iter()
-        .filter(|waveform| !waveform.x.is_empty())
-        .max_by_key(|waveform| waveform.x.len())
-        .ok_or_else(|| NO_SAMPLES_MESSAGE.to_owned())?;
-    let coordinate = reference.x.as_ref().to_vec();
-
-    let mut signals = Vec::with_capacity(waveforms.len());
-    for waveform in waveforms {
-        // A NumPy array is rectangular, so a column that does not stand on the
-        // shared coordinate has no honest place in it.
-        if waveform.x.as_ref() != coordinate.as_slice() {
-            return Err(format!(
-                "A NumPy export is one rectangular table, so every column must stand on the same \
-                 coordinate samples. '{}' carries its own x-axis samples. Export this result as \
-                 CSV or an RSpice bundle instead.",
-                waveform.name
-            ));
-        }
-        if let Some(complex) = &waveform.complex {
-            signals.push(NumpySignal {
-                name: complex.source_name.clone(),
-                real: complex.real.as_ref().to_vec(),
-                imag: Some(complex.imag.as_ref().to_vec()),
-            });
-        } else {
-            signals.push(NumpySignal {
-                name: waveform.name.clone(),
-                real: waveform.y.as_ref().to_vec(),
-                imag: None,
-            });
-        }
-    }
-    if signals.is_empty() {
-        return Err(NO_SAMPLES_MESSAGE.to_owned());
-    }
-    for signal in &signals {
-        if signal.real.len() != coordinate.len()
-            || signal
-                .imag
-                .as_ref()
-                .is_some_and(|imag| imag.len() != coordinate.len())
-        {
-            return Err(format!(
-                "'{}' has {} samples against {} coordinate samples; the export is refused rather \
-                 than padded or truncated.",
-                signal.name,
-                signal.real.len(),
-                coordinate.len()
-            ));
-        }
-    }
-    let export = NumpyExport {
-        coordinate_name: coordinate_name(analysis.analysis_type),
-        coordinate,
-        signals,
-    };
-    if export.columns() > MAX_COLUMNS {
-        return Err(format!(
-            "This result has {} columns; RSpice reads at most {MAX_COLUMNS} from a NumPy source, \
-             so publishing it would produce a file this build could not reopen. Hide traces, or \
-             export an RSpice bundle.",
-            export.columns()
+    if export.signals.len() > MAX_STATED_COLUMNS {
+        order.push_str(&format!(
+            ", and {} further signals in the dataset's order",
+            export.signals.len() - MAX_STATED_COLUMNS
         ));
     }
-    Ok(export)
-}
-
-fn borrowed_arrays(export: &NumpyExport) -> Vec<NamedArray<'_>> {
-    export
-        .signals
-        .iter()
-        .map(|signal| NamedArray {
-            name: &signal.name,
-            real: &signal.real,
-            imag: signal.imag.as_deref(),
-        })
-        .collect()
-}
-
-/// One 2-D array, C order, coordinate first.
-pub(super) fn encode_npy(export: &NumpyExport) -> Result<Vec<u8>, String> {
-    rspice_formats::numpy::matrix::encode_npy(&export.coordinate, &borrowed_arrays(export))
-        .map_err(|error| error.to_string())
-}
-
-pub(super) fn encode_npz(export: &NumpyExport) -> Result<Vec<u8>, String> {
-    rspice_formats::numpy::archive::encode_npz(
-        export.coordinate_name,
-        &export.coordinate,
-        &borrowed_arrays(export),
-    )
-    .map_err(|error| error.to_string())
+    order
 }
 
 pub(super) fn export_numpy(
@@ -269,7 +125,7 @@ pub(super) fn export_numpy(
                     ALL_TRACES_HIDDEN_MESSAGE.to_owned()
                 })
             } else {
-                prepare_numpy(analysis, &waveforms)
+                prepare_numpy(analysis, &waveforms).map_err(|error| error.to_string())
             }
         }
         None => Err(NO_ACTIVE_ANALYSIS_MESSAGE.to_owned()),
@@ -353,7 +209,7 @@ fn completion_detail(export: &NumpyExport, kind: NumpyKind) -> String {
              order is the only key to its columns.",
             export.coordinate.len(),
             export.columns(),
-            export.column_order()
+            column_order(export)
         ),
         NumpyKind::Archive => format!(
             "{} arrays of {} samples: '{}' plus one per signal, named. {dtype} values. Units, the \
@@ -401,7 +257,7 @@ mod tests {
     ) -> Result<NumpyExport, String> {
         let analysis = analysis(analysis_type);
         let borrowed = waveforms.iter().collect::<Vec<_>>();
-        prepare_numpy(&analysis, &borrowed)
+        prepare_numpy(&analysis, &borrowed).map_err(|error| error.to_string())
     }
 
     #[test]
@@ -414,7 +270,7 @@ mod tests {
             ],
         )
         .expect("a shared-axis transient prepares");
-        assert_eq!(export.column_order(), "column order = time, V(out), V(in)");
+        assert_eq!(column_order(&export), "column order = time, V(out), V(in)");
 
         let bytes = encode_npy(&export).expect("encodes");
         // `\x93NUMPY`, version 1.0, then a C-order 3x3 float64 header.
@@ -475,7 +331,7 @@ mod tests {
         assert!(header.contains("'descr': '<c16'"), "{header}");
         assert!(header.contains("'shape': (3, 2, )"), "{header}");
         assert_eq!(bytes.len(), 128 + 6 * 16);
-        assert_eq!(export.column_order(), "column order = frequency, V(out)");
+        assert_eq!(column_order(&export), "column order = frequency, V(out)");
     }
 
     #[test]
@@ -579,7 +435,7 @@ mod tests {
         // One array each is fine; an archive has to name them.
         assert!(encode_npy(&export).is_ok());
         let error = encode_npz(&export).expect_err("the member names collide");
-        assert!(error.contains("v(OUT)"), "{error}");
+        assert!(error.to_string().contains("v(OUT)"), "{error}");
     }
 
     #[test]
@@ -590,6 +446,6 @@ mod tests {
         )
         .expect("prepares");
         let error = encode_npz(&export).expect_err("'..' is refused by the archive reader");
-        assert!(error.contains("'..'"), "{error}");
+        assert!(error.to_string().contains("'..'"), "{error}");
     }
 }

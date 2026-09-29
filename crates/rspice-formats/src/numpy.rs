@@ -3,6 +3,8 @@
 pub mod archive;
 pub mod matrix;
 pub mod reader;
+#[cfg(feature = "result-waveform")]
+pub mod result;
 
 use npyz::WriterBuilder as _;
 use num_complex::Complex64;
