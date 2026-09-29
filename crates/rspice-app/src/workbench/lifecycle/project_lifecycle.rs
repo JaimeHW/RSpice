@@ -40,11 +40,13 @@ use rspice_project::lifecycle::{PreparedBrowserSave, StagedBrowserSave};
 pub(crate) use rspice_project::lifecycle::{ProjectLifecycleError, RevertReviewToken, SaveScope};
 
 use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
-use crate::io::{ProjectSimulationResults, ProjectSnapshot};
+use crate::io::ProjectSnapshot;
 #[cfg(target_arch = "wasm32")]
 use crate::product::ContentDigest;
+use crate::state::project_snapshot::SnapshotSessionCapture;
 use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app_state::AppState;
+use rspice_project::{ProjectWorkingSet, SnapshotContent};
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {
@@ -137,61 +139,38 @@ pub(crate) fn snapshot(state: &AppState) -> Result<ProjectSnapshot, ProjectLifec
     capture_snapshot(state, SnapshotContent::Committed)
 }
 
-#[derive(Clone, Copy)]
-enum SnapshotContent {
-    Committed,
-    Current,
-}
-
 fn capture_snapshot(
     state: &AppState,
     content: SnapshotContent,
 ) -> Result<ProjectSnapshot, ProjectLifecycleError> {
-    let mut workspace = state.workspace.clone();
-    if matches!(
-        workspace.content.active_view_type(),
-        ViewType::Schematic | ViewType::Testbench
-    ) {
-        workspace.insert_schematic_editor(workspace.content.active_key(), state.schematic.clone());
+    let mut sessions = SnapshotSessionCapture {
+        workspace: state.workspace.session.clone(),
+        active: &state.schematic.session,
+    };
+    let file = ProjectWorkingSet {
+        workspace: &state.workspace.content,
+        active_schematic: state.schematic.editor_ref().design,
+        libraries: &state.library_manager,
     }
-    // A save/checkpoint retains committed content even when a native window
-    // currently holds a live pointer preview in one of the runtime buffers.
-    if matches!(content, SnapshotContent::Committed) {
-        workspace.for_each_schematic_editor_mut(|_, schematic| {
-            schematic.cancel_operation();
-        });
-    }
-    workspace.mark_all_clean();
-    workspace.for_each_schematic_editor_mut(|_, schematic| {
-        strip_schematic_runtime_state(schematic);
-    });
-
-    let mut libraries = state.library_manager.clone();
-    sanitize_library_view_runtime_state(&mut libraries);
-    let simulation_results = state
-        .project_lifecycle
-        .result_cache
-        .capture(&state.simulation);
-    let execution_context =
-        crate::io::capture_execution_context(&state.sim_setup, &state.model_library_manager)
-            .map_err(ProjectLifecycleError::InvalidState)?;
-    let project = ProjectSnapshot::new_with_execution_context(
-        workspace,
-        libraries,
-        simulation_results,
-        execution_context,
-    )
-    .with_result_presentation(state.ui.results.project_presentation(&state.simulation));
-    project
-        .file
-        .validate()
-        .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
-    project
-        .file
-        .simulation_results
-        .validate()
-        .map_err(ProjectLifecycleError::InvalidState)?;
-    Ok(project)
+    .capture(
+        content,
+        &mut sessions,
+        || {
+            state
+                .project_lifecycle
+                .result_cache
+                .capture(&state.simulation)
+        },
+        || {
+            crate::io::capture_execution_context(&state.sim_setup, &state.model_library_manager)
+                .map_err(ProjectLifecycleError::InvalidState)
+        },
+        || state.ui.results.project_presentation(&state.simulation),
+    )?;
+    Ok(ProjectSnapshot {
+        file,
+        workspace_session: sessions.workspace,
+    })
 }
 
 /// Canonical identity of every authoritative input consumed by schematic
@@ -206,22 +185,9 @@ pub(crate) fn generated_netlist_input_digest(
 ) -> Result<crate::product::ContentDigest, ProjectLifecycleError> {
     // Execution provenance must describe the exact live input consumed by
     // generation, including an edit currently previewed in another window.
-    let mut project = capture_snapshot(state, SnapshotContent::Current)?;
-    project.file.simulation_results = ProjectSimulationResults::default();
-    // A receipt records validation of the existing inputs. Provider decisions
-    // still participate because they select the source emitted to the engine.
-    if let Some(context) = project.file.execution_context.as_mut() {
-        context.model_validation_receipt = None;
-    }
-    // Annotating a plot must never change what the netlist generator is
-    // asked to produce.
-    project.file.result_presentation = Default::default();
-    project.file.workspace.netlist_source = None;
-    project.file.workspace.netlist_source_path = None;
-    project.file.workspace.netlist_document = None;
-    project.file.workspace.netlist_descriptor = None;
-    project.file.workspace.retained_netlist_decks.clear();
-    registry::content_digest(&project.file).map_err(ProjectLifecycleError::InvalidState)
+    capture_snapshot(state, SnapshotContent::Current)?
+        .file
+        .generated_netlist_input_digest()
 }
 
 pub(crate) fn has_unsaved_changes(state: &AppState) -> bool {
@@ -1726,17 +1692,6 @@ fn restore_project_structure_preserving_documents(
 #[cfg(not(target_arch = "wasm32"))]
 fn mark_all_library_views_clean(libraries: &mut crate::state::LibraryManager) {
     libraries.mark_all_views_clean_runtime();
-}
-
-/// Remove presentation-only state from the serialized clone. This must never
-/// be used on the live library manager: saving engineering content does not
-/// close tabs or alter the user's presentation state.
-fn sanitize_library_view_runtime_state(libraries: &mut crate::state::LibraryManager) {
-    libraries.sanitize_views_for_persistence();
-}
-
-fn strip_schematic_runtime_state(schematic: &mut crate::state::SchematicState) {
-    schematic.strip_runtime_for_project_save();
 }
 
 #[cfg(test)]

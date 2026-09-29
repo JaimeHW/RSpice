@@ -41,3 +41,6 @@ pub use file::{
 
 pub mod lifecycle;
 pub mod persistence;
+
+mod working;
+pub use working::{ProjectWorkingSet, SnapshotContent, SnapshotSessions};

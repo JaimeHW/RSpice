@@ -1,10 +1,14 @@
 //! In-memory project snapshots retain editor state outside the canonical file.
 
+use super::SchematicState;
 #[cfg(test)]
 use super::schematic::{SchematicEditorMut, SchematicEditorRef};
 use super::workspace::WorkspaceSession;
-use super::{LibraryManager, ProjectWorkspace, SchematicState};
-use rspice_project::{ProjectExecutionContext, ProjectFile, results::ProjectSimulationResults};
+#[cfg(test)]
+use super::{LibraryManager, ProjectWorkspace};
+use rspice_project::ProjectFile;
+#[cfg(test)]
+use rspice_project::{ProjectExecutionContext, results::ProjectSimulationResults};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
@@ -48,6 +52,7 @@ impl ProjectSnapshot {
             workspace_session,
         }
     }
+    #[cfg(test)]
     pub fn new_with_execution_context(
         workspace: ProjectWorkspace,
         libraries: LibraryManager,
@@ -60,6 +65,7 @@ impl ProjectSnapshot {
             workspace_session,
         }
     }
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn with_result_presentation(
         mut self,
@@ -118,5 +124,57 @@ impl ProjectSnapshot {
     pub(crate) fn restore_pending_annotation(&mut self) -> Result<usize, String> {
         self.workspace_session
             .restore_pending_annotation(&mut self.file.workspace, &self.file.libraries)
+    }
+}
+
+/// Captured editor state follows the project owner's choice of design content.
+pub(crate) struct SnapshotSessionCapture<'a> {
+    pub(crate) workspace: WorkspaceSession,
+    pub(crate) active: &'a super::schematic::SchematicSession,
+}
+
+impl rspice_project::SnapshotSessions for SnapshotSessionCapture<'_> {
+    fn replace_active(&mut self, key: &str) {
+        self.workspace
+            .schematic_sessions
+            .insert(key.to_owned(), self.active.clone());
+    }
+
+    fn reconcile_cancelled_operation(
+        &mut self,
+        key: &str,
+        design: &mut rspice_design::schematic::owned::Schematic,
+        cancelled: Option<rspice_design::schematic::owned::CancelledOperation>,
+    ) {
+        let session = self
+            .workspace
+            .schematic_sessions
+            .entry(key.to_owned())
+            .or_default();
+        if let Some(cancelled) = cancelled {
+            SchematicState::borrow_parts(design, session)
+                .editor
+                .reconcile_cancelled_operation(cancelled);
+        }
+    }
+
+    fn mark_all_clean(&mut self) {
+        for session in self.workspace.schematic_sessions.values_mut() {
+            session.is_dirty = false;
+        }
+    }
+
+    fn strip_schematic_runtime(&mut self, key: &str) {
+        let session = self
+            .workspace
+            .schematic_sessions
+            .entry(key.to_owned())
+            .or_default();
+        session.selection = Default::default();
+        session.wire_drawing = Default::default();
+        session.clipboard = Default::default();
+        session.preview_rotation = Default::default();
+        session.preview_mirror_h = false;
+        session.is_dirty = false;
     }
 }

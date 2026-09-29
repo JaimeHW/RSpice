@@ -104,6 +104,15 @@ impl SchematicState {
         let Some(cancelled) = self.design.cancel_operation() else {
             return false;
         };
+        self.reconcile_cancelled_operation(cancelled);
+        true
+    }
+
+    /// Apply editor restoration after the design owner cancels an operation.
+    pub(crate) fn reconcile_cancelled_operation(
+        &mut self,
+        cancelled: rspice_design::schematic::owned::CancelledOperation,
+    ) {
         if let Some(repaired) = cancelled.repaired {
             self.session.is_dirty = true;
             self.session.selection.clear();
@@ -116,7 +125,6 @@ impl SchematicState {
         {
             cancel.restore(self);
         }
-        true
     }
 
     /// Convenience method for simple undoable operations

@@ -155,6 +155,7 @@ impl ProjectWorkspace {
     ) -> Self {
         Self { content, session }
     }
+    #[cfg(test)]
     pub(crate) fn into_parts(self) -> (rspice_project::ProjectWorkspace, WorkspaceSession) {
         (self.content, self.session)
     }

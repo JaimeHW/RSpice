@@ -413,18 +413,6 @@ impl SchematicState {
 }
 
 impl SchematicState {
-    pub(crate) fn strip_runtime_for_project_save(&mut self) {
-        self.session.selection = Default::default();
-        self.session.wire_drawing = Default::default();
-        self.session.clipboard = Default::default();
-        self.session.preview_rotation = Default::default();
-        self.session.preview_mirror_h = false;
-        self.design.strip_runtime_connections_for_save();
-        self.session.is_dirty = false;
-    }
-}
-
-impl SchematicState {
     pub fn history(&self) -> &rspice_design::schematic::history::SchematicHistory {
         self.design.history()
     }
