@@ -1,10 +1,9 @@
 //! MATLAB v5 publication: the displayed analysis as named column vectors.
 //!
 //! The bytes are [`writer`]'s, which implements MathWorks' *MAT-File Format*
-//! directly. This module decides what goes in them: which variable is the
-//! coordinate, what each signal is called once MATLAB's naming rules have had
-//! their say, and what the reader has to be told because the format has no
-//! place to keep it.
+//! directly. The format projection also owns coordinate names, variable
+//! naming and provenance. This module selects the displayed evidence,
+//! publishes its bytes and presents the format's limitations.
 //!
 //! # What a `.mat` file carries
 //!
@@ -43,54 +42,14 @@ use super::{
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
-use writer::publication::{MatNameAllocator, created_on, header_text, note_entry};
-use writer::{MatVariable, write_mat_v5};
-
-/// `result_import_workflow::MAX_RESULT_COLUMNS`. An export above it is a file
-/// this product refuses to read, so the ceiling is enforced here rather than
-/// discovered on re-import.
-const MAX_COLUMNS: usize = 1_024;
-
-/// `result_import_workflow::MAX_RESULT_ROWS`, on the same argument.
-const MAX_ROWS: usize = 1_000_000;
+use writer::result::{MatlabExport, prepare_matlab};
+use writer::write_mat_v5;
 
 /// The media type the result-data contract states for `matlab-v5`.
 const MATLAB_MIME_TYPE: &str = "application/x-matlab-data";
 
 const LABEL: &str = "MATLAB v5";
 const EXTENSION: &str = "mat";
-
-/// One prepared file, and what the reader is owed about it.
-#[derive(Debug)]
-pub(super) struct MatlabExport {
-    header_text: String,
-    variables: Vec<MatVariable>,
-    /// The variable the coordinate was published under.
-    coordinate: &'static str,
-    rows: usize,
-    /// Every published variable, mapped back to what it came from.
-    note: String,
-    /// The note did not fit the header's descriptive-text field.
-    note_truncated: bool,
-    /// Signals published with a zero imaginary part because the displayed
-    /// trace retained none.
-    zeroed_imaginary: Vec<String>,
-}
-
-/// The variable name an analysis publishes its coordinate under, and whether
-/// its signals are complex.
-///
-/// These are exactly the names `result_import_adapters::parse_matlab_v5`
-/// recognises a coordinate by, so a file written here reopens as the analysis
-/// it was.
-const fn coordinate_variable(analysis: crate::state::AnalysisType) -> Option<(&'static str, bool)> {
-    match analysis {
-        crate::state::AnalysisType::Transient => Some(("time", false)),
-        crate::state::AnalysisType::DcSweep => Some(("sweep", false)),
-        crate::state::AnalysisType::Ac => Some(("frequency", true)),
-        _ => None,
-    }
-}
 
 /// A transient whose retained evidence is an event schedule rather than a
 /// table of samples.
@@ -107,104 +66,6 @@ fn event_only_refusal(analysis: &crate::state::AnalysisResult) -> Option<String>
              format that holds an event history, or an RSpice bundle.",
             analysis.label
         )
-    })
-}
-
-pub(super) fn prepare_matlab(
-    analysis: &crate::state::AnalysisResult,
-    waveforms: &[&crate::state::WaveformData],
-) -> Result<MatlabExport, String> {
-    let Some((coordinate_name, spectral)) = coordinate_variable(analysis.analysis_type) else {
-        return Err(format!(
-            "A {LABEL} file carries one sampled analysis: a transient on 'time', a DC sweep on \
-             'sweep' or an AC sweep on 'frequency'. '{}' is none of those, and MAT has no header \
-             in which a variable could say what it is, so the file would reopen as an anonymous \
-             sweep. Export CSV, or an RSpice bundle, which carries this analysis whole.",
-            analysis.label
-        ));
-    };
-    let reference = waveforms
-        .iter()
-        .filter(|waveform| !waveform.x.is_empty())
-        .max_by_key(|waveform| waveform.x.len())
-        .ok_or_else(|| NO_SAMPLES_MESSAGE.to_owned())?;
-    let coordinate = reference.x.as_ref().to_vec();
-    if coordinate.len() > MAX_ROWS {
-        return Err(format!(
-            "This result has {} samples; RSpice reads at most {MAX_ROWS} from a MATLAB source, \
-             so publishing it would produce a file this build could not reopen.",
-            coordinate.len()
-        ));
-    }
-    if waveforms.len() + 1 > MAX_COLUMNS {
-        return Err(format!(
-            "This result has {} columns; RSpice reads at most {MAX_COLUMNS} from a MATLAB \
-             source. Hide traces, or export an RSpice bundle.",
-            waveforms.len() + 1
-        ));
-    }
-
-    // The coordinate claims its name first: it is written first, and the
-    // importer takes the first variable whose name it recognises.
-    let mut names = MatNameAllocator::new(coordinate_name, waveforms.len());
-    let rows = coordinate.len();
-    let mut variables = vec![MatVariable {
-        name: coordinate_name.to_owned(),
-        real: coordinate.clone(),
-        imag: None,
-    }];
-    let coordinate_source = super::axis_signal_for_analysis_type(analysis.analysis_type).0;
-    let mut entries = vec![note_entry(coordinate_name, coordinate_source, None)];
-    let mut zeroed_imaginary = Vec::new();
-    for waveform in waveforms {
-        // Every variable stands on the one coordinate, because that is what
-        // the importer reads a MAT file back as. Publishing a column with its
-        // own x-axis writes a file this product would refuse.
-        if waveform.x.as_ref() != coordinate.as_slice() {
-            return Err(format!(
-                "A {LABEL} export is one table: every signal stands on the same coordinate \
-                 samples. '{}' carries its own x-axis samples. Export this result as CSV or an \
-                 RSpice bundle instead.",
-                waveform.name
-            ));
-        }
-        let (source, real, imag) = match (spectral, &waveform.complex) {
-            (true, Some(complex)) => (
-                complex.source_name.clone(),
-                complex.real.as_ref().to_vec(),
-                Some(complex.imag.as_ref().to_vec()),
-            ),
-            (true, None) => {
-                zeroed_imaginary.push(waveform.name.clone());
-                (
-                    waveform.name.clone(),
-                    waveform.y.as_ref().to_vec(),
-                    Some(vec![0.0; rows]),
-                )
-            }
-            (false, _) => (waveform.name.clone(), waveform.y.as_ref().to_vec(), None),
-        };
-        let name = names.allocate(&source);
-        entries.push(note_entry(&name, &source, waveform.unit.as_deref()));
-        variables.push(MatVariable { name, real, imag });
-    }
-    if variables.len() == 1 {
-        return Err(NO_SAMPLES_MESSAGE.to_owned());
-    }
-
-    // Every published variable is named, not just the first few: the unit is
-    // recoverable from nowhere else, so a note that covered some of them
-    // would be a note that quietly lost the rest.
-    let note = entries.join("; ");
-    let (header_text, note_truncated) = header_text(&created_on(analysis.timestamp), &note);
-    Ok(MatlabExport {
-        header_text,
-        variables,
-        coordinate: coordinate_name,
-        rows,
-        note,
-        note_truncated,
-        zeroed_imaginary,
     })
 }
 
@@ -242,7 +103,7 @@ pub(super) fn export_matlab(
                     }
                 }))
             } else {
-                prepare_matlab(analysis, &waveforms)
+                prepare_matlab(analysis, &waveforms).map_err(|error| error.to_string())
             }
         }
         None => Err(NO_ACTIVE_ANALYSIS_MESSAGE.to_owned()),
@@ -335,7 +196,7 @@ mod tests {
     use super::*;
     use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType, WaveformData};
     use crate::workbench::workflows::result_import_workflow::parse_result_dataset;
-    use writer::publication::{ELLIPSIS, matlab_identifier};
+    use writer::publication::{ELLIPSIS, created_on, matlab_identifier};
     use writer::{
         HEADER_BYTES, HEADER_SIGNATURE, HEADER_TEXT_BYTES, MAX_NAME_CHARS, is_matlab_identifier,
     };
@@ -358,7 +219,7 @@ mod tests {
     ) -> Result<MatlabExport, String> {
         let analysis = analysis(analysis_type);
         let borrowed = waveforms.iter().collect::<Vec<_>>();
-        prepare_matlab(&analysis, &borrowed)
+        prepare_matlab(&analysis, &borrowed).map_err(|error| error.to_string())
     }
 
     #[test]
@@ -485,9 +346,11 @@ mod tests {
             AnalysisType::Ac,
         ]
         .map(|analysis| {
-            coordinate_variable(analysis)
-                .unwrap_or_else(|| panic!("{analysis:?} is one of the three MAT carries"))
-                .0
+            prepared(analysis, &[waveform("V(out)", vec![0.0], vec![1.0])])
+                .unwrap_or_else(|error| {
+                    panic!("{analysis:?} is one of the three MAT carries: {error}")
+                })
+                .coordinate
         });
         for name in published {
             assert!(
