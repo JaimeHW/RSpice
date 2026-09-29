@@ -16,8 +16,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::simulation::execution::{PreparationError, PreparationStage};
-use crate::simulation::netlist_gen::{DesignNet, projection_nets};
 use crate::state::{InstancePath, OccurrenceProbeSpelling};
+use rspice_design::connectivity::summary::{DesignNet, projection_nets};
 
 const AUTOMATIC_OUTPUT_SMALL_DESIGN_LIMIT: usize = 16;
 const AUTOMATIC_OUTPUT_HARD_LIMIT: usize = 32;
@@ -292,7 +292,7 @@ fn automatic_outputs(
     plan_id: crate::product::SimulationPlanId,
 ) -> Result<Vec<crate::state::SavedOutput>, PreparationError> {
     fn carries_signal(net: &&DesignNet) -> bool {
-        net.class != crate::simulation::netlist_gen::NetClass::Ground
+        net.class != rspice_design::connectivity::summary::NetClass::Ground
     }
 
     let non_ground_count = occurrences

@@ -9,11 +9,11 @@
 use std::collections::HashSet;
 
 use crate::product::ContentDigest;
-use crate::simulation::netlist_gen::{DesignNet, projection_nets};
 use crate::state::{GeneratedArtifact, GeneratedSourceMapEntry};
 use crate::workbench::AppState;
 use crate::workbench::TogglePreference;
 use crate::workbench::documents::result_document::SelectedResultTrace;
+use rspice_design::connectivity::summary::{DesignNet, projection_nets};
 
 /// Stable logical subject selected in the active schematic document.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -673,8 +673,8 @@ mod tests {
         let nets = vec![DesignNet {
             name: "PORT_OUT".to_owned(),
             authored_name: true,
-            class: crate::simulation::netlist_gen::NetClass::Signal,
-            terminals: vec![crate::simulation::netlist_gen::NetTerminal {
+            class: rspice_design::connectivity::summary::NetClass::Signal,
+            terminals: vec![rspice_design::connectivity::summary::NetTerminal {
                 component_id: 17,
                 reference: "X1".to_owned(),
                 pin: "OUT".to_owned(),

@@ -19,9 +19,9 @@ use rspice_design::schematic::document::SchematicDocument;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::simulation::netlist_gen::extraction::ExtractedConnectivity;
 use crate::state::{Component, ComponentType, PortDirection, is_ground_reference};
 use crate::workbench::state::{PreflightIssue, PreflightRemediation};
+use rspice_design::connectivity::ExtractedConnectivity;
 
 /// Row labels the Solver surface states as enforced contract. The refusal and
 /// the statement of the rule use one vocabulary.
@@ -398,8 +398,8 @@ fn quoted_list(nodes: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::netlist_gen::extraction::extract;
     use crate::state::{NetLabel, Point, Wire};
+    use rspice_design::connectivity::extract_with_hierarchy as extract;
 
     fn place<'a>(
         schematic: &'a mut SchematicState,

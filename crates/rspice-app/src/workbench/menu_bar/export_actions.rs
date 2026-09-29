@@ -406,7 +406,7 @@ pub(crate) fn build_menu_netlist(
     let root_schematic = execution_projection
         .root_schematic()
         .expect("a successful execution projection has a materialized root");
-    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
+    let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
         state.library_manager.catalog(),
         &execution_projection,
     );
@@ -445,6 +445,7 @@ pub(crate) fn build_menu_netlist(
             active_cell: &root_reference,
             analysis_instances: &analysis_instances,
         },
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
     );
 
     if !generation.errors.is_empty() {

@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::services::drc::{DrcLocation, DrcSeverity, DrcViolation, DrcViolationType};
+use crate::simulation::netlist_gen::{NetlistSourceData, generate_netlist_hierarchical};
 use crate::state::{
     Bus, BusDeclaration, BusSlice, BusTapOrientation, Cell, CellViewRef, Component, Library,
     LibraryCellInstance, LibraryManager, NetLabel, Point, PortDirection, PortSpec, SchematicState,
@@ -45,7 +46,13 @@ fn reference_of(schematic: &SchematicState, id: u64) -> String {
 }
 
 fn run(schematic: &SchematicState, config: DrcConfig) -> DrcResult {
-    run_drc_check_with_hierarchy_and_config(schematic, &HierarchySource::empty(), config)
+    run_drc_check_with_hierarchy_and_config(
+        schematic,
+        &HierarchySource::from_buffers(
+            &std::collections::HashMap::<String, SchematicDocument>::new(),
+        ),
+        config,
+    )
 }
 
 fn of_type(result: &DrcResult, violation_type: DrcViolationType) -> Vec<&DrcViolation> {
@@ -198,7 +205,12 @@ fn canonical_property_schema_extracts_only_definite_parameter_failures() {
     resistor.params = "m=0".to_owned();
     schematic.document_mut_for_test().components.push(resistor);
 
-    let (components, _) = extract_checked_design(&schematic, &HierarchySource::empty());
+    let (components, _) = extract_checked_design(
+        &schematic,
+        &HierarchySource::from_buffers(
+            &std::collections::HashMap::<String, SchematicDocument>::new(),
+        ),
+    );
     assert!(components[0].missing_parameters.is_empty());
     assert_eq!(
         components[0].out_of_range_parameters,
@@ -225,7 +237,12 @@ fn unresolvable_project_cell_is_reported_as_definitively_unknown() {
     let mut schematic = SchematicState::default();
     schematic.document_mut_for_test().components.push(instance);
 
-    let (components, _) = extract_checked_design(&schematic, &HierarchySource::empty());
+    let (components, _) = extract_checked_design(
+        &schematic,
+        &HierarchySource::from_buffers(
+            &std::collections::HashMap::<String, SchematicDocument>::new(),
+        ),
+    );
     assert_eq!(components[0].component_known, Some(false));
 }
 
@@ -500,7 +517,12 @@ fn a_labelled_terminal_with_no_conductor_is_floating_under_the_label_name() {
 #[test]
 fn a_bus_bit_terminal_carries_the_deck_node_in_the_check() {
     let schematic = tapped_bus_schematic();
-    let (components, connectivity) = extract_checked_design(&schematic, &HierarchySource::empty());
+    let (components, connectivity) = extract_checked_design(
+        &schematic,
+        &HierarchySource::from_buffers(
+            &std::collections::HashMap::<String, SchematicDocument>::new(),
+        ),
+    );
     let tapped = components
         .iter()
         .flat_map(|component| component.pins.iter())
@@ -514,10 +536,13 @@ fn a_bus_bit_terminal_carries_the_deck_node_in_the_check() {
         "a message quotes the spelling the drawing shows"
     );
 
-    let deck = super::super::netlist_gen::generate_netlist_hierarchical(
+    let deck = generate_netlist_hierarchical(
         &schematic,
         &[],
-        &HierarchySource::empty(),
+        &HierarchySource::from_buffers(
+            &std::collections::HashMap::<String, SchematicDocument>::new(),
+        ),
+        &NetlistSourceData::default(),
     );
     assert_eq!(
         deck.point_to_net.get(&Point::new(60, 40)),
@@ -607,7 +632,8 @@ fn assert_erc_and_deck_agree(
     schematic: &SchematicState,
     hierarchy: &HierarchySource<'_>,
 ) {
-    let deck = super::super::netlist_gen::generate_netlist_hierarchical(schematic, &[], hierarchy);
+    let deck =
+        generate_netlist_hierarchical(schematic, &[], hierarchy, &NetlistSourceData::default());
     let (components, _) = extract_checked_design(schematic, hierarchy);
     for component in &components {
         for pin in &component.pins {
@@ -628,7 +654,13 @@ fn assert_erc_and_deck_agree(
 #[test]
 fn erc_and_netlist_agree_on_nets() {
     for (label, schematic) in fixture_corpus() {
-        assert_erc_and_deck_agree(label, &schematic, &HierarchySource::empty());
+        assert_erc_and_deck_agree(
+            label,
+            &schematic,
+            &HierarchySource::from_buffers(
+                &std::collections::HashMap::<String, SchematicDocument>::new(),
+            ),
+        );
     }
 
     let (libraries, buffers) = library_with_authored_amp_symbol();

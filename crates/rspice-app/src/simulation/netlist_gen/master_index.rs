@@ -335,7 +335,11 @@ impl<'a> MasterIndex<'a> {
     /// master's own occurrence path, so a cell netlists identically whether it
     /// is the deck's root or four levels down. The index is passed by handle
     /// because those nested generators resolve their own X-lines through it.
-    pub(super) fn emit(index: &Rc<Self>, hierarchy: &'a HierarchySource<'a>) -> MasterEmission {
+    pub(super) fn emit(
+        index: &Rc<Self>,
+        hierarchy: &'a HierarchySource<'a>,
+        source_data: Option<&'a NetlistSourceData<'a>>,
+    ) -> MasterEmission {
         let mut emission = MasterEmission::default();
         for key in &index.order {
             let draft = &index.drafts[key];
@@ -347,6 +351,7 @@ impl<'a> MasterIndex<'a> {
                 hierarchy,
                 draft.representative.clone(),
                 Rc::clone(index),
+                source_data,
             );
             nested.extract_connectivity();
             // A port tied to ground inside the cell emits node 0 in the body

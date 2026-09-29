@@ -135,11 +135,16 @@ fn instance_line<'a>(netlist: &'a str, reference: &str) -> &'a str {
 #[test]
 fn project_cell_emits_subckt_definition() {
     let master = div_master();
-    let mut hierarchy = HierarchySource::empty();
-    hierarchy.insert("work", "div", &master);
+    let hierarchy_buffers = HashMap::from([("work/div/schematic".to_owned(), &master)]);
+    let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
     let top = top_with_instance(&["a", "b"]);
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     let text = result.netlist.to_lowercase();
@@ -159,13 +164,18 @@ fn project_cell_emits_subckt_definition() {
 #[test]
 fn two_instances_of_one_cellview_share_one_master_body() {
     let master = div_master();
-    let mut hierarchy = HierarchySource::empty();
-    hierarchy.insert("work", "div", &master);
+    let hierarchy_buffers = HashMap::from([("work/div/schematic".to_owned(), &master)]);
+    let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
     let mut top = SchematicState::default();
     top.add_library_cell_component(Point::new(100, 0), binding("div", &["a", "b"]));
     top.add_library_cell_component(Point::new(300, 0), binding("div", &["a", "b"]));
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert_eq!(
@@ -198,7 +208,12 @@ fn cross_library_cell_name_collision_qualifies_the_second_master() {
     let mut top = SchematicState::default();
     top.add_library_cell_component(Point::new(100, 0), binding_in("work", "amp", &["a", "b"]));
     top.add_library_cell_component(Point::new(300, 0), binding_in("analog", "amp", &["a", "b"]));
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert_eq!(
@@ -223,13 +238,20 @@ fn nested_cells_emit_leaf_first() {
     place_port(&mut outer, "q", Point::new(60, 0));
     outer.add_library_cell_component(Point::new(120, 0), binding("inner", &["a", "b"]));
 
-    let mut hierarchy = HierarchySource::empty();
-    hierarchy.insert("work", "inner", &inner);
-    hierarchy.insert("work", "outer", &outer);
+    let hierarchy_buffers = HashMap::from([
+        ("work/inner/schematic".to_owned(), &inner),
+        ("work/outer/schematic".to_owned(), &outer),
+    ]);
+    let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
     let mut top = SchematicState::default();
     top.add_library_cell_component(Point::new(100, 0), binding("outer", &["p", "q"]));
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     let text = result.netlist.to_lowercase();
@@ -258,12 +280,17 @@ fn typed_port_order_drives_subckt_header_after_storage_reordering() {
             .expect("typed port places");
     }
     master.document_mut_for_test().components.reverse();
-    let mut hierarchy = HierarchySource::empty();
-    hierarchy.insert("work", "ordered", &master);
+    let hierarchy_buffers = HashMap::from([("work/ordered/schematic".to_owned(), &master)]);
+    let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
     let mut top = SchematicState::default();
     top.add_library_cell_component(Point::new(100, 100), binding("ordered", &["IN", "OUT"]));
 
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
 
     assert!(
         result.netlist.contains(".subckt ordered IN OUT"),
@@ -275,13 +302,18 @@ fn typed_port_order_drives_subckt_header_after_storage_reordering() {
 #[test]
 fn empty_binding_resolves_master_ports() {
     let master = div_master();
-    let mut hierarchy = HierarchySource::empty();
-    hierarchy.insert("work", "div", &master);
+    let hierarchy_buffers = HashMap::from([("work/div/schematic".to_owned(), &master)]);
+    let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
     // Legacy placement: terminal_order never populated. The master has two
     // ports and the generic instance has two pins — resolvable.
     let top = top_with_instance(&[]);
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert!(result.netlist.to_lowercase().contains(".subckt div a b"));
 }
@@ -291,12 +323,17 @@ fn explicit_zero_port_project_cell_is_netlistable() {
     let mut master = SchematicState::default();
     master.add_component(ComponentType::Resistor, Point::new(30, 0));
 
-    let mut hierarchy = HierarchySource::empty();
-    hierarchy.insert("work", "isolated", &master);
+    let hierarchy_buffers = HashMap::from([("work/isolated/schematic".to_owned(), &master)]);
+    let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
     let mut top = SchematicState::default();
     top.add_library_cell_component(Point::new(100, 0), binding_with_interface("isolated", &[]));
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert!(result.netlist.contains(".subckt isolated"));
@@ -352,7 +389,12 @@ fn authored_symbol_pin_positions_define_cell_instance_connectivity() {
         .push(NetLabel::new(2, Point::new(170, 70), "vout"));
 
     let hierarchy = HierarchySource::from_workspace(libraries.catalog(), &buffers);
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert!(
@@ -385,12 +427,17 @@ fn recursion_by_lib_cell_view_is_a_typed_defect() {
     place_port(&mut looper, "b", Point::new(60, 0));
     looper.add_library_cell_component(Point::new(120, 0), binding("loop", &["a", "b"]));
 
-    let mut hierarchy = HierarchySource::empty();
-    hierarchy.insert("work", "loop", &looper);
+    let hierarchy_buffers = HashMap::from([("work/loop/schematic".to_owned(), &looper)]);
+    let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
     let mut top = SchematicState::default();
     top.add_library_cell_component(Point::new(100, 0), binding("loop", &["a", "b"]));
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
 
     let chain = result
         .defects
@@ -418,9 +465,15 @@ fn recursion_by_lib_cell_view_is_a_typed_defect() {
 
 #[test]
 fn missing_master_is_an_error() {
-    let hierarchy = HierarchySource::empty();
+    let hierarchy_buffers = HashMap::<String, SchematicDocument>::new();
+    let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
     let top = top_with_instance(&["a", "b"]);
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
     assert!(
         result
             .defects
@@ -442,15 +495,20 @@ fn missing_master_is_an_error() {
 #[test]
 fn stale_interface_is_one_typed_defect_at_every_site() {
     let master = div_master(); // master order: a, b
-    let mut hierarchy = HierarchySource::empty();
-    hierarchy.insert("work", "div", &master);
+    let hierarchy_buffers = HashMap::from([("work/div/schematic".to_owned(), &master)]);
+    let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
     for placed in [
         vec!["a", "b", "c"], // count changed
         vec!["b", "a"],      // same count, wrong order
     ] {
         let top = top_with_instance(&placed);
-        let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+        let result = generate_netlist_hierarchical(
+            &top,
+            &[],
+            &hierarchy,
+            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        );
         let stale = result
             .defects
             .iter()
@@ -505,11 +563,16 @@ fn legacy_instance_cannot_bind_a_zero_port_master() {
     let mut master = SchematicState::default();
     master.add_component(ComponentType::Resistor, Point::new(30, 0));
 
-    let mut hierarchy = HierarchySource::empty();
-    hierarchy.insert("work", "div", &master);
+    let hierarchy_buffers = HashMap::from([("work/div/schematic".to_owned(), &master)]);
+    let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
     let top = top_with_instance(&["a", "b"]);
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
     assert!(
         result
             .errors
@@ -526,11 +589,16 @@ fn port_tied_to_ground_is_an_error() {
     // Ground terminal coincides with port a's net.
     master.add_component(ComponentType::Ground, Point::new(10, 10));
 
-    let mut hierarchy = HierarchySource::empty();
-    hierarchy.insert("work", "div", &master);
+    let hierarchy_buffers = HashMap::from([("work/div/schematic".to_owned(), &master)]);
+    let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
     let top = top_with_instance(&["a", "b"]);
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
     assert!(
         result
             .defects
@@ -589,7 +657,12 @@ fn declared_parameters_reach_the_subckt_header_and_the_deck_parses() {
         .find(|component| component.kind == ComponentType::CellInstance)
         .expect("the placed instance is retained")
         .params = "rload=4k".to_owned();
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert_eq!(
@@ -615,7 +688,12 @@ fn required_parameter_without_default_is_a_defect() {
 
     let mut top = SchematicState::default();
     top.add_library_cell_component(Point::new(100, 0), binding("div", &["a", "b"]));
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
 
     assert!(
         result.defects.iter().any(|defect| matches!(
@@ -644,14 +722,21 @@ fn emission_map_covers_every_occurrence() {
     place_port(&mut outer, "q", Point::new(60, 0));
     outer.add_library_cell_component(Point::new(120, 0), binding("inner", &["a", "b"]));
 
-    let mut hierarchy = HierarchySource::empty();
-    hierarchy.insert("work", "inner", &inner);
-    hierarchy.insert("work", "outer", &outer);
+    let hierarchy_buffers = HashMap::from([
+        ("work/inner/schematic".to_owned(), &inner),
+        ("work/outer/schematic".to_owned(), &outer),
+    ]);
+    let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
     let mut top = SchematicState::default();
     top.add_library_cell_component(Point::new(100, 0), binding("outer", &["p", "q"]));
     top.add_library_cell_component(Point::new(400, 0), binding("outer", &["p", "q"]));
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     let mut rows = result
@@ -787,6 +872,7 @@ fn configured_exact_paths_materialize_distinct_schematic_and_source_views() {
         projection.root_schematic().expect("root schematic"),
         &[],
         &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
     );
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     let source_literal = source_path.to_string_lossy();
@@ -928,6 +1014,7 @@ fn two_instances_with_different_descendant_bindings_emit_v2() {
         projection.root_schematic().expect("root schematic"),
         &[],
         &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
     );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
@@ -1010,6 +1097,7 @@ fn configured_builtin_xspice_is_a_valid_executable_leaf() {
         projection.root_schematic().expect("root schematic"),
         &[],
         &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
     );
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert!(result.netlist.contains(".MODEL a1_model astate"));

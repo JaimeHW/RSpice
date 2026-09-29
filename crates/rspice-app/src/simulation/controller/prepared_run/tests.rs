@@ -5,6 +5,7 @@
 //! rather than silently reopening the changed source.
 
 use super::*;
+use rspice_design::connectivity::summary::{DesignNet, NetClass};
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -124,10 +125,10 @@ fn spectre_model_library_ahdl_is_compiled_and_emitted_as_a_sealed_runtime_direct
 fn output_test_net(
     name: &str,
     authored_name: bool,
-    class: crate::simulation::netlist_gen::NetClass,
+    class: NetClass,
     port: Option<crate::state::PortDirection>,
-) -> crate::simulation::netlist_gen::DesignNet {
-    crate::simulation::netlist_gen::DesignNet {
+) -> DesignNet {
+    DesignNet {
         name: name.to_owned(),
         authored_name,
         class,
@@ -139,7 +140,7 @@ fn output_test_net(
 
 /// The design root and the nets its sheet owns, which is the shape automatic
 /// selection reads when the design is one level deep.
-fn root_occurrence(nets: Vec<crate::simulation::netlist_gen::DesignNet>) -> Vec<OccurrenceNets> {
+fn root_occurrence(nets: Vec<DesignNet>) -> Vec<OccurrenceNets> {
     vec![OccurrenceNets {
         occurrence: crate::state::InstancePath::root(),
         nets: std::sync::Arc::new(nets),
@@ -147,10 +148,7 @@ fn root_occurrence(nets: Vec<crate::simulation::netlist_gen::DesignNet>) -> Vec<
 }
 
 /// One occurrence below the root, owning the nets of the master it instantiates.
-fn instance_occurrence(
-    path: &str,
-    nets: Vec<crate::simulation::netlist_gen::DesignNet>,
-) -> OccurrenceNets {
+fn instance_occurrence(path: &str, nets: Vec<DesignNet>) -> OccurrenceNets {
     OccurrenceNets {
         occurrence: crate::state::InstancePath::parse(path).expect("a legal occurrence path"),
         nets: std::sync::Arc::new(nets),
@@ -164,36 +162,26 @@ fn automatic_output_selection_is_bounded_prioritized_and_deterministic() {
         output_test_net(
             "0",
             true,
-            crate::simulation::netlist_gen::NetClass::Ground,
+            NetClass::Ground,
             Some(crate::state::PortDirection::Supply),
         ),
         output_test_net(
             "z_out",
             true,
-            crate::simulation::netlist_gen::NetClass::Signal,
+            NetClass::Signal,
             Some(crate::state::PortDirection::Out),
         ),
         output_test_net(
             "a_io",
             true,
-            crate::simulation::netlist_gen::NetClass::Signal,
+            NetClass::Signal,
             Some(crate::state::PortDirection::InOut),
         ),
-        output_test_net(
-            "mid",
-            true,
-            crate::simulation::netlist_gen::NetClass::Signal,
-            None,
-        ),
+        output_test_net("mid", true, NetClass::Signal, None),
     ];
-    nets.extend((0..20).map(|index| {
-        output_test_net(
-            &format!("net{index}"),
-            false,
-            crate::simulation::netlist_gen::NetClass::Signal,
-            None,
-        )
-    }));
+    nets.extend(
+        (0..20).map(|index| output_test_net(&format!("net{index}"), false, NetClass::Signal, None)),
+    );
 
     let occurrences = root_occurrence(nets);
     let (first, used_fallback) = effective_plan_saved_outputs(
@@ -247,7 +235,7 @@ fn explicit_output_modes_do_not_invent_quantities() {
     let occurrences = root_occurrence(vec![output_test_net(
         "out",
         true,
-        crate::simulation::netlist_gen::NetClass::Signal,
+        NetClass::Signal,
         Some(crate::state::PortDirection::Out),
     )]);
     for mode in [
@@ -264,18 +252,11 @@ fn explicit_output_modes_do_not_invent_quantities() {
 #[test]
 fn automatic_outputs_cover_every_occurrence_exactly_once() {
     let plan_id = crate::product::SimulationPlanId::new();
-    let master_net = || {
-        vec![output_test_net(
-            "n1",
-            true,
-            crate::simulation::netlist_gen::NetClass::Signal,
-            None,
-        )]
-    };
+    let master_net = || vec![output_test_net("n1", true, NetClass::Signal, None)];
     let mut occurrences = root_occurrence(vec![output_test_net(
         "out",
         true,
-        crate::simulation::netlist_gen::NetClass::Signal,
+        NetClass::Signal,
         Some(crate::state::PortDirection::Out),
     )]);
     occurrences.push(instance_occurrence("/X1", master_net()));
@@ -320,12 +301,7 @@ fn an_occurrence_the_engine_cannot_name_contributes_no_automatic_output() {
     let mut occurrences = root_occurrence(Vec::new());
     occurrences.push(instance_occurrence(
         "/Xé",
-        vec![output_test_net(
-            "n1",
-            true,
-            crate::simulation::netlist_gen::NetClass::Signal,
-            None,
-        )],
+        vec![output_test_net("n1", true, NetClass::Signal, None)],
     ));
 
     let (outputs, _) = effective_plan_saved_outputs(
@@ -1508,7 +1484,7 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
     let runtimes = prepared_configuration_veriloga_runtimes(&state, &projection)
         .expect("compile exact configured source closure");
 
-    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
+    let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
         state.library_manager.catalog(),
         &projection,
     );
@@ -1516,6 +1492,7 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
         projection.root_schematic().expect("materialized root"),
         &[],
         &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
     );
     assert!(generated.errors.is_empty(), "{:?}", generated.errors);
 
@@ -2369,7 +2346,7 @@ fn the_prepared_snapshot_carries_the_decks_emission_map() {
             &state.schematic,
         )
         .expect("the authored hierarchy projects");
-    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
+    let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
         state.library_manager.catalog(),
         &projection,
     );
@@ -2379,6 +2356,7 @@ fn the_prepared_snapshot_carries_the_decks_emission_map() {
             .expect("the projection carries the root"),
         &[],
         &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
     );
     assert!(generated.errors.is_empty(), "{:?}", generated.errors);
 

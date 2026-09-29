@@ -332,12 +332,16 @@ fn validate_candidate_configuration(
     let root = projection.root_schematic().ok_or_else(|| {
         "Configuration cannot be activated without its exact root schematic.".to_owned()
     })?;
-    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
+    let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
         app.state.library_manager.catalog(),
         &projection,
     );
-    let generated =
-        crate::simulation::netlist_gen::generate_netlist_hierarchical(root, &[], &hierarchy);
+    let generated = crate::simulation::netlist_gen::generate_netlist_hierarchical(
+        root,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
     if !generated.errors.is_empty() {
         return Err(format!(
             "Configuration cannot be activated because exact netlist generation failed: {}",

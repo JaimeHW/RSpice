@@ -7,7 +7,6 @@
 use std::collections::HashSet;
 
 use super::*;
-use crate::simulation::netlist_gen::extraction::extract;
 use crate::state::{
     Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
     DesignNoteKind, DocumentationShapeKind, Junction, NetLabel, PendingDesignNotePlacement,
@@ -16,6 +15,7 @@ use crate::state::{
     SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe, SheetDefinition,
     SheetPortPolicy, SheetTemplate, Tool, WaveformData, Wire,
 };
+use rspice_design::connectivity::extract_with_hierarchy as extract;
 
 fn pointer_viewport() -> Viewport {
     Viewport {

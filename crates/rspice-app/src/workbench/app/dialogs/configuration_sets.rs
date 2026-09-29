@@ -578,12 +578,16 @@ impl RSpiceApp {
         let root = projection.root_schematic().ok_or_else(|| {
             "Configuration cannot be published without its root schematic.".to_owned()
         })?;
-        let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
+        let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
             self.state.library_manager.catalog(),
             &projection,
         );
-        let generated =
-            crate::simulation::netlist_gen::generate_netlist_hierarchical(root, &[], &hierarchy);
+        let generated = crate::simulation::netlist_gen::generate_netlist_hierarchical(
+            root,
+            &[],
+            &hierarchy,
+            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        );
         if !generated.errors.is_empty() {
             return Err(format!(
                 "Configuration cannot be published because exact netlist generation failed: {}",
@@ -1173,12 +1177,16 @@ fn configuration_netlist_digest(
     let root = projection
         .root_schematic()
         .ok_or_else(|| "configuration root schematic is unavailable".to_owned())?;
-    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_design_projection(
+    let hierarchy = rspice_design::hierarchy::HierarchySource::from_design_projection(
         libraries.catalog(),
         projection,
     );
-    let generated =
-        crate::simulation::netlist_gen::generate_netlist_hierarchical(root, &[], &hierarchy);
+    let generated = crate::simulation::netlist_gen::generate_netlist_hierarchical(
+        root,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
     if !generated.errors.is_empty() {
         return Err(generated.errors.join("; "));
     }

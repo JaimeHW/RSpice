@@ -614,7 +614,7 @@ pub(super) fn variant_connectivity_signature(
             &state.schematic,
         )
         .map_err(|error| error.to_string())?;
-    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_design_projection(
+    let hierarchy = rspice_design::hierarchy::HierarchySource::from_design_projection(
         state.library_manager.catalog(),
         &projection,
     );
@@ -624,6 +624,7 @@ pub(super) fn variant_connectivity_signature(
             schematic,
             &[],
             &hierarchy,
+            &crate::simulation::netlist_gen::NetlistSourceData::default(),
         );
         if !generated.errors.is_empty() {
             return Err(format!(

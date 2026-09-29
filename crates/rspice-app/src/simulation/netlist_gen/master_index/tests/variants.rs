@@ -187,6 +187,7 @@ fn source_replacement_uses_the_requested_corner(
                 projection.root_schematic().unwrap(),
                 &[],
                 &hierarchy,
+                &crate::simulation::netlist_gen::NetlistSourceData::default(),
             );
             assert!(!generated.errors.is_empty());
             let diagnostics = projection
@@ -237,8 +238,12 @@ fn source_replacement_uses_the_requested_corner(
             Some("{ref} {nodes} {model} {params}")
         );
         let hierarchy = HierarchySource::from_design_projection(libraries.catalog(), &projection);
-        let generated =
-            generate_netlist_hierarchical(projection.root_schematic().unwrap(), &[], &hierarchy);
+        let generated = generate_netlist_hierarchical(
+            projection.root_schematic().unwrap(),
+            &[],
+            &hierarchy,
+            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        );
         assert!(
             generated.errors.is_empty(),
             "{:?}\n{}",
@@ -348,8 +353,12 @@ fn source_current(
     libraries: &LibraryManager,
 ) -> f64 {
     let hierarchy = HierarchySource::from_design_projection(libraries.catalog(), projection);
-    let generated =
-        generate_netlist_hierarchical(projection.root_schematic().unwrap(), &[], &hierarchy);
+    let generated = generate_netlist_hierarchical(
+        projection.root_schematic().unwrap(),
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
     assert!(
         generated.errors.is_empty(),
         "{:?}\n{}",
@@ -533,8 +542,12 @@ fn named_replacement_terminals_keep_their_nets_when_the_master_order_changes() {
             .design_projection(&libraries, &active, &top)
             .unwrap();
         let hierarchy = HierarchySource::from_design_projection(libraries.catalog(), &projection);
-        let deck =
-            generate_netlist_hierarchical(projection.root_schematic().unwrap(), &[], &hierarchy);
+        let deck = generate_netlist_hierarchical(
+            projection.root_schematic().unwrap(),
+            &[],
+            &hierarchy,
+            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        );
         assert!(deck.errors.is_empty(), "{:?}", deck.errors);
         assert!(
             deck.netlist.contains(".subckt alternate b a"),
@@ -920,8 +933,12 @@ fn a_variant_replacement_owns_the_plan_and_emitted_master() {
         let placed = projection.plan().binding(&instance_path("/X1")).unwrap();
         assert_eq!(placed.resolved_reference().cell, "alternate");
         let hierarchy = HierarchySource::from_design_projection(libraries.catalog(), &projection);
-        let result =
-            generate_netlist_hierarchical(projection.root_schematic().unwrap(), &[], &hierarchy);
+        let result = generate_netlist_hierarchical(
+            projection.root_schematic().unwrap(),
+            &[],
+            &hierarchy,
+            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        );
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         assert_eq!(
             subckt_headers(&result.netlist),
@@ -986,8 +1003,12 @@ fn a_primitive_substitution_inside_a_buffered_master_enters_the_hierarchy() {
             .expect("the replacement introduces a child instance");
         assert_eq!(nested.resolved_reference().cell, "alternate");
         let hierarchy = HierarchySource::from_design_projection(libraries.catalog(), &projection);
-        let result =
-            generate_netlist_hierarchical(projection.root_schematic().unwrap(), &[], &hierarchy);
+        let result = generate_netlist_hierarchical(
+            projection.root_schematic().unwrap(),
+            &[],
+            &hierarchy,
+            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        );
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         assert!(
             result
@@ -1029,8 +1050,12 @@ fn omitted_instances_do_not_require_or_emit_their_missing_master() {
             .expect("an omitted instance cannot block the populated circuit");
         assert!(projection.plan().binding(&instance_path("/X2")).is_none());
         let hierarchy = HierarchySource::from_design_projection(libraries.catalog(), &projection);
-        let result =
-            generate_netlist_hierarchical(projection.root_schematic().unwrap(), &[], &hierarchy);
+        let result = generate_netlist_hierarchical(
+            projection.root_schematic().unwrap(),
+            &[],
+            &hierarchy,
+            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        );
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         assert_eq!(subckt_headers(&result.netlist), vec![".subckt div a b"]);
         assert!(!result.netlist.lines().any(|line| line.starts_with("X2 ")));

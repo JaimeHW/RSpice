@@ -109,7 +109,7 @@ impl AppState {
                     subject.display_path()
                 )
             })?;
-        let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_design_projection(
+        let hierarchy = rspice_design::hierarchy::HierarchySource::from_design_projection(
             self.library_manager.catalog(),
             &projection,
         );
@@ -566,7 +566,7 @@ mod tests {
     fn design_checks_read_the_projection_so_coincident_pages_stay_two_nets() {
         let mut state = state_with_two_coincident_sheets();
         assert_eq!(
-            crate::simulation::netlist_gen::design_nets(&state.schematic).len(),
+            rspice_design::connectivity::summary::design_nets(&state.schematic).len(),
             1,
             "the editor buffer holds one coordinate space, so its pages overlap"
         );
@@ -580,7 +580,7 @@ mod tests {
             )
             .expect("the fixture configuration resolves");
         assert_eq!(
-            crate::simulation::netlist_gen::projection_nets(
+            rspice_design::connectivity::summary::projection_nets(
                 state.library_manager.catalog(),
                 &projection,
                 &state.workspace.content.active_view.key(),

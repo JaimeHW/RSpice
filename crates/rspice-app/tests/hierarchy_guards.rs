@@ -977,6 +977,10 @@ const NESTED_RECORD_FIELDS: &[(&str, &str)] = &[("ConnectivityContract", "policy
 const PROJECTION_MODULES: &[(&str, &str)] = &[
     ("simulation/netlist_gen.rs", "the generated deck"),
     ("simulation/netlist_gen/", "the generated deck"),
+    (
+        "design/hierarchy/source.rs",
+        "resolved global nodes in connectivity and the generated deck",
+    ),
     ("design/drc.rs", "the ERC/DRC report"),
     ("design/drc/", "the ERC/DRC report"),
     ("workbench/app_state/design_checks.rs", "the ERC/DRC report"),

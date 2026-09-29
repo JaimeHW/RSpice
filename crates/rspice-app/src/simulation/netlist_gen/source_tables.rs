@@ -12,6 +12,24 @@
 use super::*;
 use crate::simulation::table_route::{self, TableRoute};
 
+/// File-backed stimulus inputs for this generation. Inspection may omit both.
+#[derive(Default)]
+pub struct NetlistSourceData<'a> {
+    /// Directory against which project-relative data references resolve.
+    pub data_root: Option<std::path::PathBuf>,
+    /// Authored retained tables used when their named file is unavailable.
+    pub stimulus_library: Option<&'a rspice_design::stimulus_library::library::StimulusLibrary>,
+}
+
+impl<'a> NetlistSourceData<'a> {
+    fn retained_table(
+        &self,
+        component: &Component,
+    ) -> Option<&'a rspice_design::stimulus_library::definition::RetainedPwlFile> {
+        self.stimulus_library?.retained_pwl_table(component)
+    }
+}
+
 impl<'a> NetlistGenerator<'a> {
     /// The data-file reference a file-backed source stores.
     fn stored_data_file<'c>(
@@ -42,9 +60,10 @@ impl<'a> NetlistGenerator<'a> {
     ) -> (TableRoute, Option<String>) {
         table_route::route_retaining(
             stored,
-            self.hierarchy.and_then(HierarchySource::data_root),
-            self.hierarchy
-                .and_then(|hierarchy| hierarchy.retained_table(component)),
+            self.source_data
+                .and_then(|source| source.data_root.as_deref()),
+            self.source_data
+                .and_then(|source| source.retained_table(component)),
         )
     }
 
@@ -129,7 +148,7 @@ impl<'a> NetlistGenerator<'a> {
         component: &Component,
         params: &std::collections::HashMap<String, String>,
     ) -> Option<String> {
-        let table = self.hierarchy?.retained_table(component)?;
+        let table = self.source_data?.retained_table(component)?;
         let definition = &component.stimulus_provenance.as_ref()?.definition;
         let stored = Self::stored_data_file(component, params);
         match self.source_table_route(component, stored).0 {
@@ -183,8 +202,12 @@ mod tests {
         let mut state = SchematicState::default();
         state.document_mut_for_test().components = vec![source];
         let buffers: HashMap<String, SchematicDocument> = HashMap::new();
-        let hierarchy = HierarchySource::from_buffers(&buffers).with_stimulus_library(library);
-        generate_netlist_hierarchical(&state, &[], &hierarchy)
+        let hierarchy = HierarchySource::from_buffers(&buffers);
+        let source_data = NetlistSourceData {
+            data_root: None,
+            stimulus_library: Some(library),
+        };
+        generate_netlist_hierarchical(&state, &[], &hierarchy, &source_data)
     }
 
     fn scratch_folder(purpose: &str) -> std::path::PathBuf {

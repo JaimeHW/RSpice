@@ -16,10 +16,11 @@ use crate::schematic::view::sheet_visibility::{
     selectable_objects_on_active_sheet, selection_filtered_to_active_sheet,
     with_hidden_wire_topology_preserved,
 };
-use crate::simulation::netlist_gen::{
-    DesignNet, HierarchySource, design_nets_with_hierarchy, projection_nets,
-};
 use crate::state::{DuplicateExternalNets, Point, SchematicState, Selection};
+use rspice_design::connectivity::summary::{
+    DesignNet, design_nets_with_hierarchy, projection_nets,
+};
+use rspice_design::hierarchy::HierarchySource;
 
 use crate::workbench::app_state::AppState;
 
@@ -717,7 +718,9 @@ fn cut_open_net_count(state: &AppState, selection: &Selection) -> Result<usize, 
         .count())
 }
 
-fn terminal_identity(terminal: &crate::simulation::netlist_gen::NetTerminal) -> (u64, String) {
+fn terminal_identity(
+    terminal: &rspice_design::connectivity::summary::NetTerminal,
+) -> (u64, String) {
     (terminal.component_id, terminal.pin.clone())
 }
 

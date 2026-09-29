@@ -6,7 +6,6 @@
 //! guarded undo transaction; anonymous, ground-owned, stale, or ambiguous
 //! conductor selections are never guessed into an editable target.
 
-use crate::simulation::netlist_gen::{DesignNet, NetClass};
 #[cfg(test)]
 use crate::state::NetLabel;
 pub(crate) use crate::state::named_net::{
@@ -14,6 +13,7 @@ pub(crate) use crate::state::named_net::{
 };
 use crate::state::named_net::{NetMembership, net_name_eq, port_terminal};
 use crate::state::{Component, ComponentType, Point, SchematicState};
+use rspice_design::connectivity::summary::{DesignNet, NetClass};
 
 use crate::workbench::app_state::AppState;
 
@@ -54,7 +54,7 @@ pub(crate) fn selected_named_net_target(state: &AppState) -> Option<NamedNetTarg
             &state.schematic,
         )
         .ok()?;
-    let nets = crate::simulation::netlist_gen::projection_nets(
+    let nets = rspice_design::connectivity::summary::projection_nets(
         state.library_manager.catalog(),
         &projection,
         &state.workspace.content.active_view.key(),

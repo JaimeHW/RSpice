@@ -9,13 +9,13 @@ use std::collections::BTreeMap;
 use egui::{Painter, Rect, Stroke};
 
 use crate::schematic::bus_notations;
-use crate::simulation::netlist_gen::projection_nets;
 use crate::state::{
     CellViewRef, Component, CrossProbeIndex, DesignNote, DesignNoteKind, DesignReviewState, Point,
     SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicHierarchyVisibility,
     SchematicNetHighlighting, SchematicReviewMarkerVisibility,
 };
 use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};
+use rspice_design::connectivity::summary::projection_nets;
 
 use super::super::symbols::SymbolLibrary;
 use super::SchematicSymbolContext;
@@ -1590,7 +1590,7 @@ mod tests {
         let state = separated_same_name_groups();
         let colors = net_class_colors(&state);
         let connectivity =
-            crate::simulation::netlist_gen::extraction::extract(&state.schematic, None);
+            rspice_design::connectivity::extract_with_hierarchy(&state.schematic, None);
         for net in &connectivity.nets {
             let mut painted = net.wires.iter().map(|id| colors.get(id).copied());
             let first = painted.next();

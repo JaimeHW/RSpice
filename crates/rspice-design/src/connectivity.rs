@@ -13,6 +13,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::hierarchy::HierarchySource;
 use crate::resolved_symbol::ResolvedCellSymbol;
 use crate::schematic::bus::{BusNotation, VectorConnectivity, vector_connectivity};
 use crate::schematic::component::{Component, LibraryCellInstance};
@@ -25,10 +26,53 @@ use rspice_design_model::Point;
 
 pub mod bus;
 mod net;
+pub mod summary;
 mod vector_names;
 use bus::{BusConnectivityAnalysis, BusDiagnosticKind, analyze_bus_connectivity};
 pub use net::Net;
 pub use vector_names::{deck_bit_name, display_bit_name};
+
+/// Extract connectivity with the same symbol and global authority as hierarchical netlisting.
+pub fn extract_with_hierarchy(
+    schematic: &impl AsRef<SchematicDocument>,
+    hierarchy: Option<&HierarchySource<'_>>,
+) -> ExtractedConnectivity {
+    extract(
+        schematic.as_ref(),
+        |binding| hierarchy?.resolved_symbol_for(binding),
+        |name| hierarchy?.canonical_global_label(name),
+    )
+}
+
+/// Resolve terminal geometry against the shared hierarchy authority.
+pub fn terminal_positions_with_hierarchy(
+    component: &Component,
+    hierarchy: Option<&HierarchySource<'_>>,
+) -> Vec<(String, Point)> {
+    terminal_positions(component, &|binding| {
+        hierarchy?.resolved_symbol_for(binding)
+    })
+}
+
+/// Resolve a schematic point, including points between traced wire vertices.
+pub fn net_at_schematic_point<'a>(
+    schematic: &SchematicDocument,
+    nets: &'a [Net],
+    point_to_net: &HashMap<Point, usize>,
+    point: Point,
+) -> Option<&'a Net> {
+    if let Some(&id) = point_to_net.get(&point) {
+        return nets.iter().find(|net| net.id == id);
+    }
+    for wire in &schematic.wires {
+        if wire.contains_point(point) {
+            let first = wire.points.first()?;
+            let id = *point_to_net.get(first)?;
+            return nets.iter().find(|net| net.id == id);
+        }
+    }
+    None
+}
 
 /// One placed terminal, bound to the node the deck emits for it.
 #[derive(Debug, Clone)]

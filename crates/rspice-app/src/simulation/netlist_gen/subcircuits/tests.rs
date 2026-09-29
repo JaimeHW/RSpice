@@ -2,7 +2,8 @@
 
 use super::*;
 use crate::state::{
-    Cell, CellViewRef, Library, LibraryManager, Point, ProjectWorkspace, View, ViewType, Wire,
+    Cell, CellViewRef, Library, LibraryCellInstance, LibraryManager, Point, ProjectWorkspace, View,
+    ViewType, Wire,
 };
 
 fn place_port(state: &mut SchematicState, name: &str, pos: Point) {

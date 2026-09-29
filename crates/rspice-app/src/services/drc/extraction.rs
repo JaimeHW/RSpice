@@ -1,10 +1,10 @@
 //! Bind the active hierarchy to the headless design rule checker.
 
-use super::netlist_gen::HierarchySource;
-use super::netlist_gen::extraction::ExtractedConnectivity;
 use crate::state::ComponentType;
+use rspice_design::connectivity::ExtractedConnectivity;
 use rspice_design::drc::DrcResult;
 use rspice_design::drc::{ComponentInfo, DrcConfig, extract_components};
+use rspice_design::hierarchy::HierarchySource;
 use rspice_design::schematic::document::SchematicDocument;
 
 /// Resolve the design once, and bind every placed component to it.
@@ -12,7 +12,8 @@ pub(super) fn extract_checked_design(
     schematic: &impl AsRef<SchematicDocument>,
     hierarchy: &HierarchySource<'_>,
 ) -> (Vec<ComponentInfo>, ExtractedConnectivity) {
-    let connectivity = super::netlist_gen::extraction::extract(schematic, Some(hierarchy));
+    let connectivity =
+        rspice_design::connectivity::extract_with_hierarchy(schematic, Some(hierarchy));
     let components = extract_components(schematic.as_ref(), &connectivity, |comp| {
         if comp.kind != ComponentType::CellInstance {
             return Some(true);

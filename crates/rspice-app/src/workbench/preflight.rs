@@ -355,11 +355,10 @@ fn collect_report(state: &AppState) -> PreflightReport {
         let root_schematic = execution_projection
             .root_schematic()
             .expect("a successful execution projection has a materialized root");
-        let hierarchy_source =
-            crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
-                state.library_manager.catalog(),
-                execution_projection,
-            );
+        let hierarchy_source = rspice_design::hierarchy::HierarchySource::from_execution_projection(
+            state.library_manager.catalog(),
+            execution_projection,
+        );
         let result = crate::services::drc::run_drc_check_with_hierarchy_and_config(
             root_schematic,
             &hierarchy_source,
@@ -399,7 +398,7 @@ fn collect_report(state: &AppState) -> PreflightReport {
         // drawing's own nodes and instances before anything is dispatched.
         blockers.extend(topology::topology_blockers(
             root_schematic,
-            &crate::simulation::netlist_gen::extraction::extract(
+            &rspice_design::connectivity::extract_with_hierarchy(
                 root_schematic,
                 Some(&hierarchy_source),
             ),

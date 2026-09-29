@@ -3,8 +3,6 @@
 //! Active symbol and binding lookups feed the shared connectivity pass;
 //! rspice-design owns input mapping, configuration, rules, and reports.
 
-use crate::simulation::netlist_gen;
-
 mod extraction;
 
 pub use self::extraction::run_drc_check_with_hierarchy_and_config;

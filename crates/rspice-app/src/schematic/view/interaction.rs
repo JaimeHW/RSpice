@@ -8,13 +8,13 @@
 use egui::{Response, Ui};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::simulation::netlist_gen::{DesignNet, projection_nets};
 use crate::state::{
     ComponentType, OccurrenceProbeSpelling, Point, SavedOutput, SavedOutputCompatibility,
     SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe,
     Tool, ViewType,
 };
 use crate::workbench::app_state::{AppState, DragType};
+use rspice_design::connectivity::summary::{DesignNet, projection_nets};
 
 use super::SchematicSymbolContext;
 use super::array_interaction::handle_armed_array_selection;

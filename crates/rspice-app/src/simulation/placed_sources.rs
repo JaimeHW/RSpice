@@ -80,7 +80,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 
-use crate::simulation::netlist_gen::{design_nets, projection_nets};
 use crate::simulation::plan::{AnalysisDraft, SimulationPlan};
 use crate::state::stimulus_library::provenance::ProvenanceState;
 use crate::state::workspace::DesignProjection;
@@ -88,6 +87,7 @@ use crate::state::{
     CellViewRef, Component, ComponentType, InstancePath, LibraryManager, SchematicState,
     StimulusLibrary,
 };
+use rspice_design::connectivity::summary::{design_nets, projection_nets};
 
 /// Net names keyed by (component id, terminal name), as
 /// [`net_names_by_terminal`] resolves them for one schematic.
@@ -515,7 +515,7 @@ thread_local! {
     /// `ProjectWorkspace::design_projection` digests every authority and every
     /// cell view on each call and mints a new `Arc` whenever one of them moved,
     /// so two calls that see one `Arc` saw one design — the same discipline
-    /// `netlist_gen::projection_nets` gets by retaining its extraction inside
+    /// `rspice_design::connectivity::summary::projection_nets` gets by retaining its extraction inside
     /// the projection. A projection the workspace could not key, because its
     /// authorities do not serialize, is a fresh `Arc` every frame and therefore
     /// misses every frame, which is exactly the answer the projection itself
@@ -1418,7 +1418,7 @@ fn projection_terminal_nets(
 }
 
 fn keyed_by_terminal(
-    nets: impl IntoIterator<Item = crate::simulation::netlist_gen::DesignNet>,
+    nets: impl IntoIterator<Item = rspice_design::connectivity::summary::DesignNet>,
 ) -> HashMap<(u64, String), String> {
     nets.into_iter()
         .flat_map(|net| {

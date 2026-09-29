@@ -1,6 +1,6 @@
 //! The generator's view of the one connectivity extraction.
 //!
-//! Netlisting traces nothing of its own. It asks [`super::extraction`] what the
+//! Netlisting traces nothing of its own. It asks [`rspice_design::connectivity`] what the
 //! drawing connects and folds the answer into the emission state, so a terminal
 //! carries the same node identity in the deck, in the net summary, and in the
 //! electrical rule check.
@@ -15,7 +15,8 @@ impl<'a> NetlistGenerator<'a> {
     /// additionally becomes a typed defect, because a repair attaches to the
     /// kind rather than to the text of an error.
     pub(super) fn extract_connectivity(&mut self) {
-        let extracted = super::extraction::extract(self.schematic, self.hierarchy);
+        let extracted =
+            rspice_design::connectivity::extract_with_hierarchy(self.schematic, self.hierarchy);
         for diagnostic in &extracted.diagnostics {
             let destination = if diagnostic.blocking {
                 &mut self.errors

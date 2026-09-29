@@ -22,9 +22,6 @@ use rspice_publication_contract::{
 
 use crate::hardcopy::HardcopyScope;
 use crate::quantity::engineering::format_engineering_value;
-use crate::simulation::netlist_gen::{
-    HierarchySource, component_pin_names_with_hierarchy, design_nets_with_hierarchy,
-};
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry};
 use crate::workbench::app_state::AppState;
 use crate::workbench::hardcopy_adapters::render::{
@@ -36,6 +33,10 @@ use crate::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, enumerate_retained_hardcopy_sources,
     prepare_retained_hardcopy_resolution,
 };
+use rspice_design::connectivity::summary::{
+    component_pin_names_with_hierarchy, design_nets_with_hierarchy,
+};
+use rspice_design::hierarchy::HierarchySource;
 
 /// Everything the caller decides about the publication; the builder derives
 /// the rest from project state. `created_utc` is supplied here so the

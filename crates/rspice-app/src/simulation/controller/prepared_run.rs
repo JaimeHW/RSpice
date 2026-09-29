@@ -49,14 +49,17 @@ pub(super) struct PendingPreparedRun {
 /// generator reports the ones it cannot check. The stimulus library goes with
 /// it, so a file-backed source whose named table is not reachable runs from the
 /// copy its definition retains instead of being refused.
-fn bind_project_data<'a>(
-    hierarchy: crate::simulation::netlist_gen::HierarchySource<'a>,
-    state: &'a AppState,
-) -> crate::simulation::netlist_gen::HierarchySource<'a> {
-    let hierarchy = hierarchy.with_stimulus_library(&state.workspace.content.stimulus_library);
-    match state.workspace.content.project.data_root() {
-        Some(root) => hierarchy.with_data_root(root),
-        None => hierarchy,
+fn project_netlist_source_data(
+    state: &AppState,
+) -> crate::simulation::netlist_gen::NetlistSourceData<'_> {
+    crate::simulation::netlist_gen::NetlistSourceData {
+        data_root: state
+            .workspace
+            .content
+            .project
+            .data_root()
+            .map(Path::to_path_buf),
+        stimulus_library: Some(&state.workspace.content.stimulus_library),
     }
 }
 
@@ -257,7 +260,7 @@ impl SimulationController {
             .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
         // Net names carry no data-file references, so the projection's own
         // extraction is the same answer as a data-root-bound generator.
-        let nets = crate::simulation::netlist_gen::projection_nets(
+        let nets = rspice_design::connectivity::summary::projection_nets(
             state.library_manager.catalog(),
             &projection,
             &projection.root().key(),
@@ -305,13 +308,11 @@ impl SimulationController {
             )
         })?;
         validate_projected_model_binding_authority(state, &projection)?;
-        let hierarchy = bind_project_data(
-            crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
-                state.library_manager.catalog(),
-                &projection,
-            ),
-            state,
+        let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
+            state.library_manager.catalog(),
+            &projection,
         );
+        let source_data = project_netlist_source_data(state);
         let plan = state
             .sim_setup
             .stable_analysis_plan()
@@ -341,6 +342,7 @@ impl SimulationController {
                     active_cell: &root_reference,
                     analysis_instances: &analysis_instances,
                 },
+                &source_data,
             );
         if !generated.errors.is_empty() {
             return Err(PreparationError::new(
@@ -816,13 +818,11 @@ impl SimulationController {
                 ),
             ));
         }
-        let hierarchy = bind_project_data(
-            crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
-                state.library_manager.catalog(),
-                &execution_projection,
-            ),
-            state,
+        let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
+            state.library_manager.catalog(),
+            &execution_projection,
         );
+        let source_data = project_netlist_source_data(state);
         let drc = crate::services::drc::run_drc_check_with_hierarchy_and_config(
             root_schematic,
             &hierarchy,
@@ -914,7 +914,10 @@ impl SimulationController {
                 PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; "))
             })?;
         let design_nets = std::sync::Arc::new(
-            crate::simulation::netlist_gen::design_nets_with_hierarchy(root_schematic, &hierarchy),
+            rspice_design::connectivity::summary::design_nets_with_hierarchy(
+                root_schematic,
+                &hierarchy,
+            ),
         );
         let occurrences =
             projection_occurrence_nets(&state.library_manager, &execution_projection, design_nets);
@@ -1009,6 +1012,7 @@ impl SimulationController {
                     active_cell: &root_reference,
                     analysis_instances: &analysis_instances,
                 },
+                &source_data,
             );
         if !generated.errors.is_empty() {
             return Err(PreparationError::new(

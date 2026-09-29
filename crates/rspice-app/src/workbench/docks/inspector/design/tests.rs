@@ -334,7 +334,7 @@ fn wireless_semantic_net_selection_routes_to_the_exact_net_inspector() {
         name: "PORT_OUT".to_owned(),
         authored_name: true,
         class: NetClass::Signal,
-        terminals: vec![crate::simulation::netlist_gen::NetTerminal {
+        terminals: vec![rspice_design::connectivity::summary::NetTerminal {
             component_id: 71,
             reference: "X1".to_owned(),
             pin: "OUT".to_owned(),
@@ -1533,7 +1533,7 @@ fn the_inspector_reads_the_projection_so_coincident_pages_stay_two_nets() {
         ));
     state.sync_active_schematic_to_workspace();
     assert_eq!(
-        crate::simulation::netlist_gen::design_nets(&state.schematic).len(),
+        rspice_design::connectivity::summary::design_nets(&state.schematic).len(),
         1,
         "the editor buffer holds one coordinate space, so its pages overlap"
     );

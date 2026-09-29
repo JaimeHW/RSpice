@@ -11,7 +11,7 @@ use egui::{Align, Context, Frame, Label, Layout, Margin, Sense, Stroke, Ui, UiBu
 use crate::diagnostics::ConsoleMessage;
 use crate::schematic::view::SchematicSymbolContext;
 use crate::services::drc::{DrcConfig, DrcViolation, run_drc_check_with_hierarchy_and_config};
-use crate::simulation::netlist_gen::{HierarchySource, generate_netlist_hierarchical};
+use crate::simulation::netlist_gen::generate_netlist_hierarchical;
 use crate::state::{
     Cell, CellViewRef, HierarchyExtractionPlan, HierarchyExtractionTerminal,
     HierarchyNetConnectivity, NetLabel, PortDirection, PortDiscipline, PortSpec,
@@ -24,6 +24,7 @@ use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
     select_mono_with_response,
 };
+use rspice_design::hierarchy::HierarchySource;
 
 use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
 use crate::workbench::app::dialogs::state::{CreateHierarchyDialogState, CreateHierarchyPortDraft};
@@ -813,7 +814,12 @@ fn generated_for(
     libraries: &crate::state::LibraryManager,
 ) -> crate::simulation::netlist_gen::NetlistResult {
     let hierarchy = HierarchySource::from_workspace(libraries.catalog(), buffers);
-    generate_netlist_hierarchical(schematic, &[], &hierarchy)
+    generate_netlist_hierarchical(
+        schematic,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    )
 }
 
 fn unresolved_hierarchy(

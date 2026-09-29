@@ -15,7 +15,6 @@ use crate::services::drc::{
     DrcConfig, DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
     run_drc_check_with_hierarchy_and_config,
 };
-use crate::simulation::netlist_gen::{DesignNet, HierarchySource, NetClass, projection_nets};
 use crate::state::workspace::DesignProjection;
 use crate::state::{
     BundleWidthMismatchPolicy, BusDeclaration, BusDirection, BusTargetKind, CellViewRef,
@@ -28,6 +27,8 @@ use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
 use crate::workbench::design_system::section_header;
+use rspice_design::connectivity::summary::{DesignNet, NetClass, projection_nets};
+use rspice_design::hierarchy::HierarchySource;
 
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;

@@ -591,8 +591,8 @@ fn wireless_navigator_net_selection_is_exact_and_self_invalidating() {
     let net = DesignNet {
         name: "PORT_OUT".to_owned(),
         authored_name: true,
-        class: crate::simulation::netlist_gen::NetClass::Signal,
-        terminals: vec![crate::simulation::netlist_gen::NetTerminal {
+        class: rspice_design::connectivity::summary::NetClass::Signal,
+        terminals: vec![rspice_design::connectivity::summary::NetTerminal {
             component_id: 9,
             reference: "X1".to_owned(),
             pin: "OUT".to_owned(),

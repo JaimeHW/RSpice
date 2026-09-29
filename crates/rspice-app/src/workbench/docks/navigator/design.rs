@@ -20,12 +20,12 @@ use std::collections::{BTreeMap, HashSet};
 use egui::{Key, Modifiers, Response, ScrollArea, Ui};
 
 use crate::schematic::view::sheet_visibility::{self, SheetScope};
-use crate::simulation::netlist_gen::DesignNet;
 use crate::state::{PortDirection, SavedOutputKind};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use rspice_design::connectivity::summary::DesignNet;
 
 use super::super::super::commands::vocabulary::Command;
 use super::super::super::design_system::{PANEL_SECTION_H, PANEL_TABS_H, WorkbenchIcon};
@@ -592,7 +592,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
             return;
         }
     };
-    let nets = crate::simulation::netlist_gen::projection_nets(
+    let nets = rspice_design::connectivity::summary::projection_nets(
         app.state.library_manager.catalog(),
         &projection,
         &app.state.workspace.content.active_view.key(),
@@ -635,7 +635,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
         let connection_count = net.pin_count().to_string();
         let response = nav_row_indented_mono_response(
             ui,
-            if net.class == crate::simulation::netlist_gen::NetClass::Ground {
+            if net.class == rspice_design::connectivity::summary::NetClass::Ground {
                 WorkbenchIcon::Supply
             } else {
                 WorkbenchIcon::Design
@@ -643,7 +643,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
             &net.name,
             selected,
             Some(
-                if net.class == crate::simulation::netlist_gen::NetClass::Ground {
+                if net.class == rspice_design::connectivity::summary::NetClass::Ground {
                     "gnd"
                 } else {
                     &connection_count
@@ -1594,7 +1594,7 @@ fn reveal_probe_expression(state: &mut AppState, expression: &str) {
                     return;
                 }
             };
-            let nets = crate::simulation::netlist_gen::projection_nets(
+            let nets = rspice_design::connectivity::summary::projection_nets(
                 state.library_manager.catalog(),
                 &projection,
                 &state.workspace.content.active_view.key(),

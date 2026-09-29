@@ -15,13 +15,14 @@ use crate::product::ContentDigest;
 use crate::services::drc::{
     DrcConfig, DrcLocation, DrcSeverity, run_drc_check_with_hierarchy_and_config,
 };
-use crate::simulation::netlist_gen::{HierarchySource, generate_netlist_hierarchical};
+use crate::simulation::netlist_gen::generate_netlist_hierarchical;
 use crate::state::{
     CellViewRef, SymbolResolver, ValidatedRevisionDependency, ValidationFindingCounts,
 };
 use crate::workbench::lifecycle::project_lifecycle::{
     SaveScope, accepted_generation, effective_save_scope, snapshot,
 };
+use rspice_design::hierarchy::HierarchySource;
 
 use crate::workbench::app_state::AppState;
 
@@ -356,7 +357,12 @@ impl CheckAndSaveValidationReport {
                         root_is_active.then(|| violation.location.clone()),
                     );
                 }
-                let generated = generate_netlist_hierarchical(root, &[], configured_hierarchy);
+                let generated = generate_netlist_hierarchical(
+                    root,
+                    &[],
+                    configured_hierarchy,
+                    &crate::simulation::netlist_gen::NetlistSourceData::default(),
+                );
                 for error in &generated.errors {
                     insert_finding(
                         &mut findings,
@@ -494,7 +500,12 @@ impl CheckAndSaveValidationReport {
                 &mut findings,
             );
             if let (Some(hierarchy), Some(schematic)) = (configured_hierarchy.as_ref(), projected) {
-                let generated = generate_netlist_hierarchical(schematic, &[], hierarchy);
+                let generated = generate_netlist_hierarchical(
+                    schematic,
+                    &[],
+                    hierarchy,
+                    &crate::simulation::netlist_gen::NetlistSourceData::default(),
+                );
                 for error in generated.errors {
                     let discriminator = format!("{key}:{error}");
                     insert_finding(

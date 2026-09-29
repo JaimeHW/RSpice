@@ -24,8 +24,6 @@ use crate::schematic::view::{
     sheet_visibility::{self, SheetScope},
 };
 use crate::services::drc::{DrcLocation, DrcSeverity, DrcViolation};
-use crate::simulation::netlist_gen::extraction::extract;
-use crate::simulation::netlist_gen::{DesignNet, HierarchySource, NetClass};
 use crate::state::{
     AnalysisResultPayload, CellViewRef, Component, ComponentType, DisplayMode,
     DrawingSheetBorderTemplate, DrawingSheetInheritance, DrawingSheetTitleBlockAnchor,
@@ -45,6 +43,9 @@ use crate::workbench::design_system::{
 };
 use crate::workbench::state::{InlineEditField, ModelsPage, VerificationPage, Workspace};
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_design::connectivity::extract_with_hierarchy as extract;
+use rspice_design::connectivity::summary::{DesignNet, NetClass};
+use rspice_design::hierarchy::HierarchySource;
 
 use super::{
     ComponentModelEvidence, component_model_evidence, muted_inspector_copy,
@@ -394,7 +395,7 @@ fn sheet_connectivity(state: &AppState) -> SheetConnectivity {
     };
     let hierarchy =
         HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
-    let nets = crate::simulation::netlist_gen::projection_nets(
+    let nets = rspice_design::connectivity::summary::projection_nets(
         state.library_manager.catalog(),
         &projection,
         &state.workspace.content.active_view.key(),

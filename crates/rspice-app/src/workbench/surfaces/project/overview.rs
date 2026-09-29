@@ -403,7 +403,7 @@ impl OverviewSnapshot {
         let root_instance_count =
             root_schematic.map_or(0, |schematic| schematic.document().components.len());
         let root_net_count = root_schematic.map_or(0, |schematic| {
-            crate::simulation::netlist_gen::design_nets(schematic).len()
+            rspice_design::connectivity::summary::design_nets(schematic).len()
         });
 
         let latest_run_status = state.simulation.runs.first().map_or_else(

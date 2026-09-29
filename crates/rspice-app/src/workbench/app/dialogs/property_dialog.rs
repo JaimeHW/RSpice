@@ -11,13 +11,14 @@ use crate::properties::{
     ComponentEditorContext, ComponentModelContext, ComponentOperatingPointContext,
     ComponentTerminalContext, TabbedDialogResult, render_tabbed_property_dialog,
 };
-use crate::simulation::netlist_gen::{HierarchySource, projection_nets};
 use crate::state::{Component, ComponentType, PropertySheet, PropertyValue};
 use crate::workbench::app::dialogs::stimulus_link::{
     StimulusLinkMode, commit_readoption, open_stimulus_definition, open_stimulus_link,
 };
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::{ModelsPage, Workspace};
+use rspice_design::connectivity::summary::projection_nets;
+use rspice_design::hierarchy::HierarchySource;
 
 /// Render the floating schematic component editor.
 /// Call this from the main app update loop

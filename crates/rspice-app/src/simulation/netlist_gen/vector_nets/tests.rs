@@ -287,8 +287,8 @@ fn reg4_master() -> SchematicState {
 #[test]
 fn a_vector_port_becomes_deck_formals_and_per_bit_instance_nodes() {
     let master = reg4_master();
-    let mut hierarchy = HierarchySource::empty();
-    hierarchy.insert("work", "reg4", &master);
+    let hierarchy_buffers = HashMap::from([("work/reg4/schematic".to_owned(), &master)]);
+    let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
     let mut top = SchematicState::default();
     let mut binding = LibraryCellInstance::new("work", "reg4", "schematic");
@@ -310,7 +310,12 @@ fn a_vector_port_becomes_deck_formals_and_per_bit_instance_nodes() {
     ));
     top.add_component(ComponentType::Ground, Point::new(enable.x, enable.y + 10));
 
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
 
     assert!(result.errors.is_empty(), "{:?}", result.errors);
     let lowered = result.netlist.to_lowercase();
@@ -358,8 +363,8 @@ fn a_vector_port_becomes_deck_formals_and_per_bit_instance_nodes() {
 #[test]
 fn one_four_bit_vector_joins_two_instances_of_one_master() {
     let master = reg4_master();
-    let mut hierarchy = HierarchySource::empty();
-    hierarchy.insert("work", "reg4", &master);
+    let hierarchy_buffers = HashMap::from([("work/reg4/schematic".to_owned(), &master)]);
+    let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
     let mut top = SchematicState::default();
     let mut data_terminals = Vec::new();
@@ -395,7 +400,12 @@ fn one_four_bit_vector_joins_two_instances_of_one_master() {
         .expect("fixture bus"),
     );
 
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
 
     assert!(result.errors.is_empty(), "{:?}", result.errors);
     let parsed = rspice_core::netlist::Netlist::parse(&result.netlist)
@@ -530,12 +540,12 @@ fn a_projected_bit_is_shown_in_the_notation_its_own_bus_declared() {
         Point::new(40, 0),
     ));
 
-    use super::super::extraction::display_net_name;
+    use rspice_design::connectivity::display_net_name;
 
-    assert_eq!(display_net_name(&square, "DATA#3"), "DATA[3]");
-    assert_eq!(display_net_name(&angle, "DATA#3"), "DATA<3>");
+    assert_eq!(display_net_name(square.as_ref(), "DATA#3"), "DATA[3]");
+    assert_eq!(display_net_name(angle.as_ref(), "DATA#3"), "DATA<3>");
     // A name no declaration claims is already the form the drawing shows.
-    assert_eq!(display_net_name(&square, "out"), "out");
+    assert_eq!(display_net_name(square.as_ref(), "out"), "out");
 }
 
 /// A cell that widens one interface port has changed its interface, and the
@@ -546,15 +556,20 @@ fn widening_a_vector_port_makes_every_placement_of_it_stale() {
     let mut master = SchematicState::default();
     place_port(&mut master, "DATA[7:0]", Point::new(100, 0));
     place_port(&mut master, "EN", Point::new(210, 40));
-    let mut hierarchy = HierarchySource::empty();
-    hierarchy.insert("work", "reg", &master);
+    let hierarchy_buffers = HashMap::from([("work/reg/schematic".to_owned(), &master)]);
+    let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
     let mut top = SchematicState::default();
     let mut binding = LibraryCellInstance::new("work", "reg", "schematic");
     binding.terminal_order = vec!["DATA[3:0]".to_owned(), "EN".to_owned()];
     top.add_library_cell_component(Point::new(200, 100), binding);
 
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
 
     let stale = result
         .defects
@@ -571,8 +586,8 @@ fn widening_a_vector_port_makes_every_placement_of_it_stale() {
 #[test]
 fn a_vector_terminal_on_a_narrower_bus_is_reported_with_both_widths() {
     let master = reg4_master();
-    let mut hierarchy = HierarchySource::empty();
-    hierarchy.insert("work", "reg4", &master);
+    let hierarchy_buffers = HashMap::from([("work/reg4/schematic".to_owned(), &master)]);
+    let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
     let mut top = SchematicState::default();
     let mut binding = LibraryCellInstance::new("work", "reg4", "schematic");
@@ -593,7 +608,12 @@ fn a_vector_terminal_on_a_narrower_bus_is_reported_with_both_widths() {
         Point::new(data.x.saturating_add(40), data.y),
     ));
 
-    let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+    let result = generate_netlist_hierarchical(
+        &top,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    );
 
     let reported = result
         .errors
@@ -639,8 +659,9 @@ fn no_width_mismatch_policy_lets_an_implicit_mismatch_reach_the_deck() {
             },
             ..crate::state::ConnectivityContract::default()
         };
-        let mut hierarchy = HierarchySource::empty().with_connectivity(&contract);
-        hierarchy.insert("work", "reg4", &master);
+        let hierarchy_buffers = HashMap::from([("work/reg4/schematic".to_owned(), &master)]);
+        let hierarchy =
+            HierarchySource::from_buffers(&hierarchy_buffers).with_connectivity(&contract);
 
         let mut top = SchematicState::default();
         let mut binding = LibraryCellInstance::new("work", "reg4", "schematic");
@@ -664,7 +685,12 @@ fn no_width_mismatch_policy_lets_an_implicit_mismatch_reach_the_deck() {
             Point::new(data.x.saturating_add(40), data.y),
         ));
 
-        let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+        let result = generate_netlist_hierarchical(
+            &top,
+            &[],
+            &hierarchy,
+            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        );
 
         assert!(
             result

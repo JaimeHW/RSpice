@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use egui::{Align, Context, Frame, Layout, Margin, Popup, ScrollArea, Ui, vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::simulation::netlist_gen::{HierarchySource, generate_netlist_hierarchical};
+use crate::simulation::netlist_gen::generate_netlist_hierarchical;
 use crate::state::{
     Component, ComponentType, Point, Rotation, SchematicReplacementAuthority,
     SchematicReplacementPreview, SchematicReplacementSourceSpec, SchematicReplacementTargetSpec,
@@ -16,6 +16,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
+use rspice_design::hierarchy::HierarchySource;
 
 use crate::workbench::app::dialogs::operation_primitives::{
     BODY_HEIGHT, CONTEXT_WIDTH, SURFACE_HEIGHT, TRANSACTION_HEIGHT, impact_preview,
@@ -975,7 +976,12 @@ fn generate_candidate_netlist(
         .map_err(|error| error.to_string())?;
     let hierarchy =
         HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
-    Ok(generate_netlist_hierarchical(schematic, &[], &hierarchy))
+    Ok(generate_netlist_hierarchical(
+        schematic,
+        &[],
+        &hierarchy,
+        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+    ))
 }
 
 fn current_display(component: &Component) -> String {

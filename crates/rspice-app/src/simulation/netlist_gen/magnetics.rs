@@ -559,7 +559,12 @@ mod tests {
     fn generated(schematic: &SchematicState) -> super::super::NetlistResult {
         let buffers: HashMap<String, SchematicDocument> = HashMap::new();
         let hierarchy = HierarchySource::from_buffers(&buffers);
-        generate_netlist_hierarchical(schematic, &[], &hierarchy)
+        generate_netlist_hierarchical(
+            schematic,
+            &[],
+            &hierarchy,
+            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        )
     }
 
     #[test]

@@ -745,7 +745,7 @@ mod tests {
                 CrossSheetPortDirection::Input,
             ));
 
-        let joined: Vec<_> = crate::simulation::netlist_gen::design_nets(&schematic)
+        let joined: Vec<_> = rspice_design::connectivity::summary::design_nets(&schematic)
             .into_iter()
             .filter(|net| net.name == "BIAS")
             .collect();

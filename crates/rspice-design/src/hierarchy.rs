@@ -40,11 +40,13 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 mod materialize;
+mod source;
 use materialize::*;
 pub use materialize::{
     hierarchy_stop_view, materialize_authoritative_source_binding, metadata_value,
     project_veriloga_binding_for_view,
 };
+pub use source::HierarchySource;
 
 #[cfg(test)]
 mod tests;
