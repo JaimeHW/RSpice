@@ -5,8 +5,7 @@ use sha2::{Digest as _, Sha256};
 #[cfg(test)]
 pub(crate) use rspice_simulation::project_veriloga::project_virtual_compile_limits;
 pub(crate) use rspice_simulation::project_veriloga::{
-    ProjectVerilogACompileError, build_profile, compile_project_bundle_source,
-    compile_project_source_bundle_runtime, compile_project_virtual_runtime,
+    build_profile, compile_project_source_bundle_runtime, compile_project_virtual_runtime,
 };
 pub(crate) use rspice_simulation::veriloga::compile_signed_pdk_source_runtime;
 pub use rspice_simulation::veriloga::{

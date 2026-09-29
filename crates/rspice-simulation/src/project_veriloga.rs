@@ -6,6 +6,7 @@ use rspice_veriloga::{RuntimeCompileReport, VerilogACompiler};
 use crate::veriloga::{PreparedRuntimeError, PreparedVerilogARuntime};
 
 pub mod build_profile;
+pub mod worker;
 
 /// Compilation failures before projection into editor or worker diagnostics.
 #[derive(Debug)]

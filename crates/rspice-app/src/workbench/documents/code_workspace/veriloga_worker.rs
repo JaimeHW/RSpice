@@ -6,6 +6,7 @@
 //! worker uses the same immutable JavaScript/Wasm assets, but a separate worker
 //! instance and message namespace keep both operation lifecycles independent.
 
+use rspice_simulation::project_veriloga::worker::{WorkerCompileRequest, WorkerCompileTarget};
 use serde::{Deserialize, Serialize};
 
 use super::{SelectedVerilogASource, VerilogACompileOutcome};
@@ -31,11 +32,11 @@ impl VerilogAWorkerRequest {
             bundle: selected.bundle().clone(),
             selected_module: selected.selected_module().map(str::to_owned),
         };
-        request.validate()?;
+        request.validated_source()?;
         Ok(request)
     }
 
-    fn validate(&self) -> Result<(), String> {
+    fn validated_source(&self) -> Result<WorkerCompileRequest<'_>, String> {
         if self.protocol != VERILOGA_WORKER_PROTOCOL_VERSION {
             return Err(format!(
                 "Unsupported Verilog-A worker protocol {}; expected {}.",
@@ -45,22 +46,8 @@ impl VerilogAWorkerRequest {
         if self.id == 0 {
             return Err("Verilog-A worker request id must be non-zero.".to_owned());
         }
-        if self.bundle.language() != crate::state::ProjectSourceLanguage::VerilogA {
-            return Err("Verilog-A worker received a non-Verilog-A source bundle.".to_owned());
-        }
-        self.bundle
-            .validate()
-            .map_err(|error| format!("Verilog-A worker source bundle is invalid: {error}"))?;
-        super::veriloga_profile::resolve_veriloga_build_profile(&self.bundle)
-            .map_err(|error| format!("Verilog-A worker build profile is invalid: {error}"))?;
-        if self.selected_module.as_ref().is_some_and(|module| {
-            module.is_empty()
-                || module.len() > crate::state::MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES
-                || module.chars().any(char::is_control)
-        }) {
-            return Err("Verilog-A worker module selection is invalid.".to_owned());
-        }
-        Ok(())
+        WorkerCompileRequest::try_new(&self.bundle, self.selected_module.as_deref())
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -78,26 +65,28 @@ pub(crate) struct VerilogAWorkerResponse {
 
 impl VerilogAWorkerResponse {
     fn from_request(request: VerilogAWorkerRequest) -> Result<Self, String> {
-        request.validate()?;
-        let outcome = super::veriloga::compile_project_bundle_source(
-            &request.bundle,
-            request.selected_module.as_deref(),
-        );
+        let source = request.validated_source()?;
         #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
-        let (wasm_jit_artifact, wasm_jit_error) = match &outcome {
-            VerilogACompileOutcome::Success(report) => {
-                match rspice_veriloga::wasm_jit::compile_model_value_module(
-                    &report.model,
-                    &report.canonical_ir,
-                ) {
-                    Ok(artifact) => (Some(WasmJitWorkerArtifact::from_compiled(&artifact)), None),
-                    Err(error) => (None, Some(error.to_string())),
-                }
-            }
-            VerilogACompileOutcome::Failure(_) => (None, None),
+        let target = WorkerCompileTarget::WasmJit;
+        #[cfg(not(all(target_arch = "wasm32", feature = "browser-worker")))]
+        let target = WorkerCompileTarget::Bytecode;
+        let compiled = source.compile(target);
+        #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+        let (wasm_jit_artifact, wasm_jit_error) = match compiled
+            .as_ref()
+            .ok()
+            .and_then(|compiled| compiled.wasm_jit.as_ref())
+        {
+            Some(Ok(artifact)) => (Some(WasmJitWorkerArtifact::from_compiled(artifact)), None),
+            Some(Err(error)) => (None, Some(error.to_string())),
+            None => (None, None),
         };
         #[cfg(not(all(target_arch = "wasm32", feature = "browser-worker")))]
         let (wasm_jit_artifact, wasm_jit_error) = (None, None);
+        let outcome = super::veriloga::project_compile_outcome(
+            &request.bundle,
+            compiled.map(|compiled| compiled.report),
+        );
         let response = Self {
             protocol: VERILOGA_WORKER_PROTOCOL_VERSION,
             id: request.id,

@@ -1233,16 +1233,25 @@ const fn specialist_disposition_label(
 }
 
 fn compile_selected_source(selected: &SelectedVerilogASource) -> VerilogACompileOutcome {
-    compile_project_bundle_source(selected.bundle(), selected.selected_module())
+    project_compile_outcome(
+        selected.bundle(),
+        rspice_simulation::project_veriloga::compile_project_bundle_source(
+            selected.bundle(),
+            selected.selected_module(),
+        ),
+    )
 }
 
-pub(super) fn compile_project_bundle_source(
+pub(super) fn project_compile_outcome(
     bundle: &ProjectSourceBundle,
-    selected_module: Option<&str>,
+    outcome: Result<
+        Box<RuntimeCompileReport>,
+        rspice_simulation::project_veriloga::ProjectVerilogACompileError,
+    >,
 ) -> VerilogACompileOutcome {
-    use crate::simulation::veriloga::ProjectVerilogACompileError;
+    use rspice_simulation::project_veriloga::ProjectVerilogACompileError;
 
-    match crate::simulation::veriloga::compile_project_bundle_source(bundle, selected_module) {
+    match outcome {
         Ok(report) => VerilogACompileOutcome::Success(report),
         Err(ProjectVerilogACompileError::BuildProfile(error)) => build_profile_error_outcome(error),
         Err(ProjectVerilogACompileError::SourceClosure(error)) => {
