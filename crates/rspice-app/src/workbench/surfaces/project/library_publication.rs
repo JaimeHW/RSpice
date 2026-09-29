@@ -992,9 +992,9 @@ fn poll_browser_rollback_completions(ctx: &Context, app: &mut RSpiceApp) {
                 handle_id,
                 display_name,
                 bytes,
-                digest,
             } => {
                 release_browser_handle(handle_id);
+                let (bytes, digest) = bytes.into_parts();
                 match validate_rollback_artifact(&app.state, current.publication_id, &bytes) {
                     Ok(())
                         if ContentDigest::from_bytes(sha2::Sha256::digest(&bytes).into())

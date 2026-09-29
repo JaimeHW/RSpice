@@ -1526,7 +1526,6 @@ fn finish_browser_canonical_open(
         handle_id,
         display_name,
         bytes,
-        digest,
     } = result
     else {
         match result {
@@ -1551,22 +1550,12 @@ fn finish_browser_canonical_open(
         }
         return false;
     };
-    let text = match String::from_utf8(bytes) {
-        Ok(text) => text,
-        Err(error) => {
-            crate::workbench::lifecycle::project_lifecycle::release_browser_handle(handle_id);
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                state,
-                transaction,
-            );
-            state.push_user_message(ConsoleMessage::error(format!(
-                "Project open failed: selected project is not valid UTF-8: {error}"
-            )));
-            return false;
-        }
-    };
-    let project = match crate::io::project_io::load_project_text(&text, None) {
-        Ok(project) => project,
+    let (project, binding) = match rspice_project::persistence::browser::BrowserBinding::open(
+        bytes,
+        display_name.clone(),
+        crate::state::workspace::WorkspaceSourceFiles,
+    ) {
+        Ok((project, binding)) => (ProjectSnapshot::from_decoded(project), binding),
         Err(error) => {
             crate::workbench::lifecycle::project_lifecycle::release_browser_handle(handle_id);
             crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
@@ -1579,20 +1568,7 @@ fn finish_browser_canonical_open(
             return false;
         }
     };
-    let binding = PersistenceBinding::Browser {
-        handle_id,
-        binding: rspice_project::persistence::browser::BrowserBinding {
-            receipt: rspice_project::persistence::BrowserBindingReceipt {
-                binding_id: uuid::Uuid::new_v4(),
-                backend: crate::workbench::lifecycle::project_lifecycle::BrowserBindingBackend::ExternalFile,
-                project_id: project.file.workspace.project.id().to_string(),
-                accepted_generation: 1,
-                accepted_digest: digest,
-            },
-            display_name: display_name.clone(),
-            persisted_generation: None,
-        },
-    };
+    let binding = PersistenceBinding::Browser { handle_id, binding };
     let binding_for_persist = binding.clone();
     let opened = apply_loaded_project_authorized(
         state,

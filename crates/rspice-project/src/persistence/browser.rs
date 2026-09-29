@@ -4,6 +4,9 @@ use super::{BrowserBindingBackend, BrowserBindingReceipt};
 use crate::lifecycle::ProjectLifecycleError;
 use rspice_app_types::product::ContentDigest;
 
+mod load;
+pub use load::{BrowserRestoreCandidate, BrowserRestoreIssue, BrowserRestoreMetadataError};
+
 pub const BROWSER_BINDING_SCHEMA_VERSION: u32 = 2;
 pub const MAX_EXACT_BROWSER_GENERATION: u64 = (1_u64 << 53) - 1;
 

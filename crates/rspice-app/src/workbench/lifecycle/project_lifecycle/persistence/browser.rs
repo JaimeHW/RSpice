@@ -510,22 +510,18 @@ pub(super) async fn restore_browser_binding(
         // delete another project's binding authority.
         Err(error) => return BrowserRestoreResult::Evicted(error),
     };
-    if let Err(error) = validate_browser_binding_identity(&metadata, receipt) {
-        // Identity mismatch explicitly means ownership was not established.
-        // Ignore the record; never evict it using facts supplied by this
-        // untrusted receipt.
-        return BrowserRestoreResult::Evicted(error);
-    }
-    let metadata_digest = match metadata.accepted_digest.parse::<ContentDigest>() {
-        Ok(digest) => digest,
-        Err(error) => {
+    let candidate = match BrowserRestoreCandidate::new(metadata, receipt) {
+        Ok(candidate) => candidate,
+        Err(BrowserRestoreMetadataError::Unowned(error)) => {
+            // An unowned record must never be deleted using this receipt.
+            return BrowserRestoreResult::Evicted(error);
+        }
+        Err(BrowserRestoreMetadataError::InvalidOwned(error)) => {
             let _ = indexed_db_delete(&binding_key).await;
-            return BrowserRestoreResult::Evicted(format!(
-                "browser binding digest is invalid: {error}"
-            ));
+            return BrowserRestoreResult::Evicted(error);
         }
     };
-    let handle = match metadata.backend {
+    let handle = match receipt.backend {
         BrowserBindingBackend::ExternalFile => {
             match js_sys::Reflect::get(&record, &wasm_bindgen::JsValue::from_str("handle")) {
                 Ok(handle) if !handle.is_null() && !handle.is_undefined() => handle,
@@ -546,12 +542,12 @@ pub(super) async fn restore_browser_binding(
     };
     if let Err(error) = validate_browser_read_handle(
         &handle,
-        metadata.backend == BrowserBindingBackend::ExternalFile,
+        receipt.backend == BrowserBindingBackend::ExternalFile,
     ) {
         let _ = indexed_db_delete(&binding_key).await;
         return BrowserRestoreResult::Evicted(error);
     }
-    let permission = match metadata.backend {
+    let permission = match receipt.backend {
         BrowserBindingBackend::Opfs => "granted".to_owned(),
         BrowserBindingBackend::ExternalFile => match call_promise_method(
             &handle,
@@ -571,31 +567,8 @@ pub(super) async fn restore_browser_binding(
             Err(error) => return BrowserRestoreResult::Retryable(error),
         },
     };
-    let binding_from_receipt = |handle_id| PersistenceBinding::Browser {
-        handle_id,
-        binding: BrowserBinding {
-            receipt: receipt.clone(),
-            display_name: metadata.display_name.clone(),
-            persisted_generation: Some(metadata.accepted_generation),
-        },
-    };
-    let metadata_matches_receipt = validate_browser_binding_metadata(&metadata, receipt).is_ok();
-    if !metadata_matches_receipt {
-        let handle_id = register_browser_handle(handle);
-        return BrowserRestoreResult::Conflict {
-            binding: binding_from_receipt(handle_id),
-            observed_digest: metadata_digest,
-            reason: format!(
-                "another tab committed generation {} while this session accepted generation {}",
-                metadata.accepted_generation, receipt.accepted_generation
-            ),
-        };
-    }
-    if browser_permission_decision(&permission) == BrowserPermissionDecision::Reconnect {
-        let handle_id = register_browser_handle(handle);
-        return BrowserRestoreResult::ReconnectRequired {
-            binding: binding_from_receipt(handle_id),
-        };
+    if let Err(issue) = candidate.check_permission(&permission) {
+        return browser_restore_issue(issue, handle);
     }
     let bytes = match read_browser_handle_bytes(&handle).await {
         Ok(bytes) => bytes,
@@ -603,58 +576,54 @@ pub(super) async fn restore_browser_binding(
             return BrowserRestoreResult::Retryable(error);
         }
     };
-    let actual_digest = digest_bytes(&bytes);
-    let accepted_digest =
-        match validate_browser_restore_facts(&metadata, receipt, &permission, actual_digest) {
-            Ok(digest) => digest,
-            Err(error) => {
-                let handle_id = register_browser_handle(handle);
-                return BrowserRestoreResult::Conflict {
-                    binding: binding_from_receipt(handle_id),
-                    observed_digest: actual_digest,
-                    reason: error,
-                };
+    match candidate.decode(
+        bytes,
+        &permission,
+        crate::state::workspace::WorkspaceSourceFiles,
+    ) {
+        Ok((baseline, binding)) => {
+            let baseline = ProjectSnapshot::from_decoded(baseline);
+            let handle_id = register_browser_handle(handle);
+            BrowserRestoreResult::Restored {
+                baseline: Box::new(baseline),
+                binding: PersistenceBinding::Browser { handle_id, binding },
             }
-        };
-    let text = match String::from_utf8(bytes) {
-        Ok(text) => text,
-        Err(error) => {
-            return BrowserRestoreResult::Retryable(format!(
-                "canonical browser project is not UTF-8: {error}"
-            ));
         }
-    };
-    let mut baseline = match crate::io::project_io::load_project_text(&text, None) {
-        Ok(project) => project,
-        Err(error) => {
-            return BrowserRestoreResult::Retryable(format!(
-                "canonical browser project is invalid: {error}"
-            ));
-        }
-    };
-    if baseline.file.workspace.project.id().to_string() != receipt.project_id {
-        let handle_id = register_browser_handle(handle);
-        return BrowserRestoreResult::Conflict {
-            binding: binding_from_receipt(handle_id),
-            observed_digest: actual_digest,
-            reason: "canonical browser project identity no longer matches its binding".to_owned(),
-        };
+        Err(issue) => browser_restore_issue(issue, handle),
     }
-    baseline.file.workspace.project.path = None;
-    let handle_id = register_browser_handle(handle);
-    BrowserRestoreResult::Restored {
-        baseline: Box::new(baseline),
-        binding: PersistenceBinding::Browser {
-            handle_id,
-            binding: BrowserBinding {
-                receipt: BrowserBindingReceipt {
-                    accepted_digest,
-                    ..receipt.clone()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn browser_restore_issue(
+    issue: BrowserRestoreIssue,
+    handle: wasm_bindgen::JsValue,
+) -> BrowserRestoreResult {
+    match issue {
+        BrowserRestoreIssue::ReconnectRequired(binding) => {
+            let handle_id = register_browser_handle(handle);
+            BrowserRestoreResult::ReconnectRequired {
+                binding: PersistenceBinding::Browser {
+                    handle_id,
+                    binding: *binding,
                 },
-                display_name: metadata.display_name,
-                persisted_generation: Some(receipt.accepted_generation),
-            },
-        },
+            }
+        }
+        BrowserRestoreIssue::Conflict {
+            binding,
+            observed_digest,
+            reason,
+        } => {
+            let handle_id = register_browser_handle(handle);
+            BrowserRestoreResult::Conflict {
+                binding: PersistenceBinding::Browser {
+                    handle_id,
+                    binding: *binding,
+                },
+                observed_digest,
+                reason,
+            }
+        }
+        BrowserRestoreIssue::Retryable(error) => BrowserRestoreResult::Retryable(error),
     }
 }
 

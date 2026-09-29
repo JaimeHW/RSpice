@@ -22,11 +22,10 @@ pub(crate) use rspice_project::persistence::{BrowserBindingReceipt, NativeBindin
 #[cfg(target_arch = "wasm32")]
 use rspice_project::persistence::browser::{
     BROWSER_BINDING_SCHEMA_VERSION, BrowserBinding, BrowserBindingCommitOutcome,
-    BrowserBindingMetadata, BrowserPermissionDecision, BrowserWriteIntent,
-    MAX_EXACT_BROWSER_GENERATION, browser_backend_from_name, browser_backend_name,
-    browser_generation_is_exact, browser_permission_decision, classify_browser_binding_commit,
-    validate_binding_generation_commit, validate_browser_binding_identity,
-    validate_browser_binding_metadata, validate_browser_restore_facts,
+    BrowserBindingMetadata, BrowserRestoreCandidate, BrowserRestoreIssue,
+    BrowserRestoreMetadataError, BrowserWriteIntent, MAX_EXACT_BROWSER_GENERATION,
+    browser_backend_from_name, browser_backend_name, browser_generation_is_exact,
+    classify_browser_binding_commit, validate_binding_generation_commit,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -34,7 +33,7 @@ use crate::io::ProjectSnapshot;
 #[cfg(target_arch = "wasm32")]
 use crate::product::ContentDigest;
 #[cfg(target_arch = "wasm32")]
-use rspice_project::persistence::digest_bytes;
+use rspice_project::persistence::{ProjectBytes, digest_bytes};
 
 #[cfg(target_arch = "wasm32")]
 const BROWSER_BINDING_DATABASE: &str = "rspice-project-bindings";
@@ -107,8 +106,7 @@ pub(crate) enum BrowserOpenResult {
     Opened {
         handle_id: u64,
         display_name: String,
-        bytes: Vec<u8>,
-        digest: ContentDigest,
+        bytes: ProjectBytes,
     },
     Cancelled,
     Failed(String),
@@ -440,7 +438,14 @@ async fn run_browser_open(picker: js_sys::Promise) -> BrowserOpenResult {
         Ok(bytes) => bytes,
         Err(error) => return BrowserOpenResult::Failed(error),
     };
-    let digest = digest_bytes(&bytes);
+    let bytes = match ProjectBytes::from_bytes(bytes) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return BrowserOpenResult::Failed(
+                "browser project exceeds the supported project-size limit".to_owned(),
+            );
+        }
+    };
     let display_name = js_sys::Reflect::get(&handle, &wasm_bindgen::JsValue::from_str("name"))
         .ok()
         .and_then(|name| name.as_string())
@@ -450,7 +455,6 @@ async fn run_browser_open(picker: js_sys::Promise) -> BrowserOpenResult {
         handle_id,
         display_name,
         bytes,
-        digest,
     }
 }
 

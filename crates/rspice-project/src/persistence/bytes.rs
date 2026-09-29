@@ -45,6 +45,26 @@ impl ProjectBytes {
         })
     }
 
+    /// Take an already resident buffer without copying it.
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, ProjectIoError> {
+        let advertised = bytes.len() as u64;
+        if advertised > MAX_PROJECT_FILE_BYTES {
+            return Err(ProjectIoError::InvalidData(format!(
+                "project is {advertised} bytes; the supported maximum is {MAX_PROJECT_FILE_BYTES} bytes"
+            )));
+        }
+        let digest = super::digest_bytes(&bytes);
+        Ok(Self { bytes, digest })
+    }
+
+    pub fn into_parts(self) -> (Vec<u8>, ContentDigest) {
+        (self.bytes, self.digest)
+    }
+
+    pub(super) fn into_text(self) -> Result<String, std::string::FromUtf8Error> {
+        String::from_utf8(self.bytes)
+    }
+
     pub const fn digest(&self) -> ContentDigest {
         self.digest
     }
