@@ -39,7 +39,7 @@ pub(super) fn export_vcd(
     displayed: &ResolvedResultView,
 ) {
     let prepared = match displayed.primary_analysis(state) {
-        Some(analysis) => encode_result_vcd(analysis),
+        Some(analysis) => encode_result_vcd(analysis).map_err(|error| error.to_string()),
         None => Err(NO_ACTIVE_ANALYSIS_MESSAGE.to_owned()),
     };
     let prepared = match prepared {

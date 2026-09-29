@@ -21,6 +21,41 @@ const EMPTY_EVENT_EVIDENCE_MESSAGE: &str = "This transient retained an event his
      declare no signal and record no change. Publishing it would be indistinguishable from a \
      failed export.";
 
+#[derive(Debug)]
+pub enum VcdWriteError {
+    MissingEventHistory,
+    EmptyEventHistory,
+    InvalidEventEvidence(String),
+    Projection(rspice_core::execution::EventProjectionError),
+    Write(rspice_core::io::VcdError),
+}
+
+impl std::fmt::Display for VcdWriteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingEventHistory => f.write_str(NO_EVENT_EVIDENCE_MESSAGE),
+            Self::EmptyEventHistory => f.write_str(EMPTY_EVENT_EVIDENCE_MESSAGE),
+            Self::InvalidEventEvidence(detail) => f.write_str(detail),
+            Self::Projection(source) => {
+                write!(f, "The event history cannot be dumped exactly: {source}")
+            }
+            Self::Write(source) => {
+                write!(f, "The Value Change Dump could not be written: {source}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for VcdWriteError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Projection(source) => Some(source),
+            Self::Write(source) => Some(source),
+            _ => None,
+        }
+    }
+}
+
 /// What a published dump contains, for the completion message.
 #[derive(Debug)]
 pub struct EncodedVcd {
@@ -33,7 +68,7 @@ pub struct EncodedVcd {
 ///
 /// Missing or empty histories, invalid event codes and event times that VCD
 /// cannot represent are refused before bytes are returned.
-pub fn encode_result_vcd<W>(analysis: &AnalysisResult<W>) -> Result<EncodedVcd, String> {
+pub fn encode_result_vcd<W>(analysis: &AnalysisResult<W>) -> Result<EncodedVcd, VcdWriteError> {
     let Some(AnalysisResultPayload::TransientEvents {
         digital_traces,
         real_traces,
@@ -41,12 +76,13 @@ pub fn encode_result_vcd<W>(analysis: &AnalysisResult<W>) -> Result<EncodedVcd, 
         ..
     }) = analysis.result_payload.as_ref()
     else {
-        return Err(NO_EVENT_EVIDENCE_MESSAGE.to_owned());
+        return Err(VcdWriteError::MissingEventHistory);
     };
     if digital_traces.is_empty() && real_traces.is_empty() {
-        return Err(EMPTY_EVENT_EVIDENCE_MESSAGE.to_owned());
+        return Err(VcdWriteError::EmptyEventHistory);
     }
-    let (digital, real) = core_event_traces(digital_traces, real_traces)?;
+    let (digital, real) = core_event_traces(digital_traces, real_traces)
+        .map_err(VcdWriteError::InvalidEventEvidence)?;
     // The declarations go through as the result holds them. A bus is one
     // `$var wire N` in place of its members' scalars — the projection decides
     // that, not this arm — which is why passing an empty table here wrote a
@@ -56,7 +92,7 @@ pub fn encode_result_vcd<W>(analysis: &AnalysisResult<W>) -> Result<EncodedVcd, 
         .map(rspice_core::engine::DigitalBusDeclaration::from)
         .collect::<Vec<_>>();
     let document = event_vcd_document(EVENT_SCOPE, &digital, &real, &buses)
-        .map_err(|error| format!("The event history cannot be dumped exactly: {error}"))?;
+        .map_err(VcdWriteError::Projection)?;
     let node_count = document.signals.len();
     let change_count = document
         .signals
@@ -64,8 +100,7 @@ pub fn encode_result_vcd<W>(analysis: &AnalysisResult<W>) -> Result<EncodedVcd, 
         .map(|signal| signal.changes.len())
         .sum();
     let mut bytes = Vec::new();
-    write_vcd(&mut bytes, &document)
-        .map_err(|error| format!("The Value Change Dump could not be written: {error}"))?;
+    write_vcd(&mut bytes, &document).map_err(VcdWriteError::Write)?;
     Ok(EncodedVcd {
         bytes,
         node_count,
@@ -204,15 +239,17 @@ mod tests {
     #[test]
     fn a_result_with_no_event_history_is_refused_by_what_a_dump_carries() {
         let error = encode_result_vcd(&analysis(None)).expect_err("nothing to dump");
-        assert_eq!(error, NO_EVENT_EVIDENCE_MESSAGE);
-        assert!(error.contains("event timelines"), "{error}");
+        assert!(matches!(&error, VcdWriteError::MissingEventHistory));
+        assert_eq!(error.to_string(), NO_EVENT_EVIDENCE_MESSAGE);
+        assert!(error.to_string().contains("event timelines"), "{error}");
     }
 
     #[test]
     fn an_event_history_with_no_node_is_refused_rather_than_written_empty() {
         let error = encode_result_vcd(&analysis(Some(events(Vec::new(), Vec::new()))))
             .expect_err("an empty dump is not an export");
-        assert_eq!(error, EMPTY_EVENT_EVIDENCE_MESSAGE);
+        assert!(matches!(&error, VcdWriteError::EmptyEventHistory));
+        assert_eq!(error.to_string(), EMPTY_EVENT_EVIDENCE_MESSAGE);
     }
 
     #[test]
@@ -222,8 +259,9 @@ mod tests {
             Vec::new(),
         ))))
         .expect_err("13 is not an event code");
-        assert!(error.contains("node 'd'"), "{error}");
-        assert!(error.contains("event code 13"), "{error}");
+        assert!(matches!(&error, VcdWriteError::InvalidEventEvidence(_)));
+        assert!(error.to_string().contains("node 'd'"), "{error}");
+        assert!(error.to_string().contains("event code 13"), "{error}");
     }
 
     #[test]
@@ -233,7 +271,16 @@ mod tests {
             Vec::new(),
         ))))
         .expect_err("half a femtosecond has no tick");
-        assert!(error.contains("cannot be dumped exactly"), "{error}");
+        assert!(matches!(&error, VcdWriteError::Projection(_)));
+        assert!(
+            std::error::Error::source(&error)
+                .unwrap()
+                .is::<rspice_core::execution::EventProjectionError>()
+        );
+        assert!(
+            error.to_string().contains("cannot be dumped exactly"),
+            "{error}"
+        );
     }
 
     /// BUS-L2's `vector_mixed` counter, as the GUI retains it: two member
