@@ -5,7 +5,6 @@
 //! domain, and publishes it through project history once. Runtime dialog
 //! drafts are never authoritative project state.
 
-use csv::{Terminator, WriterBuilder};
 use rspice_model_library::correlation::{
     CorrelationDatasetImport, CorrelationMetricInput, CorrelationSuiteInput,
 };
@@ -734,123 +733,8 @@ fn canonical_simulation_csv(
     analysis_type: AnalysisType,
     trace: &WaveformData,
 ) -> Result<Vec<u8>, String> {
-    if trace.x.is_empty() || trace.x.len() != trace.y.len() {
-        return Err(
-            "The selected waveform must retain equally sized, non-empty X and Y vectors".to_owned(),
-        );
-    }
-    if trace.x.len() > MAX_CORRELATION_ROWS {
-        return Err(format!(
-            "The selected waveform has {} samples; correlation datasets are limited to {MAX_CORRELATION_ROWS}",
-            trace.x.len()
-        ));
-    }
-    if trace
-        .x
-        .iter()
-        .chain(trace.y.iter())
-        .any(|value| !value.is_finite())
-    {
-        return Err("The selected waveform contains a non-finite sample".to_owned());
-    }
-    let (axis, axis_unit) = waveform_axis(analysis_type)?;
-    let value_unit = waveform_value_unit(&trace.name);
-    let condition_header = format!("condition:{axis}[{axis_unit}]");
-    let mut writer = WriterBuilder::new()
-        .has_headers(false)
-        .terminator(Terminator::Any(b'\n'))
-        .from_writer(Vec::new());
-    writer
-        .write_record([
-            "id",
-            "quantity",
-            "value",
-            "unit",
-            "uncertainty",
-            "weight",
-            condition_header.as_str(),
-        ])
-        .map_err(|error| format!("Canonical correlation CSV header cannot be written: {error}"))?;
-    for (index, (&x, &y)) in trace.x.iter().zip(trace.y.iter()).enumerate() {
-        let id = format!("sample-{index:08}");
-        let value = y.to_string();
-        let coordinate = x.to_string();
-        writer
-            .write_record([
-                id.as_str(),
-                trace.name.as_str(),
-                value.as_str(),
-                value_unit,
-                "0",
-                "1",
-                coordinate.as_str(),
-            ])
-            .map_err(|error| {
-                format!(
-                    "Canonical correlation CSV row {} cannot be written: {error}",
-                    index + 1
-                )
-            })?;
-    }
-    writer
-        .into_inner()
-        .map_err(|error| format!("Canonical correlation CSV cannot be finalized: {error}"))
-}
-
-fn waveform_axis(analysis_type: AnalysisType) -> Result<(&'static str, &'static str), String> {
-    use AnalysisType as Kind;
-    match analysis_type {
-        Kind::Transient | Kind::TransientNoise | Kind::Envelope | Kind::Pss | Kind::Qpss => {
-            Ok(("time", "s"))
-        }
-        Kind::Ac
-        | Kind::Disto
-        | Kind::Noise
-        | Kind::Pac
-        | Kind::Pnoise
-        | Kind::Pxf
-        | Kind::Pstb
-        | Kind::Stb
-        | Kind::SParameter
-        | Kind::Fourier
-        | Kind::HarmonicBalance
-        | Kind::Hbsp
-        | Kind::Hbnoise
-        | Kind::Psp
-        | Kind::Qpac
-        | Kind::Qpnoise
-        | Kind::Qpxf => Ok(("frequency", "Hz")),
-        Kind::DcSweep
-        | Kind::Sensitivity
-        | Kind::MonteCarlo
-        | Kind::Parametric
-        | Kind::Corner
-        | Kind::Optimization
-        | Kind::Soa
-        | Kind::DcMismatch => Ok(("sweep", "1")),
-        Kind::DcOp | Kind::PoleZero | Kind::Tf => Err(format!(
-            "{} does not expose a correlation-compatible waveform axis",
-            analysis_type.display_name()
-        )),
-    }
-}
-
-fn waveform_value_unit(trace_name: &str) -> &'static str {
-    let normalized = trace_name.trim().to_ascii_lowercase();
-    if normalized.starts_with("phase(") {
-        "deg"
-    } else if normalized.starts_with("db(") {
-        "dB"
-    } else {
-        let unwrapped = normalized.trim_matches('|');
-        if unwrapped.starts_with("v(") {
-            "V"
-        } else if unwrapped.starts_with("i(") {
-            "A"
-        } else {
-            "1"
-        }
-    }
+    rspice_formats::result_csv::encode_correlation_csv(analysis_type, trace, MAX_CORRELATION_ROWS)
+        .map_err(|error| error.to_string())
 }
 
 fn unix_timestamp_ms(label: &str, seconds: f64) -> Result<u64, String> {
@@ -1246,27 +1130,5 @@ mod tests {
             "frequency"
         );
         assert_eq!(dataset.observations[1].coordinates[0].unit, "Hz");
-    }
-
-    #[test]
-    fn retained_waveform_export_rejects_unusable_or_unbounded_sources() {
-        let mismatched = WaveformData::new("V(out)", vec![0.0], Vec::<f64>::new(), "#ffffff");
-        assert!(
-            canonical_simulation_csv(AnalysisType::Transient, &mismatched)
-                .unwrap_err()
-                .contains("equally sized")
-        );
-        let non_finite = WaveformData::new("V(out)", vec![0.0], vec![f64::NAN], "#ffffff");
-        assert!(
-            canonical_simulation_csv(AnalysisType::Transient, &non_finite)
-                .unwrap_err()
-                .contains("non-finite")
-        );
-        let scalar = WaveformData::new("V(out)", vec![0.0], vec![1.0], "#ffffff");
-        assert!(
-            canonical_simulation_csv(AnalysisType::DcOp, &scalar)
-                .unwrap_err()
-                .contains("does not expose")
-        );
     }
 }
