@@ -19,6 +19,8 @@ pub mod numpy;
 pub mod psf;
 #[cfg(feature = "result-csv")]
 pub mod result_csv;
+#[cfg(feature = "spice-raw")]
+pub mod spice_raw;
 pub mod table;
 #[cfg(feature = "table-schema")]
 pub mod table_schema;

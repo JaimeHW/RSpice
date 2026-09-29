@@ -6,7 +6,6 @@
 
 use super::*;
 use rspice_results::result_import::waveforms::ImportedSignal;
-use std::io::Cursor;
 
 const MAX_ARCHIVE_MEMBERS: usize = 1_024;
 const MAX_ARCHIVE_EXPANDED_BYTES: u64 = MAX_RESULT_DATASET_BYTES;
@@ -15,10 +14,6 @@ const MAX_RESULT_VALUES: usize = MAX_RESULT_DATASET_BYTES as usize / std::mem::s
 
 fn adapter_error(format: ResultImportFormat, detail: impl std::fmt::Display) -> String {
     format!("{} import: {detail}", format.canonical_id())
-}
-
-fn analysis_from_coordinate(name: &str) -> AnalysisType {
-    imported_analysis_type(rspice_formats::WaveformDomain::from_coordinate_name(name))
 }
 
 fn waveform_import_limits() -> rspice_results::result_import::waveforms::WaveformImportLimits {
@@ -115,7 +110,7 @@ pub(super) fn parse_hdf5(
 ) -> Result<ParsedResultDataset, String> {
     let decoded = rspice_formats::hdf5::decode_hdf5(bytes, hdf5_limits(), format.canonical_id())
         .map_err(|error| error.to_string())?;
-    finish_hdf5(format, decoded)
+    finish_numeric_dataset(format, decoded)
 }
 
 pub(super) fn parse_matlab_v73(
@@ -125,7 +120,7 @@ pub(super) fn parse_matlab_v73(
     let decoded =
         rspice_formats::hdf5::decode_matlab_v73(bytes, hdf5_limits(), format.canonical_id())
             .map_err(|error| error.to_string())?;
-    finish_hdf5(format, decoded)
+    finish_numeric_dataset(format, decoded)
 }
 
 fn hdf5_limits() -> rspice_formats::hdf5::Hdf5Limits<'static> {
@@ -133,42 +128,6 @@ fn hdf5_limits() -> rspice_formats::hdf5::Hdf5Limits<'static> {
         max_columns: MAX_RESULT_COLUMNS,
         max_values: MAX_RESULT_VALUES,
         coordinate_names: &RESULT_COORDINATE_NAMES,
-    }
-}
-
-fn finish_hdf5(
-    format: ResultImportFormat,
-    decoded: rspice_formats::hdf5::DecodedHdf5,
-) -> Result<ParsedResultDataset, String> {
-    match decoded {
-        rspice_formats::hdf5::DecodedHdf5::Section {
-            family,
-            coordinate_name,
-            coordinate,
-            signals,
-        } => {
-            let analysis = match family {
-                rspice_formats::hdf5::Hdf5SectionFamily::Transient => AnalysisType::Transient,
-                rspice_formats::hdf5::Hdf5SectionFamily::DcSweep => AnalysisType::DcSweep,
-                rspice_formats::hdf5::Hdf5SectionFamily::Ac => AnalysisType::Ac,
-            };
-            let signals = imported_signals(signals);
-            finish_dataset(format, analysis, coordinate_name, coordinate, signals)
-        }
-        rspice_formats::hdf5::DecodedHdf5::Root {
-            coordinate_name,
-            coordinate,
-            columns,
-        } => {
-            let signals = combine_real_imag_columns(format, columns)?;
-            finish_dataset(
-                format,
-                analysis_from_coordinate(&coordinate_name),
-                coordinate_name,
-                coordinate,
-                signals,
-            )
-        }
     }
 }
 
@@ -215,15 +174,6 @@ fn imported_signals(
             unit: signal.unit,
         })
         .collect()
-}
-
-fn combine_real_imag_columns(
-    format: ResultImportFormat,
-    columns: Vec<(String, Vec<f64>)>,
-) -> Result<Vec<ImportedSignal>, String> {
-    rspice_formats::numeric::combine_real_imag_columns(columns)
-        .map(imported_signals)
-        .map_err(|error| adapter_error(format, error))
 }
 
 // -------------------------------------------------------------------------
@@ -307,32 +257,9 @@ pub(super) fn parse_spice_raw(
     let mut limits = rspice_core::ResourceLimits::default();
     limits.max_external_data_bytes = MAX_RESULT_DATASET_BYTES as usize;
     limits.max_external_data_values = MAX_RESULT_VALUES;
-    let parsed = rspice_core::io::parse_raw_reader_with_limits(&mut Cursor::new(bytes), limits)
+    let decoded = rspice_formats::spice_raw::decode_spice_raw(bytes, limits)
         .map_err(|error| adapter_error(format, error))?;
-    let mut waveforms = parsed.waveforms.into_iter();
-    let scale = waveforms
-        .next()
-        .ok_or_else(|| adapter_error(format, "rawfile contains no variables"))?;
-    let coordinate_name = scale.name;
-    let coordinate = scale.y;
-    let mut signals: Vec<ImportedSignal> = Vec::new();
-    for waveform in waveforms {
-        signals.push(ImportedSignal {
-            name: waveform.name,
-            real: waveform.y,
-            imag: waveform.y_imag,
-            unit: None,
-        });
-    }
-    let plot = parsed.header.plotname.to_ascii_lowercase();
-    let analysis = if parsed.header.is_complex || plot.contains("ac") {
-        AnalysisType::Ac
-    } else if plot.contains("tran") || coordinate_name.to_ascii_lowercase().contains("time") {
-        AnalysisType::Transient
-    } else {
-        AnalysisType::DcSweep
-    };
-    finish_dataset(format, analysis, coordinate_name, coordinate, signals)
+    finish_numeric_dataset(format, decoded)
 }
 
 // -------------------------------------------------------------------------

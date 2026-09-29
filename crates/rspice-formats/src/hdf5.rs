@@ -1,6 +1,8 @@
 //! HDF5 and MATLAB 7.3 waveform byte decoding.
 
-use crate::numeric::{DecodedNumericSignal, stated_coordinate_names};
+use crate::numeric::{
+    DecodedNumericDataset, DecodedNumericSignal, combine_real_imag_columns, stated_coordinate_names,
+};
 use std::collections::HashMap;
 
 /// A container/metadata failure or a bounded waveform decoding refusal.
@@ -64,6 +66,7 @@ pub enum Hdf5ReadFailure {
         limit: usize,
     },
     InexactInteger(crate::numeric::ExactIntegerError),
+    ComplexColumns(crate::numeric::ComplexColumnError),
 }
 
 impl std::fmt::Display for Hdf5ReadFailure {
@@ -117,6 +120,7 @@ impl std::fmt::Display for Hdf5ReadFailure {
                 "the table contains {values} values; the limit is {limit}"
             ),
             Self::InexactInteger(source) => source.fmt(f),
+            Self::ComplexColumns(source) => source.fmt(f),
         }
     }
 }
@@ -126,6 +130,7 @@ impl std::error::Error for Hdf5ReadFailure {
         match self {
             Self::Decode { source, .. } => Some(source.as_ref()),
             Self::InexactInteger(source) => Some(source),
+            Self::ComplexColumns(source) => Some(source),
             _ => None,
         }
     }
@@ -151,14 +156,14 @@ pub struct Hdf5Limits<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Hdf5SectionFamily {
+enum Hdf5SectionFamily {
     Transient,
     DcSweep,
     Ac,
 }
 
 #[derive(Debug)]
-pub enum DecodedHdf5 {
+enum DecodedHdf5 {
     Section {
         family: Hdf5SectionFamily,
         coordinate_name: String,
@@ -194,6 +199,59 @@ fn decode_error(
 }
 
 pub fn decode_hdf5(
+    bytes: &[u8],
+    limits: Hdf5Limits<'_>,
+    format: &str,
+) -> Result<DecodedNumericDataset, Hdf5ReadError> {
+    finish_hdf5(decode_hdf5_container(bytes, limits, format)?, format)
+}
+
+pub fn decode_matlab_v73(
+    bytes: &[u8],
+    limits: Hdf5Limits<'_>,
+    format: &str,
+) -> Result<DecodedNumericDataset, Hdf5ReadError> {
+    finish_hdf5(decode_matlab_v73_container(bytes, limits, format)?, format)
+}
+
+fn finish_hdf5(decoded: DecodedHdf5, format: &str) -> Result<DecodedNumericDataset, Hdf5ReadError> {
+    match decoded {
+        DecodedHdf5::Section {
+            family,
+            coordinate_name,
+            coordinate,
+            signals,
+        } => {
+            let domain = match family {
+                Hdf5SectionFamily::Transient => crate::WaveformDomain::Transient,
+                Hdf5SectionFamily::DcSweep => crate::WaveformDomain::DcSweep,
+                Hdf5SectionFamily::Ac => crate::WaveformDomain::Ac,
+            };
+            Ok(DecodedNumericDataset {
+                domain,
+                coordinate_name,
+                coordinate,
+                signals,
+            })
+        }
+        DecodedHdf5::Root {
+            coordinate_name,
+            coordinate,
+            columns,
+        } => {
+            let signals = combine_real_imag_columns(columns)
+                .map_err(|error| adapter_error(format, Hdf5ReadFailure::ComplexColumns(error)))?;
+            Ok(DecodedNumericDataset {
+                domain: crate::WaveformDomain::from_coordinate_name(&coordinate_name),
+                coordinate_name,
+                coordinate,
+                signals,
+            })
+        }
+    }
+}
+
+fn decode_hdf5_container(
     bytes: &[u8],
     limits: Hdf5Limits<'_>,
     format: &str,
@@ -252,7 +310,7 @@ fn hdf5_section_family(file: &rustyhdf5::File, group: &str) -> Option<Hdf5Sectio
     }
 }
 
-pub fn decode_matlab_v73(
+fn decode_matlab_v73_container(
     bytes: &[u8],
     limits: Hdf5Limits<'_>,
     format: &str,
@@ -624,7 +682,7 @@ fn ensure_table_value_limit(
 
 #[cfg(test)]
 mod tests {
-    use super::{DecodedHdf5, Hdf5Limits, Hdf5ReadFailure, decode_hdf5};
+    use super::{Hdf5Limits, Hdf5ReadFailure, decode_hdf5};
 
     #[test]
     fn root_reader_preserves_coordinate_and_numeric_bounds() {
@@ -638,17 +696,14 @@ mod tests {
             coordinate_names: &["time", "x"],
         };
         let decoded = decode_hdf5(&bytes, limits, "hdf5").expect("root table");
-        let DecodedHdf5::Root {
-            coordinate_name,
-            coordinate,
-            columns,
-        } = decoded
-        else {
-            panic!("root dataset should not be a named section");
-        };
-        assert_eq!(coordinate_name, "time");
-        assert_eq!(coordinate, [0.0, 1.0]);
-        assert_eq!(columns, [("V(out)".to_owned(), vec![2.0, 3.0])]);
+        assert_eq!(decoded.domain, crate::WaveformDomain::Transient);
+        assert_eq!(decoded.coordinate_name, "time");
+        assert_eq!(decoded.coordinate, [0.0, 1.0]);
+        assert_eq!(decoded.signals.len(), 1);
+        assert_eq!(decoded.signals[0].name, "V(out)");
+        assert_eq!(decoded.signals[0].real, [2.0, 3.0]);
+        assert!(decoded.signals[0].imag.is_none());
+        assert!(decoded.signals[0].unit.is_none());
 
         let small_limit = Hdf5Limits {
             max_values: 1,
@@ -682,5 +737,50 @@ mod tests {
             format!("hdf5 import: invalid HDF5 container: {source}")
         );
         assert!(error.reason.source().unwrap().is::<rustyhdf5::Error>());
+    }
+
+    #[test]
+    fn root_coordinate_priority_and_complex_pairs_are_preserved() {
+        let bytes = |with_imag| {
+            let mut builder = rustyhdf5::FileBuilder::new();
+            builder.create_dataset("t").with_f64_data(&[10.0, 20.0]);
+            builder.create_dataset("time").with_f64_data(&[0.0, 1.0]);
+            builder.create_dataset("gain_RE").with_f64_data(&[2.0, 3.0]);
+            if with_imag {
+                builder
+                    .create_dataset("gain_IM")
+                    .with_f64_data(&[-0.0, 4.0]);
+            }
+            builder.finish().unwrap()
+        };
+        let limits = Hdf5Limits {
+            max_columns: 4,
+            max_values: 8,
+            coordinate_names: &["time", "t"],
+        };
+        let decoded = decode_hdf5(&bytes(true), limits, "hdf5").unwrap();
+        assert_eq!(decoded.coordinate_name, "time");
+        assert_eq!(decoded.coordinate, [0.0, 1.0]);
+        assert_eq!(
+            decoded
+                .signals
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>(),
+            ["t", "gain"]
+        );
+        assert_eq!(decoded.signals[0].real, [10.0, 20.0]);
+        assert_eq!(decoded.signals[1].real, [2.0, 3.0]);
+        let imag = decoded.signals[1].imag.as_ref().unwrap();
+        assert_eq!(imag[0].to_bits(), (-0.0_f64).to_bits());
+        assert_eq!(imag[1], 4.0);
+        let error = decode_hdf5(&bytes(false), limits, "hdf5").unwrap_err();
+        assert!(
+            matches!(&error.reason, Hdf5ReadFailure::ComplexColumns(crate::numeric::ComplexColumnError::MissingImaginary(name)) if name == "gain")
+        );
+        assert_eq!(
+            error.to_string(),
+            "hdf5 import: complex signal 'gain' is missing its imaginary component"
+        );
     }
 }

@@ -22,6 +22,7 @@ monte-carlo-checkpoint = ["dep:rspice-results", "dep:serde_json"]
 columnar = ["dep:arrow-array", "dep:arrow-ipc", "dep:arrow-schema", "dep:bytes", "dep:parquet"]
 fst = ["dep:fst-reader"]
 hdf5 = ["dep:rustyhdf5"]
+spice-raw = ["dep:rspice-core"]
 xlsx = ["dep:rust_xlsxwriter"]
 
 [dependencies]
