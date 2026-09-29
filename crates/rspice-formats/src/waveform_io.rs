@@ -21,7 +21,10 @@ mod types;
 mod writer;
 
 pub use touchstone_reader::read_touchstone_bytes;
-pub use types::{SignalType, WaveformDataset, WaveformDomain, WaveformFormat, WaveformSignal};
+pub use types::{
+    SignalType, UnsupportedWaveformDomain, WaveformDataset, WaveformDomain, WaveformFormat,
+    WaveformSignal,
+};
 pub use writer::WaveformWriter;
 
 // =============================================================================

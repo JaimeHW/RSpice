@@ -7,9 +7,7 @@
 mod reader;
 mod writer;
 
-pub use reader::{
-    NativeBundleReadLimits, NativeCoordinate, NativeDataset, NativeSignal, decode_native_bundle,
-};
+pub use reader::{NativeBundleReadLimits, decode_native_bundle};
 pub use writer::encode_native_bundle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +71,13 @@ pub enum NativeBundleSignalValues<'a> {
 #[derive(Debug)]
 pub enum NativeBundleError {
     InvalidData(String),
+    AnalysisDomain(crate::UnsupportedWaveformDomain),
+    SignalRepresentation {
+        name: String,
+        values: bool,
+        real: bool,
+        imag: bool,
+    },
     Json {
         context: &'static str,
         source: serde_json::Error,
@@ -91,6 +96,11 @@ impl std::fmt::Display for NativeBundleError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidData(detail) => formatter.write_str(detail),
+            Self::AnalysisDomain(source) => source.fmt(formatter),
+            Self::SignalRepresentation { name, .. } => write!(
+                formatter,
+                "signal '{name}' must provide either values or both real and imag"
+            ),
             Self::Json { context, source } => write!(formatter, "{context}: {source}"),
             Self::Zip { context, source } => write!(formatter, "{context}: {source}"),
             Self::Io { context, source } => write!(formatter, "{context}: {source}"),
@@ -101,7 +111,8 @@ impl std::fmt::Display for NativeBundleError {
 impl std::error::Error for NativeBundleError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::InvalidData(_) => None,
+            Self::InvalidData(_) | Self::SignalRepresentation { .. } => None,
+            Self::AnalysisDomain(source) => Some(source),
             Self::Json { source, .. } => Some(source),
             Self::Zip { source, .. } => Some(source),
             Self::Io { source, .. } => Some(source),

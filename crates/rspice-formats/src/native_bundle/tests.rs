@@ -85,20 +85,15 @@ fn native_export_schema_is_deterministic_and_round_trips_real_and_complex() {
 
         let parsed =
             decode_native_bundle(&bytes, kind, limits()).expect("exporter/importer round-trip");
-        assert_eq!(parsed.analysis, "ac");
-        assert_eq!(parsed.coordinate.name, "frequency");
-        assert_eq!(parsed.coordinate.values, coordinate);
+        assert_eq!(parsed.domain, crate::WaveformDomain::Ac);
+        assert_eq!(parsed.coordinate_name, "frequency");
+        assert_eq!(parsed.coordinate, coordinate);
         assert_eq!(parsed.signals.len(), 2);
         assert_eq!(parsed.signals[0].name, "gain");
-        assert_eq!(
-            parsed.signals[0].values.as_deref(),
-            Some(real_values.as_slice())
-        );
+        assert_eq!(parsed.signals[0].real, real_values);
+        assert!(parsed.signals[0].imag.is_none());
         assert_eq!(parsed.signals[1].name, "V(out)");
-        assert_eq!(
-            parsed.signals[1].real.as_deref(),
-            Some(complex_real.as_slice())
-        );
+        assert_eq!(parsed.signals[1].real, complex_real);
         assert_eq!(
             parsed.signals[1].imag.as_deref(),
             Some(complex_imag.as_slice())
@@ -168,15 +163,7 @@ fn native_decode_preserves_record_names_in_json_errors() {
             "NativeSignal",
         ),
     ] {
-        let dataset = serde_json::to_vec(&document).unwrap();
-        use sha2::Digest as _;
-        let manifest = serde_json::to_vec(&serde_json::json!({
-            "schema": "rspice-result-bundle/1",
-            "dataset_member": "dataset.json",
-            "dataset_sha256": format!("{:x}", sha2::Sha256::digest(&dataset)),
-        }))
-        .unwrap();
-        let bytes = zip_bytes(&[("manifest.json", &manifest), ("dataset.json", &dataset)]);
+        let bytes = pack_dataset(&document);
         let error = decode_native_bundle(&bytes, NativeBundleKind::Result, limits()).unwrap_err();
         assert!(matches!(error, NativeBundleError::Json { .. }));
         assert!(std::error::Error::source(&error).is_some());
@@ -185,6 +172,68 @@ fn native_decode_preserves_record_names_in_json_errors() {
                 "dataset.json is invalid: invalid type: null, expected struct {record} at line "
             )),
             "{error}"
+        );
+    }
+}
+
+fn pack_dataset(document: &serde_json::Value) -> Vec<u8> {
+    let dataset = serde_json::to_vec(document).unwrap();
+    use sha2::Digest as _;
+    let manifest = serde_json::to_vec(&serde_json::json!({
+        "schema": "rspice-result-bundle/1",
+        "dataset_member": "dataset.json",
+        "dataset_sha256": format!("{:x}", sha2::Sha256::digest(&dataset)),
+    }))
+    .unwrap();
+    zip_bytes(&[("manifest.json", &manifest), ("dataset.json", &dataset)])
+}
+
+#[test]
+fn native_schema_domain_and_signal_representation_keep_their_refusal_order() {
+    let mut document = serde_json::json!({
+        "schema": "unsupported", "analysis": " UNKNOWN ",
+        "coordinate": { "name": "time", "values": [0.0] },
+        "signals": [{ "name": "out" }],
+    });
+    let error = decode_native_bundle(&pack_dataset(&document), NativeBundleKind::Result, limits())
+        .unwrap_err();
+    assert!(matches!(&error, NativeBundleError::InvalidData(_)));
+    assert_eq!(
+        error.to_string(),
+        "unsupported dataset schema 'unsupported'"
+    );
+    document["schema"] = serde_json::json!("rspice-waveform-dataset/1");
+    let error = decode_native_bundle(&pack_dataset(&document), NativeBundleKind::Result, limits())
+        .unwrap_err();
+    assert!(
+        matches!(&error, NativeBundleError::AnalysisDomain(source) if source.value == "unknown")
+    );
+    assert_eq!(error.to_string(), "unsupported analysis domain 'unknown'");
+    document["analysis"] = serde_json::json!(" AC ");
+    for (values, real, imag) in [
+        (false, false, false),
+        (true, true, false),
+        (true, false, true),
+        (true, true, true),
+        (false, true, false),
+        (false, false, true),
+    ] {
+        let mut signal = serde_json::json!({"name": "out"});
+        for (field, present) in [("values", values), ("real", real), ("imag", imag)] {
+            if present {
+                signal[field] = serde_json::json!([1.0]);
+            }
+        }
+        document["signals"] = serde_json::json!([signal]);
+        let error =
+            decode_native_bundle(&pack_dataset(&document), NativeBundleKind::Result, limits())
+                .unwrap_err();
+        assert!(
+            matches!(&error, NativeBundleError::SignalRepresentation { name, values: v, real: r, imag: i } if name == "out" && *v == values && *r == real && *i == imag)
+        );
+        assert_eq!(
+            error.to_string(),
+            "signal 'out' must provide either values or both real and imag"
         );
     }
 }

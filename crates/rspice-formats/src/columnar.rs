@@ -74,6 +74,9 @@ pub enum ColumnarReadFailure {
         data_type: Box<arrow_schema::DataType>,
     },
     InexactInteger(crate::numeric::ExactIntegerError),
+    MissingCoordinate(String),
+    AnalysisDomain(crate::UnsupportedWaveformDomain),
+    ComplexColumns(crate::numeric::ComplexColumnError),
 }
 
 impl std::fmt::Display for ColumnarReadFailure {
@@ -112,6 +115,11 @@ impl std::fmt::Display for ColumnarReadFailure {
                 "column '{column}' has unsupported Arrow type {data_type}"
             ),
             Self::InexactInteger(source) => source.fmt(f),
+            Self::MissingCoordinate(name) => {
+                write!(f, "schema metadata names missing coordinate '{name}'")
+            }
+            Self::AnalysisDomain(source) => source.fmt(f),
+            Self::ComplexColumns(source) => source.fmt(f),
         }
     }
 }
@@ -123,6 +131,8 @@ impl std::error::Error for ColumnarReadFailure {
             Self::ArrowBatch { source, .. } => Some(source),
             Self::ParquetMetadata(source) | Self::ParquetReader(source) => Some(source),
             Self::InexactInteger(source) => Some(source),
+            Self::AnalysisDomain(source) => Some(source),
+            Self::ComplexColumns(source) => Some(source),
             _ => None,
         }
     }
@@ -220,9 +230,9 @@ pub struct ColumnarLimits {
     pub max_values: usize,
 }
 
-pub struct DecodedColumnarTable {
-    pub metadata: HashMap<String, String>,
-    pub columns: Vec<(String, Vec<f64>)>,
+struct DecodedColumnarTable {
+    metadata: HashMap<String, String>,
+    columns: Vec<(String, Vec<f64>)>,
 }
 
 fn adapter_error(format: &str, reason: ColumnarReadFailure) -> ColumnarReadError {
@@ -232,7 +242,66 @@ fn adapter_error(format: &str, reason: ColumnarReadFailure) -> ColumnarReadError
     }
 }
 
+/// Decode Arrow waveform columns and their coordinate/domain metadata.
 pub fn decode_arrow_ipc(
+    bytes: &[u8],
+    limits: ColumnarLimits,
+    format: &str,
+) -> Result<crate::numeric::DecodedNumericDataset, ColumnarReadError> {
+    finish_columnar_table(format, decode_arrow_ipc_table(bytes, limits, format)?)
+}
+
+/// Decode Parquet waveform columns and their coordinate/domain metadata.
+pub fn decode_parquet(
+    bytes: &[u8],
+    limits: ColumnarLimits,
+    format: &str,
+) -> Result<crate::numeric::DecodedNumericDataset, ColumnarReadError> {
+    finish_columnar_table(format, decode_parquet_table(bytes, limits, format)?)
+}
+
+fn finish_columnar_table(
+    format: &str,
+    table: DecodedColumnarTable,
+) -> Result<crate::numeric::DecodedNumericDataset, ColumnarReadError> {
+    let DecodedColumnarTable {
+        metadata,
+        mut columns,
+    } = table;
+    let coordinate_name = metadata
+        .get("rspice.coordinate")
+        .cloned()
+        .unwrap_or_else(|| columns[0].0.clone());
+    let coordinate_index = columns
+        .iter()
+        .position(|(name, _)| name == &coordinate_name)
+        .ok_or_else(|| {
+            adapter_error(
+                format,
+                ColumnarReadFailure::MissingCoordinate(coordinate_name.clone()),
+            )
+        })?;
+    let coordinate = columns.remove(coordinate_index).1;
+    let domain = metadata
+        .get("rspice.analysis")
+        .map(|value| {
+            value
+                .parse::<crate::WaveformDomain>()
+                .map_err(|error| adapter_error(format, ColumnarReadFailure::AnalysisDomain(error)))
+        })
+        .transpose()?
+        .unwrap_or_else(|| crate::WaveformDomain::from_coordinate_name(&coordinate_name));
+    let signals = crate::numeric::combine_real_imag_columns(columns)
+        .map_err(|error| adapter_error(format, ColumnarReadFailure::ComplexColumns(error)))?;
+    Ok(crate::numeric::DecodedNumericDataset {
+        domain,
+        coordinate_name,
+        coordinate,
+        signals,
+    })
+}
+
+fn decode_arrow_ipc_table(
     bytes: &[u8],
     limits: ColumnarLimits,
     format: &str,
@@ -273,7 +342,7 @@ pub fn decode_arrow_ipc(
     }
 }
 
-pub fn decode_parquet(
+fn decode_parquet_table(
     bytes: &[u8],
     limits: ColumnarLimits,
     format: &str,
@@ -502,7 +571,10 @@ fn numeric_values(
 
 #[cfg(test)]
 mod tests {
-    use super::{ColumnarLimits, ColumnarReadFailure, decode_arrow_batches, encode_parquet_table};
+    use super::{
+        ColumnarLimits, ColumnarReadFailure, DecodedColumnarTable, decode_arrow_batches,
+        encode_parquet_table, finish_columnar_table,
+    };
     use crate::table::EngineeringTableSource;
     use arrow_array::{Array, ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray};
     use arrow_schema::{DataType, Field, Schema};
@@ -681,9 +753,8 @@ mod tests {
             max_rows: 2,
             max_values: 4,
         };
-        let error = super::decode_arrow_ipc(b"invalid", limits, "arrow_ipc")
-            .err()
-            .expect("invalid Arrow");
+        let error =
+            super::decode_arrow_ipc(b"invalid", limits, "arrow_ipc").expect_err("invalid Arrow");
         let ColumnarReadFailure::ArrowFraming { file, stream } = &error.reason else {
             panic!("expected both framing errors: {error}");
         };
@@ -700,9 +771,8 @@ mod tests {
                 .unwrap()
                 .is::<arrow_schema::ArrowError>()
         );
-        let error = super::decode_parquet(b"invalid", limits, "parquet")
-            .err()
-            .expect("invalid Parquet");
+        let error =
+            super::decode_parquet(b"invalid", limits, "parquet").expect_err("invalid Parquet");
         let ColumnarReadFailure::ParquetMetadata(source) = &error.reason else {
             panic!("expected a metadata error: {error}");
         };
@@ -716,6 +786,77 @@ mod tests {
                 .source()
                 .unwrap()
                 .is::<parquet::errors::ParquetError>()
+        );
+    }
+
+    #[test]
+    fn metadata_selects_coordinate_and_domain_before_pairing_signals() {
+        let table = || DecodedColumnarTable {
+            metadata: HashMap::from([
+                ("rspice.coordinate".into(), "x".into()),
+                ("rspice.analysis".into(), " AC ".into()),
+            ]),
+            columns: vec![
+                ("gain_IM".into(), vec![-0.0]),
+                ("x".into(), vec![3.0]),
+                ("gain_RE".into(), vec![1.0]),
+                ("plain".into(), vec![4.0]),
+            ],
+        };
+        let decoded = finish_columnar_table("arrow_ipc", table()).unwrap();
+        assert_eq!(decoded.domain, crate::WaveformDomain::Ac);
+        assert_eq!(decoded.coordinate_name, "x");
+        assert_eq!(decoded.coordinate, [3.0]);
+        assert_eq!(
+            decoded
+                .signals
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>(),
+            ["plain", "gain"]
+        );
+        assert_eq!(decoded.signals[0].real, [4.0]);
+        assert_eq!(decoded.signals[1].real, [1.0]);
+        assert_eq!(
+            decoded.signals[1].imag.as_ref().unwrap()[0].to_bits(),
+            (-0.0_f64).to_bits()
+        );
+
+        let mut invalid = table();
+        invalid
+            .metadata
+            .insert("rspice.coordinate".into(), "missing".into());
+        invalid
+            .metadata
+            .insert("rspice.analysis".into(), " UNKNOWN ".into());
+        let error = finish_columnar_table("arrow_ipc", invalid).unwrap_err();
+        assert!(
+            matches!(&error.reason, ColumnarReadFailure::MissingCoordinate(name) if name == "missing")
+        );
+        assert_eq!(
+            error.to_string(),
+            "arrow_ipc import: schema metadata names missing coordinate 'missing'"
+        );
+
+        let mut invalid = table();
+        invalid.columns.remove(0);
+        invalid
+            .metadata
+            .insert("rspice.analysis".into(), " UNKNOWN ".into());
+        let error = finish_columnar_table("parquet", invalid).unwrap_err();
+        assert!(
+            matches!(&error.reason, ColumnarReadFailure::AnalysisDomain(source) if source.value == "unknown")
+        );
+        assert_eq!(
+            error.to_string(),
+            "parquet import: unsupported analysis domain 'unknown'"
+        );
+
+        let mut invalid = table();
+        invalid.columns.remove(0);
+        let error = finish_columnar_table("parquet", invalid).unwrap_err();
+        assert!(
+            matches!(&error.reason, ColumnarReadFailure::ComplexColumns(crate::numeric::ComplexColumnError::MissingImaginary(name)) if name == "gain")
         );
     }
 }

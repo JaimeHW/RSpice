@@ -1,6 +1,7 @@
 //! Bounded native bundle container, digest, and versioned JSON decoding.
 
 use super::{NativeBundleError, NativeBundleKind};
+use crate::numeric::{DecodedNumericDataset, DecodedNumericSignal};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::io::{Cursor, Read};
@@ -21,35 +22,35 @@ struct NativeBundleManifest {
     dataset_sha256: String,
 }
 
-/// Decoded file fields; the caller applies result-domain and signal policies.
+/// Versioned file fields, retained internally until waveform interpretation.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct NativeDataset {
+struct NativeDataset {
     schema: String,
-    pub analysis: String,
-    pub coordinate: NativeCoordinate,
-    pub signals: Vec<NativeSignal>,
+    analysis: String,
+    coordinate: NativeCoordinate,
+    signals: Vec<NativeSignal>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct NativeCoordinate {
-    pub name: String,
-    pub values: Vec<f64>,
+struct NativeCoordinate {
+    name: String,
+    values: Vec<f64>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct NativeSignal {
-    pub name: String,
+struct NativeSignal {
+    name: String,
     #[serde(default)]
-    pub unit: Option<String>,
+    unit: Option<String>,
     #[serde(default)]
-    pub values: Option<Vec<f64>>,
+    values: Option<Vec<f64>>,
     #[serde(default)]
-    pub real: Option<Vec<f64>>,
+    real: Option<Vec<f64>>,
     #[serde(default)]
-    pub imag: Option<Vec<f64>>,
+    imag: Option<Vec<f64>>,
 }
 
 /// Verify the bounded container and digest before decoding the versioned file fields.
@@ -57,7 +58,7 @@ pub fn decode_native_bundle(
     bytes: &[u8],
     kind: NativeBundleKind,
     limits: NativeBundleReadLimits,
-) -> Result<NativeDataset, NativeBundleError> {
+) -> Result<DecodedNumericDataset, NativeBundleError> {
     let max_members = limits.max_members;
     let max_expanded_bytes = limits.max_expanded_bytes;
     let mut archive =
@@ -141,7 +142,37 @@ pub fn decode_native_bundle(
             dataset.schema
         )));
     }
-    Ok(dataset)
+    let domain = dataset
+        .analysis
+        .parse::<crate::WaveformDomain>()
+        .map_err(NativeBundleError::AnalysisDomain)?;
+    let mut signals = Vec::with_capacity(dataset.signals.len());
+    for signal in dataset.signals {
+        let (real, imag) = match (signal.values, signal.real, signal.imag) {
+            (Some(values), None, None) => (values, None),
+            (None, Some(real), Some(imag)) => (real, Some(imag)),
+            (values, real, imag) => {
+                return Err(NativeBundleError::SignalRepresentation {
+                    name: signal.name,
+                    values: values.is_some(),
+                    real: real.is_some(),
+                    imag: imag.is_some(),
+                });
+            }
+        };
+        signals.push(DecodedNumericSignal {
+            name: signal.name,
+            real,
+            imag,
+            unit: signal.unit,
+        });
+    }
+    Ok(DecodedNumericDataset {
+        domain,
+        coordinate_name: dataset.coordinate.name,
+        coordinate: dataset.coordinate.values,
+        signals,
+    })
 }
 
 pub(super) fn read_zip_member(

@@ -21,13 +21,6 @@ fn analysis_from_coordinate(name: &str) -> AnalysisType {
     imported_analysis_type(rspice_formats::WaveformDomain::from_coordinate_name(name))
 }
 
-fn parse_analysis(format: ResultImportFormat, value: &str) -> Result<AnalysisType, String> {
-    value
-        .parse::<rspice_formats::WaveformDomain>()
-        .map(imported_analysis_type)
-        .map_err(|error| adapter_error(format, error))
-}
-
 fn waveform_import_limits() -> rspice_results::result_import::waveforms::WaveformImportLimits {
     rspice_results::result_import::waveforms::WaveformImportLimits {
         min_rows: MIN_RESULT_ROWS,
@@ -110,36 +103,7 @@ pub(super) fn parse_native_bundle(
         },
     )
     .map_err(|error| adapter_error(format, error))?;
-    let analysis = parse_analysis(format, &dataset.analysis)?;
-    let mut signals = Vec::with_capacity(dataset.signals.len());
-    for signal in dataset.signals {
-        let (real, imag) = match (signal.values, signal.real, signal.imag) {
-            (Some(values), None, None) => (values, None),
-            (None, Some(real), Some(imag)) => (real, Some(imag)),
-            _ => {
-                return Err(adapter_error(
-                    format,
-                    format_args!(
-                        "signal '{}' must provide either values or both real and imag",
-                        signal.name
-                    ),
-                ));
-            }
-        };
-        signals.push(ImportedSignal {
-            name: signal.name,
-            real,
-            imag,
-            unit: signal.unit,
-        });
-    }
-    finish_dataset(
-        format,
-        analysis,
-        dataset.coordinate.name,
-        dataset.coordinate.values,
-        signals,
-    )
+    finish_numeric_dataset(format, dataset)
 }
 
 // -------------------------------------------------------------------------
@@ -218,7 +182,7 @@ pub(super) fn parse_arrow_ipc(
     let table =
         rspice_formats::columnar::decode_arrow_ipc(bytes, columnar_limits(), format.canonical_id())
             .map_err(|error| error.to_string())?;
-    finish_columnar_table(format, table)
+    finish_numeric_dataset(format, table)
 }
 
 pub(super) fn parse_parquet(
@@ -228,7 +192,7 @@ pub(super) fn parse_parquet(
     let table =
         rspice_formats::columnar::decode_parquet(bytes, columnar_limits(), format.canonical_id())
             .map_err(|error| error.to_string())?;
-    finish_columnar_table(format, table)
+    finish_numeric_dataset(format, table)
 }
 
 fn columnar_limits() -> rspice_formats::columnar::ColumnarLimits {
@@ -237,37 +201,6 @@ fn columnar_limits() -> rspice_formats::columnar::ColumnarLimits {
         max_rows: MAX_RESULT_ROWS,
         max_values: MAX_RESULT_VALUES,
     }
-}
-
-fn finish_columnar_table(
-    format: ResultImportFormat,
-    table: rspice_formats::columnar::DecodedColumnarTable,
-) -> Result<ParsedResultDataset, String> {
-    let rspice_formats::columnar::DecodedColumnarTable {
-        metadata,
-        mut columns,
-    } = table;
-    let coordinate_name = metadata
-        .get("rspice.coordinate")
-        .cloned()
-        .unwrap_or_else(|| columns[0].0.clone());
-    let coordinate_index = columns
-        .iter()
-        .position(|(name, _)| name == &coordinate_name)
-        .ok_or_else(|| {
-            adapter_error(
-                format,
-                format_args!("schema metadata names missing coordinate '{coordinate_name}'"),
-            )
-        })?;
-    let coordinate = columns.remove(coordinate_index).1;
-    let analysis = metadata
-        .get("rspice.analysis")
-        .map(|value| parse_analysis(format, value))
-        .transpose()?
-        .unwrap_or_else(|| analysis_from_coordinate(&coordinate_name));
-    let signals = combine_real_imag_columns(format, columns)?;
-    finish_dataset(format, analysis, coordinate_name, coordinate, signals)
 }
 
 fn imported_signals(

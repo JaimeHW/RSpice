@@ -39,15 +39,30 @@ impl WaveformDomain {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnsupportedWaveformDomain {
+    pub value: String,
+}
+
+impl std::fmt::Display for UnsupportedWaveformDomain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "unsupported analysis domain '{}'", self.value)
+    }
+}
+
+impl std::error::Error for UnsupportedWaveformDomain {}
+
 impl std::str::FromStr for WaveformDomain {
-    type Err = String;
+    type Err = UnsupportedWaveformDomain;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.trim().to_ascii_lowercase().as_str() {
             "tran" | "transient" | "time" => Ok(Self::Transient),
             "ac" | "frequency" | "freq" => Ok(Self::Ac),
             "dc" | "dc_sweep" | "dc-sweep" | "sweep" => Ok(Self::DcSweep),
-            other => Err(format!("unsupported analysis domain '{other}'")),
+            other => Err(UnsupportedWaveformDomain {
+                value: other.to_owned(),
+            }),
         }
     }
 }

@@ -78,7 +78,11 @@ fn decode_text(text: &str, limits: PsfReadLimits) -> Result<DecodedPsfWaveforms,
                     "analysis" | "type" | "sweepmode"
                 )
             {
-                analysis = Some(fields[1].parse::<WaveformDomain>()?);
+                analysis = Some(
+                    fields[1]
+                        .parse::<WaveformDomain>()
+                        .map_err(|error| error.to_string())?,
+                );
             }
         } else if section.eq_ignore_ascii_case("SWEEP") {
             let fields = psf_tokens(line, line_number)?;
