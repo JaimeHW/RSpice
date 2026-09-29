@@ -3,8 +3,11 @@
 use super::PersistenceBinding;
 use crate::io::ProjectSnapshot;
 use crate::product::ContentDigest;
+use rspice_project::ProjectIoError;
 use rspice_project::persistence::native::NativeProjectStorage;
-use rspice_project::persistence::{NativeBindingReceipt, PersistenceError, digest_bytes};
+use rspice_project::persistence::{
+    NativeBindingReceipt, PersistenceError, ProjectBytes, digest_bytes,
+};
 use std::path::{Path, PathBuf};
 
 pub(crate) struct NativeStorage;
@@ -14,6 +17,15 @@ impl NativeProjectStorage for NativeStorage {
 
     fn normalize_path(&self, path: &Path) -> Result<PathBuf, PersistenceError> {
         normalize_native_path(path)
+    }
+
+    fn reconcile_publication(&self, path: &Path) -> Result<(), PersistenceError> {
+        crate::io::durable_file::reconcile_publication(path)
+            .map_err(|error| PersistenceError::Platform(error.to_string()))
+    }
+
+    fn read_project(&self, path: &Path) -> Result<ProjectBytes, ProjectIoError> {
+        crate::io::project_io::read_project_bytes(path)
     }
 
     fn accepted_content(&self, digest: ContentDigest) -> Self::ExpectedContent {
@@ -85,17 +97,12 @@ impl NativeProjectStorage for NativeStorage {
 pub(crate) fn read_native_binding(
     path: &Path,
 ) -> Result<(ProjectSnapshot, PersistenceBinding), PersistenceError> {
-    let canonical_path = normalize_native_path(path)?;
-    crate::io::durable_file::reconcile_publication(&canonical_path)
-        .map_err(|error| PersistenceError::Platform(error.to_string()))?;
-    let (project, digest) = crate::io::project_io::load_project_file_with_digest(&canonical_path)?;
-    Ok((
-        project,
-        PersistenceBinding {
-            canonical_path,
-            accepted_digest: digest,
-        },
-    ))
+    let (project, binding) = PersistenceBinding::open(
+        &NativeStorage,
+        path,
+        crate::state::workspace::WorkspaceSourceFiles,
+    )?;
+    Ok((ProjectSnapshot::from_decoded(project), binding))
 }
 
 pub(crate) fn restore_native_binding(
@@ -103,26 +110,14 @@ pub(crate) fn restore_native_binding(
     session_project_id: &str,
     receipt: &NativeBindingReceipt,
 ) -> Result<(ProjectSnapshot, PersistenceBinding), PersistenceError> {
-    receipt.validate_session_project(session_project_id)?;
-    let canonical_path = normalize_native_path(path)?;
-    receipt.validate_canonical_path(&canonical_path)?;
-    crate::io::durable_file::reconcile_publication(&canonical_path)
-        .map_err(|error| PersistenceError::Platform(error.to_string()))?;
-    let Some(project) = crate::io::project_io::load_project_file_with_expected_digest(
-        &canonical_path,
-        receipt.accepted_digest,
-    )?
-    else {
-        return Err(PersistenceError::ExternalChange);
-    };
-    receipt.validate_loaded_project(&project.file)?;
-    Ok((
-        project,
-        PersistenceBinding {
-            canonical_path,
-            accepted_digest: receipt.accepted_digest,
-        },
-    ))
+    let (project, binding) = PersistenceBinding::restore(
+        &NativeStorage,
+        path,
+        session_project_id,
+        receipt,
+        crate::state::workspace::WorkspaceSourceFiles,
+    )?;
+    Ok((ProjectSnapshot::from_decoded(project), binding))
 }
 
 pub(crate) fn normalize_native_path(path: &Path) -> Result<PathBuf, PersistenceError> {

@@ -1,5 +1,8 @@
 //! Canonical project byte identities and persisted binding receipts.
 
+mod bytes;
+pub use bytes::ProjectBytes;
+
 pub mod browser;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;

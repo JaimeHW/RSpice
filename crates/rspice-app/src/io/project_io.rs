@@ -2,12 +2,12 @@
 
 pub use crate::state::project_snapshot::ProjectSnapshot;
 use rspice_app_types::product::ContentDigest;
+use rspice_project::persistence::ProjectBytes;
 pub use rspice_project::results::*;
 pub use rspice_project::{MAX_PROJECT_FILE_BYTES, ProjectIoError};
-use sha2::{Digest as _, Sha256};
 #[cfg(any(not(target_arch = "wasm32"), test))]
 use std::path::PathBuf;
-use std::{fs::File, io::Read, path::Path};
+use std::{fs::File, path::Path};
 
 pub const PROJECT_FILTER: (&str, &[&str]) = ("RSpice Project", &["rspiceproj", "json"]);
 
@@ -66,72 +66,19 @@ pub fn load_project_file(path: &Path) -> Result<ProjectSnapshot, ProjectIoError>
 pub(crate) fn load_project_file_with_digest(
     path: &Path,
 ) -> Result<(ProjectSnapshot, ContentDigest), ProjectIoError> {
+    let bytes = read_project_bytes(path)?;
+    let digest = bytes.digest();
+    let project = bytes.decode(Some(path), crate::state::workspace::WorkspaceSourceFiles)?;
+    Ok((ProjectSnapshot::from_decoded(project), digest))
+}
+
+pub(crate) fn read_project_bytes(path: &Path) -> Result<ProjectBytes, ProjectIoError> {
     if !path.exists() {
         return Err(ProjectIoError::NotFound(path.to_path_buf()));
     }
-
-    let (bytes, digest) = read_project_bytes_and_digest(path)?;
-    let contents = std::str::from_utf8(&bytes).map_err(|error| {
-        ProjectIoError::ParseError(format!("project is not valid UTF-8: {error}"))
-    })?;
-    let project = load_project_text(contents, Some(path))?;
-    Ok((project, digest))
-}
-
-/// Read one bounded byte snapshot and parse it only when it matches an exact
-/// previously accepted persistence identity.
-///
-/// Session restoration uses this boundary so a file replaced at a remembered
-/// pathname cannot become parser input, much less regain canonical Save
-/// authority. A mismatch is an ordinary `Ok(None)` conflict; malformed bytes
-/// are reported only when they carry the expected digest.
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn load_project_file_with_expected_digest(
-    path: &Path,
-    expected: ContentDigest,
-) -> Result<Option<ProjectSnapshot>, ProjectIoError> {
-    if !path.exists() {
-        return Err(ProjectIoError::NotFound(path.to_path_buf()));
-    }
-
-    let (bytes, digest) = read_project_bytes_and_digest(path)?;
-    if digest != expected {
-        return Ok(None);
-    }
-    let contents = std::str::from_utf8(&bytes).map_err(|error| {
-        ProjectIoError::ParseError(format!("project is not valid UTF-8: {error}"))
-    })?;
-    load_project_text(contents, Some(path)).map(Some)
-}
-
-fn read_project_bytes_and_digest(path: &Path) -> Result<(Vec<u8>, ContentDigest), ProjectIoError> {
     let file = File::open(path)?;
     let advertised = file.metadata()?.len();
-    if advertised > MAX_PROJECT_FILE_BYTES {
-        return Err(ProjectIoError::InvalidData(format!(
-            "project is {advertised} bytes; the supported maximum is {MAX_PROJECT_FILE_BYTES} bytes"
-        )));
-    }
-    let mut file = file;
-    let mut bytes = Vec::with_capacity(advertised.min(8 * 1024 * 1024) as usize);
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    let mut total = 0_u64;
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        total = total.saturating_add(read as u64);
-        if total > MAX_PROJECT_FILE_BYTES {
-            return Err(ProjectIoError::InvalidData(format!(
-                "project grew beyond the supported {MAX_PROJECT_FILE_BYTES} byte maximum while it was being read"
-            )));
-        }
-        hasher.update(&buffer[..read]);
-        bytes.extend_from_slice(&buffer[..read]);
-    }
-    Ok((bytes, ContentDigest::from_bytes(hasher.finalize().into())))
+    ProjectBytes::read(file, advertised)
 }
 
 #[cfg(test)]

@@ -11,13 +11,35 @@ struct Storage {
     observations: Cell<usize>,
     publications: Cell<usize>,
     alias: Cell<bool>,
+    steps: RefCell<Vec<&'static str>>,
+    recovered_bytes: RefCell<Option<Vec<u8>>>,
+    recovery_error: RefCell<Option<String>>,
 }
 
 impl NativeProjectStorage for Storage {
     type ExpectedContent = Option<ContentDigest>;
 
     fn normalize_path(&self, path: &Path) -> Result<PathBuf, PersistenceError> {
+        self.steps.borrow_mut().push("normalize");
         Ok(path.to_path_buf())
+    }
+    fn reconcile_publication(&self, _: &Path) -> Result<(), PersistenceError> {
+        self.steps.borrow_mut().push("reconcile");
+        if let Some(error) = self.recovery_error.borrow().as_ref() {
+            return Err(PersistenceError::Platform(error.clone()));
+        }
+        if let Some(recovered) = self.recovered_bytes.borrow_mut().take() {
+            *self.bytes.borrow_mut() = Some(recovered);
+        }
+        Ok(())
+    }
+    fn read_project(&self, path: &Path) -> Result<ProjectBytes, ProjectIoError> {
+        self.steps.borrow_mut().push("read");
+        let current = self.bytes.borrow();
+        let bytes = current
+            .as_deref()
+            .ok_or_else(|| ProjectIoError::NotFound(path.to_path_buf()))?;
+        ProjectBytes::read(bytes, bytes.len() as u64)
     }
     fn same_file(&self, _: &Path, _: &Path) -> Result<bool, PersistenceError> {
         Ok(self.alias.get())
@@ -249,4 +271,129 @@ fn independent_copy_rejects_canonical_paths_and_aliases_and_forks_identity() {
     assert_ne!(copy.workspace.project.id(), source_identity);
     assert_eq!(copy.workspace.project.name, source_name);
     assert_eq!(storage.observations.get(), 1);
+}
+
+struct NoSourceFiles;
+
+impl HierarchySourceFiles for NoSourceFiles {
+    fn source_paths_match(&self, _: &Path, _: &Path) -> bool {
+        panic!("empty schematic project must not access source files")
+    }
+    fn configured_source_identity(&self, _: &Path) -> String {
+        panic!("empty schematic project must not access source files")
+    }
+    fn validate_source_file(
+        &self,
+        _: &Path,
+        _: rspice_design::library::ViewType,
+        _: &rspice_design::schematic::component::LibraryCellInstance,
+    ) -> Result<(), String> {
+        panic!("empty schematic project must not access source files")
+    }
+}
+
+#[test]
+fn native_open_accepts_only_the_snapshot_read_after_recovery() {
+    let path = Path::new("canonical.rspiceproj");
+    let file = project();
+    let project_id = file.workspace.project.id();
+    let (bytes, digest) = serialized_project(&file).unwrap();
+    let storage = Storage {
+        bytes: RefCell::new(Some(b"unreconciled bytes".to_vec())),
+        recovered_bytes: RefCell::new(Some(bytes.clone())),
+        ..Storage::default()
+    };
+    let (decoded, binding) = NativeBinding::open(&storage, path, NoSourceFiles).unwrap();
+    assert_eq!(decoded.file.workspace.project.id(), project_id);
+    assert_eq!(decoded.file.workspace.project.path.as_deref(), Some(path));
+    assert_eq!(binding.canonical_path, path);
+    assert_eq!(binding.accepted_digest, digest);
+    assert_eq!(storage.steps.take(), ["normalize", "reconcile", "read"]);
+    assert_eq!(storage.bytes.borrow().as_deref(), Some(bytes.as_slice()));
+    assert_eq!(storage.publications.get(), 0);
+
+    *storage.bytes.borrow_mut() = None;
+    assert!(matches!(NativeBinding::open(&storage, path, NoSourceFiles),
+        Err(PersistenceError::Project(ProjectIoError::NotFound(missing))) if missing == path));
+    assert_eq!(storage.steps.take(), ["normalize", "reconcile", "read"]);
+}
+
+#[test]
+fn native_restore_checks_receipt_recovery_bytes_and_decoded_identity_in_order() {
+    let path = Path::new("canonical.rspiceproj");
+    let file = project();
+    let project_id = file.workspace.project.id().to_string();
+    let (bytes, digest) = serialized_project(&file).unwrap();
+    let receipt = NativeBindingReceipt {
+        canonical_path: path.to_path_buf(),
+        project_id: project_id.clone(),
+        accepted_digest: digest,
+    };
+    let storage = Storage {
+        bytes: RefCell::new(Some(bytes.clone())),
+        ..Storage::default()
+    };
+    assert!(matches!(
+        NativeBinding::restore(&storage, path, "different session", &receipt, NoSourceFiles),
+        Err(PersistenceError::NativeReceiptMismatch(_))
+    ));
+    assert!(storage.steps.take().is_empty());
+    assert!(matches!(
+        NativeBinding::restore(
+            &storage,
+            Path::new("other.rspiceproj"),
+            &project_id,
+            &receipt,
+            NoSourceFiles
+        ),
+        Err(PersistenceError::NativeReceiptMismatch(_))
+    ));
+    assert_eq!(storage.steps.take(), ["normalize"]);
+
+    *storage.recovery_error.borrow_mut() = Some("recovery unresolved".to_owned());
+    assert!(
+        matches!(NativeBinding::restore(&storage, path, &project_id, &receipt, NoSourceFiles),
+        Err(PersistenceError::Platform(message)) if message == "recovery unresolved")
+    );
+    assert_eq!(storage.steps.take(), ["normalize", "reconcile"]);
+    storage.recovery_error.borrow_mut().take();
+
+    for replacement in [vec![0xff], b"not JSON".to_vec()] {
+        *storage.bytes.borrow_mut() = Some(replacement.clone());
+        assert!(matches!(
+            NativeBinding::restore(&storage, path, &project_id, &receipt, NoSourceFiles),
+            Err(PersistenceError::ExternalChange)
+        ));
+        assert_eq!(storage.steps.take(), ["normalize", "reconcile", "read"]);
+        let matching = NativeBindingReceipt {
+            accepted_digest: digest_bytes(&replacement),
+            ..receipt.clone()
+        };
+        assert!(matches!(
+            NativeBinding::restore(&storage, path, &project_id, &matching, NoSourceFiles),
+            Err(PersistenceError::Project(ProjectIoError::ParseError(_)))
+        ));
+        assert_eq!(storage.steps.take(), ["normalize", "reconcile", "read"]);
+    }
+
+    let (other_bytes, other_digest) = serialized_project(&project()).unwrap();
+    *storage.bytes.borrow_mut() = Some(other_bytes);
+    let mismatched_identity = NativeBindingReceipt {
+        accepted_digest: other_digest,
+        ..receipt.clone()
+    };
+    assert!(
+        matches!(NativeBinding::restore(&storage, path, &project_id, &mismatched_identity, NoSourceFiles),
+        Err(PersistenceError::NativeReceiptMismatch(message)) if message.contains("project file identity"))
+    );
+    assert_eq!(storage.steps.take(), ["normalize", "reconcile", "read"]);
+
+    *storage.bytes.borrow_mut() = Some(bytes.clone());
+    let (decoded, binding) =
+        NativeBinding::restore(&storage, path, &project_id, &receipt, NoSourceFiles).unwrap();
+    assert_eq!(decoded.file.workspace.project.id().to_string(), project_id);
+    assert_eq!(binding.native_receipt(&project_id), receipt);
+    assert_eq!(storage.steps.take(), ["normalize", "reconcile", "read"]);
+    assert_eq!(storage.bytes.borrow().as_deref(), Some(bytes.as_slice()));
+    assert_eq!(storage.publications.get(), 0);
 }

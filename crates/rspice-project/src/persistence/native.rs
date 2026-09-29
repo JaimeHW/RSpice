@@ -1,10 +1,11 @@
 //! Native destination authority and project publication through host storage.
 
-use super::{NativeBindingReceipt, PersistenceError, serialized_project};
-use crate::ProjectFile;
+use super::{NativeBindingReceipt, PersistenceError, ProjectBytes, serialized_project};
 use crate::lifecycle::ProjectLifecycleError;
 use crate::registry::DocumentRegistry;
+use crate::{DecodedProject, ProjectFile, ProjectIoError};
 use rspice_app_types::product::ContentDigest;
+use rspice_design::hierarchy::HierarchySourceFiles;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +21,59 @@ impl NativeBinding {
             project_id: project_id.to_owned(),
             accepted_digest: self.accepted_digest,
         }
+    }
+}
+
+impl NativeBinding {
+    /// Explicit opening accepts the exact bytes read after recovery completes.
+    pub fn open(
+        storage: &impl NativeProjectStorage,
+        path: &Path,
+        source_files: impl HierarchySourceFiles,
+    ) -> Result<(DecodedProject, Self), PersistenceError> {
+        let canonical_path = storage.normalize_path(path)?;
+        storage.reconcile_publication(&canonical_path)?;
+        let bytes = storage.read_project(&canonical_path)?;
+        let accepted_digest = bytes.digest();
+        let project = bytes.decode(Some(&canonical_path), source_files)?;
+        Ok((
+            project,
+            Self {
+                canonical_path,
+                accepted_digest,
+            },
+        ))
+    }
+
+    /// A remembered path alone is not save authority. Admit the receipt before
+    /// storage access, then its exact bytes before parsing and project identity.
+    pub fn restore(
+        storage: &impl NativeProjectStorage,
+        path: &Path,
+        session_project_id: &str,
+        receipt: &NativeBindingReceipt,
+        source_files: impl HierarchySourceFiles,
+    ) -> Result<(DecodedProject, Self), PersistenceError> {
+        receipt.validate_session_project(session_project_id)?;
+        let canonical_path = storage.normalize_path(path)?;
+        receipt.validate_canonical_path(&canonical_path)?;
+        storage.reconcile_publication(&canonical_path)?;
+        let Some(project) = storage.read_project(&canonical_path)?.decode_if_digest(
+            receipt.accepted_digest,
+            Some(&canonical_path),
+            source_files,
+        )?
+        else {
+            return Err(PersistenceError::ExternalChange);
+        };
+        receipt.validate_loaded_project(&project.file)?;
+        Ok((
+            project,
+            Self {
+                canonical_path,
+                accepted_digest: receipt.accepted_digest,
+            },
+        ))
     }
 }
 
@@ -43,6 +97,8 @@ pub trait NativeProjectStorage {
     type ExpectedContent;
 
     fn normalize_path(&self, path: &Path) -> Result<PathBuf, PersistenceError>;
+    fn reconcile_publication(&self, path: &Path) -> Result<(), PersistenceError>;
+    fn read_project(&self, path: &Path) -> Result<ProjectBytes, ProjectIoError>;
     fn same_file(&self, left: &Path, right: &Path) -> Result<bool, PersistenceError>;
     fn observe_destination(&self, path: &Path) -> Result<Self::ExpectedContent, PersistenceError>;
     fn accepted_content(&self, digest: ContentDigest) -> Self::ExpectedContent;
