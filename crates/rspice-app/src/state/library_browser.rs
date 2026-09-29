@@ -26,7 +26,6 @@
 
 mod placement;
 
-pub(crate) use placement::cell_parameter_contract;
 pub use placement::{LibraryCellPlacementCandidate, library_cell_placement_candidates};
 pub use rspice_design::library::{
     Cell, Library, ProjectLibraryEditLock, ProjectLibraryEditLockScope,

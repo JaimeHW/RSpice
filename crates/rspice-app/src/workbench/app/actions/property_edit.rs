@@ -117,7 +117,7 @@ fn cell_contract_property_sheet(
 ) -> Result<PropertySheet, String> {
     let mut sheet = cell_instance_identity_sheet();
     sheet.add(instance_multiplicity_definition());
-    for (index, parameter) in crate::state::library_browser::cell_parameter_contract(cell, view)?
+    for (index, parameter) in rspice_design::library::metadata::cell_parameter_contract(cell, view)?
         .into_iter()
         .enumerate()
     {

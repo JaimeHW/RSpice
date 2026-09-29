@@ -4,6 +4,7 @@ mod catalog;
 mod cell;
 mod edit;
 mod locks;
+pub mod metadata;
 mod mutation;
 mod record;
 mod view;

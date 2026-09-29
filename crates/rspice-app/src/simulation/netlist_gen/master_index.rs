@@ -414,7 +414,7 @@ impl<'a> MasterIndex<'a> {
         let Some((cell, view)) = hierarchy.cell_declaration(&draft.reference) else {
             return String::new();
         };
-        let contract = match crate::state::library_browser::cell_parameter_contract(cell, view) {
+        let contract = match rspice_design::library::metadata::cell_parameter_contract(cell, view) {
             Ok(contract) => contract,
             Err(error) => {
                 emission.errors.push(format!(
