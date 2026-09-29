@@ -235,11 +235,9 @@ pub(super) fn parse_arrow_ipc(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
-    let table = rspice_formats::columnar::decode_arrow_ipc(
-        bytes,
-        columnar_limits(),
-        format.canonical_id(),
-    )?;
+    let table =
+        rspice_formats::columnar::decode_arrow_ipc(bytes, columnar_limits(), format.canonical_id())
+            .map_err(|error| error.to_string())?;
     finish_columnar_table(format, table)
 }
 
@@ -248,7 +246,8 @@ pub(super) fn parse_parquet(
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
     let table =
-        rspice_formats::columnar::decode_parquet(bytes, columnar_limits(), format.canonical_id())?;
+        rspice_formats::columnar::decode_parquet(bytes, columnar_limits(), format.canonical_id())
+            .map_err(|error| error.to_string())?;
     finish_columnar_table(format, table)
 }
 

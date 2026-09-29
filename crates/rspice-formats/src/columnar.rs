@@ -6,12 +6,146 @@ use std::sync::Arc;
 
 use crate::table::EngineeringTableSource;
 
+#[derive(Debug)]
+pub enum ParquetTableError {
+    Arrow(arrow_schema::ArrowError),
+    Parquet(parquet::errors::ParquetError),
+}
+
+impl std::fmt::Display for ParquetTableError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Arrow(source) => source.fmt(f),
+            Self::Parquet(source) => source.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for ParquetTableError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(match self {
+            Self::Arrow(source) => source,
+            Self::Parquet(source) => source,
+        })
+    }
+}
+
+/// A columnar decoder failure with the caller's source-format identity.
+#[derive(Debug)]
+pub struct ColumnarReadError {
+    pub format: String,
+    pub reason: ColumnarReadFailure,
+}
+
+#[derive(Debug)]
+pub enum ColumnarReadFailure {
+    ArrowFraming {
+        file: Box<arrow_schema::ArrowError>,
+        stream: Box<arrow_schema::ArrowError>,
+    },
+    ArrowBatch {
+        context: &'static str,
+        source: arrow_schema::ArrowError,
+    },
+    ParquetMetadata(parquet::errors::ParquetError),
+    ParquetReader(parquet::errors::ParquetError),
+    FieldCount {
+        fields: usize,
+        max_columns: usize,
+    },
+    SchemaChanged,
+    RowCountOverflow,
+    RowLimit {
+        rows: usize,
+        limit: usize,
+    },
+    ValueCountOverflow,
+    ValueLimit {
+        values: usize,
+        limit: usize,
+    },
+    Empty,
+    NullValues {
+        column: String,
+        count: usize,
+    },
+    UnsupportedType {
+        column: String,
+        data_type: Box<arrow_schema::DataType>,
+    },
+    InexactInteger(crate::numeric::ExactIntegerError),
+}
+
+impl std::fmt::Display for ColumnarReadFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ArrowFraming { file, stream } => write!(
+                f,
+                "neither Arrow file nor stream framing is valid (file: {file}; stream: {stream})"
+            ),
+            Self::ArrowBatch { context, source } => write!(f, "{context}: {source}"),
+            Self::ParquetMetadata(source) => write!(f, "invalid Parquet metadata: {source}"),
+            Self::ParquetReader(source) => write!(f, "could not create Parquet reader: {source}"),
+            Self::FieldCount {
+                fields,
+                max_columns,
+            } => write!(
+                f,
+                "the table has {fields} fields; expected 2..={max_columns}"
+            ),
+            Self::SchemaChanged => f.write_str("record-batch schema changed within the source"),
+            Self::RowCountOverflow => f.write_str("row count overflow"),
+            Self::RowLimit { rows, limit } => {
+                write!(f, "the table has {rows} rows; the limit is {limit}")
+            }
+            Self::ValueCountOverflow => f.write_str("table value count overflow"),
+            Self::ValueLimit { values, limit } => write!(
+                f,
+                "the table contains {values} values; the limit is {limit}"
+            ),
+            Self::Empty => f.write_str("the table contains no record batches"),
+            Self::NullValues { column, count } => {
+                write!(f, "column '{column}' contains {count} null values")
+            }
+            Self::UnsupportedType { column, data_type } => write!(
+                f,
+                "column '{column}' has unsupported Arrow type {data_type}"
+            ),
+            Self::InexactInteger(source) => source.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for ColumnarReadFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ArrowFraming { stream, .. } => Some(stream.as_ref()),
+            Self::ArrowBatch { source, .. } => Some(source),
+            Self::ParquetMetadata(source) | Self::ParquetReader(source) => Some(source),
+            Self::InexactInteger(source) => Some(source),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ColumnarReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} import: {}", self.format, self.reason)
+    }
+}
+
+impl std::error::Error for ColumnarReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.reason)
+    }
+}
+
 /// Encode an already-selected table as Parquet, preserving nullable numeric
 /// and text columns and caller-supplied provenance metadata.
 pub fn encode_parquet_table(
     source: &impl EngineeringTableSource,
     metadata: Option<Vec<(String, Option<String>)>>,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, ParquetTableError> {
     use arrow_array::{ArrayRef, Float64Array, RecordBatch, StringArray};
     use arrow_schema::{DataType, Field, Schema};
     use parquet::arrow::ArrowWriter;
@@ -63,7 +197,7 @@ pub fn encode_parquet_table(
             }
         })
         .collect::<Vec<_>>();
-    let batch = RecordBatch::try_new(schema.clone(), arrays).map_err(|error| error.to_string())?;
+    let batch = RecordBatch::try_new(schema.clone(), arrays).map_err(ParquetTableError::Arrow)?;
     let metadata = metadata.map(|items| {
         items
             .into_iter()
@@ -74,9 +208,9 @@ pub fn encode_parquet_table(
         .set_key_value_metadata(metadata)
         .build();
     let mut writer = ArrowWriter::try_new(Vec::new(), schema, Some(properties))
-        .map_err(|error| error.to_string())?;
-    writer.write(&batch).map_err(|error| error.to_string())?;
-    writer.into_inner().map_err(|error| error.to_string())
+        .map_err(ParquetTableError::Parquet)?;
+    writer.write(&batch).map_err(ParquetTableError::Parquet)?;
+    writer.into_inner().map_err(ParquetTableError::Parquet)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -91,15 +225,18 @@ pub struct DecodedColumnarTable {
     pub columns: Vec<(String, Vec<f64>)>,
 }
 
-fn adapter_error(format: &str, detail: impl std::fmt::Display) -> String {
-    format!("{format} import: {detail}")
+fn adapter_error(format: &str, reason: ColumnarReadFailure) -> ColumnarReadError {
+    ColumnarReadError {
+        format: format.to_owned(),
+        reason,
+    }
 }
 
 pub fn decode_arrow_ipc(
     bytes: &[u8],
     limits: ColumnarLimits,
     format: &str,
-) -> Result<DecodedColumnarTable, String> {
+) -> Result<DecodedColumnarTable, ColumnarReadError> {
     use arrow_ipc::reader::{FileReader, StreamReader};
     let file_attempt = FileReader::try_new(Cursor::new(bytes), None);
     match file_attempt {
@@ -114,14 +251,16 @@ pub fn decode_arrow_ipc(
             )
         }
         Err(file_error) => {
-            let reader = StreamReader::try_new(Cursor::new(bytes), None).map_err(|stream_error| {
-                adapter_error(
-                    format,
-                    format_args!(
-                        "neither Arrow file nor stream framing is valid (file: {file_error}; stream: {stream_error})"
-                    ),
-                )
-            })?;
+            let reader =
+                StreamReader::try_new(Cursor::new(bytes), None).map_err(|stream_error| {
+                    adapter_error(
+                        format,
+                        ColumnarReadFailure::ArrowFraming {
+                            file: Box::new(file_error),
+                            stream: Box::new(stream_error),
+                        },
+                    )
+                })?;
             let metadata = reader.schema().metadata().clone();
             decode_arrow_batches(
                 format,
@@ -138,23 +277,16 @@ pub fn decode_parquet(
     bytes: &[u8],
     limits: ColumnarLimits,
     format: &str,
-) -> Result<DecodedColumnarTable, String> {
+) -> Result<DecodedColumnarTable, ColumnarReadError> {
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
     let builder = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::copy_from_slice(bytes))
-        .map_err(|error| {
-            adapter_error(format, format_args!("invalid Parquet metadata: {error}"))
-        })?;
+        .map_err(|error| adapter_error(format, ColumnarReadFailure::ParquetMetadata(error)))?;
     let metadata = builder.schema().metadata().clone();
     let batch_size = 16_384.min(limits.max_rows.saturating_add(1).max(1));
     let reader = builder
         .with_batch_size(batch_size)
         .build()
-        .map_err(|error| {
-            adapter_error(
-                format,
-                format_args!("could not create Parquet reader: {error}"),
-            )
-        })?;
+        .map_err(|error| adapter_error(format, ColumnarReadFailure::ParquetReader(error)))?;
     decode_arrow_batches(
         format,
         reader,
@@ -164,17 +296,24 @@ pub fn decode_parquet(
     )
 }
 
-fn decode_arrow_batches<E: std::fmt::Display>(
+fn decode_arrow_batches(
     format: &str,
-    batches: impl IntoIterator<Item = Result<arrow_array::RecordBatch, E>>,
+    batches: impl IntoIterator<Item = Result<arrow_array::RecordBatch, arrow_schema::ArrowError>>,
     metadata: HashMap<String, String>,
     limits: ColumnarLimits,
-    batch_error: &str,
-) -> Result<DecodedColumnarTable, String> {
+    batch_error: &'static str,
+) -> Result<DecodedColumnarTable, ColumnarReadError> {
     let mut decoded = ColumnarAccumulator::new(format, limits);
     for batch in batches {
-        let batch =
-            batch.map_err(|error| adapter_error(format, format_args!("{batch_error}: {error}")))?;
+        let batch = batch.map_err(|error| {
+            adapter_error(
+                format,
+                ColumnarReadFailure::ArrowBatch {
+                    context: batch_error,
+                    source: error,
+                },
+            )
+        })?;
         decoded.push(batch)?;
     }
     decoded.finish(metadata)
@@ -199,17 +338,17 @@ impl<'a> ColumnarAccumulator<'a> {
         }
     }
 
-    fn push(&mut self, batch: arrow_array::RecordBatch) -> Result<(), String> {
+    fn push(&mut self, batch: arrow_array::RecordBatch) -> Result<(), ColumnarReadError> {
         let schema = batch.schema();
         if self.schema.is_none() {
             let fields = schema.fields().len();
             if fields < 2 || fields > self.limits.max_columns.saturating_mul(2) {
                 return Err(adapter_error(
                     self.format,
-                    format_args!(
-                        "the table has {fields} fields; expected 2..={}",
-                        self.limits.max_columns
-                    ),
+                    ColumnarReadFailure::FieldCount {
+                        fields,
+                        max_columns: self.limits.max_columns,
+                    },
                 ));
             }
             self.columns = schema
@@ -222,32 +361,32 @@ impl<'a> ColumnarAccumulator<'a> {
         if self.schema.as_ref() != Some(&schema) {
             return Err(adapter_error(
                 self.format,
-                "record-batch schema changed within the source",
+                ColumnarReadFailure::SchemaChanged,
             ));
         }
         let rows = self
             .rows
             .checked_add(batch.num_rows())
-            .ok_or_else(|| adapter_error(self.format, "row count overflow"))?;
+            .ok_or_else(|| adapter_error(self.format, ColumnarReadFailure::RowCountOverflow))?;
         if rows > self.limits.max_rows {
             return Err(adapter_error(
                 self.format,
-                format_args!(
-                    "the table has {rows} rows; the limit is {}",
-                    self.limits.max_rows
-                ),
+                ColumnarReadFailure::RowLimit {
+                    rows,
+                    limit: self.limits.max_rows,
+                },
             ));
         }
         let values = rows
             .checked_mul(schema.fields().len())
-            .ok_or_else(|| adapter_error(self.format, "table value count overflow"))?;
+            .ok_or_else(|| adapter_error(self.format, ColumnarReadFailure::ValueCountOverflow))?;
         if values > self.limits.max_values {
             return Err(adapter_error(
                 self.format,
-                format_args!(
-                    "the table contains {values} values; the limit is {}",
-                    self.limits.max_values
-                ),
+                ColumnarReadFailure::ValueLimit {
+                    values,
+                    limit: self.limits.max_values,
+                },
             ));
         }
         for (index, array) in batch.columns().iter().enumerate() {
@@ -258,12 +397,12 @@ impl<'a> ColumnarAccumulator<'a> {
         Ok(())
     }
 
-    fn finish(self, metadata: HashMap<String, String>) -> Result<DecodedColumnarTable, String> {
+    fn finish(
+        self,
+        metadata: HashMap<String, String>,
+    ) -> Result<DecodedColumnarTable, ColumnarReadError> {
         if self.schema.is_none() {
-            return Err(adapter_error(
-                self.format,
-                "the table contains no record batches",
-            ));
+            return Err(adapter_error(self.format, ColumnarReadFailure::Empty));
         }
         Ok(DecodedColumnarTable {
             metadata,
@@ -276,7 +415,7 @@ fn numeric_values(
     format: &str,
     name: &str,
     array: &dyn arrow_array::Array,
-) -> Result<Vec<f64>, String> {
+) -> Result<Vec<f64>, ColumnarReadError> {
     use arrow_array::{
         BooleanArray, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
         UInt8Array, UInt16Array, UInt32Array, UInt64Array,
@@ -284,10 +423,10 @@ fn numeric_values(
     if array.null_count() != 0 {
         return Err(adapter_error(
             format,
-            format_args!(
-                "column '{name}' contains {} null values",
-                array.null_count()
-            ),
+            ColumnarReadFailure::NullValues {
+                column: name.to_owned(),
+                count: array.null_count(),
+            },
         ));
     }
     macro_rules! float_values {
@@ -305,8 +444,11 @@ fn numeric_values(
                     .values()
                     .iter()
                     .map(|value| {
-                        crate::numeric::exact_signed_integer(name, *value as i64)
-                            .map_err(|detail| adapter_error(format, detail))
+                        crate::numeric::exact_signed_integer(name, *value as i64).map_err(
+                            |detail| {
+                                adapter_error(format, ColumnarReadFailure::InexactInteger(detail))
+                            },
+                        )
                     })
                     .collect::<Result<Vec<_>, _>>()
             })
@@ -319,8 +461,11 @@ fn numeric_values(
                     .values()
                     .iter()
                     .map(|value| {
-                        crate::numeric::exact_unsigned_integer(name, *value as u64)
-                            .map_err(|detail| adapter_error(format, detail))
+                        crate::numeric::exact_unsigned_integer(name, *value as u64).map_err(
+                            |detail| {
+                                adapter_error(format, ColumnarReadFailure::InexactInteger(detail))
+                            },
+                        )
                     })
                     .collect::<Result<Vec<_>, _>>()
             })
@@ -347,17 +492,17 @@ fn numeric_values(
     values.ok_or_else(|| {
         adapter_error(
             format,
-            format_args!(
-                "column '{name}' has unsupported Arrow type {}",
-                array.data_type()
-            ),
+            ColumnarReadFailure::UnsupportedType {
+                column: name.to_owned(),
+                data_type: Box::new(array.data_type().clone()),
+            },
         )
     })?
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ColumnarLimits, decode_arrow_batches, encode_parquet_table};
+    use super::{ColumnarLimits, ColumnarReadFailure, decode_arrow_batches, encode_parquet_table};
     use crate::table::EngineeringTableSource;
     use arrow_array::{Array, ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray};
     use arrow_schema::{DataType, Field, Schema};
@@ -386,14 +531,21 @@ mod tests {
         };
         let error = decode_arrow_batches(
             "arrow_ipc",
-            [Ok::<_, String>(batch.clone())],
+            [Ok::<_, arrow_schema::ArrowError>(batch.clone())],
             HashMap::new(),
             limits,
             "invalid Arrow record batch",
         )
         .err()
         .expect("row limit");
-        assert!(error.contains("the table has 2 rows; the limit is 1"));
+        assert!(matches!(
+            error.reason,
+            ColumnarReadFailure::RowLimit { rows: 2, limit: 1 }
+        ));
+        assert_eq!(
+            error.to_string(),
+            "arrow_ipc import: the table has 2 rows; the limit is 1"
+        );
 
         let limits = ColumnarLimits {
             max_rows: 2,
@@ -401,14 +553,25 @@ mod tests {
         };
         let error = decode_arrow_batches(
             "arrow_ipc",
-            [Ok::<_, String>(batch)],
+            [Ok::<_, arrow_schema::ArrowError>(batch)],
             HashMap::new(),
             limits,
             "invalid Arrow record batch",
         )
         .err()
         .expect("precision loss");
-        assert!(error.contains("cannot be represented exactly as f64"));
+        assert!(
+            matches!(&error.reason, ColumnarReadFailure::InexactInteger(crate::numeric::ExactIntegerError::Signed { identity, value }) if identity == "count" && *value == (1_i64 << 53) + 1)
+        );
+        assert_eq!(
+            error.to_string(),
+            "arrow_ipc import: 'count' integer 9007199254740993 cannot be represented exactly as f64"
+        );
+        assert!(
+            std::error::Error::source(&error.reason)
+                .unwrap()
+                .is::<crate::numeric::ExactIntegerError>()
+        );
     }
 
     #[test]
@@ -425,7 +588,7 @@ mod tests {
             ],
         )
         .expect("record batch");
-        let batches = [Ok::<_, String>(batch.clone()), Ok(batch)]
+        let batches = [Ok::<_, arrow_schema::ArrowError>(batch.clone()), Ok(batch)]
             .into_iter()
             .chain(std::iter::once_with(|| {
                 panic!("must not read a third batch")
@@ -443,7 +606,14 @@ mod tests {
         )
         .err()
         .expect("cumulative row limit");
-        assert!(error.contains("the table has 4 rows; the limit is 3"));
+        assert!(matches!(
+            error.reason,
+            ColumnarReadFailure::RowLimit { rows: 4, limit: 3 }
+        ));
+        assert_eq!(
+            error.to_string(),
+            "arrow_ipc import: the table has 4 rows; the limit is 3"
+        );
     }
 
     struct SelectedTable;
@@ -501,5 +671,51 @@ mod tests {
             .unwrap();
         assert_eq!(label.value(0), "first");
         assert!(label.is_null(1));
+    }
+
+    #[test]
+    fn malformed_containers_preserve_parser_causes() {
+        use std::error::Error as _;
+        let limits = ColumnarLimits {
+            max_columns: 2,
+            max_rows: 2,
+            max_values: 4,
+        };
+        let error = super::decode_arrow_ipc(b"invalid", limits, "arrow_ipc")
+            .err()
+            .expect("invalid Arrow");
+        let ColumnarReadFailure::ArrowFraming { file, stream } = &error.reason else {
+            panic!("expected both framing errors: {error}");
+        };
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "arrow_ipc import: neither Arrow file nor stream framing is valid (file: {file}; stream: {stream})"
+            )
+        );
+        assert!(
+            error
+                .reason
+                .source()
+                .unwrap()
+                .is::<arrow_schema::ArrowError>()
+        );
+        let error = super::decode_parquet(b"invalid", limits, "parquet")
+            .err()
+            .expect("invalid Parquet");
+        let ColumnarReadFailure::ParquetMetadata(source) = &error.reason else {
+            panic!("expected a metadata error: {error}");
+        };
+        assert_eq!(
+            error.to_string(),
+            format!("parquet import: invalid Parquet metadata: {source}")
+        );
+        assert!(
+            error
+                .reason
+                .source()
+                .unwrap()
+                .is::<parquet::errors::ParquetError>()
+        );
     }
 }

@@ -398,6 +398,7 @@ pub fn parquet_bytes(
         ]
     });
     rspice_formats::columnar::encode_parquet_table(&ProjectionSource(&projection), metadata)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
