@@ -208,19 +208,6 @@ fn finish_hdf5(
     }
 }
 
-/// Whether `name` is one of the coordinate names a headerless source may use.
-fn is_coordinate_name(name: &str) -> bool {
-    RESULT_COORDINATE_NAMES
-        .iter()
-        .any(|candidate| name.eq_ignore_ascii_case(candidate))
-}
-
-/// [`RESULT_COORDINATE_NAMES`] as a refusal spells them, so the sentence a
-/// reader is shown cannot drift from the list the reader actually accepts.
-fn stated_coordinate_names() -> String {
-    rspice_formats::numeric::stated_coordinate_names(&RESULT_COORDINATE_NAMES)
-}
-
 // -------------------------------------------------------------------------
 // Arrow IPC and Parquet
 
@@ -364,88 +351,17 @@ pub(super) fn parse_matlab_v5(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
-    let parsed = rspice_formats::matlab::reader::MatFile::parse(
+    let decoded = rspice_formats::matlab::reader::decode_matlab_v5(
         bytes,
-        MAX_RESULT_COLUMNS.saturating_mul(2),
+        rspice_formats::matlab::reader::MatlabReadLimits {
+            max_variables: MAX_RESULT_COLUMNS.saturating_mul(2),
+            min_rows: MIN_RESULT_ROWS,
+            coordinate_names: &RESULT_COORDINATE_NAMES,
+        },
         format.canonical_id(),
-    )?;
-    let arrays = parsed.arrays();
-    let coordinate_index = arrays
-        .iter()
-        .position(|array| is_coordinate_name(array.name()));
-    if let Some(coordinate_index) = coordinate_index {
-        let coordinate_array = &arrays[coordinate_index];
-        let (coordinate, coordinate_imag) = coordinate_array.values(format.canonical_id())?;
-        if coordinate_imag.is_some() || !coordinate_array.is_vector() {
-            return Err(adapter_error(
-                format,
-                "MATLAB coordinate variable must be a real vector",
-            ));
-        }
-        let mut signals = Vec::new();
-        for (index, array) in arrays.iter().enumerate() {
-            if index == coordinate_index {
-                continue;
-            }
-            if !array.is_vector() {
-                return Err(adapter_error(
-                    format,
-                    format_args!("MATLAB variable '{}' is not a vector", array.name()),
-                ));
-            }
-            let (real, imag) = array.values(format.canonical_id())?;
-            signals.push(ImportedSignal {
-                name: array.name().to_owned(),
-                real,
-                imag,
-                unit: None,
-            });
-        }
-        return finish_dataset(
-            format,
-            analysis_from_coordinate(coordinate_array.name()),
-            coordinate_array.name(),
-            coordinate,
-            signals,
-        );
-    }
-
-    if arrays.len() != 1 {
-        return Err(adapter_error(
-            format,
-            format_args!(
-                "MATLAB file requires a coordinate variable named {}",
-                stated_coordinate_names()
-            ),
-        ));
-    }
-    let array = &arrays[0];
-    let size = array.size();
-    if size.len() != 2 || size[0] < MIN_RESULT_ROWS || size[1] < 2 {
-        return Err(adapter_error(
-            format,
-            "without a named coordinate, MATLAB data must be one rows-by-columns table with the coordinate in column one",
-        ));
-    }
-    let (real, imag) = array.values(format.canonical_id())?;
-    if imag.is_some() {
-        return Err(adapter_error(
-            format,
-            "a complex MATLAB table requires separate named coordinate and signal variables",
-        ));
-    }
-    let rows = size[0];
-    let columns = size[1];
-    let coordinate = real[..rows].to_vec();
-    let signals = (1..columns)
-        .map(|column| ImportedSignal {
-            name: format!("{}.{}", array.name(), column),
-            real: real[column * rows..(column + 1) * rows].to_vec(),
-            imag: None,
-            unit: None,
-        })
-        .collect();
-    finish_dataset(format, AnalysisType::DcSweep, "x", coordinate, signals)
+    )
+    .map_err(|error| error.to_string())?;
+    finish_numeric_dataset(format, decoded)
 }
 
 // -------------------------------------------------------------------------
