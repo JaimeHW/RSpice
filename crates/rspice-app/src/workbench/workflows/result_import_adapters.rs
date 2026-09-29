@@ -149,7 +149,8 @@ pub(super) fn parse_hdf5(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
-    let decoded = rspice_formats::hdf5::decode_hdf5(bytes, hdf5_limits(), format.canonical_id())?;
+    let decoded = rspice_formats::hdf5::decode_hdf5(bytes, hdf5_limits(), format.canonical_id())
+        .map_err(|error| error.to_string())?;
     finish_hdf5(format, decoded)
 }
 
@@ -158,7 +159,8 @@ pub(super) fn parse_matlab_v73(
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
     let decoded =
-        rspice_formats::hdf5::decode_matlab_v73(bytes, hdf5_limits(), format.canonical_id())?;
+        rspice_formats::hdf5::decode_matlab_v73(bytes, hdf5_limits(), format.canonical_id())
+            .map_err(|error| error.to_string())?;
     finish_hdf5(format, decoded)
 }
 

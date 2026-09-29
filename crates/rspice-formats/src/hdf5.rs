@@ -3,6 +3,146 @@
 use crate::numeric::DecodedNumericSignal;
 use std::collections::HashMap;
 
+/// A container/metadata failure or a bounded waveform decoding refusal.
+#[derive(Debug)]
+pub struct Hdf5ReadError {
+    pub format: String,
+    pub reason: Hdf5ReadFailure,
+}
+
+#[derive(Debug)]
+pub enum Hdf5ReadFailure {
+    Decode {
+        context: String,
+        source: Box<rustyhdf5::Error>,
+    },
+    MultipleSections(Vec<String>),
+    UnrepresentableSignalCount {
+        section: String,
+        count: i64,
+    },
+    SignalCount {
+        section: String,
+        count: usize,
+        max_columns: usize,
+    },
+    RootDatasetLimit {
+        datasets: usize,
+        max_columns: usize,
+    },
+    MissingCoordinate {
+        expected: String,
+    },
+    ShapeOverflow {
+        dataset: String,
+    },
+    CoordinateLength {
+        dataset: String,
+        values: u64,
+        coordinate: String,
+        samples: usize,
+    },
+    DatasetValueLimit {
+        dataset: String,
+        values: u64,
+        limit: usize,
+    },
+    StringAttribute {
+        name: String,
+        found: rustyhdf5::AttrValue,
+    },
+    IntegerAttribute {
+        name: String,
+        found: rustyhdf5::AttrValue,
+    },
+    MissingAttribute {
+        name: String,
+    },
+    TableValueOverflow,
+    TableValueLimit {
+        values: usize,
+        limit: usize,
+    },
+    InexactInteger(crate::numeric::ExactIntegerError),
+}
+
+impl std::fmt::Display for Hdf5ReadFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Decode { context, source } => write!(f, "{context}: {source}"),
+            Self::MultipleSections(names) => write!(
+                f,
+                "the file contains multiple waveform sections ({}); import one analysis per file",
+                names.join(", ")
+            ),
+            Self::UnrepresentableSignalCount { section, .. } => {
+                write!(f, "/{section} signal_count is negative or too large")
+            }
+            Self::SignalCount { section, count, .. } => {
+                write!(f, "/{section} declares invalid signal_count {count}")
+            }
+            Self::RootDatasetLimit { .. } => f.write_str("too many root datasets"),
+            Self::MissingCoordinate { expected } => {
+                write!(f, "no unambiguous root coordinate dataset named {expected}")
+            }
+            Self::ShapeOverflow { dataset } => write!(f, "dataset '{dataset}' shape overflows"),
+            Self::CoordinateLength {
+                dataset,
+                values,
+                coordinate,
+                samples,
+            } => write!(
+                f,
+                "dataset '{dataset}' has {values} values; coordinate '{coordinate}' has {samples}"
+            ),
+            Self::DatasetValueLimit {
+                dataset,
+                values,
+                limit,
+            } => write!(
+                f,
+                "dataset '{dataset}' contains {values} values; the limit is {limit}"
+            ),
+            Self::StringAttribute { name, found } => write!(
+                f,
+                "attribute '{name}' must be a non-empty string, found {found:?}"
+            ),
+            Self::IntegerAttribute { name, found } => {
+                write!(f, "attribute '{name}' must be an integer, found {found:?}")
+            }
+            Self::MissingAttribute { name } => write!(f, "missing attribute '{name}'"),
+            Self::TableValueOverflow => f.write_str("table value count overflow"),
+            Self::TableValueLimit { values, limit } => write!(
+                f,
+                "the table contains {values} values; the limit is {limit}"
+            ),
+            Self::InexactInteger(source) => source.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for Hdf5ReadFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Decode { source, .. } => Some(source.as_ref()),
+            Self::InexactInteger(source) => Some(source),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for Hdf5ReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} import: {}", self.format, self.reason)
+    }
+}
+
+impl std::error::Error for Hdf5ReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.reason)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Hdf5Limits<'a> {
     pub max_columns: usize,
@@ -32,21 +172,38 @@ pub enum DecodedHdf5 {
     },
 }
 
-fn adapter_error(format: &str, detail: impl std::fmt::Display) -> String {
-    format!("{format} import: {detail}")
+fn adapter_error(format: &str, reason: Hdf5ReadFailure) -> Hdf5ReadError {
+    Hdf5ReadError {
+        format: format.to_owned(),
+        reason,
+    }
+}
+
+fn decode_error(
+    format: &str,
+    context: impl Into<String>,
+    source: rustyhdf5::Error,
+) -> Hdf5ReadError {
+    adapter_error(
+        format,
+        Hdf5ReadFailure::Decode {
+            context: context.into(),
+            source: Box::new(source),
+        },
+    )
 }
 
 pub fn decode_hdf5(
     bytes: &[u8],
     limits: Hdf5Limits<'_>,
     format: &str,
-) -> Result<DecodedHdf5, String> {
+) -> Result<DecodedHdf5, Hdf5ReadError> {
     let file = rustyhdf5::File::from_bytes(bytes.to_vec())
-        .map_err(|error| adapter_error(format, format_args!("invalid HDF5 container: {error}")))?;
+        .map_err(|error| decode_error(format, "invalid HDF5 container", error))?;
     let root = file.root();
-    let groups = root.groups().map_err(|error| {
-        adapter_error(format, format_args!("could not enumerate groups: {error}"))
-    })?;
+    let groups = root
+        .groups()
+        .map_err(|error| decode_error(format, "could not enumerate groups", error))?;
     let supported = groups
         .iter()
         .filter_map(|name| hdf5_section_family(&file, name).map(|family| (name.clone(), family)))
@@ -54,13 +211,8 @@ pub fn decode_hdf5(
     if supported.len() > 1 {
         return Err(adapter_error(
             format,
-            format_args!(
-                "the file contains multiple waveform sections ({}); import one analysis per file",
-                supported
-                    .iter()
-                    .map(|(name, _)| name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
+            Hdf5ReadFailure::MultipleSections(
+                supported.iter().map(|(name, _)| name.clone()).collect(),
             ),
         ));
     }
@@ -104,13 +256,9 @@ pub fn decode_matlab_v73(
     bytes: &[u8],
     limits: Hdf5Limits<'_>,
     format: &str,
-) -> Result<DecodedHdf5, String> {
-    let file = rustyhdf5::File::from_bytes(bytes.to_vec()).map_err(|error| {
-        adapter_error(
-            format,
-            format_args!("invalid MATLAB 7.3/HDF5 container: {error}"),
-        )
-    })?;
+) -> Result<DecodedHdf5, Hdf5ReadError> {
+    let file = rustyhdf5::File::from_bytes(bytes.to_vec())
+        .map_err(|error| decode_error(format, "invalid MATLAB 7.3/HDF5 container", error))?;
     parse_generic_hdf5_root(&file, format, limits)
 }
 
@@ -120,27 +268,35 @@ fn parse_rspice_hdf5_section(
     family: Hdf5SectionFamily,
     format: &str,
     limits: Hdf5Limits<'_>,
-) -> Result<DecodedHdf5, String> {
-    let group = file.group(section).map_err(|error| {
-        adapter_error(format, format_args!("could not open /{section}: {error}"))
-    })?;
+) -> Result<DecodedHdf5, Hdf5ReadError> {
+    let group = file
+        .group(section)
+        .map_err(|error| decode_error(format, format!("could not open /{section}"), error))?;
     let attrs = group.attrs().map_err(|error| {
-        adapter_error(
+        decode_error(
             format,
-            format_args!("could not read /{section} attributes: {error}"),
+            format!("could not read /{section} attributes"),
+            error,
         )
     })?;
     let signal_count = hdf_i64_attr(&attrs, "signal_count", format)?;
     let signal_count = usize::try_from(signal_count).map_err(|_| {
         adapter_error(
             format,
-            format_args!("/{section} signal_count is negative or too large"),
+            Hdf5ReadFailure::UnrepresentableSignalCount {
+                section: section.to_owned(),
+                count: signal_count,
+            },
         )
     })?;
     if signal_count == 0 || signal_count.saturating_add(1) > limits.max_columns {
         return Err(adapter_error(
             format,
-            format_args!("/{section} declares invalid signal_count {signal_count}"),
+            Hdf5ReadFailure::SignalCount {
+                section: section.to_owned(),
+                count: signal_count,
+                max_columns: limits.max_columns,
+            },
         ));
     }
     if family == Hdf5SectionFamily::Ac {
@@ -200,26 +356,28 @@ fn parse_generic_hdf5_root(
     file: &rustyhdf5::File,
     format: &str,
     limits: Hdf5Limits<'_>,
-) -> Result<DecodedHdf5, String> {
+) -> Result<DecodedHdf5, Hdf5ReadError> {
     let root = file.root();
-    let names = root.datasets().map_err(|error| {
-        adapter_error(
-            format,
-            format_args!("could not enumerate datasets: {error}"),
-        )
-    })?;
+    let names = root
+        .datasets()
+        .map_err(|error| decode_error(format, "could not enumerate datasets", error))?;
     if names.len() > limits.max_columns.saturating_mul(2) {
-        return Err(adapter_error(format, "too many root datasets"));
+        return Err(adapter_error(
+            format,
+            Hdf5ReadFailure::RootDatasetLimit {
+                datasets: names.len(),
+                max_columns: limits.max_columns,
+            },
+        ));
     }
     let coordinate_name =
         select_coordinate_name(names.iter().map(String::as_str), limits.coordinate_names)
             .ok_or_else(|| {
                 adapter_error(
                     format,
-                    format_args!(
-                        "no unambiguous root coordinate dataset named {}",
-                        stated_coordinate_names(limits.coordinate_names)
-                    ),
+                    Hdf5ReadFailure::MissingCoordinate {
+                        expected: stated_coordinate_names(limits.coordinate_names),
+                    },
                 )
             })?;
     let coordinate = hdf_f64_dataset(&root, &coordinate_name, format, limits)?;
@@ -230,30 +388,31 @@ fn parse_generic_hdf5_root(
             continue;
         }
         let dataset = root.dataset(&name).map_err(|error| {
-            adapter_error(
-                format,
-                format_args!("could not open dataset '{name}': {error}"),
-            )
+            decode_error(format, format!("could not open dataset '{name}'"), error)
         })?;
         let shape = dataset.shape().map_err(|error| {
-            adapter_error(
-                format,
-                format_args!("could not inspect dataset '{name}': {error}"),
-            )
+            decode_error(format, format!("could not inspect dataset '{name}'"), error)
         })?;
         let count = shape
             .iter()
             .try_fold(1_u64, |count, dim| count.checked_mul(*dim))
             .ok_or_else(|| {
-                adapter_error(format, format_args!("dataset '{name}' shape overflows"))
+                adapter_error(
+                    format,
+                    Hdf5ReadFailure::ShapeOverflow {
+                        dataset: name.to_owned(),
+                    },
+                )
             })?;
         if count != coordinate.len() as u64 {
             return Err(adapter_error(
                 format,
-                format_args!(
-                    "dataset '{name}' has {count} values; coordinate '{coordinate_name}' has {}",
-                    coordinate.len()
-                ),
+                Hdf5ReadFailure::CoordinateLength {
+                    dataset: name,
+                    values: count,
+                    coordinate: coordinate_name,
+                    samples: coordinate.len(),
+                },
             ));
         }
         let values = hdf_dataset_values(&dataset, &name, format, limits)?;
@@ -271,11 +430,12 @@ fn hdf_f64_dataset(
     name: &str,
     format: &str,
     limits: Hdf5Limits<'_>,
-) -> Result<Vec<f64>, String> {
+) -> Result<Vec<f64>, Hdf5ReadError> {
     let dataset = group.dataset(name).map_err(|error| {
-        adapter_error(
+        decode_error(
             format,
-            format_args!("could not open numeric dataset '{name}': {error}"),
+            format!("could not open numeric dataset '{name}'"),
+            error,
         )
     })?;
     hdf_dataset_values(&dataset, name, format, limits)
@@ -286,60 +446,65 @@ fn hdf_dataset_values(
     name: &str,
     format: &str,
     limits: Hdf5Limits<'_>,
-) -> Result<Vec<f64>, String> {
+) -> Result<Vec<f64>, Hdf5ReadError> {
     let count = dataset
         .shape()
         .map_err(|error| {
-            adapter_error(
+            decode_error(
                 format,
-                format_args!("could not inspect dataset '{name}' shape: {error}"),
+                format!("could not inspect dataset '{name}' shape"),
+                error,
             )
         })?
         .into_iter()
         .try_fold(1_u64, |count, dimension| count.checked_mul(dimension))
-        .ok_or_else(|| adapter_error(format, format_args!("dataset '{name}' shape overflows")))?;
+        .ok_or_else(|| {
+            adapter_error(
+                format,
+                Hdf5ReadFailure::ShapeOverflow {
+                    dataset: name.to_owned(),
+                },
+            )
+        })?;
     if count > limits.max_values as u64 {
         return Err(adapter_error(
             format,
-            format_args!(
-                "dataset '{name}' contains {count} values; the limit is {}",
-                limits.max_values
-            ),
+            Hdf5ReadFailure::DatasetValueLimit {
+                dataset: name.to_owned(),
+                values: count,
+                limit: limits.max_values,
+            },
         ));
     }
     let dtype = dataset.dtype().map_err(|error| {
-        adapter_error(
-            format,
-            format_args!("could not inspect dataset '{name}': {error}"),
-        )
+        decode_error(format, format!("could not inspect dataset '{name}'"), error)
     })?;
     match dtype {
         rustyhdf5::DType::I64 => dataset
             .read_i64()
-            .map_err(|error| {
-                adapter_error(format, format_args!("could not read '{name}': {error}"))
-            })?
+            .map_err(|error| decode_error(format, format!("could not read '{name}'"), error))?
             .into_iter()
             .map(|value| {
-                crate::numeric::exact_signed_integer(name, value)
-                    .map_err(|detail| adapter_error(format, detail))
+                crate::numeric::exact_signed_integer(name, value).map_err(|detail| {
+                    adapter_error(format, Hdf5ReadFailure::InexactInteger(detail))
+                })
             })
             .collect(),
         rustyhdf5::DType::U64 => dataset
             .read_u64()
-            .map_err(|error| {
-                adapter_error(format, format_args!("could not read '{name}': {error}"))
-            })?
+            .map_err(|error| decode_error(format, format!("could not read '{name}'"), error))?
             .into_iter()
             .map(|value| {
-                crate::numeric::exact_unsigned_integer(name, value)
-                    .map_err(|detail| adapter_error(format, detail))
+                crate::numeric::exact_unsigned_integer(name, value).map_err(|detail| {
+                    adapter_error(format, Hdf5ReadFailure::InexactInteger(detail))
+                })
             })
             .collect(),
         _ => dataset.read_f64().map_err(|error| {
-            adapter_error(
+            decode_error(
                 format,
-                format_args!("could not read numeric dataset '{name}': {error}"),
+                format!("could not read numeric dataset '{name}'"),
+                error,
             )
         }),
     }
@@ -349,16 +514,21 @@ fn hdf_string_attr(
     attrs: &HashMap<String, rustyhdf5::AttrValue>,
     name: &str,
     format: &str,
-) -> Result<String, String> {
+) -> Result<String, Hdf5ReadError> {
     match attrs.get(name) {
         Some(rustyhdf5::AttrValue::String(value)) if !value.trim().is_empty() => Ok(value.clone()),
         Some(other) => Err(adapter_error(
             format,
-            format_args!("attribute '{name}' must be a non-empty string, found {other:?}"),
+            Hdf5ReadFailure::StringAttribute {
+                name: name.to_owned(),
+                found: other.clone(),
+            },
         )),
         None => Err(adapter_error(
             format,
-            format_args!("missing attribute '{name}'"),
+            Hdf5ReadFailure::MissingAttribute {
+                name: name.to_owned(),
+            },
         )),
     }
 }
@@ -395,16 +565,21 @@ fn hdf_i64_attr(
     attrs: &HashMap<String, rustyhdf5::AttrValue>,
     name: &str,
     format: &str,
-) -> Result<i64, String> {
+) -> Result<i64, Hdf5ReadError> {
     match attrs.get(name) {
         Some(rustyhdf5::AttrValue::I64(value)) => Ok(*value),
         Some(other) => Err(adapter_error(
             format,
-            format_args!("attribute '{name}' must be an integer, found {other:?}"),
+            Hdf5ReadFailure::IntegerAttribute {
+                name: name.to_owned(),
+                found: other.clone(),
+            },
         )),
         None => Err(adapter_error(
             format,
-            format_args!("missing attribute '{name}'"),
+            Hdf5ReadFailure::MissingAttribute {
+                name: name.to_owned(),
+            },
         )),
     }
 }
@@ -437,17 +612,17 @@ fn ensure_table_value_limit(
     rows: usize,
     columns: usize,
     limits: Hdf5Limits<'_>,
-) -> Result<(), String> {
+) -> Result<(), Hdf5ReadError> {
     let values = rows
         .checked_mul(columns)
-        .ok_or_else(|| adapter_error(format, "table value count overflow"))?;
+        .ok_or_else(|| adapter_error(format, Hdf5ReadFailure::TableValueOverflow))?;
     if values > limits.max_values {
         Err(adapter_error(
             format,
-            format_args!(
-                "the table contains {values} values; the limit is {}",
-                limits.max_values
-            ),
+            Hdf5ReadFailure::TableValueLimit {
+                values,
+                limit: limits.max_values,
+            },
         ))
     } else {
         Ok(())
@@ -456,7 +631,7 @@ fn ensure_table_value_limit(
 
 #[cfg(test)]
 mod tests {
-    use super::{DecodedHdf5, Hdf5Limits, decode_hdf5};
+    use super::{DecodedHdf5, Hdf5Limits, Hdf5ReadFailure, decode_hdf5};
 
     #[test]
     fn root_reader_preserves_coordinate_and_numeric_bounds() {
@@ -487,6 +662,32 @@ mod tests {
             ..limits
         };
         let error = decode_hdf5(&bytes, small_limit, "hdf5").expect_err("value limit");
-        assert!(error.contains("contains 2 values; the limit is 1"));
+        assert!(
+            matches!(&error.reason, Hdf5ReadFailure::DatasetValueLimit { dataset, values: 2, limit: 1 } if dataset == "time")
+        );
+        assert_eq!(
+            error.to_string(),
+            "hdf5 import: dataset 'time' contains 2 values; the limit is 1"
+        );
+    }
+
+    #[test]
+    fn malformed_container_preserves_the_hdf5_parser_cause() {
+        use std::error::Error as _;
+        let limits = Hdf5Limits {
+            max_columns: 2,
+            max_values: 4,
+            coordinate_names: &["time", "x"],
+        };
+        let error = decode_hdf5(b"invalid", limits, "hdf5").unwrap_err();
+        let Hdf5ReadFailure::Decode { context, source } = &error.reason else {
+            panic!("expected a container parser failure: {error}");
+        };
+        assert_eq!(context, "invalid HDF5 container");
+        assert_eq!(
+            error.to_string(),
+            format!("hdf5 import: invalid HDF5 container: {source}")
+        );
+        assert!(error.reason.source().unwrap().is::<rustyhdf5::Error>());
     }
 }
