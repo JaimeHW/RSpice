@@ -5,7 +5,7 @@ use std::io::{Cursor, Read};
 use std::path::Path;
 
 use super::reader::{NumpyReadError, NumpyReadFailure, read_error};
-use super::{MAX_COLUMNS, NamedArray, encode_complex_array, encode_real_array};
+use super::{MAX_COLUMNS, NamedArray, NumpyWriteError, encode_complex_array, encode_real_array};
 use crate::numeric::{DecodedNumericDataset, DecodedNumericSignal, stated_coordinate_names};
 use crate::zip::deterministic_stored_zip;
 use num_complex::Complex64;
@@ -17,17 +17,12 @@ use num_complex::Complex64;
 /// signals whose names differ only in case collide. Every one of those is
 /// refused here, by name, rather than published as an archive this product
 /// would not reopen.
-fn archive_member_name(name: &str) -> Result<String, String> {
+fn archive_member_name(name: &str) -> Result<String, NumpyWriteError> {
     if name.trim().is_empty() {
-        return Err(
-            "A signal with no name cannot become an archive member; export CSV instead.".to_owned(),
-        );
+        return Err(NumpyWriteError::EmptyMemberName);
     }
     if name.starts_with('/') || name.contains("..") || name.contains('\\') {
-        return Err(format!(
-            "'{name}' cannot be an archive member name: RSpice refuses an archive member that is \
-             absolute, contains '..', or contains a backslash. Export CSV or an RSpice bundle."
-        ));
+        return Err(NumpyWriteError::InvalidMemberName(name.to_owned()));
     }
     Ok(format!("{name}.npy"))
 }
@@ -37,17 +32,18 @@ pub fn encode_npz(
     coordinate_name: &str,
     coordinate: &[f64],
     signals: &[NamedArray<'_>],
-) -> Result<Vec<u8>, String> {
-    let members = signals.len().checked_add(1).ok_or_else(|| {
-        format!("This result needs too many archive members; RSpice reads at most {MAX_COLUMNS}.")
-    })?;
+) -> Result<Vec<u8>, NumpyWriteError> {
+    let members = signals
+        .len()
+        .checked_add(1)
+        .ok_or(NumpyWriteError::ArchiveMemberLimit { members: None })?;
     if members > MAX_COLUMNS {
-        return Err(format!(
-            "This result needs {members} archive members; RSpice reads at most {MAX_COLUMNS}."
-        ));
+        return Err(NumpyWriteError::ArchiveMemberLimit {
+            members: Some(members),
+        });
     }
     if coordinate.is_empty() || signals.is_empty() {
-        return Err("A NumPy archive needs coordinate samples and at least one signal.".into());
+        return Err(NumpyWriteError::EmptyArchive);
     }
     for signal in signals {
         if signal.real.len() != coordinate.len()
@@ -55,12 +51,12 @@ pub fn encode_npz(
                 .imag
                 .is_some_and(|imag| imag.len() != coordinate.len())
         {
-            return Err(format!(
-                "'{}' has {} samples against {} coordinate samples; the export is refused rather than padded or truncated.",
-                signal.name,
-                signal.real.len(),
-                coordinate.len()
-            ));
+            return Err(NumpyWriteError::SampleCount {
+                name: signal.name.to_owned(),
+                real: signal.real.len(),
+                imag: signal.imag.map(<[f64]>::len),
+                coordinate: coordinate.len(),
+            });
         }
     }
     let rows = [coordinate.len() as u64];
@@ -71,11 +67,7 @@ pub fn encode_npz(
     for signal in signals {
         let member = archive_member_name(signal.name)?;
         if !seen.insert(signal.name.to_ascii_lowercase()) {
-            return Err(format!(
-                "Two signals both claim the archive member '{}'. An archive names its arrays, so \
-                 the names have to differ; RSpice compares them without regard to case.",
-                signal.name
-            ));
+            return Err(NumpyWriteError::DuplicateMemberName(signal.name.to_owned()));
         }
         names.push(member);
     }
@@ -103,7 +95,7 @@ pub fn encode_npz(
         .map(String::as_str)
         .zip(payloads.iter().map(Vec::as_slice))
         .collect::<Vec<_>>();
-    deterministic_stored_zip(&entries)
+    deterministic_stored_zip(&entries).map_err(NumpyWriteError::Zip)
 }
 
 /// Limits imposed by the caller's import transaction before decoding an NPZ.
@@ -290,7 +282,10 @@ mod tests {
             real: &[1.0],
             imag: None,
         };
-        assert!(encode_npz("time", &[0.0, 1.0], &[signal]).is_err());
+        let error = encode_npz("time", &[0.0, 1.0], &[signal]).unwrap_err();
+        assert!(
+            matches!(error, super::NumpyWriteError::SampleCount { name, real: 1, imag: None, coordinate: 2 } if name == "V(out)")
+        );
     }
 
     #[test]

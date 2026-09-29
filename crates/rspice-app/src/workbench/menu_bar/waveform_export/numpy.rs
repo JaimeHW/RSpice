@@ -241,6 +241,7 @@ fn borrowed_arrays(export: &NumpyExport) -> Vec<NamedArray<'_>> {
 /// One 2-D array, C order, coordinate first.
 pub(super) fn encode_npy(export: &NumpyExport) -> Result<Vec<u8>, String> {
     rspice_formats::numpy::matrix::encode_npy(&export.coordinate, &borrowed_arrays(export))
+        .map_err(|error| error.to_string())
 }
 
 pub(super) fn encode_npz(export: &NumpyExport) -> Result<Vec<u8>, String> {
@@ -249,6 +250,7 @@ pub(super) fn encode_npz(export: &NumpyExport) -> Result<Vec<u8>, String> {
         &export.coordinate,
         &borrowed_arrays(export),
     )
+    .map_err(|error| error.to_string())
 }
 
 pub(super) fn export_numpy(

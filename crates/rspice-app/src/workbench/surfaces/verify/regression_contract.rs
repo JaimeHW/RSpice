@@ -1509,7 +1509,8 @@ pub(super) fn export_regression_ci(app: &mut RSpiceApp, junit: &str, tap: &str) 
         let package = crate::workbench::workflows::export_workflow::deterministic_stored_zip(&[
             ("rspice-golden-regression.xml", junit.as_bytes()),
             ("rspice-golden-regression.tap", tap.as_bytes()),
-        ])?;
+        ])
+        .map_err(|error| error.to_string())?;
         let destination = app.export_workflow_io.observe_destination(&path)?;
         app.export_workflow_io.write_bytes_file_observed(
             &destination,

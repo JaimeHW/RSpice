@@ -515,7 +515,7 @@ fn package_publication(
         .iter()
         .map(|part| (part.suggested_filename(), part.bytes()))
         .collect::<Vec<_>>();
-    let bytes = deterministic_stored_zip(&entries)?;
+    let bytes = deterministic_stored_zip(&entries).map_err(|error| error.to_string())?;
     if bytes.len() > MAX_PUBLICATION_BYTES as usize {
         return Err("Packaged hardcopy publication exceeds its byte budget.".to_owned());
     }

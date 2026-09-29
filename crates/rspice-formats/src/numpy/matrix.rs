@@ -2,22 +2,25 @@
 
 use num_complex::Complex64;
 
-use super::{MAX_COLUMNS, NamedArray, encode_complex_array, encode_real_array};
+use super::{MAX_COLUMNS, NamedArray, NumpyWriteError, encode_complex_array, encode_real_array};
 
 /// Encode coordinate and signal columns as one NPY matrix. A complex signal
 /// makes the full matrix complex128, because an NPY array has one dtype.
-pub fn encode_npy(coordinate: &[f64], signals: &[NamedArray<'_>]) -> Result<Vec<u8>, String> {
+pub fn encode_npy(
+    coordinate: &[f64],
+    signals: &[NamedArray<'_>],
+) -> Result<Vec<u8>, NumpyWriteError> {
     let columns = signals
         .len()
         .checked_add(1)
-        .ok_or_else(|| "NumPy matrix has too many columns".to_owned())?;
+        .ok_or(NumpyWriteError::MatrixColumnLimit { columns: None })?;
     if columns > MAX_COLUMNS {
-        return Err(format!(
-            "This result has {columns} columns; RSpice reads at most {MAX_COLUMNS} from a NumPy source."
-        ));
+        return Err(NumpyWriteError::MatrixColumnLimit {
+            columns: Some(columns),
+        });
     }
     if coordinate.is_empty() || signals.is_empty() {
-        return Err("A NumPy matrix needs coordinate samples and at least one signal.".into());
+        return Err(NumpyWriteError::EmptyMatrix);
     }
     for signal in signals {
         if signal.real.len() != coordinate.len()
@@ -25,12 +28,12 @@ pub fn encode_npy(coordinate: &[f64], signals: &[NamedArray<'_>]) -> Result<Vec<
                 .imag
                 .is_some_and(|imag| imag.len() != coordinate.len())
         {
-            return Err(format!(
-                "'{}' has {} samples against {} coordinate samples; the export is refused rather than padded or truncated.",
-                signal.name,
-                signal.real.len(),
-                coordinate.len()
-            ));
+            return Err(NumpyWriteError::SampleCount {
+                name: signal.name.to_owned(),
+                real: signal.real.len(),
+                imag: signal.imag.map(<[f64]>::len),
+                coordinate: coordinate.len(),
+            });
         }
     }
 
@@ -38,7 +41,7 @@ pub fn encode_npy(coordinate: &[f64], signals: &[NamedArray<'_>]) -> Result<Vec<
     let shape = [rows as u64, columns as u64];
     let capacity = rows
         .checked_mul(columns)
-        .ok_or_else(|| "NumPy matrix exceeds the supported sample count".to_owned())?;
+        .ok_or(NumpyWriteError::MatrixSizeOverflow { rows, columns })?;
     if signals.iter().any(|signal| signal.imag.is_some()) {
         let mut values = Vec::with_capacity(capacity);
         for (row, &x) in coordinate.iter().enumerate() {
@@ -74,6 +77,9 @@ mod tests {
             real: &[1.0],
             imag: None,
         };
-        assert!(encode_npy(&[0.0, 1.0], &[signal]).is_err());
+        let error = encode_npy(&[0.0, 1.0], &[signal]).unwrap_err();
+        assert!(
+            matches!(error, super::NumpyWriteError::SampleCount { name, real: 1, imag: None, coordinate: 2 } if name == "V(out)")
+        );
     }
 }

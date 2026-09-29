@@ -2264,7 +2264,7 @@ fn export_bytes_and_identity(
         .iter()
         .map(|part| (part.suggested_filename(), part.bytes()))
         .collect::<Vec<_>>();
-    let bytes = deterministic_stored_zip(&entries)?;
+    let bytes = deterministic_stored_zip(&entries).map_err(|error| error.to_string())?;
     let digest = ContentDigest::from_bytes(Sha256::digest(&bytes).into());
     let artifact = HardcopyArtifactIdentity::try_new(
         digest,

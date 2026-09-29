@@ -524,7 +524,8 @@ impl RSpiceApp {
                                     ("table.csv", text.as_bytes()),
                                     ("schema.json", schema.as_bytes()),
                                 ],
-                            )?;
+                            )
+                            .map_err(|error| error.to_string())?;
                         io.write_bytes_file_observed(&observed, &bytes, "application/zip")
                     }
                     #[cfg(not(target_arch = "wasm32"))]
@@ -567,7 +568,7 @@ impl RSpiceApp {
                                 crate::workbench::workflows::export_workflow::deterministic_stored_zip(&[
                                     ("table.tsv", text.as_bytes()),
                                     ("metadata.json", metadata.as_bytes()),
-                                ])?;
+                                ]).map_err(|error| error.to_string())?;
                             io.write_bytes_file_observed(&observed, &bytes, "application/zip")
                         }
                         #[cfg(not(target_arch = "wasm32"))]
