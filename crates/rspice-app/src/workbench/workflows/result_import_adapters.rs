@@ -6,7 +6,6 @@
 
 use super::*;
 use rspice_results::result_import::waveforms::ImportedSignal;
-use std::collections::BTreeMap;
 use std::io::Cursor;
 
 const MAX_ARCHIVE_MEMBERS: usize = 1_024;
@@ -187,15 +186,7 @@ fn finish_hdf5(
                 rspice_formats::hdf5::Hdf5SectionFamily::DcSweep => AnalysisType::DcSweep,
                 rspice_formats::hdf5::Hdf5SectionFamily::Ac => AnalysisType::Ac,
             };
-            let signals = signals
-                .into_iter()
-                .map(|signal| ImportedSignal {
-                    name: signal.name,
-                    real: signal.real,
-                    imag: signal.imag,
-                    unit: signal.unit,
-                })
-                .collect();
+            let signals = imported_signals(signals);
             finish_dataset(format, analysis, coordinate_name, coordinate, signals)
         }
         rspice_formats::hdf5::DecodedHdf5::Root {
@@ -290,76 +281,27 @@ fn finish_columnar_table(
     finish_dataset(format, analysis, coordinate_name, coordinate, signals)
 }
 
-fn complex_component(name: &str) -> Option<(String, bool)> {
-    for (suffix, imag) in [
-        ("__real", false),
-        ("__imag", true),
-        ("_RE", false),
-        ("_IM", true),
-    ] {
-        if let Some(base) = name.strip_suffix(suffix) {
-            return Some((base.to_owned(), imag));
-        }
-    }
-    if let Some(base) = name
-        .strip_prefix("Re(")
-        .and_then(|value| value.strip_suffix(')'))
-    {
-        return Some((base.to_owned(), false));
-    }
-    if let Some(base) = name
-        .strip_prefix("Im(")
-        .and_then(|value| value.strip_suffix(')'))
-    {
-        return Some((base.to_owned(), true));
-    }
-    None
+fn imported_signals(
+    signals: Vec<rspice_formats::numeric::DecodedNumericSignal>,
+) -> Vec<ImportedSignal> {
+    signals
+        .into_iter()
+        .map(|signal| ImportedSignal {
+            name: signal.name,
+            real: signal.real,
+            imag: signal.imag,
+            unit: signal.unit,
+        })
+        .collect()
 }
 
 fn combine_real_imag_columns(
     format: ResultImportFormat,
     columns: Vec<(String, Vec<f64>)>,
 ) -> Result<Vec<ImportedSignal>, String> {
-    let mut plain = Vec::new();
-    let mut complex: BTreeMap<String, ComplexComponentColumns> = BTreeMap::new();
-    for (name, values) in columns {
-        if let Some((base, imag)) = complex_component(&name) {
-            let entry = complex.entry(base.clone()).or_default();
-            let slot = if imag { &mut entry.1 } else { &mut entry.0 };
-            if slot.replace(values).is_some() {
-                return Err(adapter_error(
-                    format,
-                    format_args!("duplicate complex component '{name}'"),
-                ));
-            }
-        } else {
-            plain.push(ImportedSignal {
-                name,
-                real: values,
-                imag: None,
-                unit: None,
-            });
-        }
-    }
-    for (name, (real, imag)) in complex {
-        plain.push(ImportedSignal {
-            name: name.clone(),
-            real: real.ok_or_else(|| {
-                adapter_error(
-                    format,
-                    format_args!("complex signal '{name}' is missing its real component"),
-                )
-            })?,
-            imag: Some(imag.ok_or_else(|| {
-                adapter_error(
-                    format,
-                    format_args!("complex signal '{name}' is missing its imaginary component"),
-                )
-            })?),
-            unit: None,
-        });
-    }
-    Ok(plain)
+    rspice_formats::numeric::combine_real_imag_columns(columns)
+        .map(imported_signals)
+        .map_err(|error| adapter_error(format, error))
 }
 
 // -------------------------------------------------------------------------
@@ -377,15 +319,7 @@ pub(super) fn parse_npy(
         MAX_RESULT_COLUMNS,
         format.canonical_id(),
     )?;
-    let signals = signals
-        .into_iter()
-        .map(|signal| ImportedSignal {
-            name: signal.name,
-            real: signal.real,
-            imag: signal.imag,
-            unit: None,
-        })
-        .collect();
+    let signals = imported_signals(signals);
     finish_dataset(format, AnalysisType::DcSweep, "sample", coordinate, signals)
 }
 

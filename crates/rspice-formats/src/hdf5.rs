@@ -1,5 +1,6 @@
 //! HDF5 and MATLAB 7.3 waveform byte decoding.
 
+use crate::numeric::DecodedNumericSignal;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy)]
@@ -17,20 +18,12 @@ pub enum Hdf5SectionFamily {
 }
 
 #[derive(Debug)]
-pub struct Hdf5Signal {
-    pub name: String,
-    pub real: Vec<f64>,
-    pub imag: Option<Vec<f64>>,
-    pub unit: Option<String>,
-}
-
-#[derive(Debug)]
 pub enum DecodedHdf5 {
     Section {
         family: Hdf5SectionFamily,
         coordinate_name: String,
         coordinate: Vec<f64>,
-        signals: Vec<Hdf5Signal>,
+        signals: Vec<DecodedNumericSignal>,
     },
     Root {
         coordinate_name: String,
@@ -162,7 +155,7 @@ fn parse_rspice_hdf5_section(
         for index in 0..signal_count {
             let prefix = format!("signal_{index:04}");
             let name = hdf_string_attr(&attrs, &format!("{prefix}_name"), format)?;
-            signals.push(Hdf5Signal {
+            signals.push(DecodedNumericSignal {
                 name,
                 real: hdf_f64_dataset(&group, &format!("{prefix}_real"), format, limits)?,
                 imag: Some(hdf_f64_dataset(
@@ -188,7 +181,7 @@ fn parse_rspice_hdf5_section(
     let mut signals = Vec::with_capacity(signal_count);
     for index in 0..signal_count {
         let prefix = format!("signal_{index:04}");
-        signals.push(Hdf5Signal {
+        signals.push(DecodedNumericSignal {
             name: hdf_string_attr(&attrs, &format!("{prefix}_name"), format)?,
             real: hdf_f64_dataset(&group, &prefix, format, limits)?,
             imag: None,
@@ -463,7 +456,7 @@ fn ensure_table_value_limit(
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_hdf5, DecodedHdf5, Hdf5Limits};
+    use super::{DecodedHdf5, Hdf5Limits, decode_hdf5};
 
     #[test]
     fn root_reader_preserves_coordinate_and_numeric_bounds() {

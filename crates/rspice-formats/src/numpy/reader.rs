@@ -1,5 +1,6 @@
 //! Bounded NPY decoding and projection into numeric waveform columns.
 
+use crate::numeric::DecodedNumericSignal;
 use std::io::Cursor;
 
 #[derive(Debug)]
@@ -14,13 +15,6 @@ impl NpyArray {
     pub fn is_complex(&self) -> bool {
         self.imag.is_some()
     }
-}
-
-#[derive(Debug)]
-pub struct NpySignal {
-    pub name: String,
-    pub real: Vec<f64>,
-    pub imag: Option<Vec<f64>>,
 }
 
 fn adapter_error(format: &str, detail: impl std::fmt::Display) -> String {
@@ -184,7 +178,7 @@ pub fn npy_matrix_to_dataset(
     max_rows: usize,
     max_columns: usize,
     format: &str,
-) -> Result<(Vec<f64>, Vec<NpySignal>), String> {
+) -> Result<(Vec<f64>, Vec<DecodedNumericSignal>), String> {
     let (rows, columns) = match array.shape.as_slice() {
         [rows] => (*rows, 1),
         [rows, columns] => (*rows, *columns),
@@ -206,19 +200,20 @@ pub fn npy_matrix_to_dataset(
     if array.imag.is_none() && columns >= 2 {
         let coordinate = (0..rows).map(|row| array.real[index(row, 0)]).collect();
         let signals = (1..columns)
-            .map(|column| NpySignal {
+            .map(|column| DecodedNumericSignal {
                 name: format!("signal_{column}"),
                 real: (0..rows)
                     .map(|row| array.real[index(row, column)])
                     .collect(),
                 imag: None,
+                unit: None,
             })
             .collect();
         return Ok((coordinate, signals));
     }
     let coordinate = (0..rows).map(|row| row as f64).collect();
     let signals = (0..columns)
-        .map(|column| NpySignal {
+        .map(|column| DecodedNumericSignal {
             name: if columns == 1 {
                 "value".to_owned()
             } else {
@@ -231,6 +226,7 @@ pub fn npy_matrix_to_dataset(
                 .imag
                 .as_ref()
                 .map(|imag| (0..rows).map(|row| imag[index(row, column)]).collect()),
+            unit: None,
         })
         .collect();
     Ok((coordinate, signals))
