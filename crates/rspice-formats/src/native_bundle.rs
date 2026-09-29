@@ -5,6 +5,8 @@
 //! its digest binds the exact canonical `dataset.json` bytes.
 
 mod reader;
+#[cfg(feature = "result-waveform")]
+pub mod result;
 mod writer;
 
 pub use reader::{NativeBundleReadLimits, decode_native_bundle};

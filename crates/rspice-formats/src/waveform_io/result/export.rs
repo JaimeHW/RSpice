@@ -221,7 +221,7 @@ fn prepare_flat_waveform_dataset(
     Ok(dataset)
 }
 
-pub fn validate_shared_x_axis<W: AsRef<RetainedWaveform>>(
+pub(crate) fn validate_shared_x_axis<W: AsRef<RetainedWaveform>>(
     waveforms: &[&W],
     reference_x: &[f64],
 ) -> Result<(), WaveformProjectionError> {
@@ -255,7 +255,7 @@ pub fn validate_shared_x_axis<W: AsRef<RetainedWaveform>>(
 /// whether its abscissa is an absolute drive frequency or an offset from a
 /// carrier. The exported quantity is a frequency in hertz either way, and
 /// which frequency it is belongs to the analysis type the file already names.
-pub fn axis_signal_for_analysis<W>(analysis: &AnalysisResult<W>) -> (&str, SignalType) {
+pub(crate) fn axis_signal_for_analysis<W>(analysis: &AnalysisResult<W>) -> (&str, SignalType) {
     if let Some(AnalysisResultPayload::DcSweep { evidence }) = &analysis.result_payload {
         let kind = if evidence.source.starts_with(['I', 'i']) {
             SignalType::Current
@@ -394,7 +394,7 @@ fn append_signal_values(
     Ok(())
 }
 
-pub fn signal_type_from_waveform_name(name: &str) -> SignalType {
+pub(crate) fn signal_type_from_waveform_name(name: &str) -> SignalType {
     if name.starts_with("V(") || name.starts_with("v(") {
         SignalType::Voltage
     } else if name.starts_with("I(") || name.starts_with("i(") {
@@ -404,7 +404,7 @@ pub fn signal_type_from_waveform_name(name: &str) -> SignalType {
     }
 }
 
-pub fn complex_signal_type(source_name: &str, real: bool) -> SignalType {
+pub(crate) fn complex_signal_type(source_name: &str, real: bool) -> SignalType {
     if source_name.starts_with("V(") || source_name.starts_with("v(") {
         if real {
             SignalType::VoltageReal
