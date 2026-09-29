@@ -28,7 +28,7 @@ use egui::Ui;
 
 use crate::analysis::calculator;
 use crate::results::visualization_document::AccessibleColorPalette;
-use crate::simulation::netlist_gen::bus_notations;
+use crate::schematic::bus_notations;
 use crate::state::{
     AnalysisResult, AnalysisType, SharedWaveformValues, SimulationRun, SimulationState,
 };

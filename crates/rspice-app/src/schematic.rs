@@ -22,7 +22,10 @@ mod port_overlay;
 mod source_labels;
 pub(crate) mod symbol_editor;
 pub(crate) mod symbols;
+mod vector_display;
 pub(crate) mod view;
+
+pub(crate) use vector_display::bus_notations;
 
 // Re-export main types
 pub use symbols::SymbolLibrary;

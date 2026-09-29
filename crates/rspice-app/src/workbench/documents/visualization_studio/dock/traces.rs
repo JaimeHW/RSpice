@@ -11,7 +11,7 @@
 use std::collections::BTreeSet;
 
 use super::super::active_project_visualization_document_id;
-use crate::simulation::netlist_gen::bus_notations;
+use crate::schematic::bus_notations;
 use crate::workbench::app_state::AppState;
 
 /// The label each row of the visibility draft paints, in draft order.

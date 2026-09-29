@@ -8,7 +8,8 @@ use std::collections::BTreeMap;
 
 use egui::{Painter, Rect, Stroke};
 
-use crate::simulation::netlist_gen::{bus_notations, projection_nets};
+use crate::schematic::bus_notations;
+use crate::simulation::netlist_gen::projection_nets;
 use crate::state::{
     CellViewRef, Component, CrossProbeIndex, DesignNote, DesignNoteKind, DesignReviewState, Point,
     SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicHierarchyVisibility,

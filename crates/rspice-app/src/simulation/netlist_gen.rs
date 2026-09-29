@@ -49,7 +49,6 @@ mod master_index;
 mod models;
 mod source_tables;
 mod subcircuits;
-mod vector_display;
 mod vector_nets;
 mod xspice;
 
@@ -59,7 +58,6 @@ use master_index::{MasterIndex, validate_occurrence_interface};
 pub use rspice_design::connectivity::Net;
 pub(crate) use rspice_design::connectivity::deck_bit_name;
 pub use subcircuits::HierarchySource;
-pub(crate) use vector_display::bus_notations;
 
 //=============================================================================
 // NetlistResult (Compatibility API)

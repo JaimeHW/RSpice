@@ -197,7 +197,7 @@ fn every_results_surface_paints_through_this_boundary() {
             production.contains("bus_notations(") && production.contains(site),
             "{path} no longer renders a result name through `bus_notations`/`{site}`.\n\
              Every surface that shows a solved vector renders it through \
-             `simulation::netlist_gen::vector_display`, so a bus bit reads the \
+             `schematic::vector_display`, so a bus bit reads the \
              same everywhere."
         );
     }

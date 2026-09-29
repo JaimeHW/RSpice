@@ -13,7 +13,7 @@ use netlist::*;
 use egui::{Align, Key, Modifiers, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::product::DatasetId;
-use crate::simulation::netlist_gen::bus_notations;
+use crate::schematic::bus_notations;
 use crate::state::ViewType;
 use crate::state::{OutlineEntry, OutlineEntryKind};
 use crate::ui::theme::{self, FontWeight};

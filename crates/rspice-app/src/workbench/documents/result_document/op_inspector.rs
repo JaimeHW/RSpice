@@ -13,7 +13,7 @@ use rspice_results::operating_point::report::{
     OperatingPointReportFacts, annotation_label, device_param_unit, process_label,
 };
 
-use crate::simulation::netlist_gen::bus_notations;
+use crate::schematic::bus_notations;
 use crate::state::{
     AnalysisResultPayload, AnalysisType, DcOpResult, OperatingPointDeviceDetailEvidence,
     RunHistoryRevision, SchematicAnnotationVisibility,

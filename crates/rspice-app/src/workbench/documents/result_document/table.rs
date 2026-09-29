@@ -13,7 +13,7 @@
 
 use egui::Ui;
 
-use crate::simulation::netlist_gen::bus_notations;
+use crate::schematic::bus_notations;
 use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType, RunHistoryRevision};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
