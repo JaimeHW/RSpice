@@ -1,7 +1,155 @@
 //! Bounded NPY decoding and projection into numeric waveform columns.
 
-use crate::numeric::DecodedNumericSignal;
+use crate::numeric::{DecodedNumericDataset, DecodedNumericSignal};
 use std::io::Cursor;
+
+/// A NumPy array/container failure or a bounded decoding refusal.
+#[derive(Debug)]
+pub struct NumpyReadError {
+    pub format: String,
+    pub reason: NumpyReadFailure,
+}
+
+#[derive(Debug)]
+pub enum NumpyReadFailure {
+    Header(std::io::Error),
+    DimensionTooLarge(u64),
+    WaveformDimensions(Vec<usize>),
+    ShapeProductOverflow(Vec<usize>),
+    NumericValueLimit {
+        values: usize,
+        limit: usize,
+    },
+    StructuredDtype(Box<npyz::DType>),
+    Values(std::io::Error),
+    InexactInteger(crate::numeric::ExactIntegerError),
+    UnsupportedDtype {
+        kind: npyz::TypeChar,
+        size: u64,
+    },
+    NonVector {
+        name: String,
+        shape: Vec<usize>,
+    },
+    PayloadShape {
+        name: String,
+        shape: Vec<usize>,
+        real: usize,
+        imag: Option<usize>,
+    },
+    WaveformBounds {
+        shape: Vec<usize>,
+        max_rows: usize,
+        max_columns: usize,
+    },
+    Archive(zip::result::ZipError),
+    MemberCount {
+        members: usize,
+        limit: usize,
+    },
+    ArchiveMember {
+        index: usize,
+        source: zip::result::ZipError,
+    },
+    UnsafeMember(String),
+    UnsupportedMember(String),
+    ExpandedSizeOverflow,
+    ExpandedByteLimit {
+        expanded: u64,
+        limit: u64,
+        decoded: bool,
+    },
+    InvalidMemberName(String),
+    DuplicateArray(String),
+    MemberRead {
+        name: String,
+        source: std::io::Error,
+    },
+    MissingCoordinate {
+        expected: String,
+    },
+    ComplexCoordinate {
+        name: String,
+    },
+}
+
+impl std::fmt::Display for NumpyReadFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Header(source) => write!(f, "invalid NPY header: {source}"),
+            Self::DimensionTooLarge(_) => f.write_str("NPY dimension exceeds this platform"),
+            Self::WaveformDimensions(shape) => write!(
+                f,
+                "NPY shape {shape:?} is not a one- or two-dimensional waveform table"
+            ),
+            Self::ShapeProductOverflow(_) => f.write_str("NPY shape product overflow"),
+            Self::NumericValueLimit { .. } => f.write_str("NPY numeric-value limit exceeded"),
+            Self::StructuredDtype(_) => f.write_str(
+                "structured and nested NPY dtypes require an explicit mapping and are not accepted",
+            ),
+            Self::Values(source) => write!(f, "could not decode NPY values: {source}"),
+            Self::InexactInteger(source) => source.fmt(f),
+            Self::UnsupportedDtype { kind, size } => {
+                write!(f, "unsupported NPY dtype {kind:?}{size}")
+            }
+            Self::NonVector { name, shape } => {
+                write!(f, "NPZ array '{name}' has non-vector shape {shape:?}")
+            }
+            Self::PayloadShape { name, .. } => {
+                write!(f, "NPZ array '{name}' payload does not match its shape")
+            }
+            Self::WaveformBounds { shape, .. } => {
+                write!(f, "NPY waveform shape {shape:?} exceeds import bounds")
+            }
+            Self::Archive(source) => write!(f, "invalid NPZ archive: {source}"),
+            Self::MemberCount { members, limit } => {
+                write!(f, "archive has {members} members; the limit is {limit}")
+            }
+            Self::ArchiveMember { index, source } => {
+                write!(f, "invalid archive member {index}: {source}")
+            }
+            Self::UnsafeMember(name) => write!(f, "unsafe archive member '{name}'"),
+            Self::UnsupportedMember(name) => write!(
+                f,
+                "unsupported NPZ member '{name}'; only .npy arrays are accepted"
+            ),
+            Self::ExpandedSizeOverflow => f.write_str("archive expanded-size accounting overflow"),
+            Self::ExpandedByteLimit { .. } => f.write_str("NPZ expanded-byte limit exceeded"),
+            Self::InvalidMemberName(name) => write!(f, "invalid member name '{name}'"),
+            Self::DuplicateArray(name) => write!(f, "archive repeats array identity '{name}'"),
+            Self::MemberRead { name, source } => write!(f, "could not decode '{name}': {source}"),
+            Self::MissingCoordinate { expected } => {
+                write!(f, "NPZ requires one coordinate array named {expected}")
+            }
+            Self::ComplexCoordinate { .. } => f.write_str("NPZ coordinate array cannot be complex"),
+        }
+    }
+}
+
+impl std::error::Error for NumpyReadFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Header(source) | Self::Values(source) | Self::MemberRead { source, .. } => {
+                Some(source)
+            }
+            Self::Archive(source) | Self::ArchiveMember { source, .. } => Some(source),
+            Self::InexactInteger(source) => Some(source),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for NumpyReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} import: {}", self.format, self.reason)
+    }
+}
+
+impl std::error::Error for NumpyReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.reason)
+    }
+}
 
 #[derive(Debug)]
 pub struct NpyArray {
@@ -12,52 +160,71 @@ pub struct NpyArray {
 }
 
 impl NpyArray {
-    pub fn is_complex(&self) -> bool {
+    pub(super) fn is_complex(&self) -> bool {
         self.imag.is_some()
     }
 }
 
-fn adapter_error(format: &str, detail: impl std::fmt::Display) -> String {
-    format!("{format} import: {detail}")
+pub(super) fn read_error(format: &str, reason: NumpyReadFailure) -> NumpyReadError {
+    NumpyReadError {
+        format: format.to_owned(),
+        reason,
+    }
 }
 
-pub fn decode_npy(bytes: &[u8], max_values: usize, format: &str) -> Result<NpyArray, String> {
+pub fn decode_npy(
+    bytes: &[u8],
+    max_values: usize,
+    format: &str,
+) -> Result<NpyArray, NumpyReadError> {
     use npyz::{DType, Order, TypeChar};
     let file = npyz::NpyFile::new(Cursor::new(bytes))
-        .map_err(|error| adapter_error(format, format_args!("invalid NPY header: {error}")))?;
+        .map_err(|error| read_error(format, NumpyReadFailure::Header(error)))?;
     let shape = file
         .shape()
         .iter()
         .map(|value| {
             usize::try_from(*value)
-                .map_err(|_| adapter_error(format, "NPY dimension exceeds this platform"))
+                .map_err(|_| read_error(format, NumpyReadFailure::DimensionTooLarge(*value)))
         })
         .collect::<Result<Vec<_>, _>>()?;
     if shape.is_empty() || shape.len() > 2 {
-        return Err(adapter_error(
+        return Err(read_error(
             format,
-            format_args!("NPY shape {shape:?} is not a one- or two-dimensional waveform table"),
+            NumpyReadFailure::WaveformDimensions(shape),
         ));
     }
     let count = shape
         .iter()
         .try_fold(1_usize, |count, dim| count.checked_mul(*dim))
-        .ok_or_else(|| adapter_error(format, "NPY shape product overflow"))?;
+        .ok_or_else(|| {
+            read_error(
+                format,
+                NumpyReadFailure::ShapeProductOverflow(shape.clone()),
+            )
+        })?;
     if count > max_values {
-        return Err(adapter_error(format, "NPY numeric-value limit exceeded"));
+        return Err(read_error(
+            format,
+            NumpyReadFailure::NumericValueLimit {
+                values: count,
+                limit: max_values,
+            },
+        ));
     }
     let fortran = file.order() == Order::Fortran;
-    let DType::Plain(type_string) = file.dtype() else {
-        return Err(adapter_error(
+    let dtype = file.dtype();
+    let DType::Plain(type_string) = dtype else {
+        return Err(read_error(
             format,
-            "structured and nested NPY dtypes require an explicit mapping and are not accepted",
+            NumpyReadFailure::StructuredDtype(Box::new(dtype)),
         ));
     };
     macro_rules! real {
         ($ty:ty) => {{
-            let values = file.into_vec::<$ty>().map_err(|error| {
-                adapter_error(format, format_args!("could not decode NPY values: {error}"))
-            })?;
+            let values = file
+                .into_vec::<$ty>()
+                .map_err(|error| read_error(format, NumpyReadFailure::Values(error)))?;
             NpyArray {
                 shape,
                 fortran,
@@ -68,9 +235,9 @@ pub fn decode_npy(bytes: &[u8], max_values: usize, format: &str) -> Result<NpyAr
     }
     macro_rules! complex {
         ($ty:ty) => {{
-            let values = file.into_vec::<$ty>().map_err(|error| {
-                adapter_error(format, format_args!("could not decode NPY values: {error}"))
-            })?;
+            let values = file
+                .into_vec::<$ty>()
+                .map_err(|error| read_error(format, NumpyReadFailure::Values(error)))?;
             NpyArray {
                 shape,
                 fortran,
@@ -86,17 +253,18 @@ pub fn decode_npy(bytes: &[u8], max_values: usize, format: &str) -> Result<NpyAr
         (TypeChar::Int, 2) => real!(i16),
         (TypeChar::Int, 4) => real!(i32),
         (TypeChar::Int, 8) => {
-            let values = file.into_vec::<i64>().map_err(|error| {
-                adapter_error(format, format_args!("could not decode NPY values: {error}"))
-            })?;
+            let values = file
+                .into_vec::<i64>()
+                .map_err(|error| read_error(format, NumpyReadFailure::Values(error)))?;
             NpyArray {
                 shape,
                 fortran,
                 real: values
                     .into_iter()
                     .map(|value| {
-                        crate::numeric::exact_signed_integer("NPY array", value)
-                            .map_err(|detail| adapter_error(format, detail))
+                        crate::numeric::exact_signed_integer("NPY array", value).map_err(|detail| {
+                            read_error(format, NumpyReadFailure::InexactInteger(detail))
+                        })
                     })
                     .collect::<Result<Vec<_>, _>>()?,
                 imag: None,
@@ -106,26 +274,27 @@ pub fn decode_npy(bytes: &[u8], max_values: usize, format: &str) -> Result<NpyAr
         (TypeChar::Uint, 2) => real!(u16),
         (TypeChar::Uint, 4) => real!(u32),
         (TypeChar::Uint, 8) => {
-            let values = file.into_vec::<u64>().map_err(|error| {
-                adapter_error(format, format_args!("could not decode NPY values: {error}"))
-            })?;
+            let values = file
+                .into_vec::<u64>()
+                .map_err(|error| read_error(format, NumpyReadFailure::Values(error)))?;
             NpyArray {
                 shape,
                 fortran,
                 real: values
                     .into_iter()
                     .map(|value| {
-                        crate::numeric::exact_unsigned_integer("NPY array", value)
-                            .map_err(|detail| adapter_error(format, detail))
+                        crate::numeric::exact_unsigned_integer("NPY array", value).map_err(
+                            |detail| read_error(format, NumpyReadFailure::InexactInteger(detail)),
+                        )
                     })
                     .collect::<Result<Vec<_>, _>>()?,
                 imag: None,
             }
         }
         (TypeChar::Bool, 1) => {
-            let values = file.into_vec::<bool>().map_err(|error| {
-                adapter_error(format, format_args!("could not decode NPY values: {error}"))
-            })?;
+            let values = file
+                .into_vec::<bool>()
+                .map_err(|error| read_error(format, NumpyReadFailure::Values(error)))?;
             NpyArray {
                 shape,
                 fortran,
@@ -139,35 +308,43 @@ pub fn decode_npy(bytes: &[u8], max_values: usize, format: &str) -> Result<NpyAr
         (TypeChar::Complex, 8) => complex!(num_complex::Complex32),
         (TypeChar::Complex, 16) => complex!(num_complex::Complex64),
         (kind, size) => {
-            return Err(adapter_error(
+            return Err(read_error(
                 format,
-                format_args!("unsupported NPY dtype {kind:?}{size}"),
+                NumpyReadFailure::UnsupportedDtype { kind, size },
             ));
         }
     };
     Ok(array)
 }
 
-pub fn npy_vector(
+pub(super) fn npy_vector(
     array: &NpyArray,
     format: &str,
     name: &str,
-) -> Result<(Vec<f64>, Option<Vec<f64>>), String> {
+) -> Result<(Vec<f64>, Option<Vec<f64>>), NumpyReadError> {
     let len = match array.shape.as_slice() {
         [len] => *len,
         [rows, 1] => *rows,
         [1, columns] => *columns,
         _ => {
-            return Err(adapter_error(
+            return Err(read_error(
                 format,
-                format_args!("NPZ array '{name}' has non-vector shape {:?}", array.shape),
+                NumpyReadFailure::NonVector {
+                    name: name.to_owned(),
+                    shape: array.shape.clone(),
+                },
             ));
         }
     };
     if array.real.len() != len || array.imag.as_ref().is_some_and(|imag| imag.len() != len) {
-        return Err(adapter_error(
+        return Err(read_error(
             format,
-            format_args!("NPZ array '{name}' payload does not match its shape"),
+            NumpyReadFailure::PayloadShape {
+                name: name.to_owned(),
+                shape: array.shape.clone(),
+                real: array.real.len(),
+                imag: array.imag.as_ref().map(Vec::len),
+            },
         ));
     }
     Ok((array.real.clone(), array.imag.clone()))
@@ -178,16 +355,20 @@ pub fn npy_matrix_to_dataset(
     max_rows: usize,
     max_columns: usize,
     format: &str,
-) -> Result<(Vec<f64>, Vec<DecodedNumericSignal>), String> {
+) -> Result<DecodedNumericDataset, NumpyReadError> {
     let (rows, columns) = match array.shape.as_slice() {
         [rows] => (*rows, 1),
         [rows, columns] => (*rows, *columns),
         _ => unreachable!(),
     };
     if !(1..=max_rows).contains(&rows) || columns == 0 || columns > max_columns {
-        return Err(adapter_error(
+        return Err(read_error(
             format,
-            format_args!("NPY waveform shape {:?} exceeds import bounds", array.shape),
+            NumpyReadFailure::WaveformBounds {
+                shape: array.shape,
+                max_rows,
+                max_columns,
+            },
         ));
     }
     let index = |row: usize, column: usize| {
@@ -209,7 +390,12 @@ pub fn npy_matrix_to_dataset(
                 unit: None,
             })
             .collect();
-        return Ok((coordinate, signals));
+        return Ok(DecodedNumericDataset {
+            domain: crate::WaveformDomain::DcSweep,
+            coordinate_name: "sample".into(),
+            coordinate,
+            signals,
+        });
     }
     let coordinate = (0..rows).map(|row| row as f64).collect();
     let signals = (0..columns)
@@ -229,7 +415,12 @@ pub fn npy_matrix_to_dataset(
             unit: None,
         })
         .collect();
-    Ok((coordinate, signals))
+    Ok(DecodedNumericDataset {
+        domain: crate::WaveformDomain::DcSweep,
+        coordinate_name: "sample".into(),
+        coordinate,
+        signals,
+    })
 }
 
 #[cfg(test)]
@@ -253,8 +444,11 @@ mod tests {
         writer.finish().expect("NPY finish");
 
         let array = decode_npy(&bytes, 6, "numpy_npy").expect("decode");
-        let (coordinate, signals) =
-            npy_matrix_to_dataset(array, 3, 2, "numpy_npy").expect("project");
+        let DecodedNumericDataset {
+            coordinate,
+            signals,
+            ..
+        } = npy_matrix_to_dataset(array, 3, 2, "numpy_npy").expect("project");
         assert_eq!(coordinate, [0.0, 1.0, 2.0]);
         assert_eq!(signals.len(), 1);
         assert_eq!(signals[0].real, [10.0, 20.0, 30.0]);
@@ -268,8 +462,11 @@ mod tests {
         ];
         let bytes = crate::numpy::encode_complex_array(&[2], &values).expect("NPY fixture");
         let array = decode_npy(&bytes, 2, "numpy_npy").expect("decode");
-        let (coordinate, signals) =
-            npy_matrix_to_dataset(array, 2, 1, "numpy_npy").expect("project");
+        let DecodedNumericDataset {
+            coordinate,
+            signals,
+            ..
+        } = npy_matrix_to_dataset(array, 2, 1, "numpy_npy").expect("project");
         assert_eq!(coordinate, [0.0, 1.0]);
         assert_eq!(signals[0].name, "value");
         assert_eq!(signals[0].real, [1.0, 3.0]);
@@ -291,6 +488,26 @@ mod tests {
         writer.finish().expect("NPY finish");
 
         let error = decode_npy(&bytes, 1, "numpy_npy").expect_err("precision loss");
-        assert!(error.contains("cannot be represented exactly as f64"));
+        assert!(
+            matches!(&error.reason, NumpyReadFailure::InexactInteger(crate::numeric::ExactIntegerError::Unsigned { value, .. }) if *value == crate::numeric::MAX_EXACT_F64_INTEGER + 1)
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("cannot be represented exactly as f64")
+        );
+    }
+
+    #[test]
+    fn malformed_npy_retains_the_header_io_cause() {
+        use std::error::Error as _;
+        let error = decode_npy(b"invalid", 2, "numpy_npy").unwrap_err();
+        assert!(matches!(&error.reason, NumpyReadFailure::Header(_)));
+        assert!(error.reason.source().unwrap().is::<std::io::Error>());
+        assert!(
+            error
+                .to_string()
+                .starts_with("numpy_npy import: invalid NPY header: ")
+        );
     }
 }

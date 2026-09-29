@@ -4,7 +4,9 @@ use std::collections::{BTreeSet, HashSet};
 use std::io::{Cursor, Read};
 use std::path::Path;
 
+use super::reader::{NumpyReadError, NumpyReadFailure, read_error};
 use super::{MAX_COLUMNS, NamedArray, encode_complex_array, encode_real_array};
+use crate::numeric::{DecodedNumericDataset, DecodedNumericSignal, stated_coordinate_names};
 use crate::zip::deterministic_stored_zip;
 use num_complex::Complex64;
 
@@ -112,28 +114,24 @@ pub struct NpzReadLimits {
     pub max_numeric_values: usize,
 }
 
-fn adapter_error(format: &str, detail: impl std::fmt::Display) -> String {
-    format!("{format} import: {detail}")
-}
-
 /// Decode named NPY members after validating the archive and its bounds.
-pub fn decode_npz_arrays(
+fn decode_npz_arrays(
     bytes: &[u8],
     limits: NpzReadLimits,
     format: &str,
-) -> Result<Vec<(String, super::reader::NpyArray)>, String> {
+) -> Result<Vec<(String, super::reader::NpyArray)>, NumpyReadError> {
     let max_members = limits.max_members;
     let max_expanded_bytes = limits.max_expanded_bytes;
     let max_numeric_values = limits.max_numeric_values;
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes))
-        .map_err(|error| adapter_error(format, format_args!("invalid NPZ archive: {error}")))?;
+        .map_err(|error| read_error(format, NumpyReadFailure::Archive(error)))?;
     if archive.len() > max_members {
-        return Err(adapter_error(
+        return Err(read_error(
             format,
-            format_args!(
-                "archive has {} members; the limit is {max_members}",
-                archive.len()
-            ),
+            NumpyReadFailure::MemberCount {
+                members: archive.len(),
+                limit: max_members,
+            },
         ));
     }
     let mut arrays = Vec::new();
@@ -142,9 +140,12 @@ pub fn decode_npz_arrays(
     let mut decoded_expanded = 0_u64;
     for index in 0..archive.len() {
         let member = archive.by_index(index).map_err(|error| {
-            adapter_error(
+            read_error(
                 format,
-                format_args!("invalid archive member {index}: {error}"),
+                NumpyReadFailure::ArchiveMember {
+                    index,
+                    source: error,
+                },
             )
         })?;
         if member.is_dir() {
@@ -153,53 +154,68 @@ pub fn decode_npz_arrays(
         let member_name = member.name().to_owned();
         if member_name.starts_with('/') || member_name.contains("..") || member_name.contains('\\')
         {
-            return Err(adapter_error(
+            return Err(read_error(
                 format,
-                format_args!("unsafe archive member '{member_name}'"),
+                NumpyReadFailure::UnsafeMember(member_name),
             ));
         }
         if !member_name.to_ascii_lowercase().ends_with(".npy") {
-            return Err(adapter_error(
+            return Err(read_error(
                 format,
-                format_args!(
-                    "unsupported NPZ member '{member_name}'; only .npy arrays are accepted"
-                ),
+                NumpyReadFailure::UnsupportedMember(member_name),
             ));
         }
         expanded = expanded
             .checked_add(member.size())
-            .ok_or_else(|| adapter_error(format, "archive expanded-size accounting overflow"))?;
+            .ok_or_else(|| read_error(format, NumpyReadFailure::ExpandedSizeOverflow))?;
         if expanded > max_expanded_bytes {
-            return Err(adapter_error(format, "NPZ expanded-byte limit exceeded"));
+            return Err(read_error(
+                format,
+                NumpyReadFailure::ExpandedByteLimit {
+                    expanded,
+                    limit: max_expanded_bytes,
+                    decoded: false,
+                },
+            ));
         }
         let stem = Path::new(&member_name)
             .file_stem()
             .and_then(|name| name.to_str())
             .ok_or_else(|| {
-                adapter_error(format, format_args!("invalid member name '{member_name}'"))
+                read_error(
+                    format,
+                    NumpyReadFailure::InvalidMemberName(member_name.clone()),
+                )
             })?
             .to_owned();
         if !names.insert(stem.to_ascii_lowercase()) {
-            return Err(adapter_error(
-                format,
-                format_args!("archive repeats array identity '{stem}'"),
-            ));
+            return Err(read_error(format, NumpyReadFailure::DuplicateArray(stem)));
         }
         let mut member_bytes = Vec::with_capacity(usize::try_from(member.size()).unwrap_or(0));
         member
             .take(max_expanded_bytes.saturating_add(1))
             .read_to_end(&mut member_bytes)
             .map_err(|error| {
-                adapter_error(
+                read_error(
                     format,
-                    format_args!("could not decode '{member_name}': {error}"),
+                    NumpyReadFailure::MemberRead {
+                        name: member_name,
+                        source: error,
+                    },
                 )
             })?;
         decoded_expanded = decoded_expanded
             .checked_add(member_bytes.len() as u64)
-            .ok_or_else(|| adapter_error(format, "archive expanded-size accounting overflow"))?;
+            .ok_or_else(|| read_error(format, NumpyReadFailure::ExpandedSizeOverflow))?;
         if decoded_expanded > max_expanded_bytes {
-            return Err(adapter_error(format, "NPZ expanded-byte limit exceeded"));
+            return Err(read_error(
+                format,
+                NumpyReadFailure::ExpandedByteLimit {
+                    expanded: decoded_expanded,
+                    limit: max_expanded_bytes,
+                    decoded: true,
+                },
+            ));
         }
         arrays.push((
             stem,
@@ -209,9 +225,62 @@ pub fn decode_npz_arrays(
     Ok(arrays)
 }
 
+/// Decode an NPZ and its named coordinate/signal interpretation.
+pub fn decode_npz(
+    bytes: &[u8],
+    limits: NpzReadLimits,
+    coordinate_names: &[&str],
+    format: &str,
+) -> Result<DecodedNumericDataset, NumpyReadError> {
+    let mut arrays = decode_npz_arrays(bytes, limits, format)?;
+    let coordinate_index = arrays
+        .iter()
+        .position(|(name, _)| {
+            coordinate_names
+                .iter()
+                .any(|candidate| name.eq_ignore_ascii_case(candidate))
+        })
+        .ok_or_else(|| {
+            read_error(
+                format,
+                NumpyReadFailure::MissingCoordinate {
+                    expected: stated_coordinate_names(coordinate_names),
+                },
+            )
+        })?;
+    let (coordinate_name, coordinate_array) = arrays.remove(coordinate_index);
+    if coordinate_array.is_complex() {
+        return Err(read_error(
+            format,
+            NumpyReadFailure::ComplexCoordinate {
+                name: coordinate_name,
+            },
+        ));
+    }
+    let coordinate = super::reader::npy_vector(&coordinate_array, format, &coordinate_name)?.0;
+    let mut signals = Vec::with_capacity(arrays.len());
+    for (name, array) in arrays {
+        let (real, imag) = super::reader::npy_vector(&array, format, &name)?;
+        signals.push(DecodedNumericSignal {
+            name,
+            real,
+            imag,
+            unit: None,
+        });
+    }
+    Ok(DecodedNumericDataset {
+        domain: crate::WaveformDomain::from_coordinate_name(&coordinate_name),
+        coordinate_name,
+        coordinate,
+        signals,
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{NamedArray, NpzReadLimits, decode_npz_arrays, encode_npz};
+    use super::{
+        NamedArray, NpzReadLimits, NumpyReadFailure, decode_npz, decode_npz_arrays, encode_npz,
+    };
     use crate::zip::deterministic_stored_zip;
 
     #[test]
@@ -236,14 +305,24 @@ mod tests {
             deterministic_stored_zip(&[("../time.npy", npy.as_slice())]).expect("ZIP fixture");
         let error =
             decode_npz_arrays(&unsafe_archive, limits, "numpy_npz").expect_err("unsafe member");
-        assert!(error.contains("unsafe archive member"));
+        assert!(
+            matches!(&error.reason, NumpyReadFailure::UnsafeMember(name) if name == "../time.npy")
+        );
+        assert_eq!(
+            error.to_string(),
+            "numpy_npz import: unsafe archive member '../time.npy'"
+        );
 
         let duplicate_archive =
             deterministic_stored_zip(&[("time.npy", npy.as_slice()), ("TIME.npy", npy.as_slice())])
                 .expect("ZIP fixture");
         let error = decode_npz_arrays(&duplicate_archive, limits, "numpy_npz")
             .expect_err("duplicate identity");
-        assert!(error.contains("archive repeats array identity"));
+        assert!(matches!(&error.reason, NumpyReadFailure::DuplicateArray(name) if name == "TIME"));
+        assert_eq!(
+            error.to_string(),
+            "numpy_npz import: archive repeats array identity 'TIME'"
+        );
 
         let small_limit = NpzReadLimits {
             max_expanded_bytes: npy.len() as u64 - 1,
@@ -251,6 +330,78 @@ mod tests {
         };
         let error = decode_npz_arrays(&duplicate_archive, small_limit, "numpy_npz")
             .expect_err("expanded limit");
-        assert!(error.contains("NPZ expanded-byte limit exceeded"));
+        assert!(
+            matches!(&error.reason, NumpyReadFailure::ExpandedByteLimit { expanded, limit, decoded: false } if *expanded == npy.len() as u64 && *limit == small_limit.max_expanded_bytes)
+        );
+        assert_eq!(
+            error.to_string(),
+            "numpy_npz import: NPZ expanded-byte limit exceeded"
+        );
+    }
+
+    #[test]
+    fn npz_coordinate_selection_preserves_member_order_and_complex_samples() {
+        let coordinate = crate::numpy::encode_real_array(&[2], &[0.0, 1.0]).unwrap();
+        let signal = crate::numpy::encode_complex_array(
+            &[2],
+            &[
+                num_complex::Complex64::new(1.0, -0.0),
+                num_complex::Complex64::new(2.0, 3.0),
+            ],
+        )
+        .unwrap();
+        let bytes = deterministic_stored_zip(&[
+            ("T.npy", &coordinate),
+            ("time.npy", &coordinate),
+            ("out.npy", &signal),
+        ])
+        .unwrap();
+        let limits = NpzReadLimits {
+            max_members: 3,
+            max_expanded_bytes: 4096,
+            max_numeric_values: 6,
+        };
+        let decoded = decode_npz(&bytes, limits, &["time", "t"], "numpy_npz").unwrap();
+        assert_eq!(decoded.coordinate_name, "T");
+        assert_eq!(decoded.domain, crate::WaveformDomain::Transient);
+        assert_eq!(decoded.coordinate, [0.0, 1.0]);
+        assert_eq!(
+            decoded
+                .signals
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>(),
+            ["time", "out"]
+        );
+        assert_eq!(decoded.signals[1].real, [1.0, 2.0]);
+        let imag = decoded.signals[1].imag.as_ref().unwrap();
+        assert_eq!(imag[0].to_bits(), (-0.0_f64).to_bits());
+        assert_eq!(imag[1], 3.0);
+        assert!(decoded.signals.iter().all(|s| s.unit.is_none()));
+
+        let complex_coordinate =
+            deterministic_stored_zip(&[("T.npy", &signal), ("out.npy", &coordinate)]).unwrap();
+        let error =
+            decode_npz(&complex_coordinate, limits, &["time", "t"], "numpy_npz").unwrap_err();
+        assert!(
+            matches!(&error.reason, NumpyReadFailure::ComplexCoordinate { name } if name == "T")
+        );
+        assert_eq!(
+            error.to_string(),
+            "numpy_npz import: NPZ coordinate array cannot be complex"
+        );
+    }
+
+    #[test]
+    fn malformed_npz_retains_the_zip_parser_cause() {
+        use std::error::Error as _;
+        let limits = NpzReadLimits {
+            max_members: 2,
+            max_expanded_bytes: 1024,
+            max_numeric_values: 2,
+        };
+        let error = decode_npz(b"invalid", limits, &["time", "t"], "numpy_npz").unwrap_err();
+        assert!(matches!(&error.reason, NumpyReadFailure::Archive(_)));
+        assert!(error.reason.source().unwrap().is::<zip::result::ZipError>());
     }
 }

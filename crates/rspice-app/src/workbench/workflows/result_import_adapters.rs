@@ -218,7 +218,7 @@ fn is_coordinate_name(name: &str) -> bool {
 /// [`RESULT_COORDINATE_NAMES`] as a refusal spells them, so the sentence a
 /// reader is shown cannot drift from the list the reader actually accepts.
 fn stated_coordinate_names() -> String {
-    rspice_formats::hdf5::stated_coordinate_names(&RESULT_COORDINATE_NAMES)
+    rspice_formats::numeric::stated_coordinate_names(&RESULT_COORDINATE_NAMES)
 }
 
 // -------------------------------------------------------------------------
@@ -314,72 +314,46 @@ pub(super) fn parse_npy(
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
     let array =
-        rspice_formats::numpy::reader::decode_npy(bytes, MAX_RESULT_VALUES, format.canonical_id())?;
-    let (coordinate, signals) = rspice_formats::numpy::reader::npy_matrix_to_dataset(
+        rspice_formats::numpy::reader::decode_npy(bytes, MAX_RESULT_VALUES, format.canonical_id())
+            .map_err(|error| error.to_string())?;
+    let decoded = rspice_formats::numpy::reader::npy_matrix_to_dataset(
         array,
         MAX_RESULT_ROWS,
         MAX_RESULT_COLUMNS,
         format.canonical_id(),
-    )?;
-    let signals = imported_signals(signals);
-    finish_dataset(format, AnalysisType::DcSweep, "sample", coordinate, signals)
+    )
+    .map_err(|error| error.to_string())?;
+    finish_numeric_dataset(format, decoded)
 }
 
 pub(super) fn parse_npz(
     bytes: &[u8],
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
-    let mut arrays = rspice_formats::numpy::archive::decode_npz_arrays(
+    let decoded = rspice_formats::numpy::archive::decode_npz(
         bytes,
         rspice_formats::numpy::archive::NpzReadLimits {
             max_members: MAX_ARCHIVE_MEMBERS,
             max_expanded_bytes: MAX_ARCHIVE_EXPANDED_BYTES,
             max_numeric_values: MAX_RESULT_VALUES,
         },
+        &RESULT_COORDINATE_NAMES,
         format.canonical_id(),
-    )?;
-    let coordinate_index = arrays
-        .iter()
-        .position(|(name, _)| is_coordinate_name(name))
-        .ok_or_else(|| {
-            adapter_error(
-                format,
-                format_args!(
-                    "NPZ requires one coordinate array named {}",
-                    stated_coordinate_names()
-                ),
-            )
-        })?;
-    let (coordinate_name, coordinate_array) = arrays.remove(coordinate_index);
-    if coordinate_array.is_complex() {
-        return Err(adapter_error(
-            format,
-            "NPZ coordinate array cannot be complex",
-        ));
-    }
-    let coordinate = rspice_formats::numpy::reader::npy_vector(
-        &coordinate_array,
-        format.canonical_id(),
-        &coordinate_name,
-    )?
-    .0;
-    let mut signals = Vec::with_capacity(arrays.len());
-    for (name, array) in arrays {
-        let (real, imag) =
-            rspice_formats::numpy::reader::npy_vector(&array, format.canonical_id(), &name)?;
-        signals.push(ImportedSignal {
-            name,
-            real,
-            imag,
-            unit: None,
-        });
-    }
+    )
+    .map_err(|error| error.to_string())?;
+    finish_numeric_dataset(format, decoded)
+}
+
+fn finish_numeric_dataset(
+    format: ResultImportFormat,
+    decoded: rspice_formats::numeric::DecodedNumericDataset,
+) -> Result<ParsedResultDataset, String> {
     finish_dataset(
         format,
-        analysis_from_coordinate(&coordinate_name),
-        coordinate_name,
-        coordinate,
-        signals,
+        imported_analysis_type(decoded.domain),
+        decoded.coordinate_name,
+        decoded.coordinate,
+        imported_signals(decoded.signals),
     )
 }
 

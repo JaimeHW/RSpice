@@ -1,6 +1,6 @@
 //! HDF5 and MATLAB 7.3 waveform byte decoding.
 
-use crate::numeric::DecodedNumericSignal;
+use crate::numeric::{DecodedNumericSignal, stated_coordinate_names};
 use std::collections::HashMap;
 
 /// A container/metadata failure or a bounded waveform decoding refusal.
@@ -598,13 +598,6 @@ fn select_coordinate_name<'a>(
         }
     }
     None
-}
-
-pub fn stated_coordinate_names(names: &[&str]) -> String {
-    let (last, rest) = names
-        .split_last()
-        .expect("the coordinate-name list is never empty");
-    format!("{}, or {last}", rest.join(", "))
 }
 
 fn ensure_table_value_limit(

@@ -11,6 +11,15 @@ pub struct DecodedNumericSignal {
     pub unit: Option<String>,
 }
 
+/// Decoded waveform fields before result validation and application admission.
+#[derive(Debug)]
+pub struct DecodedNumericDataset {
+    pub domain: crate::WaveformDomain,
+    pub coordinate_name: String,
+    pub coordinate: Vec<f64>,
+    pub signals: Vec<DecodedNumericSignal>,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum ComplexColumnError {
     DuplicateComponent(String),
@@ -143,6 +152,13 @@ pub fn combine_real_imag_columns(
         });
     }
     Ok(plain)
+}
+
+pub fn stated_coordinate_names(names: &[&str]) -> String {
+    let (last, rest) = names
+        .split_last()
+        .expect("the coordinate-name list is never empty");
+    format!("{}, or {last}", rest.join(", "))
 }
 
 #[cfg(test)]
