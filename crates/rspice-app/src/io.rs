@@ -44,4 +44,4 @@ pub use project_io::{show_open_project_dialog, show_save_project_dialog};
 #[cfg(not(target_arch = "wasm32"))]
 pub use schematic_io::{SchematicFile, show_open_dialog};
 
-pub use waveform_io::{SignalType, WaveformDataset, WaveformFormat, WaveformWriter};
+pub use waveform_io::{WaveformDataset, WaveformFormat, WaveformWriter};

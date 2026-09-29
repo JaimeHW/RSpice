@@ -1,5 +1,8 @@
 //! HDF5 and MATLAB 7.3 waveform byte decoding.
 
+#[cfg(feature = "result-hdf5")]
+pub mod result;
+
 use crate::numeric::{
     DecodedNumericDataset, DecodedNumericSignal, combine_real_imag_columns, stated_coordinate_names,
 };

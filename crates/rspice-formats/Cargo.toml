@@ -18,6 +18,8 @@ result-csv = ["dep:rspice-app-types", "dep:rspice-core", "dep:rspice-results", "
 result-digital = ["dep:rspice-core", "dep:rspice-results"]
 result-vcd = ["dep:rspice-core", "dep:rspice-results"]
 result-waveform = ["dep:rspice-results"]
+# Reuse the core HDF5 writer without widening the standalone HDF5 reader.
+result-hdf5 = ["hdf5", "result-waveform", "dep:rspice-core"]
 native-bundle = ["dep:serde_json", "dep:sha2"]
 monte-carlo-checkpoint = ["dep:rspice-results", "dep:serde_json"]
 columnar = ["dep:arrow-array", "dep:arrow-ipc", "dep:arrow-schema", "dep:bytes", "dep:parquet"]

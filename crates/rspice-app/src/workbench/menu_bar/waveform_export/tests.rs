@@ -2201,7 +2201,7 @@ fn a_display_label_change_does_not_move_an_exported_coordinate_id() {
             coordinate.signal_type,
             coordinate.signal_type.default_unit(),
         ),
-        ("frequency", crate::io::SignalType::Frequency, "Hz"),
+        ("frequency", rspice_formats::SignalType::Frequency, "Hz"),
         "a periodic transfer sweep exports a typed frequency coordinate, in hertz",
     );
     assert_ne!(

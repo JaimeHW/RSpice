@@ -269,7 +269,9 @@ pub fn axis_signal_for_analysis<W>(analysis: &AnalysisResult<W>) -> (&str, Signa
     axis_signal_for_analysis_type(analysis.analysis_type)
 }
 
-pub const fn axis_signal_for_analysis_type(analysis: AnalysisType) -> (&'static str, SignalType) {
+pub(crate) const fn axis_signal_for_analysis_type(
+    analysis: AnalysisType,
+) -> (&'static str, SignalType) {
     use AnalysisType as A;
     match analysis {
         A::Transient | A::TransientNoise | A::Pss | A::Envelope | A::Soa => {

@@ -2,9 +2,10 @@
 
 mod export;
 mod runtime_export;
+pub(crate) use export::axis_signal_for_analysis_type;
 pub use export::{
-    WaveformProjectionError, axis_signal_for_analysis, axis_signal_for_analysis_type,
-    complex_signal_type, project_waveforms, signal_type_from_waveform_name, validate_shared_x_axis,
+    WaveformProjectionError, axis_signal_for_analysis, complex_signal_type, project_waveforms,
+    signal_type_from_waveform_name, validate_shared_x_axis,
 };
 pub use runtime_export::project_sparameter_waveforms;
 

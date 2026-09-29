@@ -13,7 +13,7 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 use rspice_formats::table::csv_to_tsv;
 use rspice_formats::waveform_io::result::{
-    axis_signal_for_analysis, axis_signal_for_analysis_type, complex_signal_type,
+    axis_signal_for_analysis, complex_signal_type,
     project_waveforms as prepare_single_analysis_dataset, signal_type_from_waveform_name,
     validate_shared_x_axis,
 };
