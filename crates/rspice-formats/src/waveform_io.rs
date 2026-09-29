@@ -15,6 +15,8 @@ use std::collections::HashMap;
 
 const MAX_TOUCHSTONE_PORTS: usize = 64;
 
+#[cfg(feature = "result-waveform")]
+pub mod result;
 mod touchstone_noise;
 mod touchstone_reader;
 mod types;

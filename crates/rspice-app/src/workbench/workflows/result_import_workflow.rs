@@ -13,7 +13,6 @@ use crate::state::{
 use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::{ResultImportDialogState, ResultImportStage};
-use std::collections::BTreeMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Read as _;
 use std::path::Path;
@@ -21,8 +20,6 @@ use std::sync::Arc;
 
 #[path = "result_import_adapters.rs"]
 mod adapters;
-
-type ComplexComponentColumns<T = Vec<f64>> = (Option<T>, Option<T>);
 
 pub(crate) const RESULT_DATASET_FILTER: (&str, &[&str]) = (
     "Result dataset",
@@ -1039,149 +1036,20 @@ fn parse_touchstone_result_dataset(
     bytes: &[u8],
     identified_format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
-    let dataset = crate::io::waveform_io::read_touchstone_bytes(source_name, bytes)
-        .map_err(|error| error.to_string())?;
-    let version = dataset
-        .metadata
-        .get("touchstone_version")
-        .and_then(|value| value.parse::<u32>().ok())
-        .ok_or_else(|| "Touchstone adapter did not return a version identity".to_owned())?;
-    let parsed_format = if version >= 2 {
-        ResultImportFormat::TouchstoneV2
-    } else {
-        ResultImportFormat::TouchstoneV1
-    };
-    if identified_format != parsed_format {
-        return Err(format!(
-            "the source was identified as '{}' but declares '{}'; refusing an ambiguous import",
-            identified_format.canonical_id(),
-            parsed_format.canonical_id()
-        ));
-    }
-    let x = dataset
-        .x_signal
-        .as_ref()
-        .ok_or_else(|| "Touchstone source has no frequency axis".to_owned())?;
-    let coordinate = Arc::new(x.data.clone());
-    let mut components: BTreeMap<String, ComplexComponentColumns<crate::io::WaveformSignal>> =
-        BTreeMap::new();
-    let mut waveforms = Vec::new();
-    for signal in dataset.signals {
-        if matches!(signal.name.as_str(), "Fmin" | "Rn") {
-            let axis = signal
-                .x_values
-                .map(Arc::new)
-                .unwrap_or_else(|| Arc::clone(&coordinate));
-            if signal.data.len() != axis.len() {
-                return Err(format!(
-                    "Touchstone noise parameter {} does not match its frequency grid",
-                    signal.name
-                ));
-            }
-            let mut waveform =
-                WaveformData::new(signal.name, axis, signal.data, trace_color(waveforms.len()));
-            waveform.unit = Some(signal.unit);
-            waveforms.push(waveform);
-            continue;
-        }
-        let (base, imaginary) = if let Some(base) = signal.name.strip_suffix("_RE") {
-            (base, false)
-        } else if let Some(base) = signal.name.strip_suffix("_IM") {
-            (base, true)
-        } else {
-            return Err(format!(
-                "Touchstone adapter returned an untyped component '{}'",
-                signal.name
-            ));
-        };
-        let base = base.to_owned();
-        let entry = components.entry(base.clone()).or_default();
-        let slot = if imaginary {
-            &mut entry.1
-        } else {
-            &mut entry.0
-        };
-        if slot.replace(signal).is_some() {
-            return Err(format!("Touchstone source repeats component '{base}'"));
-        }
-    }
-    for (name, (real, imaginary)) in components {
-        let real = real.ok_or_else(|| format!("Touchstone source is missing {name}_RE"))?;
-        let imaginary =
-            imaginary.ok_or_else(|| format!("Touchstone source is missing {name}_IM"))?;
-        let axis = real
-            .x_values
-            .map(Arc::new)
-            .unwrap_or_else(|| Arc::clone(&coordinate));
-        let imaginary_axis = imaginary.x_values.as_deref().unwrap_or(&coordinate);
-        if real.data.len() != axis.len()
-            || imaginary.data.len() != axis.len()
-            || imaginary_axis != axis.as_slice()
-        {
-            return Err(format!(
-                "Touchstone parameter {name} does not match the frequency grid"
-            ));
-        }
-        let real = real.data;
-        let imaginary = imaginary.data;
-        let magnitude = real
-            .iter()
-            .zip(&imaginary)
-            .map(|(real, imaginary)| real.hypot(*imaginary))
-            .collect::<Vec<_>>();
-        waveforms.push(
-            WaveformData::new(
-                format!("|{name}|"),
-                axis,
-                magnitude,
-                trace_color(waveforms.len()),
-            )
-            .with_complex_components(name, real, imaginary)
-            .with_unit("1"),
-        );
-    }
-    let reference_impedances_ohm = dataset
-        .metadata
-        .get("z0_ports")
-        .ok_or_else(|| "Touchstone source has no reference-impedance metadata".to_owned())?
-        .split(',')
-        .map(|value| {
-            value
-                .parse::<f64>()
-                .map_err(|_| "Touchstone adapter returned invalid impedance metadata".to_owned())
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let family_metadata = AnalysisResultFamilyMetadata::SParameter {
-        noise_reference_temperature_kelvin: dataset
-            .metadata
-            .get("noise_reference_temperature_kelvin")
-            .map(|value| {
-                value
-                    .parse::<f64>()
-                    .map_err(|_| "Invalid Touchstone noise reference temperature".to_owned())
-            })
-            .transpose()?,
-        reference_impedances_ohm,
-    };
-    family_metadata.validate_for(AnalysisType::SParameter)?;
-    Ok(ParsedResultDataset {
-        source_format: parsed_format,
-        analysis_type: AnalysisType::SParameter,
-        coordinate_name: "frequency".to_owned(),
-        sample_count: coordinate.len(),
-        waveforms,
-        family_metadata: Some(family_metadata),
-        delimiter: 0,
-        notes: if dataset
-            .metadata
-            .contains_key("noise_reference_temperature_kelvin")
-        {
-            vec!["Noise parameters use the conventional 290 K source reference. This does not establish the device temperature. The independently sampled noise sweep is retained without interpolation.".into()]
-        } else {
-            Vec::new()
-        },
-        event_payload: None,
-    })
+    let decoded = rspice_formats::waveform_io::result::decode_touchstone(
+        source_name,
+        bytes,
+        identified_format,
+    )
+    .map_err(|error| error.to_string())?;
+    let mut parsed = adapters::present_imported_waveforms(
+        decoded.source_format,
+        AnalysisType::SParameter,
+        decoded.data,
+    );
+    parsed.family_metadata = Some(decoded.family_metadata);
+    parsed.notes = decoded.notes;
+    Ok(parsed)
 }
 
 fn infer_delimiter(source_name: &str, text: &str) -> Result<u8, String> {

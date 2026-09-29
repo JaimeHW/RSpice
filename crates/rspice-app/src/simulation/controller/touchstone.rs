@@ -376,8 +376,7 @@ mod tests {
             .write_text(&dataset)
             .unwrap();
         assert!(text.contains("[Number of Noise Frequencies] 2"));
-        let imported =
-            crate::io::waveform_io::read_touchstone_bytes("noise.ts", text.as_bytes()).unwrap();
+        let imported = rspice_formats::read_touchstone_bytes("noise.ts", text.as_bytes()).unwrap();
         assert_eq!(imported.metadata["z0_ports"], "75,100");
         assert_eq!(imported.get_signal("Rn").unwrap().data, [30.0; 2]);
         assert!((imported.get_signal("Fmin").unwrap().data[0] - 3.0).abs() < 1e-14);

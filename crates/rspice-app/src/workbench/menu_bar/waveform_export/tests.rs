@@ -1417,8 +1417,7 @@ fn touchstone_noise_retained_export_preserves_independent_grid() {
     let text = crate::io::WaveformWriter::new(crate::io::WaveformFormat::Touchstone)
         .write_text(&dataset)
         .unwrap();
-    let restored =
-        crate::io::waveform_io::read_touchstone_bytes("noise.ts", text.as_bytes()).unwrap();
+    let restored = rspice_formats::read_touchstone_bytes("noise.ts", text.as_bytes()).unwrap();
     assert_eq!(
         restored.get_signal("Rn").unwrap().x_values.as_deref(),
         Some([2e6].as_slice())

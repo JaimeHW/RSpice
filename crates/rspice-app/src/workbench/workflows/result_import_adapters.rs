@@ -44,7 +44,7 @@ fn finish_dataset(
     Ok(present_imported_waveforms(format, analysis_type, imported))
 }
 
-fn present_imported_waveforms(
+pub(super) fn present_imported_waveforms(
     format: ResultImportFormat,
     analysis_type: AnalysisType,
     imported: rspice_results::result_import::waveforms::ImportedWaveforms,
