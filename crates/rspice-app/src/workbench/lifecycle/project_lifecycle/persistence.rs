@@ -22,10 +22,11 @@ pub(crate) use rspice_project::persistence::{BrowserBindingReceipt, NativeBindin
 #[cfg(target_arch = "wasm32")]
 use rspice_project::persistence::browser::{
     BROWSER_BINDING_SCHEMA_VERSION, BrowserBinding, BrowserBindingCommitOutcome,
-    BrowserBindingMetadata, BrowserRestoreCandidate, BrowserRestoreIssue,
-    BrowserRestoreMetadataError, BrowserWriteIntent, MAX_EXACT_BROWSER_GENERATION,
-    browser_backend_from_name, browser_backend_name, browser_generation_is_exact,
-    classify_browser_binding_commit, validate_binding_generation_commit,
+    BrowserBindingMetadata, BrowserProjectStorage, BrowserRestoreCandidate, BrowserRestoreIssue,
+    BrowserRestoreMetadataError, BrowserWriteError, BrowserWriteIntent,
+    MAX_EXACT_BROWSER_GENERATION, browser_backend_from_name, browser_backend_name,
+    browser_generation_is_exact, classify_browser_binding_commit,
+    validate_binding_generation_commit,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -90,7 +91,7 @@ pub(crate) enum BrowserWriteResult {
     ExternalChange {
         observed_digest: ContentDigest,
     },
-    Failed(String),
+    Failed(BrowserWriteError),
 }
 
 #[cfg(target_arch = "wasm32")]

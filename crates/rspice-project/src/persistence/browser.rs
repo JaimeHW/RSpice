@@ -7,6 +7,9 @@ use rspice_app_types::product::ContentDigest;
 mod load;
 pub use load::{BrowserRestoreCandidate, BrowserRestoreIssue, BrowserRestoreMetadataError};
 
+mod write;
+pub use write::{BrowserProjectStorage, BrowserWriteError, BrowserWriteOperation};
+
 pub const BROWSER_BINDING_SCHEMA_VERSION: u32 = 2;
 pub const MAX_EXACT_BROWSER_GENERATION: u64 = (1_u64 << 53) - 1;
 

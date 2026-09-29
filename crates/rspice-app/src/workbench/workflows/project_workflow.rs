@@ -579,7 +579,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                 SaveContinuationEvent::Conflict(transaction)
             }
             crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult::Failed(error) => {
-                SaveContinuationEvent::Failed(transaction, error.clone())
+                SaveContinuationEvent::Failed(transaction, error.to_string())
             }
         };
         match &completion.result {
@@ -759,7 +759,10 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                 "Browser project save failed: {error}"
             )));
             if !project_copy {
-                continuation = Some(SaveContinuationEvent::Failed(transaction, error));
+                continuation = Some(SaveContinuationEvent::Failed(
+                    transaction,
+                    error.to_string(),
+                ));
             }
         }
     }

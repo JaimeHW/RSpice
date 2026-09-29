@@ -93,10 +93,10 @@ pub(super) async fn run_browser_write(
                 Err(error) if js_error_name(&error) == Some("AbortError") => {
                     return BrowserWriteResult::Cancelled;
                 }
-                Err(error) => return BrowserWriteResult::Failed(js_error(error)),
+                Err(error) => return BrowserWriteResult::Failed(js_error(error).into()),
             };
             if let Err(error) = validate_browser_write_handle(&handle, true) {
-                return BrowserWriteResult::Failed(error);
+                return BrowserWriteResult::Failed(error.into());
             }
             let handle_id = register_browser_handle(handle.clone());
             let mut target = target;
@@ -106,10 +106,10 @@ pub(super) async fn run_browser_write(
         BrowserWriteStart::Opfs { target } => {
             let handle = match open_opfs_binding_handle(target.intent.binding_id, true).await {
                 Ok(handle) => handle,
-                Err(error) => return BrowserWriteResult::Failed(error),
+                Err(error) => return BrowserWriteResult::Failed(error.into()),
             };
             if let Err(error) = validate_browser_write_handle(&handle, false) {
-                return BrowserWriteResult::Failed(error);
+                return BrowserWriteResult::Failed(error.into());
             }
             let handle_id = register_browser_handle(handle.clone());
             let mut target = target;
@@ -129,7 +129,7 @@ pub(super) async fn run_browser_write(
             if newly_registered {
                 release_browser_handle(target.handle_id.expect("registered browser handle"));
             }
-            return BrowserWriteResult::Failed(error);
+            return BrowserWriteResult::Failed(error.into());
         }
     };
     let result = run_browser_write_locked(
@@ -172,12 +172,12 @@ pub(super) async fn run_browser_write_locked(
             &[permission_options(BrowserPermissionMode::ReadWrite)],
         ) {
             Ok(permission) => permission,
-            Err(error) => return BrowserWriteResult::Failed(error),
+            Err(error) => return BrowserWriteResult::Failed(error.into()),
         };
         if let Err(error) =
             ensure_browser_permission(permission, BrowserPermissionMode::ReadWrite).await
         {
-            return BrowserWriteResult::Failed(error);
+            return BrowserWriteResult::Failed(error.into());
         }
     }
     if persist_binding
@@ -193,62 +193,27 @@ pub(super) async fn run_browser_write_locked(
         let observed_digest = match read_browser_handle_bytes(handle).await {
             Ok(current) => digest_bytes(&current),
             Err(read_error) => {
-                return BrowserWriteResult::Failed(format!(
-                    "{error}; current canonical bytes could not be inspected: {read_error}"
-                ));
+                return BrowserWriteResult::Failed(
+                    format!(
+                        "{error}; current canonical bytes could not be inspected: {read_error}"
+                    )
+                    .into(),
+                );
             }
         };
         return BrowserWriteResult::ExternalChange { observed_digest };
     }
-    let expected_before_commit = match read_browser_handle_bytes(handle).await {
-        Ok(current) => {
-            let observed = digest_bytes(&current);
-            if target
-                .intent
-                .expected_digest
-                .is_some_and(|expected| expected != observed)
-            {
-                return BrowserWriteResult::ExternalChange {
-                    observed_digest: observed,
-                };
-            }
-            // Even a newly picker-selected destination gets a byte receipt
-            // after overwrite confirmation. The staged writable checks this
-            // again immediately before close, preventing a late external edit
-            // from being clobbered.
-            observed
+    let staged_digest = match target
+        .intent
+        .publish_bytes(&BrowserStorage(handle), bytes)
+        .await
+    {
+        Ok(digest) => digest,
+        Err(BrowserWriteError::ExternalChange(observed_digest)) => {
+            return BrowserWriteResult::ExternalChange { observed_digest };
         }
         Err(error) => return BrowserWriteResult::Failed(error),
     };
-    match write_browser_handle_bytes(
-        handle,
-        bytes,
-        Some(expected_before_commit),
-        target.intent.backend,
-    )
-    .await
-    {
-        Ok(()) => {}
-        Err(BrowserWriteFailure::ExternalChange(observed_digest)) => {
-            return BrowserWriteResult::ExternalChange { observed_digest };
-        }
-        Err(BrowserWriteFailure::Failed(error)) => return BrowserWriteResult::Failed(error),
-    }
-    let verified = match read_browser_handle_bytes(handle).await {
-        Ok(verified) => verified,
-        Err(error) => {
-            return BrowserWriteResult::Failed(format!(
-                "browser write completed, but read-back verification failed: {error}"
-            ));
-        }
-    };
-    let staged_digest = digest_bytes(bytes);
-    if digest_bytes(&verified) != staged_digest {
-        return BrowserWriteResult::Failed(
-            "browser write completed, but read-back bytes do not match the staged project"
-                .to_owned(),
-        );
-    }
     let display_name = display_name_override.map(str::to_owned).unwrap_or_else(|| {
         js_sys::Reflect::get(handle, &wasm_bindgen::JsValue::from_str("name"))
             .ok()
@@ -358,122 +323,63 @@ pub(super) async fn read_browser_handle_bytes(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) async fn write_browser_handle_bytes(
-    handle: &wasm_bindgen::JsValue,
-    bytes: &[u8],
-    expected_before_commit: Option<ContentDigest>,
-    backend: BrowserBindingBackend,
-) -> Result<(), BrowserWriteFailure> {
-    let exclusive_options = js_sys::Object::new();
-    set_js_field(
-        &exclusive_options,
-        "mode",
-        &wasm_bindgen::JsValue::from_str("exclusive"),
-    )
-    .map_err(BrowserWriteFailure::Failed)?;
-    let arguments = if backend == BrowserBindingBackend::ExternalFile {
-        vec![exclusive_options.into()]
-    } else {
-        Vec::new()
-    };
-    let writable = call_promise_method(handle, "createWritable", &arguments)
-        .map_err(BrowserWriteFailure::Failed)?;
-    let writable = await_browser_promise(writable, "browser writable creation")
-        .await
-        .map_err(|error| {
-            if backend == BrowserBindingBackend::ExternalFile {
-                format!("exclusive canonical-file access is unavailable: {error}")
-            } else {
-                error
-            }
-        })
-        .map_err(BrowserWriteFailure::Failed)?;
-    let array = js_sys::Uint8Array::from(bytes);
-    let write = match call_promise_method(&writable, "write", &[array.into()]) {
-        Ok(write) => await_browser_promise(write, "browser staged file write").await,
-        Err(error) => {
-            let abort = abort_browser_writable(&writable).await;
-            return Err(BrowserWriteFailure::Failed(
-                format_browser_writable_failure("write", error, abort),
-            ));
-        }
-    };
-    if let Err(error) = write {
-        let abort = abort_browser_writable(&writable).await;
-        return Err(BrowserWriteFailure::Failed(
-            format_browser_writable_failure("write", error, abort),
-        ));
-    }
-    if let Some(expected) = expected_before_commit {
-        match read_browser_handle_bytes(handle).await {
-            Ok(current) if digest_bytes(&current) == expected => {}
-            Ok(current) => {
-                return match abort_browser_writable(&writable).await {
-                    Ok(()) => Err(BrowserWriteFailure::ExternalChange(digest_bytes(&current))),
-                    Err(abort_error) => Err(BrowserWriteFailure::Failed(format!(
-                        "canonical browser project changed while staged bytes were pending, and staging abort failed: {abort_error}"
-                    ))),
-                };
-            }
-            Err(error) => {
-                let abort = abort_browser_writable(&writable).await;
-                return Err(BrowserWriteFailure::Failed(
-                    format_browser_writable_failure("pre-commit verification", error, abort),
-                ));
-            }
-        }
-    }
-    let close = match call_promise_method(&writable, "close", &[]) {
-        Ok(close) => await_browser_promise(close, "browser staged file publication").await,
-        Err(error) => {
-            let abort = abort_browser_writable(&writable).await;
-            return Err(BrowserWriteFailure::Failed(
-                format_browser_writable_failure(
-                    "close",
-                    format!("{error}; publication outcome is uncertain"),
-                    abort,
-                ),
-            ));
-        }
-    };
-    if let Err(error) = close {
-        let abort = abort_browser_writable(&writable).await;
-        return Err(BrowserWriteFailure::Failed(
-            format_browser_writable_failure(
-                "close",
-                format!("{error}; publication outcome is uncertain"),
-                abort,
-            ),
-        ));
-    }
-    Ok(())
-}
+struct BrowserStorage<'a>(&'a wasm_bindgen::JsValue);
 
 #[cfg(target_arch = "wasm32")]
-pub(super) enum BrowserWriteFailure {
-    ExternalChange(ContentDigest),
-    Failed(String),
-}
+impl BrowserProjectStorage for BrowserStorage<'_> {
+    type Writable = wasm_bindgen::JsValue;
 
-#[cfg(target_arch = "wasm32")]
-pub(super) async fn abort_browser_writable(writable: &wasm_bindgen::JsValue) -> Result<(), String> {
-    let abort = call_promise_method(writable, "abort", &[])?;
-    await_browser_promise(abort, "browser staged file abort")
-        .await
-        .map(|_| ())
-}
+    async fn create_writable(
+        &self,
+        backend: BrowserBindingBackend,
+    ) -> Result<Self::Writable, String> {
+        let exclusive_options = js_sys::Object::new();
+        set_js_field(
+            &exclusive_options,
+            "mode",
+            &wasm_bindgen::JsValue::from_str("exclusive"),
+        )?;
+        let arguments = if backend == BrowserBindingBackend::ExternalFile {
+            vec![exclusive_options.into()]
+        } else {
+            Vec::new()
+        };
+        let writable = call_promise_method(self.0, "createWritable", &arguments)?;
+        await_browser_promise(writable, "browser writable creation")
+            .await
+            .map_err(|error| {
+                if backend == BrowserBindingBackend::ExternalFile {
+                    format!("exclusive canonical-file access is unavailable: {error}")
+                } else {
+                    error
+                }
+            })
+    }
 
-#[cfg(target_arch = "wasm32")]
-pub(super) fn format_browser_writable_failure(
-    operation: &str,
-    error: String,
-    abort: Result<(), String>,
-) -> String {
-    match abort {
-        Ok(()) => format!("browser project {operation} failed and staging was aborted: {error}"),
-        Err(abort_error) => format!(
-            "browser project {operation} failed: {error}; staging abort also failed: {abort_error}"
-        ),
+    async fn write(&self, writable: &Self::Writable, bytes: &[u8]) -> Result<(), String> {
+        let array = js_sys::Uint8Array::from(bytes);
+        let write = call_promise_method(writable, "write", &[array.into()])?;
+        await_browser_promise(write, "browser staged file write")
+            .await
+            .map(|_| ())
+    }
+
+    async fn read(&self) -> Result<Vec<u8>, String> {
+        read_browser_handle_bytes(self.0).await
+    }
+
+    async fn abort(&self, writable: &Self::Writable) -> Result<(), String> {
+        let abort = call_promise_method(writable, "abort", &[])?;
+        await_browser_promise(abort, "browser staged file abort")
+            .await
+            .map(|_| ())
+    }
+
+    async fn close(&self, writable: &Self::Writable) -> Result<(), String> {
+        let close = call_promise_method(writable, "close", &[])?;
+        await_browser_promise(close, "browser staged file publication")
+            .await
+            .map(|_| ())
     }
 }
 
