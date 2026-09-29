@@ -26,7 +26,7 @@
 //! stops the import rather than being dropped from it, because the one thing
 //! this must never do is land something other than what was on screen.
 
-use csv::{ReaderBuilder, StringRecord, Trim};
+use rspice_formats::csv_sheet::{CsvSheet, CsvSheetError, decode_csv_sheet};
 
 use egui::Ui;
 
@@ -242,57 +242,26 @@ const SCOPE_LABELS: [&str; 4] = [
     "Selected analysis only",
 ];
 
-/// Read a sheet into its header cells and its data rows, without judging any of
-/// them.
-///
-/// The split matters: the dialog binds columns *after* the file is read, so
-/// reading cannot depend on the binding. Only the table's own shape is refused
-/// here — bad CSV, or more than one import may carry.
-/// One numbered data row: the sheet line it came from, and its cells.
-///
-/// Named because the line number travels with the row all the way to a
-/// refusal — a defect reported against "row 4" of a file whose header is on
-/// line 2 sends the reader to the wrong place.
-type SheetRow = (u64, Vec<String>);
-
-fn read_sheet(source: &str) -> Result<(Vec<String>, Vec<SheetRow>), VariableImportRefusal> {
-    if source.len() > MAX_IMPORT_BYTES {
-        return Err(schema(
-            0,
-            format!("the spec sheet exceeds the {MAX_IMPORT_BYTES} byte import limit"),
-        ));
-    }
-    let source = source.strip_prefix('\u{feff}').unwrap_or(source);
-    let mut reader = ReaderBuilder::new()
-        .trim(Trim::All)
-        .flexible(false)
-        .from_reader(source.as_bytes());
-    let headers = reader
-        .headers()
-        .map_err(malformed_csv)?
-        .iter()
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-
-    let mut cells = Vec::new();
-    for record in reader.records() {
-        if cells.len() >= MAX_IMPORT_ROWS {
-            return Err(schema(
-                0,
-                format!("the spec sheet exceeds the {MAX_IMPORT_ROWS} row import limit"),
-            ));
-        }
-        let record = record.map_err(malformed_csv)?;
-        let line = record.position().map_or(0, csv::Position::line);
-        cells.push((line, record.iter().map(str::to_owned).collect()));
-    }
-    if cells.is_empty() {
-        return Err(schema(
-            1,
-            "the spec sheet names its columns but holds no variables".to_owned(),
-        ));
-    }
-    Ok((headers, cells))
+/// Decode the bounded CSV shape, retaining the import's existing refusal vocabulary.
+fn read_sheet(source: &str) -> Result<CsvSheet, VariableImportRefusal> {
+    decode_csv_sheet(source, MAX_IMPORT_BYTES, MAX_IMPORT_ROWS).map_err(|error| {
+        let line = error.line();
+        let detail = match error {
+            CsvSheetError::ByteLimit { limit, .. } => {
+                format!("the spec sheet exceeds the {limit} byte import limit")
+            }
+            CsvSheetError::RowLimit { limit } => {
+                format!("the spec sheet exceeds the {limit} row import limit")
+            }
+            CsvSheetError::Empty => {
+                "the spec sheet names its columns but holds no variables".to_owned()
+            }
+            CsvSheetError::Csv(source) => {
+                format!("the spec sheet is not valid CSV \u{00b7} {source}")
+            }
+        };
+        schema(line, detail)
+    })
 }
 
 /// Bind each declared column to the sheet field whose header names it.
@@ -337,10 +306,13 @@ pub(super) fn import_draft_for_sheet(
     file_name: &str,
     source: &str,
 ) -> DesignVariableImportDraft {
-    match read_sheet(source).and_then(|(headers, cells)| {
-        let binding = auto_binding(&headers)?;
+    match read_sheet(source).and_then(|sheet| {
+        let binding = auto_binding(&sheet.headers)?;
         Ok(DesignVariableImportDraft::new(
-            file_name, headers, cells, binding,
+            file_name,
+            sheet.headers,
+            sheet.rows,
+            binding,
         ))
     }) {
         Ok(mut draft) => {
@@ -397,8 +369,7 @@ fn resolve_rows(app: &RSpiceApp, plan_id: SimulationPlanId, draft: &mut DesignVa
 
     let mut rows = Vec::with_capacity(draft.cells.len());
     for (line, cells) in &draft.cells {
-        let record = StringRecord::from(cells.clone());
-        let resolved = draft_from_row(&record, &binding).map(|mut row_draft| {
+        let resolved = draft_from_row(cells, &binding).map(|mut row_draft| {
             if draft.override_scope {
                 row_draft.scope = draft.scope;
             }
@@ -931,13 +902,6 @@ fn commit_selected_rows(
     Ok(detail)
 }
 
-fn malformed_csv(error: csv::Error) -> VariableImportRefusal {
-    schema(
-        error.position().map_or(0, csv::Position::line),
-        format!("the spec sheet is not valid CSV \u{00b7} {error}"),
-    )
-}
-
 /// Header names are matched on their letters and digits alone, so `Sweep role`,
 /// `sweep_role` and `SweepRole` all bind the same column.
 fn same_column(column: &str, header: &str) -> bool {
@@ -951,12 +915,13 @@ fn same_column(column: &str, header: &str) -> bool {
 }
 
 fn draft_from_row(
-    row: &StringRecord,
+    row: &[String],
     columns: &[Option<usize>; COLUMNS.len()],
 ) -> Result<DesignVariableDraft, VariableImportRefusal> {
     let cell = |column: usize| {
         columns[column]
             .and_then(|field| row.get(field))
+            .map(String::as_str)
             .unwrap_or_default()
             .trim()
     };

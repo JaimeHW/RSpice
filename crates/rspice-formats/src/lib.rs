@@ -2,6 +2,7 @@
 
 #[cfg(feature = "columnar")]
 pub mod columnar;
+pub mod csv_sheet;
 pub mod delimited;
 #[cfg(feature = "result-digital")]
 pub mod digital;
