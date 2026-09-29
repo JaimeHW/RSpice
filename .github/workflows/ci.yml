@@ -70,6 +70,15 @@ jobs:
           cargo test --locked -p rspice-formats --no-default-features --features result-digital --lib
           cargo test --locked -p rspice-formats --no-default-features --features result-digital,fst --lib
           cargo test --locked -p rspice-formats --no-default-features --features monte-carlo-checkpoint --lib
+          cargo test --locked -p rspice-formats --no-default-features --features result-waveform --lib
+          cargo test --locked -p rspice-formats --no-default-features --features result-hdf5 --lib
+          cargo test --locked -p rspice-formats --no-default-features --features native-bundle,result-waveform --lib
+          cargo test --locked -p rspice-formats --no-default-features --features result-waveform,fst --lib
+          cargo test --locked -p rspice-formats --no-default-features --features columnar --lib
+          cargo test --locked -p rspice-formats --no-default-features --features fst --lib
+          cargo test --locked -p rspice-formats --no-default-features --features hdf5 --lib
+          cargo test --locked -p rspice-formats --no-default-features --features spice-raw --lib
+          cargo test --locked -p rspice-formats --no-default-features --features xlsx --lib
           cargo test --locked -p rspice-app-types -p rspice-results -p rspice-hardcopy-contract -p rspice-model-library -p rspice-formats -p rspice-simulation-contract -p rspice-simulation -p rspice-design -p rspice-project --lib
       - name: UI incremental build identity regressions
         run: python3 tools/ci/test_ui_build_identity.py
@@ -618,6 +627,14 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --locked -p rspice-app --bin rspice-ui-worker --features browser-worker --target wasm32-unknown-unknown
+      - name: Check standalone engineering formats
+        run: |
+          for features in "" table-schema native-bundle result-csv result-vcd result-digital \
+            result-digital,fst monte-carlo-checkpoint result-waveform result-hdf5 \
+            native-bundle,result-waveform result-waveform,fst columnar fst hdf5 spice-raw xlsx; do
+            cargo check --locked -p rspice-formats --no-default-features --features "$features" \
+              --lib --tests --target wasm32-unknown-unknown
+          done
       - name: Check rspice-publication-contract
         env:
           RUSTFLAGS: -D warnings
