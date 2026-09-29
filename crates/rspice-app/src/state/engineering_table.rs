@@ -250,6 +250,7 @@ pub fn delimited_text_selected(
         include_headers,
         include_units,
     )
+    .map_err(|error| error.to_string())
 }
 
 pub fn schema_json(
@@ -280,6 +281,7 @@ pub fn schema_json(
         },
         include_metadata,
     )
+    .map_err(|error| error.to_string())
 }
 
 pub fn xlsx_bytes(
@@ -336,6 +338,7 @@ pub fn xlsx_bytes(
             metadata,
         },
     )
+    .map_err(|error| error.to_string())
 }
 
 struct ProjectionSource<'a>(&'a EngineeringProjection);

@@ -33,7 +33,7 @@ pub fn encode_table_schema<'a>(
         impl Serialize,
     >,
     include_metadata: bool,
-) -> Result<String, String> {
+) -> Result<String, serde_json::Error> {
     let mut schema = serde_json::json!({
         "schema": 1,
         "grid_id": grid_id,
@@ -58,11 +58,14 @@ pub fn encode_table_schema<'a>(
     schema["filter_grammar"] = optional_metadata(&view.filter_grammar, include_metadata)?;
     schema["virtualization"] = optional_metadata(&view.virtualization, include_metadata)?;
     schema["frozen_identifiers"] = optional_metadata(&view.frozen_identifiers, include_metadata)?;
-    serde_json::to_string_pretty(&schema).map_err(|error| error.to_string())
+    serde_json::to_string_pretty(&schema)
 }
 
-fn optional_metadata(value: &impl Serialize, include: bool) -> Result<serde_json::Value, String> {
-    serde_json::to_value(include.then_some(value)).map_err(|error| error.to_string())
+fn optional_metadata(
+    value: &impl Serialize,
+    include: bool,
+) -> Result<serde_json::Value, serde_json::Error> {
+    serde_json::to_value(include.then_some(value))
 }
 
 #[cfg(test)]
@@ -109,6 +112,8 @@ mod tests {
                 "{key}"
             );
         }
-        assert_eq!(encode(true).unwrap_err(), "view metadata refused");
+        let error = encode(true).unwrap_err();
+        assert_eq!(error.classify(), serde_json::error::Category::Data);
+        assert_eq!(error.to_string(), "view metadata refused");
     }
 }

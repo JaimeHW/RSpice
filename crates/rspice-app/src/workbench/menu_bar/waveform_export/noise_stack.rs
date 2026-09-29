@@ -30,9 +30,11 @@ pub(super) fn prepare(
             .ok_or("Noise spectrum cannot be exported")?
             .contents
         };
-        merger.push(analysis.id.to_string(), &analysis.label, &contents)?;
+        merger
+            .push(analysis.id.to_string(), &analysis.label, &contents)
+            .map_err(|error| error.to_string())?;
     }
-    let (contents, count) = merger.finish()?;
+    let (contents, count) = merger.finish().map_err(|error| error.to_string())?;
     Ok(PreparedTypedResultCsv {
         default_name: "rspice-noise-results.csv",
         contents,

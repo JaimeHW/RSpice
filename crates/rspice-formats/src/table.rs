@@ -12,13 +12,71 @@ pub trait EngineeringTableSource {
     fn display_value(&self, row: usize, column: usize) -> Option<&str>;
 }
 
+/// Preserve CSV diagnostics, finalization failures, and invalid encoded text.
+#[derive(Debug)]
+pub enum DelimitedTableError {
+    Csv(csv::Error),
+    Finalize(std::io::Error),
+    Utf8(std::string::FromUtf8Error),
+}
+
+impl std::fmt::Display for DelimitedTableError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Csv(source) => source.fmt(f),
+            Self::Finalize(source) => source.fmt(f),
+            Self::Utf8(source) => source.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for DelimitedTableError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(match self {
+            Self::Csv(source) => source,
+            Self::Finalize(source) => source,
+            Self::Utf8(source) => source,
+        })
+    }
+}
+
+/// The failed stage of a CSV-to-TSV conversion with its original cause.
+#[derive(Debug)]
+pub enum TsvConversionError {
+    Read(csv::Error),
+    Write(csv::Error),
+    Finalize(std::io::Error),
+    Utf8(std::string::FromUtf8Error),
+}
+
+impl std::fmt::Display for TsvConversionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Read(source) => write!(f, "could not parse staged CSV rows: {source}"),
+            Self::Write(source) => write!(f, "could not encode TSV row: {source}"),
+            Self::Finalize(source) => write!(f, "could not finish TSV encoding: {source}"),
+            Self::Utf8(source) => write!(f, "TSV encoder returned invalid UTF-8: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for TsvConversionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(match self {
+            Self::Read(source) | Self::Write(source) => source,
+            Self::Finalize(source) => source,
+            Self::Utf8(source) => source,
+        })
+    }
+}
+
 /// Encode an already-selected engineering table as CSV or TSV text.
 pub fn encode_delimited_table(
     source: &impl EngineeringTableSource,
     delimiter: u8,
     include_headers: bool,
     include_units: bool,
-) -> Result<String, String> {
+) -> Result<String, DelimitedTableError> {
     let mut writer = csv::WriterBuilder::new()
         .delimiter(delimiter)
         .from_writer(Vec::new());
@@ -34,7 +92,7 @@ pub fn encode_delimited_table(
                     source.column_label(column).to_owned()
                 }
             }))
-            .map_err(|error| error.to_string())?;
+            .map_err(DelimitedTableError::Csv)?;
     }
     for row in 0..source.row_count() {
         writer
@@ -42,10 +100,12 @@ pub fn encode_delimited_table(
                 (0..source.column_count())
                     .map(|column| source.display_value(row, column).unwrap_or_default()),
             )
-            .map_err(|error| error.to_string())?;
+            .map_err(DelimitedTableError::Csv)?;
     }
-    let bytes = writer.into_inner().map_err(|error| error.to_string())?;
-    String::from_utf8(bytes).map_err(|error| error.to_string())
+    let bytes = writer
+        .into_inner()
+        .map_err(|error| DelimitedTableError::Finalize(error.into_error()))?;
+    String::from_utf8(bytes).map_err(DelimitedTableError::Utf8)
 }
 
 /// Escape one field for the existing typed-result CSV schema.
@@ -74,7 +134,7 @@ pub fn sanitize_column_label(label: &str) -> String {
 }
 
 /// Convert a validated typed-result CSV document into TSV without changing its cells.
-pub fn csv_to_tsv(contents: &str) -> Result<String, String> {
+pub fn csv_to_tsv(contents: &str) -> Result<String, TsvConversionError> {
     let mut reader = csv::ReaderBuilder::new()
         .has_headers(false)
         .from_reader(contents.as_bytes());
@@ -82,15 +142,15 @@ pub fn csv_to_tsv(contents: &str) -> Result<String, String> {
         .delimiter(b'\t')
         .from_writer(Vec::new());
     for record in reader.records() {
-        let record = record.map_err(|error| format!("could not parse staged CSV rows: {error}"))?;
+        let record = record.map_err(TsvConversionError::Read)?;
         writer
             .write_record(&record)
-            .map_err(|error| format!("could not encode TSV row: {error}"))?;
+            .map_err(TsvConversionError::Write)?;
     }
     let bytes = writer
         .into_inner()
-        .map_err(|error| format!("could not finish TSV encoding: {}", error.error()))?;
-    String::from_utf8(bytes).map_err(|error| format!("TSV encoder returned invalid UTF-8: {error}"))
+        .map_err(|error| TsvConversionError::Finalize(error.into_error()))?;
+    String::from_utf8(bytes).map_err(TsvConversionError::Utf8)
 }
 
 struct ParsedLabeledCsvTable {
@@ -121,9 +181,14 @@ impl CsvTableMerger {
     }
 
     /// Parse one validated table before the caller selects the next analysis.
-    pub fn push(&mut self, sequence: String, label: &str, contents: &str) -> Result<(), String> {
+    pub fn push(
+        &mut self,
+        sequence: String,
+        label: &str,
+        contents: &str,
+    ) -> Result<(), DelimitedTableError> {
         let mut reader = csv::Reader::from_reader(contents.as_bytes());
-        let headers = reader.headers().map_err(|error| error.to_string())?.clone();
+        let headers = reader.headers().map_err(DelimitedTableError::Csv)?.clone();
         for header in &headers {
             if !self.columns.iter().any(|column| column == header) {
                 self.columns.push(header.to_owned());
@@ -132,7 +197,7 @@ impl CsvTableMerger {
         let rows = reader
             .records()
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| error.to_string())?;
+            .map_err(DelimitedTableError::Csv)?;
         self.parsed.push(ParsedLabeledCsvTable {
             sequence,
             label: label.to_owned(),
@@ -143,11 +208,11 @@ impl CsvTableMerger {
     }
 
     /// Encode the union of columns and return the text and data-row count.
-    pub fn finish(self) -> Result<(String, usize), String> {
+    pub fn finish(self) -> Result<(String, usize), DelimitedTableError> {
         let mut writer = csv::Writer::from_writer(Vec::new());
         writer
             .write_record(&self.columns)
-            .map_err(|error| error.to_string())?;
+            .map_err(DelimitedTableError::Csv)?;
         let mut count = 0;
         for table in self.parsed {
             let mapping = table
@@ -169,13 +234,15 @@ impl CsvTableMerger {
                 cells[1] = &table.label;
                 writer
                     .write_record(cells)
-                    .map_err(|error| error.to_string())?;
+                    .map_err(DelimitedTableError::Csv)?;
                 count += 1;
             }
         }
-        let bytes = writer.into_inner().map_err(|error| error.to_string())?;
+        let bytes = writer
+            .into_inner()
+            .map_err(|error| DelimitedTableError::Finalize(error.into_error()))?;
         Ok((
-            String::from_utf8(bytes).map_err(|error| error.to_string())?,
+            String::from_utf8(bytes).map_err(DelimitedTableError::Utf8)?,
             count,
         ))
     }
@@ -184,8 +251,8 @@ impl CsvTableMerger {
 #[cfg(test)]
 mod tests {
     use super::{
-        CsvTableMerger, EngineeringTableSource, csv_to_tsv, encode_delimited_table,
-        escape_csv_field,
+        CsvTableMerger, DelimitedTableError, EngineeringTableSource, TsvConversionError,
+        csv_to_tsv, encode_delimited_table, escape_csv_field,
     };
 
     struct SelectedTable;
@@ -251,5 +318,39 @@ mod tests {
                 2
             )
         );
+    }
+
+    #[test]
+    fn malformed_table_errors_retain_csv_positions_and_causes() {
+        use std::error::Error as _;
+
+        let contents = "name,value\n\"first\nsecond\",1\nshort\n";
+        let mut merger = CsvTableMerger::new();
+        let merged_error = merger.push("7".into(), "run", contents).unwrap_err();
+        let DelimitedTableError::Csv(source) = &merged_error else {
+            panic!("expected a CSV parse error: {merged_error}");
+        };
+        assert_eq!(source.position().unwrap().line(), 4);
+        assert!(matches!(
+            source.kind(),
+            csv::ErrorKind::UnequalLengths { .. }
+        ));
+        assert_eq!(merged_error.to_string(), source.to_string());
+        assert!(merged_error.source().unwrap().is::<csv::Error>());
+
+        let tsv_error = csv_to_tsv(contents).unwrap_err();
+        let TsvConversionError::Read(source) = &tsv_error else {
+            panic!("expected a CSV parse error: {tsv_error}");
+        };
+        assert_eq!(source.position().unwrap().line(), 4);
+        assert!(matches!(
+            source.kind(),
+            csv::ErrorKind::UnequalLengths { .. }
+        ));
+        assert_eq!(
+            tsv_error.to_string(),
+            format!("could not parse staged CSV rows: {source}")
+        );
+        assert!(tsv_error.source().unwrap().is::<csv::Error>());
     }
 }

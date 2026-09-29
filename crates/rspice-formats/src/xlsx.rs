@@ -14,12 +14,10 @@ pub struct XlsxTableOptions {
 pub fn encode_xlsx_table(
     source: &impl EngineeringTableSource,
     options: XlsxTableOptions,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, rust_xlsxwriter::XlsxError> {
     let mut workbook = Workbook::new();
     let worksheet = workbook.add_worksheet();
-    worksheet
-        .set_name("Engineering table")
-        .map_err(|error| error.to_string())?;
+    worksheet.set_name("Engineering table")?;
     let header_format = Format::new()
         .set_bold()
         .set_background_color(Color::RGB(0x20282d))
@@ -35,66 +33,52 @@ pub fn encode_xlsx_table(
             } else {
                 source.column_label(column_index).to_owned()
             };
-            worksheet
-                .write_string_with_format(0, column_index as u16, &header, &header_format)
-                .map_err(|error| error.to_string())?;
+            worksheet.write_string_with_format(0, column_index as u16, &header, &header_format)?;
         }
         if source.column_count() != 0 {
-            worksheet
-                .autofilter(
-                    0,
-                    0,
-                    source.row_count() as u32,
-                    source.column_count() as u16 - 1,
-                )
-                .map_err(|error| error.to_string())?;
+            worksheet.autofilter(
+                0,
+                0,
+                source.row_count() as u32,
+                source.column_count() as u16 - 1,
+            )?;
         }
     }
     for row_index in 0..source.row_count() {
         for column_index in 0..source.column_count() {
             if let Some(number) = source.numeric_value(row_index, column_index) {
-                worksheet
-                    .write_number(row_index as u32 + row_offset, column_index as u16, number)
-                    .map_err(|error| error.to_string())?;
+                worksheet.write_number(
+                    row_index as u32 + row_offset,
+                    column_index as u16,
+                    number,
+                )?;
             } else {
-                worksheet
-                    .write_string(
-                        row_index as u32 + row_offset,
-                        column_index as u16,
-                        source
-                            .display_value(row_index, column_index)
-                            .unwrap_or_default(),
-                    )
-                    .map_err(|error| error.to_string())?;
+                worksheet.write_string(
+                    row_index as u32 + row_offset,
+                    column_index as u16,
+                    source
+                        .display_value(row_index, column_index)
+                        .unwrap_or_default(),
+                )?;
             }
         }
     }
     if options.include_headers {
-        worksheet
-            .set_freeze_panes(1, options.pinned_columns.min(source.column_count()) as u16)
-            .map_err(|error| error.to_string())?;
+        worksheet.set_freeze_panes(1, options.pinned_columns.min(source.column_count()) as u16)?;
     }
     for index in 0..source.column_count() {
         let width = options.column_widths.get(index).copied().unwrap_or(120);
-        worksheet
-            .set_column_width(index as u16, f64::from(width) / 7.0)
-            .map_err(|error| error.to_string())?;
+        worksheet.set_column_width(index as u16, f64::from(width) / 7.0)?;
     }
     if let Some(metadata_rows) = options.metadata {
         let metadata = workbook.add_worksheet();
-        metadata
-            .set_name("RSpice provenance")
-            .map_err(|error| error.to_string())?;
+        metadata.set_name("RSpice provenance")?;
         for (row, (key, value)) in metadata_rows.into_iter().enumerate() {
-            metadata
-                .write_string(row as u32, 0, &key)
-                .map_err(|error| error.to_string())?;
-            metadata
-                .write_string(row as u32, 1, &value)
-                .map_err(|error| error.to_string())?;
+            metadata.write_string(row as u32, 0, &key)?;
+            metadata.write_string(row as u32, 1, &value)?;
         }
     }
-    workbook.save_to_buffer().map_err(|error| error.to_string())
+    workbook.save_to_buffer()
 }
 
 #[cfg(test)]
