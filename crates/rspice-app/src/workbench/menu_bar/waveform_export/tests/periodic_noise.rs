@@ -30,9 +30,7 @@ fn periodic_port_noise_export_preserves_spectra_and_reference_context() {
         .waveforms
         .push(WaveformData::new("PN_F", vec![1e4], vec![2.0], "#fff").with_unit("1"));
     let waves = analysis.waveforms.iter().collect::<Vec<_>>();
-    let dataset = prepare_single_analysis_dataset(&analysis, &waves, false)
-        .unwrap()
-        .dataset;
+    let dataset = prepare_single_analysis_dataset(&analysis, &waves, false).unwrap();
     let real = dataset
         .signals
         .iter()
@@ -46,9 +44,7 @@ fn periodic_port_noise_export_preserves_spectra_and_reference_context() {
     assert!(csv.contains("re(Cw1_2[k=+1,m=-1])"), "{csv}");
     assert!(csv.contains("periodic_noise_reference_temperature_kelvin"));
     assert!(csv.contains("325"));
-    let dataset = prepare_single_analysis_dataset(&analysis, &waves, true)
-        .unwrap()
-        .dataset;
+    let dataset = prepare_single_analysis_dataset(&analysis, &waves, true).unwrap();
     let error = crate::io::WaveformWriter::new(crate::io::WaveformFormat::Touchstone)
         .write_text(&dataset)
         .unwrap_err();

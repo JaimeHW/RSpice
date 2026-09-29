@@ -11,7 +11,12 @@ use crate::analysis::eye_diagram::EyeTimebaseProvenance;
 use crate::workbench::EngineeringExportFormat;
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
-use rspice_formats::table::{csv_to_tsv, sanitize_column_label};
+use rspice_formats::table::csv_to_tsv;
+use rspice_formats::waveform_io::result::{
+    axis_signal_for_analysis, axis_signal_for_analysis_type, complex_signal_type,
+    project_waveforms as prepare_single_analysis_dataset, signal_type_from_waveform_name,
+    validate_shared_x_axis,
+};
 use typed_csv::prepare_typed_result_csv;
 
 const NO_ACTIVE_ANALYSIS_MESSAGE: &str = "No active result analysis is selected for export.";
@@ -359,16 +364,10 @@ pub(crate) fn action_export_csv_with_io(
         }
     };
 
-    for warning in &prepared.warnings {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(warning.clone()));
-    }
-
     match export_format {
-        TabularExportFormat::Csv => export_csv(state, io, &prepared.dataset),
-        TabularExportFormat::Tsv => export_tsv(state, io, &prepared.dataset),
-        TabularExportFormat::TouchstoneWhereCompatible => {
-            export_touchstone(state, io, &prepared.dataset)
-        }
+        TabularExportFormat::Csv => export_csv(state, io, &prepared),
+        TabularExportFormat::Tsv => export_tsv(state, io, &prepared),
+        TabularExportFormat::TouchstoneWhereCompatible => export_touchstone(state, io, &prepared),
     }
 }
 
@@ -828,7 +827,7 @@ fn export_native_result_bundle(
         }
     };
     if let Err(error) = validate_shared_x_axis(&waveforms, reference) {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::error(error));
+        state.push_user_message(crate::diagnostics::ConsoleMessage::error(error.to_string()));
         return;
     }
     let (coordinate_name, _) = axis_signal_for_analysis(analysis);
@@ -1138,20 +1137,6 @@ fn export_touchstone(
     }
 }
 
-#[derive(Debug)]
-struct PreparedWaveformDataset {
-    dataset: crate::io::WaveformDataset,
-    warnings: Vec<String>,
-}
-
-struct ExportSignalSlice<'a> {
-    name: &'a str,
-    signal_type: crate::io::SignalType,
-    unit: Option<&'a str>,
-    x_values: &'a [f64],
-    y_values: &'a [f64],
-}
-
 /// The traces an export of this analysis carries.
 ///
 /// One population for every export route. The dataset's own `visible` flag is
@@ -1211,7 +1196,7 @@ fn prepare_waveform_dataset(
     state: &AppState,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
     touchstone: bool,
-) -> Result<PreparedWaveformDataset, String> {
+) -> Result<crate::io::WaveformDataset, String> {
     if displayed.analysis_indices.is_empty() {
         return Err(displayed
             .run(state)
@@ -1226,6 +1211,7 @@ fn prepare_waveform_dataset(
         return Err(ALL_TRACES_HIDDEN_MESSAGE.to_owned());
     }
     prepare_single_analysis_dataset(analysis, &waveforms, touchstone)
+        .map_err(|error| error.to_string())
 }
 
 /// Long-form export for a viewer that is displaying more than one analysis.
@@ -1285,388 +1271,6 @@ fn prepare_displayed_analysis_stack_csv(
         contents: csv.into_string(),
         detail: format!("{traces} visible traces, {rows} exported samples"),
     })
-}
-
-fn prepare_single_analysis_dataset(
-    analysis: &crate::state::AnalysisResult,
-    waveforms: &[&crate::state::WaveformData],
-    touchstone: bool,
-) -> Result<PreparedWaveformDataset, String> {
-    let (x_name, x_signal_type) = axis_signal_for_analysis(analysis);
-    let mut prepared =
-        if touchstone && analysis.analysis_type == crate::state::AnalysisType::SParameter {
-            prepare_touchstone_waveform_dataset(waveforms)?
-        } else {
-            prepare_flat_waveform_dataset(waveforms, x_name, x_signal_type)?
-        };
-    if !touchstone
-        && matches!(
-            analysis.analysis_type,
-            crate::state::AnalysisType::Psp | crate::state::AnalysisType::Hbsp
-        )
-    {
-        for measurement in &analysis.measurements {
-            if measurement.name.starts_with("periodic_noise_") {
-                let value = measurement
-                    .value
-                    .filter(|value| value.is_finite())
-                    .ok_or_else(|| "Periodic noise export context must be finite".to_owned())?;
-                let mut signal = crate::io::WaveformSignal::new(
-                    &measurement.name,
-                    crate::io::SignalType::Unknown,
-                );
-                signal.unit = if measurement.name.ends_with("_kelvin") {
-                    "K"
-                } else if measurement.name.ends_with("_hz") {
-                    "Hz"
-                } else {
-                    "1"
-                }
-                .into();
-                signal.data = vec![value; prepared.dataset.point_count()];
-                prepared.dataset.add_signal(signal);
-            }
-        }
-    }
-    if let Some(crate::state::AnalysisResultFamilyMetadata::SParameter {
-        reference_impedances_ohm,
-        noise_reference_temperature_kelvin,
-    }) = analysis.family_metadata.as_ref()
-    {
-        if reference_impedances_ohm.is_empty()
-            || reference_impedances_ohm
-                .iter()
-                .any(|impedance| !impedance.is_finite() || *impedance <= 0.0)
-        {
-            return Err(
-                "S-parameter export requires finite positive per-port reference impedances."
-                    .to_owned(),
-            );
-        }
-        prepared
-            .dataset
-            .metadata
-            .insert("touchstone_version".to_owned(), "2".to_owned());
-        prepared.dataset.metadata.insert(
-            "z0_ports".to_owned(),
-            reference_impedances_ohm
-                .iter()
-                .map(f64::to_string)
-                .collect::<Vec<_>>()
-                .join(","),
-        );
-        prepared
-            .dataset
-            .metadata
-            .insert("z0".to_owned(), reference_impedances_ohm[0].to_string());
-        if let Some(temperature) = noise_reference_temperature_kelvin
-            && (!touchstone
-                || waveforms.iter().any(|waveform| {
-                    matches!(waveform.name.as_str(), "Fmin" | "Rn" | "F")
-                        || waveform.complex.as_ref().is_some_and(|complex| {
-                            complex.source_name == "Sopt" || complex.source_name.starts_with("CY(")
-                        })
-                }))
-        {
-            prepared.dataset.metadata.insert(
-                "noise_reference_temperature_kelvin".to_owned(),
-                temperature.to_string(),
-            );
-            if waveforms.iter().any(|waveform| {
-                waveform
-                    .complex
-                    .as_ref()
-                    .is_some_and(|complex| complex.source_name.starts_with("CY("))
-            }) {
-                prepared
-                    .dataset
-                    .metadata
-                    .insert("noise_covariance_unit".to_owned(), "A²/Hz".to_owned());
-            }
-        }
-    }
-    Ok(prepared)
-}
-
-fn prepare_touchstone_waveform_dataset(
-    waveforms: &[&crate::state::WaveformData],
-) -> Result<PreparedWaveformDataset, String> {
-    let network = waveforms
-        .iter()
-        .find(|waveform| {
-            waveform.complex.as_ref().is_some_and(|complex| {
-                complex.source_name.starts_with('S') && complex.source_name != "Sopt"
-            })
-        })
-        .ok_or("Touchstone export requires complex S-parameter network traces")?;
-    let mut dataset = crate::io::WaveformDataset::new("S-Parameter");
-    let mut axis = crate::io::WaveformSignal::new("frequency", crate::io::SignalType::Frequency);
-    axis.data = network.x.as_ref().clone();
-    dataset.set_x(axis);
-    let mut warnings = Vec::new();
-    for waveform in waveforms {
-        let first = dataset.signals.len();
-        append_waveform_signal(
-            &mut dataset,
-            &mut warnings,
-            &waveform.name,
-            waveform,
-            waveform.x.len(),
-        )?;
-        if waveform.x != network.x {
-            for signal in &mut dataset.signals[first..] {
-                signal.x_values = Some(waveform.x.as_ref().clone());
-            }
-        }
-    }
-    Ok(PreparedWaveformDataset { dataset, warnings })
-}
-
-fn prepare_flat_waveform_dataset(
-    waveforms: &[&crate::state::WaveformData],
-    x_name: &str,
-    x_signal_type: crate::io::SignalType,
-) -> Result<PreparedWaveformDataset, String> {
-    let reference_waveform = waveforms
-        .iter()
-        .filter(|waveform| !waveform.x.is_empty())
-        .max_by_key(|waveform| waveform.x.len())
-        .ok_or_else(|| NO_SAMPLES_MESSAGE.to_string())?;
-
-    let reference_len = reference_waveform.x.len();
-    validate_shared_x_axis(waveforms, reference_waveform.x.as_ref())?;
-
-    let mut dataset = crate::io::WaveformDataset::new("Simulation Results");
-    let mut x_signal = crate::io::WaveformSignal::new(x_name, x_signal_type);
-    x_signal.data.extend(reference_waveform.x.iter().copied());
-    dataset.set_x(x_signal);
-
-    let mut warnings = Vec::new();
-    for waveform in waveforms {
-        append_waveform_signal(
-            &mut dataset,
-            &mut warnings,
-            &waveform.name,
-            waveform,
-            reference_len,
-        )?;
-    }
-
-    Ok(PreparedWaveformDataset { dataset, warnings })
-}
-
-fn validate_shared_x_axis(
-    waveforms: &[&crate::state::WaveformData],
-    reference_x: &[f64],
-) -> Result<(), String> {
-    for waveform in waveforms {
-        if waveform.x.as_ref() != reference_x {
-            return Err(format!(
-                "CSV export requires all signals in a shared-axis result to use identical x-axis samples; '{}' has different x-axis samples.",
-                sanitize_column_label(&waveform.name)
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-/// The coordinate identity an analysis publishes in an exported file: the id
-/// a reader keys the first column on, and the `SignalType` that restores its
-/// unit.
-///
-/// This is a persisted identifier, not a caption, and it used to be spelled by
-/// lower-casing the Studio's display axis label -- which tied it to a string
-/// written to be read. That coupling has already fired: `6dc39920d` retitled
-/// `.PXF`'s Studio axis
-/// "Offset Frequency", a display-only change by intent, and thereby moved
-/// every `.PXF` export's coordinate from `frequency` to `offset_frequency` and
-/// dropped its type to `Unknown`, which carries no unit at all. So the
-/// identity is stated here per analysis, and the match is exhaustive: a new
-/// analysis type must say what it exports rather than inherit a title.
-///
-/// Every frequency-swept analysis publishes `("frequency", Frequency)`,
-/// whether its abscissa is an absolute drive frequency or an offset from a
-/// carrier. The exported quantity is a frequency in hertz either way, and
-/// which frequency it is belongs to the analysis type the file already names.
-fn axis_signal_for_analysis(
-    analysis: &crate::state::AnalysisResult,
-) -> (&str, crate::io::SignalType) {
-    if let Some(crate::state::AnalysisResultPayload::DcSweep { evidence }) =
-        &analysis.result_payload
-    {
-        let kind = if evidence.source.starts_with(['I', 'i']) {
-            crate::io::SignalType::Current
-        } else if evidence.source.starts_with(['V', 'v']) {
-            crate::io::SignalType::Voltage
-        } else {
-            crate::io::SignalType::Unknown
-        };
-        return (&evidence.source, kind);
-    }
-    axis_signal_for_analysis_type(analysis.analysis_type)
-}
-
-const fn axis_signal_for_analysis_type(
-    analysis: crate::state::AnalysisType,
-) -> (&'static str, crate::io::SignalType) {
-    use crate::io::SignalType;
-    use crate::state::AnalysisType as A;
-    match analysis {
-        A::Transient | A::TransientNoise | A::Pss | A::Envelope | A::Soa => {
-            ("time", SignalType::Time)
-        }
-        A::Ac
-        | A::Disto
-        | A::Tf
-        | A::Stb
-        | A::SParameter
-        | A::HarmonicBalance
-        | A::Fourier
-        | A::Noise
-        | A::Qpss
-        | A::Hbsp
-        | A::Psp
-        // The periodic small-signal family sweeps an offset from the carrier
-        // rather than a drive frequency. An offset is still a frequency in
-        // hertz, and a reader that keys on the coordinate needs the same id
-        // and the same unit for it.
-        | A::Pac
-        | A::Pxf
-        | A::Qpac
-        | A::Qpxf
-        | A::Pnoise
-        | A::Qpnoise
-        | A::Hbnoise => ("frequency", SignalType::Frequency),
-        A::DcSweep => ("voltage", SignalType::Unknown),
-        A::Pstb => ("mode", SignalType::Unknown),
-        A::PoleZero => ("real", SignalType::Unknown),
-        A::Sensitivity | A::DcMismatch => ("parameter", SignalType::Unknown),
-        A::MonteCarlo => ("value", SignalType::Unknown),
-        A::Parametric => ("sweep", SignalType::Unknown),
-        A::Corner => ("temperature", SignalType::Unknown),
-        A::Optimization => ("iteration", SignalType::Unknown),
-        // A scalar operating point has no abscissa to name.
-        A::DcOp => ("x", SignalType::Unknown),
-    }
-}
-
-fn append_waveform_signal(
-    dataset: &mut crate::io::WaveformDataset,
-    warnings: &mut Vec<String>,
-    signal_name: &str,
-    waveform: &crate::state::WaveformData,
-    reference_len: usize,
-) -> Result<(), String> {
-    append_signal_values(
-        dataset,
-        warnings,
-        ExportSignalSlice {
-            name: signal_name,
-            signal_type: signal_type_from_waveform_name(signal_name),
-            unit: waveform.unit.as_deref(),
-            x_values: waveform.x.as_ref(),
-            y_values: waveform.y.as_ref(),
-        },
-        reference_len,
-    )?;
-
-    if let Some(complex) = &waveform.complex {
-        let real_name = format!("re({})", complex.source_name);
-        append_signal_values(
-            dataset,
-            warnings,
-            ExportSignalSlice {
-                name: &real_name,
-                signal_type: complex_signal_type(&complex.source_name, true),
-                unit: waveform.unit.as_deref(),
-                x_values: waveform.x.as_ref(),
-                y_values: complex.real.as_ref(),
-            },
-            reference_len,
-        )?;
-        let imag_name = format!("im({})", complex.source_name);
-        append_signal_values(
-            dataset,
-            warnings,
-            ExportSignalSlice {
-                name: &imag_name,
-                signal_type: complex_signal_type(&complex.source_name, false),
-                unit: waveform.unit.as_deref(),
-                x_values: waveform.x.as_ref(),
-                y_values: complex.imag.as_ref(),
-            },
-            reference_len,
-        )?;
-    }
-    Ok(())
-}
-
-fn append_signal_values(
-    dataset: &mut crate::io::WaveformDataset,
-    warnings: &mut Vec<String>,
-    signal: ExportSignalSlice<'_>,
-    reference_len: usize,
-) -> Result<(), String> {
-    // The writer quotes delimiters and control characters. Preserve the
-    // source identity: CY(1,2) and CY(1 2) must never become the same column.
-    let export_name = signal.name.to_owned();
-    let mut export_signal = crate::io::WaveformSignal::new(&export_name, signal.signal_type);
-    if let Some(unit) = signal.unit {
-        export_signal.unit = unit.to_owned();
-    }
-
-    let available_points = signal.x_values.len().min(signal.y_values.len());
-    if signal.x_values.len() != signal.y_values.len() {
-        return Err(format!(
-            "Signal '{}' has {} x samples and {} y samples; export refused instead of truncating evidence.",
-            export_name,
-            signal.x_values.len(),
-            signal.y_values.len(),
-        ));
-    }
-
-    if available_points > reference_len {
-        return Err(format!(
-            "Signal '{}' has {} samples, exceeding shared x-axis length {}; export refused instead of truncating evidence.",
-            export_name, available_points, reference_len
-        ));
-    }
-
-    export_signal.data.extend(signal.y_values.iter().copied());
-    dataset.add_signal(export_signal);
-    let _ = warnings;
-    Ok(())
-}
-
-fn signal_type_from_waveform_name(name: &str) -> crate::io::SignalType {
-    if name.starts_with("V(") || name.starts_with("v(") {
-        crate::io::SignalType::Voltage
-    } else if name.starts_with("I(") || name.starts_with("i(") {
-        crate::io::SignalType::Current
-    } else {
-        crate::io::SignalType::Unknown
-    }
-}
-
-fn complex_signal_type(source_name: &str, real: bool) -> crate::io::SignalType {
-    if source_name.starts_with("V(") || source_name.starts_with("v(") {
-        if real {
-            crate::io::SignalType::VoltageReal
-        } else {
-            crate::io::SignalType::VoltageImag
-        }
-    } else if source_name.starts_with("I(") || source_name.starts_with("i(") {
-        if real {
-            crate::io::SignalType::CurrentReal
-        } else {
-            crate::io::SignalType::CurrentImag
-        }
-    } else if source_name.starts_with('S') || source_name.starts_with('s') {
-        crate::io::SignalType::SParameter
-    } else {
-        crate::io::SignalType::Unknown
-    }
 }
 
 #[cfg(test)]

@@ -18,7 +18,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
 use crate::diagnostics::ConsoleMessage;
-use crate::io::{SignalType, WaveformDataset, WaveformFormat, WaveformSignal, WaveformWriter};
 use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, DcSweepConfig, NoiseAnalysisConfig, NoiseSweepType,
     PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,

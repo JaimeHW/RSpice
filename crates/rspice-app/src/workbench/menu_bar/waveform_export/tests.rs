@@ -1135,17 +1135,12 @@ fn dc_export_uses_the_retained_swept_quantity_and_every_nested_curve() {
         assert!(prepare_typed_result_csv(&analysis).is_none());
         let traces = analysis.waveforms.iter().collect::<Vec<_>>();
         let exported = prepare_single_analysis_dataset(&analysis, &traces, false).unwrap();
-        let axis = exported.dataset.x_signal.as_ref().unwrap();
+        let axis = exported.x_signal.as_ref().unwrap();
         assert_eq!(axis.name, source);
         assert_eq!(axis.unit, unit);
-        assert_eq!(exported.dataset.signal_names().len(), count);
+        assert_eq!(exported.signal_names().len(), count);
         for trace in &analysis.waveforms {
-            assert!(
-                exported
-                    .dataset
-                    .signal_names()
-                    .contains(&trace.name.as_str())
-            );
+            assert!(exported.signal_names().contains(&trace.name.as_str()));
         }
     }
 }
@@ -1361,29 +1356,22 @@ fn sp_noise_csv_keeps_signed_complex_components_and_export_metadata() {
     )
     .unwrap();
     assert_eq!(
-        prepared.dataset.metadata["noise_reference_temperature_kelvin"],
+        prepared.metadata["noise_reference_temperature_kelvin"],
         "450"
     );
-    assert_eq!(prepared.dataset.metadata["noise_covariance_unit"], "A²/Hz");
+    assert_eq!(prepared.metadata["noise_covariance_unit"], "A²/Hz");
     let csv = crate::io::WaveformWriter::new(crate::io::WaveformFormat::Csv)
-        .write_text(&prepared.dataset)
+        .write_text(&prepared)
         .unwrap();
     assert!(csv.contains("CY(1,2)"), "{csv}");
     let real = prepared
-        .dataset
         .signals
         .iter()
         .find(|signal| signal.data == [-3e-20])
         .expect("signed real covariance exports");
     assert!(real.name.contains("CY(1,2)"));
     assert_eq!(real.unit, "A²/Hz");
-    assert!(
-        prepared
-            .dataset
-            .signals
-            .iter()
-            .any(|signal| signal.data == [4e-20])
-    );
+    assert!(prepared.signals.iter().any(|signal| signal.data == [4e-20]));
     assert!(
         csv.contains("-0.00000000000000000003") || csv.contains("-3e-20"),
         "{csv}"
@@ -1411,9 +1399,7 @@ fn touchstone_noise_retained_export_preserves_independent_grid() {
             .with_unit("1"),
     ]);
     let waveforms = analysis.waveforms.iter().collect::<Vec<_>>();
-    let dataset = prepare_single_analysis_dataset(&analysis, &waveforms, true)
-        .unwrap()
-        .dataset;
+    let dataset = prepare_single_analysis_dataset(&analysis, &waveforms, true).unwrap();
     let text = crate::io::WaveformWriter::new(crate::io::WaveformFormat::Touchstone)
         .write_text(&dataset)
         .unwrap();
@@ -1425,9 +1411,7 @@ fn touchstone_noise_retained_export_preserves_independent_grid() {
     assert!((restored.get_signal("Sopt_IM").unwrap().data[0] + 0.5).abs() < 1e-14);
     assert!(prepare_single_analysis_dataset(&analysis, &waveforms, false).is_err());
     let network_only = analysis.waveforms[..4].iter().collect::<Vec<_>>();
-    let dataset = prepare_single_analysis_dataset(&analysis, &network_only, true)
-        .unwrap()
-        .dataset;
+    let dataset = prepare_single_analysis_dataset(&analysis, &network_only, true).unwrap();
     let text = crate::io::WaveformWriter::new(crate::io::WaveformFormat::Touchstone)
         .write_text(&dataset)
         .unwrap();
@@ -2260,81 +2244,6 @@ fn no_shipped_export_path_derives_an_identifier_from_a_display_label() {
         offenders.is_empty(),
         "an export identifier must be stated, not read from the Studio's axis caption:\n{}",
         offenders.join("\n")
-    );
-}
-
-/// Every analysis states the coordinate it exports, and this is the table.
-///
-/// The match behind it is exhaustive, so a new analysis type cannot compile
-/// without an entry; this pins what the entries are, so moving one is a named
-/// test failure rather than a quietly rewritten file header. Rows sharing an
-/// id share a physical quantity: every frequency sweep is `frequency` in
-/// hertz, whether it sweeps a drive or an offset from a carrier.
-#[test]
-fn every_analysis_type_pins_the_coordinate_identity_it_exports() {
-    use crate::io::SignalType;
-    let expected = [
-        (AnalysisType::Transient, "time", SignalType::Time),
-        (AnalysisType::TransientNoise, "time", SignalType::Time),
-        (AnalysisType::Pss, "time", SignalType::Time),
-        (AnalysisType::Envelope, "time", SignalType::Time),
-        (AnalysisType::Soa, "time", SignalType::Time),
-        (AnalysisType::Ac, "frequency", SignalType::Frequency),
-        (AnalysisType::Disto, "frequency", SignalType::Frequency),
-        (AnalysisType::Tf, "frequency", SignalType::Frequency),
-        (AnalysisType::Stb, "frequency", SignalType::Frequency),
-        (AnalysisType::SParameter, "frequency", SignalType::Frequency),
-        (
-            AnalysisType::HarmonicBalance,
-            "frequency",
-            SignalType::Frequency,
-        ),
-        (AnalysisType::Fourier, "frequency", SignalType::Frequency),
-        (AnalysisType::Noise, "frequency", SignalType::Frequency),
-        (AnalysisType::Qpss, "frequency", SignalType::Frequency),
-        (AnalysisType::Hbsp, "frequency", SignalType::Frequency),
-        (AnalysisType::Psp, "frequency", SignalType::Frequency),
-        (AnalysisType::Pac, "frequency", SignalType::Frequency),
-        (AnalysisType::Pxf, "frequency", SignalType::Frequency),
-        (AnalysisType::Qpac, "frequency", SignalType::Frequency),
-        (AnalysisType::Qpxf, "frequency", SignalType::Frequency),
-        (AnalysisType::Pnoise, "frequency", SignalType::Frequency),
-        (AnalysisType::Qpnoise, "frequency", SignalType::Frequency),
-        (AnalysisType::Hbnoise, "frequency", SignalType::Frequency),
-        (AnalysisType::DcSweep, "voltage", SignalType::Unknown),
-        (AnalysisType::Pstb, "mode", SignalType::Unknown),
-        (AnalysisType::PoleZero, "real", SignalType::Unknown),
-        (AnalysisType::Sensitivity, "parameter", SignalType::Unknown),
-        (AnalysisType::DcMismatch, "parameter", SignalType::Unknown),
-        (AnalysisType::MonteCarlo, "value", SignalType::Unknown),
-        (AnalysisType::Parametric, "sweep", SignalType::Unknown),
-        (AnalysisType::Corner, "temperature", SignalType::Unknown),
-        (AnalysisType::Optimization, "iteration", SignalType::Unknown),
-        (AnalysisType::DcOp, "x", SignalType::Unknown),
-    ];
-    for (analysis, id, signal_type) in expected {
-        assert_eq!(
-            axis_signal_for_analysis_type(analysis),
-            (id, signal_type),
-            "{analysis:?} exports a different coordinate than the one pinned here",
-        );
-    }
-    // A table that stopped covering the enum stops guarding it. The match is
-    // exhaustive, so a new variant cannot compile without an entry there; this
-    // is what stops it reaching the export unpinned here.
-    let distinct = expected
-        .iter()
-        .map(|(analysis, ..)| format!("{analysis:?}"))
-        .collect::<std::collections::BTreeSet<_>>();
-    assert_eq!(
-        distinct.len(),
-        expected.len(),
-        "duplicate rows: {distinct:?}"
-    );
-    assert_eq!(
-        distinct.len(),
-        33,
-        "AnalysisType has a variant this table does not pin; add its row and this count",
     );
 }
 
