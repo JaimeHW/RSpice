@@ -620,11 +620,13 @@ pub(super) fn variant_connectivity_signature(
     );
     let mut groups = BTreeMap::<(String, String), Vec<String>>::new();
     for (cell_view_key, schematic) in projection.schematic_buffers() {
-        let generated = crate::simulation::netlist_gen::generate_netlist_hierarchical(
+        let generated = rspice_simulation::netlist_gen::generate_netlist_hierarchical(
             schematic,
             &[],
             &hierarchy,
-            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+            &rspice_simulation::netlist_gen::NetlistSourceData::new(
+                &crate::simulation::table_route::SourceFiles,
+            ),
         );
         if !generated.errors.is_empty() {
             return Err(format!(

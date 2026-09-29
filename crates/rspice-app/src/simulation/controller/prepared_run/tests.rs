@@ -1488,11 +1488,13 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
         state.library_manager.catalog(),
         &projection,
     );
-    let generated = crate::simulation::netlist_gen::generate_netlist_hierarchical(
+    let generated = rspice_simulation::netlist_gen::generate_netlist_hierarchical(
         projection.root_schematic().expect("materialized root"),
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
     assert!(generated.errors.is_empty(), "{:?}", generated.errors);
 
@@ -2350,13 +2352,15 @@ fn the_prepared_snapshot_carries_the_decks_emission_map() {
         state.library_manager.catalog(),
         &projection,
     );
-    let generated = crate::simulation::netlist_gen::generate_netlist_hierarchical(
+    let generated = rspice_simulation::netlist_gen::generate_netlist_hierarchical(
         projection
             .root_schematic()
             .expect("the projection carries the root"),
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
     assert!(generated.errors.is_empty(), "{:?}", generated.errors);
 
@@ -2364,7 +2368,7 @@ fn the_prepared_snapshot_carries_the_decks_emission_map() {
         .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
         .expect("the authored hierarchy prepares");
 
-    let rows = |map: &[crate::simulation::netlist_gen::EmissionRow]| {
+    let rows = |map: &[rspice_simulation::netlist_gen::EmissionRow]| {
         map.iter()
             .map(|row| {
                 (

@@ -29,7 +29,7 @@ required-features = ["browser-worker"]
 
 [features]
 default = []
-generated-veriloga-catalog = ["rspice-design/generated-veriloga-catalog"]
+generated-veriloga-catalog = ["rspice-design/generated-veriloga-catalog", "rspice-simulation/generated-veriloga-catalog"]
 browser-worker = [
     "rspice-simulation/wasm-jit",
     "rspice-core/veriloga-wasm-jit",

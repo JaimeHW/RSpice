@@ -5,11 +5,10 @@ use super::*;
 use hierarchy_core::HierarchySourceFiles;
 pub use hierarchy_core::{
     ConfigurationExecutionBinding, ConfigurationExecutionPlan, ConfigurationVerilogABinding,
-    HierarchyResolution, MasterKey, ResolvedHierarchyBinding,
+    HierarchyResolution, ResolvedHierarchyBinding,
 };
 #[cfg(test)]
 pub use hierarchy_core::{HierarchyBindingStatus, MasterRecord};
-pub(crate) use hierarchy_core::{assign_master_names, master_closure_digest};
 
 #[cfg(test)]
 mod tests;

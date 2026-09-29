@@ -15,16 +15,14 @@ use std::fmt;
 use std::rc::Rc;
 
 use super::*;
-use crate::product::ContentDigest;
-use crate::state::workspace::{
+use rspice_app_types::product::ContentDigest;
+use rspice_design::hierarchy::{
     ConfigurationExecutionBinding, ConfigurationExecutionPlan, MasterKey, assign_master_names,
     master_closure_digest,
 };
-use crate::state::{CellViewRef, LibraryCellInstance};
+use rspice_design::schematic::component::LibraryCellInstance;
 use rspice_design::schematic::interface_repair::same_terminal_contract;
-
-#[cfg(test)]
-mod tests;
+use rspice_design_model::cell_view::CellViewRef;
 
 /// Defensive bound on how many occurrences one deck may emit.
 ///
@@ -338,7 +336,7 @@ impl<'a> MasterIndex<'a> {
     pub(super) fn emit(
         index: &Rc<Self>,
         hierarchy: &'a HierarchySource<'a>,
-        source_data: Option<&'a NetlistSourceData<'a>>,
+        source_data: NetlistSourceData<'a>,
     ) -> MasterEmission {
         let mut emission = MasterEmission::default();
         for key in &index.order {

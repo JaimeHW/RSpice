@@ -925,8 +925,8 @@ fn updating_an_instance_interface_is_offered_only_for_a_stale_placement() {
 /// binding alone would pass on a repair that left the generator refusing.
 #[test]
 fn repairing_a_stale_instance_restores_its_x_line() {
-    use crate::simulation::netlist_gen::generate_netlist_hierarchical;
     use rspice_design::hierarchy::HierarchySource;
+    use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
     let (mut app, master_key) = app_with_a_placed_cell_instance();
     rename_master_port(
@@ -947,7 +947,9 @@ fn repairing_a_stale_instance_restores_its_x_line() {
             &app.state.schematic,
             &[],
             &hierarchy,
-            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+            &rspice_simulation::netlist_gen::NetlistSourceData::new(
+                &crate::simulation::table_route::SourceFiles,
+            ),
         )
     };
     assert!(
@@ -976,7 +978,9 @@ fn repairing_a_stale_instance_restores_its_x_line() {
             &app.state.schematic,
             &[],
             &hierarchy,
-            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+            &rspice_simulation::netlist_gen::NetlistSourceData::new(
+                &crate::simulation::table_route::SourceFiles,
+            ),
         )
     };
     assert!(

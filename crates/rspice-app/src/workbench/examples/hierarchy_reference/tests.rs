@@ -11,9 +11,9 @@
 use super::*;
 
 use crate::io::project_io::{load_project_text, serialize_project_file};
-use crate::simulation::netlist_gen::generate_netlist_hierarchical;
 use crate::workbench::lifecycle::project_lifecycle::snapshot;
 use rspice_design::hierarchy::HierarchySource;
+use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
 /// The four instance paths `top` executes, in placement order.
 fn instance_paths() -> Vec<InstancePath> {
@@ -169,7 +169,9 @@ fn the_reference_project_netlists_through_the_configured_execution_projection() 
             .expect("the projection carries the root schematic"),
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert!(

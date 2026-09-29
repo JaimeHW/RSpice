@@ -582,11 +582,13 @@ impl RSpiceApp {
             self.state.library_manager.catalog(),
             &projection,
         );
-        let generated = crate::simulation::netlist_gen::generate_netlist_hierarchical(
+        let generated = rspice_simulation::netlist_gen::generate_netlist_hierarchical(
             root,
             &[],
             &hierarchy,
-            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+            &rspice_simulation::netlist_gen::NetlistSourceData::new(
+                &crate::simulation::table_route::SourceFiles,
+            ),
         );
         if !generated.errors.is_empty() {
             return Err(format!(
@@ -1181,11 +1183,13 @@ fn configuration_netlist_digest(
         libraries.catalog(),
         projection,
     );
-    let generated = crate::simulation::netlist_gen::generate_netlist_hierarchical(
+    let generated = rspice_simulation::netlist_gen::generate_netlist_hierarchical(
         root,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
     if !generated.errors.is_empty() {
         return Err(generated.errors.join("; "));

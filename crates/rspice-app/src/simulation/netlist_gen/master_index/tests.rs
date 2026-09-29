@@ -3,14 +3,16 @@
 
 use super::*;
 
+#[path = "tests/variants.rs"]
 mod variants;
-use crate::simulation::netlist_gen::{generate_netlist, generate_netlist_hierarchical};
+use crate::simulation::netlist_gen::generate_netlist;
 use crate::state::{
-    Cell, ConfigurationSetCatalog, ConfigurationSetDefinition, ConfigurationSetOverride, Library,
-    LibraryManager, NetLabel, PendingPortPlacement, Point, PortDirection, PortDirectionType,
-    PortDiscipline, PortSpec, ProjectWorkspace, SymbolDocument, SymbolPin, UnresolvedBindingPolicy,
-    View, ViewType, Wire,
+    Cell, CellViewRef, ConfigurationSetCatalog, ConfigurationSetDefinition,
+    ConfigurationSetOverride, Library, LibraryManager, NetLabel, PendingPortPlacement, Point,
+    PortDirection, PortDirectionType, PortDiscipline, PortSpec, ProjectWorkspace, SymbolDocument,
+    SymbolPin, UnresolvedBindingPolicy, View, ViewType, Wire,
 };
+use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
 fn instance_path(text: &str) -> InstancePath {
     InstancePath::parse(text).expect("fixture instance path")
@@ -143,7 +145,9 @@ fn project_cell_emits_subckt_definition() {
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
@@ -174,7 +178,9 @@ fn two_instances_of_one_cellview_share_one_master_body() {
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
@@ -212,7 +218,9 @@ fn cross_library_cell_name_collision_qualifies_the_second_master() {
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
@@ -250,7 +258,9 @@ fn nested_cells_emit_leaf_first() {
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
@@ -289,7 +299,9 @@ fn typed_port_order_drives_subckt_header_after_storage_reordering() {
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
 
     assert!(
@@ -312,7 +324,9 @@ fn empty_binding_resolves_master_ports() {
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert!(result.netlist.to_lowercase().contains(".subckt div a b"));
@@ -332,7 +346,9 @@ fn explicit_zero_port_project_cell_is_netlistable() {
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
@@ -393,7 +409,9 @@ fn authored_symbol_pin_positions_define_cell_instance_connectivity() {
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
@@ -436,7 +454,9 @@ fn recursion_by_lib_cell_view_is_a_typed_defect() {
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
 
     let chain = result
@@ -472,7 +492,9 @@ fn missing_master_is_an_error() {
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
     assert!(
         result
@@ -507,7 +529,9 @@ fn stale_interface_is_one_typed_defect_at_every_site() {
             &top,
             &[],
             &hierarchy,
-            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+            &rspice_simulation::netlist_gen::NetlistSourceData::new(
+                &crate::simulation::table_route::SourceFiles,
+            ),
         );
         let stale = result
             .defects
@@ -571,7 +595,9 @@ fn legacy_instance_cannot_bind_a_zero_port_master() {
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
     assert!(
         result
@@ -597,7 +623,9 @@ fn port_tied_to_ground_is_an_error() {
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
     assert!(
         result
@@ -661,7 +689,9 @@ fn declared_parameters_reach_the_subckt_header_and_the_deck_parses() {
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
@@ -692,7 +722,9 @@ fn required_parameter_without_default_is_a_defect() {
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
 
     assert!(
@@ -735,7 +767,9 @@ fn emission_map_covers_every_occurrence() {
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
@@ -872,7 +906,9 @@ fn configured_exact_paths_materialize_distinct_schematic_and_source_views() {
         projection.root_schematic().expect("root schematic"),
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     let source_literal = source_path.to_string_lossy();
@@ -1014,7 +1050,9 @@ fn two_instances_with_different_descendant_bindings_emit_v2() {
         projection.root_schematic().expect("root schematic"),
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
 
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
@@ -1097,7 +1135,9 @@ fn configured_builtin_xspice_is_a_valid_executable_leaf() {
         projection.root_schematic().expect("root schematic"),
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert!(result.netlist.contains(".MODEL a1_model astate"));

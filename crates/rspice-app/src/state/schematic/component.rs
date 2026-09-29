@@ -1,8 +1,8 @@
 //! Component document exports and app integration coverage.
 
 pub use rspice_design::schematic::component::{
-    BuiltinXspicePortBinding, BuiltinXspicePortType, Component, ComponentDisplayMode,
-    InstanceMultiplicity, LibraryCellInstance, explicit_component_model,
+    Component, ComponentDisplayMode, InstanceMultiplicity, LibraryCellInstance,
+    explicit_component_model,
 };
 pub use rspice_model_library::symbol::validate_library_netlist_template;
 

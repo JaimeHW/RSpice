@@ -5,7 +5,6 @@ use std::collections::HashSet;
 use egui::{Align, Context, Frame, Layout, Margin, Popup, ScrollArea, Ui, vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::simulation::netlist_gen::generate_netlist_hierarchical;
 use crate::state::{
     Component, ComponentType, Point, Rotation, SchematicReplacementAuthority,
     SchematicReplacementPreview, SchematicReplacementSourceSpec, SchematicReplacementTargetSpec,
@@ -17,6 +16,7 @@ use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
 use rspice_design::hierarchy::HierarchySource;
+use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
 use crate::workbench::app::dialogs::operation_primitives::{
     BODY_HEIGHT, CONTEXT_WIDTH, SURFACE_HEIGHT, TRANSACTION_HEIGHT, impact_preview,
@@ -965,7 +965,7 @@ fn hierarchy_failures(
 fn generate_candidate_netlist(
     state: &AppState,
     schematic: &crate::state::SchematicState,
-) -> Result<crate::simulation::netlist_gen::NetlistResult, String> {
+) -> Result<rspice_simulation::netlist_gen::NetlistResult, String> {
     let projection = state
         .workspace
         .design_projection(
@@ -980,7 +980,9 @@ fn generate_candidate_netlist(
         schematic,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     ))
 }
 

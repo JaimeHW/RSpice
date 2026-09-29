@@ -34,7 +34,6 @@ use rspice_design::schematic::deletion;
 mod design_note;
 mod design_projection;
 use rspice_design::schematic::device_catalog;
-use rspice_design::schematic::device_descriptor;
 use rspice_design::schematic::document;
 use rspice_design::schematic::document_policy;
 mod documentation_shape;
@@ -75,9 +74,8 @@ pub use bus::{
     BusTap, BusTapOrientation, BusTargetKind, PendingBusTap, declared_vector, declared_width,
 };
 pub use component::{
-    BuiltinXspicePortBinding, BuiltinXspicePortType, Component, ComponentDisplayMode,
-    InstanceMultiplicity, LibraryCellInstance, explicit_component_model,
-    validate_library_netlist_template,
+    Component, ComponentDisplayMode, InstanceMultiplicity, LibraryCellInstance,
+    explicit_component_model, validate_library_netlist_template,
 };
 pub use component_type::ComponentType;
 pub use design_note::{
@@ -89,7 +87,6 @@ pub use device_catalog::{
     builtin_xspice_library_binding_with_vector_widths, builtin_xspice_vector_ports,
     engine_only_xspice_devices, validate_builtin_xspice_binding,
 };
-pub use device_descriptor::DeviceImplementation;
 pub use document_policy::{
     NetNamingPolicy, OperatingPointAnnotationPolicy, PropertyCommitPolicy, SchematicDocumentPolicy,
     SchematicGridPitch, SchematicPageOrientation, SchematicPageSize, SelectionCrossingPolicy,

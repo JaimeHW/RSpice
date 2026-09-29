@@ -81,7 +81,14 @@ fn the_bridge_writes_the_card_the_generated_deck_carries() {
         .document_mut_for_test()
         .wires
         .push(Wire::new(1, vec![Point::new(4, 4), Point::new(8, 4)]));
-    let deck = crate::simulation::netlist_gen::NetlistGenerator::new(&schematic).generate();
+    let deck = rspice_simulation::netlist_gen::NetlistGenerator::new(
+        &schematic,
+        rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
+    )
+    .finish(&[], &[])
+    .netlist;
     let deck_card = deck
         .lines()
         .find(|line| line.starts_with("V1 "))

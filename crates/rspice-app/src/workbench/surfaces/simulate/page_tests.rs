@@ -2276,12 +2276,12 @@ fn the_variables_page_states_the_rules_it_enforces_instead_of_offering_them() {
 /// signed technology pin and was verified by inspection only.
 #[test]
 fn a_bounded_variable_is_refused_on_every_path_a_test_can_reach() {
-    use crate::simulation::netlist_gen::{
-        DesignVariableNetlistContext, design_variable_parameter_lines,
-    };
     use crate::state::{
         CellViewRef, DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
         DesignVariableRange, DesignVariableScope, DesignVariableSweepEligibility,
+    };
+    use rspice_simulation::netlist_gen::{
+        DesignVariableNetlistContext, design_variable_parameter_lines,
     };
 
     let build = |expression: &str| {

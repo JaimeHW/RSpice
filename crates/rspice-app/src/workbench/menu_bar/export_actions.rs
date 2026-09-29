@@ -436,16 +436,18 @@ pub(crate) fn build_menu_netlist(
         )));
         return None;
     };
-    let generation = crate::simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
+    let generation = rspice_simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
         root_schematic,
         &[],
         &hierarchy,
         &plan_payload.design_variables,
-        crate::simulation::netlist_gen::DesignVariableNetlistContext {
+        rspice_simulation::netlist_gen::DesignVariableNetlistContext {
             active_cell: &root_reference,
             analysis_instances: &analysis_instances,
         },
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
 
     if !generation.errors.is_empty() {

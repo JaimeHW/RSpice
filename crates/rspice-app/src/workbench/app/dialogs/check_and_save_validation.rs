@@ -15,7 +15,6 @@ use crate::product::ContentDigest;
 use crate::services::drc::{
     DrcConfig, DrcLocation, DrcSeverity, run_drc_check_with_hierarchy_and_config,
 };
-use crate::simulation::netlist_gen::generate_netlist_hierarchical;
 use crate::state::{
     CellViewRef, SymbolResolver, ValidatedRevisionDependency, ValidationFindingCounts,
 };
@@ -23,6 +22,7 @@ use crate::workbench::lifecycle::project_lifecycle::{
     SaveScope, accepted_generation, effective_save_scope, snapshot,
 };
 use rspice_design::hierarchy::HierarchySource;
+use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
 use crate::workbench::app_state::AppState;
 
@@ -361,7 +361,9 @@ impl CheckAndSaveValidationReport {
                     root,
                     &[],
                     configured_hierarchy,
-                    &crate::simulation::netlist_gen::NetlistSourceData::default(),
+                    &rspice_simulation::netlist_gen::NetlistSourceData::new(
+                        &crate::simulation::table_route::SourceFiles,
+                    ),
                 );
                 for error in &generated.errors {
                     insert_finding(
@@ -504,7 +506,9 @@ impl CheckAndSaveValidationReport {
                     schematic,
                     &[],
                     hierarchy,
-                    &crate::simulation::netlist_gen::NetlistSourceData::default(),
+                    &rspice_simulation::netlist_gen::NetlistSourceData::new(
+                        &crate::simulation::table_route::SourceFiles,
+                    ),
                 );
                 for error in generated.errors {
                     let discriminator = format!("{key}:{error}");

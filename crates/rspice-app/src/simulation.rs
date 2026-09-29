@@ -16,6 +16,7 @@ pub(crate) mod engine_bridge;
 pub(crate) mod execution;
 pub(crate) mod measurement_references;
 pub(crate) mod multi_run;
+#[cfg(test)]
 pub(crate) mod netlist_gen;
 pub(crate) mod optimizer;
 pub(crate) mod output_contract;

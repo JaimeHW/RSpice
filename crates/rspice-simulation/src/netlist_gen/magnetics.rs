@@ -53,7 +53,7 @@ impl<'a> NetlistGenerator<'a> {
             return None;
         }
 
-        let params = crate::state::parse_params_string(&component.params);
+        let params = rspice_design::parameters::parse_params_string(&component.params);
         let ratio = params
             .get("turns_ratio")
             .map(|value| value.trim())
@@ -152,8 +152,8 @@ impl<'a> NetlistGenerator<'a> {
 
         let primary_nodes = self.format_nodes(&node_names[0..2], 2);
         let secondary_nodes = self.format_nodes(&node_names[2..4], 2);
-        let primary_suffix = crate::state::format_params_string(&primary_params);
-        let secondary_suffix = crate::state::format_params_string(&secondary_params);
+        let primary_suffix = rspice_design::parameters::format_params_string(&primary_params);
+        let secondary_suffix = rspice_design::parameters::format_params_string(&secondary_params);
         let primary_line = if primary_suffix.is_empty() {
             format!("{} {} {}", primary_name, primary_nodes, primary_inductance)
         } else {
@@ -278,7 +278,7 @@ impl<'a> NetlistGenerator<'a> {
         component: &Component,
         inductor_lookup: &HashMap<String, String>,
     ) -> Option<(String, String, String, String)> {
-        let params = crate::state::parse_params_string(&component.params);
+        let params = rspice_design::parameters::parse_params_string(&component.params);
         let raw_windings = params.get("inductors").cloned().unwrap_or_else(|| {
             ["l1", "l2", "l3", "l4"]
                 .iter()
@@ -340,7 +340,7 @@ impl<'a> NetlistGenerator<'a> {
         component: &Component,
         inductor_lookup: &HashMap<String, String>,
     ) -> Option<(String, String, String, String)> {
-        let params = crate::state::parse_params_string(&component.params);
+        let params = rspice_design::parameters::parse_params_string(&component.params);
         let coupled_to = params
             .get("coupled_to")
             .map(|value| value.trim())
@@ -504,12 +504,12 @@ impl<'a> NetlistGenerator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::NetLabel;
     use num_complex::Complex64;
     use rspice_core::{Engine, Netlist};
+    use rspice_design::schematic::net_label::NetLabel;
 
-    fn circuit(kind: ComponentType, coefficient: &str, reversed: bool) -> SchematicState {
-        let mut schematic = SchematicState::default();
+    fn circuit(kind: ComponentType, coefficient: &str, reversed: bool) -> Schematic {
+        let mut schematic = Schematic::default();
         let mut source = Component::new(1, ComponentType::VoltageSource, Point::origin())
             .with_name_value("V1", "0.5");
         source.params = "ac=1".to_owned();
@@ -556,14 +556,14 @@ mod tests {
         schematic
     }
 
-    fn generated(schematic: &SchematicState) -> super::super::NetlistResult {
+    fn generated(schematic: &Schematic) -> super::super::NetlistResult {
         let buffers: HashMap<String, SchematicDocument> = HashMap::new();
         let hierarchy = HierarchySource::from_buffers(&buffers);
         generate_netlist_hierarchical(
             schematic,
             &[],
             &hierarchy,
-            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+            &crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
         )
     }
 
@@ -639,8 +639,8 @@ mod tests {
 
     #[test]
     fn inductor_coupling_property_accepts_signed_values_and_keeps_absence_distinct() {
-        use crate::state::property_types::PropertyValue;
         use rspice_design::properties::PropertyCatalog;
+        use rspice_design::properties::PropertyValue;
 
         let registry = PropertyCatalog::new();
         let definition = registry

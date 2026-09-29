@@ -69,7 +69,7 @@ impl<'a> NetlistGenerator<'a> {
     pub(super) fn generate_builtin_xspice_instance(
         &mut self,
         component: &Component,
-        binding: &crate::state::LibraryCellInstance,
+        binding: &rspice_design::schematic::component::LibraryCellInstance,
         node_names: &[String],
         terminal_points: &[Point],
         instance_name: &str,
@@ -81,7 +81,9 @@ impl<'a> NetlistGenerator<'a> {
             ));
             return None;
         };
-        if let Err(error) = crate::state::validate_builtin_xspice_binding(binding) {
+        if let Err(error) =
+            rspice_design::schematic::device_catalog::validate_builtin_xspice_binding(binding)
+        {
             self.errors.push(format!(
                 "Built-in XSPICE instance '{}' is not executable: {error}",
                 component.name
@@ -202,8 +204,9 @@ impl<'a> NetlistGenerator<'a> {
         node_names: &[String],
         instance_name: &str,
     ) -> Option<String> {
-        let crate::state::DeviceImplementation::Xspice { model_type } =
-            component.kind.descriptor().implementation
+        let rspice_design::schematic::device_descriptor::DeviceImplementation::Xspice {
+            model_type,
+        } = component.kind.descriptor().implementation
         else {
             self.errors.push(format!(
                 "{} '{}' reached the XSPICE emitter without an XSPICE device descriptor",
@@ -286,7 +289,7 @@ fn supply_required_xspice_defaults(
 ) -> String {
     use rspice_core::xspice::ParamType;
 
-    let present = crate::state::parse_params_string(raw);
+    let present = rspice_design::parameters::parse_params_string(raw);
     let mut supplied = raw.trim().to_owned();
     for specification in specifications.iter().filter(|parameter| parameter.required) {
         if present
@@ -324,7 +327,7 @@ fn format_builtin_xspice_parameters(
 ) -> Result<String, String> {
     use rspice_core::xspice::ParamType;
 
-    let parsed = crate::state::parse_replacement_parameters_strict(raw)
+    let parsed = rspice_design::schematic::replacement::parse_replacement_parameters_strict(raw)
         .map_err(|error| error.to_string())?;
     for key in parsed.keys() {
         if !specifications
@@ -433,10 +436,10 @@ fn quote_xspice_string(value: &str) -> String {
 }
 
 fn format_builtin_xspice_port(
-    port: &crate::state::BuiltinXspicePortBinding,
+    port: &rspice_design::schematic::component::BuiltinXspicePortBinding,
     nodes: &[&str],
 ) -> Result<String, String> {
-    use crate::state::BuiltinXspicePortType as Type;
+    use rspice_design::schematic::component::BuiltinXspicePortType as Type;
 
     if nodes.is_empty() {
         return Err("has no schematic terminals".to_owned());
@@ -519,8 +522,9 @@ mod descriptor_contract_tests {
     fn every_legacy_xspice_descriptor_names_a_registered_code_model() {
         let registry = rspice_core::xspice::CodeModelRegistry::with_builtins();
         for kind in ComponentType::ALL {
-            let crate::state::DeviceImplementation::Xspice { model_type } =
-                kind.descriptor().implementation
+            let rspice_design::schematic::device_descriptor::DeviceImplementation::Xspice {
+                model_type,
+            } = kind.descriptor().implementation
             else {
                 continue;
             };
@@ -549,7 +553,7 @@ mod descriptor_contract_tests {
             ),
             ("queue_size".to_owned(), "32".to_owned()),
         ]);
-        let stored = crate::state::format_params_string(&values);
+        let stored = rspice_design::parameters::format_params_string(&values);
         let emitted = format_builtin_xspice_parameters(model.parameters(), &order, &stored)
             .expect("typed parameters emit");
         assert!(emitted.contains("simulation=\"ivlng simulator\""));

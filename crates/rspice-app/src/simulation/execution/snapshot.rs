@@ -12,7 +12,6 @@ use std::sync::Arc;
 use crate::product::ProcessCorner;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
 use crate::services::simulation_runner::splice_before_terminal_end_card;
-use crate::simulation::netlist_gen::EmissionRow;
 use crate::simulation::output_contract::{
     PreparedSavedOutput, output_kind_tag, policy_tag, precision_tag, streaming_tag,
 };
@@ -23,6 +22,7 @@ use crate::state::{
     HierarchyMapRow, Point, PreparedModelSourceIdentity, PreparedSourceCheckReceipt,
     PreparedSpecification, PreparedSpecificationPolicy, SimulationRunIntent,
 };
+use rspice_simulation::netlist_gen::EmissionRow;
 // The receipt's source domain is named by `snapshot/run_receipt.rs`; the
 // snapshot suite reaches it through this module's glob.
 #[cfg(test)]

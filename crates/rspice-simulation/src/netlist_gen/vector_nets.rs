@@ -16,7 +16,7 @@
 //! resolve to the same eight nodes and can never resolve to a ninth.
 //!
 //! A vector join whose two ends declare different conductors is refused under
-//! either [`crate::state::BundleWidthMismatchPolicy`], and that is what the
+//! either [`rspice_design::connectivity_contract::BundleWidthMismatchPolicy`], and that is what the
 //! permissive variant's name asks for rather than a weakening of it: the only
 //! way to author "explicit slice or extend" is a tap carrying the selector, and
 //! a tap that carries one produces a destination declaration that matches, so
@@ -27,12 +27,12 @@
 //! there — but it never decides whether a deck may carry one.
 
 use super::*;
-use crate::state::declared_vector;
+use rspice_design::schematic::bus::declared_vector;
 
 /// The formals one interface name contributes, in declaration order.
 ///
 /// A scalar name is its own formal. A vector name expands from its declared
-/// MSB end toward its LSB end — the order [`crate::state::BusDeclaration`]
+/// MSB end toward its LSB end — the order [`rspice_design::schematic::bus::BusDeclaration`]
 /// expands members in — so a header and every instance of it agree bit for bit.
 pub(super) fn formals_of(name: &str) -> Vec<String> {
     match declared_vector(name) {
@@ -98,7 +98,12 @@ impl<'a> NetlistGenerator<'a> {
 pub(super) fn width_contributions(names: &[String]) -> String {
     names
         .iter()
-        .map(|name| format!("{name} contributes {}", crate::state::declared_width(name)))
+        .map(|name| {
+            format!(
+                "{name} contributes {}",
+                rspice_design::schematic::bus::declared_width(name)
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ")
 }

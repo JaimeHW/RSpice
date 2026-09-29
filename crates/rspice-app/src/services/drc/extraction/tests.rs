@@ -7,13 +7,14 @@
 
 use super::*;
 use crate::services::drc::{DrcLocation, DrcSeverity, DrcViolation, DrcViolationType};
-use crate::simulation::netlist_gen::{NetlistSourceData, generate_netlist_hierarchical};
+use crate::simulation::table_route::SourceFiles;
 use crate::state::{
     Bus, BusDeclaration, BusSlice, BusTapOrientation, Cell, CellViewRef, Component, Library,
     LibraryCellInstance, LibraryManager, NetLabel, Point, PortDirection, PortSpec, SchematicState,
     SymbolDocument, SymbolPin, View, ViewType, Wire,
 };
 use rspice_design::drc::ParameterRangeIssue;
+use rspice_simulation::netlist_gen::{NetlistSourceData, generate_netlist_hierarchical};
 use std::collections::HashMap;
 
 fn port(name: &str, direction: PortDirection) -> PortSpec {
@@ -542,7 +543,7 @@ fn a_bus_bit_terminal_carries_the_deck_node_in_the_check() {
         &HierarchySource::from_buffers(
             &std::collections::HashMap::<String, SchematicDocument>::new(),
         ),
-        &NetlistSourceData::default(),
+        &NetlistSourceData::new(&SourceFiles),
     );
     assert_eq!(
         deck.point_to_net.get(&Point::new(60, 40)),
@@ -632,8 +633,12 @@ fn assert_erc_and_deck_agree(
     schematic: &SchematicState,
     hierarchy: &HierarchySource<'_>,
 ) {
-    let deck =
-        generate_netlist_hierarchical(schematic, &[], hierarchy, &NetlistSourceData::default());
+    let deck = generate_netlist_hierarchical(
+        schematic,
+        &[],
+        hierarchy,
+        &NetlistSourceData::new(&SourceFiles),
+    );
     let (components, _) = extract_checked_design(schematic, hierarchy);
     for component in &components {
         for pin in &component.pins {

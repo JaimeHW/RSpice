@@ -51,14 +51,10 @@ pub(super) struct PendingPreparedRun {
 /// copy its definition retains instead of being refused.
 fn project_netlist_source_data(
     state: &AppState,
-) -> crate::simulation::netlist_gen::NetlistSourceData<'_> {
-    crate::simulation::netlist_gen::NetlistSourceData {
-        data_root: state
-            .workspace
-            .content
-            .project
-            .data_root()
-            .map(Path::to_path_buf),
+) -> rspice_simulation::netlist_gen::NetlistSourceData<'_> {
+    rspice_simulation::netlist_gen::NetlistSourceData {
+        files: &crate::simulation::table_route::SourceFiles,
+        data_root: state.workspace.content.project.data_root(),
         stimulus_library: Some(&state.workspace.content.stimulus_library),
     }
 }
@@ -333,12 +329,12 @@ impl SimulationController {
             .map(crate::simulation::plan::AnalysisInstance::id)
             .collect::<Vec<_>>();
         let generated =
-            crate::simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
+            rspice_simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
                 root_schematic,
                 &[],
                 &hierarchy,
                 &payload.design_variables,
-                crate::simulation::netlist_gen::DesignVariableNetlistContext {
+                rspice_simulation::netlist_gen::DesignVariableNetlistContext {
                     active_cell: &root_reference,
                     analysis_instances: &analysis_instances,
                 },
@@ -1003,12 +999,12 @@ impl SimulationController {
             .try_merge(external_veriloga_runtimes.clone())
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         let generated =
-            crate::simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
+            rspice_simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
                 root_schematic,
                 &analysis_lines,
                 &hierarchy,
                 &plan_payload.design_variables,
-                crate::simulation::netlist_gen::DesignVariableNetlistContext {
+                rspice_simulation::netlist_gen::DesignVariableNetlistContext {
                     active_cell: &root_reference,
                     analysis_instances: &analysis_instances,
                 },

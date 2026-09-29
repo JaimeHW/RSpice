@@ -5,6 +5,8 @@ use crate::state::{
     AssemblyVariantDraft, ComponentSubstitution, SchematicObjectKey, VariantInheritance,
     VariantObjectOverride, VariantQualificationPlan, VariantQualificationState,
 };
+use rspice_app_types::product::ContentDigest;
+use std::collections::BTreeMap;
 
 fn fixture(configured: bool) -> (ProjectWorkspace, LibraryManager, SchematicState) {
     let mut libraries = LibraryManager::new();
@@ -187,7 +189,9 @@ fn source_replacement_uses_the_requested_corner(
                 projection.root_schematic().unwrap(),
                 &[],
                 &hierarchy,
-                &crate::simulation::netlist_gen::NetlistSourceData::default(),
+                &rspice_simulation::netlist_gen::NetlistSourceData::new(
+                    &crate::simulation::table_route::SourceFiles,
+                ),
             );
             assert!(!generated.errors.is_empty());
             let diagnostics = projection
@@ -242,7 +246,9 @@ fn source_replacement_uses_the_requested_corner(
             projection.root_schematic().unwrap(),
             &[],
             &hierarchy,
-            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+            &rspice_simulation::netlist_gen::NetlistSourceData::new(
+                &crate::simulation::table_route::SourceFiles,
+            ),
         );
         assert!(
             generated.errors.is_empty(),
@@ -357,7 +363,9 @@ fn source_current(
         projection.root_schematic().unwrap(),
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     );
     assert!(
         generated.errors.is_empty(),
@@ -546,7 +554,9 @@ fn named_replacement_terminals_keep_their_nets_when_the_master_order_changes() {
             projection.root_schematic().unwrap(),
             &[],
             &hierarchy,
-            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+            &rspice_simulation::netlist_gen::NetlistSourceData::new(
+                &crate::simulation::table_route::SourceFiles,
+            ),
         );
         assert!(deck.errors.is_empty(), "{:?}", deck.errors);
         assert!(
@@ -937,7 +947,9 @@ fn a_variant_replacement_owns_the_plan_and_emitted_master() {
             projection.root_schematic().unwrap(),
             &[],
             &hierarchy,
-            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+            &rspice_simulation::netlist_gen::NetlistSourceData::new(
+                &crate::simulation::table_route::SourceFiles,
+            ),
         );
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         assert_eq!(
@@ -1007,7 +1019,9 @@ fn a_primitive_substitution_inside_a_buffered_master_enters_the_hierarchy() {
             projection.root_schematic().unwrap(),
             &[],
             &hierarchy,
-            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+            &rspice_simulation::netlist_gen::NetlistSourceData::new(
+                &crate::simulation::table_route::SourceFiles,
+            ),
         );
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         assert!(
@@ -1054,7 +1068,9 @@ fn omitted_instances_do_not_require_or_emit_their_missing_master() {
             projection.root_schematic().unwrap(),
             &[],
             &hierarchy,
-            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+            &rspice_simulation::netlist_gen::NetlistSourceData::new(
+                &crate::simulation::table_route::SourceFiles,
+            ),
         );
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         assert_eq!(subckt_headers(&result.netlist), vec![".subckt div a b"]);

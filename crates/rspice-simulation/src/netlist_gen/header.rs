@@ -256,21 +256,26 @@ mod tests {
 
     #[test]
     fn model_bound_library_section_uses_lib_directive() {
-        let mut schematic = crate::state::SchematicState::default();
-        let mut binding = crate::state::LibraryCellInstance::new("models", "nmos_18", "spice");
+        let mut schematic = rspice_design::schematic::owned::Schematic::default();
+        let mut binding = rspice_design::schematic::component::LibraryCellInstance::new(
+            "models", "nmos_18", "spice",
+        );
         binding.source_path = Some(std::path::PathBuf::from("C:/models/foundry.lib"));
         binding.model_section = Some("tt".to_owned());
         binding.terminal_order = vec!["d".to_owned(), "g".to_owned()];
         binding.interface_bound = true;
         schematic.document_mut_for_test().components.push(
-            crate::state::Component::new(
+            rspice_design::schematic::component::Component::new(
                 1,
-                crate::state::ComponentType::CellInstance,
-                crate::state::Point::origin(),
+                rspice_design::schematic::component_type::ComponentType::CellInstance,
+                rspice_design_model::Point::origin(),
             )
             .with_library_cell(binding),
         );
-        let mut generator = NetlistGenerator::new(&schematic);
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
 
         generator.generate_library_view_includes();
 
@@ -285,8 +290,11 @@ mod tests {
 
     #[test]
     fn hierarchical_veriloga_directives_are_hoisted_and_deduplicated_once() {
-        let schematic = crate::state::SchematicState::default();
-        let mut generator = NetlistGenerator::new(&schematic);
+        let schematic = rspice_design::schematic::owned::Schematic::default();
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         generator.lines = vec![
             "* RSpice Netlist".to_owned(),
             String::new(),
@@ -339,8 +347,11 @@ mod tests {
 
     #[test]
     fn conflicting_module_selections_fail_closed() {
-        let schematic = crate::state::SchematicState::default();
-        let mut generator = NetlistGenerator::new(&schematic);
+        let schematic = rspice_design::schematic::owned::Schematic::default();
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         generator.lines = vec![
             "* RSpice Netlist".to_owned(),
             String::new(),

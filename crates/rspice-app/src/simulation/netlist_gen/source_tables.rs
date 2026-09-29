@@ -1,177 +1,6 @@
-//! The data files file-backed sources read.
-//!
-//! A `PWL FILE=` card names a table, and three questions about it are asked
-//! while a deck is written: which file the card is pointed at, whether that
-//! file will load, and whether the run should be told the table came from
-//! somewhere other than where the card says. The rule that answers the first
-//! is [`table_route`](crate::simulation::table_route)'s, shared with every
-//! preview; this binds it to what the generator was given — the project's data
-//! folder and its stimulus library — so a run and a preview cannot read
-//! different files.
+//! Source-file routing through the application host and extracted generator.
 
 use super::*;
-use crate::simulation::table_route::{self, TableRoute};
-
-/// File-backed stimulus inputs for this generation. Inspection may omit both.
-#[derive(Default)]
-pub struct NetlistSourceData<'a> {
-    /// Directory against which project-relative data references resolve.
-    pub data_root: Option<std::path::PathBuf>,
-    /// Authored retained tables used when their named file is unavailable.
-    pub stimulus_library: Option<&'a rspice_design::stimulus_library::library::StimulusLibrary>,
-}
-
-impl<'a> NetlistSourceData<'a> {
-    fn retained_table(
-        &self,
-        component: &Component,
-    ) -> Option<&'a rspice_design::stimulus_library::definition::RetainedPwlFile> {
-        self.stimulus_library?.retained_pwl_table(component)
-    }
-}
-
-impl<'a> NetlistGenerator<'a> {
-    /// The data-file reference a file-backed source stores.
-    fn stored_data_file<'c>(
-        component: &'c Component,
-        params: &'c std::collections::HashMap<String, String>,
-    ) -> &'c str {
-        params
-            .get("file")
-            .map_or(component.value.as_str(), String::as_str)
-            .trim()
-    }
-
-    /// The file a source's stored data-file reference is read from.
-    ///
-    /// Project files record the path relative to the project folder so a design
-    /// survives being moved or handed to someone else; the engine opens what it
-    /// is given and does not resolve against the deck, so the reference is made
-    /// absolute against the bound data root. When the file it names is not
-    /// there and the source's stimulus definition retains the table, the route
-    /// is that retained copy instead.
-    ///
-    /// The second half is why a retained copy could not stand in, when it
-    /// could not.
-    pub(super) fn source_table_route(
-        &self,
-        component: &Component,
-        stored: &str,
-    ) -> (TableRoute, Option<String>) {
-        table_route::route_retaining(
-            stored,
-            self.source_data
-                .and_then(|source| source.data_root.as_deref()),
-            self.source_data
-                .and_then(|source| source.retained_table(component)),
-        )
-    }
-
-    /// Reason a file-backed PWL source cannot run, or `None` when its table is
-    /// present — as the file the card names, or as the copy its stimulus
-    /// definition retains — and is one the engine's loader reads.
-    ///
-    /// The engine already refuses to build a circuit whose PWL file will not
-    /// load, but that happens after a run has been dispatched and reports a
-    /// resolved absolute path the user never typed. Catching it here names the
-    /// component and blocks the run before it starts.
-    pub(super) fn pwl_data_file_defect(
-        &self,
-        component: &Component,
-        params: &std::collections::HashMap<String, String>,
-    ) -> Option<String> {
-        let stored = Self::stored_data_file(component, params);
-        if stored.is_empty() {
-            return Some(format!(
-                "{} '{}' has no data file selected",
-                component.kind.display_name(),
-                component.name
-            ));
-        }
-
-        let (route, retained_failure) = self.source_table_route(component, stored);
-        let unloadable = |path: &str| {
-            table_route::engine_refusal(path).map(|refusal| {
-                format!(
-                    "{} '{}' data file '{}' is not a table the engine reads: {}",
-                    component.kind.display_name(),
-                    component.name,
-                    stored,
-                    refusal
-                )
-            })
-        };
-        // A definition's retained copy standing in for the file is a run that
-        // can happen, and `pwl_table_notice` says that it did.
-        let resolved = match route {
-            TableRoute::Named(resolved) => resolved,
-            TableRoute::Retained(retained) => return unloadable(&retained),
-        };
-        // Only a bound data root makes the reference checkable: without one a
-        // relative path is resolved by the engine against its own working
-        // directory, which is not this process's to test.
-        if std::path::Path::new(&resolved).is_relative() {
-            return None;
-        }
-        let retained_failure = retained_failure
-            .map(|failure| format!("; {failure}"))
-            .unwrap_or_default();
-        match std::fs::metadata(&resolved) {
-            Ok(metadata) if metadata.is_file() => unloadable(&resolved),
-            Ok(_) => Some(format!(
-                "{} '{}' data file '{}' is a directory{retained_failure}",
-                component.kind.display_name(),
-                component.name,
-                stored
-            )),
-            Err(error) => Some(format!(
-                "{} '{}' cannot read data file '{}': {}{retained_failure}",
-                component.kind.display_name(),
-                component.name,
-                stored,
-                error
-            )),
-        }
-    }
-
-    /// What a run should be told about where a file-backed source's table came
-    /// from, or `None` when it is simply the file the card names.
-    ///
-    /// Two things are worth a line in the log. The run read the definition's
-    /// retained copy because the named file is not reachable: the deck then
-    /// carries a cache path nobody typed, and this is what explains it. Or the
-    /// named file is there and no longer holds the bytes the definition
-    /// retains: the run reads the file, as the card says, and the definition's
-    /// digest describes something else.
-    pub(super) fn pwl_table_notice(
-        &self,
-        component: &Component,
-        params: &std::collections::HashMap<String, String>,
-    ) -> Option<String> {
-        let table = self.source_data?.retained_table(component)?;
-        let definition = &component.stimulus_provenance.as_ref()?.definition;
-        let stored = Self::stored_data_file(component, params);
-        match self.source_table_route(component, stored).0 {
-            TableRoute::Retained(_) => Some(format!(
-                "{} '{}' reads the copy of '{}' that stimulus definition '{definition}' retains: \
-                 the file the card names, '{stored}', is not reachable here",
-                component.kind.display_name(),
-                component.name,
-                table.file_name,
-            )),
-            TableRoute::Named(named) => {
-                (table_route::named_file_matches(&named, table) == Some(false)).then(|| {
-                    format!(
-                        "{} '{}' reads '{stored}', which no longer holds the bytes stimulus \
-                             definition '{definition}' retains; the run uses the file",
-                        component.kind.display_name(),
-                        component.name,
-                    )
-                })
-            }
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -204,6 +33,7 @@ mod tests {
         let buffers: HashMap<String, SchematicDocument> = HashMap::new();
         let hierarchy = HierarchySource::from_buffers(&buffers);
         let source_data = NetlistSourceData {
+            files: &crate::simulation::table_route::SourceFiles,
             data_root: None,
             stimulus_library: Some(library),
         };
@@ -316,5 +146,89 @@ mod tests {
             result.errors
         );
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    fn netlist_for(components: Vec<Component>) -> String {
+        let mut schematic = SchematicState::default();
+        schematic.document_mut_for_test().components = components;
+        generate_netlist(&schematic).netlist
+    }
+
+    fn pwl_file_source(params: &str) -> Component {
+        let mut source = Component::new(1, ComponentType::VoltageSourcePwlFile, Point::origin())
+            .with_name_value("V1", "");
+        source.params = params.to_owned();
+        source
+    }
+
+    /// The card must be spelled the way the netlist reader accepts it, quotes
+    /// and all, and every modifier the sheet exposes must survive the trip.
+    #[test]
+    fn pwl_file_source_emits_the_readers_spelling() {
+        let netlist = netlist_for(vec![pwl_file_source(
+            "file=wave.csv td=1u r=0 tscale=2 vscale=3 toffset=1n voffset=0.5",
+        )]);
+        let card = netlist
+            .lines()
+            .find(|line| line.starts_with("V1 "))
+            .unwrap_or_else(|| panic!("{netlist}"));
+        assert!(
+            card.ends_with(
+                "PWL FILE=\"wave.csv\" TD=1u R=0 TSCALE=2 VSCALE=3 TOFFSET=1n VOFFSET=0.5"
+            ),
+            "{card}"
+        );
+        rspice_core::netlist::parse_netlist(&netlist).expect("engine must accept the card");
+    }
+
+    /// An untouched modifier has no business on the card: TSCALE and VSCALE are
+    /// unset at one, the offsets and delay at zero, and R when it is blank.
+    #[test]
+    fn unset_pwl_file_modifiers_stay_off_the_card() {
+        let netlist = netlist_for(vec![pwl_file_source(
+            "file=wave.csv td=0 r= tscale=1 vscale=1 toffset=0 voffset=0",
+        )]);
+        let card = netlist
+            .lines()
+            .find(|line| line.starts_with("V1 "))
+            .unwrap_or_else(|| panic!("{netlist}"));
+        assert!(card.ends_with("PWL FILE=\"wave.csv\""), "{card}");
+        rspice_core::netlist::parse_netlist(&netlist).expect("engine must accept the card");
+    }
+
+    /// A source with no file selected cannot run, and saying so beats emitting
+    /// a card the engine will reject with a path the user never typed.
+    #[test]
+    fn a_pwl_file_source_without_a_file_blocks_the_run() {
+        let mut state = SchematicState::default();
+        state.document_mut_for_test().components = vec![pwl_file_source("td=1u")];
+        let result = generate_netlist(&state);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.contains("V1") && error.contains("no data file")),
+            "{:?}",
+            result.errors
+        );
+    }
+
+    /// An absolute reference is checkable, so a missing file stops the run
+    /// here rather than deep inside the engine's circuit build.
+    #[test]
+    fn a_missing_pwl_data_file_blocks_the_run() {
+        let absent = std::env::temp_dir().join("rspice-no-such-waveform-9c1f.csv");
+        let mut state = SchematicState::default();
+        state.document_mut_for_test().components =
+            vec![pwl_file_source(&format!("file={}", absent.display()))];
+        let result = generate_netlist(&state);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.contains("V1") && error.contains("cannot read data file")),
+            "{:?}",
+            result.errors
+        );
     }
 }

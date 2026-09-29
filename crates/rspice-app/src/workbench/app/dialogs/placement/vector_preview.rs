@@ -5,11 +5,11 @@
 //! list of scalar bits. Both placement dialogs preview that list while it is
 //! still a draft, and both render it here, so a preview can never quote a bit
 //! the deck will not carry: the names come from
-//! [`crate::simulation::netlist_gen::deck_bit_name`] — the one owner of the
+//! [`rspice_design::connectivity::deck_bit_name`] — the one owner of the
 //! deck's `#` spelling — and their order comes from the declaration that
 //! expanded them.
 
-use crate::simulation::netlist_gen::deck_bit_name;
+use rspice_design::connectivity::deck_bit_name;
 
 /// Bits a preview lists in full.
 ///

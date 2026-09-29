@@ -21,19 +21,20 @@ use super::*;
 ///
 /// `Err` carries the generator's own refusals, in the words the netlist error
 /// list would have used.
-pub(crate) fn independent_source_card(
+pub fn independent_source_card(
     component: &Component,
     node_names: [&str; 2],
     instance_name: &str,
+    source_data: NetlistSourceData<'_>,
 ) -> Result<String, Vec<String>> {
-    crate::state::params_string::validate_parameter_text(&component.params).map_err(|error| {
+    rspice_design::parameters::validate_parameter_text(&component.params).map_err(|error| {
         vec![format!(
             "{}: invalid parameter text: {error}",
             component.name
         )]
     })?;
     let schematic = SchematicDocument::default();
-    let mut generator = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic, source_data);
     let nodes = [node_names[0].to_owned(), node_names[1].to_owned()];
     match generator.generate_independent_source(component, &nodes, instance_name) {
         Some(card) if generator.errors.is_empty() => Ok(card),
@@ -50,7 +51,7 @@ impl<'a> NetlistGenerator<'a> {
     pub(super) fn validate_instance_parameters(&mut self) -> bool {
         for component in &self.schematic.components {
             if let Err(error) =
-                crate::state::params_string::validate_parameter_text(&component.params)
+                rspice_design::parameters::validate_parameter_text(&component.params)
             {
                 self.errors.push(format!(
                     "{}: invalid parameter text: {error}",
@@ -186,7 +187,7 @@ impl<'a> NetlistGenerator<'a> {
                 // M, TC1, and TC2 are the only instance parameters a B line
                 // accepts; the parser rejects the deck on anything else, so the
                 // usual pass-everything-through helper cannot be used here.
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 let mut line = format!("{instance_name} {nodes} {expression}");
                 for (key, card) in [("m", "M"), ("tc1", "TC1"), ("tc2", "TC2")] {
                     if let Some(value) = params
@@ -286,14 +287,17 @@ impl<'a> NetlistGenerator<'a> {
                 let (explicit_model, params_without_model) =
                     Self::extract_model_override(component);
                 let model = self.get_default_device_model(component, explicit_model.as_deref())?;
-                let mut params_map = crate::state::parse_params_string(&params_without_model);
+                let mut params_map =
+                    rspice_design::parameters::parse_params_string(&params_without_model);
                 params_map
                     .entry("w".to_owned())
                     .or_insert_with(|| "1u".to_owned());
                 params_map
                     .entry("l".to_owned())
                     .or_insert_with(|| "180n".to_owned());
-                let params = self.format_params(&crate::state::format_params_string(&params_map));
+                let params = self.format_params(&rspice_design::parameters::format_params_string(
+                    &params_map,
+                ));
                 Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
 
@@ -326,7 +330,7 @@ impl<'a> NetlistGenerator<'a> {
                     ));
                     return None;
                 }
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 let authored_reference = params
                     .get("vref")
                     .map(|reference| reference.trim())
@@ -433,7 +437,7 @@ impl<'a> NetlistGenerator<'a> {
                     ));
                     return None;
                 }
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 let explicit_model = params
                     .get("model")
                     .map(String::as_str)
@@ -470,7 +474,7 @@ impl<'a> NetlistGenerator<'a> {
                 ));
                 let (explicit_model, _) = Self::extract_model_override(component);
                 let model = self.get_iswitch_model(component, explicit_model.as_deref());
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 let state = match params.get("state").map(String::as_str) {
                     Some("on") => " ON",
                     Some("off") => " OFF",
@@ -486,7 +490,7 @@ impl<'a> NetlistGenerator<'a> {
             // T name a+ a- b+ b- Z0=<z0> TD=<td>
             ComponentType::TransmissionLine => {
                 let nodes = self.format_nodes(&node_names, 4);
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 let z0 = Self::get_param_owned(&params, "z0", "", "50");
                 let mut line = format!("{instance_name} {nodes} Z0={z0}");
                 // TD and F/NL are alternative specifications of the same line
@@ -543,7 +547,7 @@ impl<'a> NetlistGenerator<'a> {
                 let model = self.get_memristor_model(component, explicit_model.as_deref());
                 // IVRELATION is the memristor's only instance parameter; every
                 // other field it exposes belongs on the model card.
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 let iv_relation = params
                     .get("ivrelation")
                     .map(|value| value.trim())
@@ -594,7 +598,7 @@ impl<'a> NetlistGenerator<'a> {
             // it becomes a Thevenin source behind Z0.
             ComponentType::RfPort => {
                 let nodes = self.format_nodes(&node_names, 2);
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 let port = Self::get_param_owned(&params, "port", "", "1");
                 let z0 = Self::get_param_owned(&params, "z0", "", "50");
                 let mut line = format!("{} {} PORT={} Z0={}", instance_name, nodes, port, z0);
@@ -667,7 +671,7 @@ impl<'a> NetlistGenerator<'a> {
                 }
                 if binding.is_generated_veriloga() {
                     let descriptor =
-                        match crate::state::validate_generated_veriloga_binding(&binding) {
+                        match rspice_design::schematic::generated_veriloga_catalog::validate_generated_veriloga_binding(&binding) {
                             Ok(descriptor) => descriptor,
                             Err(error) => {
                                 self.errors.push(format!(
@@ -812,7 +816,7 @@ impl<'a> NetlistGenerator<'a> {
                 if terminal_points.len() != terminal_order.len() {
                     let declared_nodes: usize = terminal_order
                         .iter()
-                        .map(|terminal| crate::state::declared_width(terminal))
+                        .map(|terminal| rspice_design::schematic::bus::declared_width(terminal))
                         .sum();
                     self.errors.push(format!(
                         "Cell instance '{}' ({}/{}/{}) terminal mismatch: the schematic draws {} terminals but the interface declares {} terminals carrying {} nodes ({})",
@@ -940,17 +944,17 @@ impl<'a> NetlistGenerator<'a> {
     fn cell_instance_parameters(
         &mut self,
         component: &Component,
-        binding: &crate::state::LibraryCellInstance,
+        binding: &rspice_design::schematic::component::LibraryCellInstance,
     ) -> Result<String, String> {
-        if crate::state::parse_params_string(&component.params)
-            .contains_key(crate::state::InstanceMultiplicity::PARAMETER_NAME)
+        if rspice_design::parameters::parse_params_string(&component.params)
+            .contains_key(rspice_design::schematic::component::InstanceMultiplicity::PARAMETER_NAME)
         {
             return Err(format!(
                 "Cell instance '{}' ({}/{}) has an invalid parameter override: {}",
                 component.name,
                 binding.library,
                 binding.cell,
-                crate::state::InstanceMultiplicity::RESERVED_GUIDANCE
+                rspice_design::schematic::component::InstanceMultiplicity::RESERVED_GUIDANCE
             ));
         }
         if binding.parameter_order.is_empty() {
@@ -987,7 +991,7 @@ impl<'a> NetlistGenerator<'a> {
             return None;
         }
 
-        let mut params = crate::state::parse_params_string(&component.params);
+        let mut params = rspice_design::parameters::parse_params_string(&component.params);
         let upper = params
             .remove("vmax")
             .filter(|value| !value.trim().is_empty());
@@ -995,7 +999,8 @@ impl<'a> NetlistGenerator<'a> {
             .remove("vmin")
             .filter(|value| !value.trim().is_empty());
         let gain = self.format_value(&component.value);
-        let remaining = self.format_params(&crate::state::format_params_string(&params));
+        let remaining =
+            self.format_params(&rspice_design::parameters::format_params_string(&params));
 
         if upper.is_none() && lower.is_none() {
             return Some(format!(
@@ -1029,7 +1034,7 @@ impl<'a> NetlistGenerator<'a> {
             return None;
         }
 
-        let params = crate::state::parse_params_string(&component.params);
+        let params = rspice_design::parameters::parse_params_string(&component.params);
         let ac_magnitude_key = if component.kind == ComponentType::Vcvs {
             "ac_gain"
         } else {
@@ -1127,7 +1132,7 @@ impl<'a> NetlistGenerator<'a> {
             return None;
         }
 
-        let params = crate::state::parse_params_string(&component.params);
+        let params = rspice_design::parameters::parse_params_string(&component.params);
         let (waveform, is_voltage) = independent_source_parameter_names(component.kind);
         let common = common_source_parameter_names(is_voltage);
         let mut unknown = params
@@ -1460,7 +1465,7 @@ fn render_model_bound_instance_template(
     params: &str,
 ) -> Result<String, String> {
     let template = template.trim();
-    crate::state::validate_library_netlist_template(template)?;
+    rspice_model_library::symbol::validate_library_netlist_template(template)?;
 
     let reference_token = template
         .split_ascii_whitespace()
@@ -1511,7 +1516,7 @@ fn render_model_bound_instance_template(
 }
 
 pub(super) fn model_bound_instance_params(
-    binding: &crate::state::LibraryCellInstance,
+    binding: &rspice_design::schematic::component::LibraryCellInstance,
     raw: &str,
 ) -> Result<String, String> {
     if raw.trim().is_empty() {
@@ -1520,7 +1525,7 @@ pub(super) fn model_bound_instance_params(
     if raw.chars().any(char::is_control) {
         return Err("parameter text contains a line break or control character".to_owned());
     }
-    let parsed = crate::state::parse_replacement_parameters_strict(raw)
+    let parsed = rspice_design::schematic::replacement::parse_replacement_parameters_strict(raw)
         .map_err(|error| error.to_string())?;
     for (key, value) in &parsed {
         if !binding
@@ -1562,13 +1567,16 @@ pub(super) fn model_bound_instance_params(
 
 #[cfg(all(test, feature = "generated-veriloga-catalog"))]
 mod generated_veriloga_netlist_tests {
-    use crate::simulation::netlist_gen::generate_netlist;
-    use crate::state::{
-        Component, ComponentType, Point, SchematicState, generated_veriloga_devices,
-        generated_veriloga_library_binding,
-    };
+    use crate::netlist_gen::generate_netlist;
     use rspice_core::engine::{Engine, SimulationConfig};
     use rspice_core::netlist::Netlist;
+    use rspice_design::schematic::component::Component;
+    use rspice_design::schematic::component_type::ComponentType;
+    use rspice_design::schematic::generated_veriloga_catalog::{
+        generated_veriloga_devices, generated_veriloga_library_binding,
+    };
+    use rspice_design::schematic::owned::Schematic;
+    use rspice_design_model::Point;
 
     #[test]
     fn exact_generated_binding_netlists_and_routes_to_the_compiled_engine() {
@@ -1580,7 +1588,7 @@ mod generated_veriloga_netlist_tests {
         let component = Component::new(1, ComponentType::CellInstance, Point::origin())
             .with_library_cell(binding)
             .with_name_value("X1", descriptor.model_name);
-        let mut schematic = SchematicState::default();
+        let mut schematic = Schematic::default();
         schematic.document_mut_for_test().components.push(component);
 
         let generated = generate_netlist(&schematic);
@@ -1608,8 +1616,11 @@ mod generated_veriloga_netlist_tests {
 #[cfg(test)]
 mod model_bound_template_tests {
     use super::{model_bound_instance_params, render_model_bound_instance_template};
-    use crate::simulation::netlist_gen::NetlistGenerator;
-    use crate::state::{Component, ComponentType, LibraryCellInstance, Point, SchematicState};
+    use crate::netlist_gen::NetlistGenerator;
+    use rspice_design::schematic::component::{Component, LibraryCellInstance};
+    use rspice_design::schematic::component_type::ComponentType;
+    use rspice_design::schematic::owned::Schematic;
+    use rspice_design_model::Point;
 
     #[test]
     fn renders_primitive_model_instance_without_an_x_prefix() {
@@ -1691,8 +1702,11 @@ mod model_bound_template_tests {
 
     #[test]
     fn model_bound_reference_is_not_reprefixed_as_a_subcircuit() {
-        let schematic = SchematicState::default();
-        let generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let mut binding = LibraryCellInstance::new("models", "nmos_18", "spice");
         binding.netlist_template = Some("M{name} {nodes} {model}".to_owned());
         binding.reference_prefix = Some("M".to_owned());
@@ -1706,11 +1720,14 @@ mod model_bound_template_tests {
 
 #[cfg(test)]
 mod cell_instance_parameter_tests {
-    use crate::simulation::netlist_gen::{NetlistResult, generate_netlist};
-    use crate::state::{
-        Component, ComponentType, InstanceMultiplicity, LibraryCellInstance, Point, PortDirection,
-        PortSpec, SchematicState,
+    use crate::netlist_gen::{NetlistResult, generate_netlist};
+    use rspice_design::schematic::component::{
+        Component, InstanceMultiplicity, LibraryCellInstance,
     };
+    use rspice_design::schematic::component_type::ComponentType;
+    use rspice_design::schematic::owned::Schematic;
+    use rspice_design::schematic::port::{PortDirection, PortSpec};
+    use rspice_design_model::Point;
 
     /// A source-backed cell, so the instance resolves without a workspace
     /// master and the emitted line is decided only by the contract.
@@ -1742,7 +1759,7 @@ mod cell_instance_parameter_tests {
             .with_name_value("X1", "amp");
         component.params = params.to_owned();
         component.multiplicity = multiplicity;
-        let mut schematic = SchematicState::default();
+        let mut schematic = Schematic::default();
         schematic.document_mut_for_test().components.push(component);
         generate_netlist(&schematic)
     }
@@ -1840,8 +1857,11 @@ mod cell_instance_parameter_tests {
 
 #[cfg(test)]
 mod controlled_source_lowering_tests {
-    use crate::simulation::netlist_gen::NetlistGenerator;
-    use crate::state::{Component, ComponentType, Point, SchematicState};
+    use crate::netlist_gen::NetlistGenerator;
+    use rspice_design::schematic::component::Component;
+    use rspice_design::schematic::component_type::ComponentType;
+    use rspice_design::schematic::owned::Schematic;
+    use rspice_design_model::Point;
 
     fn nodes() -> Vec<String> {
         ["outp", "outn", "inp", "inn"]
@@ -1863,8 +1883,11 @@ mod controlled_source_lowering_tests {
     /// no extra unknown and reads the way it always has.
     #[test]
     fn unlimited_op_amp_stays_a_linear_vcvs() {
-        let schematic = SchematicState::default();
-        let mut generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let component =
             Component::new(1, ComponentType::OpAmp, Point::origin()).with_name_value("E1", "100k");
 
@@ -1881,8 +1904,11 @@ mod controlled_source_lowering_tests {
     /// the behavioral form rather than appending `vmax=` to a linear card.
     #[test]
     fn op_amp_output_rails_lower_to_a_behavioral_voltage_source() {
-        let schematic = SchematicState::default();
-        let mut generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let mut component =
             Component::new(1, ComponentType::OpAmp, Point::origin()).with_name_value("E4", "100k");
         component.params = "vmax=12 vmin=-12".to_owned();
@@ -1899,8 +1925,11 @@ mod controlled_source_lowering_tests {
     /// A single rail is a legitimate configuration; the other side opens.
     #[test]
     fn a_single_op_amp_rail_leaves_the_other_side_unbounded() {
-        let schematic = SchematicState::default();
-        let mut generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let mut component =
             Component::new(1, ComponentType::OpAmp, Point::origin()).with_name_value("E9", "1e5");
         component.params = "vmax=5".to_owned();
@@ -1916,8 +1945,11 @@ mod controlled_source_lowering_tests {
 
     #[test]
     fn vcvs_multiplier_is_lowered_into_the_linear_gain_expression() {
-        let schematic = SchematicState::default();
-        let mut generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let mut component =
             Component::new(1, ComponentType::Vcvs, Point::origin()).with_name_value("E1", "10");
         component.params = "m=2".to_owned();
@@ -1934,8 +1966,11 @@ mod controlled_source_lowering_tests {
 
     #[test]
     fn vcvs_polynomial_and_limits_lower_to_a_behavioral_voltage_source() {
-        let schematic = SchematicState::default();
-        let mut generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let mut component =
             Component::new(1, ComponentType::Vcvs, Point::origin()).with_name_value("E7", "1");
         component.params = "poly=\"1,2,3\" m=4 vmin=-5 vmax=5".to_owned();
@@ -1953,8 +1988,11 @@ mod controlled_source_lowering_tests {
 
     #[test]
     fn vccs_polynomial_lowers_to_a_behavioral_current_source() {
-        let schematic = SchematicState::default();
-        let mut generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let mut component =
             Component::new(1, ComponentType::Vccs, Point::origin()).with_name_value("G3", "1m");
         component.params = "poly=\"0,1m\"".to_owned();
@@ -1971,8 +2009,11 @@ mod controlled_source_lowering_tests {
 
     #[test]
     fn unsupported_controlled_source_ac_override_fails_before_netlisting() {
-        let schematic = SchematicState::default();
-        let mut generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let mut component =
             Component::new(1, ComponentType::Vcvs, Point::origin()).with_name_value("E1", "10");
         component.params = "ac_gain=2 ac_phase=45".to_owned();
@@ -1997,15 +2038,19 @@ mod controlled_source_lowering_tests {
 /// in the solver.
 #[cfg(test)]
 mod loop_probe_contract_tests {
-    use crate::simulation::dialog::StbProbeReference;
-    use crate::simulation::dialog::stb::StbConfig;
-    use crate::simulation::netlist_gen::generate_netlist;
-    use crate::state::{Component, ComponentType, Point, SchematicState, Wire};
+    use crate::netlist_gen::generate_netlist;
+    use rspice_design::schematic::component::Component;
+    use rspice_design::schematic::component_type::ComponentType;
+    use rspice_design::schematic::owned::Schematic;
+    use rspice_design::schematic::wire::Wire;
+    use rspice_design_model::Point;
+    use rspice_simulation_contract::stb_draft::StbConfig;
+    use rspice_simulation_contract::stb_draft::StbProbeReference;
 
     /// A placed probe with a wire on each terminal, so both sides become
     /// circuit nodes rather than the reference node.
-    fn schematic_with_a_placed_probe() -> SchematicState {
-        let mut schematic = SchematicState::default();
+    fn schematic_with_a_placed_probe() -> Schematic {
+        let mut schematic = Schematic::default();
         schematic.document_mut_for_test().components.push(
             Component::new(1, ComponentType::LoopProbe, Point::new(0, 0))
                 .with_name_value("VLOOP1", ""),
@@ -2023,7 +2068,7 @@ mod loop_probe_contract_tests {
         schematic
     }
 
-    fn probe_card(schematic: &SchematicState) -> String {
+    fn probe_card(schematic: &Schematic) -> String {
         let generated = generate_netlist(schematic);
         assert!(generated.errors.is_empty(), "{:?}", generated.errors);
         generated
@@ -2136,7 +2181,11 @@ mod loop_probe_contract_tests {
                 probe_reference: StbProbeReference::Placed,
                 ..StbConfig::default()
             }
-            .deleted_probe_error(&schematic_with_a_placed_probe().placed_loop_probe_names()),
+            .deleted_probe_error(
+                &rspice_design::schematic::component_edit::placed_loop_probe_names(
+                    schematic_with_a_placed_probe().document(),
+                )
+            ),
             None
         );
 
@@ -2181,8 +2230,11 @@ mod loop_probe_contract_tests {
 
 #[cfg(test)]
 mod independent_source_lowering_tests {
-    use crate::simulation::netlist_gen::NetlistGenerator;
-    use crate::state::{Component, ComponentType, Point, SchematicState};
+    use crate::netlist_gen::NetlistGenerator;
+    use rspice_design::schematic::component::Component;
+    use rspice_design::schematic::component_type::ComponentType;
+    use rspice_design::schematic::owned::Schematic;
+    use rspice_design_model::Point;
 
     fn nodes() -> Vec<String> {
         vec!["source_p".to_owned(), "source_n".to_owned()]
@@ -2200,8 +2252,11 @@ mod independent_source_lowering_tests {
 
     #[test]
     fn transient_voltage_source_preserves_ac_excitation_and_lowers_parasitics() {
-        let schematic = SchematicState::default();
-        let mut generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let mut component = Component::new(17, ComponentType::VoltageSourcePulse, Point::origin())
             .with_name_value("V1", "0");
         component.params =
@@ -2232,8 +2287,11 @@ mod independent_source_lowering_tests {
     #[test]
     fn a_bounded_pulse_train_emits_np_under_either_spelling() {
         for spelling in ["np=8", "phase=8"] {
-            let schematic = SchematicState::default();
-            let mut generator = NetlistGenerator::new(&schematic);
+            let schematic = Schematic::default();
+            let mut generator = NetlistGenerator::new(
+                &schematic,
+                crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+            );
             let mut component =
                 Component::new(4, ComponentType::VoltageSourcePulse, Point::origin())
                     .with_name_value("V1", "0");
@@ -2252,8 +2310,11 @@ mod independent_source_lowering_tests {
     /// so the ordinary seven-argument card is unchanged by the rename.
     #[test]
     fn an_unbounded_pulse_train_emits_seven_arguments() {
-        let schematic = SchematicState::default();
-        let mut generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let mut component = Component::new(5, ComponentType::VoltageSourcePulse, Point::origin())
             .with_name_value("V1", "0");
         component.params = "v2=5 pw=1u per=2u np=0".to_owned();
@@ -2272,8 +2333,11 @@ mod independent_source_lowering_tests {
     /// reads the same however it was authored.
     #[test]
     fn distortion_tones_are_lowered_to_card_annotations() {
-        let schematic = SchematicState::default();
-        let mut generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let mut component = Component::new(3, ComponentType::VoltageSourceSin, Point::origin())
             .with_name_value("V1", "0");
         component.params =
@@ -2295,8 +2359,11 @@ mod independent_source_lowering_tests {
     /// with no magnitude has nothing to shift.
     #[test]
     fn a_zero_distortion_magnitude_emits_no_tone() {
-        let schematic = SchematicState::default();
-        let mut generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let mut component = Component::new(6, ComponentType::CurrentSource, Point::origin())
             .with_name_value("I1", "1m");
         component.params = "distof1_mag=0 distof1_phase=45 distof2_phase=30".to_owned();
@@ -2311,8 +2378,11 @@ mod independent_source_lowering_tests {
 
     #[test]
     fn explicit_ac_source_keeps_its_dc_operating_point() {
-        let schematic = SchematicState::default();
-        let mut generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let mut component = Component::new(2, ComponentType::CurrentSourceAc, Point::origin())
             .with_name_value("I2", "3m");
         component.params = "dc=1m acphase=-45".to_owned();
@@ -2327,8 +2397,11 @@ mod independent_source_lowering_tests {
 
     #[test]
     fn source_level_pac_and_xf_fields_fail_before_netlisting() {
-        let schematic = SchematicState::default();
-        let mut generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let mut component = Component::new(1, ComponentType::VoltageSource, Point::origin())
             .with_name_value("V1", "1");
         component.params = "pacmag=1 pacphase=30".to_owned();
@@ -2343,8 +2416,11 @@ mod independent_source_lowering_tests {
 
     #[test]
     fn unknown_source_assignments_fail_closed() {
-        let schematic = SchematicState::default();
-        let mut generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let mut component = Component::new(1, ComponentType::CurrentSource, Point::origin())
             .with_name_value("I1", "1m");
         component.params = "invented_parameter=7".to_owned();

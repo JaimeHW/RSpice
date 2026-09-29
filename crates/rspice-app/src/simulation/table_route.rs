@@ -25,6 +25,30 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::product::ContentDigest;
 use crate::state::stimulus_library::definition::RetainedPwlFile;
+use rspice_simulation::netlist_gen::{NetlistSourceHost, TableRoute};
+
+/// Application file operations shared by generation and stimulus previews.
+pub(crate) struct SourceFiles;
+
+impl NetlistSourceHost for SourceFiles {
+    fn route_retaining(
+        &self,
+        stored: &str,
+        data_root: Option<&Path>,
+        table: Option<&RetainedPwlFile>,
+    ) -> (TableRoute, Option<String>) {
+        route_retaining(stored, data_root, table)
+    }
+    fn is_file(&self, path: &str) -> std::io::Result<bool> {
+        std::fs::metadata(path).map(|metadata| metadata.is_file())
+    }
+    fn engine_refusal(&self, path: &str) -> Option<String> {
+        engine_refusal(path)
+    }
+    fn named_file_matches(&self, path: &str, table: &RetainedPwlFile) -> Option<bool> {
+        named_file_matches(path, table)
+    }
+}
 
 /// What a reader has to find a table with.
 #[derive(Debug, Clone, Copy, Default)]
@@ -34,25 +58,6 @@ pub(crate) struct TableSources<'a> {
     pub data_root: Option<&'a Path>,
     /// The retained copy as a file, from [`materialized`].
     pub retained: Option<&'a Path>,
-}
-
-/// The file a card's table is read from, and whose it is.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum TableRoute {
-    /// The file the card names, resolved against the project's data folder.
-    Named(String),
-    /// The definition's retained copy, because the named file is not there.
-    Retained(String),
-}
-
-impl TableRoute {
-    /// The path the engine is given.
-    #[must_use]
-    pub fn path(&self) -> &str {
-        match self {
-            Self::Named(path) | Self::Retained(path) => path,
-        }
-    }
 }
 
 /// A stored reference as the engine has to be given it.

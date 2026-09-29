@@ -33,11 +33,11 @@ impl<'a> NetlistGenerator<'a> {
             return String::new();
         }
 
-        let mut params_map = crate::state::parse_params_string(params);
+        let mut params_map = rspice_design::parameters::parse_params_string(params);
         for key in excluded {
             params_map.remove(&key.to_ascii_lowercase());
         }
-        crate::state::format_params_string(&params_map)
+        rspice_design::parameters::format_params_string(&params_map)
     }
 
     pub(super) fn format_nodes(&self, nodes: &[String], expected: usize) -> String {
@@ -80,12 +80,12 @@ impl<'a> NetlistGenerator<'a> {
     /// Formatted parameter string with leading space if non-empty
     pub(super) fn format_params(&self, params: &str) -> String {
         let original = params.trim();
-        let mut runtime_params = crate::state::parse_params_string(original);
+        let mut runtime_params = rspice_design::parameters::parse_params_string(original);
         let removed_editor_metadata = runtime_params.remove("model_library").is_some()
             | runtime_params.remove("model_corner").is_some();
         let canonical;
         let trimmed = if removed_editor_metadata {
-            canonical = crate::state::format_params_string(&runtime_params);
+            canonical = rspice_design::parameters::format_params_string(&runtime_params);
             canonical.trim()
         } else {
             original
@@ -117,7 +117,7 @@ impl<'a> NetlistGenerator<'a> {
                 format!("DC {}", if value.is_empty() { "0" } else { value })
             }
             ComponentType::VoltageSourceAc | ComponentType::CurrentSourceAc => {
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 let phase =
                     Self::get_param_owned_with_aliases(&params, &["acphase", "phase"], "", "0");
                 let dc = Self::get_param_owned(&params, "dc", "", "0");
@@ -130,7 +130,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::VoltageSourcePulse => {
                 // PULSE(V1 V2 TD TR TF PW PER NP)
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 if !Self::has_any_source_parameter(
                     &params,
                     &[
@@ -155,7 +155,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::CurrentSourcePulse => {
                 // PULSE(I1 I2 TD TR TF PW PER NP)
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 if !Self::has_any_source_parameter(
                     &params,
                     &[
@@ -180,7 +180,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::VoltageSourceSin => {
                 // SIN(VO VA FREQ TD THETA PHASE)
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 if !Self::has_any_source_parameter(
                     &params,
                     &["vo", "va", "freq", "td", "theta", "phase"],
@@ -198,7 +198,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::CurrentSourceSin => {
                 // SIN(IO IA FREQ TD THETA PHASE)
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 if !Self::has_any_source_parameter(
                     &params,
                     &["io", "ia", "freq", "td", "theta", "phase"],
@@ -216,7 +216,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::VoltageSourcePwl | ComponentType::CurrentSourcePwl => {
                 // PWL(T1 V1 T2 V2 ...)
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 if !Self::has_any_source_parameter(&params, &["pwl_data", "td", "repeat"])
                     && let Some(literal) = Self::legacy_waveform_literal(value, "PWL")
                 {
@@ -239,7 +239,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::VoltageSourcePwlFile | ComponentType::CurrentSourcePwlFile => {
                 // PWL FILE="path" [TD=][R=][TSCALE=][VSCALE=][TOFFSET=][VOFFSET=]
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 let path = Self::get_param_owned(&params, "file", value, "");
                 // The path is always quoted: the reader refuses a bare path
                 // containing '=', and a directory name may hold spaces.
@@ -266,7 +266,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::VoltageSourceExp => {
                 // EXP(V1 V2 TD1 TAU1 TD2 TAU2)
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 if !Self::has_any_source_parameter(
                     &params,
                     &["v1", "v2", "td1", "tau1", "td2", "tau2"],
@@ -284,7 +284,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::CurrentSourceExp => {
                 // EXP(I1 I2 TD1 TAU1 TD2 TAU2)
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 if !Self::has_any_source_parameter(
                     &params,
                     &["i1", "i2", "td1", "tau1", "td2", "tau2"],
@@ -308,7 +308,7 @@ impl<'a> NetlistGenerator<'a> {
                 // NAMP is nonzero, and both RTS mean times positive whenever
                 // RTSAM is set and either of them is
                 // (`netlist/parser/source_specs.rs:590-615`).
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 if !Self::has_any_source_parameter(
                     &params,
                     &[
@@ -360,7 +360,7 @@ impl<'a> NetlistGenerator<'a> {
                 // as authored so the parser refuses it in its own words, which
                 // is what `source_contract::trrandom_findings` already told the
                 // editor it would do.
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 if !Self::has_any_source_parameter(
                     &params,
                     &["type", "ts", "td", "param1", "param2"],
@@ -369,11 +369,12 @@ impl<'a> NetlistGenerator<'a> {
                     return literal;
                 }
                 let authored_type = Self::get_param_owned(&params, "type", "", "uniform");
-                let distribution = crate::state::trrandom_distribution_number(&authored_type)
-                    .map_or_else(
-                        || authored_type.trim().to_owned(),
-                        |number| number.to_string(),
-                    );
+                let distribution =
+                    rspice_design::properties::trrandom_distribution_number(&authored_type)
+                        .map_or_else(
+                            || authored_type.trim().to_owned(),
+                            |number| number.to_string(),
+                        );
                 let ts = Self::get_param_owned(&params, "ts", value, "1u");
                 let td = Self::get_param_owned(&params, "td", "", "0");
                 let param1 = Self::get_param_owned(&params, "param1", "", "1");
@@ -382,7 +383,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::VoltageSourceSffm | ComponentType::CurrentSourceSffm => {
                 // SFFM(VO VA FC MDI FM TD PHASEM PHASEC)
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 if !Self::has_any_source_parameter(
                     &params,
                     &["vo", "va", "fc", "mdi", "fm", "td", "phasem", "phasec"],
@@ -408,7 +409,7 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::VoltageSourceAm | ComponentType::CurrentSourceAm => {
                 // AM(VO VMO VMA FM FC TD PHASEM PHASEC)
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 if !Self::has_any_source_parameter(
                     &params,
                     &["vo", "vmo", "vma", "fm", "fc", "td", "phasem", "phasec"],
@@ -437,7 +438,7 @@ impl<'a> NetlistGenerator<'a> {
                 // non-positive TR/TF/TSAMPLE and a DATA string without its
                 // leading B, so both are normalized here rather than handed to
                 // the parser as an error the user cannot trace back to a field.
-                let params = crate::state::parse_params_string(&component.params);
+                let params = rspice_design::parameters::parse_params_string(&component.params);
                 if !Self::has_any_source_parameter(
                     &params,
                     &[
@@ -578,14 +579,14 @@ impl<'a> NetlistGenerator<'a> {
     /// Users can provide model either in the primary value field (e.g. "2N2222")
     /// or as `model=<name>` in params. When both are present, params wins.
     pub(super) fn extract_model_override(component: &Component) -> (Option<String>, String) {
-        let mut params_map = crate::state::parse_params_string(&component.params);
+        let mut params_map = rspice_design::parameters::parse_params_string(&component.params);
         let explicit_from_params = params_map
             .remove("model")
             .map(|m| m.trim().to_string())
             .filter(|m| !m.is_empty());
         params_map.remove("model_library");
         params_map.remove("model_corner");
-        let params_without_model = crate::state::format_params_string(&params_map);
+        let params_without_model = rspice_design::parameters::format_params_string(&params_map);
 
         let explicit_model = explicit_from_params.or_else(|| {
             let value_model = component.value.trim();
@@ -607,13 +608,16 @@ mod tests {
     #[test]
     fn netlist_generation_never_discards_malformed_parameters_after_editor_metadata() {
         for params in ["model_library=vendor note='unterminated", "temp=27 TEMP=85"] {
-            let mut schematic = SchematicState::default();
+            let mut schematic = Schematic::default();
             let mut component = Component::new(1, ComponentType::Resistor, Point::origin());
             component.name = "R1".to_owned();
             component.value = "1k".to_owned();
             component.params = params.to_owned();
             schematic.document_mut_for_test().components.push(component);
-            let mut generator = NetlistGenerator::new(&schematic);
+            let mut generator = NetlistGenerator::new(
+                &schematic,
+                crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+            );
             let deck = generator.generate();
             assert!(
                 !generator.nets().is_empty(),
@@ -636,16 +640,23 @@ mod tests {
         component.name = "V1".to_owned();
         component.value = "2".to_owned();
         component.params = "ac=1 note='unterminated".to_owned();
-        let errors =
-            crate::simulation::netlist_gen::independent_source_card(&component, ["in", "0"], "V1")
-                .unwrap_err();
+        let errors = crate::netlist_gen::independent_source_card(
+            &component,
+            ["in", "0"],
+            "V1",
+            NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        )
+        .unwrap_err();
         assert!(errors[0].contains("unterminated"));
     }
 
     #[test]
     fn pwl_delay_and_repeat_are_present_in_the_canonical_source_specification() {
-        let schematic = SchematicState::default();
-        let generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let mut source = Component::new(1, ComponentType::VoltageSourcePwl, Point::origin())
             .with_name_value("V1", "0 0 1u 1");
         source.params = "td=2u repeat=true".to_owned();
@@ -658,8 +669,11 @@ mod tests {
 
     #[test]
     fn disabled_transient_noise_source_emits_only_its_dc_bias() {
-        let schematic = SchematicState::default();
-        let generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let mut source = Component::new(1, ComponentType::CurrentSourceNoise, Point::origin())
             .with_name_value("I1", "1n");
         source.params = "dc=2m isnoisy=false nt=1u".to_owned();
@@ -669,8 +683,11 @@ mod tests {
 
     #[test]
     fn ac_phase_is_positional_and_editor_catalog_metadata_is_not_netlisted() {
-        let schematic = SchematicState::default();
-        let generator = NetlistGenerator::new(&schematic);
+        let schematic = Schematic::default();
+        let generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
         let mut source = Component::new(1, ComponentType::VoltageSourceAc, Point::origin())
             .with_name_value("V1", "2");
         source.params = "acphase=90 model_library=vendor model_corner=fast".to_owned();

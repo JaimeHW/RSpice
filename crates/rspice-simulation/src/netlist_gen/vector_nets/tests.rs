@@ -6,10 +6,10 @@
 //! Everything after it is the behaviour that did not exist before.
 
 use super::*;
-use crate::state::{
-    Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, ComponentType, LibraryCellInstance,
-    Wire,
-};
+use rspice_design::schematic::bus::{Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation};
+use rspice_design::schematic::component::LibraryCellInstance;
+use rspice_design::schematic::component_type::ComponentType;
+use rspice_design::schematic::wire::Wire;
 
 /// The deck's element and instance cards: everything that is not a comment, a
 /// directive, or blank. This is the part of a deck a projection must not move.
@@ -32,8 +32,12 @@ fn declared_bus(id: u64, declaration: &str, start: Point, end: Point) -> Bus {
     .expect("fixture bus")
 }
 
-fn resistor(state: &mut SchematicState, pos: Point, value: &str) {
-    let id = state.add_component(ComponentType::Resistor, pos);
+fn resistor(state: &mut Schematic, pos: Point, value: &str) {
+    let id = state.add_component(
+        ComponentType::Resistor,
+        crate::netlist_gen::test_placement(pos),
+        None,
+    );
     state
         .document_mut_for_test()
         .components
@@ -43,8 +47,12 @@ fn resistor(state: &mut SchematicState, pos: Point, value: &str) {
         .value = value.to_owned();
 }
 
-fn place_port(state: &mut SchematicState, name: &str, pos: Point) {
-    let id = state.add_component(ComponentType::Port, pos);
+fn place_port(state: &mut Schematic, name: &str, pos: Point) {
+    let id = state.add_component(
+        ComponentType::Port,
+        crate::netlist_gen::test_placement(pos),
+        None,
+    );
     state
         .document_mut_for_test()
         .components
@@ -56,8 +64,8 @@ fn place_port(state: &mut SchematicState, name: &str, pos: Point) {
 
 /// `DATA[7:0]` tapped at bit 3 onto a wire, one resistor from that wire to
 /// ground. Exactly the shape scalar taps have always had.
-fn scalar_tap_design() -> SchematicState {
-    let mut state = SchematicState::default();
+fn scalar_tap_design() -> Schematic {
+    let mut state = Schematic::default();
     let bus = declared_bus(1, "DATA[7:0]", Point::new(0, -20), Point::new(80, -20));
     let tap = BusTap::new(
         2,
@@ -76,7 +84,11 @@ fn scalar_tap_design() -> SchematicState {
         Point::new(40, 0),
     ));
     resistor(&mut state, Point::new(40, 0), "1k");
-    state.add_component(ComponentType::Ground, Point::new(60, 10));
+    state.add_component(
+        ComponentType::Ground,
+        crate::netlist_gen::test_placement(Point::new(60, 10)),
+        None,
+    );
     state
 }
 
@@ -104,7 +116,7 @@ fn a_scalar_tap_deck_is_unchanged_by_vector_projection() {
 
 #[test]
 fn projection_names_every_bit_of_a_declared_bus_once() {
-    let mut state = SchematicState::default();
+    let mut state = Schematic::default();
     // Two buses of the same declaration, touching end to end: one vector net,
     // and eight nodes rather than sixteen.
     state.document_mut_for_test().buses.push(declared_bus(
@@ -139,7 +151,7 @@ fn projection_names_every_bit_of_a_declared_bus_once() {
 
 #[test]
 fn a_sixty_four_bit_bus_adds_exactly_sixty_four_named_nets() {
-    let mut state = SchematicState::default();
+    let mut state = Schematic::default();
     state.document_mut_for_test().buses.push(declared_bus(
         1,
         "W[63:0]",
@@ -158,7 +170,7 @@ fn a_sixty_four_bit_bus_adds_exactly_sixty_four_named_nets() {
 
 #[test]
 fn touching_buses_that_declare_different_ranges_are_not_one_vector_net() {
-    let mut state = SchematicState::default();
+    let mut state = Schematic::default();
     state.document_mut_for_test().buses.push(declared_bus(
         1,
         "DATA[7:0]",
@@ -195,7 +207,7 @@ fn touching_buses_that_declare_different_ranges_are_not_one_vector_net() {
 #[test]
 fn a_slice_tap_resolves_to_the_same_bit_under_either_index_order() {
     for (declaration, slice) in [("DATA[7:0]", "DATA[3]"), ("DATA[0:7]", "DATA[3]")] {
-        let mut state = SchematicState::default();
+        let mut state = Schematic::default();
         let bus = declared_bus(1, declaration, Point::new(0, -20), Point::new(80, -20));
         let tap = BusTap::new(
             2,
@@ -214,7 +226,11 @@ fn a_slice_tap_resolves_to_the_same_bit_under_either_index_order() {
             Point::new(40, 0),
         ));
         resistor(&mut state, Point::new(40, 0), "1k");
-        state.add_component(ComponentType::Ground, Point::new(60, 10));
+        state.add_component(
+            ComponentType::Ground,
+            crate::netlist_gen::test_placement(Point::new(60, 10)),
+            None,
+        );
 
         let result = generate_netlist(&state);
 
@@ -235,7 +251,7 @@ fn a_slice_tap_resolves_to_the_same_bit_under_either_index_order() {
 
 #[test]
 fn interface_formals_flatten_vectors_from_the_declared_msb_end() {
-    let mut master = SchematicState::default();
+    let mut master = Schematic::default();
     place_port(&mut master, "DATA[3:0]", Point::new(100, 0));
     place_port(&mut master, "EN", Point::new(100, 40));
     place_port(&mut master, "ADDR<0:2>", Point::new(100, 80));
@@ -249,6 +265,7 @@ fn interface_formals_flatten_vectors_from_the_declared_msb_end() {
     // The unexpanded contract is untouched: it is what a placement binds to.
     assert_eq!(
         master
+            .document()
             .interface_ports()
             .into_iter()
             .map(|port| port.name)
@@ -259,8 +276,8 @@ fn interface_formals_flatten_vectors_from_the_declared_msb_end() {
 
 /// A master whose interface is `DATA[3:0]` plus `EN`, with the vector reaching
 /// the body through a bus and a scalar tap.
-fn reg4_master() -> SchematicState {
-    let mut master = SchematicState::default();
+fn reg4_master() -> Schematic {
+    let mut master = Schematic::default();
     place_port(&mut master, "DATA[3:0]", Point::new(100, 0));
     let bus = declared_bus(1, "DATA[3:0]", Point::new(90, 0), Point::new(150, 0));
     let tap = BusTap::new(
@@ -290,10 +307,13 @@ fn a_vector_port_becomes_deck_formals_and_per_bit_instance_nodes() {
     let hierarchy_buffers = HashMap::from([("work/reg4/schematic".to_owned(), &master)]);
     let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
-    let mut top = SchematicState::default();
+    let mut top = Schematic::default();
     let mut binding = LibraryCellInstance::new("work", "reg4", "schematic");
     binding.terminal_order = vec!["DATA[3:0]".to_owned(), "EN".to_owned()];
-    let instance = top.add_library_cell_component(Point::new(200, 100), binding);
+    let instance = top.add_library_cell_component(
+        crate::netlist_gen::test_placement(Point::new(200, 100)),
+        binding,
+    );
     let terminals = top
         .document()
         .components
@@ -308,13 +328,17 @@ fn a_vector_port_becomes_deck_formals_and_per_bit_instance_nodes() {
         data,
         Point::new(data.x.saturating_add(40), data.y),
     ));
-    top.add_component(ComponentType::Ground, Point::new(enable.x, enable.y + 10));
+    top.add_component(
+        ComponentType::Ground,
+        crate::netlist_gen::test_placement(Point::new(enable.x, enable.y + 10)),
+        None,
+    );
 
     let result = generate_netlist_hierarchical(
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
     );
 
     assert!(result.errors.is_empty(), "{:?}", result.errors);
@@ -366,12 +390,15 @@ fn one_four_bit_vector_joins_two_instances_of_one_master() {
     let hierarchy_buffers = HashMap::from([("work/reg4/schematic".to_owned(), &master)]);
     let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
-    let mut top = SchematicState::default();
+    let mut top = Schematic::default();
     let mut data_terminals = Vec::new();
     for row in [100, 300] {
         let mut binding = LibraryCellInstance::new("work", "reg4", "schematic");
         binding.terminal_order = vec!["DATA[3:0]".to_owned(), "EN".to_owned()];
-        let instance = top.add_library_cell_component(Point::new(200, row), binding);
+        let instance = top.add_library_cell_component(
+            crate::netlist_gen::test_placement(Point::new(200, row)),
+            binding,
+        );
         let terminals = top
             .document()
             .components
@@ -381,7 +408,11 @@ fn one_four_bit_vector_joins_two_instances_of_one_master() {
             .terminal_positions();
         data_terminals.push(terminals[0].1);
         let enable = terminals[1].1;
-        top.add_component(ComponentType::Ground, Point::new(enable.x, enable.y + 10));
+        top.add_component(
+            ComponentType::Ground,
+            crate::netlist_gen::test_placement(Point::new(enable.x, enable.y + 10)),
+            None,
+        );
     }
 
     // One bus, declared once, reaching both vector terminals.
@@ -404,7 +435,7 @@ fn one_four_bit_vector_joins_two_instances_of_one_master() {
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
     );
 
     assert!(result.errors.is_empty(), "{:?}", result.errors);
@@ -457,7 +488,7 @@ fn one_four_bit_vector_joins_two_instances_of_one_master() {
 /// binding: both ends of it name the same conductors.
 #[test]
 fn a_multi_bit_tap_lands_its_slice_on_the_source_bus_conductors() {
-    let mut state = SchematicState::default();
+    let mut state = Schematic::default();
     let source = declared_bus(1, "DATA[7:0]", Point::new(0, -40), Point::new(160, -40));
     let destination = declared_bus(2, "DATA[3:0]", Point::new(0, 40), Point::new(160, 40));
     let slice_tap = BusTap::new(
@@ -501,9 +532,17 @@ fn a_multi_bit_tap_lands_its_slice_on_the_source_bus_conductors() {
         Point::new(100, 80),
     ));
     resistor(&mut state, Point::new(100, -80), "1k");
-    state.add_component(ComponentType::Ground, Point::new(120, -70));
+    state.add_component(
+        ComponentType::Ground,
+        crate::netlist_gen::test_placement(Point::new(120, -70)),
+        None,
+    );
     resistor(&mut state, Point::new(100, 80), "2k");
-    state.add_component(ComponentType::Ground, Point::new(120, 90));
+    state.add_component(
+        ComponentType::Ground,
+        crate::netlist_gen::test_placement(Point::new(120, 90)),
+        None,
+    );
 
     let result = generate_netlist(&state);
 
@@ -525,14 +564,14 @@ fn a_multi_bit_tap_lands_its_slice_on_the_source_bus_conductors() {
 
 #[test]
 fn a_projected_bit_is_shown_in_the_notation_its_own_bus_declared() {
-    let mut square = SchematicState::default();
+    let mut square = Schematic::default();
     square.document_mut_for_test().buses.push(declared_bus(
         1,
         "DATA[3:0]",
         Point::new(0, 0),
         Point::new(40, 0),
     ));
-    let mut angle = SchematicState::default();
+    let mut angle = Schematic::default();
     angle.document_mut_for_test().buses.push(declared_bus(
         1,
         "DATA<3:0>",
@@ -553,22 +592,25 @@ fn a_projected_bit_is_shown_in_the_notation_its_own_bus_declared() {
 /// the bits both happen to share.
 #[test]
 fn widening_a_vector_port_makes_every_placement_of_it_stale() {
-    let mut master = SchematicState::default();
+    let mut master = Schematic::default();
     place_port(&mut master, "DATA[7:0]", Point::new(100, 0));
     place_port(&mut master, "EN", Point::new(210, 40));
     let hierarchy_buffers = HashMap::from([("work/reg/schematic".to_owned(), &master)]);
     let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
-    let mut top = SchematicState::default();
+    let mut top = Schematic::default();
     let mut binding = LibraryCellInstance::new("work", "reg", "schematic");
     binding.terminal_order = vec!["DATA[3:0]".to_owned(), "EN".to_owned()];
-    top.add_library_cell_component(Point::new(200, 100), binding);
+    top.add_library_cell_component(
+        crate::netlist_gen::test_placement(Point::new(200, 100)),
+        binding,
+    );
 
     let result = generate_netlist_hierarchical(
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
     );
 
     let stale = result
@@ -589,10 +631,13 @@ fn a_vector_terminal_on_a_narrower_bus_is_reported_with_both_widths() {
     let hierarchy_buffers = HashMap::from([("work/reg4/schematic".to_owned(), &master)]);
     let hierarchy = HierarchySource::from_buffers(&hierarchy_buffers);
 
-    let mut top = SchematicState::default();
+    let mut top = Schematic::default();
     let mut binding = LibraryCellInstance::new("work", "reg4", "schematic");
     binding.terminal_order = vec!["DATA[3:0]".to_owned(), "EN".to_owned()];
-    let instance = top.add_library_cell_component(Point::new(200, 100), binding);
+    let instance = top.add_library_cell_component(
+        crate::netlist_gen::test_placement(Point::new(200, 100)),
+        binding,
+    );
     let data = top
         .document()
         .components
@@ -612,7 +657,7 @@ fn a_vector_terminal_on_a_narrower_bus_is_reported_with_both_widths() {
         &top,
         &[],
         &hierarchy,
-        &crate::simulation::netlist_gen::NetlistSourceData::default(),
+        &crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
     );
 
     let reported = result
@@ -651,22 +696,25 @@ fn a_vector_terminal_on_a_narrower_bus_is_reported_with_both_widths() {
 fn no_width_mismatch_policy_lets_an_implicit_mismatch_reach_the_deck() {
     let master = reg4_master();
 
-    for width_mismatch in crate::state::BundleWidthMismatchPolicy::ALL {
-        let contract = crate::state::ConnectivityContract {
-            policy: crate::state::ConnectivityPolicy {
+    for width_mismatch in rspice_design::connectivity_contract::BundleWidthMismatchPolicy::ALL {
+        let contract = rspice_design::connectivity_contract::ConnectivityContract {
+            policy: rspice_design::connectivity_contract::ConnectivityPolicy {
                 width_mismatch,
-                ..crate::state::ConnectivityPolicy::default()
+                ..rspice_design::connectivity_contract::ConnectivityPolicy::default()
             },
-            ..crate::state::ConnectivityContract::default()
+            ..rspice_design::connectivity_contract::ConnectivityContract::default()
         };
         let hierarchy_buffers = HashMap::from([("work/reg4/schematic".to_owned(), &master)]);
         let hierarchy =
             HierarchySource::from_buffers(&hierarchy_buffers).with_connectivity(&contract);
 
-        let mut top = SchematicState::default();
+        let mut top = Schematic::default();
         let mut binding = LibraryCellInstance::new("work", "reg4", "schematic");
         binding.terminal_order = vec!["DATA[3:0]".to_owned(), "EN".to_owned()];
-        let instance = top.add_library_cell_component(Point::new(200, 100), binding);
+        let instance = top.add_library_cell_component(
+            crate::netlist_gen::test_placement(Point::new(200, 100)),
+            binding,
+        );
         let data = top
             .document()
             .components
@@ -689,7 +737,7 @@ fn no_width_mismatch_policy_lets_an_implicit_mismatch_reach_the_deck() {
             &top,
             &[],
             &hierarchy,
-            &crate::simulation::netlist_gen::NetlistSourceData::default(),
+            &crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
         );
 
         assert!(

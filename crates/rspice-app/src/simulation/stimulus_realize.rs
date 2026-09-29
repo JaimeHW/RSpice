@@ -25,9 +25,10 @@ use rspice_core::circuit::VoltageSources;
 use rspice_core::config::SpiceDialect;
 use rspice_core::netlist::{ParamContext, SourceSpec};
 
-use crate::simulation::table_route::{self, TableRoute, TableSources};
+use crate::simulation::table_route::{self, TableSources};
 use crate::state::stimulus_library::definition::StimulusDefinition;
 use crate::state::{Component, ComponentType};
+use rspice_simulation::netlist_gen::TableRoute;
 
 /// The two nets a source is realized against when nobody is asking about a
 /// particular sheet.
@@ -45,10 +46,13 @@ pub(crate) fn source_card_text(
     component: &Component,
     nets: [&str; 2],
 ) -> Result<String, Vec<String>> {
-    crate::simulation::netlist_gen::independent_source_card(
+    rspice_simulation::netlist_gen::independent_source_card(
         component,
         nets,
         &component.spice_instance_name(),
+        rspice_simulation::netlist_gen::NetlistSourceData::new(
+            &crate::simulation::table_route::SourceFiles,
+        ),
     )
 }
 

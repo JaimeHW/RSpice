@@ -42,6 +42,3 @@ impl<'a> NetlistGenerator<'a> {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

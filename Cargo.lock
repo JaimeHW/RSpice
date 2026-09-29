@@ -5713,10 +5713,14 @@ name = "rspice-simulation"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "num-complex",
+ "ron",
  "rspice-app-types",
  "rspice-core",
  "rspice-design",
+ "rspice-design-model",
  "rspice-model-library",
+ "rspice-simulation-contract",
  "rspice-veriloga",
  "semver",
  "serde",

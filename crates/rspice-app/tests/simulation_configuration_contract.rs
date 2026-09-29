@@ -1,10 +1,12 @@
 use rspice_app::{
-    AnalysisInstanceId, CellViewRef, DesignVariable, DesignVariableNetlistContext,
-    DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange, DesignVariableScope,
+    AnalysisInstanceId, CellViewRef, DesignVariable, DesignVariableOverridePolicy,
+    DesignVariableQuantity, DesignVariableRange, DesignVariableScope,
     DesignVariableSweepEligibility, ProjectWorkspace, SavedOutput, SavedOutputCompatibility,
     SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
     SimulationPlanId, SimulationPlanPayload, SimulationPlanPayloadRecord,
-    design_variable_parameter_lines,
+};
+use rspice_simulation::netlist_gen::{
+    DesignVariableNetlistContext, design_variable_parameter_lines,
 };
 
 fn resistance_variable(name: &str, expression: &str, scope: DesignVariableScope) -> DesignVariable {

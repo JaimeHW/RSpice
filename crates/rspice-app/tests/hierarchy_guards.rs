@@ -284,6 +284,10 @@ fn design_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-design/src")
 }
 
+fn simulation_src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-simulation/src")
+}
+
 fn rust_sources(root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut pending = vec![root.to_path_buf()];
@@ -439,8 +443,18 @@ fn path_grammar_is_owned_by_one_module() {
 
     let mut measured: BTreeMap<String, usize> = BTreeMap::new();
     let mut root_literals = 0usize;
-    for (prefix, root) in [("", src_dir()), ("design/", design_src_dir())] {
+    for (prefix, root) in [
+        ("", src_dir()),
+        ("design/", design_src_dir()),
+        ("runtime/", simulation_src_dir()),
+    ] {
         for (path, file) in production_files(&root) {
+            // Follow the extracted generator; other runtime modules also
+            // handle filesystem paths, which have a different grammar.
+            if prefix == "runtime/" && path != "netlist_gen.rs" && !path.starts_with("netlist_gen/")
+            {
+                continue;
+            }
             let production = Source::read(&file).production;
             let count: usize = PATH_GRAMMAR_PATTERNS
                 .iter()
@@ -531,9 +545,8 @@ const RAW_BUFFER_CONSTRUCTORS: &[&str] = &[
 /// design that does not exist yet — so there is no projection to read. Both
 /// its baseline and its candidate are maps it assembled itself.
 ///
-/// `services/drc/extraction.rs`, `simulation/netlist_gen.rs`,
-/// `simulation/netlist_gen/master_index.rs`,
-/// `simulation/netlist_gen/subcircuits.rs` and `workbench/commands.rs` also
+/// `services/drc/extraction.rs`, the app netlisting integration fixtures,
+/// and `workbench/commands.rs` also
 /// call these constructors, but only from their own test modules, so they are
 /// not sites. The definition sites need no exemption either: they declare
 /// `from_workspace` and `from_buffers`, they do not call
@@ -975,8 +988,8 @@ const NESTED_RECORD_FIELDS: &[(&str, &str)] = &[("ConnectivityContract", "policy
 /// manager dialog that edits the field reads it back, and the project summary
 /// prints its label, and neither is evidence that setting it does anything.
 const PROJECTION_MODULES: &[(&str, &str)] = &[
-    ("simulation/netlist_gen.rs", "the generated deck"),
-    ("simulation/netlist_gen/", "the generated deck"),
+    ("runtime/netlist_gen.rs", "the generated deck"),
+    ("runtime/netlist_gen/", "the generated deck"),
     (
         "design/hierarchy/source.rs",
         "resolved global nodes in connectivity and the generated deck",
@@ -1112,6 +1125,7 @@ fn persisted_policies_reach_a_projection() {
         ("", src_dir()),
         ("", design_model_src_dir()),
         ("design/", design_src_dir()),
+        ("runtime/", simulation_src_dir()),
     ] {
         for (path, file) in production_files(&root) {
             let path = format!("{prefix}{path}");
